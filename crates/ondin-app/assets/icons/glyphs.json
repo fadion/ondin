@@ -229,5 +229,6 @@
  { "name": "image-tile", "codepoint": "U+F02F", "stroke": "M2.5 2.5H7V7H2.5ZM9 2.5H13.5V7H9ZM2.5 9H7V13.5H2.5ZM9 9H13.5V13.5H9Z", "fill": "M2.5 2.5H7V7H2.5Z" },
  { "name": "distribute-h", "codepoint": "U+F030", "stroke": "M1.5 2.5V13.5M14.5 2.5V13.5M4.5 5.5H6.5V10.5H4.5ZM9.5 5.5H11.5V10.5H9.5Z" },
  { "name": "distribute-v", "codepoint": "U+F031", "stroke": "M1.5 2.5V13.5M14.5 2.5V13.5M4.5 5.5H6.5V10.5H4.5ZM9.5 5.5H11.5V10.5H9.5Z", "transform": "rotate(90 8 8)" },
- { "name": "flex-layout", "codepoint": "U+F032", "stroke": "M2.5 5H5V11H2.5ZM6.75 5H9.25V11H6.75ZM11 5H13.5V11H11Z" }
+ { "name": "flex-layout", "codepoint": "U+F032", "stroke": "M2.5 5H5V11H2.5ZM6.75 5H9.25V11H6.75ZM11 5H13.5V11H11Z" },
+ { "name": "text-size", "codepoint": "U+F033", "stroke": "M1.5 12.5L4 6.5L6.5 12.5M2.4 10.5H5.6M7.5 12.5L10.75 3.5L14 12.5M8.7 9.5H12.8" }
 ]

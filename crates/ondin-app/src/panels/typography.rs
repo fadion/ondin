@@ -1161,7 +1161,7 @@ impl OndinApp {
             }
             let removed = old.len() - head - tail;
             let inserted = new.len() - head - tail;
-            self.session.name_step("Edit text", icon::CURSOR_TEXT);
+            self.session.name_step("Edit text", icon::TEXT_T);
             self.commit_edit(Transaction(vec![Operation::SetText {
                 id,
                 content: text,
@@ -1669,7 +1669,7 @@ impl OndinApp {
         let (resp, hit) = ui::value_field_marked(
             ui,
             size,
-            Prefix::Icon(icon::TEXT_T),
+            Prefix::Icon(icon::TEXT_SIZE),
             mark.map(OverrideMark::field),
             &mut value,
             Scrub::whole(0.5).range(MIN_FONT_SIZE..=MAX_FONT_SIZE),
@@ -4223,7 +4223,7 @@ impl OndinApp {
 fn char_step_name(attr: &CharAttr) -> (&'static str, &'static str) {
     match attr {
         CharAttr::Family(_) => ("Font", icon::TEXT_AA),
-        CharAttr::Size(_) => ("Font size", icon::TEXT_T),
+        CharAttr::Size(_) => ("Font size", icon::TEXT_SIZE),
         CharAttr::Weight(_) => ("Font weight", icon::STROKE_WEIGHT),
         CharAttr::Italic(_) => ("Italic", icon::TEXT_ITALIC),
         CharAttr::Variations(_) => ("Axes", icon::SLIDERS_HORIZONTAL),

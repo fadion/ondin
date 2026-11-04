@@ -355,7 +355,7 @@ impl OndinApp {
             id: page,
             name: name.to_string(),
         }]);
-        self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
+        self.session.name_step("Rename page", icon::CURSOR_TEXT);
         match fold {
             Some(at) => self.session.commit_into_last(tx, at),
             None => self.session.commit(tx),

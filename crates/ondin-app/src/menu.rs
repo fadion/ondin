@@ -890,9 +890,14 @@ impl Item {
             // A verb whose whole result is a kind wears that kind's picture (§8):
             // `POLYGON` for the two that make a `Path`, `TEXT_T` for the two that keep text.
             Item::OutlineText => s("Convert to path", icon::POLYGON, None, Group::Structure),
-            Item::DetachTextPath => s("Detach from path", icon::TEXT_T, None, Group::Structure),
+            Item::DetachTextPath => s("Detach from path", icon::LINK_BREAK, None, Group::Structure),
             // Named for the side a designer sees, not the direction mechanism.
-            Item::FlipTextPath => s("Flip to other side", icon::TEXT_T, None, Group::Structure),
+            Item::FlipTextPath => s(
+                "Flip to other side",
+                icon::FLIP_VERTICAL,
+                None,
+                Group::Structure,
+            ),
 
             Item::Restack(mv) => s(
                 match mv {
@@ -943,10 +948,10 @@ impl Item {
                 Some("Ctrl+Shift+L"),
                 Group::State,
             ),
-            Item::Rename => s("Rename", icon::TEXT_AA, Some("Ctrl+R"), Group::State),
+            Item::Rename => s("Rename", icon::CURSOR_TEXT, Some("Ctrl+R"), Group::State),
             Item::BatchRename => s(
                 "Batch rename…",
-                icon::TEXT_AA,
+                icon::CURSOR_TEXT,
                 Some("Ctrl+Shift+R"),
                 Group::State,
             ),
@@ -1031,7 +1036,7 @@ impl Item {
                 Group::View,
             ),
 
-            Item::RenamePage => s("Rename", icon::PENCIL_SIMPLE, None, Group::Pages),
+            Item::RenamePage => s("Rename", icon::CURSOR_TEXT, None, Group::Pages),
             Item::DuplicatePage => s("Duplicate page", icon::COPY_SIMPLE, None, Group::Pages),
             Item::PageDraft => s("Draft", icon::FILE, None, Group::Pages),
             Item::DeletePage => Spec {
@@ -1293,8 +1298,8 @@ impl Item {
                     TextChord::Bold => ("Bold", icon::TEXT_BOLD, "Ctrl+B"),
                     TextChord::Italic => ("Italic", icon::TEXT_ITALIC, "Ctrl+I"),
                     TextChord::Underline => ("Underline", icon::TEXT_UNDERLINE, "Ctrl+U"),
-                    TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_AA, "Ctrl+Shift+."),
-                    TextChord::Size(_) => ("Smaller text", icon::TEXT_AA, "Ctrl+Shift+,"),
+                    TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_SIZE, "Ctrl+Shift+."),
+                    TextChord::Size(_) => ("Smaller text", icon::TEXT_SIZE, "Ctrl+Shift+,"),
                     TextChord::Tracking(n) if n > 0 => {
                         ("Wider letter spacing", icon::ARROWS_HORIZONTAL, "Alt+→")
                     }

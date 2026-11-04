@@ -475,7 +475,7 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             (false, false) => "Name this version",
         };
         let name = placed(ui, pencil, |ui: &mut egui::Ui| {
-            crate::ui::icon_button(ui, icon::PENCIL_SIMPLE, 24.0, 13.0, editing, !look.private)
+            crate::ui::icon_button(ui, icon::CURSOR_TEXT, 24.0, 13.0, editing, !look.private)
         })
         .on_hover_text(tip);
         let back = word_button(

@@ -585,7 +585,8 @@ pub mod icon {
     /// The Library: its grid-view toggle (against `ROWS` for the list) and Ctrl+K's
     /// *Go to the library*.
     pub const SQUARES_FOUR: &str = "\u{e464}";
-    /// The dashboard's *Edit project*.
+    /// The Pencil tool, its cursor and *Draw path*; the dashboard's *Edit
+    /// project*; a History step with no glyph of its own.
     pub const PENCIL_SIMPLE: &str = "\u{e3b4}";
     /// A slice's glyph.
     pub const KNIFE: &str = "\u{e636}";
@@ -786,6 +787,9 @@ pub mod icon {
     /// A font family — the `Aa` glyph: the family face, *Replace font*, a missing
     /// font, the default font.
     pub const TEXT_AA: &str = "\u{e6ee}";
+    /// A font size, wherever it is set: the size field and its badge, *Larger* /
+    /// *Smaller text*. A small `A` beside a large one.
+    pub const TEXT_SIZE: &str = "\u{f033}";
     /// Line height: the vertical arrow pair. [`ARROWS_HORIZONTAL`] is its twin.
     pub const ARROWS_VERTICAL: &str = "\u{eb04}";
     /// Letter spacing, the horizontal twin of [`ARROWS_VERTICAL`] (line height).
@@ -823,7 +827,8 @@ pub mod icon {
     /// Two overlapping right angles. Box trim (the box cropped to the type), and
     /// the crop tool on the rail — both callers, so neither name owns it.
     pub const CROP: &str = "\u{e1d4}";
-    /// Text direction — the two-way swap.
+    /// A swap, one thing put in another's place: *Replace text* and its step, an
+    /// instance swap property, *Use suggestion*, and the Text direction step.
     pub const SWAP: &str = "\u{e83c}";
     /// A swap property's filter on the Properties card (§15 D1000).
     pub const FUNNEL: &str = "\u{e266}";
@@ -983,7 +988,8 @@ pub mod icon {
     pub const ARROWS_OUT: &str = "\u{e0a2}";
     /// A History row's *Fill*.
     pub const PAINT_BUCKET: &str = "\u{e392}";
-    /// A History row's *Rename*.
+    /// *Rename*, wherever a name is edited — a layer, a page, a variable, a style,
+    /// a version, batch rename — and its step: a text cursor.
     pub const CURSOR_TEXT: &str = "\u{e7d8}";
     /// A History row's mark for a step made over MCP.
     pub const SPARKLE: &str = "\u{e6a2}";
@@ -1157,6 +1163,7 @@ pub mod icon {
         ("text-align-right", TEXT_ALIGN_RIGHT),
         ("text-align-justify", TEXT_ALIGN_JUSTIFY),
         ("text-aa", TEXT_AA),
+        ("text-size", TEXT_SIZE),
         ("arrows-vertical", ARROWS_VERTICAL),
         ("arrows-horizontal", ARROWS_HORIZONTAL),
         ("text-bold", TEXT_BOLD),

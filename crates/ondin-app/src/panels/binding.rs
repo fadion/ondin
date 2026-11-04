@@ -204,7 +204,7 @@ impl FieldKey {
             FieldKey::Family { .. } => icon::TEXT_AA,
             // Each type field's own prefix; the weight's is its picker's glyph.
             FieldKey::Type { slot, .. } => match slot {
-                ondin_core::variable::TEXT_SIZE => icon::TEXT_T,
+                ondin_core::variable::TEXT_SIZE => icon::TEXT_SIZE,
                 ondin_core::variable::TEXT_WEIGHT => icon::STROKE_WEIGHT,
                 ondin_core::variable::TEXT_LINE_HEIGHT => icon::ARROWS_VERTICAL,
                 ondin_core::variable::TEXT_LETTER_SPACING => icon::ARROWS_HORIZONTAL,
@@ -1829,7 +1829,7 @@ impl OndinApp {
                     spans: Default::default(),
                     para_spans: Default::default(),
                 });
-                self.session.name_step("Edit text", icon::CURSOR_TEXT);
+                self.session.name_step("Edit text", icon::TEXT_T);
                 self.commit_edit(Transaction(ops));
             }
             return;

@@ -8194,9 +8194,16 @@ impl OndinApp {
                                             }
                                         }
                                         // Batch rename, finding what the search shows.
-                                        if icon_button(ui, icon::TEXT_AA, 20.0, 15.0, false, true)
-                                            .on_hover_text("Batch rename (Ctrl+Shift+R)")
-                                            .clicked()
+                                        if icon_button(
+                                            ui,
+                                            icon::CURSOR_TEXT,
+                                            20.0,
+                                            15.0,
+                                            false,
+                                            true,
+                                        )
+                                        .on_hover_text("Batch rename (Ctrl+Shift+R)")
+                                        .clicked()
                                         {
                                             let search = self.layer_filter.clone();
                                             let ctx = ui.ctx().clone();

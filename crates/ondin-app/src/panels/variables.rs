@@ -836,7 +836,7 @@ impl OndinApp {
                                 elsewhere |= r.hovered();
                                 r
                             };
-                            if item(ui, ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename")).clicked() {
+                            if item(ui, ui::MenuRow::new(icon::CURSOR_TEXT, "Rename")).clicked() {
                                 acts.push(Act::StartEdit(Edit::Name {
                                     var: v.id,
                                     text: v.name.clone(),
@@ -903,7 +903,7 @@ impl OndinApp {
                                 close = true;
                                 return;
                             };
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename mode") {
+                            if row(ui, icon::CURSOR_TEXT, "Rename mode") {
                                 acts.push(Act::StartEdit(Edit::Mode {
                                     mode: mode.id,
                                     text: mode.name.clone(),
@@ -1019,7 +1019,7 @@ impl OndinApp {
                             }
                         }
                         Menu::Group(collection, path) => {
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename group") {
+                            if row(ui, icon::CURSOR_TEXT, "Rename group") {
                                 acts.push(Act::StartEdit(Edit::Group {
                                     collection: *collection,
                                     path: path.clone(),
@@ -1080,7 +1080,7 @@ impl OndinApp {
                                 }
                                 return;
                             }
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename") {
+                            if row(ui, icon::CURSOR_TEXT, "Rename") {
                                 acts.push(Act::StartEdit(Edit::Style {
                                     style: st.id,
                                     text: st.name.clone(),
@@ -1134,7 +1134,7 @@ impl OndinApp {
                             }
                         }
                         Menu::StyleGroup(slot, path) => {
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename group") {
+                            if row(ui, icon::CURSOR_TEXT, "Rename group") {
                                 acts.push(Act::StartEdit(Edit::StyleGroup {
                                     slot: *slot,
                                     path: path.clone(),
@@ -1203,7 +1203,7 @@ impl OndinApp {
                                 close = true;
                                 return;
                             };
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename collection") {
+                            if row(ui, icon::CURSOR_TEXT, "Rename collection") {
                                 acts.push(Act::StartEdit(Edit::Collection {
                                     id: col.id,
                                     text: col.name.clone(),
@@ -1447,7 +1447,7 @@ impl OndinApp {
                     let changed = st.name != text;
                     self.var_edit_done();
                     if changed {
-                        self.session.name_step("Rename style", icon::PENCIL_SIMPLE);
+                        self.session.name_step("Rename style", icon::CURSOR_TEXT);
                         self.commit_edit(Transaction(vec![Operation::SetStyleName {
                             id,
                             name: text,
@@ -1471,7 +1471,7 @@ impl OndinApp {
                     Ok(ops) => {
                         self.var_edit_done();
                         if !ops.is_empty() {
-                            self.session.name_step("Rename group", icon::PENCIL_SIMPLE);
+                            self.session.name_step("Rename group", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(ops));
                         }
                     }
@@ -1712,8 +1712,7 @@ impl OndinApp {
                         let changed = table.get(id).is_some_and(|v| v.name != text);
                         self.var_edit_done();
                         if changed {
-                            self.session
-                                .name_step("Rename variable", icon::PENCIL_SIMPLE);
+                            self.session.name_step("Rename variable", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(vec![Operation::SetVariableName {
                                 id,
                                 name: text,
@@ -1736,7 +1735,7 @@ impl OndinApp {
                     let ops = var::rename_mode_ops(doc, id, &text);
                     self.var_edit_done();
                     if !ops.is_empty() {
-                        self.session.name_step("Rename mode", icon::PENCIL_SIMPLE);
+                        self.session.name_step("Rename mode", icon::CURSOR_TEXT);
                         self.commit_edit(Transaction(ops));
                     }
                 }
@@ -1756,7 +1755,7 @@ impl OndinApp {
                     Ok(ops) => {
                         self.var_edit_done();
                         if !ops.is_empty() {
-                            self.session.name_step("Rename group", icon::PENCIL_SIMPLE);
+                            self.session.name_step("Rename group", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(ops));
                         }
                     }
@@ -1876,7 +1875,7 @@ impl OndinApp {
                     self.var_edit_done();
                     if changed {
                         self.session
-                            .name_step("Rename collection", icon::PENCIL_SIMPLE);
+                            .name_step("Rename collection", icon::CURSOR_TEXT);
                         self.commit_edit(Transaction(vec![Operation::SetCollectionName {
                             id,
                             name: text,

@@ -302,7 +302,7 @@ impl OndinApp {
         );
         if self
             .session
-            .commit_aside(done.tx, "Replace text", icon::TEXT_AA)
+            .commit_aside(done.tx, "Replace text", icon::SWAP)
         {
             self.find.resume = Some((hit.node, hit.range.start + with.len()));
         }
@@ -322,7 +322,7 @@ impl OndinApp {
         }
         if self
             .session
-            .commit_aside(done.tx, "Replace text", icon::TEXT_AA)
+            .commit_aside(done.tx, "Replace text", icon::SWAP)
         {
             let said = format!(
                 "Replaced {} in {} · Ctrl+Z to undo",

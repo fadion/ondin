@@ -1536,7 +1536,7 @@ impl OndinApp {
                 && !name.is_empty()
                 && self.session.doc.get(id).is_some_and(|n| n.name() != name)
             {
-                self.session.name_step("Rename", icon::TEXT_AA);
+                self.session.name_step("Rename", icon::CURSOR_TEXT);
                 self.session
                     .commit(Transaction(vec![Operation::SetName { id, name }]));
             }

@@ -6827,7 +6827,7 @@ impl OndinApp {
                     para_spans: session.editor.para_spans().clone(),
                 }]),
                 "Edit text",
-                icon::CURSOR_TEXT,
+                icon::TEXT_T,
             )
         {
             self.session.info("Text updated");

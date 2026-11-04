@@ -727,7 +727,7 @@ impl OndinApp {
                 return;
             }
             if text != style.name {
-                self.session.name_step("Rename style", icon::PENCIL_SIMPLE);
+                self.session.name_step("Rename style", icon::CURSOR_TEXT);
                 self.commit_edit(Transaction(vec![Operation::SetStyleName {
                     id: style.id,
                     name: text,

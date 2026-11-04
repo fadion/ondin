@@ -970,7 +970,7 @@ impl OndinApp {
                 })
                 .collect(),
         );
-        self.session.name_step("Rename", icon::TEXT_AA);
+        self.session.name_step("Rename", icon::CURSOR_TEXT);
         if self.session.commit(tx) {
             self.session.info(format!(
                 "Renamed {} · Ctrl+Z to undo",

@@ -854,7 +854,7 @@ impl OndinApp {
                     {
                         let name = val.trim().to_string();
                         if !name.is_empty() && name != name0 {
-                            self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
+                            self.session.name_step("Rename page", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
                         }
                     }
@@ -1766,7 +1766,7 @@ impl OndinApp {
                     {
                         let name = val.trim().to_string();
                         if !name.is_empty() && name != name0 {
-                            self.session.name_step("Rename", icon::PENCIL_SIMPLE);
+                            self.session.name_step("Rename", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
                         }
                     }

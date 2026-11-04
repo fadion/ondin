@@ -424,11 +424,11 @@ worded for the scope that plan was made for (`Plan::scope`).
 
 - **Two verbs.** *Rename* (`Ctrl+R`, `F2`) is the layers tree's one-layer field (`app-selection.md`).
   *Batch rename…* (`Ctrl+Shift+R`, `Action::BatchRename`, `Item::BatchRename`, State group,
-  `TEXT_AA`) opens the box and is always live. With two or more layers selected, `Ctrl+R` and `F2`
+  `CURSOR_TEXT`) opens the box and is always live. With two or more layers selected, `Ctrl+R` and `F2`
   open the box rather than refusing.
 - **Doors.** The chord; the palette, offered with any target (aliases *find*, *replace*, *number*,
   *bulk*); the layer menu's one rename row, which reads *Batch rename…* with several layers selected
-  and *Rename* with one, as `Ctrl+R` does; a `TEXT_AA` button in the
+  and *Rename* with one, as `Ctrl+R` does; a `CURSOR_TEXT` button in the
   Layers header between collapse-all and search (*Batch rename (Ctrl+Shift+R)*); the cheatsheet's
   Layer section.
 - **Placement and keys.** The palette's place: an `egui::Modal` with a transparent backdrop, 520
@@ -501,7 +501,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   amber) and takes no number. An empty preview reads *Matching…* only until the first plan lands,
   and *No layers match* after it, also while a later keystroke's plan is in flight. Nothing on the
   canvas changes until Rename.
-- **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `TEXT_AA`; the
+- **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `CURSOR_TEXT`; the
   status line says *Renamed N layers · Ctrl+Z to undo*. New names are cleaned as any typed name
   (`naming::usable`). Renaming a main reaches its copies by propagation; renaming inside an instance
   is an override, as in the tree. It does not switch page. *Cancel* and *Rename N layers* are the

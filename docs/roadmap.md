@@ -15,16 +15,6 @@ reads true.
   controls are tab stops and some are painted rects that sense the pointer only. Every control and
   field joins the Tab order in reading order, with `ui::focus_ring` showing where focus is, and
   Return/Space acting on a focused button as a click does (`app-chrome.md`, *Two kinds of focus*).
-- **A size binding judged across every mode.** Binding a flex direction, or committing one of its
-  variable's cells, should detach any child's bound W/H that some mode makes computed, and say so;
-  today only the mode in force is judged (`build::keep_size_bindings`).
-- **A direction bound to a string that names none.** A string scoped wider than the flex families
-  whose cell names no direction or wrap should detach the binding at commit, and say so; today it
-  draws the literal (`Document::spacing_drawn_in`).
-- **Code export: two frames picking by width on one page** should write two pages, each filling the
-  window; today they are written side by side at their widths and reported.
-- **Code export: text content that varies by mode** as one span per mode, each shown by a hidden
-  per-mode token; today it is written for one mode and reported.
 
 ## Illustrations
 

@@ -1183,7 +1183,7 @@ impl OndinApp {
                                 // The popup's rows are `CHIP_MENU_W` inside its
                                 // margin; the flyout's card is as wide outside.
                                 let w = CHIP_MENU_W + 2.0 * (ui::FLYOUT_PAD + ui::MENU_BORDER);
-                                ui::flyout(&ctx, area, at, w, STATE_ROWS, |ui| {
+                                ui::flyout(area, at, w).show(&ctx, STATE_ROWS, |ui| {
                                     picked = state_rows(ui, set, p, vi, &mut edits);
                                 });
                                 if picked {

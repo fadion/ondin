@@ -7509,8 +7509,7 @@ impl OndinApp {
                 crate::ui::menu_sep(ui);
                 // Lit while its list is open, as the context menu holds its rows.
                 let held = flyout.is_some() && !elsewhere;
-                let panels = crate::ui::menu_check_held(ui, PANELS_ROW, false, ITEM_H, held);
-                crate::ui::paint_submenu_caret(ui, panels.rect);
+                let panels = crate::ui::submenu_check_row(ui, PANELS_ROW, held, ITEM_H);
                 if panels.hovered() || panels.clicked() {
                     flyout = Some(panels.rect);
                 }
@@ -7570,24 +7569,16 @@ impl OndinApp {
         };
         let labels: Vec<&str> = ViewSwitch::VIEW_PANELS.iter().map(|s| label(*s)).collect();
         let w = crate::ui::menu_check_width(ctx, &labels, MENU_PAD, 120.0);
-        // Rows 1pt apart, inside the card's padding and border.
-        let n = labels.len() as f32;
-        let h = 2.0 * (crate::ui::MENU_BORDER + MENU_PAD) + n * ITEM_H + (n - 1.0);
-        let pos = crate::ui::flyout_place(ctx, row, egui::vec2(w, h), MENU_PAD);
-        egui::Area::new(id)
+        crate::ui::flyout(id, row, w)
+            .pad(MENU_PAD)
             .order(egui::Order::Foreground)
-            .fixed_pos(pos)
-            .show(ctx, |ui| {
-                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(w, MENU_PAD));
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    for sw in ViewSwitch::VIEW_PANELS {
-                        let on = self.view_switch(sw);
-                        if crate::ui::menu_check(ui, label(sw), on, ITEM_H) {
-                            self.set_view_switch(sw, !on);
-                        }
+            .show(ctx, (labels.len(), 0), |ui| {
+                for sw in ViewSwitch::VIEW_PANELS {
+                    let on = self.view_switch(sw);
+                    if crate::ui::menu_check(ui, label(sw), on, ITEM_H) {
+                        self.set_view_switch(sw, !on);
                     }
-                });
+                }
             });
     }
 

@@ -2706,10 +2706,12 @@ fn menu_row_of(
     // hover paints beside the keyboard's.
     if let Some(lit) = lit {
         style = style.highlight(row.item == lit);
-    } else if held == Some(row.item) {
-        style = style.highlight(true);
     }
-    let resp = crate::ui::menu_row(ui, style, ROW_H);
+    // A live row with a submenu wears its caret and stays lit while it is `held` open.
+    let resp = match !row.sub.is_empty() && row.enabled {
+        true => crate::ui::submenu_row(ui, style, held == Some(row.item)),
+        false => crate::ui::menu_row(ui, style, ROW_H),
+    };
     // Hung off the row's own response: a `disable()`d `Ui` or `Ui::scope` is
     // silently dead (`inspector::menu_action`).
     match row.why {
@@ -2935,9 +2937,6 @@ impl OndinApp {
                         }
                         for row in group {
                             let resp = menu_row_of(ui, row, highlight, parent);
-                            if !row.sub.is_empty() && row.enabled {
-                                crate::ui::paint_submenu_caret(ui, resp.rect);
-                            }
                             if Some(row.item) == parent {
                                 row_rect = Some(resp.rect);
                             }
@@ -2971,28 +2970,23 @@ impl OndinApp {
         if let Some(f) = flyout
             && let Some(sub) = sub_of(f.parent)
         {
-            let size = egui::vec2(MENU_W, height(sub, ROW_H, 1.0, SEP_H, MENU_PAD));
-            let pos = crate::ui::flyout_place(ctx, f.row, size, MENU_PAD);
-            let fly = egui::Area::new(sub_id)
+            let rows = sub.iter().map(Vec::len).sum();
+            let seps = sub.len().saturating_sub(1);
+            let fly = crate::ui::flyout(sub_id, f.row, MENU_W)
+                .pad(MENU_PAD)
                 .order(egui::Order::Foreground)
-                .fixed_pos(pos)
-                .show(ctx, |ui| {
-                    crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                        ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
-                        ui.spacing_mut().item_spacing.y = 1.0;
-                        for (i, group) in sub.iter().enumerate() {
-                            if i > 0 {
-                                crate::ui::menu_sep(ui);
-                            }
-                            for row in group {
-                                if menu_row_of(ui, row, f.highlight, None).clicked() {
-                                    chosen = Some(row.item);
-                                }
+                .show(ctx, (rows, seps), |ui| {
+                    for (i, group) in sub.iter().enumerate() {
+                        if i > 0 {
+                            crate::ui::menu_sep(ui);
+                        }
+                        for row in group {
+                            if menu_row_of(ui, row, f.highlight, None).clicked() {
+                                chosen = Some(row.item);
                             }
                         }
-                    });
-                })
-                .response;
+                    }
+                });
             in_flyout = fly.contains_pointer();
             fly_rect = Some(fly.rect);
         }

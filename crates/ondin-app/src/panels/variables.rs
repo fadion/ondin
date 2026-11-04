@@ -860,19 +860,11 @@ impl OndinApp {
                             // Lit while its list is open, as the View menu's
                             // *Panels ▸* is; hover or a click opens it.
                             let held = b.move_to.is_some();
-                            // The row about to be drawn: a highlighted row leaves
-                            // its hover to the caller.
-                            let next = egui::Rect::from_min_size(
-                                ui.cursor().min,
-                                egui::vec2(ui.available_width(), MENU_ROW_H),
-                            );
-                            let move_to = ui::menu_row(
+                            let move_to = ui::submenu_row(
                                 ui,
-                                ui::MenuRow::new(icon::DATABASE, "Move to")
-                                    .highlight(held || ui.rect_contains_pointer(next)),
-                                MENU_ROW_H,
+                                ui::MenuRow::new(icon::DATABASE, "Move to"),
+                                held,
                             );
-                            ui::paint_submenu_caret(ui, move_to.rect);
                             let move_row = (move_to.hovered() || move_to.clicked() || held)
                                 .then_some(move_to.rect);
                             let n = users.get(&v.id).map_or(0, Vec::len);
@@ -1271,55 +1263,43 @@ impl OndinApp {
         let mut fly = None;
         if let (Menu::Var(v), Some(row_rect), false) = (&menu, b.move_to, close) {
             let v = *v;
-            let n = table.collections().len() as f32 + 1.0;
-            let size = egui::vec2(
-                menu_w,
-                n * MENU_ROW_H + (n - 1.0) + ui::MENU_SEP_H + 2.0 * (4.0 + ui::MENU_BORDER),
-            );
-            let pos = ui::flyout_place(ctx, row_rect, size, 4.0);
-            fly = Some(
-                egui::Area::new(egui::Id::new("var-browser-menu").with("move-to"))
-                    .order(egui::Order::Tooltip)
-                    .fixed_pos(pos)
-                    .show(ctx, |ui| {
-                        ui::menu_frame(4.0).show(ui, |ui| {
-                            ui.set_width(ui::menu_inner_w(menu_w, 4.0));
-                            ui.spacing_mut().item_spacing.y = 1.0;
-                            let here = table.collection_of(v).map(|c| c.id);
-                            for c in table.collections() {
-                                // One with no mode has no column to move into.
-                                let open = Some(c.id) != here && !c.modes.is_empty();
-                                let r = ui::menu_row(
-                                    ui,
-                                    ui::MenuRow::new("", &c.name)
-                                        .checked(Some(c.id) == here)
-                                        .enabled(open),
-                                    MENU_ROW_H,
-                                );
-                                let r = match c.modes.is_empty() {
-                                    true => r.on_hover_text("It has no mode yet"),
-                                    false => r,
-                                };
-                                if r.clicked() && open {
-                                    acts.push(Act::MoveTo(v, Some(c.id)));
-                                    close = true;
-                                }
-                            }
-                            ui::menu_sep(ui);
-                            let new = ui::menu_row(
-                                ui,
-                                ui::MenuRow::new(icon::PLUS, "New collection"),
-                                MENU_ROW_H,
-                            );
-                            if new.clicked() {
-                                acts.push(Act::MoveTo(v, None));
-                                close = true;
-                            }
-                        });
-                    })
-                    .response
-                    .rect,
-            );
+            let id = egui::Id::new("var-browser-menu").with("move-to");
+            let rows = (table.collections().len() + 1, 1);
+            let card = ui::flyout(id, row_rect, menu_w)
+                .pad(4.0)
+                .show(ctx, rows, |ui| {
+                    let here = table.collection_of(v).map(|c| c.id);
+                    for c in table.collections() {
+                        // One with no mode has no column to move into.
+                        let open = Some(c.id) != here && !c.modes.is_empty();
+                        let r = ui::menu_row(
+                            ui,
+                            ui::MenuRow::new("", &c.name)
+                                .checked(Some(c.id) == here)
+                                .enabled(open),
+                            MENU_ROW_H,
+                        );
+                        let r = match c.modes.is_empty() {
+                            true => r.on_hover_text("It has no mode yet"),
+                            false => r,
+                        };
+                        if r.clicked() && open {
+                            acts.push(Act::MoveTo(v, Some(c.id)));
+                            close = true;
+                        }
+                    }
+                    ui::menu_sep(ui);
+                    let new = ui::menu_row(
+                        ui,
+                        ui::MenuRow::new(icon::PLUS, "New collection"),
+                        MENU_ROW_H,
+                    );
+                    if new.clicked() {
+                        acts.push(Act::MoveTo(v, None));
+                        close = true;
+                    }
+                });
+            fly = Some(card.rect);
         }
         let pressed_elsewhere = ctx.input(|i| {
             i.pointer.any_pressed()

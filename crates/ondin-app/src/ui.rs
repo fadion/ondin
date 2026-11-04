@@ -475,7 +475,7 @@ pub fn flyout_place(
 }
 
 /// The `▸` at the right of a menu row that opens a list beside it.
-pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
+fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
     ui.painter().text(
         egui::pos2(row.right() - 10.0, row.center().y),
         egui::Align2::CENTER_CENTER,
@@ -488,53 +488,105 @@ pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
 /// A popup menu's row that opens a [`flyout`] beside it, `label ▸`: lit while
 /// `open`, so it stays lit across the gap to its list and inside it. The caller
 /// opens the list on the row's hover or click, and closes it when another row
-/// is hovered.
+/// is hovered. A `row` already given a keyboard highlight keeps it instead.
 pub fn submenu_row(ui: &mut egui::Ui, row: MenuRow<'_>, open: bool) -> egui::Response {
     // The row about to be drawn: a highlighted row leaves its hover to the caller.
     let next = egui::Rect::from_min_size(
         ui.cursor().min,
         egui::vec2(ui.available_width(), MENU_ROW_H),
     );
-    let lit = row.enabled && (open || ui.rect_contains_pointer(next));
+    let lit = row.enabled
+        && row
+            .highlight
+            .unwrap_or_else(|| open || ui.rect_contains_pointer(next));
     let resp = menu_row(ui, row.highlight(lit), MENU_ROW_H);
     paint_submenu_caret(ui, resp.rect);
     resp
 }
 
-/// The air inside a [`flyout`]'s card: a popup menu's own (`theme`'s
+/// [`submenu_row`] in a menu of [`menu_check`] rows, so its label stays in their
+/// column: never ticked, lit while `open`.
+pub fn submenu_check_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    open: bool,
+    height: f32,
+) -> egui::Response {
+    let resp = menu_check_held(ui, label, false, height, open);
+    paint_submenu_caret(ui, resp.rect);
+    resp
+}
+
+/// The air inside a [`flyout`]'s card by default: a popup menu's own (`theme`'s
 /// `menu_margin`), so a list beside a popup's row matches it.
 pub const FLYOUT_PAD: f32 = 6.0;
 
-/// The list a [`submenu_row`] at `row` opens beside it: a [`menu_frame`] card
-/// `w` wide over the popup it hangs from, holding `rows` menu rows and `seps`
-/// separators that `add` draws. Answers the card's rect, for the caller's
-/// click-outside test.
-pub fn flyout(
-    ctx: &egui::Context,
+/// The list a [`submenu_row`] at `row` opens beside it: a [`menu_frame`] card `w`
+/// wide, placed by [`flyout_place`]. [`Flyout::pad`] and [`Flyout::order`] match it
+/// to the menu it hangs from; [`Flyout::show`] draws it.
+pub fn flyout(id: egui::Id, row: egui::Rect, w: f32) -> Flyout {
+    Flyout {
+        id,
+        row,
+        w,
+        pad: FLYOUT_PAD,
+        order: egui::Order::Tooltip,
+    }
+}
+
+/// A [`flyout`] about to be shown.
+#[must_use]
+pub struct Flyout {
     id: egui::Id,
     row: egui::Rect,
     w: f32,
-    (rows, seps): (usize, usize),
-    add: impl FnOnce(&mut egui::Ui),
-) -> egui::Rect {
-    let items = (rows + seps) as f32;
-    let h = 2.0 * (MENU_BORDER + FLYOUT_PAD)
-        + rows as f32 * MENU_ROW_H
-        + seps as f32 * MENU_SEP_H
-        + (items - 1.0).max(0.0);
-    let pos = flyout_place(ctx, row, egui::vec2(w, h), FLYOUT_PAD);
-    egui::Area::new(id)
-        .order(egui::Order::Tooltip)
-        .fixed_pos(pos)
-        .show(ctx, |ui| {
-            menu_frame(FLYOUT_PAD).show(ui, |ui| {
-                ui.set_width(menu_inner_w(w, FLYOUT_PAD));
-                ui.spacing_mut().item_spacing.y = 1.0;
-                add(ui);
-            });
-        })
-        .response
-        .rect
+    pad: f32,
+    order: egui::Order,
+}
+
+impl Flyout {
+    /// The card's inner margin: the padding of the menu it hangs from, so their
+    /// rows line up. [`FLYOUT_PAD`] by default.
+    pub fn pad(mut self, pad: f32) -> Self {
+        self.pad = pad;
+        self
+    }
+
+    /// The layer the card shows on, above the menu it hangs from: `Tooltip` by
+    /// default, over a popup; a menu in a `Foreground` area of its own may keep its
+    /// list beside it there.
+    pub fn order(mut self, order: egui::Order) -> Self {
+        self.order = order;
+        self
+    }
+
+    /// Show the card holding `rows` menu rows and `seps` separators, 1pt apart,
+    /// that `add` draws. Answers the card's response, for the caller's
+    /// click-outside and pointer-inside tests.
+    pub fn show(
+        self,
+        ctx: &egui::Context,
+        (rows, seps): (usize, usize),
+        add: impl FnOnce(&mut egui::Ui),
+    ) -> egui::Response {
+        let items = (rows + seps) as f32;
+        let h = 2.0 * (MENU_BORDER + self.pad)
+            + rows as f32 * MENU_ROW_H
+            + seps as f32 * MENU_SEP_H
+            + (items - 1.0).max(0.0);
+        let pos = flyout_place(ctx, self.row, egui::vec2(self.w, h), self.pad);
+        egui::Area::new(self.id)
+            .order(self.order)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                menu_frame(self.pad).show(ui, |ui| {
+                    ui.set_width(menu_inner_w(self.w, self.pad));
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    add(ui);
+                });
+            })
+            .response
+    }
 }
 
 /// Height of a top-bar dropdown's head, and so of its hit target.
@@ -614,8 +666,8 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
     menu_check_response(ui, label, on, height).clicked()
 }
 
-/// [`menu_check`], answering the row's whole response, for a row that opens a
-/// submenu on hover.
+/// [`menu_check`], answering the row's whole response, for a caller that watches
+/// its hover.
 pub fn menu_check_response(
     ui: &mut egui::Ui,
     label: &str,
@@ -625,9 +677,9 @@ pub fn menu_check_response(
     menu_check_held(ui, label, on, height, false)
 }
 
-/// [`menu_check_response`] for a submenu's row: `held` lights it whatever the
+/// [`menu_check_response`] for [`submenu_check_row`]: `held` lights it whatever the
 /// pointer does, so it stays lit across the gap to its open submenu and inside it.
-pub fn menu_check_held(
+fn menu_check_held(
     ui: &mut egui::Ui,
     label: &str,
     on: bool,
@@ -8003,9 +8055,10 @@ mod context_menu_chrome_tests {
             .count()
     }
 
-    /// A keyboard highlight paints exactly one ground even with the pointer resting on another row (`docs/context-menus.md` §8).
+    /// A keyboard highlight paints exactly one ground even with the pointer resting on another row (`docs/context-menus.md` §8), a `submenu_row` included.
     ///
-    /// flip: `row.highlight == Some(true) || resp.hovered()` → the count is 2.
+    /// flip: `row.highlight == Some(true) || resp.hovered()` in `menu_row`, or
+    /// `submenu_row` ignoring `row.highlight` → the count is 2.
     #[test]
     fn a_keyboard_highlight_paints_one_ground_and_the_pointer_cannot_add_another() {
         let ctx = egui::Context::default();
@@ -8034,7 +8087,11 @@ mod context_menu_chrome_tests {
                             if keyboard {
                                 style = style.highlight(i == 2);
                             }
-                            menu_row(ui, style, MENU_ROW_H);
+                            // The pointer's row opens a list, as a context menu's can.
+                            match i {
+                                0 => submenu_row(ui, style, false),
+                                _ => menu_row(ui, style, MENU_ROW_H),
+                            };
                         }
                     },
                 );

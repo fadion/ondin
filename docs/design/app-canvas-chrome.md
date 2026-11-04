@@ -238,8 +238,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Pixel preview*, *Private mode*, *Focus mode*, then *Present
     mode* — a verb, not a switch: a check row that never ticks, which closes the menu and dispatches
     `Action::Present`;
-  - *Panels ▸* (`PANELS_ROW`), whose flyout (`OndinApp::panels_flyout`, placed by
-    `ui::flyout_place`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
+  - *Panels ▸* (`PANELS_ROW`, a `ui::submenu_check_row`), whose flyout
+    (`OndinApp::panels_flyout`, a `ui::flyout`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
     *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
     stay together;
   - *Check contrast* and *Simulate colour blindness*, each ticked while on and never remembered.

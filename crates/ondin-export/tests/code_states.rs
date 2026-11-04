@@ -299,7 +299,7 @@ fn a_reordered_state_falls_back_to_the_prop() {
     assert!(
         out.approximated
             .iter()
-            .any(|a| a.contains("Large, Pressed") && a.contains("moves before")),
+            .any(|a| a.contains("Large, Pressed") && a.contains("“Label” moves before “Bg”")),
         "{:?}",
         out.approximated
     );

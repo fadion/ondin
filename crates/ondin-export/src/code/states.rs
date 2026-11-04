@@ -320,8 +320,8 @@ fn check(m: &Element, s: &Element, r: &When) -> Result<(), String> {
         {
             return Err(format!(
                 "“{}” moves before “{}”",
-                merge::layer_name(x),
-                merge::layer_name(b)
+                merge::layer_name(b),
+                merge::layer_name(x)
             ));
         }
         check(y, x, r)?;
@@ -411,13 +411,7 @@ fn rename(el: &mut Element, classes: &mut Classes) {
 /// What each element of `m` drawn under `r` needs to look as `s` does: the
 /// declarations that changed (one gone written `unset`, or for `display`
 /// `revert`), and `display: none` on a layer only rest draws.
-fn diff(
-    m: &Element,
-    s: &Element,
-    r: &When,
-    path: &mut Vec<usize>,
-    out: &mut Changes,
-) {
+fn diff(m: &Element, s: &Element, r: &When, path: &mut Vec<usize>, out: &mut Changes) {
     let mine = style_under(m, r);
     let mut style: Vec<(&'static str, String)> = Vec::new();
     for (p, v) in &s.style {

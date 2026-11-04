@@ -262,7 +262,9 @@ fn order<'a>(group: &[Member<'a>]) -> Result<Vec<&'a (String, usize)>, String> {
             let at = match order.iter().position(|o| *o == key) {
                 Some(p) if after.is_some_and(|a| p < a) => {
                     let a = after.expect("checked");
-                    return Err(format!("“{}” moves before “{}”", name(key), name(order[a])));
+                    // This tree draws the layer before `key` first, where an
+                    // earlier tree drew it after.
+                    return Err(format!("“{}” moves before “{}”", name(order[a]), name(key)));
                 }
                 Some(p) => p,
                 None => {
@@ -387,7 +389,7 @@ mod tests {
         assert_eq!(apart.bodies.len(), 2);
         assert_eq!(
             apart.apart,
-            [(when("Large"), "“icon” moves before “label”".to_string())]
+            [(when("Large"), "“label” moves before “icon”".to_string())]
         );
         let bodies = vec![
             (when("Large"), holding("large", &["label", "badge"])),

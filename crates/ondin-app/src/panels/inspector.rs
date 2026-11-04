@@ -6158,7 +6158,7 @@ impl OndinApp {
                                 let resp = value_field(
                                     ui,
                                     egui::vec2(inner - CELL - ui::CARD_COL_GAP, CELL),
-                                    Prefix::Icon(icon::ARROWS_LEFT_RIGHT),
+                                    Prefix::Icon(icon::ARROWS_OUT_LINE_HORIZONTAL),
                                     &mut spacing,
                                     Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                                     |d| d.custom_formatter(ui::number(2)),
@@ -6194,7 +6194,7 @@ impl OndinApp {
                                 let rs = value_field(
                                     ui,
                                     egui::vec2(fw, CELL),
-                                    Prefix::Icon(icon::ARROWS_LEFT_RIGHT),
+                                    Prefix::Icon(icon::ARROWS_OUT_LINE_HORIZONTAL),
                                     &mut spacing,
                                     Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                                     |d| d.custom_formatter(ui::number(2)),

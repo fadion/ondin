@@ -548,6 +548,7 @@ pub mod icon {
     pub const HAND: &str = "\u{e298}";
     /// The open-hand cursor: [`HAND`] filled, so it reads over artwork.
     pub const HAND_FILL: &str = "\u{f002}";
+    /// The Line tool and layer, and a line's own *Length* field: the line, measured.
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
@@ -595,7 +596,7 @@ pub mod icon {
     /// The dashboard's *Recent*, and the picker's recent-colours row.
     pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{e1a0}";
     /// A page: its identity, *Go to* / *Move to page*, a version's page groups,
-    /// *Add page*.
+    /// *Add page*, and *Draft*, which marks a page.
     pub const FILE: &str = "\u{e230}";
     /// The dashboard's *All files*, and the placeholder on a card with no
     /// thumbnail yet.
@@ -712,7 +713,10 @@ pub mod icon {
     pub const ARROW_LINE_UP: &str = "\u{e066}";
     /// *Send to back*; see [`ARROW_LINE_UP`].
     pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
-    // A gap along an axis: the column and row gap fields and their badges.
+    /// A gap along an axis: the column and row gap fields, their badges and steps,
+    /// the canvas padding drag, and a dash's spacing. *Auto width* / *Auto height*
+    /// and the flex *Grow* / *Shrink* steps share it, since they size a box along
+    /// that axis.
     pub const ARROWS_OUT_LINE_HORIZONTAL: &str = "\u{e534}";
     pub const ARROWS_OUT_LINE_VERTICAL: &str = "\u{e536}";
     /// *Distribute horizontally*, on the Align card and in the menu: two boxes
@@ -801,8 +805,7 @@ pub mod icon {
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
     /// Colour review's merge target: the row the others fold into.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
-    /// Compare's grip between the two states, and dot and dash *spacing*: the gap
-    /// between two things.
+    /// Compare's grip between the two states. A gap is [`ARROWS_OUT_LINE_HORIZONTAL`].
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
     /// A box around several things: a multi-selection's identity, Compare's
     /// Overlay, a text's *Fixed size*, and fitting the dash pattern to the
@@ -829,7 +832,9 @@ pub mod icon {
     pub const TEXT_ALIGN_RIGHT: &str = "\u{e486}";
     pub const TEXT_ALIGN_JUSTIFY: &str = "\u{e482}";
     /// A font family — the `Aa` glyph: the family face, *Replace font*, a missing
-    /// font, the default font.
+    /// font, the default font. `Aa` is also the common picture of letter case, so it
+    /// marks the *Case* step, Find's match-case mark and, with nothing closer, the
+    /// *OpenType* step.
     pub const TEXT_AA: &str = "\u{e6ee}";
     /// A font size, wherever it is set: the size field and its badge, *Larger* /
     /// *Smaller text*. A small `A` beside a large one.

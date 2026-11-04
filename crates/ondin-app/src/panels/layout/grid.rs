@@ -546,7 +546,7 @@ impl OndinApp {
         self.reset_marked(reset, &flow_mark);
         if let Some(i) = pick {
             let tx = self.grid_tx(subjects, |g| g.auto_flow = flows[i]);
-            self.session.name_step("Auto flow", icon::GRID_FOUR);
+            self.session.name_step("Auto flow", icon::GRID_LAYOUT);
             self.commit_edit(tx);
         }
 
@@ -1168,7 +1168,7 @@ impl OndinApp {
                                         l.end = p;
                                     }
                                 });
-                                self.session.name_step(label, icon::GRID_FOUR);
+                                self.session.name_step(label, tracks_glyph(rows));
                                 self.commit_edit(tx);
                             }
                             // Said, not dropped: an unreadable line is never thrown

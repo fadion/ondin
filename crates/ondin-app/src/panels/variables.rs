@@ -1678,7 +1678,7 @@ impl OndinApp {
             Act::MoveMode(mode, to) => {
                 let ops = var::move_mode_ops(doc, mode, to);
                 if !ops.is_empty() {
-                    self.session.name_step("Move mode", icon::ARROWS_LEFT_RIGHT);
+                    self.session.name_step("Move mode", icon::MODE);
                     self.commit_edit(Transaction(ops));
                 }
             }

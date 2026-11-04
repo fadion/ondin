@@ -971,15 +971,10 @@ fn a_variants_values_merge_by_position() {
                 id: set,
                 set: Some(VariantSet {
                     props: vec![
-                        VariantProp {
-                            name: "Size".into(),
-                            values: vec!["S".into(), "L".into()],
-                        },
-                        VariantProp {
-                            name: "Tone".into(),
-                            values: vec!["Light".into(), "Dark".into()],
-                        },
+                        VariantProp::new("Size", vec!["S".into(), "L".into()]),
+                        VariantProp::new("Tone", vec!["Light".into(), "Dark".into()]),
                     ],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

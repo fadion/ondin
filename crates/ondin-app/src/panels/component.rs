@@ -4520,10 +4520,11 @@ mod tests {
             Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Small".into(), "Large".into()],
-                    }],
+                    props: vec![VariantProp::new(
+                        "Size",
+                        vec!["Small".into(), "Large".into()],
+                    )],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {
@@ -5209,10 +5210,8 @@ mod tests {
             Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Style".into(),
-                        values: vec!["Dot".into()],
-                    }],
+                    props: vec![VariantProp::new("Style", vec!["Dot".into()])],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

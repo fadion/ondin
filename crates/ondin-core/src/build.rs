@@ -3031,6 +3031,22 @@ pub fn insert_subtrees_as(
             continue;
         };
         let instance = crate::component::settle_copy(doc, &placement.nodes, &mut nodes, mains);
+        // A variant copied into its own set — *Add variant*, *Duplicate as
+        // component* — keeps each layer's key, so its layers pair with their source's.
+        let template_root = placement.nodes.iter().find(|n| {
+            n.parent
+                .is_none_or(|p| !placement.nodes.iter().any(|m| m.id == p))
+        });
+        if mains == crate::component::MainCopy::NewMain
+            && crate::variant::is_set(doc, placement.parent)
+            && template_root.is_some_and(|r| r.component && r.parent == Some(placement.parent))
+        {
+            for (copy, source) in nodes.iter_mut().zip(&placement.nodes) {
+                if copy.id != new_root {
+                    copy.lineage = Some(source.lineage());
+                }
+            }
+        }
         let Some(root) = nodes.iter().find(|n| n.id() == new_root) else {
             continue;
         };

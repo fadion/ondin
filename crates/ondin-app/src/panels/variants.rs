@@ -3676,10 +3676,11 @@ mod tests {
             ondin_core::Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Small".into(), "Primary".into(), "Huge".into()],
-                    }],
+                    props: vec![VariantProp::new(
+                        "Size",
+                        vec!["Small".into(), "Primary".into(), "Huge".into()],
+                    )],
+                    ..Default::default()
                 }),
             },
             ondin_core::Operation::SetVariant {

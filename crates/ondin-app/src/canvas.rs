@@ -16388,10 +16388,11 @@ mod frame_menu_door_tests {
             name: None,
         };
         let props = VariantSet {
-            props: vec![VariantProp {
-                name: "Size".into(),
-                values: vec!["Small".into(), "Large".into()],
-            }],
+            props: vec![VariantProp::new(
+                "Size",
+                vec!["Small".into(), "Large".into()],
+            )],
+            ..Default::default()
         };
         let mut ops = vec![frame(a, 1), frame(b, 2)];
         for id in [a, b] {
@@ -16505,10 +16506,8 @@ mod frame_menu_door_tests {
             Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Small".into()],
-                    }],
+                    props: vec![VariantProp::new("Size", vec!["Small".into()])],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

@@ -1914,6 +1914,7 @@ mod tests {
             component: false,
             link: None,
             swap: None,
+            lineage: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),

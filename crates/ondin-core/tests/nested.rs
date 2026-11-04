@@ -41,10 +41,11 @@ fn create(id: NodeId, parent: NodeId, index: usize, kind: NodeKind, name: &str) 
 
 fn weight() -> VariantSet {
     VariantSet {
-        props: vec![VariantProp {
-            name: "Weight".into(),
-            values: vec!["Regular".into(), "Bold".into()],
-        }],
+        props: vec![VariantProp::new(
+            "Weight",
+            vec!["Regular".into(), "Bold".into()],
+        )],
+        ..Default::default()
     }
 }
 
@@ -248,10 +249,11 @@ fn buttons(f: &mut F, sizes: &[&str]) -> (NodeId, Vec<NodeId>, Vec<NodeId>) {
     let mut ops = vec![Operation::SetVariantSet {
         id: set,
         set: Some(VariantSet {
-            props: vec![VariantProp {
-                name: "Size".into(),
-                values: sizes.iter().map(|s| s.to_string()).collect(),
-            }],
+            props: vec![VariantProp::new(
+                "Size",
+                sizes.iter().map(|s| s.to_string()).collect(),
+            )],
+            ..Default::default()
         }),
     }];
     for (m, s) in mains.iter().zip(sizes) {
@@ -394,15 +396,10 @@ fn a_carry_and_a_nested_row_match_properties_by_name_not_position() {
             id: tick,
             set: Some(VariantSet {
                 props: vec![
-                    VariantProp {
-                        name: "Size".into(),
-                        values: values(&["M"]),
-                    },
-                    VariantProp {
-                        name: "Weight".into(),
-                        values: values(&["Regular", "Bold"]),
-                    },
+                    VariantProp::new("Size", values(&["M"])),
+                    VariantProp::new("Weight", values(&["Regular", "Bold"])),
                 ],
+                ..Default::default()
             }),
         },
         Operation::SetVariant {

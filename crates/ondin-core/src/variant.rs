@@ -30,12 +30,17 @@ use crate::node::{Node, NodeKind};
 use crate::op::{Operation, Transaction};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// A component set's variant properties: each a name and the ordered values a
 /// variant may take for it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariantSet {
     pub props: Vec<VariantProp>,
+    /// The element a code export writes the component's root as, read only while
+    /// a property is the interaction state.
+    #[serde(default, skip_serializing_if = "RootElement::is_button")]
+    pub element: RootElement,
 }
 
 /// One variant property — `Size`, with `Small` and `Large`.
@@ -43,6 +48,128 @@ pub struct VariantSet {
 pub struct VariantProp {
     pub name: String,
     pub values: Vec<String>,
+    /// Set when this property is its set's **interaction state**: the values tied
+    /// to a browser state, by name. Rest is not stored — it is the default
+    /// variant's value — and a value tied to none stays a plain prop value. At
+    /// most one property of a set carries it, and each state is tied at most once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub states: Option<BTreeMap<String, Interaction>>,
+}
+
+impl VariantProp {
+    /// A property of `values` that is no interaction state.
+    pub fn new(name: impl Into<String>, values: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            values,
+            states: None,
+        }
+    }
+
+    /// The state value `value` is tied to, when this is the interaction state.
+    pub fn state_of(&self, value: &str) -> Option<Interaction> {
+        self.states.as_ref()?.get(value).copied()
+    }
+}
+
+/// A browser state a value of the interaction-state property stands for, in the
+/// order a stylesheet stacks them: a later one wins where two change the same
+/// declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Interaction {
+    Hover,
+    FocusVisible,
+    Active,
+    Disabled,
+}
+
+impl Interaction {
+    pub const ALL: [Interaction; 4] = [
+        Interaction::Hover,
+        Interaction::FocusVisible,
+        Interaction::Active,
+        Interaction::Disabled,
+    ];
+
+    /// The app's word for it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Interaction::Hover => "Hover",
+            Interaction::FocusVisible => "Focus",
+            Interaction::Active => "Pressed",
+            Interaction::Disabled => "Disabled",
+        }
+    }
+
+    /// The pseudo-class a stylesheet writes it as.
+    pub fn selector(self) -> &'static str {
+        match self {
+            Interaction::Hover => ":hover",
+            Interaction::FocusVisible => ":focus-visible",
+            Interaction::Active => ":active",
+            Interaction::Disabled => ":disabled",
+        }
+    }
+
+    /// The state a value's name suggests: *hover*, *pressed* or *active*,
+    /// *focus*, *disabled*, as a word of it, without case.
+    pub fn guess(value: &str) -> Option<Interaction> {
+        let lower = value.to_lowercase();
+        let words: Vec<&str> = lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        let has = |w: &[&str]| words.iter().any(|x| w.contains(x));
+        if has(&["hover", "hovered"]) {
+            Some(Interaction::Hover)
+        } else if has(&["pressed", "active", "press"]) {
+            Some(Interaction::Active)
+        } else if has(&["focus", "focused", "focusvisible"]) {
+            Some(Interaction::FocusVisible)
+        } else if has(&["disabled", "inactive"]) {
+            Some(Interaction::Disabled)
+        } else {
+            None
+        }
+    }
+}
+
+/// What a code export writes a marked set's root as.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RootElement {
+    /// A `<button type="button">`, the one with `:disabled`.
+    #[default]
+    Button,
+    /// An `<a>`, taking `href` from the props it is passed.
+    Link,
+    /// A `div` with `tabindex="0"`, for a card or a row.
+    Plain,
+}
+
+impl RootElement {
+    pub const ALL: [RootElement; 3] = [RootElement::Button, RootElement::Link, RootElement::Plain];
+
+    fn is_button(&self) -> bool {
+        *self == RootElement::Button
+    }
+
+    /// The app's word for it.
+    pub fn label(self) -> &'static str {
+        match self {
+            RootElement::Button => "Button",
+            RootElement::Link => "Link",
+            RootElement::Plain => "Plain",
+        }
+    }
+}
+
+impl VariantSet {
+    /// The interaction-state property's place, when one is marked.
+    pub fn interaction(&self) -> Option<usize> {
+        self.props.iter().position(|p| p.states.is_some())
+    }
 }
 
 /// What a component property drives on the layers bound to it.
@@ -214,6 +341,9 @@ pub enum VariantRule {
     /// A bound layer is missing, is not strictly inside a main of the owner, is
     /// not text for a text property, or is bound twice for the same field.
     Binding,
+    /// Two properties of a set are the interaction state, or one ties a name that
+    /// is not its value, or a state to two values.
+    States,
 }
 
 impl std::fmt::Display for VariantRule {
@@ -225,6 +355,7 @@ impl std::fmt::Display for VariantRule {
             Self::PropertyOwner => "has component properties but is not a main or a set",
             Self::PropertyName => "has a component property whose name is empty or repeats",
             Self::Binding => "binds a component property to a layer it cannot drive",
+            Self::States => "ties its interaction states to values it does not hold",
         })
     }
 }
@@ -262,6 +393,9 @@ pub(crate) fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, Vari
                     .any(|p| p.values.is_empty() || !names_ok(p.values.iter().map(String::as_str)))
             {
                 return Err((n.id, VariantRule::SetNames));
+            }
+            if !states_ok(set) {
+                return Err((n.id, VariantRule::States));
             }
         }
         let in_set = n
@@ -318,6 +452,21 @@ pub(crate) fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, Vari
         }
     }
     Ok(())
+}
+
+/// Whether at most one property is the interaction state, tying only its own
+/// values, each state once.
+fn states_ok(set: &VariantSet) -> bool {
+    let marked: Vec<&VariantProp> = set.props.iter().filter(|p| p.states.is_some()).collect();
+    let Some(p) = marked.first() else {
+        return true;
+    };
+    let ties = p.states.as_ref().expect("marked");
+    let mut seen = FxHashSet::default();
+    marked.len() == 1
+        && ties
+            .iter()
+            .all(|(v, s)| p.values.contains(v) && seen.insert(*s))
 }
 
 fn names_ok<'a>(names: impl Iterator<Item = &'a str>) -> bool {
@@ -760,17 +909,17 @@ pub fn combine(
                     values.push(n.clone());
                 }
             }
-            let props = vec![VariantProp {
-                name: "Property 1".into(),
-                values,
-            }];
+            let props = vec![VariantProp::new("Property 1", values)];
             let rows = names.iter().map(|n| vec![n.clone()]).collect();
             (props, rows, set_name(&names))
         }
     };
     tx.0.push(Operation::SetVariantSet {
         id: set,
-        set: Some(VariantSet { props }),
+        set: Some(VariantSet {
+            props,
+            ..Default::default()
+        }),
     });
     for (m, values) in ordered.iter().zip(rows) {
         tx.0.push(Operation::SetVariant { id: *m, values });
@@ -808,10 +957,7 @@ fn named_values(names: &[String]) -> Option<(Vec<VariantProp>, Vec<Vec<String>>,
             match props.iter_mut().find(|p| p.name == *k) {
                 Some(p) if !p.values.contains(v) => p.values.push(v.clone()),
                 Some(_) => {}
-                None => props.push(VariantProp {
-                    name: k.clone(),
-                    values: vec![v.clone()],
-                }),
+                None => props.push(VariantProp::new(k.clone(), vec![v.clone()])),
             }
         }
     }
@@ -1055,6 +1201,10 @@ pub fn rename_value(
         return None;
     }
     p.values[value] = name.clone();
+    // A renamed value keeps its tie.
+    if let Some(tie) = p.states.as_mut().and_then(|s| s.remove(&old)) {
+        p.states.as_mut().expect("marked").insert(name.clone(), tie);
+    }
     Some(edit_set(doc, set, next, |v| {
         let mut v = v.to_vec();
         if v.get(prop) == Some(&old) {
@@ -1072,10 +1222,7 @@ pub fn add_property(doc: &Document, set: NodeId, name: &str, value: &str) -> Opt
     if next.props.iter().any(|p| p.name == name) || s.props.iter().any(|p| p.name == name) {
         return None;
     }
-    next.props.push(VariantProp {
-        name,
-        values: vec![value.clone()],
-    });
+    next.props.push(VariantProp::new(name, vec![value.clone()]));
     Some(edit_set(doc, set, next, |v| {
         let mut v = v.to_vec();
         v.push(value.clone());
@@ -1178,7 +1325,10 @@ pub fn delete_value(doc: &Document, set: NodeId, prop: usize, value: usize) -> O
     if p.values.len() < 2 || value >= p.values.len() {
         return None;
     }
-    p.values.remove(value);
+    let name = p.values.remove(value);
+    if let Some(s) = p.states.as_mut() {
+        s.remove(&name);
+    }
     let gone = using_value(doc, set, prop, value);
     let mut ops = crate::component::relink_for_delete(doc, &gone);
     ops.extend(gone.iter().map(|id| Operation::DeleteNode { id: *id }));
@@ -1187,6 +1337,97 @@ pub fn delete_value(doc: &Document, set: NodeId, prop: usize, value: usize) -> O
         set: Some(next),
     });
     Some(Transaction(ops))
+}
+
+// ── Interaction states ───────────────────────────────────────────────────────
+
+/// The value of the interaction-state property `prop` that stands for rest: the
+/// default variant's.
+pub fn rest_value(doc: &Document, set: NodeId, prop: usize) -> Option<String> {
+    let d = crate::kit::default_variant(doc, set)?;
+    doc.get(d)?.variant.get(prop).cloned()
+}
+
+/// Why property `prop` of `set` cannot be marked as the interaction state, or
+/// `None` when it can: another property already is, or it has one value.
+pub fn why_not_interaction(doc: &Document, set: NodeId, prop: usize) -> Option<String> {
+    let vs = doc.get(set)?.set.as_ref()?;
+    let p = vs.props.get(prop)?;
+    if let Some(other) = vs.interaction().filter(|i| *i != prop) {
+        return Some(format!("{} is the interaction state", vs.props[other].name));
+    }
+    (p.values.len() < 2).then(|| "A property of one value has no states".to_string())
+}
+
+/// Mark property `prop` as `set`'s interaction state, its values tied as their
+/// names suggest ([`Interaction::guess`]) — rest's value never, and each state
+/// once — or unmark it. `None` when [`why_not_interaction`] refuses or nothing
+/// changes.
+pub fn mark_interaction(doc: &Document, set: NodeId, prop: usize, on: bool) -> Option<Transaction> {
+    let mut next = doc.get(set)?.set.clone()?;
+    if on == next.props.get(prop)?.states.is_some() {
+        return None;
+    }
+    if on {
+        if why_not_interaction(doc, set, prop).is_some() {
+            return None;
+        }
+        let rest = rest_value(doc, set, prop);
+        let p = &mut next.props[prop];
+        let mut ties = BTreeMap::new();
+        for v in &p.values {
+            if Some(v) == rest.as_ref() {
+                continue;
+            }
+            if let Some(s) = Interaction::guess(v)
+                && !ties.values().any(|t| *t == s)
+            {
+                ties.insert(v.clone(), s);
+            }
+        }
+        p.states = Some(ties);
+    } else {
+        next.props[prop].states = None;
+    }
+    Some(edit_set(doc, set, next, |v| v.to_vec()))
+}
+
+/// Tie value `value` of the interaction-state property `prop` to `state`, or to
+/// none. A state another value holds is refused.
+pub fn tie_state(
+    doc: &Document,
+    set: NodeId,
+    prop: usize,
+    value: usize,
+    state: Option<Interaction>,
+) -> Option<Transaction> {
+    let mut next = doc.get(set)?.set.clone()?;
+    let p = next.props.get_mut(prop)?;
+    let name = p.values.get(value)?.clone();
+    let ties = p.states.as_mut()?;
+    if ties.get(&name).copied() == state {
+        return None;
+    }
+    match state {
+        Some(s) if ties.iter().any(|(v, t)| *t == s && *v != name) => return None,
+        Some(s) => {
+            ties.insert(name, s);
+        }
+        None => {
+            ties.remove(&name);
+        }
+    }
+    Some(edit_set(doc, set, next, |v| v.to_vec()))
+}
+
+/// The element a code export writes `set`'s root as.
+pub fn set_element(doc: &Document, set: NodeId, element: RootElement) -> Option<Transaction> {
+    let mut next = doc.get(set)?.set.clone()?;
+    if next.element == element {
+        return None;
+    }
+    next.element = element;
+    Some(edit_set(doc, set, next, |v| v.to_vec()))
 }
 
 // ── Switching an instance to another variant ──────────────────────────────────
@@ -1401,15 +1642,40 @@ pub(crate) fn rewrite(
     // leaving two Shapes. `paths_by` lists parents first.
     let mut matched: FxHashMap<NodeId, NodeId> = FxHashMap::default();
     matched.insert(from, to);
+    // **Between two variants of one set, a layer pairs first by its lineage
+    // key**, the one its copies share across the set, so a rename on either side
+    // keeps the pairing; the name path is the fallback.
+    let siblings = mode == Rewrite::Relink
+        && set_of(doc, from).is_some()
+        && set_of(doc, from) == set_of(doc, to);
+    let mut taken: FxHashSet<NodeId> = FxHashSet::default();
     for (id, p) in &paths_old {
         let parent = doc.get(*id).and_then(|n| n.parent);
-        if !parent.is_some_and(|q| matched.contains_key(&q)) {
+        let Some(new_parent) = parent.and_then(|q| matched.get(&q)) else {
             continue;
-        }
-        if let Some(n) = by_path_new.get(p)
-            && same_kind(doc, *id, *n)
+        };
+        let by_key = siblings
+            .then(|| {
+                let key = doc.get(*id)?.lineage();
+                let found: Vec<NodeId> = doc
+                    .get(*new_parent)?
+                    .children
+                    .iter()
+                    .copied()
+                    .filter(|c| doc.get(*c).is_some_and(|c| c.lineage() == key))
+                    .collect();
+                match found.as_slice() {
+                    [one] => Some(*one),
+                    _ => None,
+                }
+            })
+            .flatten();
+        let found = by_key.or_else(|| by_path_new.get(p).copied());
+        if let Some(n) = found
+            && same_kind(doc, *id, n)
+            && taken.insert(n)
         {
-            matched.insert(*id, *n);
+            matched.insert(*id, n);
         }
     }
     let matched_new: FxHashSet<NodeId> = matched.values().copied().collect();
@@ -2629,11 +2895,11 @@ mod tests {
         VariantSet {
             props: props
                 .iter()
-                .map(|(n, vs)| VariantProp {
-                    name: n.to_string(),
-                    values: vs.iter().map(|v| v.to_string()).collect(),
+                .map(|(n, vs)| {
+                    VariantProp::new(n.to_string(), vs.iter().map(|v| v.to_string()).collect())
                 })
                 .collect(),
+            ..Default::default()
         }
     }
 

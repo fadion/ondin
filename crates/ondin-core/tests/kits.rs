@@ -101,10 +101,11 @@ fn kit() -> Kit {
         Operation::SetVariantSet {
             id: set,
             set: Some(VariantSet {
-                props: vec![VariantProp {
-                    name: "Size".into(),
-                    values: vec!["Large".into(), "Small".into()],
-                }],
+                props: vec![VariantProp::new(
+                    "Size",
+                    vec!["Large".into(), "Small".into()],
+                )],
+                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -1064,10 +1065,11 @@ fn a_variant_newer_than_the_held_set_asks_for_an_update() {
             Operation::SetVariantSet {
                 id: k.set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Large".into(), "Small".into(), "Medium".into()],
-                    }],
+                    props: vec![VariantProp::new(
+                        "Size",
+                        vec!["Large".into(), "Small".into(), "Medium".into()],
+                    )],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

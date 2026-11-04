@@ -113,6 +113,12 @@ pub struct Node {
     /// This frame's **variant properties**, when it is a component set (§5.3d);
     /// every main directly inside it is a variant.
     pub(crate) set: Option<crate::variant::VariantSet>,
+    /// The **lineage key** this layer of a variant shares with the layer it was
+    /// copied from in another variant of its set, however many copies back
+    /// (`None`: its own id is its key). Written only where a variant is copied
+    /// into its set; any other copy gets a fresh key, so a key is unique in each
+    /// variant. Never shown.
+    pub(crate) lineage: Option<NodeId>,
     /// This main's **values**, one per property of its set; the variant's name
     /// is derived from them (`crate::variant::settle`).
     pub(crate) variant: Vec<String>,
@@ -182,6 +188,17 @@ impl Node {
         self.props.clear();
         self.description.clear();
         self.doc_link.clear();
+        self.lineage = None;
+    }
+    /// The key that pairs this layer with its copies in the other variants of its
+    /// set: the one recorded, else its own id.
+    pub fn lineage(&self) -> NodeId {
+        self.lineage.unwrap_or(self.id)
+    }
+    /// Whether a lineage key was recorded, rather than this layer's own id
+    /// standing in.
+    pub fn lineage_recorded(&self) -> bool {
+        self.lineage.is_some()
     }
     /// What this main or set is for, in the user's words; empty is none.
     pub fn description(&self) -> &str {

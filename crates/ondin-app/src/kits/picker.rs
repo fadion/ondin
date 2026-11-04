@@ -2045,10 +2045,11 @@ pub(crate) mod tests {
             Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Small".into(), "Primary".into()],
-                    }],
+                    props: vec![VariantProp::new(
+                        "Size",
+                        vec!["Small".into(), "Primary".into()],
+                    )],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

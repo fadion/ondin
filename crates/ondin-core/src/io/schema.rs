@@ -318,6 +318,10 @@ pub(crate) struct NodeDto {
     /// links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub swap: Option<String>,
+    /// A variant layer's lineage key, as a wire id, absent where none was
+    /// recorded. Part of v13. Not checked on load: it names no layer, only a key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<String>,
     /// A component set's variant properties (§15 D982), absent on every other
     /// layer. Part of v5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -460,6 +464,7 @@ impl NodeDto {
             component: n.component(),
             link: n.link().map(NodeId::to_wire),
             swap: n.swap().map(NodeId::to_wire),
+            lineage: n.lineage.map(NodeId::to_wire),
             set: n.set().cloned(),
             variant: n.variant().to_vec(),
             props: n.props().to_vec(),
@@ -498,6 +503,7 @@ impl NodeDto {
         let parent = self.parent.as_deref().map(parse_id).transpose()?;
         let link = self.link.as_deref().map(parse_id).transpose()?;
         let swap = self.swap.as_deref().map(parse_id).transpose()?;
+        let lineage = self.lineage.as_deref().map(parse_id).transpose()?;
         let children = self
             .children
             .iter()
@@ -564,6 +570,7 @@ impl NodeDto {
             component: self.component,
             link,
             swap,
+            lineage,
             set: self.set,
             variant: self.variant,
             // Re-keyed rather than refused: earlier builds saved sets with a

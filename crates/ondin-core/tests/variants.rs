@@ -130,10 +130,8 @@ fn fixture() -> F {
         Operation::SetVariantSet {
             id: s,
             set: Some(VariantSet {
-                props: vec![VariantProp {
-                    name: "Size".into(),
-                    values: strs(&["Small", "Large"]),
-                }],
+                props: vec![VariantProp::new("Size", strs(&["Small", "Large"]))],
+                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -269,10 +267,8 @@ fn the_variant_rules_are_held_after_the_last_op() {
         vec![Operation::SetVariantSet {
             id: f.s,
             set: Some(VariantSet {
-                props: vec![VariantProp {
-                    name: "Size".into(),
-                    values: strs(&["Small", "Small", "Large"]),
-                }],
+                props: vec![VariantProp::new("Size", strs(&["Small", "Small", "Large"]))],
+                ..Default::default()
             }),
         }],
     );
@@ -1522,10 +1518,8 @@ fn an_empty_property_is_refused_rather_than_panicking() {
     let mut tx = Transaction(vec![Operation::SetVariantSet {
         id: f.s,
         set: Some(VariantSet {
-            props: vec![VariantProp {
-                name: "Size".into(),
-                values: Vec::new(),
-            }],
+            props: vec![VariantProp::new("Size", Vec::new())],
+            ..Default::default()
         }),
     }]);
     ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
@@ -1810,4 +1804,208 @@ fn a_styled_layer_crosses_a_switch_and_a_structural_add() {
         (Some(blue), solid(200)),
         "the added copy is bound and holds the look"
     );
+}
+
+/// The fixture with `State: Default, Hover, Pressed, Disabled` as a second
+/// property, Default every variant's value.
+fn with_states(f: &mut F) {
+    let tx = variant::add_property(&f.doc, f.s, "State", "Default").unwrap();
+    f.commit(tx.0);
+    for v in ["Hover", "Pressed", "Disabled"] {
+        let tx = variant::add_value(&f.doc, f.s, 1, v).unwrap();
+        f.commit(tx.0);
+    }
+}
+
+fn ties(f: &F) -> Vec<(String, variant::Interaction)> {
+    f.doc.get(f.s).unwrap().set().unwrap().props[1]
+        .states
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+/// Marking ties each value as its name suggests and never rest's, and a file
+/// keeps the ties and the element.
+///
+/// flip: `mark_interaction` guessing rest's value too → fails at "Default
+/// stays rest".
+#[test]
+fn marking_a_property_guesses_its_states() {
+    use variant::Interaction::*;
+    let mut f = fixture();
+    with_states(&mut f);
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        ties(&f),
+        [
+            ("Disabled".to_string(), Disabled),
+            ("Hover".to_string(), Hover),
+            ("Pressed".to_string(), Active)
+        ],
+        "Default stays rest"
+    );
+    assert_eq!(
+        variant::rest_value(&f.doc, f.s, 1).as_deref(),
+        Some("Default")
+    );
+    assert!(
+        variant::why_not_interaction(&f.doc, f.s, 0)
+            .is_some_and(|w| w == "State is the interaction state"),
+        "a second is refused with the first's name"
+    );
+    let tx = variant::set_element(&f.doc, f.s, variant::RootElement::Link).unwrap();
+    f.commit(tx.0);
+    let bytes = io::save(&f.doc).unwrap();
+    let loaded = io::load(&bytes).unwrap();
+    let set = loaded.get(f.s).unwrap().set().unwrap();
+    assert_eq!(set.element, variant::RootElement::Link);
+    assert_eq!(set.props[1].state_of("Hover"), Some(Hover));
+    assert_eq!(io::save(&loaded).unwrap(), bytes);
+}
+
+/// An unmarked set writes neither key, nor a layer its lineage, so its file
+/// keeps its bytes.
+#[test]
+fn an_unmarked_set_writes_no_state_keys() {
+    let f = fixture();
+    let text = String::from_utf8(io::save(&f.doc).unwrap()).unwrap();
+    assert!(!text.contains("\"states\""), "{text}");
+    assert!(!text.contains("\"element\""), "{text}");
+    assert!(!text.contains("\"lineage\""), "{text}");
+}
+
+/// A tie follows its value's rename and goes with its delete; a state is tied
+/// once.
+#[test]
+fn a_tie_follows_its_value() {
+    use variant::Interaction::*;
+    let mut f = fixture();
+    with_states(&mut f);
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    f.commit(tx.0);
+    let tx = variant::rename_value(&f.doc, f.s, 1, 1, "Hovered").unwrap();
+    f.commit(tx.0);
+    assert!(ties(&f).contains(&("Hovered".to_string(), Hover)));
+    assert!(
+        variant::tie_state(&f.doc, f.s, 1, 2, Some(Hover)).is_none(),
+        "Hover is Hovered's"
+    );
+    let tx = variant::tie_state(&f.doc, f.s, 1, 2, None).unwrap();
+    f.commit(tx.0);
+    assert!(!ties(&f).iter().any(|(v, _)| v == "Pressed"));
+    let tx = variant::delete_value(&f.doc, f.s, 1, 3).unwrap();
+    f.commit(tx.0);
+    assert_eq!(ties(&f), [("Hovered".to_string(), Hover)]);
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, false).unwrap();
+    f.commit(tx.0);
+    assert!(
+        f.doc
+            .get(f.s)
+            .unwrap()
+            .set()
+            .unwrap()
+            .interaction()
+            .is_none()
+    );
+}
+
+/// Two marked properties, or a tie naming no value, are refused.
+#[test]
+fn the_state_rules_are_held() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let mut two = f.doc.get(f.s).unwrap().set().unwrap().clone();
+    two.props[0].states = Some(Default::default());
+    two.props[1].states = Some(Default::default());
+    let rule = refused(
+        &mut f.doc,
+        vec![Operation::SetVariantSet {
+            id: f.s,
+            set: Some(two),
+        }],
+    );
+    assert_eq!(rule, VariantRule::States);
+    let mut stray = f.doc.get(f.s).unwrap().set().unwrap().clone();
+    stray.props[0].states = Some([("Huge".to_string(), variant::Interaction::Hover)].into());
+    let rule = refused(
+        &mut f.doc,
+        vec![Operation::SetVariantSet {
+            id: f.s,
+            set: Some(stray),
+        }],
+    );
+    assert_eq!(rule, VariantRule::States);
+}
+
+/// *Add variant* gives each copied layer its source's lineage key, through a
+/// copy of a copy; a layer duplicated inside one variant gets a fresh one.
+///
+/// flip: `insert_subtrees_as` not writing `lineage` → fails at "Small's key".
+#[test]
+fn an_added_variant_shares_its_sources_keys() {
+    let mut f = fixture();
+    for v in ["Huge", "Giant"] {
+        let tx = variant::add_value(&f.doc, f.s, 0, v).unwrap();
+        f.commit(tx.0);
+    }
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, huge) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, giant) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(huge)).unwrap();
+    f.commit(tx.0);
+    let key = |f: &F, id: NodeId| f.doc.get(id).unwrap().lineage();
+    for v in [huge, giant] {
+        let kids = f.kids(v);
+        assert_eq!(key(&f, kids[0]), f.bg, "Small's key");
+        assert_eq!(key(&f, kids[1]), f.label);
+    }
+    let first = f.kids(huge)[0];
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(first).unwrap(),
+            parent: huge,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    assert_eq!(
+        key(&f, made[0]),
+        made[0],
+        "a copy within a variant is fresh"
+    );
+}
+
+/// A switch pairs a layer renamed in the other variant by its lineage key, so
+/// the instance's override carries and the layer keeps its id.
+///
+/// flip: `rewrite` matching by name path only → fails at "paired by key".
+#[test]
+fn a_switch_pairs_a_renamed_layer_by_its_key() {
+    let mut f = fixture();
+    let tx = variant::add_value(&f.doc, f.s, 0, "Huge").unwrap();
+    f.commit(tx.0);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, huge) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    let hbg = f.kids(huge)[0];
+    f.commit(vec![Operation::SetName {
+        id: hbg,
+        name: "Background".into(),
+    }]);
+    let ibg = f.kids(f.i)[0];
+    f.commit(vec![Operation::SetFills {
+        id: ibg,
+        fills: fills(77),
+    }]);
+    let tx = variant::switch(&f.doc, f.i, huge, &mut f.ids).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.link(ibg), Some(hbg), "paired by key");
+    assert_eq!(f.fill(ibg), solid(77));
 }

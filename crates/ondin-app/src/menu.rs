@@ -6472,10 +6472,11 @@ mod kit_rows_tests {
             Operation::SetVariantSet {
                 id: set,
                 set: Some(VariantSet {
-                    props: vec![VariantProp {
-                        name: "Size".into(),
-                        values: vec!["Small".into(), "Large".into()],
-                    }],
+                    props: vec![VariantProp::new(
+                        "Size",
+                        vec!["Small".into(), "Large".into()],
+                    )],
+                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

@@ -167,6 +167,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         component: false,
         link: None,
         swap: None,
+        lineage: None,
         set: None,
         variant: Vec::new(),
         props: Vec::new(),
@@ -1968,6 +1969,7 @@ impl Document {
             component: false,
             link: None,
             swap: None,
+            lineage: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
@@ -3445,6 +3447,11 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // A swap is remapped only when the main came along — the link's rule
             // (§15 D983).
             swap: n.swap.map(|s| map.get(&s).copied().unwrap_or(s)),
+            // Remapped with a whole set, so its variants still share keys; a key
+            // naming a layer outside the template is dropped, so a copy within one
+            // variant gets a fresh key. `build::insert_subtrees_as` writes a
+            // variant copied into its set.
+            lineage: n.lineage.and_then(|k| map.get(&k).copied()),
             // A copied set is a set and a copied variant keeps its values (§15
             // D982); a property's bound layers are remapped with the ids, and one
             // bound outside the template is kept for `variant::settle` to unbind
@@ -3722,6 +3729,7 @@ mod tests {
             component: false,
             link: None,
             swap: None,
+            lineage: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),

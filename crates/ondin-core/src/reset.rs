@@ -75,6 +75,8 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         // rewrites the copy's children, which `overrides` writes as a `SetSwap`
         // and `crate::swap::settle` expands at the commit.
         swap: _,
+        // A key pairing a variant's layers, never an override.
+        lineage: _,
         // A main's or a set's own, read by an instance through its link (§15 D982).
         set: _,
         variant: _,

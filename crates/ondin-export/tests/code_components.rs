@@ -450,10 +450,11 @@ fn button_set(badge: Badge) -> (Document, NodeId) {
         Operation::SetVariantSet {
             id: set,
             set: Some(VariantSet {
-                props: vec![VariantProp {
-                    name: "Size".into(),
-                    values: vec!["Small".into(), "Large".into()],
-                }],
+                props: vec![VariantProp::new(
+                    "Size",
+                    vec!["Small".into(), "Large".into()],
+                )],
+                ..Default::default()
             }),
         },
         create(small, (set, 0), frame(80.0, 30.0), (10.0, 10.0), "Small"),

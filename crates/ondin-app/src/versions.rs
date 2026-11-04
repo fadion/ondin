@@ -108,11 +108,6 @@ fn day_heading(secs: u64, today: i64) -> (String, String) {
     }
 }
 
-/// Text at `pct` percent over the ground.
-fn ink(pct: u32) -> egui::Color32 {
-    color::text_a((pct * 255 / 100) as u8)
-}
-
 /// A placeholder's opacity at `time`, `delay` into its beat.
 fn pulse(time: f64, delay: f64) -> f32 {
     let phase = (time - delay) / PULSE_S * std::f64::consts::TAU;
@@ -253,7 +248,7 @@ fn tag(p: &egui::Painter, at: egui::Rect, status: Status) {
         at.center(),
         egui::Align2::CENTER_CENTER,
         sign,
-        egui::FontId::proportional(9.0),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
         ink,
     );
 }
@@ -269,14 +264,15 @@ fn count_runs(counts: Counts) -> Vec<(String, egui::Color32)> {
         .collect()
 }
 
-/// `runs` laid out as one line at 11 points, a space between each, cut at `width`.
+/// `runs` laid out as one line at `ui::SMALL_PT`, a space between each, cut at
+/// `width`.
 fn runs_line(ui: &egui::Ui, runs: &[(String, egui::Color32)], width: f32) -> Arc<egui::Galley> {
     let mut parts: Vec<(&str, f32, egui::Color32, bool)> = Vec::new();
     for (i, (text, ink)) in runs.iter().enumerate() {
         if i > 0 {
-            parts.push((" ", 11.0, *ink, false));
+            parts.push((" ", crate::ui::SMALL_PT, *ink, false));
         }
-        parts.push((text, 11.0, *ink, false));
+        parts.push((text, crate::ui::SMALL_PT, *ink, false));
     }
     compare::one_line(ui, &parts, width)
 }
@@ -285,7 +281,7 @@ fn runs_line(ui: &egui::Ui, runs: &[(String, egui::Color32)], width: f32) -> Arc
 /// (or failed, which draws its own line).
 fn summary_runs(s: &Stop, private: bool) -> Option<Vec<(String, egui::Color32)>> {
     let before = s.before.as_deref().unwrap_or_default();
-    let quiet = |t: String| vec![(t, ink(35))];
+    let quiet = |t: String| vec![(t, theme::text::faint())];
     let runs = match (s.summary.as_deref()?, s.place) {
         (Summary::Failed { .. }, _) => return None,
         (Summary::Same, None) => quiet(format!("No changes since {before}")),
@@ -293,17 +289,17 @@ fn summary_runs(s: &Stop, private: bool) -> Option<Vec<(String, egui::Color32)>>
         (Summary::Size { pages, layers }, place) => {
             let size = format!("{}, {}", plural(*pages, "page"), plural(*layers, "layer"));
             match place {
-                None => vec![(size.replace(", ", " · "), ink(40))],
+                None => vec![(size.replace(", ", " · "), theme::text::faint())],
                 Some(_) => quiet(format!("First version · {size}")),
             }
         }
         (Summary::Changed(brief), place) => {
             let mut runs = Vec::new();
             if place.is_none() {
-                runs.push((format!("Since {before}:"), ink(35)));
+                runs.push((format!("Since {before}:"), theme::text::faint()));
             }
             runs.extend(brief.parts(private).into_iter().map(|part| match part {
-                Part::Words(w) => (w, ink(55)),
+                Part::Words(w) => (w, theme::text::muted()),
                 Part::Count(status, n) => {
                     let (hue, _, sign) = compare::look(status);
                     (format!("{sign}{n}"), hue)
@@ -377,7 +373,7 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             },
             false => egui::CornerRadius::same(6),
         };
-        p.rect_filled(ground, r, ink(6));
+        p.rect_filled(ground, r, color::text_a(15));
     }
     let same = s.same();
     let named = s.name.is_some();
@@ -386,22 +382,22 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
     // The time, level with the first line.
     let time_ink = match (s.place, same, named) {
         (None, _, _) => color::accent_300(),
-        (_, true, _) => ink(35),
-        (_, _, true) => ink(72),
-        _ => ink(50),
+        (_, true, _) => theme::text::faint(),
+        (_, _, true) => theme::text::muted(),
+        _ => theme::text::dim(),
     };
     let y1 = rect.top() + LINE1_Y;
     p.text(
         egui::pos2(rect.left() + TIME_W, y1),
         egui::Align2::RIGHT_CENTER,
         &s.time,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         time_ink,
     );
 
     // The rail and the stop on it.
     let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
-    let line = egui::Stroke::new(1.0, ink(12));
+    let line = egui::Stroke::new(1.0, color::text_a(30));
     let r = match (s.place, named) {
         (None, _) => 5.5,
         (_, true) => 5.0,
@@ -435,9 +431,9 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
                 c,
                 r,
                 match (lit_stop, same) {
-                    (true, _) => ink(60),
-                    (_, true) => ink(22),
-                    _ => ink(32),
+                    (true, _) => color::text_a(153),
+                    (_, true) => color::text_a(56),
+                    _ => color::text_a(81),
                 },
             );
         }
@@ -508,9 +504,17 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         out.held = compare.has_focus();
         right = diff.left() - 8.0;
     } else if !s.ago.is_empty() {
-        let g = p.layout_no_wrap(s.ago.clone(), egui::FontId::proportional(11.0), ink(40));
+        let g = p.layout_no_wrap(
+            s.ago.clone(),
+            egui::FontId::proportional(crate::ui::SMALL_PT),
+            theme::text::faint(),
+        );
         right -= g.size().x;
-        p.galley(egui::pos2(right, mid - g.size().y / 2.0), g, ink(40));
+        p.galley(
+            egui::pos2(right, mid - g.size().y / 2.0),
+            g,
+            theme::text::faint(),
+        );
         right -= 8.0;
     }
 
@@ -528,14 +532,14 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         }
         None => {
             let (text, ink_) = match (s.place, &s.name) {
-                (None, _) => ("Current state", ink(72)),
-                (_, Some(name)) if same => (name.as_str(), ink(62)),
+                (None, _) => ("Current state", theme::text::strong()),
+                (_, Some(name)) if same => (name.as_str(), theme::text::muted()),
                 (_, Some(name)) => (name.as_str(), color::text()),
-                _ if lit_stop => ("Saved", ink(62)),
-                _ if same => ("Saved", ink(32)),
-                _ => ("Saved", ink(45)),
+                _ if lit_stop => ("Saved", theme::text::muted()),
+                _ if same => ("Saved", theme::text::faint()),
+                _ => ("Saved", theme::text::dim()),
             };
-            let g = compare::one_line(ui, &[(text, 12.5, ink_, false)], label_w);
+            let g = compare::one_line(ui, &[(text, crate::ui::CONTROL_PT, ink_, false)], label_w);
             p.galley(egui::pos2(x0, y1 - g.size().y / 2.0), g, ink_);
         }
     }
@@ -545,7 +549,11 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
     match (summary_runs(s, look.private), s.summary.as_deref()) {
         (Some(runs), _) => {
             let g = runs_line(ui, &runs, label_w);
-            p.galley(egui::pos2(x0, y2 - g.size().y / 2.0), g, ink(55));
+            p.galley(
+                egui::pos2(x0, y2 - g.size().y / 2.0),
+                g,
+                theme::text::muted(),
+            );
         }
         (None, Some(Summary::Failed { this })) => {
             p.text(
@@ -559,8 +567,13 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
                 true => "Couldn’t compare: this version could not be read",
                 false => "Couldn’t compare: the version before it could not be read",
             };
-            let g = compare::one_line(ui, &[(words, 11.0, ink(40), false)], label_w - 17.0);
-            p.galley(egui::pos2(x0 + 17.0, y2 - g.size().y / 2.0), g, ink(40));
+            let faint = theme::text::faint();
+            let g = compare::one_line(
+                ui,
+                &[(words, crate::ui::SMALL_PT, faint, false)],
+                label_w - 17.0,
+            );
+            p.galley(egui::pos2(x0 + 17.0, y2 - g.size().y / 2.0), g, faint);
         }
         _ if s
             .asked
@@ -575,12 +588,12 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             ];
             let (a, b) = BARS[look.pending % BARS.len()];
             let beat = pulse(look.time, look.pending as f64 * 0.12);
-            let bar = |x: f32, w: f32, pct: u32| {
+            let bar = |x: f32, w: f32, alpha: u8| {
                 let r = egui::Rect::from_min_size(egui::pos2(x, y2 - 3.5), egui::vec2(w, 7.0));
-                p.rect_filled(r, 4.0, ink(pct).gamma_multiply(beat));
+                p.rect_filled(r, 4.0, color::text_a(alpha).gamma_multiply(beat));
             };
-            bar(x0, a.min(label_w), 14);
-            bar(x0 + a + 5.0, b.min((label_w - a - 5.0).max(0.0)), 10);
+            bar(x0, a.min(label_w), 35);
+            bar(x0 + a + 5.0, b.min((label_w - a - 5.0).max(0.0)), 25);
         }
         _ => {}
     }
@@ -592,7 +605,7 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
 
 /// The rail from `top` to `bottom` in dashes: the line under Now before any version.
 fn dashed_rail(p: &egui::Painter, x: f32, top: f32, bottom: f32) {
-    let stroke = egui::Stroke::new(1.0, ink(18));
+    let stroke = egui::Stroke::new(1.0, color::text_a(45));
     let mut y = top + 2.0;
     while y < bottom {
         p.line_segment(
@@ -701,7 +714,7 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             sw: 6,
             se: 6,
         },
-        ink(6),
+        color::text_a(15),
     );
     let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
     if !last {
@@ -710,7 +723,7 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
                 egui::pos2(rail, rect.top()),
                 egui::pos2(rail, rect.bottom()),
             ],
-            egui::Stroke::new(1.0, ink(12)),
+            egui::Stroke::new(1.0, color::text_a(30)),
         );
     }
     let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
@@ -730,8 +743,8 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             egui::pos2(x0 + 18.0, centre(y)),
             egui::Align2::LEFT_CENTER,
             format!("Comparing with {before}…"),
-            egui::FontId::proportional(11.0),
-            ink(50),
+            egui::FontId::proportional(crate::ui::SMALL_PT),
+            theme::text::dim(),
         );
         y += LIST_LINE_H;
         for (i, frac) in [0.78, 0.62, 0.70].into_iter().enumerate() {
@@ -739,12 +752,12 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             let beat = pulse(time, i as f64 * 0.12);
             let cy = centre(y);
             let dot = egui::Rect::from_center_size(egui::pos2(x0 + 7.0, cy), egui::vec2(6.0, 6.0));
-            p.rect_filled(dot, 2.0, ink(14).gamma_multiply(beat));
+            p.rect_filled(dot, 2.0, color::text_a(35).gamma_multiply(beat));
             let bar = egui::Rect::from_min_size(
                 egui::pos2(x0 + 20.0, cy - 3.5),
                 egui::vec2((w - 20.0) * frac, 7.0),
             );
-            p.rect_filled(bar, 4.0, ink(10).gamma_multiply(beat));
+            p.rect_filled(bar, 4.0, color::text_a(25).gamma_multiply(beat));
             y += LIST_LINE_H;
         }
     }
@@ -759,15 +772,15 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             egui::Align2::LEFT_CENTER,
             g.glyph,
             theme::icon_font(12.0),
-            ink(45),
+            theme::text::dim(),
         );
-        let mut runs = vec![(g.name.clone(), ink(85))];
+        let mut runs = vec![(g.name.clone(), theme::text::strong())];
         runs.extend(count_runs(g.counts));
         let head = runs_line(ui, &runs, w - 18.0);
         p.galley(
             egui::pos2(x0 + 18.0, cy - head.size().y / 2.0),
             head,
-            ink(85),
+            theme::text::strong(),
         );
         y += LIST_LINE_H;
         for (status, trail, name, what) in g.lines.iter().take(LINES_SHOWN) {
@@ -782,16 +795,16 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             let line = compare::one_line(
                 ui,
                 &[
-                    (trail, 11.0, ink(40), false),
-                    (name, 11.0, ink(78), false),
-                    (&what, 11.0, ink(45), false),
+                    (trail, crate::ui::SMALL_PT, theme::text::faint(), false),
+                    (name, crate::ui::SMALL_PT, theme::text::strong(), false),
+                    (&what, crate::ui::SMALL_PT, theme::text::dim(), false),
                 ],
                 w - 20.0,
             );
             p.galley(
                 egui::pos2(x0 + 20.0, cy - line.size().y / 2.0),
                 line,
-                ink(78),
+                theme::text::strong(),
             );
             y += LIST_LINE_H;
         }
@@ -802,8 +815,13 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
                 true => format!("and {more} more on {}", g.name),
                 false => format!("and {more} more"),
             };
-            let line = compare::one_line(ui, &[(&words, 10.5, ink(40), false)], w - 20.0);
-            p.galley(egui::pos2(x0 + 20.0, y), line, ink(40));
+            let faint = theme::text::faint();
+            let line = compare::one_line(
+                ui,
+                &[(&words, crate::ui::CAPTION_PT, faint, false)],
+                w - 20.0,
+            );
+            p.galley(egui::pos2(x0 + 20.0, y), line, faint);
             y += 14.0;
         }
     }
@@ -815,8 +833,8 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
         egui::pos2(show.rect.right() + 8.0, cy),
         egui::Align2::LEFT_CENTER,
         format!("{} against {before}", s.time),
-        egui::FontId::proportional(10.5),
-        ink(40),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
+        theme::text::faint(),
     );
     show.clicked()
 }
@@ -834,7 +852,7 @@ fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
             egui::pos2(rail, rect.top()),
             egui::pos2(rail, rect.bottom()),
         ],
-        egui::Stroke::new(1.0, ink(12)),
+        egui::Stroke::new(1.0, color::text_a(30)),
     );
     let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
     let mut job = egui::text::LayoutJob::default();
@@ -842,8 +860,8 @@ fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
         &day.to_uppercase(),
         0.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(10.0),
-            color: ink(55),
+            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
+            color: theme::text::muted(),
             extra_letter_spacing: 0.8,
             ..Default::default()
         },
@@ -852,13 +870,17 @@ fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
         date,
         7.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(10.5),
-            color: ink(38),
+            font_id: egui::FontId::proportional(crate::ui::CAPTION_PT),
+            color: theme::text::faint(),
             ..Default::default()
         },
     );
     let g = p.layout_job(job);
-    p.galley(egui::pos2(x0, rect.bottom() - 6.0 - g.size().y), g, ink(55));
+    p.galley(
+        egui::pos2(x0, rect.bottom() - 6.0 - g.size().y),
+        g,
+        theme::text::muted(),
+    );
 }
 
 /// Under Now with no versions: why there are none, beside the dashed rail. `pins`
@@ -876,8 +898,8 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
     let body = ui.fonts_mut(|f| {
         f.layout(
             words.into(),
-            egui::FontId::proportional(11.5),
-            ink(50),
+            egui::FontId::proportional(crate::ui::SMALL_PT),
+            theme::text::dim(),
             w - x0,
         )
     });
@@ -892,7 +914,7 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
             egui::pos2(x, rect.top() + 10.0),
             egui::Align2::LEFT_TOP,
             "No versions yet",
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(crate::ui::CONTROL_PT),
             color::text(),
         );
     }
@@ -901,7 +923,7 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
     } else {
         rect.top() + 10.0
     };
-    p.galley(egui::pos2(x, top), body, ink(50));
+    p.galley(egui::pos2(x, top), body, theme::text::dim());
 }
 
 /// The card's head: the glyph, the title, the document and its count dim beside it,
@@ -918,11 +940,16 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
             ));
             ui.label(
                 egui::RichText::new("Version history")
-                    .size(14.0)
+                    .size(crate::ui::TITLE_PT)
                     .color(theme::text::strong()),
             );
             ui.add(
-                egui::Label::new(egui::RichText::new(title).size(11.5).color(ink(45))).truncate(),
+                egui::Label::new(
+                    egui::RichText::new(title)
+                        .size(crate::ui::SMALL_PT)
+                        .color(theme::text::dim()),
+                )
+                .truncate(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // The settings card's ✕ (`settings::modal_title`).
@@ -930,8 +957,8 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
                 if let Some((done, all)) = progress {
                     ui.label(
                         egui::RichText::new(format!("Comparing {done} of {all}"))
-                            .size(11.0)
-                            .color(ink(40)),
+                            .size(crate::ui::SMALL_PT)
+                            .color(theme::text::faint()),
                     );
                 }
                 close
@@ -951,7 +978,7 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
         p.rect_filled(
             egui::Rect::from_x_y_ranges(x0..=x1, at..=at + 2.0),
             0.0,
-            ink(6),
+            color::text_a(15),
         );
         let to = x0 + (x1 - x0) * done as f32 / all.max(1) as f32;
         p.rect_filled(
@@ -966,14 +993,23 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
 /// A key's name on a faint chip, set a point low: centred on the row, the chip's
 /// small caps-height text reads high against the words beside it.
 fn key_chip(ui: &mut egui::Ui, key: &str) {
-    let text =
-        ui.fonts_mut(|f| f.layout_no_wrap(key.into(), egui::FontId::proportional(10.5), ink(72)));
+    let text = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            key.into(),
+            egui::FontId::proportional(crate::ui::CAPTION_PT),
+            theme::text::muted(),
+        )
+    });
     let size = text.size() + egui::vec2(10.0, 2.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let rect = rect.translate(egui::vec2(0.0, 1.0));
     let p = ui.painter();
-    p.rect_filled(rect, 3.0, ink(8));
-    p.galley(rect.center() - text.size() / 2.0, text, ink(72));
+    p.rect_filled(rect, 3.0, color::text_a(20));
+    p.galley(
+        rect.center() - text.size() / 2.0,
+        text,
+        theme::text::muted(),
+    );
 }
 
 /// The card's foot: how a version is saved — said only while `Ctrl+S` pins one
@@ -987,7 +1023,7 @@ fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
             egui::pos2(full.min - crate::settings::PAD, rule),
             egui::pos2(full.max + crate::settings::PAD, rule),
         ],
-        egui::Stroke::new(1.0, ink(8)),
+        egui::Stroke::new(1.0, color::text_a(20)),
     );
     ui.add_space(12.0);
     ui.horizontal(|ui| {
@@ -996,8 +1032,8 @@ fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
             key_chip(ui, "Ctrl+S");
             ui.label(
                 egui::RichText::new("saves a version")
-                    .size(11.0)
-                    .color(ink(45)),
+                    .size(crate::ui::SMALL_PT)
+                    .color(theme::text::dim()),
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

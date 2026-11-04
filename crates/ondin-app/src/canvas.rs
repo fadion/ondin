@@ -887,7 +887,7 @@ const GHOST_ALPHA: f32 = 0.3;
 const SET_TAB_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 
 /// A frame tag's point size.
-const LABEL_PT: f32 = 11.0;
+const LABEL_PT: f32 = crate::ui::SMALL_PT;
 
 /// The padding inside a main's chip: its tag on a neutral ground.
 const CHIP_PAD: egui::Vec2 = egui::vec2(4.0, 2.0);
@@ -7443,7 +7443,7 @@ impl OndinApp {
 
         let galley = painter.layout_no_wrap(
             measure::label(m.distance()),
-            egui::FontId::proportional(9.5),
+            egui::FontId::proportional(crate::ui::CAPTION_PT),
             color::MEASURE_INK,
         );
         let pill = egui::Rect::from_center_size(a + (b - a) * 0.5, galley.size() + PAD * 2.0);
@@ -9355,7 +9355,7 @@ impl OndinApp {
 
         let galley = ui.painter().layout_no_wrap(
             "Done".to_owned(),
-            egui::FontId::proportional(9.5),
+            egui::FontId::proportional(crate::ui::CAPTION_PT),
             color::BADGE_INK,
         );
         let size = galley.size() + PAD * 2.0;
@@ -9823,7 +9823,7 @@ fn paint_pivot(painter: &egui::Painter, at: egui::Pos2, marker: Marker) {
 /// top-left corner" looks identical to "the top-left corner" and behaves differently.
 fn paint_pivot_badge(painter: &egui::Painter, at: egui::Pos2, name: &str) {
     const PAD: egui::Vec2 = egui::vec2(6.0, 2.0);
-    let font = egui::FontId::proportional(9.5);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
     let galley = painter.layout_no_wrap(name.to_owned(), font, color::BADGE_INK);
     let box_ = egui::Rect::from_center_size(
         at - egui::vec2(0.0, PIVOT_GLYPH_PX * 0.5 + 9.0),
@@ -9929,7 +9929,7 @@ fn paint_drop_label(painter: &egui::Painter, canvas: egui::Rect, at: egui::Pos2,
     const GAP: f32 = 8.0;
     let galley = painter.layout_no_wrap(
         text.to_owned(),
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         color::BADGE_INK,
     );
     let size = galley.size() + PAD * 2.0;
@@ -10259,7 +10259,8 @@ fn paint_size_pill(
     } else {
         color::BADGE_INK
     };
-    let galley = painter.layout_no_wrap(label, egui::FontId::proportional(9.5), ink);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
+    let galley = painter.layout_no_wrap(label, font, ink);
     let lock_w = if locked { LOCK_PT + LOCK_GAP } else { 0.0 };
     let size = egui::vec2(
         galley.size().x + lock_w + PAD.x * 2.0,

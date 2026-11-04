@@ -327,7 +327,7 @@ impl OndinApp {
                     if n == 1 { "" } else { "s" },
                     if n == 1 { "has" } else { "have" }
                 ))
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(theme::text::strong()),
             );
             ui.add_space(4.0);
@@ -349,7 +349,7 @@ impl OndinApp {
                         Some(name) => format!("{layers} using {name} keep its values."),
                         None => format!("{layers} using what the kits removed keep their values."),
                     })
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
                 );
             }
@@ -358,7 +358,7 @@ impl OndinApp {
                     "Changes {instances} instance{}. Your overrides stay.",
                     if instances == 1 { "" } else { "s" }
                 ))
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::dim()),
             );
             ui.add_space(6.0);
@@ -697,13 +697,13 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
         ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::muted()));
         ui.label(
             egui::RichText::new(&w.kit.name)
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(color::text()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(format!("v{} → v{}", w.held, w.kit.version))
-                    .size(10.5)
+                    .size(ui::CAPTION_PT)
                     .color(theme::text::faint()),
             );
         });
@@ -720,13 +720,13 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
     };
     ui.label(
         egui::RichText::new(line)
-            .size(11.0)
+            .size(ui::SMALL_PT)
             .color(theme::text::dim()),
     );
     if let Some(note) = &w.kit.note {
         ui.label(
             egui::RichText::new(format!("“{note}”"))
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .italics()
                 .color(theme::text::muted()),
         );

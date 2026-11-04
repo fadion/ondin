@@ -755,7 +755,7 @@ fn masked_name(ui: &mut egui::Ui, text: &str, width: f32) -> egui::Response {
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(ui::HEAD_PT),
         color::text(),
     );
     resp
@@ -838,7 +838,7 @@ impl OndinApp {
                         egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
                             .desired_width(140.0)
-                            .font(egui::FontId::proportional(13.0)),
+                            .font(egui::FontId::proportional(ui::HEAD_PT)),
                     );
                     if resp.has_focus() {
                         ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
@@ -862,7 +862,7 @@ impl OndinApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(place)
-                            .size(10.5)
+                            .size(ui::CAPTION_PT)
                             .color(theme::text::faint()),
                     );
                 });
@@ -1019,7 +1019,7 @@ impl OndinApp {
                 identity_glyph(ui, icon::RULER, color::accent_300());
                 ui.label(
                     egui::RichText::new(title)
-                        .size(13.0)
+                        .size(ui::HEAD_PT)
                         .color(theme::text::strong()),
                 );
             });
@@ -1196,7 +1196,7 @@ impl OndinApp {
                                     1 => "1 layer".to_string(),
                                     n => format!("{n} layers"),
                                 })
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::faint()),
                             );
                             ui.with_layout(
@@ -1225,7 +1225,7 @@ impl OndinApp {
                     if let Some(stand_in) = &drawn_in {
                         ui.label(
                             egui::RichText::new(format!("Drawn in {stand_in}"))
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::faint()),
                         );
                     }
@@ -1332,7 +1332,7 @@ impl OndinApp {
                 identity_glyph(ui, icon::BOUNDING_BOX, color::accent_300());
                 ui.label(
                     egui::RichText::new(format!("{n} layers"))
-                        .size(13.0)
+                        .size(ui::HEAD_PT)
                         .color(theme::text::strong()),
                 );
             });
@@ -1523,7 +1523,7 @@ impl OndinApp {
                 identity_glyph(ui, icon::BEZIER_CURVE, color::accent_300());
                 ui.label(
                     egui::RichText::new("Edit Path")
-                        .size(13.0)
+                        .size(ui::HEAD_PT)
                         .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1756,7 +1756,7 @@ impl OndinApp {
                         egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
                             .desired_width(140.0)
-                            .font(egui::FontId::proportional(13.0)),
+                            .font(egui::FontId::proportional(ui::HEAD_PT)),
                     );
                     if resp.has_focus() {
                         ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
@@ -5296,7 +5296,7 @@ impl OndinApp {
             if fills.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No fill")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
                 return;
@@ -5440,7 +5440,7 @@ impl OndinApp {
                 if strokes.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                     ui.label(
                         egui::RichText::new("No stroke")
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::faint()),
                     );
                     return;
@@ -5658,7 +5658,7 @@ impl OndinApp {
                     .show_ui(ui, |ui| {
                         ui.label(
                             egui::RichText::new("Open shapes stroke centred")
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::faint()),
                         );
                     })
@@ -6725,7 +6725,7 @@ impl OndinApp {
             let Some(grids) = shared.clone() else {
                 ui.label(
                     egui::RichText::new("Mixed layout grids. Add to override.")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
                 return;
@@ -6737,7 +6737,7 @@ impl OndinApp {
             if grids.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No layout grid")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
                 return;
@@ -6854,7 +6854,7 @@ impl OndinApp {
             if mixed {
                 ui.label(
                     egui::RichText::new("Pinned differently. A pin applies to every layer.")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
             }
@@ -7965,7 +7965,7 @@ impl OndinApp {
                                 .add(
                                     egui::Label::new(
                                         egui::RichText::new(paint::label_of(brush))
-                                            .size(12.0)
+                                            .size(ui::CONTROL_PT)
                                             .color(theme::text::strong()),
                                     )
                                     .sense(egui::Sense::click()),
@@ -7986,7 +7986,7 @@ impl OndinApp {
                                 .add(
                                     egui::Label::new(
                                         egui::RichText::new(paint::label_of(brush))
-                                            .size(12.0)
+                                            .size(ui::CONTROL_PT)
                                             .color(theme::text::strong()),
                                     )
                                     .sense(egui::Sense::click()),
@@ -8005,7 +8005,7 @@ impl OndinApp {
                                     1 => "1 match".to_string(),
                                     n => format!("{n} matches"),
                                 })
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::dim()),
                             );
                             return;
@@ -8622,7 +8622,7 @@ impl OndinApp {
         };
         // A refused `--name` tail dims as it is typed.
         use ondin_core::variable::VarKind;
-        let font = egui::FontId::proportional(12.0);
+        let font = egui::FontId::proportional(ui::CONTROL_PT);
         let table = self.session.doc.variables();
         let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
             let at = super::binding::refused(table, VarKind::Color, buf.as_str()).map(|r| r.1);
@@ -8794,7 +8794,7 @@ impl OndinApp {
                 if mixed {
                     ui.label(
                         egui::RichText::new("These layers have different effects")
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::faint()),
                     );
                     return;
@@ -8803,7 +8803,7 @@ impl OndinApp {
                 if effects.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                     ui.label(
                         egui::RichText::new("No effects")
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::faint()),
                     );
                     return;
@@ -9244,7 +9244,7 @@ impl OndinApp {
                             ));
                             ui.label(
                                 egui::RichText::new(effect.kind.label())
-                                    .size(12.0)
+                                    .size(ui::CONTROL_PT)
                                     .color(theme::text::strong()),
                             );
                             ui.with_layout(
@@ -9261,7 +9261,7 @@ impl OndinApp {
                                     }
                                     ui.label(
                                         egui::RichText::new(effect_summary(&effect.kind))
-                                            .size(11.0)
+                                            .size(ui::SMALL_PT)
                                             .color(theme::text::dim()),
                                     );
                                 },
@@ -10954,9 +10954,9 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
 }
 
 /// A template's name, and the size under it.
-const TEMPLATE_NAME_PT: f32 = 11.0;
+const TEMPLATE_NAME_PT: f32 = ui::SMALL_PT;
 /// See [`TEMPLATE_NAME_PT`].
-const TEMPLATE_DIMS_PT: f32 = 9.5;
+const TEMPLATE_DIMS_PT: f32 = ui::CAPTION_PT;
 /// Between a template's two lines.
 const TEMPLATE_LINE_GAP: f32 = 2.0;
 
@@ -12627,7 +12627,7 @@ mod stroke_row_tests {
                 .map(|d| {
                     f.layout_no_wrap(
                         d.label().to_owned(),
-                        egui::FontId::proportional(10.0),
+                        egui::FontId::proportional(ui::SEGMENT_LABEL_PT),
                         egui::Color32::WHITE,
                     )
                     .size()
@@ -13530,7 +13530,7 @@ mod identity_row_tests {
                 egui::TextEdit::singleline(&mut name)
                     .frame(egui::Frame::NONE)
                     .desired_width(140.0)
-                    .font(egui::FontId::proportional(13.0)),
+                    .font(egui::FontId::proportional(ui::HEAD_PT)),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 icon_button(ui, icon::LOCK_SIMPLE, 22.0, 16.0, false, true);
@@ -13541,7 +13541,7 @@ mod identity_row_tests {
             identity_glyph(ui, icon::BOUNDING_BOX, color::accent_300());
             ui.label(
                 egui::RichText::new("3 layers")
-                    .size(13.0)
+                    .size(ui::HEAD_PT)
                     .color(theme::text::strong()),
             );
         });
@@ -13578,7 +13578,7 @@ mod identity_row_tests {
                         egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
                             .desired_width(140.0)
-                            .font(egui::FontId::proportional(13.0)),
+                            .font(egui::FontId::proportional(ui::HEAD_PT)),
                     );
                     at = resp.rect.center();
                 },

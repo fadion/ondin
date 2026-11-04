@@ -484,7 +484,7 @@ impl OndinApp {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(body)
-                        .size(12.0)
+                        .size(ui::CONTROL_PT)
                         .color(theme::text::muted()),
                 )
                 .wrap(),
@@ -677,7 +677,7 @@ impl OndinApp {
                         let room = ui.available_width() - 20.0 - 2.0 * ui.spacing().item_spacing.x;
                         let mut job = egui::text::LayoutJob::simple_singleline(
                             self.shown_page_name(self.compare_page()),
-                            egui::FontId::proportional(12.0),
+                            egui::FontId::proportional(ui::CONTROL_PT),
                             theme::text::muted(),
                         );
                         job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
@@ -828,7 +828,7 @@ impl OndinApp {
                     egui::pos2(rect.left() + NAME_X, cy),
                     egui::Align2::LEFT_CENTER,
                     name,
-                    egui::FontId::proportional(12.5),
+                    egui::FontId::proportional(ui::CONTROL_PT),
                     ink,
                 );
             }
@@ -836,7 +836,7 @@ impl OndinApp {
             if *draft {
                 let tag = p.layout_no_wrap(
                     "Draft".to_string(),
-                    egui::FontId::proportional(10.0),
+                    egui::FontId::proportional(ui::CAPTION_PT),
                     theme::text::dim(),
                 );
                 let size = tag.size() + egui::vec2(10.0, 3.0);
@@ -861,7 +861,7 @@ impl OndinApp {
             {
                 let tag = p.layout_no_wrap(
                     n.to_string(),
-                    egui::FontId::proportional(10.0),
+                    egui::FontId::proportional(ui::CAPTION_PT),
                     crate::compare::CHANGED_INK,
                 );
                 let size = egui::vec2(tag.size().x.max(6.0) + 10.0, tag.size().y + 3.0);
@@ -935,7 +935,7 @@ impl OndinApp {
                 egui::pos2(rect.left() + NAME_X, cy),
                 egui::Align2::LEFT_CENTER,
                 self.shown_page_name(page),
-                egui::FontId::proportional(12.5),
+                egui::FontId::proportional(ui::CONTROL_PT),
                 theme::text::faint(),
             );
             let (hue, ink, sign) = crate::compare::look(status);
@@ -948,7 +948,7 @@ impl OndinApp {
                 tag.center(),
                 egui::Align2::CENTER_CENTER,
                 sign,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 ink,
             );
             let resp = resp.on_hover_text(tip);

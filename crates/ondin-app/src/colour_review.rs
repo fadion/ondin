@@ -599,7 +599,7 @@ fn caption(ui: &mut egui::Ui, r: &ColourReview, selected: bool, threshold: Thres
     let line = |ui: &mut egui::Ui, text: String| {
         ui.label(
             egui::RichText::new(text)
-                .size(10.5)
+                .size(ui::CAPTION_PT)
                 .color(theme::text::faint()),
         );
     };
@@ -650,7 +650,7 @@ fn empty(ui: &mut egui::Ui, r: &ColourReview, threshold: Threshold) {
                         "No near-identical colours at {}",
                         threshold.label()
                     ))
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::muted()),
                 );
                 let counted = match n {
@@ -660,7 +660,7 @@ fn empty(ui: &mut egui::Ui, r: &ColourReview, threshold: Threshold) {
                 };
                 ui.label(
                     egui::RichText::new(counted)
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
             });
@@ -735,14 +735,18 @@ fn paint_name(ui: &egui::Ui, name: &Name, x: f32, y: f32, right: f32, kit_name: 
     let p = ui.painter();
     match name {
         Name::Hex { hex, alpha } => {
-            let g = p.layout_no_wrap(hex.clone(), egui::FontId::proportional(12.0), color::text());
+            let g = p.layout_no_wrap(
+                hex.clone(),
+                egui::FontId::proportional(ui::CONTROL_PT),
+                color::text(),
+            );
             let w = g.size().x;
             p.galley(egui::pos2(x, y - g.size().y / 2.0), g, color::text());
             let mut end = x + w;
             if let Some(a) = alpha {
                 let g = p.layout_no_wrap(
                     format!("{a}%"),
-                    egui::FontId::proportional(11.0),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::dim(),
                 );
                 let ax = end + 9.0;
@@ -822,7 +826,7 @@ fn group_head(
     );
     let cg = p.layout_no_wrap(
         count,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::faint(),
     );
     let cx = rect.right() - cg.size().x;
@@ -928,7 +932,7 @@ fn members(
                 egui::pos2(end + 7.0, y),
                 egui::Align2::LEFT_CENTER,
                 "kept",
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 theme::text::faint(),
             );
         }
@@ -936,7 +940,7 @@ fn members(
             egui::pos2(uses_x + USES_W, y),
             egui::Align2::RIGHT_CENTER,
             plural(s.uses, "use", "uses"),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
         let delta = match i {
@@ -948,7 +952,7 @@ fn members(
             egui::pos2(delta_x + DELTA_W, y),
             egui::Align2::RIGHT_CENTER,
             delta,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell(reticle_x, BTN)));
@@ -1113,7 +1117,7 @@ fn foot_row<R>(ui: &mut egui::Ui, hint: &str, buttons: impl FnOnce(&mut egui::Ui
     let room = child.min_rect().left() - COL_GAP - (rect.left() + PAD);
     let mut job = egui::text::LayoutJob::simple_singleline(
         hint.to_owned(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
@@ -1143,7 +1147,7 @@ fn naming(
             "New colour variable · value {} in every mode",
             ui::hex_of(t.color)
         ))
-        .size(10.5)
+        .size(ui::CAPTION_PT)
         .color(theme::text::faint()),
     );
     let t = doc.variables();
@@ -1201,7 +1205,11 @@ fn naming(
             theme::text::faint(),
         ),
     };
-    ui.label(egui::RichText::new(note.0).size(10.5).color(note.1));
+    ui.label(
+        egui::RichText::new(note.0)
+            .size(ui::CAPTION_PT)
+            .color(note.1),
+    );
 }
 
 #[cfg(test)]

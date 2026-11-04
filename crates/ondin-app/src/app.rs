@@ -5677,7 +5677,7 @@ impl OndinApp {
                         name
                     ),
                 })
-                .size(12.0)
+                .size(crate::ui::CONTROL_PT)
                 .color(theme::text::muted()),
             );
             if pending.target.is_none() {
@@ -5686,7 +5686,7 @@ impl OndinApp {
                     egui::RichText::new(
                         "This document was never saved, so it comes back untitled.",
                     )
-                    .size(12.0)
+                    .size(crate::ui::CONTROL_PT)
                     .color(theme::text::faint()),
                 );
             }
@@ -5694,7 +5694,7 @@ impl OndinApp {
                 ui.add_space(6.0);
                 ui.label(
                     egui::RichText::new(format!("{} more after this one.", waiting - 1))
-                        .size(12.0)
+                        .size(crate::ui::CONTROL_PT)
                         .color(theme::text::faint()),
                 );
             }
@@ -6125,7 +6125,7 @@ impl OndinApp {
             };
             ui.label(
                 egui::RichText::new(sentence)
-                    .size(12.0)
+                    .size(crate::ui::CONTROL_PT)
                     .color(theme::text::muted()),
             );
             if count > 1 {
@@ -6957,7 +6957,7 @@ fn unsaved_list(ui: &mut egui::Ui, tabs: &[crate::tabs::TabInfo]) {
                     ui.painter().circle_filled(dot.center(), 3.0, color::text());
                     ui.label(
                         egui::RichText::new(&tab.name)
-                            .size(12.0)
+                            .size(crate::ui::CONTROL_PT)
                             .color(color::text()),
                     );
                     let place = match (&tab.project, &tab.path) {
@@ -6968,7 +6968,7 @@ fn unsaved_list(ui: &mut egui::Ui, tabs: &[crate::tabs::TabInfo]) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(place)
-                                .size(11.0)
+                                .size(crate::ui::SMALL_PT)
                                 .color(theme::text::dim()),
                         );
                     });
@@ -7243,7 +7243,7 @@ impl OndinApp {
             ('0'..='9')
                 .map(|d| {
                     let text = format!("{}%", d.to_string().repeat(4));
-                    let font = egui::FontId::proportional(11.5);
+                    let font = egui::FontId::proportional(crate::ui::SMALL_PT);
                     f.layout_no_wrap(text, font, theme::text::muted()).size().x
                 })
                 .fold(0.0, f32::max)
@@ -7252,7 +7252,7 @@ impl OndinApp {
         let head = crate::ui::menu_head_min(
             ui,
             egui::RichText::new(format!("{zoom}%"))
-                .size(11.5)
+                .size(crate::ui::SMALL_PT)
                 .color(theme::text::muted()),
             widest,
             TOP_GAP,
@@ -7826,7 +7826,7 @@ impl OndinApp {
             if let Some(shown) = self.shown_project_name(&project.id) {
                 project.name = shown;
             }
-            let font = egui::FontId::proportional(13.0);
+            let font = egui::FontId::proportional(crate::ui::HEAD_PT);
             let width = ui
                 .ctx()
                 .fonts_mut(|f| {
@@ -7860,7 +7860,7 @@ impl OndinApp {
             }
             ui.label(
                 egui::RichText::new("/")
-                    .size(13.0)
+                    .size(crate::ui::HEAD_PT)
                     .color(theme::text::faint()),
             );
         }
@@ -7954,16 +7954,18 @@ impl OndinApp {
                             if moded {
                                 ui.label(
                                     egui::RichText::new(self.mode.label())
-                                        .size(9.5)
+                                        .size(crate::ui::EYEBROW_PT)
                                         .color(color::accent_300()),
                                 );
                             }
                             if message {
                                 ui.add(
                                     egui::Label::new(
-                                        egui::RichText::new(&status.text).size(11.5).color(
-                                            status_color(status).gamma_multiply(message_fade),
-                                        ),
+                                        egui::RichText::new(&status.text)
+                                            .size(crate::ui::SMALL_PT)
+                                            .color(
+                                                status_color(status).gamma_multiply(message_fade),
+                                            ),
                                     )
                                     .truncate(),
                                 );
@@ -7971,14 +7973,14 @@ impl OndinApp {
                             if let Some(exporting) = &exporting {
                                 ui.label(
                                     egui::RichText::new(exporting)
-                                        .size(11.5)
+                                        .size(crate::ui::SMALL_PT)
                                         .color(theme::text::muted()),
                                 );
                                 // A bare word, lit a ramp step under the pointer.
                                 let word = ui.fonts_mut(|f| {
                                     f.layout_no_wrap(
                                         "Cancel".into(),
-                                        egui::FontId::proportional(11.5),
+                                        egui::FontId::proportional(crate::ui::SMALL_PT),
                                         egui::Color32::PLACEHOLDER,
                                     )
                                 });

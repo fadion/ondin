@@ -420,7 +420,7 @@ fn swap_picker(
                 if found.is_empty() {
                     ui.label(
                         egui::RichText::new("No main matches")
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::dim()),
                     );
                 }
@@ -671,14 +671,14 @@ fn swap_heading(ui: &mut egui::Ui, glyph: Option<&str>, name: &str, status: &str
         egui::pos2(x, y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::muted(),
     );
     p.text(
         egui::pos2(rect.right() - 4.0, y),
         egui::Align2::RIGHT_CENTER,
         status,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
 }
@@ -692,7 +692,7 @@ fn row_label(ui: &mut egui::Ui, text: &str, mark: Option<&super::component::Over
         Some(egui::vec2(LABEL_W, ui::CONTROL_H)),
         egui::Align::Max,
         text,
-        12.0,
+        ui::CONTROL_PT,
         theme::text::muted(),
         mark,
     )
@@ -761,7 +761,7 @@ fn toggle_row(
                     egui::pos2(rect.left() + inset, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     ui::MIXED_WORD,
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(ui::CONTROL_PT),
                     theme::text::faint(),
                 );
             }
@@ -782,7 +782,7 @@ fn note(ui: &mut egui::Ui, glyph: &str, text: &str) -> egui::Response {
         );
         ui.label(
             egui::RichText::new(text)
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(theme::text::strong()),
         );
     })
@@ -1372,7 +1372,7 @@ impl OndinApp {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(body)
-                        .size(12.0)
+                        .size(ui::CONTROL_PT)
                         .color(theme::text::muted()),
                 )
                 .wrap(),
@@ -1581,20 +1581,20 @@ impl OndinApp {
                     if i > 0 {
                         ui.label(
                             egui::RichText::new("›")
-                                .size(12.0)
+                                .size(ui::CONTROL_PT)
                                 .color(theme::text::dim()),
                         );
                     }
                     ui.label(
                         egui::RichText::new(name)
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::muted()),
                     );
                 }
                 if let Some(main) = &g.main {
                     ui.label(
                         egui::RichText::new(format!("· {main}"))
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::dim()),
                     );
                 }
@@ -1603,7 +1603,7 @@ impl OndinApp {
                 note(ui, icon::STACK, "Different mains");
                 ui.label(
                     egui::RichText::new("Select one to edit its properties")
-                        .size(11.5)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
                 continue;
@@ -1663,7 +1663,7 @@ impl OndinApp {
             .into_iter()
             .chain(on.map(|o| (format!("on {o}"), theme::text::dim())))
             {
-                ui.label(egui::RichText::new(text).size(11.5).color(ink));
+                ui.label(egui::RichText::new(text).size(ui::SMALL_PT).color(ink));
             }
         });
     }
@@ -1699,7 +1699,7 @@ impl OndinApp {
             );
         ui.label(
             egui::RichText::new(caption)
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::dim()),
         );
         if resp.clicked()
@@ -2434,7 +2434,7 @@ impl OndinApp {
                         // be read in the card.
                         "Bind layers from their Component line",
                     )
-                    .size(11.5)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
                 );
             }
@@ -2478,7 +2478,7 @@ impl OndinApp {
                             .add(
                                 egui::Label::new(
                                     egui::RichText::new(&name)
-                                        .size(12.0)
+                                        .size(ui::CONTROL_PT)
                                         .color(theme::text::strong()),
                                 )
                                 .sense(egui::Sense::click()),
@@ -2492,7 +2492,7 @@ impl OndinApp {
                                 "· {}",
                                 shown_names(doc, *slot).join(", ")
                             ))
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::dim()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2690,7 +2690,7 @@ impl OndinApp {
         ui.scope(|ui| {
             ui.label(
                 egui::RichText::new("Bind to a component property")
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::strong()),
             );
             for (kind, label) in kinds {
@@ -2918,7 +2918,7 @@ fn property_row(
     };
     ui.label(
         egui::RichText::new(line)
-            .size(11.0)
+            .size(ui::SMALL_PT)
             .color(theme::text::dim()),
     );
     // A swap property's filter (§15 D983 (5)): the prefix of a main's name the
@@ -2948,7 +2948,7 @@ fn property_row(
                     egui::vec2(w, ui::CONTROL_H),
                     egui::Label::new(
                         egui::RichText::new(shown)
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::dim()),
                     )
                     .truncate(),
@@ -2970,7 +2970,7 @@ fn property_row(
         });
         ui.label(
             egui::RichText::new("Filter displayed list by name")
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::dim()),
         );
         preferred_rows(ui, doc, owner, p, edits);
@@ -3017,7 +3017,8 @@ fn preferred_rows(
             let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
             ui.add_sized(
                 egui::vec2(w, ui::CONTROL_H),
-                egui::Label::new(egui::RichText::new(name).size(12.0).color(ink)).truncate(),
+                egui::Label::new(egui::RichText::new(name).size(ui::CONTROL_PT).color(ink))
+                    .truncate(),
             );
             if ui::field_button(ui, icon::X, ui::CONTROL_H, ui::FieldButton::Off)
                 .on_hover_text("No longer preferred")

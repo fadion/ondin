@@ -662,7 +662,11 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(INDENT);
-            ui.label(egui::RichText::new(e).size(10.5).color(color::warn()));
+            ui.label(
+                egui::RichText::new(e)
+                    .size(ui::CAPTION_PT)
+                    .color(color::warn()),
+            );
         });
     }
     if !f.replace_row {
@@ -768,7 +772,7 @@ fn list(
                 if let Some(done) = &f.done {
                     ui.label(
                         egui::RichText::new(format!("{} {done}", icon::CHECK))
-                            .size(11.5)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::muted()),
                     );
                     return;
@@ -780,7 +784,7 @@ fn list(
                 };
                 ui.label(
                     egui::RichText::new(format!("Nothing in {place} matches."))
-                        .size(12.0)
+                        .size(ui::CONTROL_PT)
                         .color(theme::text::muted()),
                 );
                 let widen = match f.scope {
@@ -884,15 +888,15 @@ fn page_head(ui: &mut egui::Ui, name: &str, count: usize) {
         rect.left_center() + egui::vec2(6.0, 0.0),
         egui::Align2::LEFT_CENTER,
         name.to_uppercase(),
-        egui::FontId::proportional(9.5),
-        color::text_a(97),
+        egui::FontId::proportional(ui::EYEBROW_PT),
+        theme::text::faint(),
     );
     p.text(
         rect.right_center() - egui::vec2(6.0, 0.0),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
-        color::text_a(97),
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
     );
 }
 
@@ -963,8 +967,8 @@ fn result_row(
             wrap: egui::text::TextWrapping::truncate_at_width(96.0),
             ..egui::text::LayoutJob::simple_singleline(
                 layer,
-                egui::FontId::proportional(10.5),
-                color::text_a(97),
+                egui::FontId::proportional(ui::CAPTION_PT),
+                theme::text::faint(),
             )
         })
     });
@@ -972,16 +976,16 @@ fn result_row(
     p.galley(
         egui::pos2(right - name_w, y - name.size().y / 2.0),
         name,
-        color::text_a(97),
+        theme::text::faint(),
     );
     let x = rect.left() + 27.0;
     let room = (right - name_w - 8.0 - x).max(10.0);
-    let font = egui::FontId::proportional(12.0);
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
     let mut job = egui::text::LayoutJob {
         wrap: egui::text::TextWrapping::truncate_at_width(room),
         ..Default::default()
     };
-    let dim = egui::TextFormat::simple(font.clone(), color::text_a(179));
+    let dim = egui::TextFormat::simple(font.clone(), theme::text::muted());
     job.append(&t.pre, 0.0, dim.clone());
     job.append(
         &t.hit,
@@ -1029,7 +1033,7 @@ fn footer(ui: &mut egui::Ui, f: &FindBox) {
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(said)
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::faint()),
             );
         });
@@ -1082,7 +1086,11 @@ fn field(
             theme::text::dim()
         };
         let g = ui.fonts_mut(|f| {
-            f.layout_no_wrap(note.to_string(), egui::FontId::proportional(11.0), ink)
+            f.layout_no_wrap(
+                note.to_string(),
+                egui::FontId::proportional(ui::SMALL_PT),
+                ink,
+            )
         });
         let w = g.size().x;
         p.galley(

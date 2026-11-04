@@ -1242,8 +1242,8 @@ impl OndinApp {
         if let Some(was) = was.filter(|_| format == Format::Hex) {
             ui.label(
                 egui::RichText::new(format!("was {was}"))
-                    .size(10.5)
-                    .color(theme::color::text_a(97)),
+                    .size(ui::CAPTION_PT)
+                    .color(theme::text::faint()),
             );
         }
         ui::select_all_on_focus(ui, &resp, &text);

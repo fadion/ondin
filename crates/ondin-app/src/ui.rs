@@ -229,8 +229,8 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     let (glyph_col, label_col, accel_col) = match () {
         _ if !row.enabled => (
             theme::text::disabled(),
-            theme::color::text_a(65),
-            theme::color::text_a(49),
+            theme::text::disabled(),
+            theme::text::disabled(),
         ),
         _ if row.danger => (
             color::danger(),
@@ -264,7 +264,7 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
                 egui::pos2(rect.right() - 8.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 accel,
-                egui::FontId::proportional(10.5),
+                egui::FontId::proportional(CAPTION_PT),
                 accel_col,
             );
             r.width() + MENU_ACCEL_GAP
@@ -275,7 +275,7 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     // do not run off the card; the full label is the tooltip.
     let mut job = egui::text::LayoutJob::single_section(
         row.label.to_owned(),
-        egui::TextFormat::simple(egui::FontId::proportional(11.5), label_col),
+        egui::TextFormat::simple(egui::FontId::proportional(SMALL_PT), label_col),
     );
     job.wrap = egui::text::TextWrapping {
         max_width: (rect.width() - label_x - 8.0 - accel_w).max(0.0),
@@ -374,7 +374,7 @@ pub fn menu_note(ui: &mut egui::Ui, text: &str) {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(text)
-                        .size(11.5)
+                        .size(SMALL_PT)
                         .color(theme::text::muted()),
                 )
                 .wrap(),
@@ -710,7 +710,7 @@ fn menu_check_held(
         egui::pos2(rect.left() + PAD_X + TICK_W + GAP, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(SMALL_PT),
         if on || hovered {
             color::text()
         } else {
@@ -738,7 +738,7 @@ pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f
             ctx.fonts_mut(|f| {
                 f.layout_no_wrap(
                     (*l).to_string(),
-                    egui::FontId::proportional(11.5),
+                    egui::FontId::proportional(SMALL_PT),
                     egui::Color32::WHITE,
                 )
                 .size()
@@ -865,9 +865,32 @@ pub const CONTROL_H: f32 = 28.0;
 /// of the cells ([`SEGMENT_BORDER`]).
 pub const SEGMENT_CELL_H: f32 = CONTROL_H - 4.0;
 
+// --- the type scale ----------------------------------------------------------
+//
+// Every text size in the chrome is one of these roles. A source scan
+// (`tests/text_scale.rs`) refuses a literal size outside this file and
+// `theme.rs`; a role with a reason of its own names a constant beside its
+// painter from one of these. `EYEBROW_PT` is the scale's smallest step.
+
+/// Captions, counts, badges and menu accelerators.
+pub const CAPTION_PT: f32 = 10.5;
+
+/// Notes, menu rows and secondary list text.
+pub const SMALL_PT: f32 = 11.5;
+
 /// Type size of the text in a control: a button's word, a field's value, a
 /// dropdown's choice and its list rows (egui's `TextStyle::Button`).
 pub const CONTROL_PT: f32 = 12.0;
+
+/// A surface's lead line: the inspector's layer name, the tab's document path,
+/// the palette's query.
+pub const HEAD_PT: f32 = 13.0;
+
+/// A card's or a dialog's title.
+pub const TITLE_PT: f32 = 14.0;
+
+/// A screen's heading: the dashboard's section and the import steps' numbers.
+pub const HEADING_PT: f32 = 17.0;
 
 /// Size of a glyph in a [`CONTROL_H`] control: a field button's, a prefix's, a
 /// segment's, a dropdown's leading glyph. The dropdown chevron is
@@ -1119,7 +1142,7 @@ pub fn section_head_full(
                         .painter()
                         .layout_no_wrap(
                             o.reset.to_owned(),
-                            egui::FontId::proportional(11.0),
+                            egui::FontId::proportional(SMALL_PT),
                             theme::text::muted(),
                         )
                         .size()
@@ -1255,7 +1278,7 @@ pub fn section_head_full(
                 egui::pos2(slot.left() + HEAD_RESET_PAD + 16.0, mid),
                 egui::Align2::LEFT_CENTER,
                 o.reset,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(SMALL_PT),
                 theme::text::strong(),
             );
             if target.clicked() {
@@ -1269,7 +1292,7 @@ pub fn section_head_full(
                 egui::pos2(slot.left() + 8.0, slot.center().y),
                 egui::Align2::LEFT_CENTER,
                 o.count.to_string(),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(CAPTION_PT),
                 theme::text::muted(),
             );
         }
@@ -1309,7 +1332,7 @@ pub(crate) fn painted_override_dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
 fn head_badge(ui: &mut egui::Ui, word: &str) {
     let galley = ui.painter().layout_no_wrap(
         word.to_owned(),
-        egui::FontId::proportional(10.0),
+        egui::FontId::proportional(CAPTION_PT),
         color::accent_100(),
     );
     let (rect, _) = ui.allocate_exact_size(
@@ -1325,10 +1348,10 @@ fn head_badge(ui: &mut egui::Ui, word: &str) {
     );
 }
 
-/// A [`HeadDrop`]: 11-pt text and a 10-pt caret 4 pt after it, muted at the
-/// default and strong otherwise or under the pointer.
+/// A [`HeadDrop`]: [`SMALL_PT`] text and a 10-pt caret 4 pt after it, muted at
+/// the default and strong otherwise or under the pointer.
 fn head_drop(ui: &mut egui::Ui, d: HeadDrop<'_>) -> egui::Response {
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(SMALL_PT);
     let text_w = ui
         .painter()
         .layout_no_wrap(d.text.to_owned(), font.clone(), theme::text::strong())
@@ -1738,8 +1761,8 @@ pub fn field_toggle(
     mono: bool,
 ) -> egui::Response {
     let font = match mono {
-        true => egui::FontId::monospace(11.0),
-        false => egui::FontId::proportional(11.0),
+        true => egui::FontId::monospace(SMALL_PT),
+        false => egui::FontId::proportional(SMALL_PT),
     };
     let (rect, resp) = ui.allocate_exact_size(FIELD_TOGGLE, egui::Sense::click());
     segment_ground(ui.painter(), rect, *on, resp.hovered());
@@ -2029,7 +2052,7 @@ const PREFIX_GAP: f32 = 7.0;
 const SUFFIX_HIT_PAD: f32 = 4.0;
 /// Type size of the unit itself, smaller than [`PREFIX_PT`] on purpose: it sits
 /// alone at the far end of a field and must not compete with the number.
-const SUFFIX_PT: f32 = 11.0;
+const SUFFIX_PT: f32 = SMALL_PT;
 /// How far the chip hangs past the field's content box into its own padding, so
 /// the chip finishes inside the hairline and belongs to the field.
 const SUFFIX_BLEED: f32 = 4.0;
@@ -2462,7 +2485,7 @@ pub fn value_field_marked(
 /// Height of a [`badge_field`], the size badge's own pill height.
 pub const BADGE_FIELD_H: f32 = 20.0;
 /// Type size inside a badge pill, and the gap between its label and its value.
-pub const BADGE_PT: f32 = 10.5;
+pub const BADGE_PT: f32 = CAPTION_PT;
 const BADGE_FIELD_GAP: f32 = 5.0;
 /// Padding inside a badge pill, matching `canvas::draw_size_badge`'s.
 const BADGE_FIELD_PAD_X: f32 = 7.0;
@@ -3251,7 +3274,7 @@ pub fn label_button_noted(
         egui::pos2(word.right() + NOTE_GAP, rect.center().y),
         egui::Align2::LEFT_CENTER,
         note,
-        egui::FontId::monospace(11.0),
+        egui::FontId::monospace(SMALL_PT),
         theme::text::faint(),
     );
     resp
@@ -3272,7 +3295,7 @@ pub fn label_button_noted_w(ctx: &egui::Context, text: &str, note: &str) -> f32 
     };
     let note_w = match note.is_empty() {
         true => 0.0,
-        false => NOTE_GAP + w(note, egui::FontId::monospace(11.0)),
+        false => NOTE_GAP + w(note, egui::FontId::monospace(SMALL_PT)),
     };
     (w(text, egui::FontId::proportional(CONTROL_PT)) + note_w + FIELD_PAD_X * 2.0).ceil()
 }
@@ -3571,7 +3594,7 @@ pub fn grip(ui: &mut egui::Ui, enabled: bool, row_h: f32) -> egui::Response {
     let fg = if live {
         theme::text::muted()
     } else {
-        theme::color::text_a(77)
+        theme::text::faint()
     };
     ui.painter().text(
         rect.center() - egui::vec2(3.0, 0.0),
@@ -3921,7 +3944,7 @@ pub fn segment_mixed(painter: &egui::Painter, rect: egui::Rect) {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         "–",
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(SMALL_PT),
         theme::text::faint(),
     );
 }
@@ -4044,7 +4067,7 @@ pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bo
 
 /// Type size of a [`switch_row`]'s label, shared with the typography panel's
 /// n-way `cvXX` row, which sits in the same column.
-pub const SWITCH_ROW_LABEL_PT: f32 = 11.5;
+pub const SWITCH_ROW_LABEL_PT: f32 = SMALL_PT;
 
 /// The ink of a toggle-list row's label: [`theme::text::strong()`] when the row is
 /// on, [`theme::text::muted()`] when it is off. A row that is not a switch still
@@ -4157,7 +4180,7 @@ pub const MIXED_WORD: &str = "Mixed";
 
 /// Type size of a [`segment_label`]. Named because a cell clips nothing, so
 /// whether a label fits is a question a test can ask only with this number.
-pub const SEGMENT_LABEL_PT: f32 = 10.0;
+pub const SEGMENT_LABEL_PT: f32 = CAPTION_PT;
 
 /// Centred text for a [`segmented`] cell.
 pub fn segment_label(painter: &egui::Painter, rect: egui::Rect, text: &str, on: bool) {

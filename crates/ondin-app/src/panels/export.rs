@@ -51,11 +51,6 @@ const ROW_UNIT_GAP: f32 = 6.0;
 /// An export's two halves sit closer than one export sits to the next, or the size
 /// line reads as belonging to the row below it.
 const _: () = assert!(ROW_LINE_GAP < ROW_UNIT_GAP);
-/// The size line's ink — 34%, quieter than `text::faint()` (38%),
-/// because it annotates a control rather than labelling one.
-fn size_ink() -> egui::Color32 {
-    theme::color::text_a(87)
-}
 /// The collapse key the Preview section shares with the panel list.
 ///
 /// `collapsed_panels` is keyed by title, but the section now lives inside the Export
@@ -364,7 +359,7 @@ impl OndinApp {
             if specs.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No exports")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
                 return;
@@ -526,8 +521,8 @@ impl OndinApp {
             }
             ui.label(
                 egui::RichText::new(&preview.summary)
-                    .size(10.5)
-                    .color(size_ink()),
+                    .size(ui::CAPTION_PT)
+                    .color(theme::text::faint()),
             );
         });
     }
@@ -663,7 +658,7 @@ impl OndinApp {
     fn export_mixed_row(&mut self, ui: &mut egui::Ui) {
         ui.label(
             egui::RichText::new("Mixed exports. Add to override.")
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::faint()),
         );
     }
@@ -741,7 +736,7 @@ impl OndinApp {
                                         "{} has no pixels to scale",
                                         spec.format.label()
                                     ))
-                                    .size(11.0)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::faint()),
                                 );
                             })
@@ -822,8 +817,12 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.add_space(2.0);
-                        ui.label(theme::icon_text(icon::FRAME, 12.0, size_ink()));
-                        ui.label(egui::RichText::new(size).size(10.5).color(size_ink()));
+                        ui.label(theme::icon_text(icon::FRAME, 12.0, theme::text::faint()));
+                        ui.label(
+                            egui::RichText::new(size)
+                                .size(ui::CAPTION_PT)
+                                .color(theme::text::faint()),
+                        );
                     });
                 });
             }
@@ -3231,9 +3230,11 @@ mod tests {
                             ui.spacing_mut().interact_size.y = 0.0;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 6.0;
-                                ui.label(theme::icon_text(icon::FRAME, 12.0, size_ink()));
+                                ui.label(theme::icon_text(icon::FRAME, 12.0, theme::text::faint()));
                                 ui.label(
-                                    egui::RichText::new("100×60").size(10.5).color(size_ink()),
+                                    egui::RichText::new("100×60")
+                                        .size(crate::ui::CAPTION_PT)
+                                        .color(theme::text::faint()),
                                 );
                             })
                             .response

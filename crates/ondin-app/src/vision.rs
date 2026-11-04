@@ -149,7 +149,7 @@ impl OndinApp {
                             None => {
                                 ui.label(
                                     egui::RichText::new("Whole canvas")
-                                        .size(12.0)
+                                        .size(crate::ui::Scale::Toolbar.text_pt())
                                         .color(color::text()),
                                 );
                             }
@@ -162,7 +162,7 @@ impl OndinApp {
                         let head = crate::ui::menu_head(
                             ui,
                             egui::RichText::new(deficiency.label())
-                                .size(12.0)
+                                .size(crate::ui::Scale::Toolbar.text_pt())
                                 .color(theme::text::muted()),
                             4.0,
                             open,

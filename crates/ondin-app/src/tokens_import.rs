@@ -361,7 +361,11 @@ impl OndinApp {
             false => format!("{name} \u{b7} {}", changes_label(n)),
         };
         let galley = ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap(text, egui::FontId::proportional(11.5), color::accent_300())
+            f.layout_no_wrap(
+                text,
+                egui::FontId::proportional(ui::SMALL_PT),
+                color::accent_300(),
+            )
         });
         let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
@@ -513,7 +517,7 @@ fn head(ui: &mut egui::Ui, path: &Path) -> bool {
         egui::pos2(rect.left() + PAD, y),
         egui::Align2::LEFT_CENTER,
         "Import tokens",
-        egui::FontId::proportional(14.0),
+        egui::FontId::proportional(ui::TITLE_PT),
         theme::text::strong(),
     );
     let (name, dirs) = where_label(path);
@@ -524,7 +528,7 @@ fn head(ui: &mut egui::Ui, path: &Path) -> bool {
     let max = rect.right() - 40.0 - (title.right() + 8.0);
     let mut job = egui::text::LayoutJob::simple_singleline(
         place,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::dim(),
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(max.max(40.0));
@@ -610,7 +614,7 @@ fn filters(ui: &mut egui::Ui, r: &Review, filter: &mut Option<Change>) {
                 egui::pos2(chip.left() + 9.0 + 4.0, chip.center().y),
                 egui::Align2::CENTER_CENTER,
                 s,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 dot,
             );
         }
@@ -649,7 +653,7 @@ fn list(
     let cw = col_w(r.columns.len());
     let (head, _) = ui.allocate_exact_size(egui::vec2(W, 28.0), egui::Sense::hover());
     let p = ui.painter();
-    let font = egui::FontId::proportional(10.0);
+    let font = egui::FontId::proportional(ui::EYEBROW_PT);
     let y = head.center().y + 2.0;
     let name_x = head.left() + GAP + 8.0 + BOX_W + GAP;
     p.text(
@@ -693,7 +697,7 @@ fn list(
                     rect.left_center() + egui::vec2(8.0, 0.0),
                     egui::Align2::LEFT_CENTER,
                     "Nothing to change: the document already holds what the file says",
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(ui::CONTROL_PT),
                     theme::text::dim(),
                 );
                 return;
@@ -772,14 +776,14 @@ fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
         egui::pos2(rect.left() + 8.0 + 18.0, y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::dim(),
     );
     p.text(
         egui::pos2(label.right() + 6.0, y),
         egui::Align2::LEFT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     resp.clicked()
@@ -830,13 +834,13 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
         t.center(),
         egui::Align2::CENTER_CENTER,
         sign,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         fade(ink),
     );
     let name_w = cols_x - GAP - (x + 23.0) - 4.0;
     let mut job = egui::text::LayoutJob::simple_singleline(
         row.name.clone(),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(ui::CONTROL_PT),
         fade(color::text()),
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
@@ -851,7 +855,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
     if let Some(sub) = &row.sub {
         let mut job = egui::text::LayoutJob::simple_singleline(
             sub.clone(),
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             fade(theme::text::dim()),
         );
         job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
@@ -933,7 +937,7 @@ fn value(
         } else {
             egui::Stroke::NONE
         },
-        ..egui::TextFormat::simple(egui::FontId::proportional(11.0), fade(ink))
+        ..egui::TextFormat::simple(egui::FontId::proportional(ui::SMALL_PT), fade(ink))
     };
     let mut job = egui::text::LayoutJob::default();
     job.append(&s.text, 0.0, fmt);
@@ -1004,7 +1008,7 @@ fn note_row(ui: &mut egui::Ui, note: &str) {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(note)
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     )
                     .wrap(),
@@ -1052,7 +1056,7 @@ fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
     if let Some(why) = &t.why_not {
         let mut job = egui::text::LayoutJob::simple_singleline(
             why.clone(),
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             color::warn(),
         );
         job.wrap =

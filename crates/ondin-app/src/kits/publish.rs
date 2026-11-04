@@ -88,7 +88,7 @@ impl OndinApp {
             .fonts_mut(|f| {
                 f.layout_no_wrap(
                     n.to_string(),
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(ui::CAPTION_PT),
                     color::text(),
                 )
             })
@@ -137,7 +137,7 @@ impl OndinApp {
                 chip.center(),
                 egui::Align2::CENTER_CENTER,
                 n.to_string(),
-                egui::FontId::proportional(10.5),
+                egui::FontId::proportional(ui::CAPTION_PT),
                 color::accent_100(),
             );
         }
@@ -232,7 +232,7 @@ impl OndinApp {
             };
             ui.label(
                 egui::RichText::new(sub)
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::muted()),
             );
             ui.add_space(10.0);
@@ -243,7 +243,7 @@ impl OndinApp {
                 if c.added.len() > FIRST_LISTED {
                     ui.label(
                         egui::RichText::new(format!("+ {} more", c.added.len() - FIRST_LISTED))
-                            .size(11.5)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     );
                 }
@@ -263,7 +263,7 @@ impl OndinApp {
             ui.add_space(10.0);
             ui.label(
                 egui::RichText::new("Note · optional")
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
             ui.add_space(4.0);
@@ -419,12 +419,12 @@ fn section(ui: &mut egui::Ui, title: &str, ids: &[NodeId], doc: &Document, aside
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(title)
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::dim()),
         );
         ui.label(
             egui::RichText::new(ids.len().to_string())
-                .size(11.0)
+                .size(ui::SMALL_PT)
                 .color(theme::text::faint()),
         );
     });
@@ -462,7 +462,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
         egui::pos2(rect.left() + 22.0, y),
         egui::Align2::LEFT_CENTER,
         crate::private::layer(doc, id),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(ui::CONTROL_PT),
         color::text(),
     );
     let right = match (aside, n.set().is_some()) {
@@ -479,7 +479,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
             egui::pos2(rect.right() - 4.0, y),
             egui::Align2::RIGHT_CENTER,
             r,
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             theme::text::faint(),
         );
     }

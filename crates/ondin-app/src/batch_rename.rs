@@ -1102,7 +1102,7 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
             rect.left_center(),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(ui::CONTROL_PT),
             theme::text::muted(),
         );
         ui.add_space(GAP);
@@ -1269,7 +1269,11 @@ fn find_row(ui: &mut egui::Ui, s: &mut Settings, error: Option<&str>) {
             ui::field_toggle(&mut child, "Aa", "Match case", &mut s.match_case, false);
             ui::field_toggle(&mut child, ".*", "Find as a pattern", &mut s.pattern, true);
             if let Some(e) = error {
-                ui.label(egui::RichText::new(e).size(10.5).color(color::warn()));
+                ui.label(
+                    egui::RichText::new(e)
+                        .size(ui::CAPTION_PT)
+                        .color(color::warn()),
+                );
             }
         });
     });
@@ -1368,7 +1372,7 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Empty: removes the match")
-                                .size(10.5)
+                                .size(ui::CAPTION_PT)
                                 .color(theme::text::faint()),
                         );
                     });
@@ -1523,14 +1527,14 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
         egui::pos2(rect.left() + PAD, y),
         egui::Align2::LEFT_CENTER,
         "PREVIEW",
-        egui::FontId::proportional(9.5),
+        egui::FontId::proportional(ui::EYEBROW_PT),
         theme::text::faint(),
     );
     p.text(
         egui::pos2(rect.right() - PAD, y),
         egui::Align2::RIGHT_CENTER,
         count_label(scope, plan),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::dim(),
     );
     egui::Frame::NONE
@@ -1552,7 +1556,7 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
                     } else {
                         "Matching…"
                     },
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(ui::CONTROL_PT),
                     theme::text::dim(),
                 );
                 return;
@@ -1588,14 +1592,14 @@ fn page_head(ui: &mut egui::Ui, name: &str, n: usize) {
         egui::pos2(rect.left() + 8.0 + 17.0, y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::dim(),
     );
     p.text(
         egui::pos2(rect.right() - 8.0, y),
         egui::Align2::RIGHT_CENTER,
         n.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
 }
@@ -1622,7 +1626,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
         fade(l.tint.colour()),
     );
 
-    let font = egui::FontId::proportional(12.0);
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
     let mut old = egui::text::LayoutJob::default();
     let mut at = 0;
     let plain = egui::TextFormat::simple(font.clone(), fade(theme::text::muted()));
@@ -1693,7 +1697,7 @@ fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act>
         egui::pos2(rect.left() + PAD, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "Enter renames · Esc cancels",
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     let go = match changes {

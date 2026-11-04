@@ -1718,7 +1718,11 @@ fn form(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         if busy {
-            ui.add(egui::Spinner::new().size(11.0).color(theme::text::faint()));
+            ui.add(
+                egui::Spinner::new()
+                    .size(ui::SMALL_PT)
+                    .color(theme::text::faint()),
+            );
         }
         ui.label(
             egui::RichText::new(foot)
@@ -1894,7 +1898,7 @@ fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     ui.label(
                         egui::RichText::new("Figma files come in by link")
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::strong()),
                     );
                     ui.add(
@@ -1903,7 +1907,7 @@ fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
                                 "Ondin doesn't read .fig files. It reads the file through Figma's \
                                  API instead. In Figma, use Share › Copy link and paste the link here.",
                             )
-                            .size(settings::CAPTION_PT + 1.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::muted()),
                         )
                         .wrap(),
@@ -2042,7 +2046,7 @@ fn badge_chip(ui: &mut egui::Ui, text: &str, tint: egui::Color32) {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        egui::FontId::proportional(9.0),
+        egui::FontId::proportional(ui::CAPTION_PT),
         tint,
     );
 }
@@ -2057,14 +2061,7 @@ fn message(ui: &mut egui::Ui, glyph: &str, text: &str, col: egui::Color32) {
             ui.add_space(1.0);
             ui.label(theme::icon_text(glyph, 12.0, col));
         });
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .size(settings::CAPTION_PT + 0.5)
-                    .color(col),
-            )
-            .wrap(),
-        );
+        ui.add(egui::Label::new(egui::RichText::new(text).size(ui::SMALL_PT).color(col)).wrap());
     });
 }
 
@@ -2162,7 +2159,7 @@ fn dotted(name: &str, hex: Option<&str>) -> egui::WidgetText {
         glyph,
         0.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(9.0),
+            font_id: egui::FontId::proportional(ui::CAPTION_PT),
             color: col,
             valign: egui::Align::Center,
             ..Default::default()
@@ -2172,7 +2169,7 @@ fn dotted(name: &str, hex: Option<&str>) -> egui::WidgetText {
         name,
         7.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(12.0),
+            font_id: egui::FontId::proportional(ui::CONTROL_PT),
             color: color::text(),
             valign: egui::Align::Center,
             ..Default::default()
@@ -2291,7 +2288,7 @@ fn check_row(
             egui::pos2(row.response.rect.left() + w, row.response.rect.center().y),
             egui::Align2::RIGHT_CENTER,
             meta,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
         if !sub.is_empty() {
@@ -2319,10 +2316,14 @@ fn loading(ui: &mut egui::Ui, what: &str) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.add(egui::Spinner::new().size(14.0).color(theme::text::dim()));
+        ui.add(
+            egui::Spinner::new()
+                .size(ui::TITLE_PT)
+                .color(theme::text::dim()),
+        );
         ui.label(
             egui::RichText::new(what)
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(theme::text::strong()),
         );
     });
@@ -2354,12 +2355,12 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
             ui.add_space(2.0);
             ui.label(
                 egui::RichText::new(&o.title)
-                    .size(14.0)
+                    .size(ui::TITLE_PT)
                     .color(theme::text::strong()),
             );
             ui.label(
                 egui::RichText::new(&o.sub)
-                    .size(settings::CAPTION_PT + 0.5)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
         });
@@ -2379,14 +2380,14 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
                     rect.left_top() + egui::vec2(11.0, 9.0),
                     egui::Align2::LEFT_TOP,
                     n.to_string(),
-                    egui::FontId::proportional(16.0),
+                    egui::FontId::proportional(ui::HEADING_PT),
                     theme::text::strong(),
                 );
                 p.text(
                     rect.left_bottom() + egui::vec2(11.0, -9.0),
                     egui::Align2::LEFT_BOTTOM,
                     if n == 1 { one } else { many },
-                    egui::FontId::proportional(11.0),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::dim(),
                 );
             }
@@ -2437,7 +2438,7 @@ fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
                     ui.set_width(ui.available_width());
                     ui.label(
                         egui::RichText::new(head)
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::muted()),
                     );
                 });
@@ -2471,13 +2472,13 @@ fn report_rows(ui: &mut egui::Ui, rows: &[ReportRow]) {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&r.what)
-                            .size(12.0)
+                            .size(ui::CONTROL_PT)
                             .color(theme::text::strong()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(&r.count)
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::faint()),
                         );
                     });
@@ -2485,7 +2486,7 @@ fn report_rows(ui: &mut egui::Ui, rows: &[ReportRow]) {
                 ui.add_space(2.0);
                 ui.label(
                     egui::RichText::new(&r.how)
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
             });

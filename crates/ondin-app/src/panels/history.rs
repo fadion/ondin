@@ -170,7 +170,7 @@ impl OndinApp {
                     let tail = tail.map(|t| {
                         ui.painter().layout_no_wrap(
                             t,
-                            egui::FontId::proportional(10.5),
+                            egui::FontId::proportional(crate::ui::CAPTION_PT),
                             theme::text::dim(),
                         )
                     });
@@ -179,7 +179,7 @@ impl OndinApp {
                         ui.available_width() - tail.as_ref().map_or(0.0, |t| t.size().x + 8.0);
                     let mut job = egui::text::LayoutJob::simple_singleline(
                         self.current_step_text(),
-                        egui::FontId::proportional(12.0),
+                        egui::FontId::proportional(crate::ui::CONTROL_PT),
                         theme::text::muted(),
                     );
                     job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
@@ -396,7 +396,7 @@ impl OndinApp {
         if row.saved {
             let tag = p.layout_no_wrap(
                 "Saved".to_string(),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(crate::ui::CAPTION_PT),
                 dim(theme::text::muted()),
             );
             let size = tag.size() + egui::vec2(10.0, 3.0);
@@ -412,7 +412,7 @@ impl OndinApp {
         }
 
         // `Label · Subject · Page`: the subject gives way first, then the page.
-        let font = egui::FontId::proportional(12.5);
+        let font = egui::FontId::proportional(crate::ui::CONTROL_PT);
         let ink = dim(if lit {
             color::text()
         } else {

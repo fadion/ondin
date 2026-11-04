@@ -1148,7 +1148,7 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
                     .id(egui::Id::new("command-palette-field"))
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY)
-                    .font(egui::FontId::proportional(13.0))
+                    .font(egui::FontId::proportional(crate::ui::HEAD_PT))
                     .text_color(color::text())
                     .hint_text(
                         egui::RichText::new(if pal.layers_only {
@@ -1156,7 +1156,7 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
                         } else {
                             "Search commands and layers"
                         })
-                        .size(13.0)
+                        .size(crate::ui::HEAD_PT)
                         .color(theme::text::faint()),
                     ),
             );
@@ -1184,7 +1184,7 @@ fn section_label(ui: &mut egui::Ui, title: &str) {
     let mut job = egui::text::LayoutJob::single_section(
         title.to_uppercase(),
         egui::TextFormat {
-            font_id: egui::FontId::proportional(9.0),
+            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
             color: theme::text::faint(),
             extra_letter_spacing: 0.9,
             ..Default::default()
@@ -1235,8 +1235,8 @@ fn chip(ui: &egui::Ui, right: f32, y: f32, accel: &str, live: bool) -> f32 {
     let text = accel.replace('+', " + ");
     let galley = p.layout_no_wrap(
         text,
-        egui::FontId::proportional(10.0),
-        theme::color::text_a(if live { 125 } else { 70 }),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
+        theme::color::text_a(if live { 125 } else { 70 }), // text-ink: on the chord chip's ground
     );
     let size = galley.size() + egui::vec2(10.0, 4.0);
     let rect = egui::Rect::from_min_size(egui::pos2(right - size.x, y - size.y / 2.0), size);
@@ -1314,8 +1314,12 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
     };
     let side_g = p.layout_no_wrap(
         side.to_string(),
-        egui::FontId::proportional(10.5),
-        theme::color::text_a(if live { 97 } else { 79 }),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
+        if live {
+            theme::text::faint()
+        } else {
+            theme::text::disabled()
+        },
     );
     let side_w = side_g.size().x;
     p.galley(
@@ -1337,11 +1341,11 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
         )
     } else {
         (
-            theme::color::text_a(97),
+            theme::text::faint(),
             color::accent_300().gamma_multiply(0.6),
         )
     };
-    let mut job = lit_label(&c.label, &c.hits, 12.0, base, hit);
+    let mut job = lit_label(&c.label, &c.hits, crate::ui::CONTROL_PT, base, hit);
     job.wrap.max_width = (right - label_x).max(0.0);
     let galley = p.layout_job(job);
     p.galley(
@@ -1392,7 +1396,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
     let mut job = lit_label(
         &l.name,
         &l.hits,
-        12.0,
+        crate::ui::CONTROL_PT,
         if lit {
             color::text()
         } else {
@@ -1411,7 +1415,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
     );
     let room = right - (label_x + name_w + 12.0);
     if room > 20.0 && !l.path.is_empty() {
-        let font = egui::FontId::proportional(10.5);
+        let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
         // Cut from the left, a whole parent at a time: the nearest parent is the
         // one that tells two same-named layers apart.
         let mut parts: Vec<&str> = l.path.split(" / ").collect();
@@ -1454,7 +1458,7 @@ fn more_row(ui: &mut egui::Ui, n: usize, lit: bool) -> egui::Response {
         } else {
             format!("{n} more layers")
         },
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         theme::text::muted(),
     );
     chip(ui, rect.right() - 8.0, rect.center().y, "Tab", true);
@@ -1476,14 +1480,14 @@ fn no_match(ui: &mut egui::Ui, pal: &Palette) {
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::ui::CONTROL_PT),
         theme::text::dim(),
     );
 }
 
 /// The *Layers* chip in the field.
 fn layers_chip(ui: &mut egui::Ui) {
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(crate::ui::SMALL_PT);
     let galley = ui
         .painter()
         .layout_no_wrap("Layers".into(), font, color::accent_100());
@@ -1518,7 +1522,7 @@ fn layers_chip(ui: &mut egui::Ui) {
 fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOTER_H), egui::Sense::empty());
     let p = ui.painter();
-    let font = egui::FontId::proportional(10.5);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
     // The text's optical centre, a point above the box's.
     let y = rect.center().y - FOOTER_TEXT_LIFT;
     let keys = if layers_only {

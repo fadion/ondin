@@ -540,7 +540,7 @@ impl OndinApp {
                         if card.empty() {
                             ui.label(
                                 egui::RichText::new("Nothing left at this distance")
-                                    .size(11.0)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::muted()),
                             );
                         }

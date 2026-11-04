@@ -447,7 +447,7 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Keyboard shortcuts")
-                        .size(14.0)
+                        .size(crate::ui::TITLE_PT)
                         .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -486,7 +486,7 @@ impl OndinApp {
                                 "No shortcut matches “{}”",
                                 sheet.filter.trim()
                             ))
-                            .size(12.0)
+                            .size(crate::ui::CONTROL_PT)
                             .color(theme::text::dim()),
                         );
                         return;
@@ -564,7 +564,7 @@ fn in_a_file(ui: &mut egui::Ui) {
     let p = ui.painter();
     let g = p.layout_no_wrap(
         "In a file".into(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
         theme::text::faint(),
     );
     let w = g.size().x;
@@ -590,8 +590,8 @@ fn section_ui(ui: &mut egui::Ui, s: &Section, query: &[String], held: [bool; 3],
     let mut job = egui::text::LayoutJob::single_section(
         s.title.to_uppercase(),
         egui::TextFormat {
-            font_id: egui::FontId::proportional(11.0),
-            color: theme::color::text_a(87),
+            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
+            color: theme::text::faint(),
             extra_letter_spacing: 0.5,
             ..Default::default()
         },
@@ -628,7 +628,7 @@ fn row_ui(
     );
     let p = ui.painter();
     let fade = |c: egui::Color32| if bright { c } else { c.gamma_multiply(0.28) };
-    let font = egui::FontId::proportional(10.0);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
     let mut right = rect.right();
     // Laid right to left, so the last alternative's last key is at the margin.
     for (n, chord) in row.chords.iter().enumerate().rev() {
@@ -647,7 +647,7 @@ fn row_ui(
             let (fg, bg) = match () {
                 _ if lit_held => (color::accent_100(), color::accent().gamma_multiply_u8(77)),
                 _ if lit_query => (color::accent_300(), theme::color::text_a(20)),
-                _ => (theme::color::text_a(184), theme::color::text_a(20)),
+                _ => (theme::color::text_a(184), theme::color::text_a(20)), // text-ink: on the keycap's ground
             };
             let word = key == "drag";
             let g = p.layout_no_wrap(key.clone(), font.clone(), fade(fg));
@@ -694,10 +694,11 @@ fn row_ui(
             right = x - 5.0;
         }
     }
-    let base = fade(theme::color::text_a(204));
+    let base = fade(theme::text::strong());
     let mut job = egui::text::LayoutJob::default();
-    let plain = egui::TextFormat::simple(egui::FontId::proportional(11.5), base);
-    let lit = egui::TextFormat::simple(egui::FontId::proportional(11.5), fade(color::accent_300()));
+    let label_font = egui::FontId::proportional(crate::ui::SMALL_PT);
+    let plain = egui::TextFormat::simple(label_font.clone(), base);
+    let lit = egui::TextFormat::simple(label_font, fade(color::accent_300()));
     // Light each label word a query word starts.
     let mut at = 0;
     let label = &row.label;
@@ -753,7 +754,7 @@ fn footer(ui: &mut egui::Ui) {
         rect.top() + 0.5,
         egui::Stroke::new(1.0, theme::color::text_a(20)),
     );
-    let font = egui::FontId::proportional(10.5);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
     let y = rect.center().y;
     let mut job = egui::text::LayoutJob::default();
     let dim = egui::TextFormat::simple(font.clone(), theme::text::dim());

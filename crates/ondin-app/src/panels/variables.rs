@@ -548,13 +548,17 @@ impl OndinApp {
                             ui.add_space(-6.0);
                             ui.label(
                                 egui::RichText::new(line)
-                                    .size(10.5)
+                                    .size(ui::CAPTION_PT)
                                     .color(theme::text::dim()),
                             );
                         }
                         if let Some(why) = &b.refusal {
                             ui.add_space(-6.0);
-                            ui.label(egui::RichText::new(why).size(11.0).color(theme::text::muted()));
+                            ui.label(
+                                egui::RichText::new(why)
+                                    .size(ui::SMALL_PT)
+                                    .color(theme::text::muted()),
+                            );
                         }
                         match b.tab {
                             Tab::Styles if doc.styles().is_empty() => empty(
@@ -2205,7 +2209,7 @@ pub(crate) fn collection_head(ui: &mut egui::Ui, name: &str) {
         egui::pos2(rect.left() + 26.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         ink,
     );
 }
@@ -2230,7 +2234,7 @@ fn collection_row(ui: &mut egui::Ui, c: &ondin_core::variable::Collection) {
         egui::pos2(rect.left() + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         c.name.to_uppercase(),
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::EYEBROW_PT),
         ink,
     );
     let modes: Vec<&str> = c.modes.iter().map(|m| m.name.as_str()).collect();
@@ -2238,7 +2242,7 @@ fn collection_row(ui: &mut egui::Ui, c: &ondin_core::variable::Collection) {
         egui::pos2(rect.right() - 2.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         modes.join(" · "),
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::faint(),
     );
 }
@@ -2300,7 +2304,7 @@ fn scope_popover(
         ));
         ui.label(
             egui::RichText::new(&v.name)
-                .size(12.5)
+                .size(ui::CONTROL_PT)
                 .strong()
                 .color(color::text()),
         );
@@ -2309,7 +2313,7 @@ fn scope_popover(
                 ui.add_space(SCOPE_INSET);
                 ui.label(
                     egui::RichText::new(&c.name)
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
             });
@@ -2375,7 +2379,7 @@ fn scope_popover(
             egui::pos2(rect.left() + SCOPE_LABEL_X, rect.center().y),
             egui::Align2::LEFT_CENTER,
             field_label(f),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(ui::SMALL_PT),
             ink,
         );
         // The count selects the layers bound there.
@@ -2392,7 +2396,7 @@ fn scope_popover(
                 egui::pos2(rect.right() - SCOPE_INSET, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 n,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 if hit.hovered() {
                     color::text()
                 } else {
@@ -2422,7 +2426,7 @@ fn scope_popover(
     let foot = |ui: &mut egui::Ui, text: String, ink: egui::Color32| {
         ui.horizontal(|ui| {
             ui.add_space(SCOPE_INSET);
-            ui.label(egui::RichText::new(text).size(11.0).color(ink));
+            ui.label(egui::RichText::new(text).size(ui::SMALL_PT).color(ink));
         });
     };
     // Always the line's room, so the popover keeps its height.
@@ -2985,7 +2989,11 @@ fn linked_line(ui: &mut egui::Ui, path: &str, changes: usize) -> bool {
         n => format!("{n} changes"),
     };
     let tail_g = ui.fonts_mut(|f| {
-        f.layout_no_wrap(tail, egui::FontId::proportional(10.5), color::accent_300())
+        f.layout_no_wrap(
+            tail,
+            egui::FontId::proportional(ui::CAPTION_PT),
+            color::accent_300(),
+        )
     });
     let tail_w = tail_g.size().x;
     ui.painter().galley(
@@ -2994,7 +3002,7 @@ fn linked_line(ui: &mut egui::Ui, path: &str, changes: usize) -> bool {
         color::accent_300(),
     );
     // The path elided from the left, so the file's own name stays.
-    let font = egui::FontId::proportional(11.5);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     let room = rect.width() - 9.0 - 20.0 - 9.0 - tail_w - 8.0;
     let mut shown = path.replace('\\', "/");
     let width = |s: &str, ui: &egui::Ui| {
@@ -3117,7 +3125,7 @@ fn styles_tab(
                 );
                 let name = p.layout_no_wrap(
                     slot.title().to_string(),
-                    egui::FontId::proportional(11.5),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     color::text(),
                 );
                 let name_w = name.size().x;
@@ -3135,7 +3143,7 @@ fn styles_tab(
                     egui::pos2(rect.left() + 23.0 + name_w + 6.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     count,
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(ui::CAPTION_PT),
                     theme::text::faint(),
                 );
                 if resp.clicked() {
@@ -3224,7 +3232,15 @@ fn style_group_row(
             egui::pos2(left + 20.0, rect.top() + 2.0),
             egui::pos2(rect.right() - 40.0, rect.bottom() - 2.0),
         );
-        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
+        let resp = edit_field(
+            ui,
+            r,
+            text,
+            id.with("edit"),
+            ui::SMALL_PT,
+            None,
+            refused.as_deref(),
+        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -3260,7 +3276,7 @@ fn style_group_row(
     );
     let name = p.layout_no_wrap(
         g.path.to_string(),
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         color::text(),
     );
     let name_w = name.size().x;
@@ -3278,7 +3294,7 @@ fn style_group_row(
         egui::pos2(left + 23.0 + name_w + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         count,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     if g.kit.is_none() && ui::double_clicked(ui, &resp) {
@@ -3320,7 +3336,7 @@ fn describe_row(
         return false;
     }
     let id = ui.id().with(("describe", of));
-    let field = edit_field(ui, r, text, id, 11.5, Some("Description"), None);
+    let field = edit_field(ui, r, text, id, ui::SMALL_PT, Some("Description"), None);
     if b.edit_focus {
         b.edit_focus = false;
         field.request_focus();
@@ -3371,7 +3387,15 @@ fn style_row(
     if let Some(Edit::Style { style, text }) = b.edit.as_mut()
         && *style == s.id
     {
-        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
+        let resp = edit_field(
+            ui,
+            r,
+            text,
+            id.with("edit"),
+            ui::SMALL_PT,
+            None,
+            refused.as_deref(),
+        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -3387,14 +3411,14 @@ fn style_row(
         egui::pos2(sw.right() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         var::split_name(&s.name).1,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::strong(),
     );
     p.text(
         egui::pos2(rect.right() - 6.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     let menu_at = |r: &egui::Response| {
@@ -3410,14 +3434,14 @@ fn empty(ui: &mut egui::Ui, head: &str, sub: &str) {
     ui.vertical_centered(|ui| {
         ui.label(
             egui::RichText::new(head)
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(theme::text::strong()),
         );
         ui.add_space(-4.0);
         ui.add(
             egui::Label::new(
                 egui::RichText::new(sub)
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             )
             .wrap(),
@@ -3451,7 +3475,7 @@ fn header(
         egui::pos2(rect.left() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "NAME",
-        egui::FontId::proportional(9.5),
+        egui::FontId::proportional(ui::EYEBROW_PT),
         theme::text::faint(),
     );
     let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
@@ -3467,7 +3491,15 @@ fn header(
             && *mode == m.id
         {
             let r = cell.shrink2(egui::vec2(3.0, 2.0)).intersect(clip);
-            let resp = edit_field(ui, r, text, id.with("edit"), 11.0, None, refused.as_deref());
+            let resp = edit_field(
+                ui,
+                r,
+                text,
+                id.with("edit"),
+                ui::SMALL_PT,
+                None,
+                refused.as_deref(),
+            );
             if b.edit_focus {
                 b.edit_focus = false;
                 resp.request_focus();
@@ -3489,7 +3521,7 @@ fn header(
             egui::pos2(cell.left() + 6.0, cell.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             if resp.hovered() {
                 theme::text::strong()
             } else {
@@ -3501,7 +3533,7 @@ fn header(
                 egui::pos2(named.right() + 4.0, cell.center().y),
                 egui::Align2::LEFT_CENTER,
                 format!("≥{}", var::px(*w)),
-                egui::FontId::monospace(10.0),
+                egui::FontId::proportional(ui::CAPTION_PT),
                 theme::text::faint(),
             );
         }
@@ -3549,7 +3581,15 @@ fn group_row(
             rect.min + egui::vec2(20.0, 2.0),
             egui::vec2(NAME_W - 26.0, GROUP_H - 4.0),
         );
-        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
+        let resp = edit_field(
+            ui,
+            r,
+            text,
+            id.with("edit"),
+            ui::SMALL_PT,
+            None,
+            refused.as_deref(),
+        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -3578,7 +3618,7 @@ fn group_row(
     );
     let name = p.layout_no_wrap(
         path.to_string(),
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         color::text(),
     );
     let name_w = name.size().x;
@@ -3596,7 +3636,7 @@ fn group_row(
         egui::pos2(rect.left() + 23.0 + name_w + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         count,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     if let Some(collection) = of.own()
@@ -3670,7 +3710,7 @@ fn var_row(
             r,
             text,
             id.with("name"),
-            11.5,
+            ui::SMALL_PT,
             Some("name, / to group"),
             refused.as_deref(),
         );
@@ -3689,7 +3729,7 @@ fn var_row(
         let p = ui.painter();
         let count_galley = p.layout_no_wrap(
             count_text,
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             theme::text::faint(),
         );
         let count_rect = egui::Rect::from_min_size(
@@ -3702,7 +3742,7 @@ fn var_row(
         let leaf_w = count_rect.left() - (rect.left() + INDENT) - 6.0;
         let galley = p.layout(
             leaf.to_string(),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(ui::SMALL_PT),
             color::text(),
             f32::INFINITY,
         );
@@ -3732,7 +3772,7 @@ fn var_row(
             count_rect.left_center(),
             egui::Align2::LEFT_CENTER,
             count.to_string(),
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             count_col,
         );
         if count > 0 {
@@ -3787,7 +3827,7 @@ fn var_row(
                 r,
                 text,
                 id.with(("cell", m.id)),
-                11.0,
+                ui::SMALL_PT,
                 None,
                 refused.as_deref(),
             );
@@ -3945,7 +3985,7 @@ fn kit_row(
         egui::pos2(g.right() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         super::binding::kit_name(doc, kit),
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::strong(),
     );
     if let Some((held, next)) = waiting {
@@ -3953,7 +3993,7 @@ fn kit_row(
         let galley = ui.ctx().fonts_mut(|f| {
             f.layout_no_wrap(
                 format!("· v{held} → v{next}"),
-                egui::FontId::proportional(10.5),
+                egui::FontId::proportional(ui::CAPTION_PT),
                 theme::text::dim(),
             )
         });
@@ -4008,7 +4048,7 @@ fn kit_row(
             egui::pos2(cell.left() + 6.0, cell.center().y),
             egui::Align2::LEFT_CENTER,
             name,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             if hand {
                 theme::text::strong()
             } else {
@@ -4057,7 +4097,7 @@ fn kit_var_row(
     let p = ui.painter();
     let count_galley = p.layout_no_wrap(
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     let count_rect = egui::Rect::from_min_size(
@@ -4075,7 +4115,7 @@ fn kit_var_row(
         egui::pos2(rect.left() + INDENT, rect.center().y),
         egui::Align2::LEFT_CENTER,
         leaf,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(ui::SMALL_PT),
         theme::text::muted(),
     );
     let count_resp = ui.interact(
@@ -4087,7 +4127,7 @@ fn kit_var_row(
         count_rect.left_center(),
         egui::Align2::LEFT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         if count_resp.hovered() && count > 0 {
             color::text()
         } else {
@@ -4124,7 +4164,7 @@ fn kit_var_row(
 /// naming its target.
 fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect, c: &Cell) {
     let y = cell.center().y;
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     match c {
         Cell::Color(col) => {
             let sw = egui::Rect::from_center_size(
@@ -4180,7 +4220,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 p.rect_stroke(
                     bx,
                     3,
-                    egui::Stroke::new(1.0, color::text_a(102)),
+                    egui::Stroke::new(1.0, theme::color::text_a(102)),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -4519,7 +4559,7 @@ impl OndinApp {
                         label.left_center(),
                         egui::Align2::LEFT_CENTER,
                         row_label,
-                        egui::FontId::proportional(10.5),
+                        egui::FontId::proportional(ui::CAPTION_PT),
                         theme::text::strong(),
                     );
                     ui::override_dot(ui.painter(), egui::pos2(g.right() + 5.0, g.center().y));
@@ -4529,7 +4569,7 @@ impl OndinApp {
                         label.left_center(),
                         egui::Align2::LEFT_CENTER,
                         row_label,
-                        egui::FontId::proportional(10.5),
+                        egui::FontId::proportional(ui::CAPTION_PT),
                         theme::text::dim(),
                     );
                 }
@@ -4563,7 +4603,7 @@ impl OndinApp {
                     egui::pos2(x + gw + 5.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     s,
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(ui::CAPTION_PT),
                     theme::text::faint(),
                 );
             }

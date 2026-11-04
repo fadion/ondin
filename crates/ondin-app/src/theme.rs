@@ -449,9 +449,15 @@ pub mod text {
     /// disabling (`icon_button`'s `enabled: false`, `FieldButton::Disabled`) must
     /// land on the same ink. It also stays well apart from the "off" tiers
     /// (`HIDDEN_OPACITY` over muted is 95, a hidden or locked layer row is
-    /// `text_a(102)`), so dimmed-because-off and dimmed-because-unavailable differ.
+    /// [`off`]), so dimmed-because-off and dimmed-because-unavailable differ.
     pub fn disabled() -> Color32 {
         text_a(79)
+    }
+    /// **A row that is off** — a hidden or locked layer, a style or variable that
+    /// does not apply: ~40%, a step above [`faint`] so the row still reads as its
+    /// list's own, and apart from [`disabled`].
+    pub fn off() -> Color32 {
+        text_a(102)
     }
 }
 

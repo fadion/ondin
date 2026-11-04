@@ -6,7 +6,7 @@
 
 use super::index::{kit_heading, kits_in};
 use crate::app::OndinApp;
-use crate::theme::{self, color, icon};
+use crate::theme::{self, icon};
 use eframe::egui;
 use ondin_core::NodeId;
 
@@ -104,7 +104,7 @@ impl OndinApp {
         // the arrow, so the ink is the only hover cue.
         let galley = ui.painter().layout_no_wrap(
             format!("← {name}"),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(crate::ui::SMALL_PT),
             theme::text::muted(),
         );
         let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
@@ -201,7 +201,7 @@ impl OndinApp {
                     "{name} becomes a main in this document that you can edit. It stops \
                      receiving updates from {kit}."
                 ))
-                .size(12.0)
+                .size(crate::ui::CONTROL_PT)
                 .color(theme::text::muted()),
             );
             ui.add_space(6.0);
@@ -215,7 +215,7 @@ impl OndinApp {
                     },
                     if instances == 1 { "" } else { "s" }
                 ))
-                .size(12.0)
+                .size(crate::ui::CONTROL_PT)
                 .color(theme::text::dim()),
             );
             if nested_in_kit > 0 {
@@ -224,7 +224,7 @@ impl OndinApp {
                     egui::RichText::new(format!(
                         "{kit}'s own components that use {name} keep {kit}'s {name}."
                     ))
-                    .size(12.0)
+                    .size(crate::ui::CONTROL_PT)
                     .color(theme::text::dim()),
                 );
             }
@@ -338,8 +338,8 @@ pub(crate) fn source_line(ui: &mut egui::Ui, k: &KitLine) {
         }
         ui.label(
             egui::RichText::new(text)
-                .size(11.0)
-                .color(color::text_a(140)),
+                .size(crate::ui::SMALL_PT)
+                .color(theme::text::muted()),
         );
     });
 }

@@ -37,7 +37,10 @@ const PASS: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xc0, 0x8a);
 /// reads over any artwork.
 const CHIP: egui::Color32 = egui::Color32::from_rgba_premultiplied(25, 25, 28, 209);
 const BADGE_H: f32 = 19.0;
-const BADGE_PT: f32 = 10.5;
+const BADGE_PT: f32 = crate::ui::CAPTION_PT;
+/// The fix card's ratio readout: larger than the scale's titles, so the number
+/// reads first.
+const RATIO_PT: f32 = 15.0;
 /// A badge's distance above the layer it names.
 const BADGE_LIFT: f32 = 3.0;
 /// The fix card's width.
@@ -756,7 +759,7 @@ impl OndinApp {
                             None => {
                                 ui.label(
                                     egui::RichText::new("Contrast")
-                                        .size(12.0)
+                                        .size(crate::ui::CONTROL_PT)
                                         .color(color::text()),
                                 );
                             }
@@ -770,7 +773,7 @@ impl OndinApp {
                         let lr = crate::ui::menu_head(
                             ui,
                             egui::RichText::new(level.label())
-                                .size(12.0)
+                                .size(crate::ui::CONTROL_PT)
                                 .color(theme::text::muted()),
                             4.0,
                             level_open,
@@ -794,21 +797,21 @@ impl OndinApp {
                         if let Some(alpha) = pulse {
                             ui.label(
                                 egui::RichText::new("Measuring…")
-                                    .size(12.0)
+                                    .size(crate::ui::CONTROL_PT)
                                     .color(theme::text::muted().gamma_multiply(alpha)),
                             );
                         } else if fails.is_empty() {
                             glyph(ui, theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
                             ui.label(
                                 egui::RichText::new(format!("All {measured} pass"))
-                                    .size(12.0)
+                                    .size(crate::ui::CONTROL_PT)
                                     .color(ink),
                             );
                         } else {
                             glyph(ui, theme::icon_text(icon::WARNING, 13.0, FAIL_LINE));
                             ui.label(
                                 egui::RichText::new(format!("{} failing", fails.len()))
-                                    .size(12.0)
+                                    .size(crate::ui::CONTROL_PT)
                                     .color(ink),
                             );
                         }
@@ -820,7 +823,7 @@ impl OndinApp {
                                 .painter()
                                 .layout_no_wrap(
                                     format!("{n} / {n}"),
-                                    egui::FontId::proportional(12.0),
+                                    egui::FontId::proportional(crate::ui::CONTROL_PT),
                                     theme::text::dim(),
                                 )
                                 .size()
@@ -829,7 +832,7 @@ impl OndinApp {
                                 if let Some(at) = at {
                                     ui.label(
                                         egui::RichText::new(format!("{at} / {}", fails.len()))
-                                            .size(12.0)
+                                            .size(crate::ui::CONTROL_PT)
                                             .color(theme::text::dim()),
                                     );
                                 }
@@ -1666,7 +1669,11 @@ fn card_head(ui: &mut egui::Ui, name: &str, f: &Finding, level: Level) {
                     icon::TEXT_T
                 };
                 ui.label(theme::icon_text(glyph, 15.0, color::accent_300()));
-                ui.label(egui::RichText::new(name).size(12.5).color(color::text()));
+                ui.label(
+                    egui::RichText::new(name)
+                        .size(crate::ui::CONTROL_PT)
+                        .color(color::text()),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let what = match () {
                         _ if f.non_text => "non-text",
@@ -1675,7 +1682,7 @@ fn card_head(ui: &mut egui::Ui, name: &str, f: &Finding, level: Level) {
                     };
                     ui.label(
                         egui::RichText::new(format!("{what} · {}", level.label()))
-                            .size(10.5)
+                            .size(crate::ui::CAPTION_PT)
                             .color(theme::text::dim()),
                     );
                 });
@@ -1696,7 +1703,7 @@ fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
                         egui::RichText::new(format!("{} on {}", hex(w.ink), hex(w.backdrop)))
-                            .size(10.5)
+                            .size(crate::ui::CAPTION_PT)
                             .color(color::text()),
                     );
                     ui.label(
@@ -1705,14 +1712,14 @@ fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
                         } else {
                             "text on backdrop"
                         })
-                        .size(10.5)
+                        .size(crate::ui::CAPTION_PT)
                         .color(theme::text::dim()),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(level.format(f.ratio))
-                            .size(15.0)
+                            .size(RATIO_PT)
                             .strong()
                             .color(FAIL_LINE),
                     );
@@ -1740,7 +1747,7 @@ fn card_modes(ui: &mut egui::Ui, f: &Finding, level: Level) {
                     split_swatch(ui, s.ink, s.backdrop, egui::vec2(12.0, 16.0));
                     ui.label(
                         egui::RichText::new(s.name.as_deref().unwrap_or("Default"))
-                            .size(11.5)
+                            .size(crate::ui::SMALL_PT)
                             .color(color::text()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1751,7 +1758,7 @@ fn card_modes(ui: &mut egui::Ui, f: &Finding, level: Level) {
                         };
                         ui.label(
                             egui::RichText::new(level.format(s.score))
-                                .size(11.5)
+                                .size(crate::ui::SMALL_PT)
                                 .color(ink),
                         );
                         let glyph = if pass { icon::CHECK } else { icon::WARNING };
@@ -1816,14 +1823,14 @@ fn fix_row(ui: &mut egui::Ui, swatch: Color, name: &str, score: &str) -> egui::R
         egui::pos2(sw.right() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         color::text(),
     );
     p.text(
         egui::pos2(rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         score,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         theme::text::muted(),
     );
     resp
@@ -1843,7 +1850,7 @@ fn note(ui: &mut egui::Ui, text: &str) {
         ui.add_space(8.0);
         ui.label(
             egui::RichText::new(text)
-                .size(11.0)
+                .size(crate::ui::SMALL_PT)
                 .color(theme::text::dim()),
         );
     });

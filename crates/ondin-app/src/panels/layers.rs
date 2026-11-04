@@ -1268,7 +1268,7 @@ impl OndinApp {
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new("No layers match")
-                    .size(11.5)
+                    .size(crate::ui::SMALL_PT)
                     .color(theme::text::faint()),
             );
             Vec::new()
@@ -1882,7 +1882,7 @@ impl OndinApp {
             (true, ..) => color::select_ink(),
             (_, true, _) if hexagon.is_some() => color::text(),
             (_, true, _) => color::select_ink(),
-            (_, false, true) => theme::color::text_a(102),
+            (_, false, true) => theme::text::off(),
             (_, false, false) => theme::text::muted(),
         };
         let glyph_col = match (drop_host, selected, dimmed) {
@@ -1927,7 +1927,7 @@ impl OndinApp {
         let badge = badge.filter(|_| !locked && !show_lock).map(|b| {
             // One layout for both, differing only in the font.
             let (s, font, worded) = match b {
-                RowBadge::Text(s) => (s, egui::FontId::proportional(10.5), true),
+                RowBadge::Text(s) => (s, egui::FontId::proportional(crate::ui::CAPTION_PT), true),
                 RowBadge::Icon(g, size) => (g.to_string(), theme::icon_font(size), false),
             };
             // Clear of a component mark, which holds the very edge.
@@ -1951,8 +1951,11 @@ impl OndinApp {
         if !renaming {
             // Whole, never cut: the tree scrolls sideways to the rest.
             let x = icon_x + NAME_GAP;
-            let galley =
-                p.layout_no_wrap(name.to_string(), egui::FontId::proportional(12.5), name_col);
+            let galley = p.layout_no_wrap(
+                name.to_string(),
+                egui::FontId::proportional(crate::ui::CONTROL_PT),
+                name_col,
+            );
             let name_end = x + galley.size().x;
             // Clipped where the cover turns solid: the cover's right corners are
             // rounded to the row's, and a name running under them would show
@@ -2004,7 +2007,7 @@ impl OndinApp {
                     if visible {
                         theme::text::dim()
                     } else {
-                        theme::color::text_a(102)
+                        theme::text::off()
                     },
                 ),
             );
@@ -2985,7 +2988,7 @@ mod rename_layout_tests {
                 egui::pos2(left, row.center().y),
                 egui::Align2::LEFT_CENTER,
                 "Ellipse",
-                egui::FontId::proportional(12.5),
+                egui::FontId::proportional(crate::ui::CONTROL_PT),
                 egui::Color32::WHITE,
             );
             let field = rename_field_rect(row, left);
@@ -3287,7 +3290,11 @@ mod badge_ink_tests {
                 .native_pixels_per_point = Some(ppp);
             let _ = ctx.run_ui(input, |_| {});
 
-            let word = ink_height(&ctx, "800 × 600", egui::FontId::proportional(10.5));
+            let word = ink_height(
+                &ctx,
+                "800 × 600",
+                egui::FontId::proportional(crate::ui::CAPTION_PT),
+            );
             for (name, badge, size) in [
                 ("stack", icon::STACK_SIMPLE, BADGE_STACK),
                 ("half-circle", icon::CIRCLE_HALF, BADGE_MASK),
@@ -5188,7 +5195,7 @@ mod panel_width_tests {
             ctx.fonts_mut(|f| {
                 f.layout_no_wrap(
                     s.to_string(),
-                    egui::FontId::proportional(12.5),
+                    egui::FontId::proportional(crate::ui::CONTROL_PT),
                     egui::Color32::WHITE,
                 )
                 .size()

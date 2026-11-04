@@ -73,7 +73,7 @@ impl OndinApp {
         let head = crate::ui::menu_head(
             ui,
             egui::RichText::new(title)
-                .size(13.0)
+                .size(crate::ui::HEAD_PT)
                 .color(theme::text::strong()),
             TOP_GAP,
             open,
@@ -396,7 +396,7 @@ impl OndinApp {
             for line in [users::sentence(&name, count), again] {
                 ui.label(
                     egui::RichText::new(line)
-                        .size(12.0)
+                        .size(crate::ui::CONTROL_PT)
                         .color(theme::text::muted()),
                 );
                 ui.add_space(4.0);
@@ -448,7 +448,7 @@ pub(crate) fn kit_tag(ui: &mut egui::Ui) {
     const PAD: f32 = 10.0;
     const GAP: f32 = 7.0;
     let scale = crate::ui::Scale::Toolbar;
-    let ink = color::text_a(191);
+    let ink = theme::text::strong();
     let glyph = egui::WidgetText::from(theme::icon_text(icon::PACKAGE, scale.glyph_pt(), ink))
         .into_galley(
             ui,

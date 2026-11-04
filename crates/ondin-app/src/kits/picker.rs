@@ -1521,14 +1521,14 @@ fn browse(
         if let Some(note) = &s.note {
             ui.label(
                 egui::RichText::new(note)
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
         }
         if s.groups.is_empty() && s.note.is_none() {
             ui.label(
                 egui::RichText::new("Loading…")
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::faint()),
             );
         }
@@ -1536,8 +1536,8 @@ fn browse(
             if !group.is_empty() {
                 ui.label(
                     egui::RichText::new(group)
-                        .size(10.5)
-                        .color(color::text_a(107)),
+                        .size(ui::CAPTION_PT)
+                        .color(theme::text::dim()),
                 );
             }
             tiles(ui, items, out);
@@ -1561,7 +1561,7 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
     let ink = if s.used {
         color::text()
     } else {
-        color::text_a(191)
+        theme::text::muted()
     };
     p.text(
         egui::pos2(rect.left() + 4.0, y),
@@ -1585,15 +1585,15 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
         egui::pos2(rect.left() + 38.0, y),
         egui::Align2::LEFT_CENTER,
         &s.name,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(ui::CONTROL_PT),
         ink,
     );
     p.text(
         egui::pos2(rect.right() - 4.0, y),
         egui::Align2::RIGHT_CENTER,
         &s.status,
-        egui::FontId::proportional(10.5),
-        color::text_a(102),
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
     );
     resp
 }
@@ -1668,19 +1668,20 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
             egui::Align2::CENTER_CENTER,
             icon::SQUARES_FOUR,
             theme::icon_font(11.0),
-            color::text_a(160),
+            theme::text::muted(),
         );
     } else {
-        crate::ui::paint_hexagon_filled(p, egui::pos2(gx, y), 10.0, color::text_a(160));
+        crate::ui::paint_hexagon_filled(p, egui::pos2(gx, y), 10.0, theme::text::muted());
     }
     let text = p.layout(
         item.name.clone(),
-        egui::FontId::proportional(11.0),
-        color::text_a(204),
+        egui::FontId::proportional(ui::SMALL_PT),
+        theme::text::strong(),
         cell.width() - 14.0,
     );
     let at = egui::pos2(cell.left() + 14.0, y - text.size().y / 2.0);
-    p.with_clip_rect(cell).galley(at, text, color::text_a(204));
+    p.with_clip_rect(cell)
+        .galley(at, text, theme::text::strong());
 }
 
 /// A search result: a small picture, the name, and the kit on the right.
@@ -1726,21 +1727,21 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
                 egui::Align2::CENTER_CENTER,
                 icon::SQUARES_FOUR,
                 theme::icon_font(11.0),
-                color::text_a(160),
+                theme::text::muted(),
             );
         } else {
             crate::ui::paint_hexagon_filled(
                 p,
                 egui::pos2(rect.left() + 46.0, gy),
                 10.0,
-                color::text_a(160),
+                theme::text::muted(),
             );
         }
         p.text(
             egui::pos2(rect.left() + 56.0, gy),
             egui::Align2::LEFT_CENTER,
             &item.name,
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(ui::CONTROL_PT),
             color::text(),
         );
         if let Some((kit, used)) = &item.kit {
@@ -1753,8 +1754,8 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
                 egui::pos2(rect.right() - 6.0, gy),
                 egui::Align2::RIGHT_CENTER,
                 right,
-                egui::FontId::proportional(10.5),
-                color::text_a(102),
+                egui::FontId::proportional(ui::CAPTION_PT),
+                theme::text::faint(),
             );
         }
         if !about.is_empty() {
@@ -1764,15 +1765,15 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
                 wrap: egui::text::TextWrapping::truncate_at_width(rect.right() - 6.0 - x),
                 ..egui::text::LayoutJob::simple_singleline(
                     about.to_string(),
-                    egui::FontId::proportional(11.0),
-                    color::text_a(115),
+                    egui::FontId::proportional(ui::SMALL_PT),
+                    theme::text::dim(),
                 )
             };
             let galley = ui.fonts_mut(|f| f.layout_job(line));
             p.galley(
                 egui::pos2(x, rect.top() + ROW_H - 4.0),
                 galley,
-                color::text_a(115),
+                theme::text::dim(),
             );
         }
     }
@@ -1782,7 +1783,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
                 true => crate::private::DECLINE_SEARCH,
                 false => "No components match",
             })
-            .size(11.0)
+            .size(ui::SMALL_PT)
             .color(theme::text::faint()),
         );
     }
@@ -1821,7 +1822,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                         );
                         ui.label(
                             egui::RichText::new(&item.name)
-                                .size(12.5)
+                                .size(ui::CONTROL_PT)
                                 .color(theme::text::strong()),
                         );
                         if item.variants > 0 {
@@ -1834,7 +1835,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                                     };
                                     ui.label(
                                         egui::RichText::new(n)
-                                            .size(10.5)
+                                            .size(ui::CAPTION_PT)
                                             .color(theme::text::faint()),
                                     );
                                 },
@@ -1847,7 +1848,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                     if !item.about.is_empty() {
                         let mut job = egui::text::LayoutJob::simple(
                             item.about.clone(),
-                            egui::FontId::proportional(11.5),
+                            egui::FontId::proportional(ui::SMALL_PT),
                             theme::text::muted(),
                             ui.available_width(),
                         );
@@ -1864,7 +1865,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                             );
                             let host = ui.label(
                                 egui::RichText::new(ondin_core::link_host(&item.docs))
-                                    .size(11.0)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::dim()),
                             );
                             // Painted against the host rather than laid out: the
@@ -1877,7 +1878,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                                 ),
                                 egui::Align2::RIGHT_CENTER,
                                 "Alt+click to open",
-                                egui::FontId::proportional(10.5),
+                                egui::FontId::proportional(ui::CAPTION_PT),
                                 theme::text::faint(),
                             );
                         });
@@ -1911,15 +1912,15 @@ fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
         egui::pos2(rect.left() + 20.0, y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(ui::CONTROL_PT),
         color::text(),
     );
     p.text(
         egui::pos2(rect.right() - 4.0, y),
         egui::Align2::RIGHT_CENTER,
         count,
-        egui::FontId::proportional(10.5),
-        color::text_a(102),
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
     );
 }
 
@@ -1927,9 +1928,9 @@ fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
 fn caps(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text.to_uppercase())
-            .size(9.5)
+            .size(ui::EYEBROW_PT)
             .extra_letter_spacing(0.95)
-            .color(color::text_a(97)),
+            .color(theme::text::faint()),
     );
 }
 
@@ -1943,7 +1944,7 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
         ui.label(theme::icon_text(icon::PACKAGE, 18.0, theme::text::dim()));
         ui.label(
             egui::RichText::new("No kits in your library")
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(color::text()),
         );
         ui.label(
@@ -1951,7 +1952,7 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
                 "Any document can become one: open it and choose Make this a kit \
                  from the document menu.",
             )
-            .size(11.0)
+            .size(ui::SMALL_PT)
             .color(theme::text::dim()),
         );
         ui.add_space(8.0);

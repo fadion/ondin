@@ -498,10 +498,8 @@ mod tests {
 
     /// The label pill stays narrow enough to centre on its own line: a measure
     /// shorter than the pill is covered by its label and only the end ticks show,
-    /// a fine trade only while that is a tight gap. At 9.5pt with `PAD`, `8` is
-    /// about 14px, `40` about 20 (the table the two-digit assert refers to),
-    /// `1200` about 30 and `40.25` about 34. Re-check if the badge font size or
-    /// `PAD` moves.
+    /// a fine trade only while that is a tight gap. The bounds are for `CAPTION_PT`
+    /// with `PAD`; re-check them if either moves.
     #[test]
     fn the_label_pill_is_narrow_enough_to_centre_on_its_own_line() {
         let ctx = egui::Context::default();
@@ -513,7 +511,7 @@ mod tests {
             ctx.fonts_mut(|f| {
                 f.layout_no_wrap(
                     text.to_owned(),
-                    egui::FontId::proportional(9.5),
+                    egui::FontId::proportional(crate::ui::CAPTION_PT),
                     egui::Color32::WHITE,
                 )
                 .size()
@@ -522,15 +520,12 @@ mod tests {
         };
 
         let two = width(&label(40.0));
-        assert!(
-            (18.0..=23.0).contains(&two),
-            "a two-digit pill is {two}px, not the ~20 the table above records"
-        );
+        assert!((18.0..=23.0).contains(&two), "a two-digit pill is {two}px");
         // The widest labels a whole and a fractional number produce.
         let four = width(&label(1200.0));
         let frac = width(&label(40.25));
         assert!(four <= 32.0, "a four-digit pill is {four}px");
-        assert!(frac <= 36.0, "a fractional pill is {frac}px");
+        assert!(frac <= 38.0, "a fractional pill is {frac}px");
         // One digit is the tight case, carried by the ticks.
         let one = width(&label(8.0));
         assert!(one <= 15.0, "a one-digit pill is {one}px");

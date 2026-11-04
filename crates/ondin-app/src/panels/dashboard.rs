@@ -637,7 +637,7 @@ impl OndinApp {
                     let brand = ui
                         .label(
                             egui::RichText::new("Ondin")
-                                .size(13.0)
+                                .size(ui::HEAD_PT)
                                 .color(theme::text::strong()),
                         )
                         .rect;
@@ -727,7 +727,7 @@ impl OndinApp {
                 egui::pos2(rect.right() - ui::FIELD_PAD_X, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 "Ctrl + K",
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(ui::CAPTION_PT),
                 theme::text::faint(),
             );
             // A click or a Tab into the field opens the overlay; focus left over from
@@ -845,7 +845,7 @@ impl OndinApp {
                     } else {
                         "No matches"
                     },
-                    egui::FontId::proportional(11.5),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::dim(),
                 );
             }));
@@ -901,7 +901,7 @@ impl OndinApp {
                     egui::pos2(r.left() + 30.0, r.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(ui::CONTROL_PT),
                     theme::text::strong(),
                 );
                 if !meta.is_empty() {
@@ -909,7 +909,7 @@ impl OndinApp {
                         egui::pos2(r.right() - 10.0, r.center().y),
                         egui::Align2::RIGHT_CENTER,
                         meta,
-                        egui::FontId::proportional(10.5),
+                        egui::FontId::proportional(ui::CAPTION_PT),
                         theme::text::faint(),
                     );
                 }
@@ -1153,7 +1153,7 @@ impl OndinApp {
             egui::pos2(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(ui::CONTROL_PT),
             fg,
         );
         if let Some(n) = count {
@@ -1161,7 +1161,7 @@ impl OndinApp {
                 egui::pos2(rect.right() - 12.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 n.to_string(),
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 theme::text::faint(),
             );
         }
@@ -1226,7 +1226,7 @@ impl OndinApp {
             egui::pos2(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &shown,
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(ui::CONTROL_PT),
             fg,
         );
         match kind {
@@ -1234,7 +1234,7 @@ impl OndinApp {
                 egui::pos2(rect.right() - 12.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 n.to_string(),
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(ui::SMALL_PT),
                 theme::text::faint(),
             ),
             ProjectRowKind::Archived => painter.text(
@@ -1350,7 +1350,7 @@ impl OndinApp {
             rect.center(),
             egui::Align2::CENTER_CENTER,
             into.unwrap_or_else(|| "Drop to import".into()),
-            egui::FontId::proportional(14.0),
+            egui::FontId::proportional(ui::TITLE_PT),
             theme::color::select_ink(),
         );
     }
@@ -1427,12 +1427,12 @@ impl OndinApp {
             ui.vertical(|ui| {
                 ui.label(
                     egui::RichText::new(&heading)
-                        .size(17.0)
+                        .size(ui::HEADING_PT)
                         .color(theme::text::strong()),
                 );
                 ui.label(
                     egui::RichText::new(subheading.replace("{n}", &count.to_string()))
-                        .size(11.5)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
             });
@@ -1627,8 +1627,8 @@ impl OndinApp {
                 p.text(
                     egui::pos2(row.left() + 8.0 + DOT + 8.0, row.center().y),
                     egui::Align2::LEFT_CENTER,
-                    elide(p.ctx(), name, 11.5, w - 60.0),
-                    egui::FontId::proportional(11.5),
+                    elide(p.ctx(), name, ui::SMALL_PT, w - 60.0),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     if on || lit {
                         color::text()
                     } else {
@@ -1724,7 +1724,7 @@ impl OndinApp {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(line)
-                    .size(12.5)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::dim()),
             );
             // No path under the sentence: the base folder lives in Settings.
@@ -1811,15 +1811,20 @@ impl OndinApp {
         painter.text(
             egui::pos2(rect.left() + PROJECT_PAD + DOT + 7.0, name_y),
             egui::Align2::LEFT_CENTER,
-            elide(ui, &shown, 12.5, w - PROJECT_PAD * 2.0 - DOT - 7.0),
-            egui::FontId::proportional(12.5),
+            elide(
+                ui,
+                &shown,
+                ui::CONTROL_PT,
+                w - PROJECT_PAD * 2.0 - DOT - 7.0,
+            ),
+            egui::FontId::proportional(ui::CONTROL_PT),
             theme::text::strong(),
         );
         ui.painter().text(
             egui::pos2(rect.left() + PROJECT_PAD, rect.bottom() - PROJECT_PAD - 6.0),
             egui::Align2::LEFT_CENTER,
             format!("{count} file(s) · {touched}"),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
         resp.clicked()
@@ -1974,8 +1979,8 @@ impl OndinApp {
         p.text(
             rect.center() + egui::vec2(0.0, 12.0),
             egui::Align2::CENTER_CENTER,
-            elide(ui, &format!("New file in {into}"), 11.5, w - 20.0),
-            egui::FontId::proportional(11.5),
+            elide(ui, &format!("New file in {into}"), ui::SMALL_PT, w - 20.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             ink,
         );
         resp.clicked()
@@ -2067,7 +2072,7 @@ impl OndinApp {
                     egui::Align2::CENTER_CENTER,
                     icon::FILES,
                     theme::icon_font(22.0),
-                    theme::color::text_a(40),
+                    theme::color::text_a(40), // text-ink: a placeholder mark on the cover plate
                 );
             }
         }
@@ -2114,8 +2119,13 @@ impl OndinApp {
             ui.painter().text(
                 egui::pos2(rect.left() + 12.0, thumb.bottom() + 15.0),
                 egui::Align2::LEFT_CENTER,
-                elide(ui, &self.library.shown_entry(entry), 12.5, w - 46.0),
-                egui::FontId::proportional(12.5),
+                elide(
+                    ui,
+                    &self.library.shown_entry(entry),
+                    ui::CONTROL_PT,
+                    w - 46.0,
+                ),
+                egui::FontId::proportional(ui::CONTROL_PT),
                 theme::text::strong(),
             );
         }
@@ -2124,7 +2134,7 @@ impl OndinApp {
             egui::pos2(rect.left() + 12.0, thumb.bottom() + 31.0),
             egui::Align2::LEFT_CENTER,
             clock::relative_label(clock::since(entry.modified)),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
 
@@ -2414,7 +2424,7 @@ impl OndinApp {
                     egui::pos2(x + 10.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     *label,
-                    egui::FontId::proportional(11.0),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::faint(),
                 );
                 x += w;
@@ -2463,7 +2473,7 @@ impl OndinApp {
             egui::pos2(badge.right() + 9.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "New file",
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(ui::CONTROL_PT),
             ink,
         );
         resp.clicked()
@@ -2534,12 +2544,12 @@ impl OndinApp {
                 continue;
             }
             let room = w - 34.0 - if i == 0 { chip_room } else { 0.0 };
-            let shown = elide(ui, text, 12.0, room);
+            let shown = elide(ui, text, ui::CONTROL_PT, room);
             ui.painter().text(
                 egui::pos2(x + 10.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 &shown,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(ui::CONTROL_PT),
                 if i == 0 {
                     theme::text::strong()
                 } else {
@@ -2552,7 +2562,7 @@ impl OndinApp {
                     .fonts_mut(|f| {
                         f.layout_no_wrap(
                             shown.clone(),
-                            egui::FontId::proportional(12.0),
+                            egui::FontId::proportional(ui::CONTROL_PT),
                             theme::text::strong(),
                         )
                     })
@@ -2731,7 +2741,7 @@ impl OndinApp {
                     egui::pos2(row.left() + 8.0, row.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    egui::FontId::proportional(11.5),
+                    egui::FontId::proportional(ui::SMALL_PT),
                     match () {
                         _ if danger => theme::color::danger(),
                         _ if lit => color::text(),
@@ -3534,7 +3544,7 @@ impl OndinApp {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(format!("“{shown}” can't be brought back."))
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::muted()),
             );
             let Some(dp) = self.dash.deleting_project.as_mut() else {
@@ -3578,7 +3588,7 @@ impl OndinApp {
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new("It has no files in it.")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
             }
@@ -3650,7 +3660,7 @@ impl OndinApp {
             }
             ui.label(
                 egui::RichText::new(format!("“{name}”"))
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
             ui.add_space(10.0);
@@ -3682,7 +3692,7 @@ impl OndinApp {
                                 egui::pos2(rect.left() + 28.0, rect.center().y),
                                 egui::Align2::LEFT_CENTER,
                                 label,
-                                egui::FontId::proportional(12.0),
+                                egui::FontId::proportional(ui::CONTROL_PT),
                                 theme::text::strong(),
                             );
                             if selected {
@@ -4149,7 +4159,7 @@ impl OndinApp {
                 } else {
                     format!("“{name}” moves to Trash.")
                 })
-                .size(12.0)
+                .size(ui::CONTROL_PT)
                 .color(theme::text::muted()),
             );
             match settings::danger_footer(ui, "Delete") {
@@ -4190,7 +4200,7 @@ impl OndinApp {
                     egui::RichText::new(format!(
                         "“{name}” is no longer on disk, so it is removed from the library."
                     ))
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::muted()),
                 )
                 .wrap(),
@@ -4350,7 +4360,7 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
         egui::pos2(rect.left() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
 }
@@ -4384,14 +4394,14 @@ fn archived_header(ui: &mut egui::Ui, open: bool, count: usize) -> bool {
         egui::pos2(rect.left() + 26.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "Archived projects",
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         fg,
     );
     p.text(
         egui::pos2(rect.right() - 12.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     resp.clicked()
@@ -4583,10 +4593,14 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
     const PAD: f32 = 7.0;
     const GAP: f32 = 5.0;
     const GLYPH: f32 = 11.0;
-    let ink = theme::color::on_scrim(|| theme::color::text_a(179));
-    let word = ui
-        .ctx()
-        .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(10.5), ink));
+    let ink = theme::color::on_scrim(|| theme::color::text_a(179)); // text-ink: on the cover scrim
+    let word = ui.ctx().fonts_mut(|f| {
+        f.layout_no_wrap(
+            "Kit".into(),
+            egui::FontId::proportional(ui::CAPTION_PT),
+            ink,
+        )
+    });
     let w = PAD + GLYPH + GAP + word.size().x + PAD;
     let rect = egui::Align2::LEFT_BOTTOM.anchor_size(at, egui::vec2(w, H));
     let p = ui.painter();
@@ -4695,7 +4709,7 @@ fn open_word(ui: &egui::Ui, chip: StateChip) -> std::sync::Arc<egui::Galley> {
     ui.ctx().fonts_mut(|f| {
         f.layout_no_wrap(
             chip.word().into(),
-            egui::FontId::proportional(10.5),
+            egui::FontId::proportional(ui::CAPTION_PT),
             chip.colors().0,
         )
     })
@@ -4741,7 +4755,7 @@ impl Mark {
     }
 }
 
-const MARK_PT: f32 = 8.5;
+const MARK_PT: f32 = ui::EYEBROW_PT;
 
 /// How much room [`mark_chip`] needs.
 ///

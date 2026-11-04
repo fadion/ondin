@@ -70,7 +70,7 @@ const DEFAULT_FONT_W: f32 = 200.0;
 /// rows *are* switch rows and a caption beside one has to match it.
 pub(crate) const LABEL_PT: f32 = ui::SWITCH_ROW_LABEL_PT;
 /// Type size of the sentence under a row that needs one.
-pub(crate) const CAPTION_PT: f32 = 10.5;
+pub(crate) const CAPTION_PT: f32 = ui::CAPTION_PT;
 /// Type size of a button's word — [`ui::label_button`]'s at [`BUTTON_H`].
 const BUTTON_PT: f32 = ui::CONTROL_PT;
 
@@ -520,7 +520,7 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(title)
-                .size(14.0)
+                .size(ui::TITLE_PT)
                 .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

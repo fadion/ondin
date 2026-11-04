@@ -281,8 +281,8 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "Ag",
-                egui::FontId::proportional(11.0),
-                ink(204),
+                egui::FontId::proportional(ui::SMALL_PT),
+                theme::text::muted(),
             );
         }
         // The display glyph turned with the direction (§15 D1076).
@@ -292,7 +292,7 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
                 egui::Align2::CENTER_CENTER,
                 layout_glyph(&l.display),
                 theme::icon_font(13.0),
-                ink(204),
+                theme::text::muted(),
             );
         }
     }
@@ -352,7 +352,7 @@ fn capsule(
             icon::CARET_RIGHT
         },
         theme::icon_font(11.0),
-        color::text_a(115),
+        theme::text::dim(),
     );
     x += 11.0 + 8.0;
     let sw = egui::Rect::from_min_size(egui::pos2(x, mid - 7.0), egui::vec2(14.0, 14.0));
@@ -366,7 +366,7 @@ fn capsule(
     } else {
         icon::LINK_BREAK
     };
-    let font = egui::FontId::proportional(10.5);
+    let font = egui::FontId::proportional(ui::CAPTION_PT);
     let chip_w = p
         .layout_no_wrap(chip_label.into(), font.clone(), theme::text::strong())
         .size()
@@ -384,7 +384,7 @@ fn capsule(
         summary(doc, &style.value)
     };
     let tail_w = p
-        .layout_no_wrap(tail.clone(), font.clone(), color::text_a(107))
+        .layout_no_wrap(tail.clone(), font.clone(), theme::text::dim())
         .size()
         .x;
     let name_right = if hovered {
@@ -392,7 +392,7 @@ fn capsule(
     } else {
         rect.right() - 4.0 - 6.0 - tail_w - 6.0
     };
-    let name = elided(p, &style.name, 12.0, name_right - x);
+    let name = elided(p, &style.name, ui::CONTROL_PT, name_right - x);
     p.galley(
         egui::pos2(x, mid - name.size().y / 2.0),
         name,
@@ -415,7 +415,7 @@ fn capsule(
             egui::Align2::CENTER_CENTER,
             chip_glyph,
             theme::icon_font(11.0),
-            color::text_a(191),
+            theme::text::muted(),
         );
         p.text(
             egui::pos2(chip.left() + 8.0 + 11.0 + 5.0, mid),
@@ -434,7 +434,7 @@ fn capsule(
             egui::Align2::RIGHT_CENTER,
             tail,
             font,
-            color::text_a(107),
+            theme::text::dim(),
         );
     }
     out.toggled = resp.clicked();
@@ -460,15 +460,15 @@ fn mixed_capsule(ui: &mut egui::Ui, doc: &Document, styles: &[StyleId]) {
         egui::pos2(x + 22.0, mid),
         egui::Align2::LEFT_CENTER,
         "Mixed",
-        egui::FontId::proportional(12.0),
-        color::text_a(140),
+        egui::FontId::proportional(ui::CONTROL_PT),
+        theme::text::muted(),
     );
     p.text(
         egui::pos2(rect.right() - 10.0, mid),
         egui::Align2::RIGHT_CENTER,
         format!("{} styles", styles.len()),
-        egui::FontId::proportional(10.5),
-        color::text_a(107),
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::dim(),
     );
     let names: Vec<&str> = found.iter().map(|s| s.name.as_str()).collect();
     resp.on_hover_text(names.join("\n"));
@@ -478,11 +478,11 @@ fn mixed_capsule(ui: &mut egui::Ui, doc: &Document, styles: &[StyleId]) {
 fn footer(ui: &mut egui::Ui, glyph: &str, text: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.0;
-        ui.label(theme::icon_text(glyph, 10.0, color::text_a(102)));
+        ui.label(theme::icon_text(glyph, 10.0, theme::text::faint()));
         ui.label(
             egui::RichText::new(text)
-                .size(10.0)
-                .color(color::text_a(102)),
+                .size(ui::CAPTION_PT)
+                .color(theme::text::faint()),
         );
     });
 }
@@ -665,7 +665,7 @@ impl OndinApp {
         // padding**: `place` stretches the edit over the box with its row at the
         // top, and padding that is the edit's takes a press anywhere on it.
         // `place`, not `put`: the capsule is allocated already.
-        let font = egui::FontId::proportional(12.0);
+        let font = egui::FontId::proportional(ui::CONTROL_PT);
         let field = egui::Rect::from_min_max(
             egui::pos2(sw.right() + 8.0, rect.top()),
             egui::pos2(rect.right() - 12.0, rect.bottom()),
@@ -702,14 +702,14 @@ impl OndinApp {
         if let Some(why) = &n.refusal {
             ui.label(
                 egui::RichText::new(why)
-                    .size(10.5)
+                    .size(ui::CAPTION_PT)
                     .color(theme::text::muted()),
             );
         } else {
             ui.label(
                 egui::RichText::new("↵ create   Esc cancel")
-                    .size(10.5)
-                    .color(color::text_a(115)),
+                    .size(ui::CAPTION_PT)
+                    .color(theme::text::dim()),
             );
         }
         if enter || edit.lost_focus() {
@@ -1025,7 +1025,7 @@ impl OndinApp {
                         };
                         let note = ui.label(
                             egui::RichText::new(text)
-                                .size(11.0)
+                                .size(ui::SMALL_PT)
                                 .color(theme::text::faint()),
                         );
                         // The list's room, so the next search's rows fit.
@@ -1084,15 +1084,15 @@ impl OndinApp {
                                     egui::pos2(sw.right() + 8.0, r.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     leaf,
-                                    egui::FontId::proportional(11.5),
+                                    egui::FontId::proportional(ui::SMALL_PT),
                                     theme::text::strong(),
                                 );
                                 p.text(
                                     egui::pos2(r.right() - 8.0, r.center().y),
                                     egui::Align2::RIGHT_CENTER,
                                     counts[i].to_string(),
-                                    egui::FontId::proportional(10.5),
-                                    color::text_a(102),
+                                    egui::FontId::proportional(ui::CAPTION_PT),
+                                    theme::text::faint(),
                                 );
                                 let resp = if s.description.is_empty() {
                                     resp

@@ -749,7 +749,7 @@ impl OndinApp {
                         (true, 1) => "1 track".to_owned(),
                         (true, n) => format!("{n} tracks"),
                     })
-                    .size(10.5)
+                    .size(ui::CAPTION_PT)
                     .color(theme::text::faint()),
                 );
             });
@@ -846,7 +846,11 @@ impl OndinApp {
             }
         }
         if let Some(why) = refusal(ui, key, shown.as_deref()) {
-            ui.label(egui::RichText::new(why).size(10.5).color(color::danger()));
+            ui.label(
+                egui::RichText::new(why)
+                    .size(ui::CAPTION_PT)
+                    .color(color::danger()),
+            );
         }
     }
 
@@ -1074,7 +1078,7 @@ impl OndinApp {
                             rest,
                             egui::Label::new(
                                 egui::RichText::new(text)
-                                    .size(11.0)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::dim()),
                             )
                             .truncate(),
@@ -1186,7 +1190,11 @@ impl OndinApp {
                 }
             });
             if let Some(why) = refused {
-                ui.label(egui::RichText::new(why).size(10.5).color(color::danger()));
+                ui.label(
+                    egui::RichText::new(why)
+                        .size(ui::CAPTION_PT)
+                        .color(color::danger()),
+                );
             }
         }
 

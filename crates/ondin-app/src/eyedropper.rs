@@ -716,7 +716,7 @@ struct Chip {
 /// The chip under the loupe — swatch and name, and the magnet when it snapped —
 /// centred on `x` with its top at `top`.
 fn draw_chip(painter: &egui::Painter, x: f32, top: f32, c: &Chip) {
-    let font = egui::FontId::proportional(10.5);
+    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
     let galley = painter.layout_no_wrap(c.text.clone(), font, egui::Color32::WHITE);
     let swatch = 10.0 + 5.0;
     let magnet = if c.snapped { 12.0 + 5.0 } else { 0.0 };

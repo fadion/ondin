@@ -1087,7 +1087,7 @@ impl OndinApp {
                     reset_hit = badge.on_hover_text(&m.tip).clicked();
                 }
             }
-            let font = egui::FontId::proportional(12.0);
+            let font = egui::FontId::proportional(ui::CONTROL_PT);
             let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
             #[expect(
                 clippy::disallowed_methods,
@@ -1369,7 +1369,7 @@ impl OndinApp {
                 egui::pos2(text.left(), rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 family,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(ui::CONTROL_PT),
                 theme::text::muted(),
             );
         }
@@ -2102,7 +2102,7 @@ impl OndinApp {
                                                 egui::RichText::new(
                                                     "The text style holds the greyed rows. Detach to edit",
                                                 )
-                                                .size(10.0)
+                                                .size(ui::CAPTION_PT)
                                                 .color(theme::text::muted()),
                                             );
                                         }
@@ -3005,7 +3005,7 @@ impl OndinApp {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(axis.name.as_str())
-                                    .size(11.5)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::muted()),
                             )
                             .truncate(),
@@ -3550,7 +3550,7 @@ impl OndinApp {
             {
                 ui.label(
                     egui::RichText::new("An ellipsis needs a line limit or a fixed height.")
-                        .size(10.0)
+                        .size(ui::CAPTION_PT)
                         .color(theme::text::faint()),
                 );
             }
@@ -7269,7 +7269,7 @@ mod tests {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new("Optical size")
-                                    .size(11.5)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::muted()),
                             )
                             .truncate(),

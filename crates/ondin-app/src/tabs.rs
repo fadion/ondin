@@ -1376,7 +1376,7 @@ impl OndinApp {
         let galley = ui.ctx().fonts_mut(|f| {
             let mut job = egui::text::LayoutJob::simple_singleline(
                 info.name.clone(),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(crate::ui::CONTROL_PT),
                 shown,
             );
             job.wrap = egui::text::TextWrapping::truncate_at_width(room);
@@ -1511,7 +1511,7 @@ impl OndinApp {
                         let galley = ui.ctx().fonts_mut(|f| {
                             let mut job = egui::text::LayoutJob::simple_singleline(
                                 info.name.clone(),
-                                egui::FontId::proportional(11.5),
+                                egui::FontId::proportional(crate::ui::SMALL_PT),
                                 ink,
                             );
                             job.wrap =
@@ -1631,12 +1631,20 @@ impl OndinApp {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     if let Some(project) = &info.project {
-                        ui.label(egui::RichText::new(project).size(13.0).color(text::muted()));
-                        ui.label(egui::RichText::new("/").size(13.0).color(text::faint()));
+                        ui.label(
+                            egui::RichText::new(project)
+                                .size(crate::ui::HEAD_PT)
+                                .color(text::muted()),
+                        );
+                        ui.label(
+                            egui::RichText::new("/")
+                                .size(crate::ui::HEAD_PT)
+                                .color(text::faint()),
+                        );
                     }
                     ui.label(
                         egui::RichText::new(&info.name)
-                            .size(13.0)
+                            .size(crate::ui::HEAD_PT)
                             .color(color::text()),
                     );
                 });
@@ -1651,18 +1659,22 @@ impl OndinApp {
                     let Some(why) = &info.failed else {
                         ui.label(
                             egui::RichText::new(format!("Loading {}…", info.name))
-                                .size(11.5)
+                                .size(crate::ui::SMALL_PT)
                                 .color(text::dim()),
                         );
                         return;
                     };
                     ui.label(
                         egui::RichText::new(format!("“{}” could not be read", info.name))
-                            .size(13.0)
+                            .size(crate::ui::HEAD_PT)
                             .color(color::text()),
                     );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(why).size(11.5).color(text::dim()));
+                    ui.label(
+                        egui::RichText::new(why)
+                            .size(crate::ui::SMALL_PT)
+                            .color(text::dim()),
+                    );
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         let w = 2.0 * 96.0 + 8.0;

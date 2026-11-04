@@ -403,7 +403,7 @@ pub(crate) fn chip(
     } else {
         cap.right() - 8.0
     };
-    let font = egui::FontId::proportional(11.5);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     let shown = elide_groups(ui, name, &font, text_right - (cap.left() + 8.0));
     p.with_clip_rect(egui::Rect::from_x_y_ranges(
         cap.left()..=text_right,
@@ -474,7 +474,7 @@ pub(crate) fn chip(
 /// variable without binding anything: left-centred at `at`, as wide as the name
 /// (to `max_w`, its groups elided). Returns where it was painted.
 pub(crate) fn capsule(ui: &egui::Ui, at: egui::Pos2, name: &str, max_w: f32) -> egui::Rect {
-    let font = egui::FontId::proportional(11.5);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     let shown = elide_groups(ui, name, &font, max_w - 16.0);
     let galley = ui.painter().layout_no_wrap(shown, font, color::text());
     let cap = egui::Rect::from_min_size(
@@ -775,7 +775,7 @@ pub(crate) fn refusal_galley(
             job.append(
                 &text[a..],
                 0.0,
-                egui::TextFormat::simple(font.clone(), color::text_a(102)),
+                egui::TextFormat::simple(font.clone(), theme::text::off()),
             );
         }
         None => job.append(text, 0.0, egui::TextFormat::simple(font.clone(), ink)),
@@ -810,7 +810,7 @@ pub(crate) fn underline_refusal(
                 egui::pos2(out.galley_pos.x + x0, y),
                 egui::pos2(out.galley_pos.x + x1, y),
             ],
-            color::text_a(102),
+            theme::text::off(),
             3.0,
             0.6,
         ));
@@ -1318,7 +1318,7 @@ impl OndinApp {
                             ui.add_space(8.0);
                             ui.label(
                                 egui::RichText::new(format!("{} binds {words} only.", v.name))
-                                    .size(11.5)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::dim()),
                             );
                         });
@@ -1335,7 +1335,7 @@ impl OndinApp {
                         }
                         ui.add_space(4.0);
                     } else if let Some((v, t, at)) = &refusal {
-                        let font = egui::FontId::proportional(11.5);
+                        let font = egui::FontId::proportional(ui::SMALL_PT);
                         let plain = egui::TextFormat::simple(font.clone(), theme::text::dim());
                         let mut job = egui::text::LayoutJob::default();
                         job.append(
@@ -1346,7 +1346,10 @@ impl OndinApp {
                         job.append(
                             t[*at..].trim(),
                             0.0,
-                            egui::TextFormat::simple(egui::FontId::monospace(11.0), color::text()),
+                            egui::TextFormat::simple(
+                                egui::FontId::monospace(ui::SMALL_PT),
+                                color::text(),
+                            ),
                         );
                         job.append(&format!(" to bind {}.", v.name), 0.0, plain);
                         job.wrap.max_width = LIST_W - 8.0 - 16.0;
@@ -1376,7 +1379,7 @@ impl OndinApp {
                                     }
                                 }
                             })
-                            .size(11.5)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                         );
                     }
@@ -1429,7 +1432,7 @@ impl OndinApp {
                                     ui.add_space(8.0);
                                     ui.label(
                                         egui::RichText::new(scoped_out_line(hidden))
-                                            .size(11.0)
+                                            .size(ui::SMALL_PT)
                                             .color(theme::text::faint()),
                                     );
                                 });
@@ -1439,7 +1442,7 @@ impl OndinApp {
                         ui.add_space(2.0);
                         ui.label(
                             egui::RichText::new(format!("{} · ↑↓ preview · ↵ bind", m.name))
-                                .size(10.0)
+                                .size(ui::CAPTION_PT)
                                 .color(theme::text::faint()),
                         );
                     }
@@ -1774,7 +1777,7 @@ impl OndinApp {
         let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
         let mut field = None;
         let table = self.session.doc.variables();
-        let font = egui::FontId::proportional(12.0);
+        let font = egui::FontId::proportional(ui::CONTROL_PT);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
             let (strip, lead) = ui::prefix_strip(ui, key.prefix());
             ui::paint_prefix(ui.painter(), strip, lead, theme::text::faint());
@@ -2239,7 +2242,7 @@ impl OndinApp {
                     };
                     ui.label(
                         egui::RichText::new(none)
-                            .size(11.5)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     );
                 }
@@ -2296,7 +2299,7 @@ impl OndinApp {
                     }
                     ui.label(
                         egui::RichText::new(scoped_out_line(hidden))
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::faint()),
                     );
                 }
@@ -2340,8 +2343,8 @@ pub(crate) fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
         egui::pos2(rect.left() + 3.0, rect.center().y + 1.0),
         egui::Align2::LEFT_CENTER,
         group.to_uppercase(),
-        egui::FontId::proportional(9.5),
-        color::text_a(97),
+        egui::FontId::proportional(ui::EYEBROW_PT),
+        theme::text::faint(),
     );
 }
 
@@ -2361,7 +2364,7 @@ pub(crate) fn kit_header(ui: &mut egui::Ui, name: &str, w: f32) {
         egui::pos2(g.right() + 5.0, y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::dim(),
     );
 }
@@ -2404,11 +2407,16 @@ fn face_row(
         _ => String::new(),
     };
     let hex_right = rect.right() - 3.0 - check_w - 8.0;
-    let hex_galley = ui
-        .fonts_mut(|f| f.layout_no_wrap(hex, egui::FontId::proportional(10.5), color::text_a(102)));
+    let hex_galley = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            hex,
+            egui::FontId::proportional(ui::CAPTION_PT),
+            theme::text::faint(),
+        )
+    });
     let name_left = sw.right() + 8.0;
     let name_right = hex_right - hex_galley.size().x - 8.0;
-    let font = egui::FontId::proportional(11.5);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     let shown = elide_groups(ui, &v.name, &font, name_right - name_left);
     p.text(
         egui::pos2(name_left, y + 1.0),
@@ -2416,8 +2424,8 @@ fn face_row(
         shown,
         font,
         match (refusal, v.origin.is_some()) {
-            (Some(_), _) => color::text_a(102),
-            (None, true) => color::text_a(170),
+            (Some(_), _) => theme::text::off(),
+            (None, true) => theme::text::muted(),
             (None, false) => color::text(),
         },
     );
@@ -2435,7 +2443,7 @@ fn face_row(
             egui::Align2::CENTER_CENTER,
             icon::CHECK,
             crate::theme::icon_font(12.0),
-            color::text_a(204),
+            theme::text::strong(),
         );
     }
     resp
@@ -2482,11 +2490,11 @@ fn list_row(
         );
         x = g.right() + 5.0;
     }
-    let font = egui::FontId::proportional(11.5);
+    let font = egui::FontId::proportional(ui::SMALL_PT);
     let mut job = egui::text::LayoutJob::default();
     let q = query.trim().to_lowercase();
     let hit = (!q.is_empty()).then(|| folded_find(&v.name, &q)).flatten();
-    let dim = egui::TextFormat::simple(font.clone(), color::text_a(153));
+    let dim = egui::TextFormat::simple(font.clone(), theme::text::muted());
     let bright = egui::TextFormat::simple(font.clone(), color::text());
     match hit {
         Some(r) => {
@@ -2513,7 +2521,7 @@ fn list_row(
         egui::pos2(rect.right() - 8.0, y),
         egui::Align2::RIGHT_CENTER,
         value,
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
     if v.description.is_empty() {

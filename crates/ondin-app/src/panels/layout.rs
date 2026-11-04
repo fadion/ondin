@@ -827,8 +827,8 @@ fn glyph_combo<T: Copy + PartialEq>(
         } else {
             theme::text::disabled()
         };
-        let label_font = egui::FontId::proportional(10.5);
-        let value_font = egui::FontId::proportional(12.0);
+        let label_font = egui::FontId::proportional(ui::CAPTION_PT);
+        let value_font = egui::FontId::proportional(ui::CONTROL_PT);
         let label_w = ui
             .ctx()
             .fonts_mut(|f| f.layout_no_wrap(label.to_owned(), label_font.clone(), ink))
@@ -941,7 +941,7 @@ fn glyph_combo<T: Copy + PartialEq>(
                 egui::pos2(face.right() - 26.0, face.center().y),
                 egui::Align2::RIGHT_CENTER,
                 hint,
-                egui::FontId::proportional(10.5),
+                egui::FontId::proportional(ui::CAPTION_PT),
                 theme::text::disabled(),
             );
         }
@@ -1829,7 +1829,7 @@ impl OndinApp {
                         "{} of these are out of the flow and keep their place.",
                         subjects.len() - flowing.len()
                     ))
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::text::faint()),
                 );
             }
@@ -1888,13 +1888,13 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 ui.label(
                     egui::RichText::new(title)
-                        .size(12.0)
+                        .size(ui::CONTROL_PT)
                         .color(theme::text::strong()),
                 );
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(body)
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     )
                     .wrap(),
@@ -2272,7 +2272,7 @@ impl OndinApp {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(format!("Resizing set {list}."))
-                                    .size(11.0)
+                                    .size(ui::SMALL_PT)
                                     .color(theme::text::strong()),
                             )
                             .wrap(),
@@ -2282,7 +2282,7 @@ impl OndinApp {
                             // under the pointer.
                             let word = ui.painter().layout_no_wrap(
                                 "Undo".to_owned(),
-                                egui::FontId::proportional(11.0),
+                                egui::FontId::proportional(ui::SMALL_PT),
                                 egui::Color32::PLACEHOLDER,
                             );
                             let (rect, resp) =
@@ -2474,7 +2474,7 @@ impl OndinApp {
                         Some(0) => "All auto".to_owned(),
                         Some(n) => format!("{n} set"),
                     })
-                    .size(10.5)
+                    .size(ui::CAPTION_PT)
                     .color(theme::text::faint()),
                 );
             });

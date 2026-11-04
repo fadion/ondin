@@ -354,7 +354,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
         ui.add_space(2.0);
         ui.label(
             egui::RichText::new(title)
-                .size(10.5)
+                .size(crate::ui::CAPTION_PT)
                 .color(theme::text::faint()),
         );
         let more = rows.len().saturating_sub(MAX_ROWS);
@@ -364,7 +364,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
         if more > 0 {
             ui.label(
                 egui::RichText::new(format!("and {more} more"))
-                    .size(11.0)
+                    .size(crate::ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
         }
@@ -470,7 +470,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
                 egui::pos2(right, y),
                 egui::Align2::RIGHT_CENTER,
                 t,
-                egui::FontId::proportional(10.5),
+                egui::FontId::proportional(crate::ui::CAPTION_PT),
                 theme::text::faint(),
             )
             .left(),
@@ -493,7 +493,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
         egui::pos2(name_rect.left(), y),
         egui::Align2::LEFT_CENTER,
         r.name,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         color::text(),
     );
 }

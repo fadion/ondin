@@ -458,7 +458,7 @@ fn pill_ink(alpha: f32) -> egui::Color32 {
 fn counter(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) {
     let galley = painter.layout_no_wrap(
         text.to_string(),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::ui::CONTROL_PT),
         pill_ink(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
@@ -492,7 +492,7 @@ const PAGE_CHIP_INSET: f32 = 20.0;
 fn page_chip(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) {
     let galley = painter.layout_no_wrap(
         text.to_string(),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::ui::CONTROL_PT),
         pill_ink(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);

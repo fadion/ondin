@@ -941,7 +941,7 @@ impl OndinApp {
         {
             ui.label(
                 egui::RichText::new(why.to_string())
-                    .size(11.0)
+                    .size(ui::SMALL_PT)
                     .color(theme::color::error()),
             );
         }
@@ -1172,7 +1172,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
             egui::pos2(text_x, y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(ui::CONTROL_PT),
             theme::text::faint(),
         );
         ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, FieldButton::Off)
@@ -1570,7 +1570,7 @@ fn heading(
         let summary_w = if summary.is_empty() {
             0.0
         } else {
-            let font = egui::FontId::proportional(11.0);
+            let font = egui::FontId::proportional(ui::SMALL_PT);
             ui.painter()
                 .layout_no_wrap(summary.to_owned(), font, theme::text::dim())
                 .size()
@@ -1593,7 +1593,7 @@ fn heading(
             if !caption.is_empty() {
                 ui.label(
                     egui::RichText::new(caption)
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
             }
@@ -1607,7 +1607,7 @@ fn heading(
                     .painter()
                     .layout_no_wrap(
                         name.to_owned(),
-                        egui::FontId::proportional(13.0),
+                        egui::FontId::proportional(ui::HEAD_PT),
                         theme::text::strong(),
                     )
                     .size()
@@ -1622,7 +1622,7 @@ fn heading(
                                 ui.add(
                                     egui::Label::new(
                                         egui::RichText::new(name)
-                                            .size(13.0)
+                                            .size(ui::HEAD_PT)
                                             .underline()
                                             .color(theme::text::strong()),
                                     )
@@ -1659,7 +1659,7 @@ fn heading(
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(title)
-                                .size(13.0)
+                                .size(ui::HEAD_PT)
                                 .color(theme::text::strong()),
                         )
                         .truncate(),
@@ -1687,7 +1687,7 @@ fn heading(
                 if !summary.is_empty() {
                     ui.label(
                         egui::RichText::new(summary)
-                            .size(11.0)
+                            .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     );
                 }
@@ -1764,7 +1764,7 @@ fn reset_row(
                         ctx.fonts_mut(|f| {
                             f.layout_no_wrap(
                                 t.to_string(),
-                                egui::FontId::proportional(11.5),
+                                egui::FontId::proportional(ui::SMALL_PT),
                                 egui::Color32::WHITE,
                             )
                             .size()
@@ -2090,7 +2090,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(text)
-                        .size(12.0)
+                        .size(ui::CONTROL_PT)
                         .color(theme::text::strong()),
                 )
                 .truncate(),
@@ -2115,7 +2115,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
             } else {
                 ui.label(
                     egui::RichText::new("no counterpart")
-                        .size(11.0)
+                        .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
             }
@@ -2143,7 +2143,7 @@ fn mixed_line(ui: &mut egui::Ui, roots: &[NodeId], others: usize, act: &mut Opti
                 plural(roots.len(), "instance"),
                 plural(others, "other layer")
             ))
-            .size(12.0)
+            .size(ui::CONTROL_PT)
             .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

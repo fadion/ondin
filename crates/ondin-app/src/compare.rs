@@ -1029,7 +1029,7 @@ enum Act {
 fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     ui.label(theme::icon_text(icon::GIT_DIFF, 15.0, color::accent_400()));
     let mut job = egui::text::LayoutJob::default();
-    let font = egui::FontId::proportional(12.0);
+    let font = egui::FontId::proportional(crate::ui::Scale::Toolbar.text_pt());
     let part = |job: &mut egui::text::LayoutJob, text: &str, ink: egui::Color32| {
         job.append(
             text,
@@ -1109,7 +1109,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     let n = c.rows.len();
     ui.label(
         egui::RichText::new(plural(n, "change"))
-            .size(12.0)
+            .size(crate::ui::Scale::Toolbar.text_pt())
             .color(color::text()),
     );
     // Room for the widest position, so stepping never moves the arrows.
@@ -1117,7 +1117,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
         .painter()
         .layout_no_wrap(
             format!("{n} / {n}"),
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(crate::ui::Scale::Toolbar.text_pt()),
             theme::text::dim(),
         )
         .size()
@@ -1126,7 +1126,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
         if let Some(i) = c.current {
             ui.label(
                 egui::RichText::new(format!("{} / {n}", i + 1))
-                    .size(12.0)
+                    .size(crate::ui::Scale::Toolbar.text_pt())
                     .color(theme::text::dim()),
             );
         }
@@ -1175,7 +1175,7 @@ fn card_head(ui: &mut egui::Ui, c: &Compare) {
         "CHANGES",
         0.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(9.5),
+            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
             color: theme::text::dim(),
             extra_letter_spacing: 1.0,
             ..Default::default()
@@ -1194,7 +1194,7 @@ fn card_head(ui: &mut egui::Ui, c: &Compare) {
         egui::pos2(rect.right() - ROW_PAD, rect.top() + 6.0),
         egui::Align2::RIGHT_CENTER,
         sum.join(" · "),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
         theme::text::dim(),
     );
 }
@@ -1283,7 +1283,7 @@ fn heading(ui: &mut egui::Ui, glyph: &str, name: &str, count: usize, dim: bool) 
         ink,
     );
     let room = rect.width() - ROW_PAD * 2.0 - 18.0 - 24.0;
-    let galley = one_line(ui, &[(name, 11.0, ink, false)], room);
+    let galley = one_line(ui, &[(name, crate::ui::SMALL_PT, ink, false)], room);
     p.galley(
         egui::pos2(rect.left() + ROW_PAD + 18.0, cy - galley.size().y / 2.0),
         galley,
@@ -1293,7 +1293,7 @@ fn heading(ui: &mut egui::Ui, glyph: &str, name: &str, count: usize, dim: bool) 
         egui::pos2(rect.right() - ROW_PAD, cy),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
         ink,
     );
 }
@@ -1334,15 +1334,16 @@ pub(crate) fn one_line(
 
 /// A change's values as its line shows them: what, then before struck → after.
 fn value_parts(c: &Change) -> Vec<(String, f32, egui::Color32, bool)> {
-    let mut out = vec![(format!("{} ", c.what), 11.0, theme::text::muted(), false)];
+    let pt = crate::ui::SMALL_PT;
+    let mut out = vec![(format!("{} ", c.what), pt, theme::text::muted(), false)];
     match (&c.before, &c.after) {
         (Some(b), Some(a)) => {
-            out.push((b.clone(), 11.0, theme::text::faint(), true));
-            out.push((" → ".into(), 11.0, theme::text::muted(), false));
-            out.push((a.clone(), 11.0, color::text(), false));
+            out.push((b.clone(), pt, theme::text::faint(), true));
+            out.push((" → ".into(), pt, theme::text::muted(), false));
+            out.push((a.clone(), pt, color::text(), false));
         }
-        (None, Some(a)) => out.push((a.clone(), 11.0, color::text(), false)),
-        (Some(b), None) => out.push((b.clone(), 11.0, theme::text::faint(), true)),
+        (None, Some(a)) => out.push((a.clone(), pt, color::text(), false)),
+        (Some(b), None) => out.push((b.clone(), pt, theme::text::faint(), true)),
         (None, None) => {}
     }
     out
@@ -1437,7 +1438,7 @@ fn row_ui(
         tag.center(),
         egui::Align2::CENTER_CENTER,
         sign,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         ink,
     );
     let mut title = name.to_string();
@@ -1476,8 +1477,8 @@ fn row_ui(
     let galley = one_line(
         ui,
         &[
-            (trail, 12.0, theme::text::faint(), false),
-            (&title, 12.0, color::text(), false),
+            (trail, crate::ui::CONTROL_PT, theme::text::faint(), false),
+            (&title, crate::ui::CONTROL_PT, color::text(), false),
         ],
         end - x,
     );
@@ -1509,13 +1510,13 @@ fn row_ui(
                     tag.center(),
                     egui::Align2::CENTER_CENTER,
                     sign,
-                    egui::FontId::proportional(9.0),
+                    egui::FontId::proportional(crate::ui::CAPTION_PT),
                     ink,
                 );
                 let x = left + FOLDED_INDENT;
                 let galley = one_line(
                     ui,
-                    &[(name, 11.5, color::text(), false)],
+                    &[(name, crate::ui::SMALL_PT, color::text(), false)],
                     rect.right() - ROW_PAD - x,
                 );
                 p.galley(egui::pos2(x, y), galley, color::text());
@@ -1540,13 +1541,13 @@ fn off_canvas_row(ui: &mut egui::Ui, c: &Change, private: bool) {
         tag.center(),
         egui::Align2::CENTER_CENTER,
         sign,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::ui::SMALL_PT),
         ink,
     );
     let x = tag.right() + 7.0;
     let galley = one_line(
         ui,
-        &[(&c.what, 12.0, color::text(), false)],
+        &[(&c.what, crate::ui::CONTROL_PT, color::text(), false)],
         rect.right() - ROW_PAD - x,
     );
     p.galley(
@@ -1606,8 +1607,11 @@ fn paint_mark(painter: &egui::Painter, row: &Row, name: &str, at: egui::Rect, cu
     }
     // A floor keeps the sign and a few letters over a layer narrower than them.
     let max_w = (at.width() + 2.0).max(TAG_MIN_W) - 10.0;
-    let mut job =
-        egui::text::LayoutJob::simple_singleline(label, egui::FontId::proportional(10.0), ink);
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        label,
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
+        ink,
+    );
     job.wrap = egui::text::TextWrapping {
         max_width: max_w,
         max_rows: 1,
@@ -1703,7 +1707,7 @@ fn paint_handle(painter: &egui::Painter, rect: egui::Rect, x: f32) {
     ] {
         let galley = painter.layout_no_wrap(
             text.into(),
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(crate::ui::CAPTION_PT),
             egui::Color32::WHITE,
         );
         let pill = align.anchor_size(at, galley.size() + egui::vec2(12.0, 6.0));

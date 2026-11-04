@@ -634,6 +634,10 @@ pub mod icon {
     pub const DATABASE: &str = "\u{f015}";
     /// A variable's scope — the fields it may bind: *Scope…* and the door to it.
     pub const TARGET: &str = "\u{f016}";
+    /// An interaction state — a set's property tied to the browser's hover,
+    /// press, focus and disabled — wherever one is marked: a hand, its index
+    /// finger raised.
+    pub const HAND_POINTING: &str = "\u{f017}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -1017,6 +1021,7 @@ pub mod icon {
         ("square-fill", SQUARE_FILL),
         ("database", DATABASE),
         ("target", TARGET),
+        ("hand-pointing", HAND_POINTING),
         ("book-open", BOOK_OPEN),
         ("git-diff", GIT_DIFF),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),

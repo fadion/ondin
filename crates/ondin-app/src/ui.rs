@@ -3124,6 +3124,55 @@ pub fn label_button(
     resp
 }
 
+/// [`label_button`] with a `note` after its word, in 11pt mono and
+/// [`theme::text::faint()`] — never the accent — sized by
+/// [`label_button_noted_w`]: a set's value chip naming the state it is tied to.
+pub fn label_button_noted(
+    ui: &mut egui::Ui,
+    text: &str,
+    note: &str,
+    state: FieldButton,
+) -> egui::Response {
+    let w = label_button_noted_w(ui.ctx(), text, note);
+    let (rect, resp, fg) = button_face(ui, egui::vec2(w, CONTROL_H), state);
+    let p = ui.painter();
+    let word = p.text(
+        egui::pos2(rect.left() + FIELD_PAD_X, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(CONTROL_PT),
+        fg,
+    );
+    p.text(
+        egui::pos2(word.right() + NOTE_GAP, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        note,
+        egui::FontId::monospace(11.0),
+        theme::text::faint(),
+    );
+    resp
+}
+
+/// The air between a [`label_button_noted`]'s word and its note.
+const NOTE_GAP: f32 = 5.0;
+
+/// The width a [`label_button_noted`] takes: its word, the gap, its note, and
+/// [`FIELD_PAD_X`] each side; a plain [`label_button`]'s with no note.
+pub fn label_button_noted_w(ctx: &egui::Context, text: &str, note: &str) -> f32 {
+    let w = |s: &str, font: egui::FontId| {
+        ctx.fonts_mut(|f| {
+            f.layout_no_wrap(s.to_owned(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+    };
+    let note_w = match note.is_empty() {
+        true => 0.0,
+        false => NOTE_GAP + w(note, egui::FontId::monospace(11.0)),
+    };
+    (w(text, egui::FontId::proportional(CONTROL_PT)) + note_w + FIELD_PAD_X * 2.0).ceil()
+}
+
 /// The ink a resting control's content takes: [`theme::text::muted()`] while it can
 /// be used, [`theme::text::disabled()`] when it cannot. `enabled` is ignored under an
 /// already-disabled `Ui` ([`disable_unless`]): faded `muted()` is `text::disabled()`.

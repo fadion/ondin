@@ -2009,3 +2009,40 @@ fn a_switch_pairs_a_renamed_layer_by_its_key() {
     assert_eq!(f.link(ibg), Some(hbg), "paired by key");
     assert_eq!(f.fill(ibg), solid(77));
 }
+
+/// A state variant pairs with its rest through a rename, and one whose layers
+/// change order is named with the layer that moved; a state with no rest at
+/// its other values is named too.
+///
+/// flip: `line_up` skipping the order check → fails at "moves before".
+#[test]
+fn a_state_that_reorders_does_not_pair() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, hover) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    f.commit(
+        variant::set_values(&f.doc, hover, strs(&["Small", "Hover"]))
+            .unwrap()
+            .0,
+    );
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    f.commit(tx.0);
+    let hbg = f.kids(hover)[0];
+    f.commit(vec![Operation::SetName {
+        id: hbg,
+        name: "Background".into(),
+    }]);
+    assert!(
+        variant::unpaired_states(&f.doc, f.s).is_empty(),
+        "a rename pairs by key: {:?}",
+        variant::unpaired_states(&f.doc, f.s)
+    );
+    f.commit(vec![Operation::Reorder { id: hbg, index: 1 }]);
+    let found = variant::unpaired_states(&f.doc, f.s);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].variant, hover);
+    assert_eq!(found[0].why, "“Label” moves before “Background”");
+    assert_eq!(found[0].layer, Some(f.kids(hover)[0]));
+}

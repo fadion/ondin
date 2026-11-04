@@ -1430,6 +1430,118 @@ pub fn set_element(doc: &Document, set: NodeId, element: RootElement) -> Option<
     Some(edit_set(doc, set, next, |v| v.to_vec()))
 }
 
+/// A state variant of a marked set whose layers do not line up with its rest
+/// variant's — the one with the same values of every other property — so a
+/// code export writes it only behind the state prop: the variant, why, and the
+/// layer that broke the pairing when one did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unpaired {
+    pub variant: NodeId,
+    pub why: String,
+    pub layer: Option<NodeId>,
+}
+
+/// Every state variant of `set` that does not pair with its rest. Layers pair
+/// under a paired parent by lineage key where one was recorded, else by name
+/// path; one only a side draws is a show or a hide, which is not a failure.
+/// What fails is another kind of layer, other text, or another order.
+pub fn unpaired_states(doc: &Document, set: NodeId) -> Vec<Unpaired> {
+    let Some(vs) = doc.get(set).and_then(|s| s.set.as_ref()) else {
+        return Vec::new();
+    };
+    let Some(at) = vs.interaction() else {
+        return Vec::new();
+    };
+    let Some(rest) = rest_value(doc, set, at) else {
+        return Vec::new();
+    };
+    let p = &vs.props[at];
+    let mut out = Vec::new();
+    for v in variants(doc, set) {
+        let Some(values) = doc.get(v).map(|n| n.variant.clone()) else {
+            continue;
+        };
+        let Some(value) = values.get(at).filter(|x| **x != rest) else {
+            continue;
+        };
+        if p.state_of(value).is_none() {
+            continue;
+        }
+        let mut at_rest = values.clone();
+        at_rest[at] = rest.clone();
+        let failed = match find_variant(doc, set, &at_rest) {
+            None => Some((
+                format!("no variant is {} to pair with", derived_name(&at_rest)),
+                None,
+            )),
+            Some(r) => line_up(doc, r, v).err(),
+        };
+        if let Some((why, layer)) = failed {
+            out.push(Unpaired {
+                variant: v,
+                why,
+                layer,
+            });
+        }
+    }
+    out
+}
+
+/// Whether the children of `s` line up with those of `r`, recursively, or why
+/// not and at which of `s`'s layers.
+fn line_up(doc: &Document, r: NodeId, s: NodeId) -> Result<(), (String, Option<NodeId>)> {
+    let (Some(rn), Some(sn)) = (doc.get(r), doc.get(s)) else {
+        return Ok(());
+    };
+    let named = |n: &Node| match n.name.is_empty() {
+        true => n.kind.default_name().to_lowercase(),
+        false => format!("“{}”", n.name),
+    };
+    let step = |parent: &Node, id: NodeId| {
+        let n = doc.get(id)?;
+        let k = parent
+            .children
+            .iter()
+            .take_while(|c| **c != id)
+            .filter(|c| doc.get(**c).is_some_and(|c| c.name == n.name))
+            .count();
+        Some((n.name.clone(), k))
+    };
+    let mut last: Option<(usize, NodeId)> = None;
+    for c in &sn.children {
+        let Some(cn) = doc.get(*c) else { continue };
+        let found: Vec<(usize, NodeId)> = rn
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| match cn.lineage {
+                Some(k) => doc.get(**x).is_some_and(|x| x.lineage() == k),
+                None => step(rn, **x) == step(sn, *c),
+            })
+            .map(|(i, x)| (i, *x))
+            .collect();
+        let [(i, x)] = found.as_slice() else { continue };
+        if !same_kind(doc, *x, *c) {
+            return Err((format!("{} is another kind of layer", named(cn)), Some(*c)));
+        }
+        if let (NodeKind::Text { content: a, .. }, NodeKind::Text { content: b, .. }) =
+            (&doc.get(*x).expect("found").kind, &cn.kind)
+            && a != b
+        {
+            return Err((format!("the text of {} differs", named(cn)), Some(*c)));
+        }
+        if let Some((before, b)) = last
+            && *i < before
+        {
+            let moved = doc.get(b).map(named).unwrap_or_default();
+            return Err((format!("{moved} moves before {}", named(cn)), Some(b)));
+        }
+        line_up(doc, *x, *c)?;
+        last = Some((*i, *c));
+    }
+    Ok(())
+}
+
 // ── Switching an instance to another variant ──────────────────────────────────
 
 /// The variant of the same set an instance of `main` would switch to when

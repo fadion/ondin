@@ -70,9 +70,27 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     let up = super::up(dir);
     let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
     let uses = super::with_defaults(uses, props);
+    // A marked set's root element, whose own props the component passes on.
+    let live = bodies
+        .iter()
+        .find_map(|(_, r)| r.live.as_ref().map(|_| r.tag));
     let mut out = String::new();
-    if props.iter().any(|(_, ty, _)| *ty == Ty::Component) {
-        out.push_str("import type { ComponentType } from \"react\";\n");
+    let types: Vec<&str> = [
+        (
+            props.iter().any(|(_, ty, _)| *ty == Ty::Component),
+            "ComponentType",
+        ),
+        (live.is_some(), "ComponentPropsWithoutRef"),
+    ]
+    .into_iter()
+    .filter_map(|(on, t)| on.then_some(t))
+    .collect();
+    if !types.is_empty() {
+        let _ = writeln!(
+            out,
+            "import type {{ {} }} from \"react\";",
+            types.join(", ")
+        );
     }
     let _ = writeln!(out, "import \"{up}base.css\";");
     if tokens {
@@ -92,7 +110,21 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     if is_app {
         let _ = writeln!(out, "export default function App() {{");
     } else {
-        let _ = writeln!(out, "export interface {name}Props {{");
+        match live {
+            // The element's own props, less those the component names.
+            Some(tag) => {
+                let mut named = vec![js_string("className")];
+                named.extend(props.iter().map(|(p, _, _)| js_string(p)));
+                let _ = writeln!(
+                    out,
+                    "export interface {name}Props\n  extends Omit<ComponentPropsWithoutRef<\"{tag}\">, {}> {{",
+                    named.join(" | ")
+                );
+            }
+            None => {
+                let _ = writeln!(out, "export interface {name}Props {{");
+            }
+        }
         let _ = writeln!(out, "  className?: string;");
         for (p, ty, _) in props {
             let ty = match ty {
@@ -123,6 +155,9 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
                 Some(Arg::Var { .. }) | None => bound,
             }
         }));
+        if live.is_some() {
+            params.push("...rest".to_string());
+        }
         let _ = writeln!(
             out,
             "export default function {name}({{ {} }}: {name}Props) {{",

@@ -2,8 +2,9 @@
 //! element choosing its rule by the variant values, and an element only some
 //! variants draw shown under those.
 //!
-//! Layers match across the trees by their step in the name path, as the model
-//! matches a variant's layers (`Element::key`).
+//! Layers match across the trees by `Element::key`, which [`pair`] first sets
+//! on every other tree to its counterpart's in the default's: by lineage key
+//! where one was recorded, else by name path.
 
 use super::dom::{Alt, Child, Element, Show, When};
 
@@ -11,45 +12,129 @@ use super::dom::{Alt, Child, Element, Show, When};
 /// `None` for the default's, which leads any group it is in.
 type Member<'a> = (Option<&'a When>, &'a Element);
 
+/// What [`merge`] makes of a set's trees.
+pub(crate) struct Merged {
+    /// The trees each drawn under their values — the variants that did not
+    /// merge — then the merged tree, drawn for any other values.
+    pub bodies: Vec<(When, Element)>,
+    /// Each variant left out of the merge, and why.
+    pub apart: Vec<(When, String)>,
+}
+
 /// `bodies` — each variant's tree with the values it is drawn for, the
-/// default's last — as one tree when the trees merge; otherwise unchanged.
+/// default's last — as one tree, less any variant that does not merge with the
+/// rest, which keeps a tree of its own.
 ///
-/// They merge when, at every place, the elements the trees draw there match in
-/// all but their declarations, and the layers under each come in an order every
-/// tree agrees with.
-pub(crate) fn merge(bodies: Vec<(When, Element)>) -> Vec<(When, Element)> {
-    let one = {
-        let Some(((_, default), others)) = bodies.split_last() else {
-            return bodies;
+/// Trees merge when, at every place, the elements they draw there match in all
+/// but their declarations, and the layers under each come in an order every
+/// tree agrees with. Variants join in order, each kept out when it would break
+/// what has merged so far.
+pub(crate) fn merge(mut bodies: Vec<(When, Element)>) -> Merged {
+    let Some((_, default)) = bodies.pop() else {
+        return Merged {
+            bodies,
+            apart: Vec::new(),
         };
-        if others.is_empty() {
-            return bodies;
-        }
-        let group: Vec<Member> = std::iter::once((None, default))
-            .chain(others.iter().map(|(w, t)| (Some(w), t)))
-            .collect();
-        merged(&group)
     };
-    match one {
-        Some(el) => vec![(Vec::new(), el)],
-        None => bodies,
+    let mut joined: Vec<(When, Element)> = Vec::new();
+    let mut apart = Vec::new();
+    let mut alone = Vec::new();
+    for (when, tree) in bodies {
+        let mut group: Vec<Member> = vec![(None, &default)];
+        group.extend(joined.iter().map(|(w, t)| (Some(w), t)));
+        group.push((Some(&when), &tree));
+        match merged(&group) {
+            Ok(_) => joined.push((when, tree)),
+            Err(why) => {
+                apart.push((when.clone(), why));
+                alone.push((when, tree));
+            }
+        }
+    }
+    let group: Vec<Member> = std::iter::once((None, &default))
+        .chain(joined.iter().map(|(w, t)| (Some(w), t)))
+        .collect();
+    let one = merged(&group).expect("each tree joined only where it merged");
+    alone.push((Vec::new(), one));
+    Merged {
+        bodies: alone,
+        apart,
+    }
+}
+
+/// The name a report gives the layer an element draws.
+pub(crate) fn layer_name(el: &Element) -> &str {
+    el.key
+        .as_ref()
+        .map(|(k, _)| k.split('\u{0}').next().unwrap_or(k))
+        .unwrap_or("its root")
+}
+
+/// Set each layer's key in `other` to its counterpart's in `default`, under a
+/// paired parent: by lineage key where `other`'s layer recorded one, else by
+/// name path; a counterpart must be the only one found. A layer that pairs with
+/// nothing keeps a key of its own — its lineage's where it recorded one, so the
+/// same layer pairs across the other trees.
+pub(crate) fn pair(default: &Element, other: &mut Element) {
+    let layers = other
+        .children
+        .iter()
+        .any(|c| matches!(c, Child::Element(x) if x.key.is_some()));
+    if !layers {
+        // Paragraphs and runs, by place.
+        for (d, o) in default.children.iter().zip(&mut other.children) {
+            if let (Child::Element(d), Child::Element(o)) = (d, o) {
+                pair(d, o);
+            }
+        }
+        return;
+    }
+    let mut used: Vec<usize> = Vec::new();
+    for c in &mut other.children {
+        let Child::Element(o) = c else { continue };
+        let Some(key) = o.key.clone() else { continue };
+        let found: Vec<(usize, &Element)> = default
+            .children
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| match d {
+                Child::Element(d) => Some((i, &**d)),
+                _ => None,
+            })
+            .filter(|(_, d)| match o.lineage {
+                Some((k, true)) => d.lineage.is_some_and(|(dk, _)| dk == k),
+                _ => d.key.as_ref() == Some(&key),
+            })
+            .collect();
+        match found.as_slice() {
+            [(i, d)] if !used.contains(i) => {
+                used.push(*i);
+                o.key = d.key.clone();
+                pair(d, o);
+            }
+            _ => {
+                if let Some((k, true)) = o.lineage {
+                    o.key = Some((format!("{}\u{0}{}", key.0, k.to_wire()), 0));
+                }
+            }
+        }
     }
 }
 
 /// The trees' elements at one place as one element: the first's, wearing each
 /// other's class where its declarations differ, one class per distinct set of
-/// them.
-fn merged(group: &[Member]) -> Option<Element> {
+/// them; or why they do not merge.
+fn merged(group: &[Member]) -> Result<Element, String> {
     let (_, base) = group[0];
-    if !group[1..].iter().all(|(_, e)| same_own(base, e)) {
-        return None;
+    for (_, e) in &group[1..] {
+        same_own(base, e)?;
     }
     let mut el = base.clone();
     for (when, e) in &group[1..] {
         if e.style == el.style {
             continue;
         }
-        let when = (*when)?.clone();
+        let when = (*when).expect("only the default leads").clone();
         match el.alts.iter_mut().find(|a| a.style == e.style) {
             Some(a) => a.when.push(when),
             None => el.alts.push(Alt {
@@ -60,11 +145,25 @@ fn merged(group: &[Member]) -> Option<Element> {
         }
     }
     el.children = children(group)?;
-    Some(el)
+    Ok(el)
 }
 
-/// Whether `b` is what `a` is but for its declarations and its children.
-fn same_own(a: &Element, b: &Element) -> bool {
+/// Whether `b` is what `a` is but for its declarations and its children, or
+/// why not.
+pub(crate) fn same_own(a: &Element, b: &Element) -> Result<(), String> {
+    if a.shown_by != b.shown_by {
+        return Err(format!("“{}” is shown by another property", layer_name(a)));
+    }
+    if !same_kind(a, b) {
+        return Err(format!(
+            "“{}” is drawn as another kind of layer",
+            layer_name(a)
+        ));
+    }
+    Ok(())
+}
+
+fn same_kind(a: &Element, b: &Element) -> bool {
     let markup = match (&a.markup, &b.markup) {
         (None, None) => true,
         // An inline SVG carries its class, so it keeps one rule.
@@ -78,7 +177,6 @@ fn same_own(a: &Element, b: &Element) -> bool {
         && a.tag == b.tag
         && a.attrs == b.attrs
         && a.instance == b.instance
-        && a.shown_by == b.shown_by
         && a.takes_class == b.takes_class
         && a.key == b.key
 }
@@ -86,16 +184,17 @@ fn same_own(a: &Element, b: &Element) -> bool {
 /// The group's children merged: layers matched by key, each shown under the
 /// trees that draw it; anything else — a text's paragraphs and runs — matched
 /// by place, which every tree must hold alike.
-fn children(group: &[Member]) -> Option<Vec<Child>> {
+fn children(group: &[Member]) -> Result<Vec<Child>, String> {
     let layers = group.iter().all(|(_, e)| {
         e.children
             .iter()
             .all(|c| matches!(c, Child::Element(x) if x.key.is_some()))
     });
+    let text = || format!("the text of “{}” differs", layer_name(group[0].1));
     if !layers {
         let n = group[0].1.children.len();
         if group.iter().any(|(_, e)| e.children.len() != n) {
-            return None;
+            return Err(text());
         }
         return (0..n)
             .map(|i| match &group[0].1.children[i] {
@@ -106,13 +205,15 @@ fn children(group: &[Member]) -> Option<Vec<Child>> {
                             Child::Element(x) => Some((*w, &**x)),
                             _ => None,
                         })
-                        .collect::<Option<Vec<Member>>>()?;
-                    Some(Child::Element(Box::new(merged(&at)?)))
+                        .collect::<Option<Vec<Member>>>()
+                        .ok_or_else(text)?;
+                    Ok(Child::Element(Box::new(merged(&at)?)))
                 }
                 c => group
                     .iter()
                     .all(|(_, e)| same_leaf(c, &e.children[i]))
-                    .then(|| c.clone()),
+                    .then(|| c.clone())
+                    .ok_or_else(text),
             })
             .collect();
     }
@@ -144,13 +245,14 @@ fn children(group: &[Member]) -> Option<Vec<Child>> {
         }
         out.push(Child::Element(Box::new(el)));
     }
-    Some(out)
+    Ok(out)
 }
 
 /// Every key under the group's elements, in an order each tree's children
-/// keep, or `None` when two trees order two layers each other's way round.
-fn order<'a>(group: &[Member<'a>]) -> Option<Vec<&'a (String, usize)>> {
+/// keep, or why not: two trees order two layers each other's way round.
+fn order<'a>(group: &[Member<'a>]) -> Result<Vec<&'a (String, usize)>, String> {
     let mut order: Vec<&(String, usize)> = Vec::new();
+    let name = |k: &(String, usize)| k.0.split('\u{0}').next().unwrap_or("").to_string();
     for &(_, e) in group {
         // Where this tree's previous layer sits in `order`.
         let mut after: Option<usize> = None;
@@ -158,7 +260,10 @@ fn order<'a>(group: &[Member<'a>]) -> Option<Vec<&'a (String, usize)>> {
             let Child::Element(x) = c else { continue };
             let Some(key) = &x.key else { continue };
             let at = match order.iter().position(|o| *o == key) {
-                Some(p) if after.is_some_and(|a| p < a) => return None,
+                Some(p) if after.is_some_and(|a| p < a) => {
+                    let a = after.expect("checked");
+                    return Err(format!("“{}” moves before “{}”", name(key), name(order[a])));
+                }
                 Some(p) => p,
                 None => {
                     let p = after.map_or(0, |a| a + 1);
@@ -169,7 +274,7 @@ fn order<'a>(group: &[Member<'a>]) -> Option<Vec<&'a (String, usize)>> {
             after = Some(at);
         }
     }
-    Some(order)
+    Ok(order)
 }
 
 /// Whether two children that are not elements are alike.
@@ -212,7 +317,7 @@ mod tests {
             (when("Same"), tree("same", "80px", "Go")),
             (Vec::new(), tree("small", "80px", "Go")),
         ];
-        let merged = merge(bodies);
+        let merged = merge(bodies).bodies;
         assert_eq!(merged.len(), 1, "one tree");
         let root = &merged[0].1;
         assert_eq!(root.alts.len(), 1, "one alternative: {:?}", root.alts);
@@ -252,7 +357,7 @@ mod tests {
             (when("Huge"), holding("huge", &["icon", "label"])),
             (Vec::new(), holding("small", &["icon", "label"])),
         ];
-        let merged = merge(bodies);
+        let merged = merge(bodies).bodies;
         assert_eq!(merged.len(), 1);
         let Child::Element(icon) = &merged[0].1.children[0] else {
             panic!("an element")
@@ -278,12 +383,17 @@ mod tests {
             (when("Large"), holding("large", &["label", "icon"])),
             (Vec::new(), holding("small", &["icon", "label"])),
         ];
-        assert_eq!(merge(bodies).len(), 2);
+        let apart = merge(bodies);
+        assert_eq!(apart.bodies.len(), 2);
+        assert_eq!(
+            apart.apart,
+            [(when("Large"), "“icon” moves before “label”".to_string())]
+        );
         let bodies = vec![
             (when("Large"), holding("large", &["label", "badge"])),
             (Vec::new(), holding("small", &["icon", "label"])),
         ];
-        let merged = merge(bodies);
+        let merged = merge(bodies).bodies;
         let keys: Vec<_> = merged[0]
             .1
             .children
@@ -303,6 +413,60 @@ mod tests {
             (when("Large"), tree("large", "120px", "Go")),
             (Vec::new(), tree("small", "80px", "Stop")),
         ];
-        assert_eq!(merge(bodies).len(), 2);
+        assert_eq!(merge(bodies).bodies.len(), 2);
+    }
+
+    /// A variant that does not merge keeps a tree of its own and the rest
+    /// still merge, the one apart drawn first under its values.
+    ///
+    /// flip: `merge` returning every tree apart on one failure → fails at
+    /// "the others merge".
+    #[test]
+    fn one_variant_apart_leaves_the_rest_merged() {
+        let bodies = vec![
+            (when("Large"), tree("large", "120px", "Go")),
+            (when("Odd"), tree("odd", "80px", "Stop")),
+            (Vec::new(), tree("small", "80px", "Go")),
+        ];
+        let m = merge(bodies);
+        assert_eq!(m.bodies.len(), 2, "the others merge");
+        assert_eq!(m.bodies[0].0, when("Odd"));
+        assert!(m.bodies[1].0.is_empty());
+        assert_eq!(m.bodies[1].1.alts.len(), 1, "Large's class");
+        assert_eq!(m.apart.len(), 1);
+        assert!(m.apart[0].1.contains("text"), "{:?}", m.apart);
+    }
+
+    /// A layer renamed in another variant pairs by the lineage key it
+    /// recorded, so the trees merge; without the key the name keeps them apart.
+    ///
+    /// flip: `pair` matching by name only → fails at "paired by lineage".
+    #[test]
+    fn a_renamed_layer_pairs_by_its_lineage() {
+        let id = |n: u64| ondin_core::NodeId::from_wire(&format!("1:{n}")).unwrap();
+        let keyed = |class: &str, name: &str, own: u64, recorded: Option<u64>| {
+            let mut root = Element::new("div", class.into());
+            let mut e = Element::new("div", format!("{class}-icon"));
+            e.key = Some((name.to_string(), 0));
+            e.lineage = Some((id(recorded.unwrap_or(own)), recorded.is_some()));
+            root.children.push(Child::Element(Box::new(e)));
+            root
+        };
+        let default = keyed("small", "Icon", 5, None);
+        let mut other = keyed("large", "Icon copy", 9, Some(5));
+        pair(&default, &mut other);
+        let m = merge(vec![(when("Large"), other), (Vec::new(), default.clone())]);
+        let kids = &m.bodies[0].1.children;
+        assert!(
+            kids.len() == 1 && matches!(&kids[0], Child::Element(e) if e.shown_when.is_none()),
+            "paired by lineage: one layer, drawn always"
+        );
+        let mut unkeyed = keyed("large", "Icon copy", 9, None);
+        pair(&default, &mut unkeyed);
+        let m = merge(vec![(when("Large"), unkeyed), (Vec::new(), default)]);
+        let Child::Element(icon) = &m.bodies[0].1.children[0] else {
+            panic!("an element")
+        };
+        assert!(icon.shown_when.is_some(), "two layers, each shown alone");
     }
 }

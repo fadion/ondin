@@ -8,7 +8,7 @@
 
 use super::Report;
 use super::css::{self, px};
-use super::dom::{Arg, Child, Classes, Element, Instance, When};
+use super::dom::{Arg, Child, Classes, Element, Instance, Live, When};
 use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
@@ -20,7 +20,7 @@ use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
 use ondin_core::variable::VarId;
-use ondin_core::variant::{self, PropKind, PropValue, Property};
+use ondin_core::variant::{self, Interaction, PropKind, PropValue, Property, RootElement};
 use ondin_core::{
     Brush, BrushSource, Document, EffectKind, Fill, ItemId, Node, NodeId, NodeKind, Resolved,
     Stroke, StrokeAlign, StrokeSides, TextSizing, TextStyle,
@@ -232,6 +232,12 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
             root.children.push(Child::Element(Box::new(el)));
         }
     }
+    if !components && holds_marked_set(doc, origins) {
+        walk.report.state(
+            "Interaction states are written by the React and Vue exports; \
+             plain HTML draws each layer as it is",
+        );
+    }
     let tokens = walk.tokens.css(doc);
     let components = walk.components.map(|c| c.list).unwrap_or_default();
     Page {
@@ -274,6 +280,8 @@ struct Components {
     names: HashSet<String>,
     /// Each kit's folder under `components`, by kit id.
     kit_dirs: HashMap<String, String>,
+    /// The components whose root is a button or a link, by name.
+    interactive: HashSet<String>,
 }
 
 /// What a use of a component needs to know of it.
@@ -333,6 +341,7 @@ impl Walk<'_> {
         };
         el.shown_by = shown_by;
         el.key = Some(name_step(doc, node));
+        el.lineage = Some((node.lineage(), node.lineage_recorded()));
         Some(el)
     }
 
@@ -996,6 +1005,34 @@ impl Walk<'_> {
             }
         }
 
+        // A set's interaction state: its place, rest's value, the ties, the
+        // element, and the prop forcing a state, which loses its default.
+        let marked = owner.set().and_then(|vs| {
+            let at = vs.interaction()?;
+            let rest = variant::rest_value(doc, owner_id, at)?;
+            let p = params
+                .iter()
+                .position(|p| matches!(p.kind, ParamKind::Choice(i) if i == at))?;
+            Some((at, rest, vs.props[at].states.clone()?, vs.element, p))
+        });
+        let mut live = None;
+        if let Some((_, _, ties, element, p)) = &marked {
+            props[*p].2 = None;
+            let mut taken: HashSet<String> = props.iter().map(|(c, _, _)| c.clone()).collect();
+            taken.extend(["className", "key", "ref", "children"].map(String::from));
+            let disabled = unique("disabled".into(), &mut taken);
+            props.push((disabled.clone(), Ty::Bool, Some(Arg::Bool(false))));
+            live = Some(Live {
+                prop: params[*p].code.clone(),
+                disabled,
+                disabled_value: ties
+                    .iter()
+                    .find(|(_, s)| **s == Interaction::Disabled)
+                    .map(|(v, _)| v.clone()),
+                element: *element,
+            });
+        }
+
         // One file's classes across every variant's tree.
         let classes = std::mem::take(&mut self.classes);
         let outer_bound = std::mem::replace(&mut self.bound, bound);
@@ -1016,17 +1053,86 @@ impl Walk<'_> {
                     .iter()
                     .filter_map(|p| match p.kind {
                         ParamKind::Choice(i) => {
-                            Some((p.code.clone(), node.variant().get(i)?.clone()))
+                            let value = node.variant().get(i)?.clone();
+                            Some(match &marked {
+                                // Unset, the browser decides: read as rest.
+                                Some((at, rest, ties, ..)) if *at == i => {
+                                    let plain: Vec<String> = owner
+                                        .set()
+                                        .map(|vs| vs.props[i].values.clone())
+                                        .unwrap_or_default()
+                                        .into_iter()
+                                        .filter(|v| v != rest && !ties.contains_key(v))
+                                        .collect();
+                                    (super::dom::state_prop(&p.code, rest, &plain), value)
+                                }
+                                _ => (p.code.clone(), value),
+                            })
                         }
                         _ => None,
                     })
                     .collect(),
             };
-            bodies.push((when, root));
+            bodies.push(super::states::Body {
+                when,
+                values: node.variant().to_vec(),
+                tree: root,
+            });
         }
         bodies.rotate_left(1);
         self.bound = outer_bound;
         self.forwards = outer_forwards;
+        // Every tree's layers keyed as the default's counterparts.
+        if let Some((last, others)) = bodies.split_last_mut() {
+            for b in others {
+                super::merge::pair(&last.tree, &mut b.tree);
+            }
+        }
+        let mut bodies = match &marked {
+            Some((at, rest, ties, _, p)) => {
+                let m = super::states::Marked {
+                    component: &name,
+                    prop: &params[*p].code,
+                    at: *at,
+                    rest,
+                    ties,
+                };
+                super::states::write(bodies, &m, &mut self.classes, &mut self.report)
+            }
+            None => {
+                let bodies = bodies.into_iter().map(|b| (b.when, b.tree)).collect();
+                super::merge::merge(bodies).bodies
+            }
+        };
+        if let Some(mut live) = live {
+            // Interactive content cannot nest: a root holding a button or a link
+            // is written as Plain.
+            let comps = self.components.as_ref().expect("components are on");
+            let mut nested = None;
+            for (_, root) in &bodies {
+                root.each(&mut |e| {
+                    if let Some(i) = &e.instance
+                        && nested.is_none()
+                        && comps.interactive.contains(&i.component)
+                    {
+                        nested = Some(i.component.clone());
+                    }
+                });
+            }
+            if let Some(inner) = nested.filter(|_| live.element != RootElement::Plain) {
+                self.report.approximate(format!(
+                    "{name}: it holds a {inner}, which is interactive, so it is written as Plain"
+                ));
+                live.element = RootElement::Plain;
+            }
+            if live.element != RootElement::Plain {
+                let comps = self.components.as_mut().expect("components are on");
+                comps.interactive.insert(name.clone());
+            }
+            for (_, root) in &mut bodies {
+                as_element(root, &live);
+            }
+        }
         self.classes = classes;
 
         // Pushed once finished, so after the components it uses.
@@ -1034,7 +1140,7 @@ impl Walk<'_> {
         comps.list.push(Component {
             name,
             dir,
-            bodies: super::merge::merge(bodies),
+            bodies,
             props,
         });
         sig
@@ -2376,6 +2482,64 @@ impl Walk<'_> {
             }
         }
     }
+}
+
+/// Whether anything under `origins` is a variant, or an instance of one, of a
+/// set with an interaction state.
+fn holds_marked_set(doc: &Document, origins: &[NodeId]) -> bool {
+    let marked = |id: NodeId| {
+        component::main_of(doc, id)
+            .or(Some(id))
+            .and_then(|m| variant::set_of(doc, m).or(Some(m)))
+            .and_then(|s| doc.get(s)?.set()?.interaction())
+            .is_some()
+    };
+    ondin_core::build::subtree_nodes(doc, origins)
+        .into_iter()
+        .any(marked)
+}
+
+/// A marked set's root written as its element: a `<button type="button">`
+/// whose rule resets what the browser draws on one, an `<a>`, or a `div` taking
+/// focus; and with the props driving its states. A root drawn as a picture
+/// stays one.
+fn as_element(root: &mut Element, live: &Live) {
+    if root.markup.is_some() {
+        return;
+    }
+    let reset: &[(&'static str, &str)] = match live.element {
+        RootElement::Button => {
+            root.tag = "button";
+            root.attrs.insert(0, ("type", "button".into()));
+            &[
+                ("margin", "0"),
+                ("padding", "0"),
+                ("border", "0"),
+                ("background", "none"),
+                ("font", "inherit"),
+                ("color", "inherit"),
+                ("text-align", "inherit"),
+            ]
+        }
+        RootElement::Link => {
+            root.tag = "a";
+            &[("color", "inherit"), ("text-decoration", "none")]
+        }
+        RootElement::Plain => {
+            root.attrs.insert(0, ("tabindex", "0".into()));
+            &[]
+        }
+    };
+    // First, so the root's own declarations override each.
+    let styles = std::iter::once(&mut root.style).chain(root.alts.iter_mut().map(|a| &mut a.style));
+    for style in styles {
+        for (i, (p, v)) in reset.iter().enumerate() {
+            if !style.iter().any(|(q, _)| q == p) {
+                style.insert(i.min(style.len()), (*p, (*v).to_string()));
+            }
+        }
+    }
+    root.live = Some(live.clone());
 }
 
 /// `left`/`top` for a translation, else a `transform`.

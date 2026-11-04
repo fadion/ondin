@@ -24,6 +24,7 @@ mod image;
 mod jsx;
 mod merge;
 pub mod react;
+mod states;
 mod tokens;
 pub mod vue;
 mod walk;
@@ -152,6 +153,9 @@ pub struct CodeExport {
     /// Instances written out as their layers rather than as a use of their
     /// main's component, and why. Empty for plain HTML, which has no components.
     pub inlined: Vec<String>,
+    /// One line per set whose interaction states are written as CSS, or, from
+    /// plain HTML, that it writes none.
+    pub states: Vec<String>,
 }
 
 impl CodeExport {
@@ -180,9 +184,18 @@ pub(crate) struct Report {
     approximated: Vec<String>,
     positioned: Vec<String>,
     inlined: Vec<String>,
+    states: Vec<String>,
 }
 
 impl Report {
+    /// A set's interaction states, and how they are written.
+    pub(crate) fn state(&mut self, what: impl Into<String>) {
+        let what = what.into();
+        if !self.states.contains(&what) {
+            self.states.push(what);
+        }
+    }
+
     /// The page draws this differently. Deduplicated by wording.
     pub(crate) fn approximate(&mut self, what: impl Into<String>) {
         let what = what.into();
@@ -207,11 +220,13 @@ impl Report {
         }
     }
 
-    /// The report as `report.txt` holds it: one line per entry under a heading,
-    /// or a single line saying there is nothing to report.
+    /// The report as `report.txt` holds it: the interaction states written, then
+    /// one line per entry under a heading, or a single line saying there is
+    /// nothing to report.
     pub(crate) fn text(&self) -> String {
         let mut out = String::new();
         for (heading, lines) in [
+            ("Interaction states:", &self.states),
             ("Drawn differently from the canvas:", &self.approximated),
             (
                 "Drawn right, with fixed positions or as a picture:",
@@ -233,15 +248,25 @@ impl Report {
                 out.push('\n');
             }
         }
-        if out.is_empty() {
+        let exact = self.approximated.is_empty() && self.positioned.is_empty();
+        if exact && self.inlined.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
             out.push_str("Everything was written exactly.\n");
         }
         out
     }
 
-    /// The report's lists, for [`CodeExport`].
-    pub(crate) fn into_lists(self) -> (Vec<String>, Vec<String>, Vec<String>) {
-        (self.approximated, self.positioned, self.inlined)
+    /// The report's lists, for [`CodeExport`]: approximated, positioned,
+    /// inlined and states.
+    pub(crate) fn into_lists(self) -> [Vec<String>; 4] {
+        [
+            self.approximated,
+            self.positioned,
+            self.inlined,
+            self.states,
+        ]
     }
 }
 
@@ -263,12 +288,13 @@ pub(crate) fn finish(mut files: Vec<CodeFile>, page: walk::Page) -> CodeExport {
         path: "report.txt".into(),
         bytes: page.report.text().into_bytes(),
     });
-    let (approximated, positioned, inlined) = page.report.into_lists();
+    let [approximated, positioned, inlined, states] = page.report.into_lists();
     CodeExport {
         files,
         approximated,
         positioned,
         inlined,
+        states,
     }
 }
 
@@ -278,6 +304,7 @@ pub(crate) fn finish(mut files: Vec<CodeFile>, page: walk::Page) -> CodeExport {
 pub(crate) fn stylesheet(root: &dom::Element, up: &str) -> String {
     let mut css = String::new();
     root.css(&mut css);
+    root.states_css(&mut css);
     css.replace("url(\"assets/", &format!("url(\"{up}assets/"))
 }
 

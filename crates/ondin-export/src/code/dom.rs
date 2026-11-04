@@ -1,6 +1,7 @@
 //! The tree the walk builds and the emitters print: elements, their class and
 //! their declarations, before any target's syntax.
 
+use ondin_core::variant::{Interaction, RootElement};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
@@ -25,8 +26,16 @@ pub(crate) struct Element {
     /// or under all but these (`Show::Except`).
     pub shown_when: Option<Show>,
     /// The layer's step in its name path, which matches it across a set's
-    /// variant trees; `None` for an element drawn for no layer of its own.
+    /// variant trees once they are paired (`merge::pair`); `None` for an element
+    /// drawn for no layer of its own.
     pub key: Option<(String, usize)>,
+    /// The layer's lineage key, and whether it was recorded rather than its own
+    /// id standing in (`Node::lineage`).
+    pub lineage: Option<(ondin_core::NodeId, bool)>,
+    /// What each interaction state changes on this element, in a merged tree.
+    pub states: Vec<StateStyle>,
+    /// A marked set's root: written with the props that drive its states.
+    pub live: Option<Live>,
     /// A component's root, which takes the class its user places it with.
     pub takes_class: bool,
     /// The Vue directive choosing this variant's tree (`v-if="…"`, `v-else`),
@@ -47,9 +56,116 @@ pub(crate) struct Alt {
     pub style: Vec<(&'static str, String)>,
 }
 
+/// The declarations one interaction state writes on an element, under one of
+/// its variants: the rule names the element's class and its root's, each by its
+/// place in [`Element::classes`] (0 its own, then its alternatives'), so a
+/// renamed class renames the rule.
+#[derive(Debug, Clone)]
+pub(crate) struct StateStyle {
+    pub state: Interaction,
+    /// The prop value that forces it, written as `data-state`.
+    pub value: String,
+    pub root_class: usize,
+    pub class: usize,
+    pub style: Vec<(&'static str, String)>,
+}
+
+/// What a marked set's root is written with: the prop forcing a state, the
+/// `disabled` prop, the value tied to Disabled, and the element.
+#[derive(Debug, Clone)]
+pub(crate) struct Live {
+    pub prop: String,
+    pub disabled: String,
+    pub disabled_value: Option<String>,
+    pub element: RootElement,
+}
+
+impl Live {
+    /// `disabled`, or forced Disabled, as an expression.
+    fn disabled_expr(&self, syntax: Syntax) -> String {
+        match &self.disabled_value {
+            Some(v) => format!(
+                "{} || {} === {}",
+                self.disabled,
+                self.prop,
+                match syntax {
+                    Syntax::Jsx => super::jsx::js_string(v),
+                    _ => super::jsx::single_quoted(v),
+                }
+            ),
+            None => self.disabled.clone(),
+        }
+    }
+
+    /// The root's state attributes: the forced value, and the behaviour of
+    /// `disabled` — the attribute on a button, `aria-disabled` on anything else.
+    fn attrs(&self, out: &mut String, syntax: Syntax) {
+        let expr = self.disabled_expr(syntax);
+        let button = self.element == RootElement::Button;
+        let _ = match syntax {
+            Syntax::Jsx if button => {
+                write!(out, " data-state={{{}}} disabled={{{expr}}}", self.prop)
+            }
+            Syntax::Jsx => write!(
+                out,
+                " data-state={{{}}} aria-disabled={{{expr} || undefined}}",
+                self.prop
+            ),
+            _ if button => write!(
+                out,
+                " :data-state=\"{}\" :disabled=\"{}\"",
+                self.prop,
+                escape(&expr)
+            ),
+            _ => write!(
+                out,
+                " :data-state=\"{}\" :aria-disabled=\"{}\"",
+                self.prop,
+                escape(&format!("{expr} || undefined"))
+            ),
+        };
+    }
+
+    /// The selector under which `state` applies live to a root of class
+    /// `root`: never while a value is forced, and hover and press never on a
+    /// disabled root.
+    fn live_selector(&self, state: Interaction, root: &str) -> String {
+        let off = match self.element {
+            RootElement::Button => ":not(:disabled)",
+            _ => ":not([aria-disabled=\"true\"])",
+        };
+        match (state, self.element) {
+            (Interaction::Hover, _) => format!(".{root}:hover:not([data-state]){off}"),
+            (Interaction::FocusVisible, _) => format!(".{root}:focus-visible:not([data-state])"),
+            (Interaction::Active, _) => format!(".{root}:active:not([data-state]){off}"),
+            (Interaction::Disabled, RootElement::Button) => format!(".{root}:disabled"),
+            (Interaction::Disabled, _) => format!(".{root}[aria-disabled=\"true\"]"),
+        }
+    }
+}
+
+/// `s` as a double-quoted CSS string's content.
+fn css_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Variant values a tree or class is drawn for, as `(prop, value)`: every one
-/// must hold.
+/// must hold. A prop written as [`state_prop`] makes it is read as
+/// [`condition`] says there.
 pub(crate) type When = Vec<(String, String)>;
+
+/// The interaction state's prop as a [`When`] names it, with its rest value
+/// and the values tied to no state. Its rest holds for any value but those —
+/// unset, or a state the stylesheet draws from rest's tree — and any other
+/// value holds only when passed.
+pub(crate) fn state_prop(prop: &str, rest: &str, plain: &[String]) -> String {
+    let mut out = format!("{prop}\u{0}{rest}");
+    for p in plain {
+        out.push('\u{0}');
+        out.push_str(p);
+    }
+    out
+}
 
 /// Which variants a merged tree's element is drawn under.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,14 +179,37 @@ pub(crate) enum Show {
 
 /// `when` as a condition: JSX's double-quoted strings, Vue's single-quoted ones.
 pub(crate) fn condition(when: &[(String, String)], syntax: Syntax) -> String {
+    let quote = |v: &str| match syntax {
+        Syntax::Jsx => super::jsx::js_string(v),
+        _ => super::jsx::single_quoted(v),
+    };
     let terms: Vec<String> = when
         .iter()
-        .map(|(p, v)| match syntax {
-            Syntax::Jsx => format!("{p} === {}", super::jsx::js_string(v)),
-            _ => format!("{p} === {}", super::jsx::single_quoted(v)),
+        .filter_map(|(p, v)| {
+            let mut parts = p.split('\u{0}');
+            let name = parts.next().unwrap_or_default();
+            let Some(rest) = parts.next() else {
+                return Some(format!("{p} === {}", quote(v)));
+            };
+            let plain: Vec<&str> = parts.collect();
+            match (v == rest, plain.as_slice()) {
+                (false, _) => Some(format!("{name} === {}", quote(v))),
+                (true, []) => None,
+                (true, [one]) => Some(format!("{name} !== {}", quote(one))),
+                (true, many) => {
+                    let any: Vec<String> = many
+                        .iter()
+                        .map(|x| format!("{name} === {}", quote(x)))
+                        .collect();
+                    Some(format!("!({})", any.join(" || ")))
+                }
+            }
         })
         .collect();
-    terms.join(" && ")
+    match terms.is_empty() {
+        true => "true".to_string(),
+        false => terms.join(" && "),
+    }
 }
 
 /// A condition holding when any of `whens` does.
@@ -349,6 +488,11 @@ impl Element {
     /// The opening tag; `void` closes it as an element with no content.
     fn open(&self, out: &mut String, syntax: Syntax, void: bool) {
         let _ = write!(out, "<{}", self.tag);
+        // What the component does not name reaches its root — `onClick`,
+        // `href` — before its own attributes, which win.
+        if self.live.is_some() && syntax == Syntax::Jsx {
+            out.push_str(" {...rest}");
+        }
         self.class_attr(out, syntax);
         for (k, v) in &self.attrs {
             if syntax == Syntax::Jsx && *k == "src" {
@@ -356,6 +500,9 @@ impl Element {
             } else {
                 let _ = write!(out, " {k}=\"{}\"", escape(v));
             }
+        }
+        if let Some(live) = &self.live {
+            live.attrs(out, syntax);
         }
         if syntax == Syntax::Vue {
             if let Some(b) = &self.branch {
@@ -418,6 +565,49 @@ impl Element {
         for c in &self.children {
             if let Child::Element(e) = c {
                 e.css(out);
+            }
+        }
+    }
+
+    /// The interaction states' rules over this root's tree, in the order they
+    /// stack — hover, focus, press, disabled — each live under its pseudo-class
+    /// and forced by its value. Nothing for a root that is not [`Self::live`].
+    pub fn states_css(&self, out: &mut String) {
+        let Some(live) = &self.live else { return };
+        let roots: Vec<&String> = self.classes().collect();
+        for state in Interaction::ALL {
+            self.each_with_depth(0, &mut |e, depth| {
+                let classes: Vec<&String> = e.classes().collect();
+                for s in e.states.iter().filter(|s| s.state == state) {
+                    let (Some(root), Some(class)) = (roots.get(s.root_class), classes.get(s.class))
+                    else {
+                        continue;
+                    };
+                    let below = match depth {
+                        0 => String::new(),
+                        _ => format!(" .{class}"),
+                    };
+                    let _ = writeln!(
+                        out,
+                        "{}{below},\n.{root}[data-state=\"{}\"]{below} {{",
+                        live.live_selector(state, root),
+                        css_string(&s.value)
+                    );
+                    for (p, v) in &s.style {
+                        let _ = writeln!(out, "  {p}: {v};");
+                    }
+                    out.push_str("}\n");
+                }
+            });
+        }
+    }
+
+    /// [`Self::each`], with each element's depth below this one.
+    fn each_with_depth(&self, depth: usize, f: &mut impl FnMut(&Element, usize)) {
+        f(self, depth);
+        for c in &self.children {
+            if let Child::Element(e) = c {
+                e.each_with_depth(depth + 1, f);
             }
         }
     }

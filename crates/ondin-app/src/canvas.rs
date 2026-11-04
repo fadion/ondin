@@ -9538,7 +9538,14 @@ impl OndinApp {
         let ids = self.session.selection.ids();
         let (edge, box_) = self.badge_placement(rect, ppp, offset)?;
         // W × H of the layer, not of the edge the pill landed on.
-        let label = size_label(box_);
+        let mut label = size_label(box_);
+        // A frame that picks its mode by width names the mode its width — the
+        // one a resize is previewing — picks.
+        if let [id] = ids
+            && let Some(mode) = width_mode_label(&self.session.doc, *id, box_.width())
+        {
+            label = format!("{label} · {mode}");
+        }
         // `any`: if any member refuses to move, the set does.
         let locked = ids
             .iter()
@@ -10197,6 +10204,16 @@ fn origin_pivot(kind: &NodeKind, box_: KRect, x_pct: f64, y_pct: f64) -> Option<
 /// a selected and a drawn shape, so the number does not twitch on release.
 fn size_label(box_: KRect) -> String {
     format!("{} × {}", box_.width().round(), box_.height().round())
+}
+
+/// The name of the mode frame `id` picks at `width`, while it picks one by its
+/// width (`Document::width_pick`); `None` otherwise — a pin names nothing here,
+/// the frame tag does.
+fn width_mode_label(doc: &ondin_core::Document, id: NodeId, width: f64) -> Option<String> {
+    doc.width_pick(id)?;
+    let c = doc.variables().by_width()?;
+    let m = c.mode_for_width(width)?;
+    Some(doc.variables().mode(m)?.name.clone())
 }
 
 /// The segment the pen's readout quotes, in world space: from the last anchor to

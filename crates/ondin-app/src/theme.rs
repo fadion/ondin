@@ -638,6 +638,9 @@ pub mod icon {
     /// press, focus and disabled — wherever one is marked: a hand, its index
     /// finger raised.
     pub const HAND_POINTING: &str = "\u{f017}";
+    /// A breakpoint — a mode a frame picks from its width — wherever one is
+    /// named: a monitor with a phone before it.
+    pub const DEVICES: &str = "\u{f018}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -1022,6 +1025,7 @@ pub mod icon {
         ("database", DATABASE),
         ("target", TARGET),
         ("hand-pointing", HAND_POINTING),
+        ("devices", DEVICES),
         ("book-open", BOOK_OPEN),
         ("git-diff", GIT_DIFF),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),

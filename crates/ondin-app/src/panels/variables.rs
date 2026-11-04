@@ -174,6 +174,9 @@ pub(crate) struct Browser {
     /// The text that refusal answered, which the field draws dim and dotted
     /// while it still holds it, as the inspector's fields do (§15 D1053).
     refused: Option<String>,
+    /// A mode's minimum width while its field in the mode menu is dragged, until
+    /// the drag ends and commits it.
+    width_draft: Option<(ModeId, f64)>,
     /// How far the mode columns are scrolled sideways, past three modes.
     scroll_x: f32,
     /// A drag on the sideways bar's thumb: the pointer's x and `scroll_x` where
@@ -269,6 +272,10 @@ enum Act {
     CollectionName(CollectionId, String),
     DuplicateCollection(CollectionId),
     DeleteCollection(CollectionId),
+    /// *Pick mode by width* ticked or unticked on a collection.
+    ByWidth(CollectionId, bool),
+    /// A mode's minimum width, typed in its menu.
+    Breakpoint(ModeId, f64),
     /// *Move to*: variables into a collection, or into a new one.
     MoveTo(VarId, Option<CollectionId>),
     /// A scope ticked: the variable's new scope, `None` every field.
@@ -427,6 +434,7 @@ impl OndinApp {
             .collection(shown)
             .map(|c| c.modes.clone())
             .unwrap_or_default();
+        let widths = table.collection(shown).and_then(|c| c.breakpoints.clone());
         let anchor = if self.var_button.is_finite() && self.show_toolbar {
             egui::pos2(
                 self.var_button.right() + 8.0,
@@ -585,7 +593,7 @@ impl OndinApp {
                                 // Spanning, each collection heads its own rows,
                                 // so the columns are never shared across them.
                                 if !across {
-                                    header(ui, &modes, &mut b, &mut acts);
+                                    header(ui, &modes, widths.as_ref(), &mut b, &mut acts);
                                 }
                                 egui::ScrollArea::vertical()
                                     .auto_shrink([false, false])
@@ -731,12 +739,20 @@ impl OndinApp {
             _ => 200.0,
         };
         let modes_of = |m: ModeId| table.collection_of_mode(m).map_or(0, |c| c.modes.len());
+        // A by-width mode past the first carries its width's field, a control's
+        // height and a gap.
+        let width_field = |m: ModeId| match table.collection_of_mode(m) {
+            Some(c) if c.by_width() && c.default_mode() != Some(m) => {
+                (ui::CONTROL_H + 1.0) / MENU_ROW_H
+            }
+            _ => 0.0,
+        };
         let rows = match &menu {
             Menu::Add => 7.0,
             Menu::Var(_) => 7.0,
-            Menu::Mode(m) if modes_of(*m) > 1 => 6.5,
-            Menu::Mode(_) => 3.0,
-            Menu::Collection(_) => 4.5,
+            Menu::Mode(m) if modes_of(*m) > 1 => 6.5 + width_field(*m),
+            Menu::Mode(m) => 3.0 + width_field(*m),
+            Menu::Collection(_) => 5.5,
             Menu::ConfirmCollection(_) => 4.0,
             Menu::Scope(v) => scope_rows(table.get(*v)),
             Menu::Group(..) => 3.0,
@@ -897,14 +913,53 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
+                            let i = table.mode_index(mode.id).unwrap_or(0);
+                            // A by-width mode's minimum, past the first's fixed 0:
+                            // a drag or a typed number held as a draft, committed
+                            // when the drag ends or the number lands.
+                            let by_width = table
+                                .collection_of_mode(mode.id)
+                                .is_some_and(|c| c.by_width());
+                            if let Some(min) = table
+                                .collection_of_mode(mode.id)
+                                .and_then(|c| c.min_width(mode.id))
+                                .filter(|_| i > 0)
+                            {
+                                let mut w = match b.width_draft {
+                                    Some((m, w)) if m == mode.id => w,
+                                    _ => min,
+                                };
+                                let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+                                let (resp, _) = ui::value_field_suffixed(
+                                    ui,
+                                    size,
+                                    ui::Prefix::Icon(icon::DEVICES),
+                                    Some(ui::Suffix {
+                                        text: "px",
+                                        clickable: false,
+                                        tooltip: "",
+                                    }),
+                                    &mut w,
+                                    ui::Scrub::whole(0.5).range(0.0..=f64::from(u16::MAX)),
+                                    |d| d.custom_formatter(ui::number(2)),
+                                );
+                                let resp =
+                                    resp.on_hover_text(format!("{} from this width up", mode.name));
+                                if (resp.changed() && !resp.dragged()) || resp.drag_stopped() {
+                                    b.width_draft = None;
+                                    acts.push(Act::Breakpoint(mode.id, w));
+                                } else if resp.changed() {
+                                    b.width_draft = Some((mode.id, w));
+                                }
+                            }
                             if row(ui, icon::COPY, "Duplicate mode") {
                                 acts.push(Act::DuplicateMode(mode.id));
                                 close = true;
                             }
                             // The order: the first mode is the default every
-                            // unset frame reads.
+                            // unset frame reads; a by-width collection's is its
+                            // widths'.
                             let n = modes_of(mode.id);
-                            let i = table.mode_index(mode.id).unwrap_or(0);
                             if n > 1 {
                                 ui::menu_sep(ui);
                                 let moves = [
@@ -913,11 +968,16 @@ impl OndinApp {
                                     (icon::ARROW_RIGHT, "Move right", i + 1, i + 1 < n),
                                 ];
                                 for (glyph, label, to, on) in moves {
+                                    let on = on && !by_width;
                                     let r = ui::menu_row(
                                         ui,
                                         ui::MenuRow::new(glyph, label).enabled(on),
                                         MENU_ROW_H,
                                     );
+                                    let r = match by_width {
+                                        true => r.on_hover_text("Ordered by width"),
+                                        false => r,
+                                    };
                                     if on && r.clicked() {
                                         acts.push(Act::MoveMode(mode.id, to));
                                         close = true;
@@ -1144,6 +1204,26 @@ impl OndinApp {
                             }
                             if row(ui, icon::COPY, "Duplicate collection") {
                                 acts.push(Act::DuplicateCollection(col.id));
+                                close = true;
+                            }
+                            // One collection at most is picked by width.
+                            let other = table.by_width().filter(|o| o.id != col.id);
+                            let pick = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::DEVICES, "Pick mode by width")
+                                    .checked(col.by_width())
+                                    .enabled(other.is_none()),
+                                MENU_ROW_H,
+                            );
+                            let pick = match other {
+                                Some(o) => pick
+                                    .on_hover_text(format!("{} picks its mode by width", o.name)),
+                                None => pick.on_hover_text(
+                                    "A top-level frame picks its mode from its width",
+                                ),
+                            };
+                            if pick.clicked() && other.is_none() {
+                                acts.push(Act::ByWidth(col.id, !col.by_width()));
                                 close = true;
                             }
                             let mut who: Vec<NodeId> = table
@@ -1814,6 +1894,34 @@ impl OndinApp {
                     });
                 }
             }
+            Act::ByWidth(c, on) => match var::by_width_ops(doc, c, on) {
+                Err(why) => self.session.info(why),
+                Ok(ops) if ops.is_empty() => {}
+                Ok(ops) => {
+                    // Unticking sets each frame that picked by width to the mode
+                    // it drew; say how many, since the frames now carry a pin.
+                    let pinned = ops
+                        .iter()
+                        .filter(|op| matches!(op, Operation::SetModes { .. }))
+                        .count();
+                    self.session.name_step("Pick mode by width", icon::DEVICES);
+                    if self.commit_edit(Transaction(ops)) && pinned > 0 {
+                        self.session.info(match pinned {
+                            1 => "1 frame keeps the mode it drew".to_string(),
+                            n => format!("{n} frames keep the mode they drew"),
+                        });
+                    }
+                }
+            },
+            Act::Breakpoint(m, width) => match var::breakpoint_ops(doc, m, width) {
+                Err(why) => self.var_refuse(why),
+                Ok(ops) => {
+                    if !ops.is_empty() {
+                        self.session.name_step("Breakpoint", icon::DEVICES);
+                        self.commit_edit(Transaction(ops));
+                    }
+                }
+            },
             Act::MoveTo(v, to) => {
                 let mut ops = Vec::new();
                 let target = match to {
@@ -3246,9 +3354,16 @@ fn mode_x(left: f32, i: usize, scroll: f32) -> f32 {
     left + NAME_W + MODE_W * i as f32 - scroll
 }
 
-/// *Name* and the mode headers — *Value* while there is one mode.
-/// Double-click renames a mode; a right-click opens its menu.
-fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act>) {
+/// *Name* and the mode headers — *Value* while there is one mode — each mode of
+/// a collection picked by width followed by its minimum, the first's 0 left
+/// unwritten. Double-click renames a mode; a right-click opens its menu.
+fn header(
+    ui: &mut egui::Ui,
+    modes: &[Mode],
+    widths: Option<&var::Breakpoints>,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, HEAD_H), egui::Sense::hover());
     ui.painter().hline(
@@ -3293,7 +3408,8 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
         } else {
             m.name.as_str()
         };
-        ui.painter().with_clip_rect(clip).text(
+        let painter = ui.painter().with_clip_rect(cell.intersect(clip));
+        let named = painter.text(
             egui::pos2(cell.left() + 6.0, cell.center().y),
             egui::Align2::LEFT_CENTER,
             label,
@@ -3304,6 +3420,15 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
                 theme::text::muted()
             },
         );
+        if let Some(w) = widths.and_then(|b| b.get(&m.id)).filter(|w| **w > 0.0) {
+            painter.text(
+                egui::pos2(named.right() + 4.0, cell.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("≥{}", var::px(*w)),
+                egui::FontId::monospace(10.0),
+                theme::text::faint(),
+            );
+        }
         if ui::double_clicked(ui, &resp) {
             acts.push(Act::StartEdit(Edit::Mode {
                 mode: m.id,
@@ -4122,8 +4247,9 @@ pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
 }
 
 /// The mode of collection `c` frame `id` inherits when it sets none of it — the
-/// nearest ancestor frame's that sets one, and that frame, else the
-/// collection's default (D1038 (a)).
+/// nearest ancestor frame's that sets one or picks one by its width, and that
+/// frame, else the collection's default (D1038 (a)). What `id` would pick by its
+/// own width is [`width_inherits`]'s.
 pub(crate) fn inherited_mode(
     doc: &Document,
     id: NodeId,
@@ -4133,12 +4259,37 @@ pub(crate) fn inherited_mode(
     let mut at = doc.get(id)?.parent();
     while let Some(p) = at {
         let n = doc.get(p)?;
-        if let Some(m) = n.modes().iter().copied().find(|m| col.has(*m)) {
+        if let Some(m) = n
+            .modes()
+            .iter()
+            .copied()
+            .chain(doc.width_pick(p))
+            .find(|m| col.has(*m))
+        {
             return Some((m, Some(p)));
         }
         at = n.parent();
     }
     Some((col.default_mode()?, None))
+}
+
+/// Whether *Inherit* on `id`'s row for collection `c` means *By width*: `c` is
+/// picked by width and `id` is a page, or a top-level frame whose page sets no
+/// mode of `c`. A page has no width, so on it the choice leaves each top-level
+/// frame to pick its own.
+pub(crate) fn width_inherits(doc: &Document, id: NodeId, c: CollectionId) -> bool {
+    let Some(col) = doc.variables().collection(c).filter(|c| c.by_width()) else {
+        return false;
+    };
+    if doc.is_page(id) {
+        return true;
+    }
+    doc.picks_by_width(id)
+        && doc
+            .get(id)
+            .and_then(|n| n.parent())
+            .and_then(|p| doc.get(p))
+            .is_some_and(|page| !page.modes().iter().any(|m| col.has(*m)))
 }
 
 /// The collections a frame's identity card gives a mode row: the one a
@@ -4204,8 +4355,17 @@ impl OndinApp {
         let page = doc.is_page(id);
         let table = doc.variables();
         let owner = var::ModeOwner::Collection(c);
+        let by_width = width_inherits(doc, id, c);
         let (value, suffix, set) = match node.mode_of(table, owner).and_then(|m| table.mode(m)) {
             Some(m) => (m.name.clone(), None, true),
+            // A page has no width: each of its top-level frames picks its own.
+            None if by_width && page => ("By width".to_string(), None, false),
+            None if by_width => {
+                let Some(m) = doc.width_mode(id).and_then(|m| table.mode(m)) else {
+                    return;
+                };
+                (m.name.clone(), Some("· by width".to_string()), false)
+            }
             None => {
                 let Some((m, from)) = inherited_mode(doc, id, c) else {
                     return;
@@ -4328,6 +4488,12 @@ impl OndinApp {
                 ui::combo_chevron_ink(),
             );
             let resp = resp.on_hover_text(match (page, set) {
+                (false, false) if by_width => {
+                    "Picked by this frame's width — pick a mode to set one whatever its width"
+                }
+                (true, false) if by_width => {
+                    "Each top-level frame on this page picks its mode from its width"
+                }
                 (false, true) => "The mode this frame sets for itself and everything in it",
                 (false, false) => {
                     "Inherited — pick a mode to set one for this frame and everything in it"
@@ -4367,9 +4533,23 @@ impl OndinApp {
         let owner = var::ModeOwner::Collection(c);
         let current = node.mode_of(table, owner);
         let set = node.modes().to_vec();
-        let inherits = inherited_mode(doc, id, c)
-            .and_then(|(m, _)| table.mode(m))
-            .map(|m| m.name.clone());
+        // On a top-level frame or a page of a collection picked by width,
+        // *Inherit* is *By width*, naming the mode the frame picks now.
+        let by_width = width_inherits(doc, id, c);
+        let inherits = match by_width {
+            true => doc.width_mode(id),
+            false => inherited_mode(doc, id, c).map(|(m, _)| m),
+        }
+        .and_then(|m| table.mode(m))
+        .map(|m| m.name.clone());
+        let widths: Vec<Option<String>> = modes
+            .iter()
+            .map(|m| {
+                col.min_width(m.id)
+                    .filter(|w| *w > 0.0)
+                    .map(|w| format!("≥{}", var::px(w)))
+            })
+            .collect();
         let w = under.width().max(200.0);
         let size = egui::vec2(w, (modes.len() as f32 + 1.0) * MENU_ROW_H + 18.0);
         let pos = ui::menu_place(ctx, under.left_bottom() + egui::vec2(0.0, 4.0), size);
@@ -4381,16 +4561,20 @@ impl OndinApp {
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(ui::menu_inner_w(w, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let inherit = ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit")
-                        .accel(inherits.as_deref())
-                        .checked(current.is_none());
+                    let inherit = match by_width {
+                        true => ui::MenuRow::new(icon::DEVICES, "By width"),
+                        false => ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit"),
+                    }
+                    .accel(inherits.as_deref())
+                    .checked(current.is_none());
                     if ui::menu_row(ui, inherit, MENU_ROW_H).clicked() {
                         pick = Some(None);
                     }
                     ui::menu_sep(ui);
-                    for m in &modes {
-                        let row =
-                            ui::MenuRow::new(icon::COLUMNS, &m.name).checked(current == Some(m.id));
+                    for (m, width) in modes.iter().zip(&widths) {
+                        let row = ui::MenuRow::new(icon::COLUMNS, &m.name)
+                            .accel(width.as_deref())
+                            .checked(current == Some(m.id));
                         if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
                             pick = Some(Some(m.id));
                         }
@@ -4445,6 +4629,28 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run_ui(input, |_| app.var_browser_ui(ctx));
+    }
+
+    /// Every piece of text `draw` lays out, on its second frame: an `Area` draws
+    /// nothing on its first, which only sizes it.
+    fn texts(ctx: &egui::Context, draw: impl FnMut(&egui::Ui)) -> Vec<String> {
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1200.0, 800.0),
+            )),
+            ..Default::default()
+        };
+        let mut draw = draw;
+        let _ = ctx.run_ui(input(), |ui| draw(ui));
+        let out = ctx.run_ui(input(), |ui| draw(ui));
+        out.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn the_only_var(app: &OndinApp) -> Variable {
@@ -6093,6 +6299,96 @@ mod tests {
         app.var_act(Act::NewMode);
         let t = app.session.doc.variables();
         assert_eq!(mode_rows(t), vec![t.collections()[1].id]);
+    }
+
+    /// **A collection picked by width, through the browser and the mode row**:
+    /// ticking gives the modes 0, 768 and 1200, the headers draw them, a width
+    /// at a neighbour's is refused naming it, a top-level frame's *Inherit* is
+    /// *By width* naming its pick, a nested frame inherits it from the top-level
+    /// one, and unticking leaves the frame set to the mode it drew.
+    ///
+    /// flip: `inherited_mode` without `width_pick` in its walk → fails at "from
+    /// the top-level frame".
+    #[test]
+    fn a_collection_picked_by_width_through_the_browser_and_the_mode_row() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        app.var_act(Act::NewMode);
+        app.var_act(Act::NewMode);
+        let c = CollectionId::FIRST;
+        app.var_act(Act::ByWidth(c, true));
+        let modes: Vec<ModeId> = app.session.doc.variables().first_collection().modes[..]
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        let col = app.session.doc.variables().first_collection().clone();
+        assert_eq!(
+            modes.iter().map(|m| col.min_width(*m)).collect::<Vec<_>>(),
+            [Some(0.0), Some(768.0), Some(1200.0)]
+        );
+        let shown = texts(&ctx, |_| app.var_browser_ui(&ctx));
+        assert!(shown.iter().any(|t| t == "≥768"), "{shown:?}");
+        assert!(
+            !shown.iter().any(|t| t == "≥0"),
+            "the first's 0 is unwritten"
+        );
+
+        app.var_act(Act::Breakpoint(modes[1], 1200.0));
+        let b = app.var_browser.as_ref().unwrap();
+        assert_eq!(
+            b.refusal.as_deref(),
+            Some(format!("{} starts at 1200.", col.modes[2].name).as_str())
+        );
+        app.var_act(Act::Breakpoint(modes[1], 900.0));
+        let col = app.session.doc.variables().first_collection().clone();
+        assert_eq!(col.min_width(modes[1]), Some(900.0));
+
+        let (home, card) = (app.session.ids.mint(), app.session.ids.mint());
+        let root = app.session.doc.first_page();
+        let frame = |id, parent, w| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: ondin_core::NodeKind::Artboard {
+                size: Size::new(w, 400.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        };
+        assert!(app.commit_edit(Transaction(vec![
+            frame(home, root, 1024.0),
+            frame(card, home, 100.0),
+        ])));
+        let doc = &app.session.doc;
+        assert!(width_inherits(doc, home, c));
+        assert!(
+            width_inherits(doc, root, c),
+            "a page's Inherit is By width too"
+        );
+        assert!(!width_inherits(doc, card, c));
+        assert_eq!(
+            inherited_mode(doc, card, c),
+            Some((modes[1], Some(home))),
+            "from the top-level frame"
+        );
+        app.mode_menu = Some((
+            home,
+            c,
+            egui::Rect::from_min_size(egui::pos2(400.0, 100.0), egui::vec2(200.0, 28.0)),
+        ));
+        let menu = texts(&ctx, |_| app.mode_menu_ui(&ctx));
+        assert!(menu.iter().any(|t| t == "By width"), "{menu:?}");
+        assert!(menu.iter().any(|t| t == "≥900"), "{menu:?}");
+        app.mode_menu = None;
+
+        app.var_act(Act::ByWidth(c, false));
+        let doc = &app.session.doc;
+        assert!(!doc.variables().first_collection().by_width());
+        assert_eq!(doc.get(home).unwrap().modes(), [modes[1]]);
+        assert!(!width_inherits(doc, home, c));
     }
 
     /// **The `--` list offers only what is scoped to the field**, counts the

@@ -1100,8 +1100,8 @@ impl RenderOverrides {
                 let width = patched.box_size().map(|s| s.width);
                 self.set_kind(doc, res, *id, patched);
                 // A top-level frame dragged across a breakpoint draws what it holds
-                // in the mode its new width picks — itself too, unless its size is
-                // bound, which the arm above has drawn already.
+                // in the mode its new width picks — itself too, all but its size,
+                // which the arm above has drawn already.
                 if let (Some(w), Some(now)) = (width, doc.width_pick(*id)) {
                     let t = doc.variables().with_width(*id, w);
                     if doc.width_pick_in(&t, *id) != Some(now) {
@@ -1109,13 +1109,12 @@ impl RenderOverrides {
                         let mut stack = vec![*id];
                         while let Some(at) = stack.pop() {
                             let Some(n) = doc.get(at) else { continue };
-                            let own_size = at == *id && n.size_vars().iter().any(Option::is_some);
-                            if n.reads_variables() && !own_size {
+                            if n.reads_variables() {
                                 reading.push(at);
                             }
                             stack.extend(n.children().iter().copied());
                         }
-                        self.redraw_reading(doc, res, &t, reading);
+                        self.redraw_reading(doc, res, &t, reading, Some(*id));
                     }
                 }
                 // Only the node's own painted area moves, not its children's frame.
@@ -1447,7 +1446,7 @@ impl RenderOverrides {
             Operation::SetVariableCell { id: var, mode, cell } => {
                 let t = doc.variables().with_cell(*var, *mode, cell.clone())?;
                 let bound: Vec<NodeId> = doc.bound_nodes().collect();
-                self.redraw_reading(doc, res, &t, bound);
+                self.redraw_reading(doc, res, &t, bound, None);
             }
             // The rest of the table has no override: the walk reads it off the
             // document, so these draw as committed. None is dragged, and absorbing
@@ -1578,13 +1577,15 @@ impl RenderOverrides {
 
     /// Patch each of `nodes` that reads a variable with what it draws against
     /// table `t` — a previewed cell's, or a previewed width's — built on its
-    /// pending paint and kind.
+    /// pending paint and kind. `sized` keeps the size its caller has drawn: a
+    /// frame dragged across a breakpoint, whose bound size the drag writes.
     fn redraw_reading(
         &mut self,
         doc: &Document,
         res: &Resolved,
         t: &ondin_core::variable::Variables,
         nodes: Vec<NodeId>,
+        sized: Option<NodeId>,
     ) {
         for n in nodes {
             if self.ghost(n).is_some() {
@@ -1616,6 +1617,7 @@ impl RenderOverrides {
             // A bound width or height the same way, after the corners above,
             // whose kind it starts from; the layout pass lays the chain again.
             if let Some(node) = doc.get(n)
+                && sized != Some(n)
                 && node.size_vars().iter().any(Option::is_some)
                 && let Some(base) = self.current_kind(doc, n)
             {

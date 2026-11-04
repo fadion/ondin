@@ -5785,3 +5785,106 @@ fn a_frame_dragged_across_a_breakpoint_previews_in_its_new_mode() {
     assert_preview_matches_commit(&doc, &resize(700.0), "dragged under 768");
     assert_preview_matches_commit(&doc, &resize(900.0), "dragged within Tablet");
 }
+
+/// A frame whose own width is bound, dragged across a breakpoint, draws its own
+/// bound fill in the new mode too, its size as the drag writes it.
+///
+/// flip: the dragged frame left out of `redraw_reading` again → fails
+/// *"bound frame dragged under 768: preview diverged from commit"*.
+#[test]
+fn a_bound_size_frame_dragged_across_a_breakpoint_draws_its_own_fill_anew() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, Collection, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xBE);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let home = ids.mint();
+    let (mobile, tablet) = (ids.mint_mode(), ids.mint_mode());
+    let (bp, ink, wide) = (ids.mint_collection(), ids.mint_var(), ids.mint_var());
+    let var = |id, name: &str, kind, a: Cell, b: Cell| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind,
+            cells: [(mobile, a), (tablet, b)].into(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: home,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(1024.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::AddCollection {
+            collection: Collection {
+                id: bp,
+                name: "Breakpoint".into(),
+                modes: vec![
+                    Mode {
+                        id: mobile,
+                        name: "Mobile".into(),
+                    },
+                    Mode {
+                        id: tablet,
+                        name: "Tablet".into(),
+                    },
+                ],
+                breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+            },
+            index: 1,
+        },
+        var(
+            ink,
+            "ink",
+            VarKind::Color,
+            Cell::Color(Color::from_rgba8(200, 10, 10, 255)),
+            Cell::Color(Color::from_rgba8(10, 10, 200, 255)),
+        ),
+        var(
+            wide,
+            "wide",
+            VarKind::Number,
+            Cell::Number(1024.0),
+            Cell::Number(1024.0),
+        ),
+        Operation::SetFills {
+            id: home,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: ink,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+    ]))
+    .unwrap();
+    doc.apply(&Transaction(ondin_core::bind_size_ops(
+        &doc,
+        home,
+        [Some(wide), None],
+    )))
+    .unwrap();
+    assert_eq!(doc.get(home).unwrap().size_vars()[0], Some(wide));
+    // Through the commit's pass, which detaches the width the drag writes past.
+    let resize = ondin_core::keep_size_bindings(
+        &doc,
+        None,
+        Transaction(vec![Operation::SetGeometry {
+            id: home,
+            geometry: GeometryPatch::Size(Size::new(700.0, 300.0)),
+        }]),
+    );
+    assert_preview_matches_commit(&doc, &resize, "bound frame dragged under 768");
+}

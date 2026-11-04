@@ -213,7 +213,7 @@ impl FieldKey {
             // The row's own label.
             FieldKey::Limit { slot, .. } => LIMIT_LABELS[slot],
             // The opacity field's own prefix.
-            FieldKey::Opacity { .. } => icon::DROP_HALF,
+            FieldKey::Opacity { .. } => icon::CHECKERBOARD,
             // The weight field's own prefix.
             FieldKey::StrokeWidth { .. } => icon::LINE_SEGMENT,
             // The popover's own word prefixes.

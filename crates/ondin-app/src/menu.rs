@@ -856,11 +856,11 @@ impl Item {
             ),
             Item::Mask => s(
                 "Use as mask",
-                icon::CIRCLE_HALF,
+                icon::MASK,
                 Some("Ctrl+Alt+M"),
                 Group::Structure,
             ),
-            Item::EvenOdd => s("Even-odd fill", icon::CIRCLE_HALF, None, Group::Structure),
+            Item::EvenOdd => s("Even-odd fill", icon::EVEN_ODD, None, Group::Structure),
             Item::Boolean(op) => s(
                 match op {
                     BoolOp::Union => "Union",
@@ -1555,7 +1555,7 @@ impl Item {
             Action::TextStyle(chord) => Item::TextChord(chord),
             Action::Nudge(_) => return Some(("Nudge", icon::ARROWS_OUT_CARDINAL)),
             Action::SizeStep(_) => return Some(("Resize", icon::ARROWS_OUT)),
-            Action::OpacityDigit(_) => return Some(("Opacity", icon::DROP_HALF)),
+            Action::OpacityDigit(_) => return Some(("Opacity", icon::CHECKERBOARD)),
             _ => return None,
         };
         let spec = item.spec();

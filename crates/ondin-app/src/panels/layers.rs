@@ -494,7 +494,7 @@ const BADGE_BASE: f32 = 9.75;
 /// quarter point puts the braces on the word's height at every scaling.
 const BADGE_BOUND: f32 = 11.25;
 
-/// Type size for a mask's `circle-half`, measured the same way; at 10.0 it inks
+/// Type size for a mask's `mask`, measured the same way; at 10.0 it inks
 /// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
 const BADGE_MASK: f32 = 10.0;
 
@@ -1713,7 +1713,7 @@ impl OndinApp {
             .and_then(|o| doc.get(o))
             .is_some_and(|o| o.props().iter().any(|p| p.bound.contains(&id)));
         let badge = if node.mask() {
-            Some(RowBadge::Icon(icon::CIRCLE_HALF, BADGE_MASK))
+            Some(RowBadge::Icon(icon::MASK, BADGE_MASK))
         } else if let Some(n) = set_count {
             Some(RowBadge::Text(match n {
                 1 => "1 variant".to_string(),
@@ -3298,7 +3298,7 @@ mod badge_ink_tests {
             );
             for (name, badge, size) in [
                 ("diamond", icon::DIAMOND, BADGE_BASE),
-                ("half-circle", icon::CIRCLE_HALF, BADGE_MASK),
+                ("mask", icon::MASK, BADGE_MASK),
             ] {
                 let glyph = ink_height(&ctx, badge, theme::icon_font(size));
                 assert!(

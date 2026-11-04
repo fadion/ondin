@@ -2484,7 +2484,7 @@ impl OndinApp {
             return;
         }
         self.opacity_entry = None;
-        self.session.name_step("Opacity", icon::DROP_HALF);
+        self.session.name_step("Opacity", icon::CHECKERBOARD);
         // `entry.subject`, not the live selection, which may have moved.
         self.set_opacity_pct_on(&entry.subject, opacity_of_digit(entry.first), true);
     }

@@ -4636,11 +4636,17 @@ impl StateChip {
         }
     }
 
-    fn glyph(self) -> &'static str {
+    /// *Open* leads with its tab glyph; *New* is the word alone.
+    fn glyph(self) -> Option<&'static str> {
         match self {
-            Self::Open => icon::BROWSERS,
-            Self::New => icon::SPARKLE,
+            Self::Open => Some(icon::BROWSERS),
+            Self::New => None,
         }
+    }
+
+    /// The width the glyph and its gap take before the word.
+    fn lead(self) -> f32 {
+        self.glyph().map_or(0.0, |_| OPEN_GLYPH + OPEN_GAP)
     }
 
     /// Ink, ground and hairline.
@@ -4675,16 +4681,18 @@ fn open_chip(ui: &egui::Ui, chip: StateChip, at: egui::Pos2, align: egui::Align2
         egui::Stroke::new(1.0, line),
         egui::StrokeKind::Inside,
     );
-    p.text(
-        egui::pos2(rect.left() + OPEN_PAD + OPEN_GLYPH / 2.0, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        chip.glyph(),
-        theme::icon_font(OPEN_GLYPH),
-        ink,
-    );
+    if let Some(glyph) = chip.glyph() {
+        p.text(
+            egui::pos2(rect.left() + OPEN_PAD + OPEN_GLYPH / 2.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            theme::icon_font(OPEN_GLYPH),
+            ink,
+        );
+    }
     p.galley(
         egui::pos2(
-            rect.left() + OPEN_PAD + OPEN_GLYPH + OPEN_GAP,
+            rect.left() + OPEN_PAD + chip.lead(),
             rect.center().y - word.size().y / 2.0,
         ),
         word,
@@ -4712,7 +4720,7 @@ fn open_word(ui: &egui::Ui, chip: StateChip) -> std::sync::Arc<egui::Galley> {
 /// column before eliding.
 fn open_chip_size(ui: &egui::Ui, chip: StateChip) -> egui::Vec2 {
     egui::vec2(
-        OPEN_PAD + OPEN_GLYPH + OPEN_GAP + open_word(ui, chip).size().x + OPEN_PAD,
+        OPEN_PAD + chip.lead() + open_word(ui, chip).size().x + OPEN_PAD,
         18.0,
     )
 }

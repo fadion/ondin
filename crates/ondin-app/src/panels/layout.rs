@@ -1868,11 +1868,11 @@ impl OndinApp {
                 icon::EYE,
             ),
             OutOfFlow::Mask => (
-                icon::CIRCLE_HALF,
+                icon::MASK,
                 "Mask".to_owned(),
                 "Masks clip their siblings and are never laid out.".to_owned(),
                 "Release mask",
-                icon::CIRCLE_HALF,
+                icon::MASK,
             ),
         };
         ui.horizontal(|ui| {
@@ -1952,7 +1952,7 @@ impl OndinApp {
         let (verb, glyph) = match why {
             OutOfFlow::Absolute => ("Unpin", icon::PIN),
             OutOfFlow::Hidden => ("Show", icon::EYE),
-            OutOfFlow::Mask => ("Release mask", icon::CIRCLE_HALF),
+            OutOfFlow::Mask => ("Release mask", icon::MASK),
         };
         self.session.name_step(verb, glyph);
         self.commit_edit(Transaction(ops));

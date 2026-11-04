@@ -2820,7 +2820,7 @@ mod tests {
         let painted = inks(&out);
         let (drop_at, drop_ink) = painted
             .iter()
-            .find(|(t, ..)| t == icon::DROP_HALF)
+            .find(|(t, ..)| t == icon::CHECKERBOARD)
             .map(|(_, r, c)| (*r, *c))
             .expect("the opacity field");
         assert_eq!(drop_ink, theme::text::strong(), "opacity is overridden");

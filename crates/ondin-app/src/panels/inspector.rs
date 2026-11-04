@@ -482,10 +482,27 @@ fn effect_glyph(kind: &EffectKind) -> &'static str {
     match kind {
         EffectKind::DropShadow(_) => icon::DROP_HALF_BOTTOM,
         EffectKind::InnerShadow(_) => icon::DROP_HALF,
-        EffectKind::LayerBlur { .. } => icon::CIRCLE_HALF,
+        EffectKind::LayerBlur { .. } => icon::LAYER_BLUR,
         EffectKind::BackgroundBlur { .. } => icon::SQUARE_DOTS,
         EffectKind::Filters(_) => icon::SUN,
     }
+}
+/// The glyph of an Effects step that rewrote the stack `before` into `after`:
+/// the row glyph of the effect it added, removed, changed or moved first.
+fn effects_step_glyph(before: &[Keyed<Effect>], after: &[Keyed<Effect>]) -> &'static str {
+    after
+        .iter()
+        .find(|e| !before.contains(e))
+        .or_else(|| before.iter().find(|e| !after.contains(e)))
+        .or_else(|| {
+            after
+                .iter()
+                .zip(before)
+                .find(|(a, b)| a != b)
+                .map(|(a, _)| a)
+        })
+        .or(after.first())
+        .map_or(icon::DROP_HALF_BOTTOM, |e| effect_glyph(&e.kind))
 }
 /// The one number at the right-hand end of an effect row.
 ///
@@ -2028,7 +2045,7 @@ impl OndinApp {
             if ui::disable_unless(ui, mask.is_ok(), |ui| {
                 ui::icon_button(
                     ui,
-                    icon::CIRCLE_HALF,
+                    icon::MASK,
                     BOOL_ROW_H,
                     ACTION_GLYPH,
                     masked,
@@ -2274,7 +2291,7 @@ impl OndinApp {
             let face = egui::ComboBox::from_id_salt("mask-mode")
                 .icon(ui::combo_chevron)
                 .width(ui.available_width())
-                .selected_text(ui::glyph_and_text(icon::CIRCLE_HALF, label))
+                .selected_text(ui::glyph_and_text(icon::MASK, label))
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     if let Some(m) = &mark {
@@ -2305,7 +2322,7 @@ impl OndinApp {
                 .map(|(t, _)| Operation::SetMaskMode { id: *t, mode })
                 .collect();
             if !ops.is_empty() {
-                self.session.name_step("Mask mode", icon::CIRCLE_HALF);
+                self.session.name_step("Mask mode", icon::MASK);
                 self.commit_edit(Transaction(ops));
             }
         }
@@ -2906,7 +2923,7 @@ impl OndinApp {
                 let (ro, hit) = ui::value_field_marked(
                     ui,
                     egui::vec2(fw, 28.0),
-                    Prefix::Icon(icon::DROP_HALF),
+                    Prefix::Icon(icon::CHECKERBOARD),
                     opacity_mark.as_ref().map(Mark::field),
                     &mut pct,
                     Scrub::whole(0.5).range(0.0..=100.0),
@@ -2936,7 +2953,7 @@ impl OndinApp {
                         .flat_map(|id| ondin_core::detach_opacity_ops(doc, id))
                         .collect();
                     ops.extend(set.0);
-                    app.named_valve("Opacity", icon::DROP_HALF, &ro, Transaction(ops));
+                    app.named_valve("Opacity", icon::CHECKERBOARD, &ro, Transaction(ops));
                 }
                 if !has_corners {
                     return;
@@ -4657,7 +4674,7 @@ impl OndinApp {
         let (ro, _, hit) = ui::value_field_unit_marked(
             ui,
             egui::vec2(fw, 28.0),
-            Prefix::Icon(icon::DROP_HALF),
+            Prefix::Icon(icon::CHECKERBOARD),
             None,
             mark.as_ref().map(Mark::field),
             &mut pct,
@@ -4667,7 +4684,7 @@ impl OndinApp {
         self.reset_marked(hit, mark);
         self.named_valve(
             "Opacity",
-            icon::DROP_HALF,
+            icon::CHECKERBOARD,
             &ro,
             Transaction(vec![Operation::SetOpacity {
                 id,
@@ -8894,11 +8911,12 @@ impl OndinApp {
             }
             _ => None,
         };
-        if let (Some(effects), [one]) = (list, subjects) {
-            self.session.name_step("Effects", icon::SPARKLE);
+        if let (Some(list), [one]) = (list, subjects) {
+            self.session
+                .name_step("Effects", effects_step_glyph(&effects, &list));
             self.commit_edit(Transaction(vec![Operation::SetEffects {
                 id: *one,
-                effects,
+                effects: list,
             }]));
             return;
         }
@@ -8973,7 +8991,8 @@ impl OndinApp {
         );
         if !tx.0.is_empty() {
             if !self.session.has_step_name() {
-                self.session.name_step("Effects", icon::SPARKLE);
+                self.session
+                    .name_step("Effects", effects_step_glyph(&anchor, &effects));
             }
             self.commit_edit(tx);
         }
@@ -9046,8 +9065,9 @@ impl OndinApp {
             return;
         };
         edit(&mut entry.kind);
+        let glyph = effect_glyph(&entry.kind);
         let tx = self.effects_tx(subjects, &anchor_list, &effects, |_, _| {});
-        self.named_valve("Effects", icon::SPARKLE, resp, tx);
+        self.named_valve("Effects", glyph, resp, tx);
     }
 
     /// `SetEffects` writing `edited` (an edit of `anchor`'s list) onto every subject,
@@ -9170,7 +9190,8 @@ impl OndinApp {
                     }
                 })
             };
-            self.named_valve("Effects", icon::SPARKLE, &resp, tx);
+            let glyph = effect_glyph(&anchor_list[index].kind);
+            self.named_valve("Effects", glyph, &resp, tx);
         }
         if let Some(k) = key {
             self.field_doors(ui, k, &resp);
@@ -10201,7 +10222,12 @@ impl OndinApp {
             PaintSlot::GroupColor(_) | PaintSlot::GroupGradient(_) => {
                 ("Group colors", icon::PALETTE)
             }
-            PaintSlot::Effect(_) => ("Effects", icon::SPARKLE),
+            PaintSlot::Effect(i) => {
+                let glyph = (self.session.selection.ids().first())
+                    .and_then(|id| self.session.display_node(*id))
+                    .and_then(|n| n.effects().get(i).map(|e| effect_glyph(&e.kind)));
+                ("Effects", glyph.unwrap_or(icon::DROP_HALF_BOTTOM))
+            }
             PaintSlot::Grid(_) => ("Layout grid", icon::COLUMNS),
             PaintSlot::VarCell(..) => ("Variable", icon::BRACKETS_CURLY),
         };

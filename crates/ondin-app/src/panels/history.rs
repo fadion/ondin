@@ -536,7 +536,7 @@ mod tests {
     }
 
     fn opacity(app: &mut OndinApp, id: NodeId, opacity: f32) {
-        app.session.name_step("Opacity", icon::DROP_HALF);
+        app.session.name_step("Opacity", icon::CHECKERBOARD);
         assert!(
             app.session
                 .commit(Transaction(vec![Operation::SetOpacity { id, opacity }]))

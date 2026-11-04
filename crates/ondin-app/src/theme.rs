@@ -498,9 +498,15 @@ pub mod icon {
     pub const MAGNIFYING_GLASS_PLUS: &str = "\u{e310}";
     pub const FRAME: &str = "\u{e626}";
     pub const SELECTION: &str = "\u{e69a}";
-    /// The identity row's three actions, beside the boolean dropdown (§9.4).
-    /// Also the Effects panel's **Layer blur** row glyph.
-    pub const CIRCLE_HALF: &str = "\u{e18c}"; // mask
+    /// Contrast, wherever it is checked: View's *Check contrast*, the contrast
+    /// bar, *Fix contrast*.
+    pub const CIRCLE_HALF: &str = "\u{e18c}";
+    /// A mask — *Use as mask*, the identity row's toggle, its mode, its badge in
+    /// the layers tree: a circle with a horizon across it.
+    pub const MASK: &str = "\u{f038}";
+    /// *Even-odd fill*: a ring, its overlap left empty.
+    pub const EVEN_ODD: &str = "\u{f039}";
+    // The identity row's actions, beside the boolean dropdown (§9.4).
     pub const SELECTION_PLUS: &str = "\u{e69c}"; // group
     pub const SELECTION_SLASH: &str = "\u{e69e}"; // ungroup
     /// A `Path`'s kind glyph in the layers tree, and the *Outline shape* row's,
@@ -619,16 +625,17 @@ pub mod icon {
     /// Not [`ARROWS_CLOCKWISE`], which means *reverse*: the button steps to the
     /// next key, and arrows passing each other read as "ordered by".
     pub const ARROWS_DOWN_UP: &str = "\u{e098}";
-    /// Opacity, and the **inner shadow**'s row glyph.
-    /// The two never share a card. It is the same droplet as [`DROP_HALF_BOTTOM`],
-    /// split vertically rather than horizontally, so the inner and drop shadow read
-    /// as two states of one picture.
+    /// The **inner shadow**'s row glyph. It is the same droplet as
+    /// [`DROP_HALF_BOTTOM`], split vertically rather than horizontally, so the
+    /// inner and drop shadow read as two states of one picture.
     pub const DROP_HALF: &str = "\u{e566}";
     /// The **drop shadow**'s row glyph.
     /// See [`DROP_HALF`], which is its pair.
     pub const DROP_HALF_BOTTOM: &str = "\u{eb40}";
     /// The **Filters** row's glyph.
     pub const SUN: &str = "\u{e472}";
+    /// The **layer blur**'s row glyph: a disc of soft dots.
+    pub const LAYER_BLUR: &str = "\u{f037}";
     pub const SQUARE_HALF: &str = "\u{e462}"; // stroke alignment
     // Per-corner radius: a box drawn in dots with the one corner it sets rounded
     // and solid, one drawing turned into each corner.
@@ -658,7 +665,9 @@ pub mod icon {
     pub const SIDES_SEPARATE: &str = "\u{f011}";
     /// *Pad out to a square*: a picture centred in a square drawn in dots.
     pub const PAD_SQUARE: &str = "\u{f012}";
-    /// A transparent background: the checkerboard that stands for no colour.
+    /// Transparency, in both its places: a layer's opacity (the field, its badge
+    /// and its steps) and an export's transparent background. The checkerboard
+    /// that stands for no colour.
     pub const CHECKERBOARD: &str = "\u{f013}";
     /// A colour chip in a dropdown's face, where a painter cannot reach: the
     /// outline [`SQUARE`]'s solid twin.
@@ -1044,6 +1053,8 @@ pub mod icon {
         ("frame", FRAME),
         ("selection", SELECTION),
         ("circle-half", CIRCLE_HALF),
+        ("mask", MASK),
+        ("even-odd", EVEN_ODD),
         ("selection-plus", SELECTION_PLUS),
         ("selection-slash", SELECTION_SLASH),
         ("polygon", POLYGON),
@@ -1103,6 +1114,7 @@ pub mod icon {
         ("drop-half", DROP_HALF),
         ("drop-half-bottom", DROP_HALF_BOTTOM),
         ("sun", SUN),
+        ("layer-blur", LAYER_BLUR),
         ("square-half", SQUARE_HALF),
         ("corner-top-left", CORNER_TOP_LEFT),
         ("corner-top-right", CORNER_TOP_RIGHT),

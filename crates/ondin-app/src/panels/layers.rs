@@ -1731,6 +1731,16 @@ impl OndinApp {
                     .then_some(RowBadge::Icon(icon::DIAMOND, BADGE_BASE)),
             }
         };
+        // A glyph badge's words, for the row's tooltip: hovered, the eye and lock
+        // take its slot, so the badge itself is never under the pointer.
+        let badge_tip = match &badge {
+            Some(RowBadge::Icon(g, _)) if *g == icon::MASK => Some("A mask"),
+            Some(RowBadge::Icon(g, _)) if *g == icon::PROPERTY_BOUND => {
+                Some("Bound to a component property")
+            }
+            Some(RowBadge::Icon(g, _)) if *g == icon::DIAMOND => Some("The subtraction's base"),
+            _ => None,
+        };
         // (node borrow ends here — safe to mutate self below)
 
         let selected = self.session.selection.contains(id);
@@ -1775,8 +1785,14 @@ impl OndinApp {
 
         let rect = row.rect;
         let resp = ui.interact(rect, row_id(id), egui::Sense::click_and_drag());
-        // The mark's words, on the row it sits on.
-        let resp = match &children_tip {
+        // The mark's and the badge's words, on the row they sit on.
+        let tip = match (&children_tip, badge_tip) {
+            (Some(m), Some(b)) => Some(format!("{b}\n{m}")),
+            (Some(m), None) => Some(m.clone()),
+            (None, Some(b)) => Some(b.to_string()),
+            (None, None) => None,
+        };
+        let resp = match &tip {
             Some(tip) => resp.on_hover_text(tip),
             None => resp,
         };

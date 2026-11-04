@@ -4681,6 +4681,7 @@ impl OndinApp {
             Scrub::whole(0.5).range(0.0..=100.0),
             |d| d.suffix("%").max_decimals(0),
         );
+        let ro = tip_unless_marked(ro, mark, "Opacity");
         self.reset_marked(hit, mark);
         self.named_valve(
             "Opacity",
@@ -5791,7 +5792,8 @@ impl OndinApp {
                         &mut width,
                         Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                         |d| d.custom_formatter(ui::number(2)),
-                    );
+                    )
+                    .on_hover_text("Stroke weight");
                     if let Some(k) = key {
                         self.field_doors(ui, k, &rw);
                     }

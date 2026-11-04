@@ -883,13 +883,18 @@ impl OndinApp {
                 // Pointer and keyboard can be on different rows; the `Enter` row is lit.
                 let p = ui.painter();
                 ui::list_row_ground(p, r, i == sel, resp.hovered());
-                p.text(
-                    egui::pos2(r.left() + 10.0, r.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    glyph,
-                    theme::icon_font(13.0),
-                    ink,
-                );
+                // No glyph is a project, which wears its colour dot as the sidebar does.
+                if glyph.is_empty() {
+                    p.circle_filled(egui::pos2(r.left() + 16.5, r.center().y), 4.0, ink);
+                } else {
+                    p.text(
+                        egui::pos2(r.left() + 10.0, r.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        glyph,
+                        theme::icon_font(13.0),
+                        ink,
+                    );
+                }
                 p.text(
                     egui::pos2(r.left() + 30.0, r.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -923,7 +928,7 @@ impl OndinApp {
                 i += 1;
             }
             for (id, name, color) in &projects {
-                if row(ui, i, icon::FOLDER_OPEN, swatch(color), name, "Project") {
+                if row(ui, i, "", swatch(color), name, "Project") {
                     nav_to = Some(Nav::Project(id.clone()));
                 }
                 i += 1;
@@ -1127,13 +1132,7 @@ impl OndinApp {
             theme::text::muted()
         };
         let p = ui.painter();
-        if selected || lit {
-            p.rect_filled(
-                rect,
-                egui::CornerRadius::same(7),
-                theme::color::text_a(if selected { 20 } else { 12 }),
-            );
-        }
+        ui::list_row_ground(p, rect, selected, lit);
         p.text(
             egui::pos2(rect.left() + 12.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -1197,13 +1196,7 @@ impl OndinApp {
             theme::text::muted()
         };
         let painter = ui.painter();
-        if selected || lit {
-            painter.rect_filled(
-                rect,
-                egui::CornerRadius::same(7),
-                theme::color::text_a(if selected { 20 } else { 12 }),
-            );
-        }
+        ui::list_row_ground(painter, rect, selected, lit);
         painter.circle_filled(
             egui::pos2(rect.left() + 18.0, rect.center().y),
             4.0,
@@ -1467,12 +1460,14 @@ impl OndinApp {
                 }
                 // A segmented track, not two icon buttons: one of grid and list is always on.
                 let selected = usize::from(self.dash.list_view);
-                let picked = ui::segmented(
+                let picked = ui::segmented_tipped(
                     ui,
                     VIEW_TRACK_W,
                     VIEW_CELL_H,
                     2,
                     selected,
+                    |_| true,
+                    |i| if i == 0 { "Grid view" } else { "List view" },
                     |p, i, rect, on| {
                         let glyph = if i == 0 {
                             icon::SQUARES_FOUR
@@ -2630,11 +2625,13 @@ impl OndinApp {
         act: &mut Option<Act>,
     ) {
         let hit = egui::Rect::from_center_size(centre, egui::vec2(22.0, 22.0));
-        let resp = ui.interact(
-            hit,
-            egui::Id::new(("file-menu", &entry.path)),
-            egui::Sense::click(),
-        );
+        let resp = ui
+            .interact(
+                hit,
+                egui::Id::new(("file-menu", &entry.path)),
+                egui::Sense::click(),
+            )
+            .on_hover_text("More");
         let open = self.dash.menu_for.as_ref() == Some(&entry.path);
         ui.painter().text(
             centre,

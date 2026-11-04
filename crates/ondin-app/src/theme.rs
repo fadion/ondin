@@ -711,16 +711,19 @@ pub mod icon {
     /// whose lid and handle collapse into noise at a cursor's 19pt.
     pub const TRASH_SIMPLE: &str = "\u{e4a8}";
     pub const CHECK: &str = "\u{e182}"; // a checked row in the View/Snap menus
-    // The Transform panel's proportion lock: a whole chain when locked, a broken
-    // one when not.
+    /// A binding, wherever one is made: *Bind to variable…*, *Bind property*, a
+    /// linked tokens file. [`LINK_BREAK`] undoes it.
     pub const LINK_SIMPLE: &str = "\u{e2e6}";
-    pub const LINK_SIMPLE_BREAK: &str = "\u{e2e8}";
+    /// The Transform panel's proportion lock, locked or not: a box with two
+    /// opposite corners held.
+    pub const ASPECT_RATIO: &str = "\u{f034}";
+    /// A web address — a main's documentation link, a Figma link: a globe.
+    pub const GLOBE: &str = "\u{f035}";
     /// The typography popup's **skip-ink** toggle, beside the underline's line
     /// style (§15 D357).
     ///
     /// The only *horizontal* break in the link set: two chain ends facing each
     /// other across a gap, the picture of what skip-ink does to a band.
-    /// `LINK_SIMPLE_BREAK` is diagonal and means the proportion lock.
     pub const LINK_SIMPLE_HORIZONTAL_BREAK: &str = "\u{e2ec}";
     pub const MAGNET: &str = "\u{e680}"; // the Snap menu
     /// The transform origin, in two states. `CROSSHAIR_SIMPLE` is the read-only
@@ -858,6 +861,9 @@ pub mod icon {
     /// A main component's mark, and the *Create component* and *Duplicate as
     /// component* rows': [`HEXAGON`] filled, since fill marks the state.
     pub const HEXAGON_FILL: &str = "\u{f000}";
+    /// A layer local to an instance, not in its main: [`HEXAGON`] with a plus
+    /// beside it.
+    pub const INSTANCE_LOCAL: &str = "\u{f036}";
     /// A variant set, a component set's mains taken as one: [`HEXAGON_FILL`]
     /// inside corner brackets.
     pub const VARIANT_SET: &str = "\u{f021}";
@@ -889,7 +895,9 @@ pub mod icon {
     /// A kit update (§5.3e): waiting, the *Accept update* row, and the *Update
     /// kit* step.
     pub const ARROW_CIRCLE_DOWN: &str = "\u{e028}";
-    /// *Detach instance* — "no longer from the main" (§15 D981).
+    /// Every detach, row and step — *Detach instance*, a variable or a style
+    /// detached, *Detach from path*, *Make local*, *Unlink tokens file*: "no
+    /// longer from" what it was tied to.
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
     /// Component card's main link and its *Go to main* button (§15 D981).
@@ -1122,7 +1130,8 @@ pub mod icon {
         ("trash-simple", TRASH_SIMPLE),
         ("check", CHECK),
         ("link-simple", LINK_SIMPLE),
-        ("link-simple-break", LINK_SIMPLE_BREAK),
+        ("aspect-ratio", ASPECT_RATIO),
+        ("globe", GLOBE),
         ("link-simple-horizontal-break", LINK_SIMPLE_HORIZONTAL_BREAK),
         ("magnet", MAGNET),
         ("crosshair-simple", CROSSHAIR_SIMPLE),
@@ -1192,6 +1201,7 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("hexagon-fill", HEXAGON_FILL),
+        ("instance-local", INSTANCE_LOCAL),
         ("variant-set", VARIANT_SET),
         ("package", PACKAGE),
         ("browsers", BROWSERS),

@@ -748,8 +748,7 @@ impl OndinApp {
             .map(|t| style::bind_op(*t, slot, None))
             .collect();
         if !ops.is_empty() {
-            self.session
-                .name_step("Detach style", icon::LINK_SIMPLE_BREAK);
+            self.session.name_step("Detach style", icon::LINK_BREAK);
             self.commit_edit(Transaction(ops));
         }
     }

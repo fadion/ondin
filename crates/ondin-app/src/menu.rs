@@ -1235,12 +1235,7 @@ impl Item {
             ),
             Item::ImportTokens => s("Import tokens…", icon::ARROW_CIRCLE_DOWN, None, Group::Kits),
             Item::ExportTokens => s("Export tokens…", icon::EXPORT, None, Group::Kits),
-            Item::UnlinkTokens => s(
-                "Unlink tokens file",
-                icon::LINK_SIMPLE_BREAK,
-                None,
-                Group::Kits,
-            ),
+            Item::UnlinkTokens => s("Unlink tokens file", icon::LINK_BREAK, None, Group::Kits),
             Item::PublishKit => s(
                 "Publish kit…",
                 icon::UPLOAD_SIMPLE,

@@ -860,7 +860,7 @@ impl OndinApp {
                 ui.set_min_height(ui::CONTROL_H - ui::FIELD_BORDER_H);
                 ui.spacing_mut().item_spacing.x = 7.0;
                 ui.label(theme::icon_text(
-                    icon::LINK_SIMPLE,
+                    icon::GLOBE,
                     ui::CONTROL_GLYPH_PT,
                     theme::text::faint(),
                 ));
@@ -921,7 +921,7 @@ impl OndinApp {
                 match ondin_core::web_link(&e.text) {
                     Ok(url) if url == saved => {}
                     Ok(url) => {
-                        self.session.name_step("Link", icon::LINK_SIMPLE);
+                        self.session.name_step("Link", icon::GLOBE);
                         self.commit_edit(Transaction(vec![Operation::SetDocLink { id, url }]));
                     }
                     Err(why) => {
@@ -1085,7 +1085,7 @@ pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, 
             p.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                icon::PLUS,
+                icon::INSTANCE_LOCAL,
                 theme::icon_font(11.0),
                 theme::text::muted(),
             );
@@ -2059,13 +2059,14 @@ fn main_tail(ui: &mut egui::Ui, act: &mut Option<Act>) {
 }
 
 /// *In Button instance · Go to main*, or *Local to this instance · no
-/// counterpart* — a row of the identity card. A local layer leads with the
-/// **broken link**, not `+`, which at the head of a row reads as a button.
+/// counterpart* — a row of the identity card. A local layer leads with
+/// [`icon::INSTANCE_LOCAL`], the instance's hexagon with a plus beside it, not a
+/// bare `+`, which at the head of a row reads as a button.
 fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option<Act>) {
     let (glyph, text) = if linked {
         (icon::HEXAGON, format!("In {main_name} instance"))
     } else {
-        (icon::LINK_BREAK, "Local to this instance".to_string())
+        (icon::INSTANCE_LOCAL, "Local to this instance".to_string())
     };
     let mut slot = egui::Rect::NOTHING;
     let row = ui.horizontal(|ui| {
@@ -3311,17 +3312,17 @@ mod tests {
         assert!(painted.iter().any(|(t, _)| *t == gone_hex), "a ghost row");
         let own_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 3, 30));
         let rect_of = |s: &str| painted.iter().find(|(t, _)| t == s).map(|(_, r)| *r);
-        // **The own fill's `+` is on its own row**, not counted among the Fill and
-        // Stroke headers' own `+`s. Flip, run: `item_slot`'s `Local` arm painting
-        // `""` for `icon::PLUS` fails *"a + on the own fill's row"*.
+        // **The own fill's local mark is on its own row**. Flip, run: `item_slot`'s
+        // `Local` arm painting `""` for `icon::INSTANCE_LOCAL` fails *"a local mark
+        // on the own fill's row"*.
         let own_row = rect_of(&own_hex).expect("the own fill's row");
         assert!(
             painted.iter().any(|(t, r)| {
-                t == icon::PLUS
+                t == icon::INSTANCE_LOCAL
                     && (r.center().y - own_row.center().y).abs() < 4.0
                     && r.left() > own_row.right()
             }),
-            "a + on the own fill's row: {painted:?}"
+            "a local mark on the own fill's row: {painted:?}"
         );
         let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
         // **The ghost row is laid out as the live one**: its hex starts where a

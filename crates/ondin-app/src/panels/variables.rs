@@ -818,7 +818,7 @@ impl OndinApp {
                                         || "tokens file".to_string(),
                                         |n| n.to_string_lossy().into_owned(),
                                     );
-                                if row(ui, icon::LINK_SIMPLE_BREAK, &format!("Unlink {name}")) {
+                                if row(ui, icon::LINK_BREAK, &format!("Unlink {name}")) {
                                     acts.push(Act::UnlinkTokens);
                                     close = true;
                                 }

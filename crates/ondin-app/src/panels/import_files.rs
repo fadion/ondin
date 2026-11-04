@@ -1844,7 +1844,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
         ),
         Field::Link { .. } | Field::Fetching { .. } => message(
             ui,
-            icon::LINK_SIMPLE,
+            icon::GLOBE,
             "A Figma link, read through Figma's API with your token.",
             theme::text::faint(),
         ),

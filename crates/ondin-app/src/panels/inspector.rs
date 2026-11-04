@@ -3309,11 +3309,7 @@ impl OndinApp {
                 // A set is locked when every member is.
                 let all_locked =
                     tools::proportions_locked(&app.session.doc, app.session.selection.ids());
-                let glyph = if all_locked {
-                    icon::LINK_SIMPLE
-                } else {
-                    icon::LINK_SIMPLE_BREAK
-                };
+                let glyph = icon::ASPECT_RATIO;
                 if ui::field_button(ui, glyph, 28.0, ui::FieldButton::on_if(all_locked))
                     .on_hover_text(if all_locked {
                         "Unlock proportions on every selected layer"
@@ -4242,11 +4238,7 @@ impl OndinApp {
                             app.field_doors(ui, key, &resp);
                         }
                     }
-                    let glyph = if locked {
-                        icon::LINK_SIMPLE
-                    } else {
-                        icon::LINK_SIMPLE_BREAK
-                    };
+                    let glyph = icon::ASPECT_RATIO;
                     let state = if both_px {
                         ui::FieldButton::on_if(locked)
                     } else {

@@ -6860,7 +6860,7 @@ mod transform_row_tests {
                     Scrub::whole(0.5),
                     |d| d,
                 );
-                field_button(ui, icon::LINK_SIMPLE, H, FieldButton::Off);
+                field_button(ui, icon::ASPECT_RATIO, H, FieldButton::Off);
             });
         });
 

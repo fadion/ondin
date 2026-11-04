@@ -959,8 +959,7 @@ impl OndinApp {
     /// Detach `key`, which then reads the value it resolved to.
     pub(crate) fn detach_field(&mut self, key: FieldKey) {
         let tx = self.detach_tx(key);
-        self.session
-            .name_step("Detach variable", icon::LINK_SIMPLE_BREAK);
+        self.session.name_step("Detach variable", icon::LINK_BREAK);
         self.commit_edit(tx);
     }
 

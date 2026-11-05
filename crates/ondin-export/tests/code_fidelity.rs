@@ -2747,6 +2747,45 @@ fn an_approximated_layer_is_reported() {
     );
 }
 
+/// Two PNGs of one class in two files are two assets: a component's *Rect* and
+/// the page's, each with its own shadow.
+/// flip: `Walk::picture` naming a new PNG by its class alone → fails at "two
+/// paths".
+#[test]
+fn pngs_of_one_class_in_two_files_keep_their_own_paths() {
+    let spread = |spread: f64| {
+        vec![EffectKind::DropShadow(Shadow {
+            offset: Vec2::new(2.0, 2.0),
+            blur: 4.0,
+            spread,
+            color: Color::BLACK,
+            blend: ondin_core::BlendMode::Normal,
+        })]
+    };
+    let mut d = Doc::new();
+    let mains = d.frame(None, 0.0, 300.0, 380.0, 100.0, "Mains");
+    let board = d.frame(None, 0.0, 0.0, 380.0, 180.0, "Board");
+    let shadowed = |d: &mut Doc, c: [NodeId; 3]| d.effects(c[1], spread(6.0));
+    let main = d.card(mains, (10.0, 10.0), None, shadowed);
+    d.card(board, (10.0, 100.0), Some(main), shadowed);
+    let own = d.rect(board, 300.0, 20.0, 40.0, 40.0, 0.0);
+    d.fill(own, solid(30, 120, 200, 255));
+    d.effects(own, spread(3.0));
+    let (doc, res) = d.done();
+    let export = ondin_export::code::Target::React.export(&doc, &res, &[board]);
+    assert!(export.inlined.is_empty(), "{:?}", export.inlined);
+    let mut pngs: Vec<&str> = export
+        .files
+        .iter()
+        .map(|f| f.path.as_str())
+        .filter(|p| p.ends_with(".png"))
+        .collect();
+    pngs.sort_unstable();
+    let len = pngs.len();
+    pngs.dedup();
+    assert_eq!((len, pngs.len()), (2, 2), "two paths: {pngs:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Components: the React and Vue walk, drawn as plain HTML
 // ---------------------------------------------------------------------------

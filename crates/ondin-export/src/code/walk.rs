@@ -2590,11 +2590,17 @@ impl Walk<'_> {
             };
             let raster = crate::png::raster_of(self.doc, self.res, &[id], &opts)?;
             let bytes = crate::png::encode_rgba8(&raster.rgba, raster.width, raster.height);
-            // The same picture shares one file, so its uses pair across variants.
+            // The same picture shares one file, so its uses pair across variants;
+            // another takes a free name, since a class is unique only in its file.
             let path = match self.assets.iter().find(|(_, b)| *b == bytes) {
                 Some((p, _)) => p.clone(),
                 None => {
-                    let path = format!("assets/{class}.png");
+                    let mut path = format!("assets/{class}.png");
+                    let mut n = 1;
+                    while self.assets.iter().any(|(p, _)| *p == path) {
+                        n += 1;
+                        path = format!("assets/{class}-{n}.png");
+                    }
                     self.assets.push((path.clone(), bytes));
                     path
                 }

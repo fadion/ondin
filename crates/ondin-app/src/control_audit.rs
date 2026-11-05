@@ -356,6 +356,11 @@ fn heights() -> Vec<Rung> {
             radii: &[4],
             what: "field toggle",
         },
+        Rung {
+            h: ui::HEAD_H,
+            radii: &[5],
+            what: "dropdown head",
+        },
     ]
 }
 
@@ -977,8 +982,21 @@ fn every_control_ground_is_on_the_standard_in_the_light_theme() {
     sweep(Theme::Light);
 }
 
-/// Every surface's grounds, audited and hovered with the chrome in `theme`.
+/// Every surface's grounds, audited and hovered with the chrome in `theme`. On a
+/// thread of its own stack: a debug build gives each fixture's `OndinApp` its
+/// own slot, past what the test thread has.
 fn sweep(theme: Theme) {
+    let run = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || sweep_on(theme))
+        .expect("a sweep thread")
+        .join();
+    if let Err(panic) = run {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+fn sweep_on(theme: Theme) {
     let ctx = egui::Context::default();
     crate::theme::install(&ctx);
     crate::theme::apply(&ctx, theme);
@@ -1095,6 +1113,35 @@ fn sweep(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| a.toggle_var_browser());
     check("variables browser", app, found);
+    // The browser's *Scope…* popover, on a number: its switch and family boxes.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let first = a.session.ids.mint_mode();
+        let table = a.session.doc.variables();
+        let into = table.first_collection().id;
+        let (mut ops, modes) = ondin_core::variable::columns_for_new(table, into, first);
+        let id = a.session.ids.mint_var();
+        ops.push(Operation::AddVariable {
+            var: ondin_core::Variable {
+                id,
+                name: "space/gutter".into(),
+                kind: ondin_core::VarKind::Number,
+                cells: modes
+                    .into_iter()
+                    .map(|m| (m, ondin_core::Cell::Number(24.0)))
+                    .collect(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        });
+        a.session
+            .try_commit(Transaction(ops))
+            .expect("a number variable");
+        a.open_scope(id);
+    });
+    check("scope popover", app, found);
     let scratch = std::env::temp_dir().join(format!(
         "ondin-audit-{}-{}",
         std::process::id(),
@@ -1128,9 +1175,72 @@ fn sweep(theme: Theme) {
     )
     .unwrap();
     let mut app = with_a_rect(&ctx);
-    let found = opened(&ctx, &mut app, |_, a| a.open_tokens_import(tokens, false));
+    let file = tokens.clone();
+    let found = opened(&ctx, &mut app, |_, a| a.open_tokens_import(file, false));
     assert!(app.tokens_import.is_some(), "the tokens review opened");
     check("tokens import", app, found);
+    // The top bar's pill for a linked tokens file that changed since it was
+    // applied: one ground, so audited directly, as Version history is.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let then = std::fs::read_to_string(&tokens)
+            .unwrap()
+            .replace("#6d8cd9", "#000000");
+        a.session
+            .doc
+            .set_tokens_link(Some(ondin_core::meta::TokensLink {
+                path: tokens.display().to_string(),
+                applied: serde_json::from_str(&then).unwrap(),
+                into: None,
+            }));
+    });
+    let at_rest = audit("tokens pill", &found, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "tokens pill", &found, &mut faults);
+    assert!(
+        at_rest >= 1 && hovered >= 1,
+        "tokens pill: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds and hovered {hovered}"
+    );
+    // The colour-blind simulation's bar on a selected frame: the scope chip at
+    // rest, and the deficiency head and ✕, which paint a ground only hovered.
+    let mut app = with_a_rect(&ctx);
+    let (resting, lit) = swept(&ctx, &mut app, |_, a| {
+        let frame = a.session.ids.mint();
+        let page = a.session.page;
+        a.session
+            .try_commit(Transaction(vec![Operation::CreateNode {
+                id: frame,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 200.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((300.0, 0.0))),
+                name: Some("Card".into()),
+            }]))
+            .expect("a frame");
+        a.session.selection.set_one(frame);
+        a.toggle_vision();
+    });
+    // The bar's own: the selection restyled the inspector too.
+    let bar = ctx
+        .memory(|m| m.area_rect(egui::Id::new("vision-bar")))
+        .expect("the bar was drawn");
+    let on_bar = |gs: Vec<Ground>| -> Vec<Ground> {
+        gs.into_iter()
+            .filter(|g| bar.contains(g.rect.center()))
+            .collect()
+    };
+    let (resting, lit) = (on_bar(resting), on_bar(lit));
+    let at_rest = audit("vision bar", &resting, disabled_alpha(&ctx), &mut faults);
+    let hovered = audit("vision bar", &lit, disabled_alpha(&ctx), &mut faults);
+    assert!(
+        at_rest >= 1 && hovered >= 2,
+        "vision bar: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds at rest and {hovered} under the pointer"
+    );
     // The footer's two buttons, the only grounds the card paints at rest. Its
     // timeline rows are not row-audited: a row and the body it opens are one
     // `text_a(15)` block, not `ui::list_row_ground`.

@@ -451,42 +451,34 @@ impl OndinApp {
             true => n.to_string(),
             false => format!("{name} \u{b7} {}", changes_label(n)),
         };
-        let galley = ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap(
-                text,
-                egui::FontId::proportional(ui::SMALL_PT),
-                color::accent_300(),
-            )
-        });
-        let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
+        // The kit update pill's face: lit while the changes wait unreviewed, at
+        // rest once put off with *Later*.
+        let scale = ui::Scale::Toolbar;
+        let glyph_pt = scale.glyph_pt();
+        let font = egui::FontId::proportional(scale.text_pt());
+        let text_w = ui
+            .ctx()
+            .fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), color::text()))
+            .size()
+            .x;
+        let w = 9.0 + glyph_pt + 6.0 + text_w + 9.0;
+        let state = FieldButton::on_if(!quiet);
+        let (rect, resp, fg) = ui::button_face(ui, egui::vec2(w, ui::TOOLBAR_H), state);
         let p = ui.painter();
-        let ground = match (resp.hovered(), quiet) {
-            (true, _) => color::accent_a(56),
-            (false, true) => color::accent_a(20),
-            (false, false) => color::accent_a(40),
-        };
-        p.rect_filled(rect, egui::CornerRadius::same(6), ground);
-        if !quiet {
-            p.rect_stroke(
-                rect,
-                egui::CornerRadius::same(6),
-                egui::Stroke::new(1.0, color::accent_a(100)),
-                egui::StrokeKind::Inside,
-            );
-        }
         let y = rect.center().y;
         p.text(
             egui::pos2(rect.left() + 9.0, y),
             egui::Align2::LEFT_CENTER,
             icon::IMPORT,
-            theme::icon_font(13.0),
-            color::accent_300(),
+            theme::icon_font(glyph_pt),
+            fg,
         );
-        p.galley(
-            egui::pos2(rect.left() + 28.0, y - galley.size().y / 2.0),
-            galley,
-            color::accent_300(),
+        p.text(
+            egui::pos2(rect.left() + 9.0 + glyph_pt + 6.0, y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font,
+            fg,
         );
         let resp = resp.on_hover_text(format!(
             "{name} changed since it was last applied \u{b7} click to review"

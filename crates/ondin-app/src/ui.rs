@@ -805,7 +805,7 @@ impl Flyout {
 }
 
 /// Height of a top-bar dropdown's head, and so of its hit target.
-const HEAD_H: f32 = 26.0;
+pub(crate) const HEAD_H: f32 = 26.0;
 
 /// Empty space a head keeps after its caret, `(HEAD_H - 16) / 2`, the inset an
 /// [`icon_button`] gives its glyph, so the two space evenly in one cluster.

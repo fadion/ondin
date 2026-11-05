@@ -1665,15 +1665,8 @@ impl OndinApp {
                 let doc = &self.session.doc;
                 let ops = match col.default_mode() {
                     Some(first) => var::copy_mode_ops(doc, first, id, &name, col.modes.len()),
-                    None => vec![Operation::AddMode {
-                        collection: shown,
-                        mode: Mode {
-                            id,
-                            name: name.clone(),
-                        },
-                        index: 0,
-                        cells: vec![],
-                    }],
+                    // Named `free_name`'s *Mode 1*, with its width when ticked.
+                    None => var::columns_for_new(table, shown, id).0,
                 };
                 self.session.name_step("New mode", icon::COLUMNS_PLUS_RIGHT);
                 if !ops.is_empty()
@@ -2019,11 +2012,13 @@ impl OndinApp {
                 }
             }
             Act::Scope(v, scope) => {
-                let dropped: usize = var::users_by_field(doc, v)
-                    .iter()
-                    .filter(|(f, _)| scope.is_some_and(|s| !s.contains(*f)))
-                    .map(|(_, ids)| ids.len())
-                    .sum();
+                // Each layer counted once, however many families it loses.
+                let dropped = var::users_by_field(doc, v)
+                    .into_iter()
+                    .filter(|(f, _)| var::scope_drops(scope, *f))
+                    .flat_map(|(_, ids)| ids)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
                 let ops = var::scope_ops(doc, v, scope);
                 if ops.is_empty() {
                     return;
@@ -6678,5 +6673,68 @@ mod tests {
             Some(ids[0])
         );
         assert_eq!(scope_words(t.get(ids[0]).unwrap()), "corner radius");
+    }
+
+    /// *New mode* on a modeless collection picked by width commits its first
+    /// mode with its width.
+    /// flip: `Act::NewMode`'s modeless arm a bare `AddMode` → fails at "added".
+    #[test]
+    fn new_mode_on_a_modeless_collection_picked_by_width_commits() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        let c = CollectionId::FIRST;
+        assert!(
+            app.session
+                .doc
+                .variables()
+                .first_collection()
+                .modes
+                .is_empty()
+        );
+        app.var_act(Act::ByWidth(c, true));
+        assert!(app.session.doc.variables().first_collection().by_width());
+        app.var_act(Act::NewMode);
+        let col = app.session.doc.variables().first_collection();
+        assert_eq!(col.modes.len(), 1, "added: {}", app.session.status().text);
+        assert_eq!(col.min_width(col.modes[0].id), Some(0.0));
+    }
+
+    /// *Scope…* counts each detached layer once, however many of its fields
+    /// lose the variable.
+    /// flip: `Act::Scope` summing `users_by_field`'s lists → fails at the
+    /// status.
+    #[test]
+    fn scoping_counts_each_detached_layer_once() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        let v = the_only_var(&app).id;
+        let rect = app.session.ids.mint();
+        let root = app.session.doc.first_page();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetCornerVars {
+                id: rect,
+                vars: [Some(v); 4],
+            },
+            Operation::SetSizeVars {
+                id: rect,
+                vars: [Some(v), None],
+            },
+        ])));
+        app.var_act(Act::Scope(v, Some(Scope::of([Field::Spacing]))));
+        assert_eq!(app.session.status().text, "1 layer was detached.");
+        assert!(var::users(&app.session.doc, v).is_empty());
     }
 }

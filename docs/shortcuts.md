@@ -358,8 +358,9 @@ save, files and tabs) and answers the rest with the read-only sentence, silently
 
 ### 8d. A focused control's keys
 
-Once `Tab` has put the focus on a control (the ring shows it), the keymap is silent and these are
-the control's (`design/app-chrome.md`, *Two kinds of focus*):
+Once `Tab` has put the focus on a control (the ring shows it), the keymap is silent but for undo,
+redo and save (`input::resolve`; a text entry keeps even those), and these are the control's
+(`design/app-chrome.md`, *Two kinds of focus*):
 
 | Key | Action |
 |---|---|

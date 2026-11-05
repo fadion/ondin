@@ -595,8 +595,9 @@ impl NudgeStep {
 
 /// Resolve this frame's keyboard input into actions for `mode`.
 ///
-/// Returns nothing at all when a chrome widget owns the keyboard: text typed
-/// into the inspector is text, never a command.
+/// Returns nothing at all when a text entry owns the keyboard: text typed into
+/// the inspector is text, never a command. Any other focused control leaves undo,
+/// redo and save.
 ///
 /// The focus read here is this frame's, not last frame's: egui updates focus in
 /// `begin_pass`, so a key that surrenders focus is seen with focus already gone
@@ -610,7 +611,18 @@ impl NudgeStep {
 /// [`OndinApp::escape`]: crate::app::OndinApp
 pub fn resolve(ctx: &egui::Context, mode: Mode, nudge: NudgeStep) -> Vec<Action> {
     if ctx.egui_wants_keyboard_input() {
-        return Vec::new();
+        // A focused control that is no text entry (a button, a layers row) keeps
+        // its keys, but undo, redo and save still reach the document: `Ctrl+Z`
+        // must answer the `Delete` a focused row just took.
+        let text = ctx
+            .memory(|m| m.focused())
+            .is_none_or(|id| egui::TextEdit::load_state(ctx, id).is_some());
+        if text {
+            return Vec::new();
+        }
+        let mut out = normal_mode(ctx, nudge);
+        out.retain(|a| matches!(a, Action::Undo | Action::Redo | Action::Save));
+        return out;
     }
     match mode {
         // Insert mode is near exclusive: the canvas text editor owns every bare
@@ -2904,6 +2916,58 @@ mod boolean_key_tests {
         for i in 0..4 {
             assert!(frame(true), "press {i} found the keymap shut");
         }
+    }
+
+    /// A focused button lets undo, redo and save through and nothing else; a
+    /// focused text entry lets nothing through.
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widgets")]
+    fn a_focused_button_still_hears_undo_and_save() {
+        use super::tests::key;
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let mut frame = |events: Vec<egui::Event>, modifiers, focus: Option<egui::Id>| {
+            let input = egui::RawInput {
+                events,
+                modifiers,
+                ..Default::default()
+            };
+            let mut got = Vec::new();
+            let mut ids = (None, None);
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(id) = focus {
+                    ui.memory_mut(|m| m.request_focus(id));
+                }
+                got = resolve(ui.ctx(), Mode::Normal, NudgeStep::default());
+                ids.0 = Some(ui.button("one").id);
+                ids.1 = Some(ui.text_edit_singleline(&mut text).id);
+            });
+            (got, ids)
+        };
+        let ctrl = egui::Modifiers::COMMAND;
+        let (_, (button, field)) = frame(Vec::new(), egui::Modifiers::NONE, None);
+        frame(Vec::new(), egui::Modifiers::NONE, button);
+        let (got, _) = frame(
+            vec![key(egui::Key::Z, ctrl), key(egui::Key::S, ctrl)],
+            ctrl,
+            None,
+        );
+        assert_eq!(
+            got,
+            [Action::Undo, Action::Save],
+            "a focused button: undo and save"
+        );
+        let (got, _) = frame(
+            vec![key(egui::Key::Delete, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+            None,
+        );
+        assert!(got.is_empty(), "but not Delete, the control's own: {got:?}");
+
+        frame(Vec::new(), egui::Modifiers::NONE, field);
+        frame(Vec::new(), egui::Modifiers::NONE, None);
+        let (got, _) = frame(vec![key(egui::Key::Z, ctrl)], ctrl, None);
+        assert!(got.is_empty(), "a focused text entry keeps Ctrl+Z: {got:?}");
     }
 }
 

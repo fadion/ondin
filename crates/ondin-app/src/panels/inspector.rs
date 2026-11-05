@@ -6111,6 +6111,7 @@ impl OndinApp {
             // A low stroke row could otherwise hang the popover off the bottom.
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     if locked {
                         super::styles::lock(ui);
@@ -8190,6 +8191,7 @@ impl OndinApp {
             .fixed_pos(anchor)
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     let inner = ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
                     ui.set_width(inner);
@@ -9355,6 +9357,7 @@ impl OndinApp {
             // A low row's popover would otherwise hang off the bottom.
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     if locked {
                         super::styles::lock(ui);

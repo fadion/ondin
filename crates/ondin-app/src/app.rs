@@ -1682,6 +1682,11 @@ impl eframe::App for OndinApp {
     /// The frame body: everything the app draws and decides, once per pass.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Before any widget runs; dropped after the last, on every return below. A
+        // text session's or a path's `Tab` stays the canvas's under an open popover.
+        let canvas_tab =
+            self.view != View::Dashboard && (self.text.is_some() || self.edited_path().is_some());
+        let _focus = crate::ui::KeyboardFocus::begin(&ctx, canvas_tab);
         // Before anything draws a name.
         self.poll_private(&ctx);
         crate::private::set(self.prefs.private);
@@ -8476,6 +8481,7 @@ impl OndinApp {
                             // Tight: each card carries a hairline and a shadow.
                             ui.spacing_mut().item_spacing.y = 5.0;
                             self.inspector_ui(ui);
+                            crate::ui::keep_focus_in_view(ui);
                         });
                 });
             });
@@ -16972,7 +16978,7 @@ mod font_arrival_tests {
 #[cfg(test)]
 mod close_confirmation_tests {
     //! The close confirmation is built from the app's own modal vocabulary:
-    //! `settings::card` paints the focus ring, and Discard is a `FieldButton::Danger`.
+    //! `settings::card` holds `Tab`, and Discard is a `FieldButton::Danger`.
 
     use super::OndinApp;
     use crate::theme::color;
@@ -16996,9 +17002,16 @@ mod close_confirmation_tests {
             ..Default::default()
         };
         // Read the last frame: a modal's `Area` fades in, scaling every colour.
-        let mut out = ctx.run_ui(with, |ui| app.close_confirmation(ui.ctx()));
+        // The frame's keyboard focus, as `OndinApp::ui` makes it: it paints the ring.
+        let frame = |app: &mut OndinApp, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
+                let _focus = crate::ui::KeyboardFocus::begin(ui.ctx(), false);
+                app.close_confirmation(ui.ctx());
+            })
+        };
+        let mut out = frame(app, with);
         for _ in 0..30 {
-            out = ctx.run_ui(idle.clone(), |ui| app.close_confirmation(ui.ctx()));
+            out = frame(app, idle.clone());
         }
         fn walk(shape: &egui::Shape, into: &mut Vec<egui::epaint::RectShape>) {
             match shape {
@@ -17028,9 +17041,9 @@ mod close_confirmation_tests {
     }
 
     /// One `Tab` puts the focus ring on screen; the no-key frame is the control,
-    /// since `focus_ring` paints only after a `Tab`.
+    /// since the ring paints only after a `Tab`.
     ///
-    /// flip: routing the card through `egui::Modal::new` → fails at the ring assertion with 0
+    /// flip: `KeyboardFocus`'s drop skips `focus_ring` → fails at the ring assertion with 0
     #[test]
     fn tabbing_the_unsaved_changes_card_shows_which_button_enter_will_press() {
         let ctx = egui::Context::default();

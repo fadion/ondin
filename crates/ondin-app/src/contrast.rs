@@ -982,6 +982,7 @@ impl OndinApp {
             .fade_in(false)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
+                crate::ui::hold_tab(ui);
                 crate::ui::menu_frame(0.0).show(ui, |ui| {
                     ui.set_width(CARD_W);
                     ui.spacing_mut().item_spacing.y = 0.0;

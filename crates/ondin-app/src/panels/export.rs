@@ -893,6 +893,7 @@ impl OndinApp {
             // Keeps the card on screen when its row is near the bottom.
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     ui.set_width(POP_INNER);
                     ui.spacing_mut().item_spacing.y = SECTION_GAP;
@@ -1411,6 +1412,7 @@ impl OndinApp {
             .fixed_pos(anchor)
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     ui.set_width(ui::menu_inner_w(MENU_W, ui::POPOVER_PAD));
                     ui::popup_rows(ui);

@@ -1046,7 +1046,7 @@ impl OndinApp {
             if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
                 act = a;
             }
-            ui::focus_ring(ui);
+            ui::hold_tab(ui);
         });
         // Armed after a right-click's cancel is answered, so the frame it lands on
         // cannot re-arm it.

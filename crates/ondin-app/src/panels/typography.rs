@@ -2056,6 +2056,7 @@ impl OndinApp {
             .fixed_pos(anchor)
             .constrain_to(screen.shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     ui.set_width(MENU_INNER);
                     ui.spacing_mut().item_spacing.y = SECTION_GAP;

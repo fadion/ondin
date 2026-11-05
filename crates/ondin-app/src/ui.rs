@@ -3236,50 +3236,238 @@ pub fn widget_rect(ctx: &egui::Context, id: egui::Id) -> Option<egui::WidgetRect
     })
 }
 
-/// The accent hairline around whatever the keyboard has focused, like CSS
-/// `:focus-visible`. Call it once at the end of a modal's body (`settings::card`
-/// does). It paints nothing unless a key put the focus there: `Tab` turns the mode
-/// on and any pointer press turns it off. The rect is last frame's, since the
-/// focused widget may not be drawn yet.
-pub fn focus_ring(ui: &egui::Ui) {
-    let ctx = ui.ctx();
-    // Two reads and a write, never nested: the context lock is not re-entrant.
-    let tabbed = ctx.input(|i| i.events.iter().any(is_tab));
-    let pointed = ctx.input(|i| i.pointer.any_pressed());
-    let key = egui::Id::new("focus-visible");
-    let visible = ctx.data_mut(|d| {
-        let was = d.get_temp::<bool>(key).unwrap_or(false);
-        let now = (was || tabbed) && !pointed;
-        d.insert_temp(key, now);
-        now
+/// Keyboard focus for one frame, like CSS `:focus-visible`. Made at the top of the
+/// frame body, before any widget runs; dropped after the last, on every return
+/// path. On drop it moves a `Tab` an open surface held ([`hold_tab`]) and paints
+/// [`focus_ring`]. Every focusable control gets both without doing anything.
+pub struct KeyboardFocus {
+    ctx: egui::Context,
+}
+
+impl KeyboardFocus {
+    /// Updates the visibility latch (`Tab` turns it on, any pointer press off) and,
+    /// when a surface held `Tab` last frame, takes this frame's `Tab` from egui so
+    /// that no widget behind the surface moves the focus first. `canvas_tab`: the
+    /// canvas has a use for `Tab` (a text session, a path's points), which it keeps
+    /// while no control holds the focus, a surface open or not.
+    pub fn begin(ctx: &egui::Context, canvas_tab: bool) -> Self {
+        // Reads and writes one at a time: the context lock is not re-entrant.
+        let pressed = ctx.input(|i| tab_pressed(&i.events));
+        let pointed = ctx.input(|i| i.pointer.any_pressed());
+        let focused = ctx.memory(|m| m.focused()).is_some();
+        let tab = pressed.filter(|_| focused || !canvas_tab);
+        let surface_open = ctx.data(|d| d.get_temp::<bool>(open_id())).unwrap_or(false);
+        let held = tab.is_some() && surface_open;
+        ctx.data_mut(|d| {
+            let was = d.get_temp::<bool>(visible_id()).unwrap_or(false);
+            d.insert_temp(visible_id(), (was || tab.is_some()) && !pointed);
+            d.insert_temp(tab_id(), tab);
+            d.insert_temp(held_id(), held);
+            d.remove::<Vec<egui::LayerId>>(holders_id());
+        });
+        if held {
+            ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        }
+        Self { ctx: ctx.clone() }
+    }
+}
+
+impl Drop for KeyboardFocus {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let ctx = &self.ctx;
+        let tab = ctx.data(|d| d.get_temp::<Option<bool>>(tab_id()).flatten());
+        let held = ctx.data(|d| d.get_temp::<bool>(held_id())).unwrap_or(false);
+        let holders = ctx
+            .data(|d| d.get_temp::<Vec<egui::LayerId>>(holders_id()))
+            .unwrap_or_default();
+        // The higher `Order` wins; within one, the area on top of it, else the later.
+        let top = holders
+            .into_iter()
+            .reduce(|a, b| match a.order.cmp(&b.order) {
+                std::cmp::Ordering::Greater => a,
+                std::cmp::Ordering::Less => b,
+                std::cmp::Ordering::Equal => {
+                    match ctx.memory(|m| m.areas().top_layer_id(a.order)) == Some(a) {
+                        true => a,
+                        false => b,
+                    }
+                }
+            });
+        ctx.data_mut(|d| d.insert_temp(open_id(), top.is_some()));
+        if let (Some(top), Some(back)) = (top, tab) {
+            cycle_focus(ctx, top, back, held);
+        }
+        focus_ring(ctx);
+    }
+}
+
+fn visible_id() -> egui::Id {
+    egui::Id::new("focus-visible")
+}
+
+/// This frame's `Tab`: `Some(true)` with `Shift`.
+fn tab_id() -> egui::Id {
+    egui::Id::new("focus-tab")
+}
+
+/// The layers that called [`hold_tab`] this frame.
+fn holders_id() -> egui::Id {
+    egui::Id::new("focus-holders")
+}
+
+/// Whether a surface held `Tab` at the end of last frame.
+fn open_id() -> egui::Id {
+    egui::Id::new("focus-surface-open")
+}
+
+/// Whether this frame's `Tab` was taken from egui for a surface.
+fn held_id() -> egui::Id {
+    egui::Id::new("focus-held")
+}
+
+/// Keeps `Tab` inside the surface this `ui` draws: a popover, a dialog, a card
+/// over the canvas. Call it anywhere in the surface's body, every frame it shows.
+/// The first `Tab` after it opens focuses its first control and `Shift+Tab` its
+/// last; from either end the focus wraps round, never leaving for the panels
+/// behind it. When several are open, the topmost holds.
+pub fn hold_tab(ui: &egui::Ui) {
+    let layer = ui.layer_id();
+    ui.ctx().data_mut(|d| {
+        let holders = d.get_temp_mut_or_default::<Vec<egui::LayerId>>(holders_id());
+        if !holders.contains(&layer) {
+            holders.push(layer);
+        }
     });
-    if !visible {
+}
+
+/// Moves the focus one tab stop along `layer`'s controls, in the order they were
+/// laid out, wrapping at either end. A focus outside the layer enters at the end
+/// the key points to. When egui kept the key (`held` false: the surface opened
+/// this frame), a move it already made into the layer stands.
+fn cycle_focus(ctx: &egui::Context, layer: egui::LayerId, back: bool, held: bool) {
+    let mut stops: Vec<egui::Id> = Vec::new();
+    ctx.viewport(|v| {
+        for w in v.this_pass.widgets.get_layer(layer) {
+            if w.enabled && w.sense.is_focusable() && !stops.contains(&w.id) {
+                stops.push(w.id);
+            }
+        }
+    });
+    if stops.is_empty() {
+        return;
+    }
+    let focused = ctx.memory(|m| m.focused());
+    let at = focused.and_then(|f| stops.iter().position(|&s| s == f));
+    if !held && at.is_some() {
+        return;
+    }
+    let n = stops.len();
+    let next = match (at, back) {
+        (Some(i), false) => (i + 1) % n,
+        (Some(i), true) => (i + n - 1) % n,
+        (None, false) => 0,
+        (None, true) => n - 1,
+    };
+    ctx.memory_mut(|m| m.request_focus(stops[next]));
+    // The widget draws focused next frame, and nothing else asks for that frame.
+    ctx.request_repaint();
+}
+
+/// Whether the keyboard moved the focus last: on after `Tab`, off at any pointer
+/// press. The pointer never shows [`focus_ring`].
+pub fn focus_visible(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(visible_id()))
+        .unwrap_or(false)
+}
+
+/// The accent hairline outside whatever the keyboard has focused, painted last on
+/// the focused widget's own layer so it sits under any surface above it, and cut
+/// where the widget is. Never on a text entry, whose [`typing_edge`] already says
+/// where keys go, and not on the frame focus arrives: a number field becomes its
+/// text entry only on its next frame.
+fn focus_ring(ctx: &egui::Context) {
+    if !focus_visible(ctx) {
         return;
     }
     let Some(id) = ctx.memory(|m| m.focused()) else {
         return;
     };
-    let Some(rect) = widget_rect(ctx, id).map(|w| w.rect) else {
+    if !ctx.memory(|m| m.had_focus_last_frame(id)) {
+        ctx.request_repaint();
+        return;
+    }
+    if egui::TextEdit::load_state(ctx, id).is_some() {
+        return;
+    }
+    let Some(w) = ctx.viewport(|v| v.this_pass.widgets.get(id).copied()) else {
         return;
     };
-    ui.painter().rect_stroke(
-        rect.expand(FOCUS_GAP),
-        egui::CornerRadius::same(BUTTON_R + FOCUS_GAP as u8),
-        egui::Stroke::new(1.0, color::accent()),
-        egui::StrokeKind::Outside,
-    );
+    let ring = w.rect.expand(FOCUS_GAP);
+    // `interact_rect` is the widget cut to its clip: where it is cut, so is the ring.
+    let clip = match w.interact_rect == w.rect {
+        true => ring.expand(1.0),
+        false => w.interact_rect,
+    };
+    ctx.layer_painter(w.layer_id)
+        .with_clip_rect(clip)
+        .rect_stroke(
+            ring,
+            egui::CornerRadius::same(BUTTON_R + FOCUS_GAP as u8),
+            egui::Stroke::new(1.0, color::accent()),
+            egui::StrokeKind::Outside,
+        );
 }
 
-/// Whether an event is `Tab` going down, in either direction.
-fn is_tab(event: &egui::Event) -> bool {
-    matches!(
-        event,
+/// Scrolls the scroll area whose content `ui` is so the control the keyboard just
+/// focused is in view. Call it last inside the content of a scroll area that holds
+/// tab stops; a focus outside the content, or one the pointer gave, is left alone.
+pub fn keep_focus_in_view(ui: &egui::Ui) {
+    let ctx = ui.ctx();
+    if !focus_visible(ctx) {
+        return;
+    }
+    let Some(id) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    let Some(w) = ctx.viewport(|v| v.this_pass.widgets.get(id).copied()) else {
+        return;
+    };
+    // Once per focus: a person scrolling the focused control away is not undone.
+    let key = ui.id().with("focus-scrolled");
+    if ctx.data(|d| d.get_temp::<egui::Id>(key)) == Some(id) {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(key, id));
+    let ring = w.rect.expand(FOCUS_GAP + 1.0);
+    if w.layer_id == ui.layer_id()
+        && ui.min_rect().intersects(w.rect)
+        && !ui.clip_rect().contains_rect(ring)
+    {
+        ui.scroll_to_rect(ring, None);
+    }
+}
+
+/// This frame's `Tab` going down: `Some(true)` with `Shift`, `Some(false)` alone,
+/// `None` without one or with another modifier.
+fn tab_pressed(events: &[egui::Event]) -> Option<bool> {
+    events.iter().find_map(|e| match e {
         egui::Event::Key {
             key: egui::Key::Tab,
             pressed: true,
+            modifiers,
             ..
-        }
-    )
+        } if !modifiers.any() => Some(false),
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.shift_only() => Some(true),
+        _ => None,
+    })
 }
 
 /// A square button that sits *in* a field row rather than floating on the card:
@@ -4841,6 +5029,195 @@ mod pulse_tests {
         assert_eq!(pulse_alpha(back + e), 1.0, "held whole");
         let period = 2.0 * (PULSE_RAMP + PULSE_HOLD);
         assert_eq!(pulse_alpha(period + PULSE_RAMP + e), 0.5, "and again");
+    }
+}
+
+#[cfg(test)]
+mod keyboard_focus_tests {
+    use super::*;
+
+    /// A panel of two buttons and, when `open`, a popover of three that holds
+    /// `Tab`, drawn after the panel as the app draws its popovers.
+    struct Fixture {
+        ctx: egui::Context,
+        panel: Vec<egui::Id>,
+        popover: Vec<egui::Id>,
+        shapes: Vec<egui::epaint::ClippedShape>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            Self {
+                ctx,
+                panel: Vec::new(),
+                popover: Vec::new(),
+                shapes: Vec::new(),
+            }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>, open: bool, canvas_tab: bool) {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let (mut panel, mut popover) = (Vec::new(), Vec::new());
+            let out = self.ctx.run_ui(input, |ui| {
+                let _focus = KeyboardFocus::begin(ui.ctx(), canvas_tab);
+                for _ in 0..2 {
+                    panel.push(field_button(ui, icon::X, 28.0, FieldButton::Off).id);
+                }
+                if open {
+                    egui::Area::new(egui::Id::new("popover"))
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(egui::pos2(400.0, 100.0))
+                        .show(ui.ctx(), |ui| {
+                            hold_tab(ui);
+                            for _ in 0..3 {
+                                popover.push(field_button(ui, icon::X, 28.0, FieldButton::Off).id);
+                            }
+                        });
+                }
+            });
+            self.panel = panel;
+            self.popover = popover;
+            self.shapes = out.shapes;
+        }
+
+        fn idle(&mut self, open: bool) {
+            for _ in 0..3 {
+                self.frame(Vec::new(), open, false);
+            }
+        }
+
+        fn focused(&self) -> Option<egui::Id> {
+            self.ctx.memory(|m| m.focused())
+        }
+
+        fn rings(&self) -> usize {
+            self.shapes
+                .iter()
+                .filter(|cs| {
+                    matches!(&cs.shape, egui::Shape::Rect(r)
+                        if r.stroke.color == color::accent()
+                            && r.stroke_kind == egui::StrokeKind::Outside)
+                })
+                .count()
+        }
+    }
+
+    fn tab(shift: bool) -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: match shift {
+                true => egui::Modifiers::SHIFT,
+                false => egui::Modifiers::NONE,
+            },
+        }]
+    }
+
+    /// An open popover takes the first `Tab` to its first control, wraps from its
+    /// last to its first and back, and never lets the focus reach the panel.
+    /// flip: `KeyboardFocus::begin` no longer takes the `Tab` from egui → fails at
+    /// "Tab walks it in order", egui and the hold each moving the focus.
+    #[test]
+    fn an_open_popover_holds_tab_among_its_own_controls() {
+        let mut f = Fixture::new();
+        f.idle(true);
+        assert_eq!(f.focused(), None, "the fixture opens with nothing focused");
+
+        f.frame(tab(false), true, false);
+        f.idle(true);
+        assert_eq!(
+            f.focused(),
+            Some(f.popover[0]),
+            "the first Tab enters the popover"
+        );
+
+        for _ in 0..2 {
+            f.frame(tab(false), true, false);
+            f.idle(true);
+        }
+        assert_eq!(f.focused(), Some(f.popover[2]), "Tab walks it in order");
+        f.frame(tab(false), true, false);
+        f.idle(true);
+        assert_eq!(
+            f.focused(),
+            Some(f.popover[0]),
+            "the wrap: past the last, its first"
+        );
+        f.frame(tab(true), true, false);
+        f.idle(true);
+        assert_eq!(f.focused(), Some(f.popover[2]), "and Shift+Tab wraps back");
+        assert_eq!(f.rings(), 1, "the keyboard's focus wears the ring");
+    }
+
+    /// With no surface open, `Tab` is egui's own walk through the panel.
+    #[test]
+    fn without_a_surface_tab_walks_the_panel() {
+        let mut f = Fixture::new();
+        f.idle(false);
+        f.frame(tab(false), false, false);
+        f.idle(false);
+        assert_eq!(f.focused(), Some(f.panel[0]));
+        f.frame(tab(false), false, false);
+        f.idle(false);
+        assert_eq!(f.focused(), Some(f.panel[1]));
+    }
+
+    /// A text session's `Tab` stays the canvas's under an open popover while no
+    /// control has the focus: the popover does not take it (the app's own
+    /// surrender hands back what egui focused). flip: drop `canvas_tab` from
+    /// `begin`'s filter → fails, the popover's first control focused.
+    #[test]
+    fn the_canvas_keeps_its_tab_while_nothing_is_focused() {
+        let mut f = Fixture::new();
+        f.idle(true);
+        f.frame(tab(false), true, true);
+        f.idle(true);
+        let focused = f.focused();
+        assert!(
+            focused.is_none_or(|id| !f.popover.contains(&id)),
+            "{focused:?}"
+        );
+    }
+
+    /// A pointer press hides the ring, and a click never focuses a button.
+    #[test]
+    fn the_pointer_never_shows_the_ring() {
+        let mut f = Fixture::new();
+        f.idle(true);
+        f.frame(tab(false), true, false);
+        f.idle(true);
+        assert_eq!(f.rings(), 1, "the fixture shows a ring after Tab");
+        let at = widget_rect(&f.ctx, f.popover[1])
+            .expect("drawn")
+            .rect
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        f.frame(vec![egui::Event::PointerMoved(at)], true, false);
+        f.frame(vec![press(true)], true, false);
+        f.frame(vec![press(false)], true, false);
+        f.idle(true);
+        assert_eq!(f.rings(), 0, "the press put the ring away");
+        assert_ne!(
+            f.focused(),
+            Some(f.popover[1]),
+            "and the click did not focus"
+        );
     }
 }
 

@@ -425,18 +425,15 @@ fn cache_row(bytes: Option<u64>) -> (String, bool) {
     }
 }
 
-/// [`card_modal`] shown, with the keyboard's focus ring painted over it.
-///
-/// The wrapper exists so a card cannot forget the ring: `ui::focus_ring` must be
-/// the last thing drawn in the body, and every card goes through here.
+/// [`card_modal`] shown, holding `Tab` among its own controls ([`ui::hold_tab`]).
 pub(crate) fn card<R>(
     id: &str,
     ctx: &egui::Context,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::ModalResponse<R> {
     card_modal(ctx, id).show(ctx, |ui| {
+        ui::hold_tab(ui);
         let out = body(ui);
-        ui::focus_ring(ui);
         // The card's rect, frame included, so the window's own controls laid over
         // the backdrop keep clear of it (`chrome::above_modal`).
         let rect = ui.min_rect().expand(PAD);

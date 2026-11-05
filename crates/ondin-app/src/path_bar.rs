@@ -522,6 +522,7 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(ctx, |ui| {
+                ui::hold_tab(ui);
                 ui.set_max_width(CARD_W);
                 ui::card(ui, |ui| {
                     ui::labelled(ui, "Offset", |ui| {

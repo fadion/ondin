@@ -997,6 +997,7 @@ impl OndinApp {
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(ui::menu_inner_w(PICKER_W, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;

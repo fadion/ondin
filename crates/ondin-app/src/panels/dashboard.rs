@@ -7842,7 +7842,11 @@ mod tests {
                     events: events.take().unwrap_or_default(),
                     ..Default::default()
                 };
-                let full = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
+                let full = ctx.run_ui(input, |ui| {
+                    // As `OndinApp::ui` makes it: the frame's keyboard focus paints the ring.
+                    let _focus = crate::ui::KeyboardFocus::begin(ui.ctx(), false);
+                    app.dashboard_ui(ui);
+                });
                 out = full
                     .shapes
                     .iter()

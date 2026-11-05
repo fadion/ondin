@@ -522,6 +522,7 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::card_frame()
                     .inner_margin(PAD)
                     .show(ui, |ui| {

@@ -443,6 +443,7 @@ impl OndinApp {
             window = window.current_pos(spawn);
         }
         window.show(ctx, |ui| {
+            ui::hold_tab(ui);
             ui.set_width(WIDTH - ui::POPOVER_PAD * 2.0);
             // One number across every popover in the app.
             ui.spacing_mut().item_spacing.y = crate::ui::POPOVER_SECTION_GAP;

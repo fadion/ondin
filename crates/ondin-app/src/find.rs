@@ -409,6 +409,7 @@ impl OndinApp {
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::card_frame().show(ui, |ui| {
                     ui.set_width(W);
                     ui.set_max_height(max_h);

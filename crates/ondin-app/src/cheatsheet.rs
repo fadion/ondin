@@ -507,8 +507,7 @@ impl OndinApp {
                     });
                 });
             footer(ui);
-            // Last, as `settings::card` paints it: this card keeps its own margin.
-            crate::ui::focus_ring(ui);
+            crate::ui::hold_tab(ui);
         });
         if closed || modal.should_close() {
             self.cheatsheet = None;

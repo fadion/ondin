@@ -289,6 +289,7 @@ impl OndinApp {
         let r = &mut self.colour_review;
         let mut act = None;
         ui::canvas_popup_area(ctx, egui::Id::new("colour-review"), canvas).show(ctx, |ui| {
+            ui::hold_tab(ui);
             crate::settings::card_frame().show(ui, |ui| {
                 ui.set_width(W);
                 ui.set_max_height(room);

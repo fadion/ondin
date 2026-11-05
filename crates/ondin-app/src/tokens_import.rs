@@ -439,7 +439,7 @@ impl OndinApp {
             if let Some(a) = foot(ui, &mut t) {
                 act = a;
             }
-            ui::focus_ring(ui);
+            ui::hold_tab(ui);
         });
         if modal.backdrop_response.clicked() {
             return;

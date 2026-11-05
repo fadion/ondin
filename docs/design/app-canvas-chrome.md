@@ -651,8 +651,10 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   and merge*; a name is refused as the variables browser refuses one
   (`panels::variables::name_refusal`).
 - **Status.** Undo steps *Merge colours* and *Merge into a new variable*. *Merged N colours into X · U
-  uses on L layers*, then *· K took its value, as stops, shadows and text colours do not bind* and
-  *· K on locked layers left* when they apply. With no group: *No near-identical colours at
+  uses on L layers*, then *· K took its value instead of binding* and *· K on locked layers left*
+  when they apply. The first names no reason, for it has several: stops, shadows and text colours
+  never bind, a field the variable's scope refuses does not, and nor does a layer in a mode where
+  the variable draws another colour. With no group: *No near-identical colours at
   ‹threshold›* over how many colours the scope holds.
 - **Keys.** `Escape` is a rung of `OndinApp::escape` below Find's: the caret menu, then the naming,
   then the card.

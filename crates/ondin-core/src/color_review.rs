@@ -4,8 +4,9 @@
 //! **Every raw colour counts**: solid fills and strokes, gradient stops, shadow
 //! colours, and a text layer's own colour and its runs'. A fill or stroke bound to
 //! a colour variable is a member too, as that variable; it is never merged away.
-//! Only fills and strokes bind, so a merge into a variable binds those and writes
-//! the variable's value into the other places ([`Merged::unbound`]).
+//! Only fills and strokes bind, so a merge into a variable binds those its scope
+//! allows and writes the variable's value into the other places
+//! ([`Merged::unbound`]).
 //!
 //! **A group grows around its anchor**, the most-used colour not already taken,
 //! and every member is within the limit of the anchor itself, so A≈B≈C cannot
@@ -312,8 +313,9 @@ pub struct Merged {
     pub layers: usize,
     /// Places on locked layers it left as they were.
     pub locked: usize,
-    /// Places it wrote the variable's value into because they cannot bind:
-    /// gradient stops, shadow colours, text colours.
+    /// Places it wrote the variable's value into instead of binding: gradient
+    /// stops, shadow and text colours, a field the target's scope refuses, and
+    /// every field of a layer where the target draws another colour.
     pub unbound: usize,
 }
 

@@ -488,7 +488,7 @@ impl OndinApp {
         );
         if merged.unbound > 0 {
             said.push_str(&format!(
-                " · {} took its value, as stops, shadows and text colours do not bind",
+                " · {} took its value instead of binding",
                 merged.unbound
             ));
         }
@@ -1327,6 +1327,77 @@ mod tests {
         assert_eq!(r.seen.census[r.seen.groups[0].members[1]].uses, 1);
         assert!(f.app.session.undo());
         assert_eq!(fill(&f.app, f.b), BrushSource::from(B), "one step");
+    }
+
+    /// A fill the target's scope refuses takes the value, and the status line
+    /// counts it without blaming stops, shadows or text.
+    /// flip: `merge_group` naming the old reason → fails at the status line.
+    #[test]
+    fn a_fill_the_scope_refuses_is_counted_without_a_reason() {
+        use ondin_core::variable::{Cell, Field, Scope, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let s = &mut f.app.session;
+        let var = s.ids.mint_var();
+        let first = s.ids.mint_mode();
+        let t = s.doc.variables();
+        let (mut ops, modes) =
+            ondin_core::variable::columns_for_new(t, t.first_collection().id, first);
+        ops.push(Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "color/line".into(),
+                kind: VarKind::Color,
+                cells: modes.into_iter().map(|m| (m, Cell::Color(A))).collect(),
+                scope: Some(Scope::of([Field::Stroke])),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        });
+        let lined = s.ids.mint();
+        let page = s.page;
+        ops.push(Operation::CreateNode {
+            id: lined,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        });
+        ops.push(Operation::SetStrokes {
+            id: lined,
+            strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
+                brush: BrushSource::Bound { var, alpha: 1.0 },
+                width: 1.0,
+                ..Default::default()
+            }]),
+        });
+        assert!(s.commit(Transaction(ops)));
+        f.app.open_colour_review();
+        run(&mut f.app, &ctx);
+        let r = &f.app.colour_review;
+        let g = &r.seen.groups[0];
+        assert!(
+            !r.seen.census[g.members[r.target(g)]].is_raw(),
+            "the variable is the target"
+        );
+
+        f.app.colour_review_act(&ctx, Some(Act::Merge(0)));
+        assert_eq!(
+            fill(&f.app, f.b),
+            BrushSource::from(A),
+            "the value, unbound"
+        );
+        let said = &f.app.session.status().text;
+        assert!(
+            said.contains(" · 4 took its value instead of binding"),
+            "the status line: {said}"
+        );
     }
 
     /// The caret's other merge names a new variable first; a name with an empty

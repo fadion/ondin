@@ -178,7 +178,9 @@ fn a_nested_frame_is_a_group_led_by_its_paint() {
     assert_eq!(first["hasClippingMask"], Value::Bool(true));
 }
 
-/// The mask clips the picture above it, and paints nothing of its own.
+/// The mask clips the picture above it, and paints nothing of its own: no
+/// fill, no border.
+/// flip: `flags` turning off the fills only → fails at the borders.
 #[test]
 fn a_mask_clips_and_does_not_paint() {
     let (_, z) = written();
@@ -188,8 +190,234 @@ fn a_mask_clips_and_does_not_paint() {
         .find(|l| s(l, "name") == "Clip")
         .expect("the mask");
     assert_eq!(clip["hasClippingMask"], Value::Bool(true));
-    let fills = clip["style"]["fills"].as_array().unwrap();
-    assert!(!fills.is_empty() && fills.iter().all(|f| f["isEnabled"] == false));
+    for key in ["fills", "borders"] {
+        let paints = clip["style"][key].as_array().unwrap();
+        assert!(!paints.is_empty(), "the fixture: the mask has {key}");
+        assert!(paints.iter().all(|f| f["isEnabled"] == false), "{key}");
+    }
+}
+
+/// A frame's opacity and shadow are drawn once: by the group a nested frame
+/// becomes, and by each instance of a main, never again by the paint layer
+/// that leads it.
+/// flip: `frame_paint` styling its rect with `style_of` → fails at the row's
+/// paint layer.
+#[test]
+fn a_frames_paint_layer_carries_no_effects() {
+    let (_, z) = written();
+    let all = layers(&z);
+    let opacity = |l: &Value| l["style"]["contextSettings"]["opacity"].as_f64();
+    let shadows = |l: &Value| l["style"]["shadows"].as_array().map_or(0, Vec::len);
+    let row = all
+        .iter()
+        .map(|(_, l)| l)
+        .find(|l| s(l, "name") == "Row" && s(l, "_class") == "group")
+        .expect("the row, as a group");
+    assert_eq!((opacity(row), shadows(row)), (Some(0.5), 1), "on the group");
+    let paint = &row["layers"][0];
+    assert_eq!(s(paint, "_class"), "rectangle");
+    assert_eq!(
+        (opacity(paint), shadows(paint)),
+        (Some(1.0), 0),
+        "row's paint"
+    );
+    let master = all
+        .iter()
+        .map(|(_, l)| l)
+        .find(|l| s(l, "_class") == "symbolMaster")
+        .expect("the button's master");
+    let paint = &master["layers"][0];
+    assert_eq!(s(paint, "_class"), "rectangle");
+    assert_eq!(shadows(paint), 0, "the master's paint");
+    let instances: Vec<&Value> = all
+        .iter()
+        .map(|(_, l)| l)
+        .filter(|l| s(l, "_class") == "symbolInstance")
+        .collect();
+    assert!(!instances.is_empty() && instances.iter().all(|i| shadows(i) == 1));
+}
+
+/// A copy whose label differs from its main's in its runs is written as plain
+/// layers, since a string override carries no runs, and the report says so.
+/// flip: `text_overrides` taking a `SetText` by its content alone → fails at
+/// "plain".
+#[test]
+fn a_copy_whose_runs_differ_is_written_plain() {
+    let f = fixture();
+    let out = ondin_export::sketch::export(&f.doc, &f.res, "Fixture").unwrap();
+    let z = unzip(&out.bytes);
+    let flipped: Vec<String> = layers(&z)
+        .into_iter()
+        .filter(|(_, l)| s(l, "name") == "Flipped")
+        .map(|(_, l)| s(&l, "_class").to_owned())
+        .collect();
+    // The group and the rect leading it with its paint.
+    assert_eq!(flipped, ["group", "rectangle"], "plain");
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a.starts_with("Instances that differ"))
+    );
+}
+
+/// What Sketch cannot hold of the fixture, each once, in the order met.
+/// flip: `text_overrides` taking a `SetText` by its content alone → fails at
+/// the list, the plain-layers line gone.
+#[test]
+fn the_report_names_what_sketch_cannot_hold() {
+    let f = fixture();
+    let out = ondin_export::sketch::export(&f.doc, &f.res, "Fixture").unwrap();
+    assert_eq!(
+        out.approximated,
+        [
+            "Guides, left out",
+            "Auto layout, kept at drawn positions",
+            "Frames inside frames or groups, as groups",
+            "Instances that differ from their main past text, as plain layers",
+            "Layout grids, left out",
+        ]
+    );
+}
+
+/// A text override inside a nested copy that its master writes as plain layers
+/// names the text by its own id there; every path resolves segment by segment,
+/// through symbol instances only, to a text layer.
+/// flip: `override_path` prefixing the nearest copy whether or not it is
+/// written as an instance → fails at the resolution.
+#[test]
+fn an_override_through_a_plain_nested_copy_resolves() {
+    use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+    use ondin_core::{
+        Document, Fill, Operation, Resolved, TextSizing, TextStyle, Transaction, build::Placement,
+        keyed_by_position, peniko::Color,
+    };
+    let mut ids = IdSource::new(0x5E);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [n, t, m] = [(); 3].map(|_| ids.mint());
+    let frame = |id, w, x| Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Artboard {
+            size: Size::new(w, 60.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((x, 0.0))),
+        name: None,
+    };
+    doc.apply(&Transaction(vec![
+        frame(n, 100.0, 0.0),
+        Operation::CreateNode {
+            id: t,
+            parent: n,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "Hi".into(),
+                style: Box::new(TextStyle::default()),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetComponent {
+            id: n,
+            component: true,
+        },
+        frame(m, 200.0, 200.0),
+    ]))
+    .unwrap();
+    let copy_into = |doc: &mut Document, ids: &mut IdSource, main, parent| {
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            ids,
+            &[Placement {
+                nodes: doc.capture_subtree(main).unwrap(),
+                parent,
+                index: None,
+            }],
+            Default::default(),
+        );
+        doc.apply(&tx).unwrap();
+        made[0]
+    };
+    // M holds a copy of N with a fill of its own, which M's master writes plain.
+    let r = copy_into(&mut doc, &mut ids, n, m);
+    doc.apply(&Transaction(vec![
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: ondin_core::peniko::Brush::Solid(Color::from_rgb8(9, 9, 9)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetComponent {
+            id: m,
+            component: true,
+        },
+    ]))
+    .unwrap();
+    let i = copy_into(&mut doc, &mut ids, m, root);
+    let text = doc
+        .get(doc.get(i).unwrap().children()[0])
+        .unwrap()
+        .children()[0];
+    doc.apply(&Transaction(vec![Operation::SetText {
+        id: text,
+        content: "Yo".into(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = ondin_export::sketch::export(&doc, &res, "Nested").unwrap();
+    let z = unzip(&out.bytes);
+    let all = layers(&z);
+    let masters: BTreeMap<&str, &Value> = all
+        .iter()
+        .filter(|(_, l)| s(l, "_class") == "symbolMaster")
+        .map(|(_, l)| (s(l, "symbolID"), l))
+        .collect();
+    fn find<'a>(l: &'a Value, id: &str) -> Option<&'a Value> {
+        l["layers"].as_array()?.iter().find_map(|c| {
+            (s(c, "do_objectID") == id)
+                .then_some(c)
+                .or_else(|| find(c, id))
+        })
+    }
+    let mut reached = 0;
+    for (_, inst) in all
+        .iter()
+        .filter(|(_, l)| s(l, "_class") == "symbolInstance")
+    {
+        for o in inst["overrideValues"].as_array().unwrap() {
+            let name = s(o, "overrideName");
+            let path = name
+                .strip_suffix("_stringValue")
+                .expect("a string override");
+            let mut master = masters[s(inst, "symbolID")];
+            let segments: Vec<&str> = path.split('/').collect();
+            for (k, seg) in segments.iter().enumerate() {
+                let layer = find(master, seg).unwrap_or_else(|| panic!("{name}: {seg}"));
+                if k + 1 == segments.len() {
+                    assert_eq!(s(layer, "_class"), "text", "{name}");
+                } else {
+                    assert_eq!(s(layer, "_class"), "symbolInstance", "{name}: {seg}");
+                    master = masters[s(layer, "symbolID")];
+                }
+            }
+            reached += 1;
+        }
+    }
+    assert_eq!(reached, 1, "the copy of M overrides its text");
 }
 
 /// A rect turned 30° clockwise is its unturned frame about the same centre,
@@ -218,6 +446,8 @@ fn the_same_document_writes_the_same_file() {
 /// Sketch's reader takes the file back: the layers in their places, the swatch
 /// still bound, the title in its style, and the copy an instance of the
 /// button with its own label.
+/// flip: `place` writing the rotation unnegated → fails at the turned rect's
+/// corners, whose bounds alone agree.
 #[test]
 fn sketch_import_reads_the_export_back() {
     let f = fixture();
@@ -226,7 +456,7 @@ fn sketch_import_reads_the_export_back() {
     let back = ondin_core::sketch_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
         .expect("read back");
     let doc = back.doc;
-    for name in ["Screen", "Title", "Clip", "Glow"] {
+    for name in ["Screen", "Title", "Clip", "Glow", "Turned"] {
         same_place(&f, &doc, name);
     }
     let bound = doc

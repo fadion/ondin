@@ -106,7 +106,7 @@ fn every_reference_in_the_file_resolves() {
     assert_eq!(refs.0, 1, "the swatch names its library colour");
     assert_eq!(refs.1, 1, "the photo names its picture");
     assert!(refs.2 >= 2, "the title's runs name their typography");
-    assert_eq!(refs.3, 2, "the copy and its label name the main's layers");
+    assert_eq!(refs.3, 4, "each copy and its label name the main's layers");
 }
 
 /// The masked group holds the mask first, then the picture it clips.
@@ -143,10 +143,12 @@ fn a_copy_names_its_main_and_what_it_overrides() {
         .collect();
     let root = copies
         .iter()
-        .find(|v| v.get("componentRoot").is_some())
+        .find(|v| v.get("componentRoot").is_some() && s(v, "name") == "Button")
         .expect("the copy's root");
-    assert_eq!(s(root, "name"), "Button");
-    let label = copies.iter().find(|v| s(v, "type") == "text").unwrap();
+    let label = copies
+        .iter()
+        .find(|v| s(v, "type") == "text" && s(v, "parentId") == s(root, "id"))
+        .unwrap();
     let touched: Vec<&str> = label["touched"]
         .as_array()
         .expect("the label's overrides")
@@ -211,6 +213,24 @@ fn a_turned_rect_keeps_its_box_and_turns_about_its_centre() {
     );
 }
 
+/// What Penpot cannot hold of the fixture, each once, in the order met.
+/// flip: `paints` dropping a hidden fill unreported → fails at the list.
+#[test]
+fn the_report_names_what_penpot_cannot_hold() {
+    let f = fixture();
+    let out = ondin_export::penpot::export(&f.doc, &f.res, "Fixture").unwrap();
+    assert_eq!(
+        out.approximated,
+        [
+            "Guides, left out",
+            "Hidden fills, left out",
+            "Export settings, left out",
+            "Layout grids, left out",
+            "Slices, left out",
+        ]
+    );
+}
+
 /// Writing the same document twice gives the same bytes.
 #[test]
 fn the_same_document_writes_the_same_file() {
@@ -230,7 +250,9 @@ fn penpot_import_reads_the_export_back() {
     let back = ondin_core::penpot_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
         .expect("read back");
     let doc = back.doc;
-    for name in ["Screen", "Row", "Button", "Title", "Clip", "Glow"] {
+    for name in [
+        "Screen", "Row", "Button", "Title", "Clip", "Glow", "Turned", "Flipped",
+    ] {
         same_place(&f, &doc, name);
     }
     let swatch = doc

@@ -81,6 +81,11 @@ fn png() -> Vec<u8> {
 /// A page with a flex row, a component and an instance whose label is
 /// overridden, a fill bound to a colour variable, a text style, a mask over a
 /// picture, a turned rect, a radial gradient and a hidden, locked layer.
+///
+/// Past what both files hold: the row is half opaque and shadowed, as is the
+/// button; a second copy, turned and mirrored, makes part of its label bold;
+/// the row's first rect has a hidden fill, the mask a stroke; the screen has an
+/// export setting and a layout grid, the page a guide and a slice.
 pub fn fixture() -> Fixture {
     let mut ids = IdSource::new(0x7E7);
     let root = ids.mint();
@@ -101,7 +106,21 @@ pub fn fixture() -> Fixture {
         turned,
         glow,
         ghost,
-    ] = [(); 14].map(|_| ids.mint());
+        slice,
+    ] = [(); 15].map(|_| ids.mint());
+    let guide = ondin_core::GuideId(ids.mint());
+    let shadow = |id: NodeId| Operation::SetEffects {
+        id,
+        effects: keyed_by_position([ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
+            ondin_core::Shadow {
+                offset: ondin_core::kurbo::Vec2::new(0.0, 4.0),
+                blur: 8.0,
+                spread: 0.0,
+                color: Color::from_rgba8(0, 0, 0, 80),
+                blend: ondin_core::BlendMode::Normal,
+            },
+        ))]),
+    };
     let picture = ImageId("test:photo".into());
     let mut bold = CharSpans::default();
     let title_style = TextStyle {
@@ -320,6 +339,10 @@ pub fn fixture() -> Fixture {
             Affine::translate((380.0, 220.0)) * Affine::rotate(30f64.to_radians()),
         ),
         solid(turned, [120, 60, 200]),
+        Operation::SetName {
+            id: turned,
+            name: "Turned".into(),
+        },
         Operation::CreateNode {
             id: glow,
             parent: screen,
@@ -362,6 +385,63 @@ pub fn fixture() -> Fixture {
             id: ghost,
             locked: true,
         },
+        Operation::SetOpacity {
+            id: row,
+            opacity: 0.5,
+        },
+        shadow(row),
+        shadow(button),
+        Operation::SetFills {
+            id: a,
+            fills: keyed_by_position([
+                Fill {
+                    brush: Brush::Solid(Color::from_rgb8(10, 150, 120)).into(),
+                    visible: true,
+                },
+                Fill {
+                    brush: Brush::Solid(Color::from_rgb8(255, 0, 0)).into(),
+                    visible: false,
+                },
+            ]),
+        },
+        Operation::SetStrokes {
+            id: mask,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                brush: Brush::Solid(Color::from_rgb8(0, 0, 0)).into(),
+                width: 2.0,
+                ..Default::default()
+            }]),
+        },
+        Operation::SetExports {
+            id: screen,
+            exports: keyed_by_position([ondin_core::ExportSpec::new(
+                ondin_core::ExportFormat::Png,
+                ondin_core::ExportScale::Times(2.0),
+            )]),
+        },
+        Operation::SetLayoutGrids {
+            id: screen,
+            grids: keyed_by_position([ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns)]),
+        },
+        Operation::AddGuide {
+            guide: ondin_core::Guide {
+                id: guide,
+                axis: ondin_core::GuideAxis::Vertical,
+                position: 240.0,
+                color: None,
+                owner: screen,
+            },
+        },
+        Operation::CreateNode {
+            id: slice,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Slice {
+                size: Size::new(100.0, 100.0),
+            },
+            transform: Some(Affine::translate((600.0, 30.0))),
+            name: Some("Crop".into()),
+        },
     ]))
     .expect("build the fixture");
 
@@ -392,6 +472,46 @@ pub fn fixture() -> Fixture {
         },
     ]))
     .expect("override the copy");
+
+    // Another, turned 30° and mirrored, its label's first two letters bold.
+    let (tx, made) = ondin_core::insert_subtrees(
+        &doc,
+        &mut ids,
+        &[Placement {
+            nodes: doc.capture_subtree(button).expect("the main"),
+            parent: screen,
+            index: None,
+        }],
+        Default::default(),
+    );
+    doc.apply(&tx).expect("a second instance");
+    let flipped = made[0];
+    let flipped_label = doc.get(flipped).unwrap().children()[0];
+    let label_style = match doc.get(flipped_label).unwrap().kind() {
+        NodeKind::Text { style, .. } => style.as_ref().clone(),
+        _ => unreachable!("the label is a text"),
+    };
+    let mut strong = CharSpans::default();
+    strong.set(0..2, CharAttr::Weight(700), &label_style);
+    doc.apply(&Transaction(vec![
+        Operation::SetTransform {
+            id: flipped,
+            transform: Affine::translate((330.0, 160.0))
+                * Affine::rotate(30f64.to_radians())
+                * Affine::scale_non_uniform(-1.0, 1.0),
+        },
+        Operation::SetName {
+            id: flipped,
+            name: "Flipped".into(),
+        },
+        Operation::SetText {
+            id: flipped_label,
+            content: "Press".into(),
+            spans: strong,
+            para_spans: Default::default(),
+        },
+    ]))
+    .expect("turn and embolden the second copy");
     let res = Resolved::rebuild(&doc);
     Fixture { doc, res }
 }
@@ -473,17 +593,22 @@ pub fn named(doc: &Document, name: &str) -> NodeId {
     found[0]
 }
 
-/// Whether `name`'s box in `back`, read from a file, is where it is in `f`.
+/// Whether `name`'s box in `back`, read from a file, is where it is in `f`:
+/// each corner of its own box on the page, in order, so a turn of the wrong
+/// sign or a mirror shows where the bounds alone would not.
 pub fn same_place(f: &Fixture, back: &Document, name: &str) {
     let res = Resolved::rebuild(back);
-    let (a, b) = (named(&f.doc, name), named(back, name));
-    let (wa, wb) = (f.res.world_bounds(a).unwrap(), res.world_bounds(b).unwrap());
-    for (x, y) in [
-        (wa.x0, wb.x0),
-        (wa.y0, wb.y0),
-        (wa.x1, wb.x1),
-        (wa.y1, wb.y1),
-    ] {
-        assert!((x - y).abs() < 0.5, "{name}: {wa:?} came back as {wb:?}");
+    let corners = |doc: &Document, res: &Resolved, id: NodeId| {
+        let b = ondin_core::local_box(doc, res, id).expect("a box");
+        let m = res.world_transform(id).expect("placed");
+        [(b.x0, b.y0), (b.x1, b.y0), (b.x1, b.y1), (b.x0, b.y1)].map(|(x, y)| m * Point::new(x, y))
+    };
+    let wa = corners(&f.doc, &f.res, named(&f.doc, name));
+    let wb = corners(back, &res, named(back, name));
+    for (p, q) in wa.iter().zip(&wb) {
+        assert!(
+            (*p - *q).hypot() < 0.5,
+            "{name}: {wa:?} came back as {wb:?}"
+        );
     }
 }

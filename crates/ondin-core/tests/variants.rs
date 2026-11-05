@@ -1064,6 +1064,11 @@ fn a_typed_link_is_made_a_web_address_or_refused() {
         "design.kestrel.app"
     );
     assert_eq!(link_host("https://me@x.dev:8080?q"), "x.dev:8080");
+    // A browser reads `\` as `/` in a web address, so this one opens `evil.example`.
+    assert_eq!(
+        link_host(r"https://evil.example\@good.example/docs"),
+        "evil.example"
+    );
 }
 
 /// *Combine as variants*: one property, each main's name a value, names kept.

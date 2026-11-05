@@ -491,9 +491,11 @@ pub fn web_link(typed: &str) -> Result<String, LinkRefusal> {
 
 /// The host of a stored [`Node::doc_link`], what a card shows when the field is
 /// not being edited: the address without its scheme, path, query or fragment.
+/// The host ends at a `\` too, as a browser reads it in a web address, so the
+/// host shown is the host opened.
 pub fn link_host(link: &str) -> &str {
     let rest = link.split_once("://").map_or(link, |(_, r)| r);
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let end = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
     let host = &rest[..end];
     host.rsplit_once('@').map_or(host, |(_, h)| h)
 }

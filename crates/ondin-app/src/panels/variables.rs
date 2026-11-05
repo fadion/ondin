@@ -4650,7 +4650,7 @@ impl OndinApp {
         let w = under.width().max(200.0);
         // *Inherit* or *By width*, a rule, then one row per mode.
         let size = egui::vec2(w, ui::menu_height(modes.len() + 1, 1));
-        let pos = ui::menu_place(ctx, under.left_bottom() + egui::vec2(0.0, 4.0), size);
+        let pos = ui::dropdown_place(ctx, under, size, 4.0);
         let mut pick: Option<Option<ModeId>> = None;
         let rect = egui::Area::new(egui::Id::new("frame-mode-menu"))
             .order(egui::Order::Tooltip)
@@ -6568,6 +6568,15 @@ mod tests {
             (painted - computed).abs() < 0.01,
             "the mode menu is placed by its painted height: {computed} vs {painted}"
         );
+        // Short of room below, it opens above its row rather than over it.
+        // flip: `mode_menu_ui` placing with `menu_place` → fails here.
+        let low = egui::Rect::from_min_size(egui::pos2(400.0, 760.0), egui::vec2(200.0, 28.0));
+        app.mode_menu = Some((home, c, low));
+        let _ = texts(&ctx, |_| app.mode_menu_ui(&ctx));
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("frame-mode-menu")))
+            .expect("drawn");
+        assert!(card.bottom() <= low.top(), "above the row: {card:?}");
         app.mode_menu = None;
 
         app.var_act(Act::ByWidth(c, false));

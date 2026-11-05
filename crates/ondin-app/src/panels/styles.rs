@@ -873,11 +873,11 @@ impl OndinApp {
             (_, k) => format!("Detach style from {k} layers"),
         };
         let size = egui::vec2(MENU_W, 3.0 * ui::MENU_ROW_H + 10.0);
-        let pos = ui::menu_place(
-            ctx,
-            egui::pos2(menu.under.right() - MENU_W + 8.0, menu.under.bottom() + 6.0),
-            size,
-        );
+        // Right edge 8pt past the `⋯`, placed as a dropdown from that span so short
+        // of room below it opens above the header instead of over it.
+        let right = menu.under.right() + 8.0;
+        let head = egui::Rect::from_x_y_ranges(right - MENU_W..=right, menu.under.y_range());
+        let pos = ui::dropdown_place(ctx, head, size, 6.0);
         let mut act: Option<u8> = None;
         let rect = egui::Area::new(egui::Id::new("style-card-menu"))
             .order(egui::Order::Tooltip)
@@ -1568,6 +1568,29 @@ mod tests {
             .expect("drawn");
         assert!(card.bottom() <= under.top(), "above the head: {card:?}");
         assert_eq!(card.width(), PICKER_W, "the width it was placed for");
+    }
+
+    /// Short of room below, the `⋯` menu opens above its header, right edge 8pt
+    /// past the button.
+    /// flip: `style_menu_ui` placing with `menu_place` → fails at "above the header".
+    #[test]
+    fn the_style_menu_opens_above_a_header_near_the_bottom() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        let under = egui::Rect::from_min_size(egui::pos2(900.0, 760.0), egui::vec2(20.0, 20.0));
+        app.style_menu = Some(StyleMenu {
+            slot: StyleSlot::Fills,
+            targets: vec![a],
+            under,
+        });
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("style-card-menu")))
+            .expect("drawn");
+        assert!(card.bottom() <= under.top(), "above the header: {card:?}");
+        assert_eq!(card.right(), under.right() + 8.0, "right edge kept");
     }
 
     /// **The picker's highlight previews on the canvas and `Enter` applies it**.

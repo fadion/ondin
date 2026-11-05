@@ -123,7 +123,7 @@ struct MenuOutcome {
     dismissed: bool,
 }
 
-/// A floating menu hung under `anchor`, right edges together, or opened at it
+/// A floating menu hung under `anchor` (above it short of room), right edges together, or opened at it
 /// when `anchor` is a point (a right-click's press, flipped off the screen's
 /// edges): a [`ui::menu_frame`] card of [`ui::MENU_ROW_H`] rows, their hover ground
 /// (a menu row's) and the click-away test. `paint` draws a row's contents into the
@@ -159,7 +159,10 @@ fn anchored_menu(
     let pos = if anchor.size() == egui::Vec2::ZERO {
         ui::menu_place(ui.ctx(), anchor.min, egui::vec2(w, h))
     } else {
-        egui::pos2(anchor.right() - w, anchor.bottom() + ui::MENU_GAP)
+        // Right edges together, above the anchor when below has no room.
+        let span =
+            egui::Rect::from_x_y_ranges(anchor.right() - w..=anchor.right(), anchor.y_range());
+        ui::dropdown_place(ui.ctx(), span, egui::vec2(w, h), ui::MENU_GAP)
     };
     let area = egui::Area::new(id)
         .order(egui::Order::Foreground)
@@ -4814,6 +4817,33 @@ fn elide(ctx: &egui::Context, text: &str, size: f32, max_w: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Short of room below, a menu hung from a control opens above it, right
+    /// edges together.
+    /// flip: `anchored_menu` placing at `anchor.bottom() + MENU_GAP` unplaced → fails at "above".
+    #[test]
+    fn an_anchored_menu_near_the_bottom_opens_above_its_control() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let anchor = egui::Rect::from_min_size(egui::pos2(600.0, 770.0), egui::vec2(24.0, 24.0));
+        let id = egui::Id::new("anchored-probe");
+        let mut keys = MenuKeys::default();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let _ = anchored_menu(ui, id, anchor, 180.0, 4, &mut keys, |_, _, _, _| {});
+            });
+        }
+        let card = ctx.memory(|m| m.area_rect(id)).expect("drawn");
+        assert!(card.bottom() <= anchor.top(), "above: {card:?}");
+        assert_eq!(card.right(), anchor.right(), "right edges together");
+    }
 
     #[test]
     fn a_nav_preference_round_trips_and_a_stale_project_degrades() {

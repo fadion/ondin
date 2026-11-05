@@ -1377,8 +1377,8 @@ mod tests {
     }
 
     /// `Tab` walks the footer the way it reads: the link box, Cancel, then Apply.
-    /// flip: the buttons laid right to left (`foot`'s old row, or
-    /// `settings::footer_row_noted`'s layout) → fails at "left to right".
+    /// flip: `foot` (or `settings::footer_row_noted`) laying its buttons in a
+    /// `right_to_left` row → fails at "left to right".
     #[test]
     fn tab_walks_the_footer_left_to_right() {
         let (ctx, mut app) = app();

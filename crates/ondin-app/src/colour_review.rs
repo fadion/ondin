@@ -1331,7 +1331,8 @@ mod tests {
 
     /// A fill the target's scope refuses takes the value, and the status line
     /// counts it without blaming stops, shadows or text.
-    /// flip: `merge_group` naming the old reason → fails at the status line.
+    /// flip: `merge_group` saying stops, shadows and text colours do not bind →
+    /// fails at the status line.
     #[test]
     fn a_fill_the_scope_refuses_is_counted_without_a_reason() {
         use ondin_core::variable::{Cell, Field, Scope, VarKind, Variable};

@@ -6,7 +6,7 @@
 use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
 use ondin_core::op::GeometryPatch;
 use ondin_core::peniko::Color;
-use ondin_core::variant::{self, VariantProp, VariantSet};
+use ondin_core::variant::{self, RootElement, VariantProp, VariantSet};
 use ondin_core::{
     Brush, Document, Fill, IdSource, NodeId, NodeKind, Operation, Placement, Resolved, TextSizing,
     Transaction, keyed_by_position,
@@ -400,9 +400,41 @@ fn chip(edit: impl FnOnce(&mut Document, NodeId, NodeId)) -> (Document, NodeId) 
     let mut ids = IdSource::new(0x5A);
     let root = ids.mint();
     let mut doc = Document::new(root);
+    let (_, rest) = chip_set(&mut doc, &mut ids, "Chip", 0.0, edit);
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    (doc, inst)
+}
+
+/// An instance of `main` at the top of the page, `doc` left holding it.
+fn instance_of(doc: &mut Document, ids: &mut IdSource, main: NodeId) -> NodeId {
+    let (tx, made) = ondin_core::insert_subtrees(
+        doc,
+        ids,
+        &[Placement {
+            nodes: doc.capture_subtree(main).unwrap(),
+            parent: doc.first_page(),
+            index: None,
+        }],
+        Default::default(),
+    );
+    doc.apply(&tx).unwrap();
+    made[0]
+}
+
+/// [`chip`]'s set, named `name` and placed at `x` on the page: the set and its
+/// rest variant.
+fn chip_set(
+    doc: &mut Document,
+    ids: &mut IdSource,
+    name: &str,
+    x: f64,
+    edit: impl FnOnce(&mut Document, NodeId, NodeId),
+) -> (NodeId, NodeId) {
+    let root = doc.first_page();
+    let index = doc.get(root).unwrap().children().len();
     let [set, rest, bg, icon] = [(); 4].map(|_| ids.mint());
     doc.apply(&Transaction(vec![
-        create(set, root, 0, frame(300.0, 200.0), (0.0, 0.0), "Chip"),
+        create(set, root, index, frame(300.0, 200.0), (x, 0.0), name),
         create(rest, set, 0, frame(80.0, 30.0), (10.0, 10.0), "Default"),
         create(
             bg,
@@ -452,31 +484,20 @@ fn chip(edit: impl FnOnce(&mut Document, NodeId, NodeId)) -> (Document, NodeId) 
         },
     ]))
     .unwrap();
-    let res = Resolved::rebuild(&doc);
-    let (tx, hover) = variant::add_variant(&doc, &res, &mut ids, set, Some(rest)).unwrap();
+    let res = Resolved::rebuild(doc);
+    let (tx, hover) = variant::add_variant(doc, &res, ids, set, Some(rest)).unwrap();
     doc.apply(&tx).unwrap();
-    doc.apply(&variant::set_values(&doc, hover, vec!["Hover".into()]).unwrap())
+    doc.apply(&variant::set_values(doc, hover, vec!["Hover".into()]).unwrap())
         .unwrap();
-    edit(&mut doc, rest, hover);
-    let tie = variant::tie_state(&doc, set, 0, 1, Some(variant::Interaction::Hover));
+    edit(doc, rest, hover);
+    let tie = variant::tie_state(doc, set, 0, 1, Some(variant::Interaction::Hover));
     doc.apply(&tie.unwrap()).unwrap();
     assert_eq!(
-        variant::rest_value(&doc, set, 0).as_deref(),
+        variant::rest_value(doc, set, 0).as_deref(),
         Some("Default"),
         "the fixture's rest"
     );
-    let (tx, made) = ondin_core::insert_subtrees(
-        &doc,
-        &mut ids,
-        &[Placement {
-            nodes: doc.capture_subtree(rest).unwrap(),
-            parent: root,
-            index: None,
-        }],
-        Default::default(),
-    );
-    doc.apply(&tx).unwrap();
-    (doc, made[0])
+    (set, rest)
 }
 
 /// A state whose star icon is recoloured draws a picture rest's cannot become
@@ -709,4 +730,180 @@ fn plain_html_says_it_writes_no_states() {
     let out = Target::Html.export(&f.doc, &res, &[f.inst]);
     assert_eq!(out.states.len(), 1, "{:?}", out.states);
     assert!(out.states[0].contains("plain HTML"), "{:?}", out.states);
+}
+
+/// `set`'s variant at `values`, made from `from` by *Add variant*.
+fn variant_of(
+    doc: &mut Document,
+    ids: &mut IdSource,
+    set: NodeId,
+    from: NodeId,
+    values: &[&str],
+) -> NodeId {
+    let res = Resolved::rebuild(doc);
+    let (tx, v) = variant::add_variant(doc, &res, ids, set, Some(from)).unwrap();
+    doc.apply(&tx).unwrap();
+    let values = values.iter().map(|v| v.to_string()).collect();
+    doc.apply(&variant::set_values(doc, v, values).unwrap())
+        .unwrap();
+    v
+}
+
+/// The chip's set with its root written as `element`.
+fn set_element(doc: &mut Document, set: NodeId, element: RootElement) {
+    let mut vs = doc.get(set).unwrap().set().unwrap().clone();
+    vs.element = element;
+    doc.apply(&Transaction(vec![Operation::SetVariantSet {
+        id: set,
+        set: Some(vs),
+    }]))
+    .unwrap();
+}
+
+/// A Disabled tie on a Plain root: a focusable `div` whose `aria-disabled` the
+/// prop or a forced Disabled sets, a rule reading it, and a use forced Disabled
+/// drawing it in plain HTML.
+///
+/// flip: `Live::drawn_attrs` ignoring a forced Disabled → fails at "the forced
+/// use".
+#[test]
+fn a_disabled_tie_on_a_plain_root_reads_aria_disabled() {
+    let mut ids = IdSource::new(0x5C);
+    let mut doc = Document::new(ids.mint());
+    let (set, rest) = chip_set(&mut doc, &mut ids, "Chip", 0.0, |_, _, _| {});
+    doc.apply(&variant::add_value(&doc, set, 0, "Disabled").unwrap())
+        .unwrap();
+    let off = variant_of(&mut doc, &mut ids, set, rest, &["Disabled"]);
+    let bg = doc.get(off).unwrap().children()[0];
+    doc.apply(&Transaction(vec![paint(bg, (150, 150, 150))]))
+        .unwrap();
+    let tie = variant::tie_state(&doc, set, 0, 2, Some(variant::Interaction::Disabled));
+    doc.apply(&tie.unwrap()).unwrap();
+    set_element(&mut doc, set, RootElement::Plain);
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    let forced = instance_of(&mut doc, &mut ids, off);
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    let tsx = file(&out, "components/Chip.tsx");
+    assert!(
+        tsx.contains("<div {...rest} className=") && tsx.contains(" tabIndex={0} data-state="),
+        "a focusable div, in React's spelling: {tsx}"
+    );
+    assert!(
+        tsx.contains("aria-disabled={disabled || state === \"Disabled\" || undefined}"),
+        "{tsx}"
+    );
+    let css = file(&out, "components/Chip.module.css");
+    let rule = &css[css.find("[aria-disabled=\"true\"] .").expect(&css)..];
+    assert!(rule[..rule.find('}').unwrap()].contains("#969696"), "{css}");
+
+    let out = ondin_export::code::html::html_of_components(&doc, &res, &[inst, forced]);
+    let html = file(&out, "index.html");
+    assert!(
+        html.contains("data-state=\"Disabled\" aria-disabled=\"true\""),
+        "the forced use: {html}"
+    );
+    assert_eq!(html.matches("aria-disabled").count(), 1, "{html}");
+}
+
+/// A Link root is an `<a>`; a set whose variant holds a use of an interactive
+/// component is written as Plain instead, since interactive content cannot
+/// nest, and says so.
+///
+/// flip: `Walk::component` skipping the nesting check → fails at "written as
+/// Plain".
+#[test]
+fn a_root_holding_an_interactive_use_is_written_plain() {
+    let mut ids = IdSource::new(0x5D);
+    let mut doc = Document::new(ids.mint());
+    let (_, chip) = chip_set(&mut doc, &mut ids, "Chip", 0.0, |_, _, _| {});
+    let mut inner = IdSource::new(0x5E);
+    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 400.0, |doc, rest, hover| {
+        for v in [rest, hover] {
+            let (tx, _) = ondin_core::insert_subtrees(
+                doc,
+                &mut inner,
+                &[Placement {
+                    nodes: doc.capture_subtree(chip).unwrap(),
+                    parent: v,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            doc.apply(&tx).unwrap();
+        }
+    });
+    set_element(&mut doc, row, RootElement::Link);
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a == "Row: it holds a Chip, which is interactive, so it is written as Plain"),
+        "written as Plain: {:?}",
+        out.approximated
+    );
+    let tsx = file(&out, "components/Row.tsx");
+    assert!(
+        tsx.contains("<div {...rest} className=") && tsx.contains(" tabIndex={0} "),
+        "{tsx}"
+    );
+    assert!(file(&out, "components/Chip.tsx").contains("<button "));
+
+    // Without the use inside, the Link stands.
+    let mut ids = IdSource::new(0x5F);
+    let mut doc = Document::new(ids.mint());
+    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 0.0, |_, _, _| {});
+    set_element(&mut doc, row, RootElement::Link);
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    assert!(
+        file(&out, "components/Row.tsx").contains("<a {...rest} className="),
+        "an anchor"
+    );
+}
+
+/// Two variants that share a root class but differ in a state get a root class
+/// each, so each state's rule reaches its own: *Tone* Primary and Ghost look
+/// alike at rest, and hover blue and green.
+///
+/// flip: `states::write` not calling `split_roots` → fails at "two roots".
+#[test]
+fn variants_differing_only_in_a_state_split_their_root_class() {
+    let (mut doc, inst) = chip(|doc, _, hover| {
+        let bg = doc.get(hover).unwrap().children()[0];
+        doc.apply(&Transaction(vec![paint(bg, (0, 90, 200))]))
+            .unwrap();
+    });
+    let mut ids = IdSource::new(0x60);
+    let set = doc.get(inst).unwrap().link().unwrap();
+    let set = doc.get(set).unwrap().parent().unwrap();
+    doc.apply(&variant::add_property(&doc, set, "Tone", "Primary").unwrap())
+        .unwrap();
+    doc.apply(&variant::add_value(&doc, set, 1, "Ghost").unwrap())
+        .unwrap();
+    let find = |doc: &Document, v: [&str; 2]| {
+        variant::find_variant(doc, set, &v.map(String::from)).unwrap()
+    };
+    let rest = find(&doc, ["Default", "Primary"]);
+    let hover = find(&doc, ["Hover", "Primary"]);
+    variant_of(&mut doc, &mut ids, set, rest, &["Default", "Ghost"]);
+    let ghost = variant_of(&mut doc, &mut ids, set, hover, &["Hover", "Ghost"]);
+    let bg = doc.get(ghost).unwrap().children()[0];
+    doc.apply(&Transaction(vec![paint(bg, (0, 160, 60))]))
+        .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    assert!(out.approximated.is_empty(), "{:?}", out.approximated);
+    let css = file(&out, "components/Chip.module.css");
+    let roots: std::collections::BTreeSet<&str> = css
+        .lines()
+        .filter(|l| l.contains(":hover:not("))
+        .filter_map(|l| l.strip_prefix('.')?.split(':').next())
+        .collect();
+    assert_eq!(roots.len(), 2, "two roots: {roots:?}\n{css}");
+    assert!(css.contains("#005ac8") && css.contains("#00a03c"), "{css}");
 }

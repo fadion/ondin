@@ -831,7 +831,8 @@ fn list_hover() -> Color32 {
 /// What is wrong with a list row's ground under the pointer, if anything: it
 /// must be a list row's height and corner, in the list hover and no hairline.
 fn row_fault(g: &Ground) -> Option<String> {
-    let rung = (g.rect.height() - ui::MENU_ROW_H).abs() <= SLOP && uniform(g.radius) == Some(4);
+    let rung = (g.rect.height() - ui::MENU_ROW_H).abs() <= SLOP
+        && uniform(g.radius) == Some(ui::LIST_ROW_RADIUS);
     if !rung {
         return Some("not a list row's height and corner".into());
     }
@@ -841,7 +842,8 @@ fn row_fault(g: &Ground) -> Option<String> {
 /// `row_fault` for a row of several lines: a list row's corner and hover, at
 /// least a list row's height.
 fn tall_row_fault(g: &Ground) -> Option<String> {
-    let rung = g.rect.height() >= ui::MENU_ROW_H - SLOP && uniform(g.radius) == Some(4);
+    let rung =
+        g.rect.height() >= ui::MENU_ROW_H - SLOP && uniform(g.radius) == Some(ui::LIST_ROW_RADIUS);
     if !rung {
         return Some("not a list row's corner".into());
     }
@@ -1262,7 +1264,8 @@ fn sweep_on(theme: Theme) {
             faults.push(format!("version history: {why}: {g}"));
         }
     }
-    // *Now* joins them once its summary is in and it opens, which is timing.
+    // *Now* joins them once its summary is in and it can open, so it is
+    // clickable: which run that happens in is timing.
     assert!(
         version_rows.len() >= 2,
         "version history: the fixture is not in the state it is about — it swept {} \

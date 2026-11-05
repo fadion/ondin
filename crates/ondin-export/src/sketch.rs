@@ -54,6 +54,9 @@ pub fn export(doc: &Document, res: &Resolved, name: &str) -> std::io::Result<Ske
         plain: Vec::new(),
     };
     let (swatches, text_styles) = w.library();
+    if !doc.guides().is_empty() {
+        w.approximate("Guides, left out");
+    }
     w.find_symbols();
     let mut pages = Vec::new();
     let mut directory = serde_json::Map::new();
@@ -550,6 +553,9 @@ impl Writer<'_> {
     }
 
     /// A layer's export settings as Sketch's export presets. Sketch names a file
+        if !node.grids().is_empty() {
+            self.approximate("Layout grids, left out");
+        }
     /// by a suffix or a prefix, not both.
     fn exports(&mut self, node: &Node) -> Value {
         use ondin_core::{ExportFormat, ExportScale};

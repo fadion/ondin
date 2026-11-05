@@ -66,6 +66,9 @@ pub fn export(doc: &Document, res: &Resolved, name: &str) -> std::io::Result<Pen
         plain: Vec::new(),
     };
     w.library();
+    if !doc.guides().is_empty() {
+        w.approximate("Guides, left out");
+    }
     let mut pages = Vec::new();
     for (index, page) in doc.page_ids().enumerate() {
         let pid = uuid(&["page", &page.to_wire()]);
@@ -430,6 +433,12 @@ impl Writer<'_> {
             self.paints(&mut shape, id, node, &paint_space);
         }
         self.common(&mut shape, id, node);
+        if !node.exports().is_empty() {
+            self.approximate("Export settings, left out");
+        }
+        if !node.grids().is_empty() {
+            self.approximate("Layout grids, left out");
+        }
         self.layout(&mut shape, id, node);
         self.item(&mut shape, id, node);
         self.component(&mut shape, id, node, page);
@@ -521,6 +530,7 @@ impl Writer<'_> {
         let mut fills = Vec::new();
         for (i, f) in paint.fills.iter().enumerate().rev() {
             if !f.visible {
+                self.approximate("Hidden fills, left out");
                 continue;
             }
             let bound = own.fills.get(i).and_then(|o| o.brush.var());
@@ -809,9 +819,9 @@ impl Writer<'_> {
             let own = node.paint();
             for (i, f) in paint.fills.iter().enumerate().rev() {
                 let bound = own.fills.get(i).and_then(|o| o.brush.var());
-                if f.visible
-                    && let Some(v) = self.colour(f.brush.drawn(), bound, "fill", &space)
-                {
+                if !f.visible {
+                    self.approximate("Hidden fills, left out");
+                } else if let Some(v) = self.colour(f.brush.drawn(), bound, "fill", &space) {
                     node_fills.push(v);
                 }
             }

@@ -25,7 +25,8 @@ const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
 const MARGIN: f32 = 16.0;
 const FIELD_H: f32 = ui::CONTROL_H;
-const ROW_H: f32 = 28.0;
+/// A list row's height, so its ground is the list row's.
+const ROW_H: f32 = ui::MENU_ROW_H;
 /// The list scrolls past this many rows.
 const ROWS_SHOWN: f32 = 10.0;
 /// The side of the arrow and close buttons, the caret's width, and the air

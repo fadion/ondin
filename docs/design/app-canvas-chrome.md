@@ -553,7 +553,8 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   All pages*: it opens on *Selection* when something is selected, else *This page*, and *Selection*
   is disabled with nothing selected. Last, *Include text inside instances*. The fields, the scope
   (`batch_rename::scope_segments`) and the tick box (`ui::tick_box`) are Batch rename's.
-- **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
+- **The list**, grouped under page headings with their counts. A row is a list row
+  (`ui::MENU_ROW_H`, `ui::list_row_ground`, lit when current). It has the kind glyph (text, an
   outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when
   locked, a slashed eye when hidden, else `TEXT_AA` for a case-transformed run. A row a replace would

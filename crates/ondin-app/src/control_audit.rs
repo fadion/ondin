@@ -930,7 +930,11 @@ fn every_control_ground_is_on_the_standard() {
     let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c));
     check("settings", app, found);
     let mut app = with_a_text(&ctx);
-    let found = opened(&ctx, &mut app, |_, a| a.open_find(true));
+    // A query with a match, so the list, its lit row and the footer are drawn.
+    let found = opened(&ctx, &mut app, |_, a| {
+        a.open_find(true);
+        a.find.find = "yearly".into();
+    });
     check("find", app, found);
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |c, a| a.open_batch_rename(c, None));

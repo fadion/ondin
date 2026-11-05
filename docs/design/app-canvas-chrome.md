@@ -600,10 +600,13 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   the raw members but the target, so a bound member is never merged away, and a kit's variable may
   be the target. `merge` is one transaction: into a raw target the merged places take its colour;
   into a bound one fills and strokes bind to its variable (the binding alpha keeping the drawn alpha)
-  and stops, shadow and text colours take its default-mode value (`Merged::unbound`). Effectively
-  locked layers are never written (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document
-  with no modes, a variable valued the target's colour in every mode, and binds every raw member's
-  users, the target's included.
+  and stops, shadow and text colours take its default-mode value (`Merged::unbound`). So does a fill
+  or stroke the variable's scope refuses, and every place on a layer where the variable draws
+  another colour than its default mode's, which is the value the census matched: a bind there would
+  change the colour by more than the threshold. Effectively locked layers are never written
+  (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document with no modes, a variable valued
+  the target's colour in every mode, and binds every raw member's users, the target's included;
+  with every use on a locked layer it writes nothing, the variable included.
 - **Doors and place.** The View menu's last row, after *Simulate colour blindness* and never ticked,
   and the palette (`Item::ColourReview`, unbound). It hangs at the palette's place
   (`ui::canvas_popup_area`), 420 wide, on the settings card's ground (`settings::card_frame`), but is

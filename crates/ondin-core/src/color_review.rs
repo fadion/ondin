@@ -415,6 +415,10 @@ pub fn merge_into_new(
             own: value,
         },
     );
+    // Every use on a locked layer: nothing to bind, so no variable either.
+    if merged.uses == 0 {
+        return merged;
+    }
     ops.append(&mut merged.tx.0);
     merged.tx = Transaction(ops);
     merged
@@ -443,10 +447,19 @@ fn rewrite(doc: &Document, roots: &[NodeId], from: &[Key], into: Into) -> Merged
                 }
             })
         };
-        // A field the target's scope refuses takes its colour, unbound. A
-        // variable the merge makes is not held yet, and binds every field.
+        // A field the target's scope refuses takes its colour, unbound, and so
+        // does every field of a layer where the target draws another colour than
+        // its default mode's, which the census matched. A variable the merge
+        // makes is not held yet, and binds every field.
+        let here = match into {
+            Into::Var { var, own, .. } => doc
+                .variables()
+                .get(var)
+                .is_none_or(|_| doc.resolve_var(id, var) == Some(Value::Color(own))),
+            Into::Raw(_) => true,
+        };
         let binds = |var: VarId, f: crate::variable::Field| {
-            doc.variables().get(var).is_none_or(|v| v.binds(f))
+            here && doc.variables().get(var).is_none_or(|v| v.binds(f))
         };
         let brush = |b: &BrushSource,
                      literal: &mut dyn FnMut(Color) -> Option<Color>,
@@ -481,39 +494,37 @@ fn rewrite(doc: &Document, roots: &[NodeId], from: &[Key], into: Into) -> Merged
         let fills: Vec<_> = paint
             .fills
             .iter()
-            .map(|f| {
-                let solid = matches!(f.brush, BrushSource::Literal(Brush::Solid(_)));
-                match brush(&f.brush, &mut literal, crate::variable::Field::Fill) {
+            .map(
+                |f| match brush(&f.brush, &mut literal, crate::variable::Field::Fill) {
                     Some(b) => {
                         fills_changed = true;
-                        solids_bound += usize::from(solid);
+                        solids_bound += usize::from(b.is_bound());
                         f.map(|f| Fill {
                             brush: b.clone(),
                             visible: f.visible,
                         })
                     }
                     None => f.clone(),
-                }
-            })
+                },
+            )
             .collect();
         let mut strokes_changed = false;
         let strokes: Vec<_> = paint
             .strokes
             .iter()
-            .map(|s| {
-                let solid = matches!(s.brush, BrushSource::Literal(Brush::Solid(_)));
-                match brush(&s.brush, &mut literal, crate::variable::Field::Stroke) {
+            .map(
+                |s| match brush(&s.brush, &mut literal, crate::variable::Field::Stroke) {
                     Some(b) => {
                         strokes_changed = true;
-                        solids_bound += usize::from(solid);
+                        solids_bound += usize::from(b.is_bound());
                         s.map(|s| Stroke {
                             brush: b.clone(),
                             ..s.clone()
                         })
                     }
                     None => s.clone(),
-                }
-            })
+                },
+            )
             .collect();
         if fills_changed {
             ops.push(Operation::SetFills { id, fills });

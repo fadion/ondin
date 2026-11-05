@@ -352,17 +352,19 @@ impl OndinApp {
                         ondin_core::PaintTarget::Fill
                     };
                     // Snapped to a bound colour, the pick binds rather than copying
-                    // — where that variable's scope takes the field.
+                    // — where that variable's scope takes the field, and it draws
+                    // the snapped colour in the modes of every target.
                     let field = match pick.stroke {
                         true => ondin_core::variable::Field::Stroke,
                         false => ondin_core::variable::Field::Fill,
                     };
+                    let doc = &self.session.doc;
                     let var = var.filter(|v| {
-                        self.session
-                            .doc
-                            .variables()
-                            .get(*v)
-                            .is_some_and(|x| x.binds(field))
+                        doc.variables().get(*v).is_some_and(|x| x.binds(field))
+                            && ids.iter().all(|id| {
+                                doc.resolve_var(*id, *v)
+                                    == Some(ondin_core::variable::Value::Color(color))
+                            })
                     });
                     let tx = match var {
                         Some(var) => ondin_core::build::bind_top_paint_all(
@@ -1682,5 +1684,63 @@ mod tests {
             }
             ref other => panic!("bound, not {other:?}"),
         }
+    }
+
+    /// A snap to a variable that draws another colour in the target's mode
+    /// copies the snapped colour instead of binding.
+    /// flip: `land_pick` binding without its mode test → fails at "copied".
+    #[test]
+    fn a_pick_snapped_to_a_variable_another_mode_recolours_copies() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        let (light, dark) = (app.session.ids.mint_mode(), app.session.ids.mint_mode());
+        let var = app.session.ids.mint_var();
+        let [r, g, bl] = BLUE;
+        let page = app.session.doc.first_page();
+        let add = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: Vec::new(),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            add(light, "Light", 0),
+            add(dark, "Dark", 1),
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "color/blue".into(),
+                    kind: VarKind::Color,
+                    cells: [
+                        (light, Cell::Color(Color::from_rgba8(r, g, bl, 255))),
+                        (dark, Cell::Color(Color::from_rgba8(17, 17, 17, 255))),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetFills {
+                id: b,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: ondin_core::BrushSource::Bound { var, alpha: 1.0 },
+                    visible: true,
+                }]),
+            },
+            Operation::SetModes {
+                id: page,
+                modes: vec![dark],
+            },
+        ])));
+        app.choose_tool(Tool::Eyedropper);
+        app.land_pick(&ctx, pick(false), near_blue());
+        assert_eq!(top_fill(&app, a), Some([r, g, bl, 102]), "copied");
     }
 }

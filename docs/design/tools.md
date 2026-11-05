@@ -361,7 +361,9 @@ the rail tool, as the narrower ask.
   to; `OndinApp::dropper_snap`, over `color_review::census` of every page, taken once per
   revision): antialiasing and blends leave pixels a hair off the colour meant. A colour bound to a
   variable wins a tie, and on the rail door the pick then **binds** the top paint
-  (`build::bind_top_paint_all`, keeping its `%`); a picker's slot takes the colour. `Ctrl` held
+  (`build::bind_top_paint_all`, keeping its `%`) where the variable's scope takes the field and it
+  draws the snapped colour in every target's modes, else copies it (the census values a variable
+  at its default mode); a picker's slot takes the colour. `Ctrl` held
   takes the raw pixel (`PendingPick::raw`); `Alt` and `Shift` keep their meanings, so `Ctrl` was free.
 - **One click, one transaction, one undo step.** A click never changes the selection.
 - **No canvas preview.** Hovering writes nothing and installs no `RenderOverrides`: a preview would change the pixels the next sample reads. From a picker, the hovered colour (canvas sample or frozen pixel) shows in its plane, hue and value row (`Picker::preview`): a dim *was XXXXXX* beside a hex, or the channel fields tinted accent with the old colour as a chip in the format chooser. That preview is not in the frozen frame: picking over the picker reads it as captured.

@@ -438,6 +438,105 @@ fn merging_into_a_new_variable_binds_every_member() {
     assert!(f.doc.variables().get(var).is_none(), "one undo step");
 }
 
+/// A merge into a variable leaves unbound a fill where the variable draws
+/// another colour than the default mode's the census matched: it takes the
+/// value instead.
+/// flip: `rewrite` binding without its `here` test → fails at the counts.
+#[test]
+fn a_merge_does_not_bind_where_the_variable_draws_another_mode() {
+    let mut f = F::new();
+    let v = f.var("color/accent", A);
+    let dark = f.ids.mint_mode();
+    f.apply(vec![
+        Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id: dark,
+                name: "Dark".into(),
+            },
+            index: 1,
+            cells: vec![(v, Cell::Color(FAR))],
+        },
+        Operation::SetModes {
+            id: f.board,
+            modes: vec![dark],
+        },
+    ]);
+    f.rect(vec![BrushSource::Bound { var: v, alpha: 1.0 }]);
+    let raw = f.rect(vec![solid(B)]);
+    let census = f.census();
+    let g = group_of(&census);
+    let t = g.default_target(&census);
+    let merged = color_review::merge(&f.doc, &[f.root], &census, &g, t);
+    assert_eq!((merged.uses, merged.unbound), (1, 1));
+    f.apply(merged.tx.0);
+    assert_eq!(f.fill(raw), solid(A), "took the value");
+}
+
+/// A fill merged into a variable whose scope refuses fills takes the value,
+/// and is counted unbound.
+/// flip: `rewrite` counting every changed solid as bound → fails at the counts.
+#[test]
+fn a_fill_the_targets_scope_refuses_is_counted_unbound() {
+    let mut f = F::new();
+    let v = f.var("color/line", A);
+    let scoped = Variable {
+        scope: Some(ondin_core::variable::Scope::of([
+            ondin_core::variable::Field::Stroke,
+        ])),
+        ..f.doc.variables().get(v).unwrap().clone()
+    };
+    f.apply(vec![Operation::SetVariable { var: scoped }]);
+    let lined = f.rect(vec![]);
+    f.apply(vec![Operation::SetStrokes {
+        id: lined,
+        strokes: keyed_by_position([ondin_core::Stroke {
+            brush: BrushSource::Bound { var: v, alpha: 1.0 },
+            ..Default::default()
+        }]),
+    }]);
+    let raw = f.rect(vec![solid(B)]);
+    let census = f.census();
+    let g = group_of(&census);
+    let t = g.default_target(&census);
+    let merged = color_review::merge(&f.doc, &[f.root], &census, &g, t);
+    assert_eq!((merged.uses, merged.unbound), (1, 1));
+    f.apply(merged.tx.0);
+    assert_eq!(f.fill(raw), solid(A));
+}
+
+/// Merging into a new variable a group whose every use is on a locked layer
+/// writes nothing — no variable bound to nothing.
+/// flip: `merge_into_new` without its `uses == 0` return → fails at "empty".
+#[test]
+fn merging_only_locked_uses_into_a_new_variable_writes_nothing() {
+    let mut f = F::new();
+    let a = f.rect(vec![solid(A)]);
+    let b = f.rect(vec![solid(B)]);
+    f.apply(
+        [a, b]
+            .map(|id| Operation::SetLocked { id, locked: true })
+            .into(),
+    );
+    let census = f.census();
+    let g = group_of(&census);
+    let (var, mode) = (f.ids.mint_var(), f.ids.mint_mode());
+    let merged = color_review::merge_into_new(
+        &f.doc,
+        &[f.root],
+        &census,
+        &g,
+        0,
+        NewVar {
+            id: var,
+            name: "color/blue",
+            first_mode: mode,
+        },
+    );
+    assert!(merged.tx.0.is_empty(), "empty");
+    assert_eq!((merged.uses, merged.locked), (0, 2));
+}
+
 /// The eyedropper's snap: a pixel a hair from a document colour gets that
 /// colour, a variable winning; one far from all gets none.
 #[test]

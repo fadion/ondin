@@ -150,6 +150,9 @@ impl OndinApp {
     /// Open the publish dialog — *Publish N*, *Publish kit…*, `Ctrl+Alt+P`. With
     /// nothing to publish it says so instead.
     pub(crate) fn open_publish(&mut self) {
+        if self.refused_by_compare() {
+            return;
+        }
         // The one seam for the button, the menu row and the chord: a publish
         // under a live text session froze the main without what was typed and
         // spent the version on it, and the dialog's change list has to be
@@ -300,6 +303,10 @@ impl OndinApp {
 
     /// Publish: freeze, bump, stamp, save — and say so.
     pub(crate) fn publish_now(&mut self, note: String) {
+        // The writer refuses as well as the dialog's door, for any other caller.
+        if self.refused_by_compare() {
+            return;
+        }
         // `open_publish` finished it; this is the verb, and any other caller.
         self.finish_text_first();
         let changes = self.kit_changes();
@@ -588,6 +595,75 @@ mod tests {
             "counted again"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// While a compare is open, the kit's mark and its publish, written outside
+    /// `apply`, are refused with the compare's sentence.
+    /// flip: `make_kit` without its compare guard → fails at "Make a kit is refused".
+    #[test]
+    fn a_compare_refuses_the_kit_mark_and_publish() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let version = std::env::temp_dir().join(format!(
+            "ondin-publish-compare-{}.ondin",
+            std::process::id()
+        ));
+        std::fs::write(&version, ondin_core::io::save(&app.session.doc).unwrap()).unwrap();
+        let main = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(80.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Button".into()),
+            },
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        app.compare_with(
+            crate::compare::Pick {
+                path: version.clone(),
+                title: "Before".into(),
+                when: None,
+            },
+            None,
+        );
+        assert!(app.session.compare.is_some(), "the compare opens");
+
+        app.make_kit();
+        assert!(
+            app.session.doc.meta().kit.is_none(),
+            "Make a kit is refused"
+        );
+        assert_eq!(app.session.status().text, crate::compare::READ_ONLY);
+
+        let mut meta = app.session.doc.meta().clone();
+        meta.kit = Some(ondin_core::meta::KitMark {
+            sharing: true,
+            ..Default::default()
+        });
+        app.session.doc.set_meta(meta);
+        app.stop_sharing_kit();
+        assert!(app.shared_kit().is_some(), "Stop sharing is refused");
+        app.open_publish();
+        assert!(app.publishing.is_none(), "the publish dialog does not open");
+        app.publish_now("Then".into());
+        assert_eq!(
+            app.shared_kit().map(|k| k.version),
+            Some(0),
+            "nor a publish"
+        );
+        let _ = std::fs::remove_file(&version);
     }
 
     /// **A set's row counts its variants, not its children** (§15 D1015's fix):

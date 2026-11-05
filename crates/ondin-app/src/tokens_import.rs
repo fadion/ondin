@@ -313,9 +313,10 @@ impl OndinApp {
         self.tokens_import = Some(t);
     }
 
-    /// Whether a compare holds the document read-only, saying so. The link is
-    /// written outside `apply`, past the session's own refusal.
-    fn refused_by_compare(&mut self) -> bool {
+    /// Whether a compare holds the document read-only, saying so: the guard for
+    /// a door that writes the document outside `apply` (the tokens link, a kit's
+    /// mark and its publish), past the session's own refusal.
+    pub(crate) fn refused_by_compare(&mut self) -> bool {
         let comparing = self.session.compare.is_some();
         if comparing {
             self.session.fail(crate::compare::READ_ONLY);

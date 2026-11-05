@@ -165,6 +165,9 @@ impl OndinApp {
     /// stopped sharing is turned back on with its version kept, so a re-made kit
     /// continues from its last publish.
     pub(crate) fn make_kit(&mut self) {
+        if self.refused_by_compare() {
+            return;
+        }
         // The save below is of `session.doc`, which holds no typed text until
         // the session ends.
         self.finish_text_first();
@@ -233,6 +236,9 @@ impl OndinApp {
     /// it keep their copies; they read it as no longer a kit. Reached through
     /// [`OndinApp::stop_sharing_dialog`], which asks first.
     pub(crate) fn stop_sharing_kit(&mut self) {
+        if self.refused_by_compare() {
+            return;
+        }
         // As `make_kit`: the save holds no typed text until the session ends.
         self.finish_text_first();
         let mut meta = self.session.doc.meta().clone();

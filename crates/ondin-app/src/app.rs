@@ -1678,9 +1678,11 @@ impl eframe::App for OndinApp {
     }
 
     /// An armed eyedropper keeps the panels from seeing the pointer
-    /// (`OndinApp::gate_dropper_input`).
+    /// (`OndinApp::gate_dropper_input`), and `Shift+F10` on a focused control
+    /// becomes a right-click on it (`ui::menu_key_as_right_click`).
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         self.gate_dropper_input(ctx, raw_input);
+        crate::ui::menu_key_as_right_click(ctx, raw_input);
     }
 
     /// The frame body: everything the app draws and decides, once per pass.

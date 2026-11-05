@@ -356,6 +356,26 @@ other chord still resolves, but `dispatch` runs only what `compare::admits` (vie
 save, files and tabs) and answers the rest with the read-only sentence, silently for `Enter`
 (`design/app-compare.md`).
 
+### 8d. A focused control's keys
+
+Once `Tab` has put the focus on a control (the ring shows it), the keymap is silent and these are
+the control's (`design/app-chrome.md`, *Two kinds of focus*):
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift+Tab` | the next / previous control; an open popover or dialog keeps it inside, wrapping |
+| `Enter` · `Space` | press it, as a click does |
+| `Shift+F10` | right-click it: its menu, where the pointer's would open (`ui::menu_key_as_right_click`) |
+| `Alt+↓` | open the list behind it: a split button's choices, a tool group's members (`ui::list_key`) |
+| `F2` · `Ctrl+R` | rename the row: a layer, a page, a variable, a mode, a group (`ui::rename_key`) |
+| arrows | a slider, the picker's plane and tracks, a gradient stop: a hundredth of the range, a tenth with `Shift` (`ui::arrow_keys`). Elsewhere egui moves the focus to the neighbour that way |
+| `Delete` | a gradient stop: remove it (not below two) |
+| `Escape` | drop the focus, or close the surface it is in |
+
+A layers row adds `→`/`←` (open, fold), `↑`/`↓` (the next row, past the rows in view) and
+`Ctrl+Shift+H` / `Ctrl+Shift+L` for that row. `Space` is the focused control's, never the pan
+(`canvas::space_down`).
+
 ## 9. Gesture modifiers
 
 Built: space+drag pan · `Shift` constrain / keep ratio · `Alt` duplicate-drag · `Alt` resize about

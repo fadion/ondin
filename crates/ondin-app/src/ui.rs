@@ -3267,7 +3267,10 @@ impl KeyboardFocus {
     pub fn begin(ctx: &egui::Context, canvas_tab: bool) -> Self {
         // Reads and writes one at a time: the context lock is not re-entrant.
         let pressed = ctx.input(|i| tab_pressed(&i.events));
-        let pointed = ctx.input(|i| i.pointer.any_pressed());
+        let keyed = ctx
+            .data_mut(|d| d.remove_temp::<bool>(keyed_press_id()))
+            .is_some();
+        let pointed = !keyed && ctx.input(|i| i.pointer.any_pressed());
         let focused = ctx.memory(|m| m.focused()).is_some();
         let tab = pressed.filter(|_| focused || !canvas_tab);
         let surface_open = ctx.data(|d| d.get_temp::<bool>(open_id())).unwrap_or(false);
@@ -3531,6 +3534,62 @@ pub fn rename_key(ui: &egui::Ui, resp: &egui::Response) -> bool {
             i.modifiers.is_none() && i.key_pressed(egui::Key::F2)
                 || i.modifiers.command_only() && i.key_pressed(egui::Key::R)
         })
+}
+
+/// Whether the focused control `resp` was asked for the list behind it (a split
+/// button's choices, a tool group's members): `Alt+↓`, as a dropdown opens.
+pub fn list_key(ui: &egui::Ui, resp: &egui::Response) -> bool {
+    resp.has_focus()
+        && ui.input(|i| {
+            i.modifiers.alt && !i.modifiers.command && i.key_pressed(egui::Key::ArrowDown)
+        })
+}
+
+/// `Shift+F10` on a focused control is a right-click on it, as on every desktop.
+/// Rewritten in the raw input before egui reads it (`App::raw_input_hook`): the key
+/// becomes the pointer pressing and releasing the secondary button at the middle
+/// of the control, so every menu a right-click opens opens from the keys, where
+/// the pointer's would. The pointer stays there until the mouse moves, and the
+/// press does not put the focus ring away.
+pub fn menu_key_as_right_click(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    let Some(at) = raw.events.iter().position(|e| {
+        matches!(e, egui::Event::Key {
+            key: egui::Key::F10,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.shift_only())
+    }) else {
+        return;
+    };
+    let Some(id) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    // A text entry keeps its keys; it has no menu of its own here.
+    if egui::TextEdit::load_state(ctx, id).is_some() {
+        return;
+    }
+    let Some(rect) = widget_rect(ctx, id).map(|w| w.interact_rect) else {
+        return;
+    };
+    let pos = rect.center();
+    let press = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    raw.events.splice(
+        at..=at,
+        [egui::Event::PointerMoved(pos), press(true), press(false)],
+    );
+    ctx.data_mut(|d| d.insert_temp(keyed_press_id(), true));
+}
+
+/// Set for the frame [`menu_key_as_right_click`] made a press, which
+/// [`KeyboardFocus::begin`] does not count as the pointer's.
+fn keyed_press_id() -> egui::Id {
+    egui::Id::new("focus-keyed-press")
 }
 
 /// This frame's `Tab` going down: `Some(true)` with `Shift`, `Some(false)` alone,
@@ -3820,8 +3879,7 @@ pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> Spl
         theme::icon_font(12.0),
         ink,
     );
-    let alt_down =
-        resp.has_focus() && ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowDown));
+    let alt_down = list_key(ui, &resp);
     SplitButton {
         action: resp.clicked() && !on_caret,
         caret: resp.clicked() && on_caret || alt_down,
@@ -5430,6 +5488,58 @@ mod keyboard_focus_tests {
             ctx.memory(|m| m.focused()),
             Some(slider_id),
             "the arrows stayed its"
+        );
+    }
+
+    /// `Shift+F10` on a focused button is a right-click on it, and the ring stays.
+    /// flip: `menu_key_as_right_click` returns before the splice → fails at "a
+    /// right-click".
+    #[test]
+    fn shift_f10_right_clicks_the_focused_control() {
+        let mut f = Fixture::new();
+        f.idle(true);
+        f.frame(tab(false), true, false);
+        f.idle(true);
+        assert_eq!(
+            f.focused(),
+            Some(f.popover[0]),
+            "the fixture focuses a button"
+        );
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            modifiers: egui::Modifiers::SHIFT,
+            events: vec![egui::Event::Key {
+                key: egui::Key::F10,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::SHIFT,
+            }],
+            ..Default::default()
+        };
+        menu_key_as_right_click(&f.ctx, &mut raw);
+        let mut right = false;
+        let out = f.ctx.run_ui(raw, |ui| {
+            let _focus = KeyboardFocus::begin(ui.ctx(), false);
+            egui::Area::new(egui::Id::new("popover"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(egui::pos2(400.0, 100.0))
+                .show(ui.ctx(), |ui| {
+                    hold_tab(ui);
+                    right = field_button(ui, icon::X, 28.0, FieldButton::Off).secondary_clicked();
+                    for _ in 0..2 {
+                        let _ = field_button(ui, icon::X, 28.0, FieldButton::Off);
+                    }
+                });
+        });
+        f.shapes = out.shapes;
+        assert!(right, "a right-click on the focused button");
+        assert!(
+            focus_visible(&f.ctx),
+            "and the keyed press left the ring up"
         );
     }
 }

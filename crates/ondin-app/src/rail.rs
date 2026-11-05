@@ -158,8 +158,8 @@ impl OndinApp {
         }
     }
 
-    /// A grouped slot: a click arms what it shows, a press held [`HOLD_S`] or a
-    /// right-click opens its members beside it.
+    /// A grouped slot: a click arms what it shows, a press held [`HOLD_S`], a
+    /// right-click or `Alt+↓` opens its members beside it.
     pub(crate) fn rail_group(&mut self, ui: &mut egui::Ui, group: Group) -> egui::Response {
         let shown = self.rail_shown(group);
         let mut resp = ui::icon_button(
@@ -188,7 +188,8 @@ impl OndinApp {
                     .request_repaint_after(std::time::Duration::from_secs_f64(HOLD_S - since));
             }
         }
-        if resp.secondary_clicked() {
+        // `Alt+↓` on the focused slot opens it from the keys, as a dropdown opens.
+        if resp.secondary_clicked() || ui::list_key(ui, &resp) {
             self.rail.flyout = Some(Flyout {
                 group,
                 at: resp.rect,
@@ -238,6 +239,7 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
+                ui::hold_tab(ui);
                 ui::menu_frame(PAD).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = GAP;

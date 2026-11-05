@@ -11,13 +11,6 @@ reads true.
 
 ## Now
 
-- **The keyboard's last pointer-only gestures.** Every control is a tab stop now
-  (`app-chrome.md`, *Two kinds of focus*); what a focused one still cannot do from the keys: a
-  layers row's caret, eye and lock (one stop that `Enter` selects); the colour picker's gradient
-  stops (add, move, remove) and its plane and tracks, which take no arrows; `ui::slider`, likewise;
-  renaming a variable, a mode, a group or a page, which only a double-click starts; and a tool
-  group's flyout, which opens by press-and-hold (its tools have letters).
-
 ## Illustrations
 
 Vector editing enough for icons, logos and simple illustrations without leaving Ondin.

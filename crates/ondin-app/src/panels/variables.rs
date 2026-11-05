@@ -3290,7 +3290,7 @@ fn style_group_row(
         egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
-    if g.kit.is_none() && ui::double_clicked(ui, &resp) {
+    if g.kit.is_none() && (ui::double_clicked(ui, &resp) || ui::rename_key(ui, &resp)) {
         acts.push(Act::StartEdit(Edit::StyleGroup {
             slot: g.slot,
             path: g.path.to_string(),
@@ -3511,7 +3511,7 @@ fn header(
                 theme::text::faint(),
             );
         }
-        if ui::double_clicked(ui, &resp) {
+        if ui::double_clicked(ui, &resp) || ui::rename_key(ui, &resp) {
             acts.push(Act::StartEdit(Edit::Mode {
                 mode: m.id,
                 text: m.name.clone(),
@@ -3612,7 +3612,7 @@ fn group_row(
         theme::text::faint(),
     );
     if let Some(collection) = of.own()
-        && ui::double_clicked(ui, &resp)
+        && (ui::double_clicked(ui, &resp) || ui::rename_key(ui, &resp))
     {
         acts.push(Act::StartEdit(Edit::Group {
             collection,
@@ -3766,7 +3766,7 @@ fn var_row(
         if let Some(tip) = tip {
             name_resp = name_resp.on_hover_text(tip);
         }
-        if ui::double_clicked(ui, &name_resp) {
+        if ui::double_clicked(ui, &name_resp) || ui::rename_key(ui, &name_resp) {
             acts.push(Act::StartEdit(Edit::Name {
                 var: v.id,
                 text: v.name.clone(),

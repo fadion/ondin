@@ -868,7 +868,7 @@ impl OndinApp {
             if resp.secondary_clicked() {
                 self.open_context_menu(ui.ctx(), crate::menu::Target::Page(*page), None);
             }
-            if crate::ui::double_clicked(ui, &resp) {
+            if crate::ui::double_clicked(ui, &resp) || crate::ui::rename_key(ui, &resp) {
                 self.start_page_rename(*page);
             } else if resp.clicked() && self.context_menu.is_none() {
                 self.go_to_page(*page);

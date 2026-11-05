@@ -1035,6 +1035,28 @@ fn sweep(theme: Theme) {
     let found = opened(&ctx, &mut app, |_, a| a.toggle_var_browser());
     check("variables browser", app, found);
 
+    // The tokens import review, on a file in its own folder per theme: two
+    // groups of rows, the filters, and the link box in the footer.
+    let tokens = std::env::temp_dir().join(format!(
+        "ondin-audit-tokens-{}-{}",
+        std::process::id(),
+        matches!(theme, Theme::Dark)
+    ));
+    std::fs::create_dir_all(&tokens).unwrap();
+    let tokens = tokens.join("tokens.json");
+    std::fs::write(
+        &tokens,
+        r##"{
+  "brand": { "$type": "color", "500": { "$value": "#6d8cd9" }, "600": { "$value": "#4a6bc0" } },
+  "space": { "$type": "dimension", "gutter": { "$value": { "value": 24, "unit": "px" } } }
+}"##,
+    )
+    .unwrap();
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| a.open_tokens_import(tokens, false));
+    assert!(app.tokens_import.is_some(), "the tokens review opened");
+    check("tokens import", app, found);
+
     // A value chip's popup, then its *State ▸* flyout over it: list rows, whose
     // ground is the hover alone, so each is swept.
     let mut rows_seen: Vec<(&str, usize)> = Vec::new();

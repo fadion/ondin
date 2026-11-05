@@ -3106,10 +3106,12 @@ impl OndinApp {
         }
         // Handed over every frame: `current` reads through the preview, so a
         // `value != current` guard would be false on the release frame. Engaged by
-        // the drag alone: its keys commit above, so a drag of a slider that already
-        // has the focus commits on release rather than when the focus leaves.
+        // the press, not the focus: its keys commit above, so a click or drag of a
+        // slider that already has the focus commits on release rather than when the
+        // focus leaves. `dragged()` alone misses a still click, which jumps the knob.
         let next = axis_coords_after(axis, coords, value, clear_at_default);
-        self.char_valve_engaged(&resp, resp.dragged(), subject, CharAttr::Variations(next));
+        let engaged = resp.is_pointer_button_down_on() || resp.dragged();
+        self.char_valve_engaged(&resp, engaged, subject, CharAttr::Variations(next));
     }
 
     /// Write one axis coordinate, if it moved.
@@ -10192,6 +10194,42 @@ mod axis_valve_tests {
         assert!(
             stored_wght(&app, id).is_some_and(|w| w > 500.0),
             "committed on release: {:?}",
+            stored_wght(&app, id)
+        );
+    }
+
+    /// A still click on an axis slider jumps the knob there and commits it on release.
+    /// flip: `axis_slider` engaging its valve on `dragged()` alone → fails at "committed".
+    #[test]
+    fn a_still_click_on_an_axis_slider_commits() {
+        let (ctx, mut app, id, _) = app_with_wght(500.0);
+        let slider = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            let coords = attr!(&subject, Variations, Variations);
+            let mut out = egui::Rect::NOTHING;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let r = ui.max_rect();
+                    app.axis_slider(ui, &subject, &wght(), &coords, 200.0, true);
+                    out = ui.min_rect().intersect(r);
+                },
+            );
+            out
+        };
+        let rect = slider(&mut app, Vec::new());
+        let at = rect.center() + egui::vec2(40.0, 0.0);
+        slider(&mut app, vec![egui::Event::PointerMoved(at)]);
+        slider(&mut app, vec![click(at, true)]);
+        slider(&mut app, vec![click(at, false)]);
+        slider(&mut app, Vec::new());
+        assert!(!app.session.has_gesture_preview(), "no preview left");
+        assert!(
+            stored_wght(&app, id).is_some_and(|w| w > 500.0),
+            "committed: {:?}",
             stored_wght(&app, id)
         );
     }

@@ -1049,8 +1049,8 @@ fn note(r: &Review) -> Option<String> {
         };
         let n = r.left_out.len();
         out.push(format!(
-            "{n} token{} left out: {list} {} no variable or style here.",
-            if n == 1 { "" } else { "s" },
+            "{} left out: {list} {} no variable or style here.",
+            ui::count(n, "token"),
             if n == 1 { "has" } else { "have" }
         ));
     }

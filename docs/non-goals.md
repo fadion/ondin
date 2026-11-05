@@ -29,6 +29,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **A rotation handle or mid-edge squares** — sides still resize (§15 D14).
 - **A user-draggable ruler origin** — the rulers would disagree with the world-space inspector; rulers re-origin only on a lone selected frame (§15 D137, D36).
 - **Middle-button pan over the origin fields** (§15 D254).
+- **`Tab` held inside a menu or a dropdown's list** — a desktop menu's keys are its arrows, `Enter` and `Escape`, and `Tab` does not cycle it; popovers, dialogs and cards hold `Tab`, menus do not (`app-chrome.md`, *Two kinds of focus*).
 - **One insertion line for the layers tree and the paint panels' reorder** — a gap cannot name a parent (§15 D306).
 - **A resizable inspector column** — its width is a function of the design (§15 D351).
 - **Unique layer names** — names only need to be displayable (§15 D127). Batch rename makes no name unique, and its preview does not flag duplicates.

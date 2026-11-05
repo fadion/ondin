@@ -534,8 +534,9 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   character attributes (`Spans::replaced`, `text.md`).
 - **Stored text only.** Matching reads `content`: a case transform is drawn, not stored, and list
   markers are not text. Text whose content is bound to a variable stores a placeholder and is skipped.
-- **Doors.** `Ctrl+F` (`Action::FindText { replace: false }`) opens on Find; `Ctrl+H` opens with the
-  Replace row showing, unshifted only, since `Ctrl+Shift+H` is hide/show. Both are normal-mode
+- **Doors.** `Ctrl+F` (`Action::FindText { replace: false }`) opens on Find; `Ctrl+H` (⌥⌘F on macOS, where
+  ⌘H hides the app) opens with the Replace row showing, unshifted only, since `Ctrl+Shift+H` is
+  hide/show. Both are normal-mode
   chords. The palette rows *Find in text…* and *Replace text…* (`Item::FindText`, `ReplaceText`,
   State group) are also in the cheatsheet's Layer section. Opening again while open only takes the
   keyboard back.

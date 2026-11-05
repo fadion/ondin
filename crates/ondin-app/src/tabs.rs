@@ -554,7 +554,7 @@ impl OndinApp {
     }
 
     /// Bring forward the tab `step` places from the one in front, wrapping, the
-    /// library's tab counted: `Ctrl+Tab` and `Ctrl+Shift+Tab`.
+    /// library's tab counted: `Ctrl+Tab` and `Ctrl+Shift+Tab`, ⌃⇥ and ⌃⇧⇥ on macOS.
     pub(crate) fn step_tab(&mut self, step: isize) {
         let count = self.tabs.list.len() as isize + 1;
         let at = match self.front_tab().and_then(|id| self.tabs.index(id)) {
@@ -941,7 +941,7 @@ const OVERFLOW_W: f32 = 220.0;
 /// What a key on either screen asks of the tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabKey {
-    /// `Ctrl+Tab` (1) and `Ctrl+Shift+Tab` (-1).
+    /// `Ctrl+Tab` (1) and `Ctrl+Shift+Tab` (-1); ⌃⇥ and ⌃⇧⇥ on macOS.
     Step(isize),
     /// `Alt+1`…`Alt+9`.
     Slot(u8),

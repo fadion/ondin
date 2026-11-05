@@ -1,4 +1,4 @@
-//! Find and replace in what text layers say (`Ctrl+F`, `Ctrl+H`): a box at the
+//! Find and replace in what text layers say (`Ctrl+F`, `Ctrl+H` or ⌥⌘F on macOS): a box at the
 //! canvas's top-right, beside the inspector and never over it, listing every
 //! match in the selection, the page or every page (`ondin_core::find`), and the
 //! matches tinted on the canvas, the current one ringed.

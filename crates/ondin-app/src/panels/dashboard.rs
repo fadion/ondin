@@ -722,7 +722,7 @@ impl OndinApp {
             ui.painter().text(
                 egui::pos2(rect.right() - ui::FIELD_PAD_X, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
-                "Ctrl + K",
+                crate::input::keys("Ctrl+K").replace('+', " + "),
                 egui::FontId::proportional(ui::CAPTION_PT),
                 theme::text::faint(),
             );
@@ -3876,7 +3876,9 @@ impl OndinApp {
                 d.version_history,
                 settings::SWITCH_H,
             )
-            .on_hover_text("Ctrl+S pins a version you can go back to")
+            .on_hover_text(crate::input::keys(
+                "Ctrl+S pins a version you can go back to",
+            ))
             .clicked()
             {
                 d.version_history = !d.version_history;

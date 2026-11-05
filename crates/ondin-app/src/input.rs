@@ -540,6 +540,170 @@ impl ViewSwitch {
     ];
 }
 
+/// The modifiers a chord can be spelled with, as `docs/shortcuts.md` writes them,
+/// in the order a Mac menu sets them out (⌃ ⌥ ⇧ ⌘; [`key_name`] gives each
+/// symbol). `Ctrl` is egui's `command`, so ⌘ on a Mac; `Control` is the physical
+/// key, the spelling only a macOS-only binding uses.
+const MODIFIERS: [&str; 4] = ["Control", "Alt", "Shift", "Ctrl"];
+
+/// Every shortcut in `text` as this host writes it: as spelled on Windows and
+/// Linux, and in the symbols a Mac menu uses on macOS (`Ctrl+Shift+Z` is `⇧⌘Z`).
+/// Every label that shows a chord, bare or inside a sentence, goes through this.
+pub fn keys(text: &str) -> std::borrow::Cow<'_, str> {
+    keys_for(text, on_mac())
+}
+
+/// Whether the keymap is a Mac's: the few chords macOS keeps for itself are
+/// bound elsewhere, and labels use its symbols.
+pub(crate) fn on_mac() -> bool {
+    crate::chrome::Host::current() == crate::chrome::Host::MacOs
+}
+
+/// *Replace text…*'s chord: `Ctrl+H`, but `Ctrl+Alt+F` (⌥⌘F) on macOS, whose
+/// app menu keeps ⌘H for *Hide*.
+pub(crate) fn replace_chord() -> &'static str {
+    if on_mac() { "Ctrl+Alt+F" } else { "Ctrl+H" }
+}
+
+/// The next and previous tab chords: `Ctrl+Tab`, but `Control+Tab` (⌃⇥) on
+/// macOS, where ⌘Tab is the app switcher (`tabs::read_keys`).
+pub(crate) fn tab_step_chords() -> [&'static str; 2] {
+    if on_mac() {
+        ["Control+Tab", "Control+Shift+Tab"]
+    } else {
+        ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+    }
+}
+
+/// The cheatsheet's chord: `Ctrl+Shift+/`, but `Control+Shift+/` (⌃⇧/) on macOS,
+/// where ⇧⌘/ is the system's *Show Help menu* and never reaches the app.
+pub(crate) fn cheatsheet_chord_spelled() -> &'static str {
+    if on_mac() {
+        "Control+Shift+/"
+    } else {
+        "Ctrl+Shift+/"
+    }
+}
+
+/// The modifiers [`cheatsheet_chord_spelled`] holds, as egui reports them.
+pub(crate) fn cheatsheet_modifiers() -> egui::Modifiers {
+    if on_mac() {
+        egui::Modifiers::CTRL | egui::Modifiers::SHIFT
+    } else {
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT
+    }
+}
+
+/// [`keys`] for a host chosen by the caller, so both spellings are testable on any.
+fn keys_for(text: &str, mac: bool) -> std::borrow::Cow<'_, str> {
+    if !text.contains('+') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut prev: Option<char> = None;
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        // A name the user gave sits in curly quotes (`Deleted “{name}”`) and is
+        // theirs, chord-like or not: copied through to its closing quote.
+        if c == '“' {
+            let quoted = rest
+                .find('”')
+                .map_or(rest.len(), |end| end + '”'.len_utf8());
+            out.push_str(&rest[..quoted]);
+            prev = rest[..quoted].chars().last();
+            rest = &rest[quoted..];
+            continue;
+        }
+        // A chord starts a word: `Ctrl` inside `MyCtrl+X` is not one.
+        if prev.is_none_or(|p| !p.is_alphanumeric())
+            && let Some((chord, len)) = chord_at(rest, mac)
+        {
+            changed |= chord != rest[..len];
+            out.push_str(&chord);
+            prev = rest[..len].chars().last();
+            rest = &rest[len..];
+            continue;
+        }
+        out.push(c);
+        prev = Some(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    if changed {
+        std::borrow::Cow::Owned(out)
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// The chord `s` starts with, written for the host, and its length in `s`; `None`
+/// when `s` does not start with a modifier and `+`. The key is a run of letters
+/// and digits (`Z`, `F2`, `Enter`, `drag`) or one other character (`;`, `=`, `+`).
+fn chord_at(s: &str, mac: bool) -> Option<(String, usize)> {
+    let mut held = [false; MODIFIERS.len()];
+    let mut at = 0;
+    while let Some(i) = MODIFIERS
+        .iter()
+        .position(|name| s[at..].starts_with(name) && s[at + name.len()..].starts_with('+'))
+    {
+        held[i] = true;
+        at += MODIFIERS[i].len() + 1;
+    }
+    if at == 0 {
+        return None;
+    }
+    let first = s[at..].chars().next().filter(|c| !c.is_whitespace())?;
+    let key_len = if first.is_alphanumeric() {
+        s[at..]
+            .char_indices()
+            .find(|&(_, c)| !c.is_alphanumeric())
+            .map_or(s.len() - at, |(j, _)| j)
+    } else {
+        first.len_utf8()
+    };
+    let key = &s[at..at + key_len];
+    let len = at + key_len;
+    if !mac {
+        return Some((s[..len].replace("Control+", "Ctrl+"), len));
+    }
+    let mut chord: String = MODIFIERS
+        .iter()
+        .zip(held)
+        .filter(|&(_, on)| on)
+        .map(|(name, _)| key_name_for(name, true))
+        .collect();
+    // `Alt+drag`, `Shift+click`: a gesture, not a key, reads apart.
+    if first.is_lowercase() {
+        chord.push(' ');
+    }
+    chord.push_str(key_name_for(key, true));
+    Some((chord, len))
+}
+
+/// One key or modifier's name as this host writes it, for a keycap of its own:
+/// `Ctrl` is `⌘` on macOS, `Enter` is `↩`, and `Control` is `Ctrl` elsewhere.
+pub fn key_name(name: &str) -> &str {
+    key_name_for(name, on_mac())
+}
+
+/// [`key_name`] for a host chosen by the caller.
+fn key_name_for(name: &str, mac: bool) -> &str {
+    if !mac {
+        return if name == "Control" { "Ctrl" } else { name };
+    }
+    match name {
+        "Control" => "⌃",
+        "Alt" => "⌥",
+        "Shift" => "⇧",
+        "Ctrl" => "⌘",
+        "Enter" => "↩",
+        "Esc" | "Escape" => "⎋",
+        "Tab" => "⇥",
+        "Backspace" => "⌫",
+        other => other,
+    }
+}
+
 /// How far an arrow key moves the selection, and how far with Shift held —
 /// the defaults, and what [`NudgeStep::default`] hands out.
 const NUDGE: f64 = 1.0;
@@ -793,10 +957,16 @@ pub(crate) fn cheatsheet_chord(ctx: &egui::Context) -> bool {
 ///
 /// `Ctrl+Shift+/` arrives as `Key::Questionmark` on most layouts (§0), so both
 /// spellings are read; the palette's `/` is Shift-up so the two never fire together.
+/// On macOS the cheatsheet is on Control (`cheatsheet_chord_spelled`).
 fn discovery_chord(i: &egui::InputState) -> Option<Action> {
     let m = i.modifiers;
     let cmd_only = m.command && !m.alt;
-    if cmd_only
+    let sheet_held = if on_mac() {
+        m.ctrl && !m.command && !m.alt
+    } else {
+        cmd_only
+    };
+    if sheet_held
         && ((m.shift && i.key_pressed(egui::Key::Slash)) || i.key_pressed(egui::Key::Questionmark))
     {
         return Some(Action::Cheatsheet);
@@ -1286,11 +1456,14 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::FindText { replace: false },
             &mut out,
         );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::H),
-            Action::FindText { replace: true },
-            &mut out,
-        );
+        // A Mac's app menu takes ⌘H for *Hide*, so Replace is ⌥⌘F there
+        // (`replace_chord`).
+        let replace = if on_mac() {
+            m.command && m.alt && !m.shift && i.key_pressed(egui::Key::F)
+        } else {
+            cmd_only && !m.shift && i.key_pressed(egui::Key::H)
+        };
+        on(replace, Action::FindText { replace: true }, &mut out);
         // Flip, on Figma's pair. `plain` keeps these off `Alt+H`/`Alt+V` (align
         // centres) below.
         on(
@@ -3689,6 +3862,163 @@ mod text_insert_tests {
             assert!(
                 actions(Mode::TextInsert, vec![key(k, cmd_shift())], cmd_shift()).is_empty(),
                 "Ctrl+Shift+{k:?} is not a second spelling here either"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod keys_tests {
+    use super::keys_for;
+
+    /// A Mac writes chords in its menus' symbols, modifiers in their order and
+    /// named keys as glyphs, whether the chord stands alone or sits in a sentence.
+    ///
+    /// flip: `chord_at` setting the modifiers in the order they were spelled →
+    /// fails at `Ctrl+Shift+Z`.
+    #[test]
+    fn a_mac_writes_chords_as_its_menus_do() {
+        for (spelled, mac) in [
+            ("Ctrl+Shift+Z", "⇧⌘Z"),
+            ("Shift+Ctrl+Z", "⇧⌘Z"),
+            ("Ctrl+Alt+Enter", "⌥⌘↩"),
+            ("Control+Tab", "⌃⇥"),
+            ("Ctrl+;", "⌘;"),
+            ("Ctrl+Alt+\\", "⌥⌘\\"),
+            ("Ctrl+=", "⌘="),
+            ("Ctrl+-", "⌘-"),
+            ("Ctrl+'", "⌘'"),
+            ("Ctrl+PageDown", "⌘PageDown"),
+            ("Shift+F", "⇧F"),
+            ("Shift+Esc", "⇧⎋"),
+            ("Ctrl+Backspace", "⌘⌫"),
+            ("Alt+drag", "⌥ drag"),
+            ("Alt+click to open", "⌥ click to open"),
+            ("Previous match (Shift+Enter)", "Previous match (⇧↩)"),
+            (
+                "names are hidden (Ctrl+Shift+N).",
+                "names are hidden (⇧⌘N).",
+            ),
+            ("Ctrl+Alt+V/H", "⌥⌘V/H"),
+        ] {
+            assert_eq!(keys_for(spelled, true), mac, "{spelled}");
+        }
+    }
+
+    /// A name the user gave, in the curly quotes the app sets names in, is never
+    /// rewritten; the chords around it still are.
+    ///
+    /// flip: `keys_for` without its `“` arm → fails at the quoted name.
+    #[test]
+    fn a_quoted_name_is_left_as_the_user_wrote_it() {
+        assert_eq!(
+            keys_for(
+                "“Ctrl+A notes” and its 3 layers go with it. Ctrl+Z brings them back.",
+                true
+            ),
+            "“Ctrl+A notes” and its 3 layers go with it. ⌘Z brings them back."
+        );
+        assert_eq!(
+            keys_for("Deleted “Alt+1 / Shift+2” · Ctrl+Z to undo", false),
+            "Deleted “Alt+1 / Shift+2” · Ctrl+Z to undo",
+            "and elsewhere too"
+        );
+        assert_eq!(
+            keys_for("an open “Ctrl+X quote with no end", true),
+            "an open “Ctrl+X quote with no end",
+            "an unclosed quote runs to the end"
+        );
+    }
+
+    /// Elsewhere a chord stays as spelled, but for the physical `Control`, which
+    /// is `Ctrl` there; text with no chord comes back untouched.
+    ///
+    /// flip: `chord_at` answering `None` for a chord off macOS → fails at
+    /// `Control+Tab`.
+    #[test]
+    fn elsewhere_chords_stay_as_spelled() {
+        for (spelled, shown) in [
+            ("Ctrl+Shift+Z", "Ctrl+Shift+Z"),
+            ("Alt+click to open", "Alt+click to open"),
+            ("Control+Tab", "Ctrl+Tab"),
+            (
+                "Previous match (Control+Shift+Tab)",
+                "Previous match (Ctrl+Shift+Tab)",
+            ),
+        ] {
+            assert_eq!(keys_for(spelled, false), shown, "{spelled}");
+        }
+        for plain in ["Save", "1 + 1", "Shift", "MyCtrl+X", "Ctrl+ alone", "Ctrl+"] {
+            assert_eq!(keys_for(plain, true), plain, "{plain} has no chord");
+            assert!(
+                matches!(keys_for(plain, false), std::borrow::Cow::Borrowed(_)),
+                "{plain} is not copied"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod host_chord_tests {
+    use super::tests::{actions, key};
+    use super::*;
+
+    /// A chord as `docs/shortcuts.md` spells it, as the key and modifiers egui
+    /// reports for it: `Ctrl` is `command`, `Control` the physical key.
+    fn pressed(chord: &str) -> (egui::Key, egui::Modifiers) {
+        let mut m = egui::Modifiers::NONE;
+        let mut parts: Vec<&str> = chord.split('+').collect();
+        let key = parts.pop().expect("a key");
+        for part in parts {
+            match part {
+                "Ctrl" => m.command = true,
+                "Control" => m.ctrl = true,
+                "Alt" => m.alt = true,
+                "Shift" => m.shift = true,
+                other => panic!("no modifier {other}"),
+            }
+        }
+        (egui::Key::from_name(key).expect("a key egui names"), m)
+    }
+
+    /// The chord *Replace text…* shows is the one that opens it, on whichever host
+    /// runs the test: `Ctrl+H`, or ⌥⌘F on macOS.
+    ///
+    /// flip: `resolve` reading Replace on ⌘H on macOS too → fails on a Mac at
+    /// "opens Replace" (elsewhere the flip is a no-op, which CI's Mac leg covers).
+    #[test]
+    fn the_replace_chord_shown_is_the_one_bound() {
+        let (k, m) = pressed(replace_chord());
+        assert!(
+            actions(Mode::Normal, vec![key(k, m)], m).contains(&Action::FindText { replace: true }),
+            "{} opens Replace",
+            replace_chord()
+        );
+    }
+
+    /// The tab chords shown are the ones that step: `Ctrl+Tab`, or ⌃⇥ on macOS.
+    ///
+    /// flip: `tabs::read_keys` stepping on `command` on macOS → fails on a Mac at
+    /// "steps forward".
+    #[test]
+    fn the_tab_chords_shown_are_the_ones_bound() {
+        for (chord, step) in tab_step_chords().into_iter().zip([1, -1]) {
+            let (k, m) = pressed(chord);
+            let ctx = egui::Context::default();
+            let mut got = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    modifiers: m,
+                    events: vec![key(k, m)],
+                    ..Default::default()
+                },
+                |ui| got = crate::tabs::read_keys(ui.ctx()),
+            );
+            let way = if step > 0 { "forward" } else { "back" };
+            assert_eq!(
+                got,
+                Some(crate::tabs::TabKey::Step(step)),
+                "{chord} steps {way}"
             );
         }
     }

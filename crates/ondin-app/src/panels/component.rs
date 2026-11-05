@@ -1752,7 +1752,7 @@ fn reset_row(
             FieldButton::Off,
             egui::vec2(half, h),
         )
-        .on_hover_text("Detach instance · Ctrl+Alt+B")
+        .on_hover_text(crate::input::keys("Detach instance · Ctrl+Alt+B"))
         .clicked()
         {
             *act = Some(Act::Detach);

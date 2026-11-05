@@ -296,8 +296,8 @@ fn sections(lead: Lead) -> Vec<Section> {
         Section {
             title: "Tabs",
             rows: vec![
-                hand_row("Next tab", &["Ctrl+Tab"]),
-                hand_row("Previous tab", &["Ctrl+Shift+Tab"]),
+                hand_row("Next tab", &[crate::input::tab_step_chords()[0]]),
+                hand_row("Previous tab", &[crate::input::tab_step_chords()[1]]),
                 hand_row("Reopen closed tab", &["Ctrl+Shift+T"]),
                 hand_row("Go to tab 1–8", &["Alt+1…8"]),
                 hand_row("Go to the last tab", &["Alt+9"]),
@@ -343,16 +343,33 @@ fn sections(lead: Lead) -> Vec<Section> {
     out
 }
 
-/// The modifier keys, as the registry spells them.
+/// The modifier keys, as the registry spells them. `Control` is the physical key
+/// a macOS-only chord names (`input::tab_step_chords`).
 fn is_modifier(key: &str) -> bool {
-    matches!(key, "Ctrl" | "Alt" | "Shift")
+    matches!(key, "Ctrl" | "Control" | "Alt" | "Shift")
+}
+
+/// The modifiers *hold to look* tells apart, in the order of `held`'s slots.
+/// `Ctrl` is ⌘ on a Mac and `Control` the ⌃ beside it; elsewhere they are one key,
+/// read as `Ctrl` ([`held_now`]).
+const HELD: [&str; 4] = ["Ctrl", "Control", "Alt", "Shift"];
+
+/// Which of [`HELD`] are down. egui reports a Windows or Linux Ctrl as both
+/// `command` and `ctrl`, so there `Control` never counts; a Mac's ⌘ sets
+/// `mac_cmd`, so there ⌃ counts beside it as Alt does.
+fn held_now(m: egui::Modifiers) -> [bool; 4] {
+    [
+        m.command,
+        m.ctrl && (m.mac_cmd || !m.command),
+        m.alt,
+        m.shift,
+    ]
 }
 
 /// Whether `keys` uses exactly the `held` modifiers — what *hold to look*
 /// leaves bright.
-fn uses_exactly(keys: &[String], held: [bool; 3]) -> bool {
-    let has = |m: &str| keys.iter().any(|k| k == m);
-    [has("Ctrl"), has("Alt"), has("Shift")] == held && keys.iter().any(|k| !is_modifier(k))
+fn uses_exactly(keys: &[String], held: [bool; 4]) -> bool {
+    HELD.map(|m| keys.iter().any(|k| k == m)) == held && keys.iter().any(|k| !is_modifier(k))
 }
 
 /// Whether a row survives the filter: every query word starts a word of the
@@ -411,10 +428,7 @@ impl OndinApp {
             .filter(|w| !w.is_empty())
             .map(str::to_lowercase)
             .collect();
-        let held = ctx.input(|i| {
-            let m = i.modifiers;
-            [m.command || m.ctrl, m.alt, m.shift]
-        });
+        let held = ctx.input(|i| held_now(i.modifiers));
         let any_held = held.iter().any(|h| *h);
         sheet.released |= !any_held;
         let looking = sheet.released && query.is_empty() && any_held;
@@ -574,7 +588,7 @@ fn in_a_file(ui: &mut egui::Ui) {
 }
 
 /// One section: its title over a rule, then its rows.
-fn section_ui(ui: &mut egui::Ui, s: &Section, query: &[String], held: [bool; 3], looking: bool) {
+fn section_ui(ui: &mut egui::Ui, s: &Section, query: &[String], held: [bool; 4], looking: bool) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), TITLE_H),
         egui::Sense::empty(),
@@ -605,7 +619,7 @@ fn row_ui(
     ui: &mut egui::Ui,
     row: &Row,
     query: &[String],
-    held: [bool; 3],
+    held: [bool; 4],
     looking: bool,
     bright: bool,
 ) {
@@ -620,14 +634,8 @@ fn row_ui(
     // Laid right to left, so the last alternative's last key is at the margin.
     for (n, chord) in row.chords.iter().enumerate().rev() {
         for key in chord.iter().rev() {
-            let lit_held = looking
-                && bright
-                && match key.as_str() {
-                    "Ctrl" => held[0],
-                    "Alt" => held[1],
-                    "Shift" => held[2],
-                    _ => false,
-                };
+            let lit_held =
+                looking && bright && HELD.iter().position(|m| m == key).is_some_and(|i| held[i]);
             let lit_query = query
                 .iter()
                 .any(|q| key.to_lowercase().starts_with(q.as_str()));
@@ -637,7 +645,11 @@ fn row_ui(
                 _ => (theme::color::text_a(184), theme::color::text_a(20)), // text-ink: on the keycap's ground
             };
             let word = key == "drag";
-            let g = p.layout_no_wrap(key.clone(), font.clone(), fade(fg));
+            let g = p.layout_no_wrap(
+                crate::input::key_name(key).to_owned(),
+                font.clone(),
+                fade(fg),
+            );
             if word {
                 let x = right - g.size().x - 2.0;
                 p.galley(
@@ -746,15 +758,17 @@ fn footer(ui: &mut egui::Ui) {
     let mut job = egui::text::LayoutJob::default();
     let dim = egui::TextFormat::simple(font.clone(), theme::text::dim());
     let strong = egui::TextFormat::simple(font.clone(), theme::text::muted());
+    let palette = crate::input::keys("Ctrl+K").replace('+', " + ");
+    let key = crate::input::key_name;
     for (text, fmt) in [
         ("Run any command by name with ", &dim),
-        ("Ctrl + K", &strong),
+        (palette.as_str(), &strong),
         ("        Hold ", &dim),
-        ("Ctrl", &strong),
+        (key("Ctrl"), &strong),
         (", ", &dim),
-        ("Alt", &strong),
+        (key("Alt"), &strong),
         (" or ", &dim),
-        ("Shift", &strong),
+        (key("Shift"), &strong),
         (" to see what they do", &dim),
     ] {
         job.append(text, 0.0, fmt.clone());
@@ -902,6 +916,8 @@ mod tests {
                     modifiers.ctrl = true;
                     modifiers.command = true;
                 }
+                // The physical key a macOS-only chord names, without `command`.
+                "Control" => modifiers.ctrl = true,
                 "Alt" => modifiers.alt = true,
                 "Shift" => modifiers.shift = true,
                 "→" => key = Some(egui::Key::ArrowRight),
@@ -974,12 +990,8 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
-        let chord = egui::Modifiers {
-            ctrl: true,
-            command: true,
-            shift: true,
-            ..Default::default()
-        };
+        // The host's chord: ⌃⇧/ on macOS, whose ⇧⌘/ the system keeps.
+        let chord = crate::input::cheatsheet_modifiers();
         let press = |app: &mut OndinApp, events: Vec<egui::Event>, modifiers| {
             let mut frame = eframe::Frame::_new_kittest();
             let input = egui::RawInput {
@@ -1018,14 +1030,54 @@ mod tests {
         }
     }
 
-    /// Holding Ctrl+Alt leaves exactly the Ctrl+Alt chords bright.
+    /// Holding Ctrl+Alt leaves exactly the Ctrl+Alt chords bright; on a Mac ⌘
+    /// and ⌃ are told apart and held together like any pair, and a Windows or
+    /// Linux Ctrl, which egui reports as both, is `Ctrl` alone. The second flip:
+    /// `held_now` counting ⌃ only without `command` → fails at "⌘⌃ holds both".
+    ///
+    /// flip: `held_now` folding `ctrl` into the first slot again → fails at "⌃
+    /// lights a ⌃ chord", as ⌃ then fills both slots.
     #[test]
     fn holding_modifiers_keeps_only_their_chords() {
         let keys = |s: &str| keys_of(s);
-        let held = [true, true, false];
-        assert!(uses_exactly(&keys("Ctrl+Alt+U"), held));
-        assert!(!uses_exactly(&keys("Ctrl+Alt+Shift+U"), held));
-        assert!(!uses_exactly(&keys("Ctrl+G"), held));
+        let ctrl_alt = held_now(egui::Modifiers {
+            ctrl: true,
+            command: true,
+            alt: true,
+            ..Default::default()
+        });
+        assert!(uses_exactly(&keys("Ctrl+Alt+U"), ctrl_alt));
+        assert!(!uses_exactly(&keys("Ctrl+Alt+Shift+U"), ctrl_alt));
+        assert!(!uses_exactly(&keys("Ctrl+G"), ctrl_alt));
+
+        let mac_cmd = held_now(egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND);
+        let mac_ctrl = held_now(egui::Modifiers::CTRL);
+        assert!(uses_exactly(&keys("Ctrl+G"), mac_cmd), "⌘ lights a ⌘ chord");
+        assert!(
+            !uses_exactly(&keys("Control+Tab"), mac_cmd),
+            "⌘ lights no ⌃ chord"
+        );
+        assert!(
+            uses_exactly(&keys("Control+Tab"), mac_ctrl),
+            "⌃ lights a ⌃ chord"
+        );
+        assert!(
+            !uses_exactly(&keys("Ctrl+G"), mac_ctrl),
+            "⌃ lights no ⌘ chord"
+        );
+
+        // ⌘ and ⌃ together are both held, as ⌘ and ⌥ are.
+        let mac_both =
+            held_now(egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND | egui::Modifiers::CTRL);
+        assert_eq!(mac_both, [true, true, false, false], "⌘⌃ holds both");
+        assert!(
+            !uses_exactly(&keys("Ctrl+G"), mac_both),
+            "⌘⌃ lights no ⌘-only chord"
+        );
+        assert!(
+            !uses_exactly(&keys("Control+Tab"), mac_both),
+            "⌘⌃ lights no ⌃-only chord"
+        );
     }
 
     /// A filter word finds a row by its label's word starts or by a key's name.

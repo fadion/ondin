@@ -11,6 +11,15 @@ sections. Its tests check every registry chord it shows against `input::resolve`
 action `input::resolve` binds against the sheet; the hand-kept sections and this file are not
 checked.
 
+**macOS.** `Ctrl` here is egui's `command`, so ⌘ on a Mac, and `Alt` is ⌥. Every chord the UI
+shows goes through `input::keys`, which writes it as a Mac menu does (`Ctrl+Shift+Z` is ⇧⌘Z; a
+name in “curly quotes” is the user's and is left alone). Three chords macOS keeps for itself are
+bound elsewhere there, each spelled once beside its binding: tab stepping is ⌃⇥ (`Control+Tab`,
+`input::tab_step_chords`), since ⌘⇥ is the app switcher; *Replace text…* is ⌥⌘F
+(`input::replace_chord`), since the app menu's *Hide* takes ⌘H; and the cheatsheet is ⌃⇧/
+(`input::cheatsheet_chord_spelled`), since ⇧⌘/ is the system's *Show Help menu*, as Figma's
+is for the same reason.
+
 **Sources.** Figma and Sketch agree with each other far more than with Adobe, so take their
 binding where they disagree with Adobe about a concept both have, and Adobe's where Figma has no
 answer (grid, guides, snapping — §6). Three collisions are unresolvable (bottom).
@@ -174,7 +183,7 @@ without it); the `!m.shift` sits on `Equals` only.
 | `Ctrl+R` · `F2` | **rename** | ✅ Figma · Windows alias. With two or more layers selected, opens batch rename |
 | `Ctrl+Shift+R` | **batch rename…** | ✅ `Action::BatchRename`; live with any selection or none (`app-canvas-chrome.md`, *Batch rename*) |
 | `Ctrl+F` | **find in text…** | ✅ `Action::FindText { replace: false }`, normal mode; opens the find and replace box on Find (`app-canvas-chrome.md`, *Find and replace*) |
-| `Ctrl+H` | **replace text…** | ✅ `Action::FindText { replace: true }`, the box with its Replace row showing. **Unshifted only**: `Ctrl+Shift+H` is hide / show |
+| `Ctrl+H` · ⌥⌘F on macOS | **replace text…** | ✅ `Action::FindText { replace: true }`, the box with its Replace row showing. **Unshifted only**: `Ctrl+Shift+H` is hide / show |
 | `Shift+H` / `Shift+V` | flip horizontal / vertical | ✅ Figma |
 
 **Hide and lock are one switch for the whole selection, and a mixed selection hides / locks**:
@@ -281,7 +290,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+N` | **new document** | ✅ the dashboard's *New file*, from both screens, in a new tab; the strip's `+` is the same. **The project is computed at the door**: the library reads the nav being viewed, the editor the open document's project — *the project in front of you*. Unfiled at the root from *Recent*, *All files*, *Starred*, the trash, or a session not in the library (§15 D383) |
 | `Ctrl+W` | **close the tab** | ✅ the browser's meaning, not the window's: `close_tab` on the tab in front, which saves a filed document and asks only about work that cannot be saved; the next tab comes forward, else the library. A pinned tab stays open and the status line says to unpin it. Nothing on the library |
 | `Ctrl+Shift+T` | **reopen the closed tab** | ✅ the browser's: the last closed, at its old place in the strip |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | **next / previous tab** | ✅ wrapping, the library's tab counted. Both screens (`tabs::read_keys`, read before the keymap) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` · ⌃⇥ / ⌃⇧⇥ on macOS | **next / previous tab** | ✅ wrapping, the library's tab counted. Both screens (`tabs::read_keys`, read before the keymap) |
 | `Alt+1`…`Alt+8`, `Alt+9` | **that tab**, **the last tab** | ✅ the library's tab is 1. On `Alt` because `Ctrl+1`/`Ctrl+2` are zoom and `Ctrl+PageUp`/`PageDown` step pages. Read with `!command && !shift` |
 | `Ctrl+Shift+E` | ~~export~~ | ⛔ *Export as…* was removed when the inspector's Export panel (§15 D274) answered where, format and size from the layer. ⚠️ **Unbound but not free**: plain `Ctrl+E` is *Flatten*, so `!m.shift` on that arm is all that stands between a stray hand and a dissolved selection. `a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening` pins it |
 | `Ctrl+Alt+E` | export all | ✅ not Figma's. Re-runs every layer's saved export settings into the last export folder, asking only the first time (`architecture.md` §7). Alt **and** not-Shift: `Ctrl+Alt+Shift+E` is neither this nor `Ctrl+Shift+E` |
@@ -290,7 +299,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
 | `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, read by `input::discovery_chord` in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
 | `Ctrl+/` | **command palette** | ✅ Figma's quick actions, alias; Shift up, so it never reads as `Ctrl+Shift+/` |
-| `Ctrl+Shift+/` | **shortcut cheatsheet** | ✅ `Key::Questionmark` too (§0). Editor (both modes) and library (`dashboard_keys`); the chord again closes it, read in `cheatsheet_ui` because `resolve` does not run under a modal |
+| `Ctrl+Shift+/` · ⌃⇧/ on macOS | **shortcut cheatsheet** | ✅ `Key::Questionmark` too (§0). Editor (both modes) and library (`dashboard_keys`); the chord again closes it, read in `cheatsheet_ui` because `resolve` does not run under a modal |
 
 ⚠️ `Ctrl+K` (palette) and `Ctrl+Shift+K` (place image) are adjacent and unrelated; a stray Shift
 opens a file dialog, visible and undone by `Escape`. If it grates, give up `Ctrl+K`: `Ctrl+/` has

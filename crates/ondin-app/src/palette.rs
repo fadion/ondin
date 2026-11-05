@@ -102,10 +102,14 @@ pub(crate) fn read_keys(ctx: &egui::Context) -> Keys {
             escape: i.consume_key(none, egui::Key::Escape),
             // Before `close`, whose `/` would take the shifted chord too: an extra
             // Shift still matches logically.
-            cheatsheet: i.consume_key(
-                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                egui::Key::Slash,
-            ) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Questionmark),
+            cheatsheet: i.consume_key(crate::input::cheatsheet_modifiers(), egui::Key::Slash)
+                || i.consume_key(
+                    egui::Modifiers {
+                        shift: false,
+                        ..crate::input::cheatsheet_modifiers()
+                    },
+                    egui::Key::Questionmark,
+                ),
             close: i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)
                 || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash),
         }
@@ -1212,10 +1216,10 @@ fn lit_label(
     job
 }
 
-/// A chord as keycaps would read it in one chip: `Ctrl + K`.
+/// A chord as keycaps would read it in one chip: `Ctrl + K`, `⌘K` on macOS.
 fn chip(ui: &egui::Ui, right: f32, y: f32, accel: &str, live: bool) -> f32 {
     let p = ui.painter();
-    let text = accel.replace('+', " + ");
+    let text = crate::input::keys(accel).replace('+', " + ");
     let galley = p.layout_no_wrap(
         text,
         egui::FontId::proportional(crate::ui::CAPTION_PT),
@@ -1511,7 +1515,11 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     } else {
         "↑↓ move · Enter run · Tab layers · Esc close"
     };
-    let keys_g = p.layout_no_wrap(keys.into(), font.clone(), theme::text::dim());
+    let keys_g = p.layout_no_wrap(
+        crate::input::keys(keys).into_owned(),
+        font.clone(),
+        theme::text::dim(),
+    );
     let keys_w = keys_g.size().x;
     p.galley(
         egui::pos2(rect.right() - 14.0 - keys_w, y - keys_g.size().y / 2.0),
@@ -1519,8 +1527,8 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
         theme::text::dim(),
     );
     let (text, col) = match why {
-        Some(why) => (why, theme::text::muted()),
-        None => (note, theme::text::muted()),
+        Some(why) => (crate::input::keys(why), theme::text::muted()),
+        None => (note.into(), theme::text::muted()),
     };
     let mut job = egui::text::LayoutJob::single_section(
         text.to_string(),
@@ -1896,7 +1904,7 @@ pub(crate) mod tests {
     /// flip: `read_keys` not reading the cheatsheet chord → fails at "Slash".
     #[test]
     fn the_cheatsheet_chord_swaps_the_palette_for_the_sheet() {
-        let shift_ctrl = CTRL | egui::Modifiers::SHIFT;
+        let shift_ctrl = crate::input::cheatsheet_modifiers();
         for (spelling, k) in [
             ("Slash", egui::Key::Slash),
             ("Questionmark", egui::Key::Questionmark),

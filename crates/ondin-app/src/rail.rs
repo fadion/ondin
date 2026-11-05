@@ -205,7 +205,7 @@ impl OndinApp {
         }
         // A tooltip under the open row, or over a press about to open it, would fight it.
         if !held && !open {
-            resp = resp.on_hover_text(shown.tip());
+            resp = resp.on_hover_text(crate::input::keys(shown.tip()));
         }
         resp
     }
@@ -245,7 +245,7 @@ impl OndinApp {
                         for m in members {
                             let lit = dragged_over.map_or(m == shown, |d| d == m);
                             let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, true)
-                                .on_hover_text(m.tip());
+                                .on_hover_text(crate::input::keys(m.tip()));
                             if resp.clicked() {
                                 picked = Some(m);
                             }

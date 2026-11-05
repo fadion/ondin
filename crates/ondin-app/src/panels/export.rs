@@ -1528,7 +1528,9 @@ impl OndinApp {
                         ui::MenuRow::new(icon::EXPORT_SYNC, "Re-export on save").checked(on_save),
                         ui::MENU_ROW_H,
                     )
-                    .on_hover_text("Every Ctrl+S rewrites the whole export set")
+                    .on_hover_text(crate::input::keys(
+                        "Every Ctrl+S rewrites the whole export set",
+                    ))
                     .clicked()
                     {
                         act = Some(MenuAct::ToggleOnSave);

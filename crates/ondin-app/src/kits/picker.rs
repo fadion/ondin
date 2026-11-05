@@ -1859,7 +1859,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                                     host.rect.center().y + HINT_NUDGE,
                                 ),
                                 egui::Align2::RIGHT_CENTER,
-                                "Alt+click to open",
+                                crate::input::keys("Alt+click to open"),
                                 egui::FontId::proportional(ui::CAPTION_PT),
                                 theme::text::faint(),
                             );

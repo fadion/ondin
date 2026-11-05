@@ -95,8 +95,10 @@ pub(crate) fn pill(ui: &mut egui::Ui) -> bool {
         font,
         fg,
     );
-    resp.on_hover_text("Names are hidden · click to leave private mode (Ctrl+Shift+N)")
-        .clicked()
+    resp.on_hover_text(crate::input::keys(
+        "Names are hidden · click to leave private mode (Ctrl+Shift+N)",
+    ))
+    .clicked()
 }
 
 /// `id`'s name as drawn: the name itself, or masked as its kind's word and its

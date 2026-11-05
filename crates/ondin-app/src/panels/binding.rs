@@ -1355,7 +1355,7 @@ impl OndinApp {
                     } else if list.is_empty() && hidden == 0 {
                         ui::empty_note(
                             ui,
-                            if table.iter().any(|v| v.kind == c.key.kind()) {
+                            &crate::input::keys(if table.iter().any(|v| v.kind == c.key.kind()) {
                                 "No variables match"
                             } else {
                                 match c.key.kind() {
@@ -1372,7 +1372,7 @@ impl OndinApp {
                                         "No string variables yet — Shift+S to add one"
                                     }
                                 }
-                            },
+                            }),
                         );
                     }
                     // One height whatever the query matches, a note above the
@@ -2234,7 +2234,7 @@ impl OndinApp {
                         true => "No variables match",
                         false => "No colour variables yet — Shift+S to add one",
                     };
-                    ui::empty_note(ui, none);
+                    ui::empty_note(ui, &crate::input::keys(none));
                 }
                 // The document's own first, then each kit's under its name and
                 // the kit mark, its rows dimmed (§15 D1065).

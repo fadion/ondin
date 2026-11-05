@@ -450,7 +450,7 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             let r = p.text(
                 egui::pos2(rect.right() - 8.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
-                accel,
+                crate::input::keys(accel),
                 egui::FontId::proportional(CAPTION_PT),
                 accel_col,
             );

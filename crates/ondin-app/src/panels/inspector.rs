@@ -2053,13 +2053,13 @@ impl OndinApp {
                     masked,
                     mask.is_ok(),
                 )
-                .on_hover_text(if masked {
+                .on_hover_text(crate::input::keys(if masked {
                     "Release mask — the layer draws again  (Ctrl+Alt+M)"
                 } else if wraps {
                     "Use as mask — groups them, and the lowest clips the rest  (Ctrl+Alt+M)"
                 } else {
                     "Use as mask — the layer clips the siblings above it  (Ctrl+Alt+M)"
-                })
+                }))
                 .on_disabled_hover_text(mask.err().unwrap_or_default())
             })
             .inner
@@ -4395,7 +4395,9 @@ impl OndinApp {
                         .range(-tools::MAX_SKEW.to_degrees()..=tools::MAX_SKEW.to_degrees()),
                     |d| d.suffix("°").custom_formatter(ui::number(2)),
                 )
-                .on_hover_text("Lean the layer sideways — Ctrl-drag a side does the same");
+                .on_hover_text(crate::input::keys(
+                    "Lean the layer sideways — Ctrl+drag a side does the same",
+                ));
                 // An unrepresentable basis writes nothing but still goes through the valve.
                 let ts = match skew_exact {
                     true => app.place_at(

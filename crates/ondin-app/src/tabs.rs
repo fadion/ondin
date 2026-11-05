@@ -950,11 +950,18 @@ pub(crate) enum TabKey {
 }
 
 /// The tab keys pressed this frame. `Ctrl+1`, `Ctrl+2` and `Ctrl+PageUp/PageDown`
-/// stay the zoom and page keys, so jumps go on `Alt` and stepping on `Ctrl+Tab`.
+/// stay the zoom and page keys, so jumps go on `Alt` and stepping on `Ctrl+Tab`,
+/// or `Control+Tab` on macOS, whose ⌘Tab is the app switcher
+/// (`input::tab_step_chords`).
 pub(crate) fn read_keys(ctx: &egui::Context) -> Option<TabKey> {
     ctx.input(|i| {
         let m = i.modifiers;
-        if m.command && !m.alt && i.key_pressed(egui::Key::Tab) {
+        let step = if crate::input::on_mac() {
+            m.ctrl && !m.command
+        } else {
+            m.command
+        };
+        if step && !m.alt && i.key_pressed(egui::Key::Tab) {
             return Some(TabKey::Step(if m.shift { -1 } else { 1 }));
         }
         if m.command && m.shift && !m.alt && i.key_pressed(egui::Key::T) {
@@ -1114,7 +1121,7 @@ impl OndinApp {
         let plus =
             egui::Rect::from_min_size(egui::pos2(x, foot - TAB_H), egui::vec2(BUTTON, TAB_H));
         if strip_button(ui, plus, crate::theme::icon::PLUS, false, "tab-new")
-            .on_hover_text("New file (Ctrl+N)")
+            .on_hover_text(crate::input::keys("New file (Ctrl+N)"))
             .clicked()
             && live
         {
@@ -1290,7 +1297,11 @@ impl OndinApp {
         ui.painter().rect_filled(rect, tab_corners(), ground);
         let mark = egui::Rect::from_center_size(rect.center(), egui::vec2(18.0, 18.0));
         crate::ui::logo(ui, mark, false);
-        if resp.on_hover_text("Library (Ctrl+O)").clicked() && act {
+        if resp
+            .on_hover_text(crate::input::keys("Library (Ctrl+O)"))
+            .clicked()
+            && act
+        {
             self.show_library();
         }
     }
@@ -2498,14 +2509,20 @@ mod tests {
 
         // In focus mode, where no strip is drawn to stop the frame after it.
         app.focus = true;
+        // The host's step chord: `Ctrl+Tab`, or ⌃⇥ on macOS.
+        let step = if crate::input::on_mac() {
+            egui::Modifiers::CTRL
+        } else {
+            egui::Modifiers::COMMAND
+        };
         let tab = egui::Event::Key {
             key: egui::Key::Tab,
             physical_key: None,
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::COMMAND,
+            modifiers: step,
         };
-        let texts = frame_texts(&ctx, &mut app, egui::Modifiers::COMMAND, vec![tab]);
+        let texts = frame_texts(&ctx, &mut app, step, vec![tab]);
         assert_eq!(app.tabs.shown, Some(b), "one step");
         assert!(
             !texts.iter().any(|t| t == "Frame 1"),

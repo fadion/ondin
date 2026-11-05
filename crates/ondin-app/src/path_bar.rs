@@ -309,7 +309,11 @@ impl OndinApp {
                                 } => {
                                     let resp =
                                         icon_button(ui, glyph, 30.0, 20.0, *active, *enabled)
-                                            .on_hover_text(if *enabled { *tip } else { *dimmed });
+                                            .on_hover_text(crate::input::keys(if *enabled {
+                                                tip
+                                            } else {
+                                                dimmed
+                                            }));
                                     if matches!(verb, Verb::Offset) {
                                         offset_button = resp.rect;
                                     }

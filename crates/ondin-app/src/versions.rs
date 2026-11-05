@@ -458,10 +458,10 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
                 !s.unreadable(),
             )
         })
-        .on_hover_text(match s.unreadable() {
+        .on_hover_text(crate::input::keys(match s.unreadable() {
             true => "This version could not be read",
             false => "Compare with now · Shift+click two to compare them",
-        });
+        }));
         let tip = match (look.private, named) {
             (true, _) => crate::private::DECLINE_RENAME,
             (false, true) => "Rename this version",
@@ -494,7 +494,9 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         let compare = placed(ui, diff, |ui: &mut egui::Ui| {
             crate::ui::icon_button(ui, NOW_GLYPH, 24.0, 14.0, true, !s.unreadable())
         })
-        .on_hover_text("Compare with now · Shift+click two to compare them");
+        .on_hover_text(crate::input::keys(
+            "Compare with now · Shift+click two to compare them",
+        ));
         if compare.clicked() && !s.unreadable() {
             out.press = Some(Press::Compare(ui.input(|i| i.modifiers.shift)));
         }
@@ -892,7 +894,7 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
     };
     let body = ui.fonts_mut(|f| {
         f.layout(
-            words.into(),
+            crate::input::keys(words).into_owned(),
             egui::FontId::proportional(crate::ui::SMALL_PT),
             theme::text::dim(),
             w - x0,
@@ -989,7 +991,7 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
 fn key_chip(ui: &mut egui::Ui, key: &str) {
     let text = ui.fonts_mut(|f| {
         f.layout_no_wrap(
-            key.into(),
+            crate::input::keys(key).into_owned(),
             egui::FontId::proportional(crate::ui::CAPTION_PT),
             theme::text::muted(),
         )

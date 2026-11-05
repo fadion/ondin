@@ -661,7 +661,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 
-- **Doors.** `Ctrl+Shift+/` (and `Key::Questionmark`) in the editor (`discovery_chord`, both modes)
+- **Doors.** `Ctrl+Shift+/`, ⌃⇧/ on macOS (and `Key::Questionmark`), in the editor (`discovery_chord`, both modes)
   and in the library (`dashboard_keys`, through `input::cheatsheet_chord`), and the palette's
   *Keyboard shortcuts* row. Opening it closes the palette and any context menu.
 - **The card.** A `settings::card_modal`, 960 wide and at most 640 tall, each shrunk to the window

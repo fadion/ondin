@@ -483,7 +483,7 @@ impl OndinApp {
             ui.add_space(8.0);
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(body)
+                    egui::RichText::new(crate::input::keys(&body))
                         .size(ui::CONTROL_PT)
                         .color(theme::text::muted()),
                 )

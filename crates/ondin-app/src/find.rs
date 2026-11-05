@@ -667,7 +667,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         let live = n > 0;
         ui.add_space(GAP_X);
         if ui::icon_button(ui, icon::CARET_LEFT, BTN, 14.0, false, live)
-            .on_hover_text("Previous match (Shift+Enter)")
+            .on_hover_text(crate::input::keys("Previous match (Shift+Enter)"))
             .clicked()
             && live
         {

@@ -1161,7 +1161,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     });
     ui.spacing_mut().item_spacing.x = 2.0;
     if crate::ui::icon_button(ui, icon::CARET_LEFT, 24.0, 13.0, false, n > 0)
-        .on_hover_text("Previous change (Shift+Enter)")
+        .on_hover_text(crate::input::keys("Previous change (Shift+Enter)"))
         .clicked()
     {
         *act = Some(Act::Step(-1));

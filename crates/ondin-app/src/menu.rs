@@ -956,7 +956,12 @@ impl Item {
                 Some("Ctrl+F"),
                 Group::State,
             ),
-            Item::ReplaceText => s("Replace text…", icon::SWAP, Some("Ctrl+H"), Group::State),
+            Item::ReplaceText => s(
+                "Replace text…",
+                icon::SWAP,
+                Some(crate::input::replace_chord()),
+                Group::State,
+            ),
             Item::Suggestion(_) => s("Use suggestion", icon::SWAP, None, Group::Head),
             Item::AddToDictionary => s("Add to dictionary", icon::PLUS, None, Group::Head),
 
@@ -1105,11 +1110,16 @@ impl Item {
             ),
             Item::NewDocument => s("New file", icon::PLUS, Some("Ctrl+N"), Group::File),
             Item::CloseDocument => s("Close tab", icon::X, Some("Ctrl+W"), Group::File),
-            Item::NextTab => s("Next tab", icon::BROWSERS, Some("Ctrl+Tab"), Group::File),
+            Item::NextTab => s(
+                "Next tab",
+                icon::BROWSERS,
+                Some(crate::input::tab_step_chords()[0]),
+                Group::File,
+            ),
             Item::PreviousTab => s(
                 "Previous tab",
                 icon::BROWSERS,
-                Some("Ctrl+Shift+Tab"),
+                Some(crate::input::tab_step_chords()[1]),
                 Group::File,
             ),
             Item::ReopenTab => s(
@@ -1328,7 +1338,7 @@ impl Item {
             Item::Cheatsheet => s(
                 "Keyboard shortcuts",
                 icon::LIST,
-                Some("Ctrl+Shift+/"),
+                Some(crate::input::cheatsheet_chord_spelled()),
                 Group::File,
             ),
             Item::Present => s(
@@ -2704,7 +2714,7 @@ fn menu_row_of(
     // Hung off the row's own response: a `disable()`d `Ui` or `Ui::scope` is
     // silently dead (`inspector::menu_action`).
     match row.why {
-        Some(why) => resp.on_hover_text(why),
+        Some(why) => resp.on_hover_text(crate::input::keys(why)),
         None => resp,
     }
 }

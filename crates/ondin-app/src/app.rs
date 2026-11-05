@@ -7119,7 +7119,7 @@ pub(crate) fn status_dot(ui: &mut egui::Ui, status: &crate::session::Status) {
     );
     ui.painter()
         .circle_filled(rect.center(), STATUS_DOT_R, status_color(status));
-    resp.on_hover_text(&status.text);
+    resp.on_hover_text(crate::input::keys(&status.text));
 }
 
 /// The library status dot's radius: an 8pt mark, the cap height of the status text.
@@ -7238,7 +7238,7 @@ impl OndinApp {
                         let can_redo = !comparing && self.session.history.can_redo();
                         // Redo first: the mirror again.
                         if icon_button(ui, icon::ARROW_U_UP_RIGHT, 26.0, 16.0, false, can_redo)
-                            .on_hover_text("Redo (Ctrl+Shift+Z)")
+                            .on_hover_text(crate::input::keys("Redo (Ctrl+Shift+Z)"))
                             .clicked()
                             && can_redo
                         {
@@ -7246,7 +7246,7 @@ impl OndinApp {
                             self.redo();
                         }
                         if icon_button(ui, icon::ARROW_U_UP_LEFT, 26.0, 16.0, false, can_undo)
-                            .on_hover_text("Undo (Ctrl+Z)")
+                            .on_hover_text(crate::input::keys("Undo (Ctrl+Z)"))
                             .clicked()
                             && can_undo
                         {
@@ -7995,7 +7995,7 @@ impl OndinApp {
                             if message {
                                 ui.add(
                                     egui::Label::new(
-                                        egui::RichText::new(&status.text)
+                                        egui::RichText::new(crate::input::keys(&status.text))
                                             .size(crate::ui::SMALL_PT)
                                             .color(
                                                 status_color(status).gamma_multiply(message_fade),
@@ -8094,7 +8094,7 @@ impl OndinApp {
                             E::Btn(glyph, tool, tip) => {
                                 let active = *tool == self.tool;
                                 let resp = icon_button(ui, glyph, 30.0, 20.0, active, true)
-                                    .on_hover_text(*tip);
+                                    .on_hover_text(crate::input::keys(tip));
                                 if resp.clicked() {
                                     match tool {
                                         // Arming the image tool is picking files.
@@ -8117,7 +8117,7 @@ impl OndinApp {
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     let open = self.kit_picker.is_some();
                     let resp = icon_button(ui, icon::HEXAGON, 30.0, 20.0, open, true)
-                        .on_hover_text("Insert components (Shift+I)");
+                        .on_hover_text(crate::input::keys("Insert components (Shift+I)"));
                     self.kit_button = resp.rect;
                     if resp.clicked() {
                         self.toggle_kit_picker();
@@ -8125,7 +8125,7 @@ impl OndinApp {
                     // The styles and variables browser's, directly above it.
                     let open = self.var_browser.is_some();
                     let resp = icon_button(ui, icon::SWATCHES, 30.0, 20.0, open, true)
-                        .on_hover_text("Styles and variables (Shift+S)");
+                        .on_hover_text(crate::input::keys("Styles and variables (Shift+S)"));
                     self.var_button = resp.rect;
                     if resp.clicked() {
                         self.toggle_var_browser();
@@ -8240,7 +8240,9 @@ impl OndinApp {
                                             false,
                                             true,
                                         )
-                                        .on_hover_text("Batch rename (Ctrl+Shift+R)")
+                                        .on_hover_text(crate::input::keys(
+                                            "Batch rename (Ctrl+Shift+R)",
+                                        ))
                                         .clicked()
                                         {
                                             let search = self.layer_filter.clone();

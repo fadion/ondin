@@ -434,6 +434,11 @@ impl Walk<'_> {
             },
         };
         if let Some(var) = shown_var {
+            // A use's own display is its component root's, which a `display`
+            // in its doubled-class rule would override.
+            if el.instance.is_some() {
+                el = self.around(el, "shown");
+            }
             let own = el
                 .style
                 .iter()
@@ -995,9 +1000,15 @@ impl Walk<'_> {
     /// `used` inside an element that draws no box and sets `mode`: a component
     /// use writes no attributes of its own.
     fn with_mode(&mut self, used: Element, mode: String) -> Element {
-        let mut around = Element::new("div", self.classes.mint("mode", "mode"));
-        around.set("display", "contents");
+        let mut around = self.around(used, "mode");
         around.attrs.push(("data-mode", mode));
+        around
+    }
+
+    /// `used` inside an element of class `name` that draws no box.
+    fn around(&mut self, used: Element, name: &str) -> Element {
+        let mut around = Element::new("div", self.classes.mint(name, name));
+        around.set("display", "contents");
         around.children.push(Child::Element(Box::new(used)));
         around
     }

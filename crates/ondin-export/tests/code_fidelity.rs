@@ -2991,6 +2991,81 @@ fn holds_components(test: &str, doc: &Document, res: &Resolved) {
     holds_as(test, doc, res, 3, MAX_TEXT_CELL_ERROR, html_of_components);
 }
 
+/// A use whose visibility varies by mode is shown by an element around it, so
+/// its component root keeps its own flex layout: shown in Light, hidden in Dark.
+///
+/// flip: `Walk::node` writing the visibility token on the use itself → fails
+/// at "no display on the use".
+#[test]
+fn a_use_shown_by_mode_keeps_its_roots_layout() {
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (index, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        d.apply(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let show = d.ids.mint_var();
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: show,
+            name: "show-cta".into(),
+            kind: VarKind::Boolean,
+            cells: [(light, Cell::Boolean(true)), (dark, Cell::Boolean(false))].into(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
+    // A row, whose items a block would stack; centred across only, so the text
+    // stays on whole pixels.
+    let centred = |d: &mut Doc, c: [NodeId; 3]| {
+        d.apply(vec![Operation::SetDisplay {
+            id: c[0],
+            display: Some(Display::Flex(Flex {
+                align_items: AlignItems::Center,
+                ..Default::default()
+            })),
+        }]);
+    };
+    let mains = d.frame(None, 0.0, 300.0, 380.0, 100.0, "Mains");
+    let main = d.card(mains, (10.0, 10.0), None, centred);
+    let mut uses = Vec::new();
+    for (i, mode) in [light, dark].into_iter().enumerate() {
+        let board = d.frame(None, i as f64 * 200.0, 0.0, 180.0, 80.0, "Board");
+        d.apply(vec![Operation::SetModes {
+            id: board,
+            modes: vec![mode],
+        }]);
+        let used = d.card(board, (10.0, 10.0), Some(main), centred)[0];
+        d.apply(vec![Operation::SetVisibleVar {
+            id: used,
+            var: Some(show),
+        }]);
+        uses.push(used);
+    }
+    let (doc, res) = d.done();
+    let export = ondin_export::code::Target::React.export(&doc, &res, &[uses[0]]);
+    assert!(export.inlined.is_empty(), "{:?}", export.inlined);
+    let css = String::from_utf8(export.file("App.module.css").unwrap().to_vec()).unwrap();
+    let rule = &css[css.find(".card.card {").expect(&css)..];
+    let rule = &rule[..rule.find('}').unwrap()];
+    assert!(!rule.contains("display"), "no display on the use: {css}");
+    assert!(
+        css.contains("display: var(--show-cta, contents)"),
+        "the element around it: {css}"
+    );
+    holds_components("use-shown-by-mode", &doc, &res);
+}
+
 /// A boolean property bound to a dot inside a masked group, which is drawn as a
 /// picture: a use cannot pass it into the picture, so the instance hiding the
 /// dot is its layers.

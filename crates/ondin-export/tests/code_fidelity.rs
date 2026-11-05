@@ -2384,6 +2384,125 @@ fn an_origin_setting_a_mode_keeps_its_ancestors_others() {
     assert_eq!(html.matches("data-mode=").count(), 1, "{html}");
 }
 
+/// A picture inside the window frame bakes the frame's width mode, so one
+/// reading a variable another width changes — a fill, a visibility — is
+/// reported; one reading none, or pinned to its mode, is not.
+///
+/// flip: `Walk::picture` never asking `picture_follows_width` → fails at
+/// "both pictures".
+#[test]
+fn a_picture_in_the_window_that_reads_the_width_is_reported() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (mobile, desktop) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let (brand, wide) = (d.ids.mint_var(), d.ids.mint_var());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        collection: CollectionId::FIRST,
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    let var = |id, name: &str, kind, a, b| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind,
+            cells: [(mobile, a), (desktop, b)].into(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    d.apply(vec![
+        mode(mobile, "Mobile", 0),
+        mode(desktop, "Desktop", 1),
+        Operation::SetBreakpoints {
+            id: CollectionId::FIRST,
+            breakpoints: Some([(mobile, 0.0), (desktop, 1024.0)].into()),
+        },
+        var(
+            brand,
+            "brand",
+            VarKind::Color,
+            Cell::Color(Color::from_rgba8(220, 40, 40, 255)),
+            Cell::Color(Color::from_rgba8(40, 90, 220, 255)),
+        ),
+        var(
+            wide,
+            "show-desktop",
+            VarKind::Boolean,
+            Cell::Boolean(false),
+            Cell::Boolean(true),
+        ),
+    ]);
+    let home = d.frame(None, 0.0, 0.0, 375.0, 200.0, "Home");
+    let pinned = d.frame(Some(home), 200.0, 10.0, 100.0, 100.0, "Pinned");
+    d.apply(vec![Operation::SetModes {
+        id: pinned,
+        modes: vec![mobile],
+    }]);
+    let star = |d: &mut Doc, parent, x, name: &str| {
+        d.add(
+            Some(parent),
+            NodeKind::Star {
+                size: Size::new(20.0, 20.0),
+                points: 5,
+                inner_ratio: 0.5,
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
+            },
+            Affine::translate((x, 10.0)),
+            name,
+        )
+    };
+    let bound = Fill {
+        brush: BrushSource::Bound {
+            var: brand,
+            alpha: 1.0,
+        },
+        visible: true,
+    };
+    let icon = star(&mut d, home, 10.0, "Icon");
+    let spark = star(&mut d, home, 40.0, "Spark");
+    let plain = star(&mut d, home, 70.0, "Plain");
+    let kept = star(&mut d, pinned, 10.0, "Kept");
+    d.fill(spark, solid(0, 0, 0, 255));
+    d.fill(plain, solid(0, 0, 0, 255));
+    for id in [icon, kept] {
+        d.apply(vec![Operation::SetFills {
+            id,
+            fills: keyed_by_position([bound.clone()]),
+        }]);
+    }
+    d.apply(vec![Operation::SetVisibleVar {
+        id: spark,
+        var: Some(wide),
+    }]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[home]);
+    let follows = |what: &str| {
+        export
+            .approximated
+            .iter()
+            .any(|a| a.contains(what) && a.contains("width mode"))
+    };
+    assert!(
+        follows("“Icon”") && follows("“Spark”"),
+        "both pictures: {:?}",
+        export.approximated
+    );
+    assert!(
+        !follows("“Plain”") && !follows("“Kept”"),
+        "{:?}",
+        export.approximated
+    );
+}
+
 /// An alias into another collection follows that collection's mode a frame
 /// sets: Theme's `gap` aliases Density's `space` (4, 12), and a row set to
 /// Comfy is 12 apart, as on the canvas. One aliasing by mode, which no block

@@ -19,7 +19,7 @@ use ondin_core::container::{
 use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
-use ondin_core::variable::VarId;
+use ondin_core::variable::{ModeId, VarId};
 use ondin_core::variant::{self, Interaction, PropKind, PropValue, Property, RootElement};
 use ondin_core::{
     Brush, BrushSource, Document, EffectKind, Fill, ItemId, Node, NodeId, NodeKind, Resolved,
@@ -191,6 +191,7 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         forwards: HashMap::new(),
         params_memo: RefCell::default(),
         inline_memo: RefCell::default(),
+        window: None,
     };
     // A frame that picks its mode by width is the window: written alone, it
     // fills it, and the media blocks read the window's width as the canvas
@@ -274,6 +275,8 @@ struct Walk<'a> {
     /// only the document and are asked again at every level of a nesting.
     params_memo: RefCell<HashMap<NodeId, Rc<Vec<Param>>>>,
     inline_memo: RefCell<HashMap<NodeId, Option<String>>>,
+    /// The page being written's frame filling the window, if it is one.
+    window: Option<NodeId>,
 }
 
 /// The components made so far.
@@ -330,6 +333,7 @@ impl Walk<'_> {
             [id] => doc.width_pick(*id).is_some().then_some(*id),
             _ => None,
         };
+        self.window = window;
         if window.is_some() {
             root.set("width", "100%");
             root.set("min-height", px(view.height()));
@@ -626,37 +630,53 @@ impl Walk<'_> {
         while let Some((at, pictured)) = under.pop() {
             let Some(n) = doc.get(at) else { continue };
             let pictured = pictured || self.css_blocker(n).is_some();
-            let paint = n.paint();
-            let mut structural: Vec<Option<VarId>> = vec![n.visible_var(), n.text_vars()[0]];
-            structural.extend(paint.strokes.iter().map(|s| s.width_var));
-            structural.extend(n.effects().iter().flat_map(|e| e.vars));
-            if varies(&structural) {
+            if varies(&deciding_vars(n, pictured)) {
                 return true;
-            }
-            if pictured {
-                let mut drawn: Vec<Option<VarId>> = vec![n.opacity_var()];
-                drawn.extend(&n.text_vars()[1..]);
-                drawn.extend(n.item().limit_vars);
-                drawn.extend(n.size_vars());
-                drawn.extend(n.corner_vars());
-                drawn.extend(n.spacing_vars());
-                for b in paint
-                    .fills
-                    .iter()
-                    .map(|f| &f.brush)
-                    .chain(paint.strokes.iter().map(|s| &s.brush))
-                {
-                    if let BrushSource::Bound { var, .. } = b {
-                        drawn.push(Some(*var));
-                    }
-                }
-                if varies(&drawn) {
-                    return true;
-                }
             }
             under.extend(n.children().iter().map(|c| (*c, pictured)));
         }
         false
+    }
+
+    /// Whether the picture at `id`, inside the window frame, bakes a value the
+    /// window's width would change: one of its layers reads a variable that
+    /// resolves otherwise in another mode of the collection picked by width,
+    /// with no layer between pinning that collection's mode.
+    fn picture_follows_width(&self, id: NodeId) -> bool {
+        let doc = self.doc;
+        let t = doc.variables();
+        let (Some(window), Some(c)) = (self.window, t.by_width()) else {
+            return false;
+        };
+        let mut at = Some(id);
+        while let Some(a) = at.filter(|a| *a != window) {
+            let Some(n) = doc.get(a) else { return false };
+            if n.modes().iter().any(|m| c.has(*m)) {
+                return false;
+            }
+            at = n.parent();
+        }
+        if at.is_none() {
+            return false;
+        }
+        let set: Vec<ModeId> = doc
+            .modes_at(id)
+            .into_iter()
+            .filter(|m| !c.has(*m))
+            .collect();
+        let differs = |var: VarId| {
+            let mut values = c.modes.iter().map(|m| {
+                let mut s = set.clone();
+                s.push(m.id);
+                t.resolve_at(var, &s)
+            });
+            let first = values.next();
+            values.any(|v| Some(v) != first)
+        };
+        ondin_core::build::subtree_nodes(doc, &[id])
+            .into_iter()
+            .filter_map(|at| doc.get(at))
+            .any(|n| deciding_vars(n, true).into_iter().flatten().any(differs))
     }
 
     /// The trees the component made from `main` draws — its set's variants, the
@@ -2634,6 +2654,14 @@ impl Walk<'_> {
             e.attrs.push(("alt", node.name().to_string()));
             e
         };
+        if self.picture_follows_width(id) {
+            self.report.approximate(format!(
+                "{} {}: drawn as a picture in the frame's width mode, which a wider \
+                 or narrower window does not change",
+                kind_word(node),
+                label(node)
+            ));
+        }
         // On the element, not only inside it: an `<svg>` or an `<img>` is drawn
         // alone, so a mode written within blends with nothing of the page.
         if let Some((prop, value)) = crate::svg::blend_decl(self.doc, node) {
@@ -2985,6 +3013,35 @@ fn under(doc: &Document, id: NodeId, ancestor: NodeId) -> bool {
         at = doc.get(a).and_then(Node::parent);
     }
     false
+}
+
+/// The variables `n` reads that decide what CSS is written for it — its
+/// visibility, content, stroke widths and effects — and, when it is `pictured`,
+/// every one it reads, which the picture bakes.
+fn deciding_vars(n: &Node, pictured: bool) -> Vec<Option<VarId>> {
+    let paint = n.paint();
+    let mut out: Vec<Option<VarId>> = vec![n.visible_var(), n.text_vars()[0]];
+    out.extend(paint.strokes.iter().map(|s| s.width_var));
+    out.extend(n.effects().iter().flat_map(|e| e.vars));
+    if pictured {
+        out.push(n.opacity_var());
+        out.extend(&n.text_vars()[1..]);
+        out.extend(n.item().limit_vars);
+        out.extend(n.size_vars());
+        out.extend(n.corner_vars());
+        out.extend(n.spacing_vars());
+        for b in paint
+            .fills
+            .iter()
+            .map(|f| &f.brush)
+            .chain(paint.strokes.iter().map(|s| &s.brush))
+        {
+            if let BrushSource::Bound { var, .. } = b {
+                out.push(Some(*var));
+            }
+        }
+    }
+    out
 }
 
 /// The runs of ASCII letters and digits in `name`.

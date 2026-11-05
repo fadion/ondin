@@ -251,6 +251,7 @@ fn avoid(bodies: &mut [Element], taken: &HashSet<String>) {
 
 fn rename(el: &mut Element, taken: &HashSet<String>, all: &mut HashSet<String>) {
     if el.instance.is_none() {
+        let old = el.class.clone();
         for class in el.classes_mut().filter(|c| taken.contains(c.as_str())) {
             let base = class.clone();
             let mut n = 2;
@@ -259,6 +260,16 @@ fn rename(el: &mut Element, taken: &HashSet<String>, all: &mut HashSet<String>) 
             }
             *class = format!("{base}-{n}");
             all.insert(class.clone());
+        }
+        // An inline SVG writes its class in its markup.
+        if let Some(m) = &mut el.markup
+            && el.class != old
+        {
+            *m = m.replacen(
+                &format!("class=\"{old}\""),
+                &format!("class=\"{}\"", el.class),
+                1,
+            );
         }
     }
     for c in &mut el.children {

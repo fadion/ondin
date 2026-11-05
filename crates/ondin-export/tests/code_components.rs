@@ -412,6 +412,49 @@ fn a_vue_page_never_shares_a_class_with_a_component_root_it_uses() {
     assert!(app.contains("\n.card-3 {"), "its rule moved with it: {app}");
 }
 
+/// An inline SVG renamed off a component root's class carries the new class in
+/// its markup, where its rule finds it.
+/// flip: `vue::rename` leaving the markup alone → fails at "renamed off the
+/// root's class".
+#[test]
+fn a_vue_page_renames_an_inline_svgs_class_with_its_rule() {
+    let mut f = fixture();
+    let star = f.ids.mint();
+    let root = f.doc.first_page();
+    let index = f.doc.get(root).unwrap().children().len();
+    f.doc
+        .apply(&Transaction(vec![
+            create(
+                star,
+                (root, index),
+                NodeKind::Star {
+                    size: Size::new(10.0, 10.0),
+                    points: 5,
+                    inner_ratio: 0.5,
+                    corner_radius: 0.0,
+                    corner_smoothing: 0.0,
+                },
+                (300.0, 0.0),
+                "Card",
+            ),
+            paint(star, Color::from_rgba8(0, 0, 0, 255)),
+        ]))
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let out = vue_of(&f.doc, &res, &[star, f.clean]);
+    let app = file(&out, "App.vue");
+    let class = app
+        .split("<svg class=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect(&app);
+    assert_ne!(class, "card", "renamed off the root's class: {app}");
+    assert!(
+        app.contains(&format!("\n.{class} {{")),
+        "the svg's class has a rule: {app}"
+    );
+}
+
 /// Where `button_set`'s *Badge* is.
 #[derive(Clone, Copy, PartialEq)]
 enum Badge {

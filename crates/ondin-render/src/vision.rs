@@ -283,19 +283,22 @@ mod tests {
 
     /// The shader's transfer functions carry `color.rs`'s constants, which the
     /// default gates can check without a GPU; mid-grey decodes to 0.214.
-    /// flip: `vision.wgsl`'s decode threshold set to 0.04 → fails at its line.
+    /// flip: `color::SRGB_KNEE` set to 0.04 → fails at "vision.wgsl lacks".
     #[test]
     fn the_shader_transfers_as_color_rs_does() {
+        use crate::color::{
+            LINEAR_KNEE, SRGB_GAMMA, SRGB_KNEE, SRGB_OFFSET, SRGB_SCALE, SRGB_SLOPE,
+        };
         let wgsl = include_str!("vision.wgsl");
         for line in [
-            "if c <= 0.04045 {",
-            "return c / 12.92;",
-            "return pow((c + 0.055) / 1.055, 2.4);",
-            "if c <= 0.0031308 {",
-            "return c * 12.92;",
-            "return 1.055 * pow(c, 1.0 / 2.4) - 0.055;",
+            format!("if c <= {SRGB_KNEE} {{"),
+            format!("return c / {SRGB_SLOPE};"),
+            format!("return pow((c + {SRGB_OFFSET}) / {SRGB_SCALE}, {SRGB_GAMMA});"),
+            format!("if c <= {LINEAR_KNEE} {{"),
+            format!("return c * {SRGB_SLOPE};"),
+            format!("return {SRGB_SCALE} * pow(c, 1.0 / {SRGB_GAMMA}) - {SRGB_OFFSET};"),
         ] {
-            assert!(wgsl.contains(line), "vision.wgsl lacks `{line}`");
+            assert!(wgsl.contains(&line), "vision.wgsl lacks `{line}`");
         }
         let mid = crate::color::srgb_to_linear(0.5);
         assert!((mid - 0.214).abs() < 1e-3, "{mid}");

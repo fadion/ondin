@@ -19,23 +19,33 @@ pub fn to_backend(color: Color) -> Color {
     color
 }
 
+/// The sRGB transfer function's constants: the encoded and the linear knee, the
+/// linear segment's slope, the curve's offset, scale and exponent. `vision.wgsl`
+/// carries a copy, held to these by a test there.
+pub(crate) const SRGB_KNEE: f32 = 0.04045;
+pub(crate) const LINEAR_KNEE: f32 = 0.003_130_8;
+pub(crate) const SRGB_SLOPE: f32 = 12.92;
+pub(crate) const SRGB_OFFSET: f32 = 0.055;
+pub(crate) const SRGB_SCALE: f32 = 1.055;
+pub(crate) const SRGB_GAMMA: f32 = 2.4;
+
 /// The sRGB transfer function's inverse: an encoded channel in 0–1 to linear
 /// light. The colour-vision pass's Rust model (`vision::simulate_rgba8`) reads
-/// it; `vision.wgsl` carries the same constants, pinned by a test there.
+/// it.
 pub fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
+    if c <= SRGB_KNEE {
+        c / SRGB_SLOPE
     } else {
-        ((c + 0.055) / 1.055).powf(2.4)
+        ((c + SRGB_OFFSET) / SRGB_SCALE).powf(SRGB_GAMMA)
     }
 }
 
 /// [`srgb_to_linear`]'s inverse: linear light in 0–1 to an encoded channel.
 pub fn linear_to_srgb(c: f32) -> f32 {
-    if c <= 0.003_130_8 {
-        c * 12.92
+    if c <= LINEAR_KNEE {
+        c * SRGB_SLOPE
     } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
+        SRGB_SCALE * c.powf(1.0 / SRGB_GAMMA) - SRGB_OFFSET
     }
 }
 

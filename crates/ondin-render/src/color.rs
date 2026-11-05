@@ -19,6 +19,26 @@ pub fn to_backend(color: Color) -> Color {
     color
 }
 
+/// The sRGB transfer function's inverse: an encoded channel in 0–1 to linear
+/// light. The colour-vision pass's Rust model (`vision::simulate_rgba8`) reads
+/// it; `vision.wgsl` carries the same constants, pinned by a test there.
+pub fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// [`srgb_to_linear`]'s inverse: linear light in 0–1 to an encoded channel.
+pub fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 /// Which resolution a backend wants a picture at.
 ///
 /// The one thing the two backends are meant to disagree about (§15 D745): vello's

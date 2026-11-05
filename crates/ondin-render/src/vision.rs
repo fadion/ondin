@@ -94,29 +94,14 @@ impl Deficiency {
     }
 }
 
-fn decode(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-fn encode(c: f32) -> f32 {
-    if c <= 0.003_130_8 {
-        c * 12.92
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    }
-}
-
 /// One straight-alpha sRGB pixel as `d` sees it; alpha passes through.
 pub fn simulate_rgba8(d: Deficiency, [r, g, b, a]: [u8; 4]) -> [u8; 4] {
-    let lin = [r, g, b].map(|c| decode(f32::from(c) / 255.0));
+    use crate::color::{linear_to_srgb, srgb_to_linear};
+    let lin = [r, g, b].map(|c| srgb_to_linear(f32::from(c) / 255.0));
     let m = d.matrix();
     let out = m.map(|row| {
         let v = row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2];
-        (encode(v.clamp(0.0, 1.0)) * 255.0).round() as u8
+        (linear_to_srgb(v.clamp(0.0, 1.0)) * 255.0).round() as u8
     });
     [out[0], out[1], out[2], a]
 }
@@ -294,6 +279,27 @@ mod tests {
         }
         let [r, g, b, _] = simulate_rgba8(Deficiency::Achromatopsia, red);
         assert!(r == g && g == b);
+    }
+
+    /// The shader's transfer functions carry `color.rs`'s constants, which the
+    /// default gates can check without a GPU; mid-grey decodes to 0.214.
+    /// flip: `vision.wgsl`'s decode threshold set to 0.04 → fails at its line.
+    #[test]
+    fn the_shader_transfers_as_color_rs_does() {
+        let wgsl = include_str!("vision.wgsl");
+        for line in [
+            "if c <= 0.04045 {",
+            "return c / 12.92;",
+            "return pow((c + 0.055) / 1.055, 2.4);",
+            "if c <= 0.0031308 {",
+            "return c * 12.92;",
+            "return 1.055 * pow(c, 1.0 / 2.4) - 0.055;",
+        ] {
+            assert!(wgsl.contains(line), "vision.wgsl lacks `{line}`");
+        }
+        let mid = crate::color::srgb_to_linear(0.5);
+        assert!((mid - 0.214).abs() < 1e-3, "{mid}");
+        assert!((crate::color::linear_to_srgb(mid) - 0.5).abs() < 1e-5);
     }
 
     #[test]

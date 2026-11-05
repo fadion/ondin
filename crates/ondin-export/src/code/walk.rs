@@ -227,7 +227,7 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
             None => {
                 let base = slug(name);
                 let base = if base.is_empty() { "page".into() } else { base };
-                unique(base, &mut html_names)
+                unique_file(base, "-page", &mut html_names)
             }
         };
         others.push((file, walk.page_root(&[*id])));

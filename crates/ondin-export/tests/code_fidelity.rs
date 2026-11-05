@@ -2169,6 +2169,7 @@ fn frames_picked_by_width_beside_others_are_pages_of_their_own() {
     ]);
     d.frame(None, 0.0, 0.0, 900.0, 200.0, "Home");
     d.frame(None, 1000.0, 0.0, 600.0, 300.0, "Pricing");
+    d.frame(None, 1700.0, 0.0, 300.0, 300.0, "Con");
     d.add(
         None,
         NodeKind::Rect {
@@ -2199,10 +2200,15 @@ fn frames_picked_by_width_beside_others_are_pages_of_their_own() {
     );
     assert!(home.contains("class=\"home\""), "Home's page:\n{home}");
     assert!(pricing.contains("class=\"pricing\""), "{pricing}");
+    // A Windows device name is no file name.
+    assert!(
+        export.file("con-page.html").is_some() && export.file("con.html").is_none(),
+        "Con's page"
+    );
     let css = file("styles.css");
     assert_eq!(
         css.matches("width: 100%").count(),
-        4,
+        6,
         "each page and frame fills the window:\n{css}"
     );
     let react = react_of(&doc, &res, &origins);

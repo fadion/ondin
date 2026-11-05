@@ -3589,6 +3589,17 @@ pub fn arrow_keys(ui: &egui::Ui, resp: &egui::Response, x: bool, y: bool) -> Arr
     keys
 }
 
+/// Where the primary button is pressing, clicking or dragging `resp`, for a control
+/// whose press is a value (a slider, a colour plane). A right-click, including the
+/// one `Shift+F10` makes at the control's middle, is its menu and moves nothing.
+pub fn primary_press_pos(ui: &egui::Ui, resp: &egui::Response) -> Option<egui::Pos2> {
+    let primary = resp.clicked()
+        || resp.dragged_by(egui::PointerButton::Primary)
+        || resp.drag_stopped_by(egui::PointerButton::Primary)
+        || resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down());
+    primary.then(|| resp.interact_pointer_pos()).flatten()
+}
+
 /// Whether the focused control `resp` was asked to rename what it stands for, or
 /// to type into the cell it is: `F2` or `Ctrl+R`, the keys rename has everywhere.
 pub fn rename_key(ui: &egui::Ui, resp: &egui::Response) -> bool {
@@ -4514,7 +4525,7 @@ pub fn slider(
     let travel = (rect.width() - SLIDER_H).max(1.0);
 
     // Absolute: jumps to where it is pressed, then follows the pointer.
-    if let Some(pos) = resp.interact_pointer_pos()
+    if let Some(pos) = primary_press_pos(ui, &resp)
         && hi > lo
     {
         let t = f64::from(((pos.x - rect.left() - half) / travel).clamp(0.0, 1.0));
@@ -5596,6 +5607,135 @@ mod keyboard_focus_tests {
             Some(slider_id),
             "the arrows stayed its"
         );
+    }
+
+    /// `Shift+F10` on a focused slider is a right-click, which moves no value.
+    /// flip: `primary_press_pos` returns any button's position → fails at "unmoved".
+    #[test]
+    fn shift_f10_on_a_focused_slider_leaves_its_value() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut value = 100.0_f64;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let frame = |value: &mut f64, mut raw: egui::RawInput| {
+            raw.screen_rect = Some(screen);
+            let mut out = None;
+            let _ = ctx.run_ui(raw, |ui| {
+                let resp = slider(ui, 200.0, value, 100.0..=900.0);
+                out = Some((resp.id, resp.secondary_clicked()));
+            });
+            out.expect("drawn")
+        };
+        let (id, _) = frame(&mut value, Default::default());
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(&mut value, Default::default());
+        let mut raw = egui::RawInput {
+            modifiers: egui::Modifiers::SHIFT,
+            events: vec![egui::Event::Key {
+                key: egui::Key::F10,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::SHIFT,
+            }],
+            ..Default::default()
+        };
+        menu_key_as_right_click(&ctx, &mut raw);
+        let (_, right) = frame(&mut value, raw);
+        assert!(right, "the key reached the slider as a right-click");
+        assert_eq!(value, 100.0, "unmoved");
+    }
+
+    /// `Alt+↓` on a focused split button opens its choices, as its caret does; `↓`
+    /// alone does not.
+    /// flip: `split_button` dropping `|| alt_down` → fails at "Alt+↓ opens".
+    #[test]
+    fn alt_down_on_a_focused_split_button_opens_its_choices() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let frame = |events: Vec<egui::Event>, alt: bool| {
+            let mut out = None;
+            let raw = egui::RawInput {
+                events,
+                modifiers: match alt {
+                    true => egui::Modifiers::ALT,
+                    false => egui::Modifiers::NONE,
+                },
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| {
+                let b = split_button(ui, "Merge", CONTROL_H, true);
+                out = Some((b.resp.id, b.caret));
+            });
+            out.expect("drawn")
+        };
+        let down = |alt: bool| egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: match alt {
+                true => egui::Modifiers::ALT,
+                false => egui::Modifiers::NONE,
+            },
+        };
+        let (id, _) = frame(Vec::new(), false);
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(Vec::new(), false);
+        assert!(!frame(vec![down(false)], false).1, "↓ alone does not");
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(Vec::new(), false);
+        assert!(frame(vec![down(true)], true).1, "Alt+↓ opens");
+    }
+
+    /// A scroll area of tab stops brings the control `Tab` reaches into view, once:
+    /// scrolled away again, the focused control is left where the person put it.
+    /// flip: `keep_focus_in_view` without its once-per-focus check → fails at "left
+    /// where it was scrolled".
+    #[test]
+    fn a_tabbed_to_control_is_scrolled_into_view_once() {
+        let mut f = Fixture::new();
+        let frame = |f: &mut Fixture, events: Vec<egui::Event>, offset: Option<f32>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut at = 0.0;
+            let _ = f.ctx.run_ui(input, |ui| {
+                let _focus = KeyboardFocus::begin(ui.ctx(), false);
+                let mut area = egui::ScrollArea::vertical().max_height(100.0);
+                if let Some(y) = offset {
+                    area = area.vertical_scroll_offset(y);
+                }
+                at = area
+                    .show(ui, |ui| {
+                        for _ in 0..12 {
+                            let _ = field_button(ui, icon::X, 28.0, FieldButton::Off);
+                        }
+                        keep_focus_in_view(ui);
+                    })
+                    .state
+                    .offset
+                    .y;
+            });
+            at
+        };
+        frame(&mut f, Vec::new(), None);
+        for _ in 0..12 {
+            frame(&mut f, tab(false), None);
+            frame(&mut f, Vec::new(), None);
+        }
+        let moved = frame(&mut f, Vec::new(), None);
+        assert!(f.focused().is_some(), "the fixture: Tab reached the list");
+        assert!(moved > 200.0, "scrolled to the last: {moved}");
+        frame(&mut f, Vec::new(), Some(0.0));
+        frame(&mut f, Vec::new(), None);
+        let back = frame(&mut f, Vec::new(), None);
+        assert_eq!(back, 0.0, "left where it was scrolled");
     }
 
     /// `Shift+F10` on a focused button is a right-click on it, and the ring stays.

@@ -1357,6 +1357,54 @@ mod tests {
         assert_eq!(during, before, "nothing below moves");
     }
 
+    /// `F2` on a focused page row opens its name for renaming, as a double-click does.
+    /// flip: `page_rows` dropping its `rename_key` → fails at "F2 renames".
+    #[test]
+    fn f2_on_a_focused_page_row_renames_it() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.pages_section(ui)).shapes
+        };
+        frame(&mut app, vec![]);
+        let shapes = frame(&mut app, vec![]);
+        let at = shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Pricing" => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .expect("the row is drawn");
+        let row = ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws.iter())
+                .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+                .last()
+                .map(|w| w.id)
+        });
+        ctx.memory_mut(|m| m.request_focus(row.expect("a clickable row")));
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![key(egui::Key::F2)]);
+        assert_eq!(
+            app.pages.renaming.as_ref().map(|r| r.page),
+            Some(second),
+            "F2 renames"
+        );
+    }
+
     /// A list dragged to show every row grows by the page added to it; one dragged
     /// shorter keeps its height.
     ///
@@ -1615,8 +1663,8 @@ mod tests {
 
     /// *Delete page?*'s footer puts its commit rightmost, as every footer does.
     ///
-    /// flip: `settings::footer_buttons` adding its buttons in their own order to
-    /// its right-to-left row → fails at "Delete right of Cancel".
+    /// flip: `settings::footer_row_noted` adding its buttons in reverse order →
+    /// fails at "Delete right of Cancel".
     #[test]
     fn the_delete_page_card_puts_delete_rightmost() {
         let ctx = egui::Context::default();

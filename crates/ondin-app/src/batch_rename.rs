@@ -1683,8 +1683,8 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
     );
 }
 
-/// The footer: the hint, then *Cancel* and *Rename* as the Settings modal's
-/// footer draws them. `why_not` dims Rename and is its tooltip.
+/// The footer: the hint, then *Cancel* and *Rename* in the dialogs' footer row
+/// (`settings::footer_row_noted`). `why_not` dims Rename and is its tooltip.
 fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act> {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 48.0), egui::Sense::hover());
     ui.painter().text(
@@ -1701,25 +1701,17 @@ fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act>
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    child.spacing_mut().item_spacing.x = 8.0;
     let state = match why_not {
         None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
-    let primary = crate::settings::text_button(&mut child, &go, state);
-    let primary = match why_not {
-        Some(why) => primary.on_hover_text(why),
-        None => primary,
-    };
-    let cancel = crate::settings::text_button(&mut child, "Cancel", FieldButton::Off);
-    if primary.clicked() && why_not.is_none() {
-        Some(Act::Rename)
-    } else if cancel.clicked() {
-        Some(Act::Cancel)
-    } else {
-        None
+    let buttons = [("Cancel", FieldButton::Off), (go.as_str(), state)];
+    match crate::settings::footer_row_noted(&mut child, &buttons, why_not) {
+        Some(0) => Some(Act::Cancel),
+        Some(_) => Some(Act::Rename),
+        None => None,
     }
 }
 

@@ -1057,11 +1057,17 @@ impl OndinApp {
         };
         let mut field = None;
         let mut reset_hit = false;
+        let mut badge_menu = false;
         let row = field_row(ui, egui::vec2(w, ROW_H), |ui| {
             let over = ui.rect_contains_pointer(ui.max_rect());
             match mark {
                 None => {
-                    ui.label(theme::icon_text(key.badge(), 14.0, theme::text::faint()));
+                    // Clicked for its right-click alone, and no tab stop.
+                    let badge = ui.add(
+                        egui::Label::new(theme::icon_text(key.badge(), 14.0, theme::text::faint()))
+                            .sense(egui::Sense::CLICK),
+                    );
+                    badge_menu = badge.secondary_clicked();
                 }
                 Some(m) => {
                     let glyph = if over {
@@ -1079,6 +1085,7 @@ impl OndinApp {
                             badge.rect.right_top() + egui::vec2(1.5, 3.0),
                         );
                     }
+                    badge_menu = badge.secondary_clicked();
                     reset_hit = badge.on_hover_text(&m.tip).clicked();
                 }
             }
@@ -1122,7 +1129,7 @@ impl OndinApp {
             };
             let _ = hover.clone().on_hover_text(why);
         }
-        if (hover.secondary_clicked() || field.secondary_clicked())
+        if (hover.secondary_clicked() || field.secondary_clicked() || badge_menu)
             && let Some(at) = ui.input(|i| i.pointer.interact_pos())
         {
             self.field_menu = Some((key, at, row));
@@ -3088,6 +3095,14 @@ impl OndinApp {
         let current = axis_value(axis, coords);
         let mut value = current;
         let resp = ui::slider(ui, width, &mut value, axis.min..=axis.max);
+        // An arrow step commits at once, the steps of one run one undo step, as the
+        // picker's do: held in the valve until the focus left, a save or an undo in
+        // between would miss it.
+        if resp.changed() && resp.interact_pointer_pos().is_none() {
+            let next = axis_coords_after(axis, coords, value, clear_at_default);
+            self.apply_char_attrs_as(subject, vec![CharAttr::Variations(next)], Some("axis-keys"));
+            return;
+        }
         // Handed over every frame: `current` reads through the preview, so a
         // `value != current` guard would be false on the release frame.
         self.axis_valve(&resp, subject, axis, coords, value, clear_at_default);
@@ -8133,6 +8148,44 @@ mod content_row_tests {
             "the field takes focus"
         );
     }
+
+    /// A right-click on the editable row's badge opens the field menu.
+    /// flip: the unmarked badge laid as a plain label → fails at "the field menu".
+    #[test]
+    fn a_right_click_on_the_content_badge_opens_the_field_menu() {
+        let (ctx, mut app, id) = app_with_text();
+        let frame = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            let mut row = egui::Rect::NOTHING;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(240.0);
+                    let top = ui.cursor().min;
+                    app.type_content_row(ui, &subject, &None);
+                    row = egui::Rect::from_min_max(top, ui.min_rect().max);
+                },
+            );
+            row
+        };
+        frame(&mut app, Vec::new());
+        let row = frame(&mut app, Vec::new());
+        // The badge: the row's first glyph, past its inset.
+        let at = row.left_center() + egui::vec2(12.0, 0.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, vec![press(true)]);
+        frame(&mut app, vec![press(false)]);
+        assert!(app.field_menu.is_some(), "the field menu");
+    }
 }
 
 /// The panel tests' one text fixture: a headless app holding a single `Auto`
@@ -9978,6 +10031,58 @@ mod axis_valve_tests {
             None,
             "reset means the coordinate is gone, not that it holds the font's own \
              value — `Some(400.0)` is the valve-shaped failure"
+        );
+    }
+
+    /// A focused axis slider's arrow steps reach the document at once, as one undo
+    /// step, so a save or an undo while it still holds the focus sees them.
+    /// flip: `axis_slider` sends its key steps through `axis_valve` → fails at "committed".
+    #[test]
+    fn a_focused_axis_sliders_key_steps_commit_at_once() {
+        let (ctx, mut app, id, _) = app_with_wght(500.0);
+        let slider = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            let coords = attr!(&subject, Variations, Variations);
+            let mut out = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.axis_slider(ui, &subject, &wght(), &coords, 200.0, true);
+                    out = ui.ctx().memory(|m| m.focused());
+                },
+            );
+            out
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let right = key(egui::Key::ArrowRight);
+        slider(&mut app, Vec::new());
+        slider(&mut app, vec![key(egui::Key::Tab)]);
+        let focused = slider(&mut app, Vec::new());
+        assert!(focused.is_some(), "the fixture: Tab focused the slider");
+        let depth0 = app.session.history.undo_depth();
+        for _ in 0..3 {
+            slider(&mut app, vec![right.clone()]);
+        }
+        slider(&mut app, Vec::new());
+        assert_eq!(slider(&mut app, Vec::new()), focused, "still focused");
+        assert_eq!(
+            stored_wght(&app, id),
+            Some(524.0),
+            "committed: 3 × 8 over 800"
+        );
+        assert_eq!(
+            app.session.history.undo_depth() - depth0,
+            1,
+            "one undo step"
         );
     }
 

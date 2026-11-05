@@ -1029,7 +1029,7 @@ impl OndinApp {
             6.5,
             egui::Stroke::new(1.0, egui::Color32::from_black_alpha(100)),
         );
-        if let Some(pos) = resp.interact_pointer_pos() {
+        if let Some(pos) = ui::primary_press_pos(ui, &resp) {
             let s = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
             let v = 1.0 - ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0);
             let next = Hsv::new(hsv.h, s, v, hsv.a);
@@ -1069,7 +1069,7 @@ impl OndinApp {
         ui::paint_ramp(p, rect, &ramp);
         mask_corners(p, rect, TRACK_H * 0.5, color::card());
         slider_knob(p, rect, hsv.h, Hsv::new(hsv.h, 1.0, 1.0, 1.0).to_egui());
-        if let Some(pos) = resp.interact_pointer_pos() {
+        if let Some(pos) = ui::primary_press_pos(ui, &resp) {
             let h = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
             let next = Hsv::new(h, hsv.s, hsv.v, hsv.a);
             self.write_stop_colour(&resp, node, slot, brush, index, next);
@@ -1103,7 +1103,7 @@ impl OndinApp {
         ui::paint_ramp(p, rect, &[(0.0, clear), (1.0, opaque)]);
         mask_corners(p, rect, TRACK_H * 0.5, color::card());
         slider_knob(p, rect, hsv.a, opaque);
-        if let Some(pos) = resp.interact_pointer_pos() {
+        if let Some(pos) = ui::primary_press_pos(ui, &resp) {
             let a = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
             let next = Hsv::new(hsv.h, hsv.s, hsv.v, a);
             self.write_stop_colour(&resp, node, slot, brush, index, next);

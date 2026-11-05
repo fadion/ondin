@@ -566,12 +566,36 @@ pub(crate) fn footer_buttons(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)])
 /// [`footer_buttons`]' row without the gap above, for a popover, whose fields sit
 /// closer than a dialog's.
 pub(crate) fn footer_row(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)]) -> Option<usize> {
+    footer_row_noted(ui, buttons, None)
+}
+
+/// [`footer_row`], the last button (the commit) wearing `why_not` as its tooltip:
+/// the reason it is `Disabled`.
+pub(crate) fn footer_row_noted(
+    ui: &mut egui::Ui,
+    buttons: &[(&str, FieldButton)],
+    why_not: Option<&str>,
+) -> Option<usize> {
+    const GAP: f32 = 8.0;
     let mut pressed = None;
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        // A right-to-left row adds the rightmost first.
-        for (i, (label, state)) in buttons.iter().enumerate().rev() {
-            if text_button(ui, label, *state).clicked() && *state != FieldButton::Disabled {
+    let widths: f32 = buttons
+        .iter()
+        .map(|(label, _)| text_button_w(ui, label))
+        .sum();
+    let row = widths + GAP * buttons.len().saturating_sub(1) as f32;
+    // Laid left to right after the slack, not right to left: `Tab` follows the
+    // order controls are added in, and it must read the way out first.
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        ui.add_space((ui.available_width() - row).max(0.0));
+        for (i, (label, state)) in buttons.iter().enumerate() {
+            let mut resp = text_button(ui, label, *state);
+            if i + 1 == buttons.len()
+                && let Some(why) = why_not
+            {
+                resp = resp.on_hover_text(why);
+            }
+            if resp.clicked() && *state != FieldButton::Disabled {
                 pressed = Some(i);
             }
         }
@@ -689,23 +713,20 @@ fn nudge_field(ui: &mut egui::Ui, size: egui::Vec2, label: &'static str, value: 
 /// Measured rather than given a constant width: `label_button` centres its text in
 /// the box it is handed, and the card's three buttons differ in length.
 pub(crate) fn text_button(ui: &mut egui::Ui, label: &str, state: FieldButton) -> egui::Response {
-    let w = ui
-        .ctx()
-        .fonts_mut(|f| {
-            f.layout_no_wrap(
-                label.to_owned(),
-                egui::FontId::proportional(BUTTON_PT),
-                theme::text::muted(),
-            )
-        })
-        .size()
-        .x;
-    ui::label_button(
-        ui,
-        label,
-        egui::vec2(w + BUTTON_PAD_X * 2.0, BUTTON_H),
-        state,
-    )
+    let w = text_button_w(ui, label);
+    ui::label_button(ui, label, egui::vec2(w, BUTTON_H), state)
+}
+
+/// The width [`text_button`] gives `label`: the text and its padding.
+fn text_button_w(ui: &egui::Ui, label: &str) -> f32 {
+    let text = ui.ctx().fonts_mut(|f| {
+        f.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(BUTTON_PT),
+            theme::text::muted(),
+        )
+    });
+    text.size().x + BUTTON_PAD_X * 2.0
 }
 
 /// A byte count as a person reads one: `0 B`, `840 KB`, `1.4 MB`, `180 MB`.
@@ -1224,5 +1245,63 @@ mod tests {
             centre_of(Some(canvas))
         );
         assert!((centre_of(None) - screen.center()).length() < 1.0);
+    }
+
+    /// `Tab` walks a footer in the order it reads, the way out first, and the row
+    /// still ends at the card's right edge.
+    /// flip: `footer_row_noted` laid right to left again → fails at "left to right".
+    #[test]
+    fn tab_walks_a_footer_left_to_right() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let buttons = [
+            ("Cancel", FieldButton::Off),
+            ("Discard", FieldButton::Danger),
+            ("Save and close", FieldButton::Primary),
+        ];
+        let frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                events,
+                ..Default::default()
+            };
+            let mut right = 0.0;
+            let _ = ctx.run_ui(input, |ui| {
+                ui.set_width(400.0);
+                let _ = footer_row(ui, &buttons);
+                right = ui.max_rect().right();
+            });
+            let at = ctx
+                .memory(|m| m.focused())
+                .and_then(|id| ctx.read_response(id))
+                .map(|r| r.rect);
+            (at, right)
+        };
+        let tab = || {
+            vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(Vec::new());
+        let mut stops = Vec::new();
+        let mut edge = 0.0;
+        for _ in 0..3 {
+            frame(tab());
+            let (at, right) = frame(Vec::new());
+            stops.push(at.expect("a footer button holds the focus"));
+            edge = right;
+        }
+        assert!(
+            stops.windows(2).all(|w| w[0].center().x < w[1].center().x),
+            "left to right: {stops:?}"
+        );
+        assert!(
+            (stops[2].right() - edge).abs() < 0.5,
+            "the commit is rightmost"
+        );
     }
 }

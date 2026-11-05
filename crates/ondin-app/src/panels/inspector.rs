@@ -1537,8 +1537,10 @@ impl OndinApp {
                         .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let _ = icon_button(ui, icon::LOCK_SIMPLE_OPEN, 22.0, 16.0, false, false);
-                    let _ = icon_button(ui, icon::EYE, 22.0, 16.0, false, false);
+                    let _ = icon_button(ui, icon::LOCK_SIMPLE_OPEN, 22.0, 16.0, false, false)
+                        .on_hover_text("Lock — not while editing points");
+                    let _ = icon_button(ui, icon::EYE, 22.0, 16.0, false, false)
+                        .on_hover_text("Toggle visibility — not while editing points");
                 });
             });
             // The live row, inert, so it cannot drift from it.
@@ -6649,6 +6651,7 @@ impl OndinApp {
                             });
                         }
                     }
+                    ui::keep_focus_in_view(ui);
                 });
         });
         // A click on the lit cell writes nothing, so it is not an empty undo step.

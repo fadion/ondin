@@ -520,7 +520,9 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
 
 - **Core.** `Query::new(find, replace, match_case, whole_words, pattern, keep_case)`: the
   replacement is literal text unless `pattern` is set, when it is a rename `Template`, so `[1]`
-  inserts group 1. Whole words wrap the pattern in `\b(?:…)\b` (`Find::with_words`). `Scope` is
+  inserts group 1. Whole words wrap the pattern in `\b{start-half}(?:…)\b{end-half}`
+  (`Find::with_words`): no word character just outside either end, so *C++* and *#tag* are found as
+  whole words, which `\b` would refuse. `Scope` is
   `Under(roots)` (those layers and all under them), `Page(p)`, or `Pages { here }`, every page but
   the drafts while keeping `here`, as batch rename's gather does. `find` orders the `Hit`s by page in
   document order, then by layer in the layers panel's order (top of the stack first), then by place

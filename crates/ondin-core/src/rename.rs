@@ -114,8 +114,9 @@ impl Find {
         Self::with_words(text, match_case, pattern, false)
     }
 
-    /// [`Self::new`], and with `whole_words` a match must start and end at a word
-    /// boundary, so *team* does not find *teams*.
+    /// [`Self::new`], and with `whole_words` a match has no word character just
+    /// outside either end, so *team* does not find *teams* and *C++* finds
+    /// *C++ daily*. Half boundaries, not `\b`, which needs a word character inside.
     pub fn with_words(
         text: &str,
         match_case: bool,
@@ -131,7 +132,7 @@ impl Find {
             regex::escape(text)
         };
         if whole_words {
-            src = format!(r"\b(?:{src})\b");
+            src = format!(r"\b{{start-half}}(?:{src})\b{{end-half}}");
         }
         RegexBuilder::new(&src)
             .case_insensitive(!match_case)
@@ -486,6 +487,29 @@ mod tests {
             new_name(&p("[Group 2]"), "01 · Welcome").as_deref(),
             Some("Welcome")
         );
+    }
+
+    /// Whole words finds a find whose edge is not a word character, and still
+    /// not a find inside a longer word.
+    #[test]
+    fn whole_words_takes_a_find_with_a_non_word_edge() {
+        let whole = |find: &str, text: &str| {
+            let rule = Rule {
+                find: Find::with_words(find, false, false, true).unwrap(),
+                template: Template::parse("x"),
+                keep_case: false,
+            };
+            rule.replacements(text, "1")
+                .into_iter()
+                .map(|(r, _)| (r.start, r.end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(whole("C++", "I write C++ daily"), [(8, 11)]);
+        assert_eq!(whole("#launch", "Join #launch now"), [(5, 12)]);
+        assert_eq!(whole("$5", "only $5 today, not $50"), [(5, 7)]);
+        assert_eq!(whole("(beta)", "App (beta)"), [(4, 10)]);
+        assert_eq!(whole("team", "teams team"), [(6, 10)]);
+        assert!(whole("C++", "C++x").is_empty());
     }
 
     /// A pattern that does not parse says why in one line.

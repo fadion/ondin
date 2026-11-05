@@ -443,6 +443,56 @@ fn the_same_document_writes_the_same_file() {
     assert!(a.bytes == b.bytes);
 }
 
+/// Export settings come back through `sketch_in` as they went out, a prefix and
+/// a typed suffix on rows of their own included.
+/// flip: `Writer::exports` writing every row's `namingScheme` as 0 → fails at
+/// the prefixed row.
+#[test]
+fn export_settings_read_back_as_they_were() {
+    let mut f = fixture();
+    let screen = named(&f.doc, "Screen");
+    let mut prefixed = ondin_core::ExportSpec::new(
+        ondin_core::ExportFormat::Svg,
+        ondin_core::ExportScale::Times(1.0),
+    );
+    prefixed.prefix = "icons/".into();
+    let mut suffixed = ondin_core::ExportSpec::new(
+        ondin_core::ExportFormat::Jpeg,
+        ondin_core::ExportScale::Width(960),
+    );
+    suffixed.suffix = "-big".into();
+    let rows = [
+        ondin_core::ExportSpec::new(
+            ondin_core::ExportFormat::Png,
+            ondin_core::ExportScale::Times(2.0),
+        ),
+        prefixed,
+        suffixed,
+    ];
+    f.doc
+        .apply(&ondin_core::Transaction(vec![
+            ondin_core::Operation::SetExports {
+                id: screen,
+                exports: ondin_core::keyed_by_position(rows.clone()),
+            },
+        ]))
+        .expect("set the screen's exports");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+    let out = ondin_export::sketch::export(&f.doc, &f.res, "Fixture").unwrap();
+    let mut ids = IdSource::new(0x9F);
+    let back = ondin_core::sketch_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
+        .expect("read back");
+    let ours: Vec<ondin_core::ExportSpec> = back
+        .doc
+        .get(named(&back.doc, "Screen"))
+        .unwrap()
+        .exports()
+        .iter()
+        .map(|k| k.value.clone())
+        .collect();
+    assert_eq!(ours, rows);
+}
+
 /// Sketch's reader takes the file back: the layers in their places, the swatch
 /// still bound, the title in its style, and the copy an instance of the
 /// button with its own label.

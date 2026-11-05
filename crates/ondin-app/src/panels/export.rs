@@ -1207,30 +1207,24 @@ impl OndinApp {
                 clippy::disallowed_methods,
                 reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
             )]
-            let row = ui.scope(|ui| {
-                ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    ui.label(theme::icon_text(
-                        icon::TEXT_T,
-                        ui::CONTROL_GLYPH_PT,
-                        theme::text::faint(),
-                    ));
-                    let font = egui::FontId::proportional(ui::CONTROL_PT);
-                    let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut text)
-                            .id(egui::Id::new((part.id_salt(), index)))
-                            .desired_width(ui.available_width())
-                            .frame(pad)
-                            .hint_text(egui::RichText::new(hint).size(ui::CONTROL_PT))
-                            .font(font),
-                    )
-                })
+            let resp = ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
+                ui.spacing_mut().item_spacing.x = 7.0;
+                ui.label(theme::icon_text(
+                    icon::TEXT_T,
+                    ui::CONTROL_GLYPH_PT,
+                    theme::text::faint(),
+                ));
+                let font = egui::FontId::proportional(ui::CONTROL_PT);
+                let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(egui::Id::new((part.id_salt(), index)))
+                        .desired_width(ui.available_width())
+                        .frame(pad)
+                        .hint_text(egui::RichText::new(hint).size(ui::CONTROL_PT))
+                        .font(font),
+                )
             });
-            let resp = row.inner;
-            if resp.has_focus() {
-                ui::typing_edge(ui, row.response.rect);
-            }
             if resp.gained_focus() || resp.changed() {
                 *match part {
                     NamePart::Prefix => &mut self.export_prefix_text,

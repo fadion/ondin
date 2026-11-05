@@ -6398,30 +6398,24 @@ impl OndinApp {
             clippy::disallowed_methods,
             reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
         )]
-        let row = ui.scope(|ui| {
-            ui::field_row(ui, egui::vec2(width, cell), |ui| {
-                ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                ui.label(theme::icon_text(
-                    icon::LIST_DASHES,
-                    ui::CONTROL_GLYPH_PT,
-                    theme::text::faint(),
-                ));
-                let font = egui::FontId::proportional(ui::CONTROL_PT);
-                let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .id(egui::Id::new(("stroke-dash-list", index)))
-                        .desired_width(ui.available_width())
-                        .frame(pad)
-                        .hint_text(egui::RichText::new("5, 10").size(ui::CONTROL_PT))
-                        .font(font),
-                )
-            })
+        let resp = ui::field_row(ui, egui::vec2(width, cell), |ui| {
+            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+            ui.label(theme::icon_text(
+                icon::LIST_DASHES,
+                ui::CONTROL_GLYPH_PT,
+                theme::text::faint(),
+            ));
+            let font = egui::FontId::proportional(ui::CONTROL_PT);
+            let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(egui::Id::new(("stroke-dash-list", index)))
+                    .desired_width(ui.available_width())
+                    .frame(pad)
+                    .hint_text(egui::RichText::new("5, 10").size(ui::CONTROL_PT))
+                    .font(font),
+            )
         });
-        let resp = row.inner;
-        if resp.has_focus() {
-            ui::typing_edge(ui, row.response.rect);
-        }
         // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() parses.
         if resp.gained_focus() || resp.changed() {
             self.stroke_dash_text = Some((index, text.clone()));
@@ -19844,6 +19838,38 @@ mod dash_list_field_tests {
             "fixture: the field reported lost_focus and cleared its buffer"
         );
         assert_eq!(out, None, "and it wrote nothing back");
+    }
+
+    /// The focused dash list wears one typing edge, the row's.
+    /// flip: `dash_list_field` paints its own `typing_edge` again → fails at "one".
+    #[test]
+    fn a_focused_dash_list_wears_one_typing_edge() {
+        let ctx = egui::Context::default();
+        let (mut app, s) = app_and_stroke(&ctx, vec![4.0, 2.0]);
+        let mut edges = 0;
+        for pass in 0..3 {
+            ctx.memory_mut(|m| m.request_focus(field_id()));
+            let out = ctx.run_ui(Default::default(), |ui| {
+                let _ = app.dash_list_field(ui, 260.0, 24.0, 0, &s);
+            });
+            if pass < 2 {
+                continue;
+            }
+            let mut count = |s: &egui::Shape| {
+                if let egui::Shape::Rect(r) = s
+                    && r.stroke.color == theme::color::accent_700()
+                {
+                    edges += 1;
+                }
+            };
+            for c in &out.shapes {
+                match &c.shape {
+                    egui::Shape::Vec(v) => v.iter().for_each(&mut count),
+                    s => count(s),
+                }
+            }
+        }
+        assert_eq!(edges, 1, "one");
     }
 
     /// The control: a typed change still lands.

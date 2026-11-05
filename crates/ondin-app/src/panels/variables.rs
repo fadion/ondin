@@ -984,7 +984,7 @@ impl OndinApp {
                             if n > 1 {
                                 ui::menu_sep(ui);
                                 let moves = [
-                                    (icon::ARROW_LINE_LEFT, "Make default", 0, i > 0),
+                                    (icon::MODE_DEFAULT, "Make default", 0, i > 0),
                                     (icon::ARROW_LEFT, "Move left", i.saturating_sub(1), i > 0),
                                     (icon::ARROW_RIGHT, "Move right", i + 1, i + 1 < n),
                                 ];

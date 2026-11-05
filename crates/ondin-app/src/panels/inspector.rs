@@ -5585,7 +5585,7 @@ impl OndinApp {
         let ids = self.session.selection.ids().to_vec();
         let (noun, glyph) = match target {
             ondin_core::PaintTarget::Fill => ("Fill", icon::PAINT_BUCKET),
-            ondin_core::PaintTarget::Stroke => ("Stroke", icon::LINE_SEGMENT),
+            ondin_core::PaintTarget::Stroke => ("Stroke", icon::STROKE),
         };
         if out.remove || out.toggle {
             self.session.name_step(noun, glyph);
@@ -6074,7 +6074,7 @@ impl OndinApp {
             edit(slot);
         }
         let tx = self.strokes_tx(scope, next);
-        self.named_valve("Stroke", icon::LINE_SEGMENT, resp, tx);
+        self.named_valve("Stroke", icon::STROKE, resp, tx);
     }
     /// One stroke's dash, cap and join, behind the sliders button.
     ///
@@ -10232,7 +10232,7 @@ impl OndinApp {
             | PaintSlot::SelectionAll(PaintTarget::Fill) => ("Fill", icon::PAINT_BUCKET),
             PaintSlot::Stroke(_)
             | PaintSlot::Selection(PaintTarget::Stroke, _)
-            | PaintSlot::SelectionAll(PaintTarget::Stroke) => ("Stroke", icon::LINE_SEGMENT),
+            | PaintSlot::SelectionAll(PaintTarget::Stroke) => ("Stroke", icon::STROKE),
             PaintSlot::Canvas => ("Canvas colour", icon::PAINT_BUCKET),
             PaintSlot::Guide => ("Guide colour", icon::RULER),
             PaintSlot::TextDecoration(super::paint::DecorationSide::Underline) => {
@@ -10370,7 +10370,7 @@ impl OndinApp {
     fn write_strokes(&mut self, scope: PaintScope, strokes: Vec<Keyed<Stroke>>) {
         let anchor = self.strokes_in_scope(scope);
         if !self.session.has_step_name() {
-            self.session.name_step("Stroke", icon::LINE_SEGMENT);
+            self.session.name_step("Stroke", icon::STROKE);
         }
         self.write_paint_list(
             scope,

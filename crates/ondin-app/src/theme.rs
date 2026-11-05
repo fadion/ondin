@@ -555,8 +555,11 @@ pub mod icon {
     /// The open-hand cursor: [`HAND`] filled, so it reads over artwork.
     pub const HAND_FILL: &str = "\u{f002}";
     /// The Line tool and layer, and a line's own *Length* field: the line, measured.
-    /// Also every *Stroke* step, which has no glyph of its own.
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
+    /// A stroke's paint, wherever a *Stroke* step is named: a box drawn only as
+    /// its edge, the hollow twin of [`SQUARE_FILL`] and the partner of
+    /// [`PAINT_BUCKET`]'s *Fill*.
+    pub const STROKE: &str = "\u{f045}";
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
     /// *Make corner*, on the path bar and in the menu: a point where two straight
@@ -876,9 +879,9 @@ pub mod icon {
     /// from (`ARROW_LINE_LEFT` for the start inset), and swapping the pair would
     /// put each number on the opposite margin.
     ///
-    /// They also carry [`ARROW_LINE_UP`]'s *all the way* reading: a mode's *Make
-    /// default* (moved to the first column) and flex *No wrap* (a line run into
-    /// the wall, against [`WRAP`]'s turning back).
+    /// `ARROW_LINE_RIGHT` also carries [`ARROW_LINE_UP`]'s *all the way* reading
+    /// for flex *No wrap*: a line run into the wall, against [`WRAP`]'s turning
+    /// back.
     pub const ARROW_LINE_LEFT: &str = "\u{e062}";
     pub const ARROW_LINE_RIGHT: &str = "\u{e064}";
     /// Paragraph spacing — the pilcrow, which is the thing being spaced.
@@ -952,6 +955,9 @@ pub mod icon {
     /// A variable mode, wherever a frame picks one: two sheets, one behind the
     /// other.
     pub const MODE: &str = "\u{f02d}";
+    /// *Make default*: [`MODE`] with its front sheet filled, the mode every unset
+    /// frame reads.
+    pub const MODE_DEFAULT: &str = "\u{f046}";
     /// *Publish* (§5.3e).
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
     /// An update waiting to be taken: a kit's (§5.3e) — waiting, *Accept kit
@@ -1129,6 +1135,7 @@ pub mod icon {
         ("hand", HAND),
         ("hand-fill", HAND_FILL),
         ("line-segment", LINE_SEGMENT),
+        ("stroke", STROKE),
         ("pen-nib", PEN_NIB),
         ("bezier-curve", BEZIER_CURVE),
         ("node-corner", NODE_CORNER),
@@ -1297,6 +1304,7 @@ pub mod icon {
         ("toggle", TOGGLE),
         ("columns-plus-right", COLUMNS_PLUS_RIGHT),
         ("mode", MODE),
+        ("mode-default", MODE_DEFAULT),
         ("upload-simple", UPLOAD_SIMPLE),
         ("arrow-circle-down", ARROW_CIRCLE_DOWN),
         ("link-break", LINK_BREAK),

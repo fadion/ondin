@@ -3687,10 +3687,21 @@ mod text_colour_route_tests {
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
 
     fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        frame_with(ctx, app, events, egui::Modifiers::NONE);
+    }
+
+    /// [`frame`] with `modifiers` held.
+    fn frame_with(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) {
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
                 events,
+                modifiers,
                 ..Default::default()
             },
             |ui| app.picker_ui(ui.ctx()),
@@ -3841,5 +3852,61 @@ mod text_colour_route_tests {
             depth + 1,
             "and it is one undo step for the whole drag, not one a frame"
         );
+    }
+
+    /// **A run of arrow steps on the focused plane is one undo step**, for a text
+    /// layer's colour too, whose write goes per character.
+    /// flip: `write_slot_step` sends a per-character slot to `write_slot` → fails at
+    /// "one undo step".
+    #[test]
+    fn arrow_steps_on_a_text_layers_colour_fold_into_one_undo_step() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = text_app(&ctx);
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        assert!(app.picker.is_some(), "the fixture: the picker is up");
+        let plane = ctx
+            .viewport(|v| {
+                // The frame just run; its widgets move to `prev_pass` only when the
+                // next one begins. The plane is the picker's biggest draggable stop.
+                v.this_pass
+                    .widgets
+                    .get_layer(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        super::layer_id(),
+                    ))
+                    .filter(|w| w.sense.is_focusable() && w.sense.senses_drag())
+                    .max_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+                    .map(|w| w.id)
+            })
+            .expect("the plane is drawn");
+        ctx.memory_mut(|m| m.request_focus(plane));
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        let depth = app.session.history.undo_depth();
+
+        // Up, a tenth at a time: brightness, so each step is a colour of its own
+        // from the black the layer starts in (saturation steps on black are not).
+        let up = egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        };
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            frame_with(&ctx, &mut app, vec![up.clone()], egui::Modifiers::SHIFT);
+            seen.push(text_rgba(&app, id));
+        }
+        frame(&ctx, &mut app, Vec::new());
+
+        seen.dedup();
+        assert_eq!(
+            seen.len(),
+            5,
+            "each step wrote a colour of its own: {seen:?}"
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
     }
 }

@@ -402,6 +402,9 @@ impl CharSlot {
 pub enum CharWrite<'a> {
     /// A click, or a hex typed and committed: write it now.
     Commit,
+    /// A key step: write it now, folding into the run of `verb` before it, so a
+    /// held arrow is one undo step (`EditorSession::commit_run`).
+    Step(&'static str),
     /// A drag: preview each frame, commit once on release.
     Valve(&'a egui::Response),
     /// A pointer down on a colour control that has not travelled far enough to be a

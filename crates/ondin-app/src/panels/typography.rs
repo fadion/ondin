@@ -4014,6 +4014,17 @@ impl OndinApp {
     /// Apply character attributes now — for clicks and unit toggles, which have no
     /// drag for a valve to wait on.
     pub(super) fn apply_char_attrs(&mut self, subject: &TypeSubject, attrs: Vec<CharAttr>) {
+        self.apply_char_attrs_as(subject, attrs, None);
+    }
+
+    /// [`Self::apply_char_attrs`], its commit folding into the run of `run`'s verb
+    /// when one is named (a key step), as a nudge's does.
+    fn apply_char_attrs_as(
+        &mut self,
+        subject: &TypeSubject,
+        attrs: Vec<CharAttr>,
+        run: Option<&'static str>,
+    ) {
         if subject.partial {
             if let Some(s) = self.text.as_mut().filter(|s| s.id == subject.id) {
                 for attr in attrs {
@@ -4031,7 +4042,15 @@ impl OndinApp {
             if let Some((label, glyph)) = step {
                 self.session.name_step(label, glyph);
             }
-            self.commit_edit(tx.clone());
+            match run {
+                Some(verb) => {
+                    self.note_edit(None, &tx);
+                    self.session.commit_run(tx.clone(), verb);
+                }
+                None => {
+                    self.commit_edit(tx.clone());
+                }
+            }
             // A session on a bare caret reaches here, so the editor must adopt the
             // cleared span list.
             self.text_session_restyled_after(&tx);
@@ -4104,7 +4123,7 @@ impl OndinApp {
         // A commit reads the committed document: the press frame has just put this
         // colour in the preview, so `apply_char_attrs` would see no change.
         let subject = match how {
-            CharWrite::Commit => TypeSubject::committed(self, id),
+            CharWrite::Commit | CharWrite::Step(_) => TypeSubject::committed(self, id),
             CharWrite::Valve(_) | CharWrite::Preview => TypeSubject::of(self, id),
         };
         let Some(subject) = subject else {
@@ -4134,6 +4153,7 @@ impl OndinApp {
         }
         match how {
             CharWrite::Commit => self.apply_char_attrs(&subject, vec![attr]),
+            CharWrite::Step(verb) => self.apply_char_attrs_as(&subject, vec![attr], Some(verb)),
             CharWrite::Valve(resp) => self.char_valve(resp, &subject, attr),
             // Not through `char_valve`: a press that never becomes a drag has no
             // release frame to clear the preview.

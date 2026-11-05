@@ -10154,8 +10154,7 @@ impl OndinApp {
         self.retarget_after(slot, &brush);
     }
     /// [`Self::write_slot`] for one key step: consecutive steps of `verb` fold into
-    /// one undo step, as a nudge's do. A per-character slot has no run and commits
-    /// each step.
+    /// one undo step, as a nudge's do, a per-character slot's included.
     pub(crate) fn write_slot_step(
         &mut self,
         id: NodeId,
@@ -10163,8 +10162,8 @@ impl OndinApp {
         brush: Brush,
         verb: &'static str,
     ) {
-        if slot.char_scoped().is_some() {
-            self.write_slot(id, slot, brush);
+        if let Some(cs) = slot.char_scoped() {
+            self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Step(verb));
             return;
         }
         let tx = self.slot_transaction(id, slot, brush.clone());

@@ -164,7 +164,9 @@ impl Live {
 
     /// The selector under which `state` applies live to a root of class
     /// `root`: never while a value is forced, and hover and press never on a
-    /// disabled root.
+    /// disabled root. Every state's selector weighs four classes, the root's
+    /// class repeated to pad the lighter ones, so two states applying at once
+    /// are decided by source order, the later winning.
     fn live_selector(&self, state: Interaction, root: &str) -> String {
         let off = match self.element {
             RootElement::Button => ":not(:disabled)",
@@ -172,10 +174,16 @@ impl Live {
         };
         match (state, self.element) {
             (Interaction::Hover, _) => format!(".{root}:hover:not([data-state]){off}"),
-            (Interaction::FocusVisible, _) => format!(".{root}:focus-visible:not([data-state])"),
+            (Interaction::FocusVisible, _) => {
+                format!(".{root}.{root}:focus-visible:not([data-state])")
+            }
             (Interaction::Active, _) => format!(".{root}:active:not([data-state]){off}"),
-            (Interaction::Disabled, RootElement::Button) => format!(".{root}:disabled"),
-            (Interaction::Disabled, _) => format!(".{root}[aria-disabled=\"true\"]"),
+            (Interaction::Disabled, RootElement::Button) => {
+                format!(".{root}.{root}.{root}:disabled")
+            }
+            (Interaction::Disabled, _) => {
+                format!(".{root}.{root}.{root}[aria-disabled=\"true\"]")
+            }
         }
     }
 }
@@ -859,6 +867,34 @@ mod tests {
             "{{ 'a \\u007b\\u007b b \\u007d\\u007d' }}"
         );
         assert_eq!(vue_text("<i>  \"q\""), "{{ '&lt;i&gt;  &quot;q&quot;' }}");
+    }
+
+    /// Every live state's selector weighs the same on every root element, so
+    /// hover and focus at once, or focus on a disabled link, go by source order.
+    ///
+    /// flip: `Live::live_selector` writing focus with the root's class once →
+    /// fails at `FocusVisible`.
+    #[test]
+    fn live_states_weigh_the_same() {
+        // Classes, attributes and pseudo-classes, `:not()` weighing its argument.
+        let weight = |s: &str| {
+            s.matches('.').count() + s.matches('[').count() + s.matches(':').count()
+                - s.matches(":not(").count()
+        };
+        for element in [RootElement::Button, RootElement::Link, RootElement::Plain] {
+            let live = Live {
+                prop: "state".into(),
+                rest: "Default".into(),
+                disabled: "disabled".into(),
+                disabled_value: None,
+                element,
+                spread: "rest".into(),
+            };
+            for state in Interaction::ALL {
+                let s = live.live_selector(state, "r");
+                assert_eq!(weight(&s), 4, "{state:?} on {element:?}: {s}");
+            }
+        }
     }
 
     /// No element carries `v-pre`, which would void a `v-if` beside it.

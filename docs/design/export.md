@@ -96,9 +96,11 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
     | State | Live on the root |
     | --- | --- |
     | Hover | `:hover:not([data-state])`, then `:not(:disabled)` on a Button, `:not([aria-disabled="true"])` on a Link or Plain |
-    | Focus | `:focus-visible:not([data-state])`, and `outline: none`: the state draws its own focus, never the browser's ring too |
+    | Focus | `:focus-visible:not([data-state])` after the root's class twice, and `outline: none`: the state draws its own focus, never the browser's ring too |
     | Pressed | `:active:not([data-state])`, then the same as Hover |
-    | Disabled | `:disabled` on a Button, `[aria-disabled="true"]` on a Link or Plain |
+    | Disabled | `:disabled` on a Button, `[aria-disabled="true"]` on a Link or Plain, after the root's class three times |
+
+    Every live selector weighs four classes (`dom::Live::live_selector`), the root's class repeated to pad the lighter ones, so where two states apply at once — hover and focus, focus on a disabled Link — source order decides, as the order above means.
 
     - Only changed declarations are written; one rest has and the state lacks is `unset` (`display` is `revert`). A layer only the state draws is added with `display: none` and shown by the rule; one only rest draws is hidden by it. **A layer drawn another way than rest's counterpart is a swap** (`merge::same_drawing` refuses it: another tag, a picture whose markup differs, another use or arguments, another binding): rest's is hidden and the state's added and shown, so a recoloured vector icon still pairs. Rules name elements by class index (`dom::StateStyle`), so Vue's class renames carry; where variants sharing a root class need different state rules, the root takes a class per variant (`split_roots`).
     - **Placement and size are never written on the root** (`states::PLACEMENT`), since a use's must win: a state changing them is reported approximated (*the root is 2 px larger than at rest; drawn at rest's size and place*).

@@ -884,6 +884,9 @@ pub struct OndinApp {
     pub(crate) version_diffs: crate::version_diffs::Diffs,
     /// The card's row opened to its changes; cleared when the card closes.
     pub(crate) version_opened: Option<crate::version_diffs::Later>,
+    /// The open document's versions as the card read them: once per opening, and
+    /// again after a pin or a name, not on every frame. `None` while it is closed.
+    pub(crate) version_list: Option<std::sync::Arc<Vec<crate::versions::Version>>>,
     /// The kit *Make all local*'s confirmation is asking about.
     pub(crate) making_all_local: Option<String>,
     /// *Stop sharing as kit*'s confirmation: `Some(None)` asks about the open document,
@@ -1552,6 +1555,7 @@ impl OndinApp {
             version_naming: None,
             version_diffs: Default::default(),
             version_opened: None,
+            version_list: None,
             making_all_local: None,
             unsharing_kit: None,
             context_menu: None,
@@ -5450,6 +5454,8 @@ impl OndinApp {
         // The document may have just been filed; the entry carries the version's id.
         self.library.refresh();
         let entry = self.library.entry_at(&path).cloned()?;
+        // A pin adds a version and may prune the oldest.
+        self.version_list = None;
         match crate::library::store::pin_version(&self.library.root, &entry) {
             Ok(pinned) => pinned,
             Err(e) => {

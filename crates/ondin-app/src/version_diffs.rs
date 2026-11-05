@@ -5,19 +5,23 @@
 //! or went counts the layers inside it.
 //!
 //! **Worked out once, off the UI thread.** A pinned version never changes, so a
-//! pair's summary is cached by the two paths for as long as the app runs. The open
+//! pair's summary is cached by the two paths for as long as the app runs and the
+//! card still lists the pair, its lines cut to what an opened row shows. The open
 //! document's line, against the newest version, is cached by its revision. One
 //! pair is worked on at a time, the card's order deciding which ([`Diffs::want`]).
 
 use crate::job::Job;
 use ondin_core::diff::{self, Change, Status};
 use ondin_core::{Document, NodeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// A row's line names this many pages, then says how many more.
 const PAGES_NAMED: usize = 2;
+/// An opened row lists this many layers a page, then says how many more; a
+/// summary keeps no more lines than that, since the cache outlives the card.
+pub(crate) const LINES_SHOWN: usize = 4;
 
 /// The later side of a pair: a pinned version, or the open document at a revision.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -91,7 +95,10 @@ pub(crate) struct PageBrief {
     pub(crate) masked: String,
     pub(crate) status: Status,
     pub(crate) counts: Counts,
+    /// The first [`LINES_SHOWN`] lines.
     pub(crate) lines: Vec<Line>,
+    /// How many more there were.
+    pub(crate) more: usize,
 }
 
 /// Something outside every page that differs: a variable, a style, a guide…
@@ -247,6 +254,7 @@ pub(crate) fn summarize(older: Option<&Document>, newer: &Document) -> Summary {
             status: page.status,
             counts: Counts::default(),
             lines: Vec::new(),
+            more: 0,
         };
         if page.status != Status::Changed {
             brief.counts.add(page.status, page.inside);
@@ -303,6 +311,8 @@ pub(crate) fn summarize(older: Option<&Document>, newer: &Document) -> Summary {
                 };
             }
         }
+        brief.more = brief.lines.len().saturating_sub(LINES_SHOWN);
+        brief.lines.truncate(LINES_SHOWN);
         pages.push(brief);
     }
     crate::private::set(was);
@@ -402,6 +412,7 @@ impl Diffs {
         at: f64,
         now: impl Fn() -> Document,
     ) {
+        let mut fresh = false;
         for pair in pairs {
             let running = self.running.as_ref().is_some_and(|(p, _)| p == pair);
             if self.done.contains_key(pair) || running {
@@ -409,6 +420,7 @@ impl Diffs {
             }
             self.asked.entry(pair.clone()).or_insert(at);
             if !self.queue.iter().any(|t| &t.pair == pair) {
+                fresh = true;
                 // The open document's line for an older revision is never shown again.
                 if matches!(pair.newer, Later::Now(_)) {
                     self.done.retain(|p, _| !matches!(p.newer, Later::Now(_)));
@@ -421,6 +433,19 @@ impl Diffs {
                     now,
                 });
             }
+        }
+        // A new pair is a new pin, which may have pruned the oldest: the pairs of
+        // these versions' folder that are no longer asked for go.
+        if fresh {
+            let folder = |p: &Pair| match &p.newer {
+                Later::Version(v) => v.parent().map(Path::to_path_buf),
+                Later::Now(_) => None,
+            };
+            let folders: HashSet<PathBuf> = pairs.iter().filter_map(folder).collect();
+            let wanted: HashSet<&Pair> = pairs.iter().collect();
+            self.done.retain(|p, _| {
+                wanted.contains(p) || folder(p).is_none_or(|f| !folders.contains(&f))
+            });
         }
         if let Some(first) = first
             && let Some(i) = self.queue.iter().position(|t| &t.pair == first)
@@ -453,11 +478,13 @@ impl Diffs {
         landed
     }
 
-    /// Stop: the queue is dropped and the pair in hand with it; what finished stays.
+    /// Stop: the queue is dropped; what finished stays, and the pair in hand is
+    /// kept to land at the next [`Self::pump`], since its thread cannot be stopped
+    /// and a reopened card asking for it again would run a second beside it.
     pub(crate) fn stop(&mut self) {
         self.queue.clear();
-        self.running = None;
-        self.asked.clear();
+        let running = self.running.as_ref().map(|(p, _)| p);
+        self.asked.retain(|p, _| Some(p) == running);
     }
 
     /// Work out everything queued on this thread (tests only).
@@ -487,6 +514,7 @@ mod tests {
             status,
             counts,
             lines: Vec::new(),
+            more: 0,
         }
     }
 
@@ -500,6 +528,105 @@ mod tests {
 
     fn words(w: &str) -> Part {
         Part::Words(w.into())
+    }
+
+    /// `summarize` counts topmost changed layers as the compare does: a changed
+    /// layer under a changed frame is the frame's *1 layer inside*, a new frame
+    /// counts once, and a layer moved into it counts on its own.
+    ///
+    /// flip: `summarize` counting every listed layer (no `top != i` arm) → fails
+    /// at the counts, the price counted; `topmost` folding into an added row →
+    /// fails at the counts, the badge lost.
+    #[test]
+    fn a_summary_counts_the_topmost_changed_layers() {
+        use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let mut ids = ondin_core::IdSource::new(0xE1);
+        let root = ids.mint();
+        let [card, price, badge, old, tray] = [(); 5].map(|_| ids.mint());
+        let boxed = |id, parent, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::IDENTITY),
+            name: Some(name.into()),
+        };
+        let mut then = Document::new(root);
+        then.apply(&Transaction(vec![
+            boxed(card, root, "Card"),
+            boxed(price, card, "Price"),
+            boxed(badge, root, "Badge"),
+            boxed(old, root, "Old"),
+        ]))
+        .unwrap();
+        let mut now = then.clone();
+        let fade = |id| Operation::SetOpacity { id, opacity: 0.5 };
+        now.apply(&Transaction(vec![
+            Operation::SetName {
+                id: card,
+                name: "Studio".into(),
+            },
+            fade(price),
+            boxed(tray, root, "Tray"),
+            Operation::Reparent {
+                id: badge,
+                new_parent: tray,
+                index: 0,
+            },
+            fade(badge),
+            Operation::DeleteNode { id: old },
+        ]))
+        .unwrap();
+        let Summary::Changed(brief) = summarize(Some(&then), &now) else {
+            panic!("a change");
+        };
+        let page = &brief.pages[0];
+        let n = |changed, added, removed| Counts {
+            changed,
+            added,
+            removed,
+        };
+        assert_eq!(page.counts, n(2, 1, 1), "{:#?}", page.lines);
+        let line = |name: &str| page.lines.iter().find(|l| l.name == name);
+        assert_eq!(
+            line("Studio").map(|l| l.what.as_str()),
+            Some("name, 1 layer inside")
+        );
+        assert!(line("Badge").is_some_and(|l| l.status == Status::Changed));
+        assert!(line("Price").is_none(), "folded into the card");
+    }
+
+    /// A stop keeps the pair in hand, so a reopened card asking for it again runs
+    /// no second; a new pin's pair drops the pairs of its folder no longer listed.
+    ///
+    /// flip: `Diffs::stop` dropping `running` → fails at "not run again".
+    #[test]
+    fn a_stop_keeps_the_pair_in_hand_and_a_pin_drops_a_pruned_pair() {
+        let ctx = egui::Context::default();
+        let dir = std::env::temp_dir().join("ondin-diffs-missing");
+        let pair = |newer: &str, older: Option<&str>| Pair {
+            older: older.map(|o| dir.join(o)),
+            newer: Later::Version(dir.join(newer)),
+        };
+        let none = || -> Document { unreachable!("no pair is the open document's") };
+        let mut d = Diffs::default();
+        let (one, two) = (pair("1.ondin", None), pair("2.ondin", Some("1.ondin")));
+        d.want(&[two.clone(), one.clone()], None, 0.0, none);
+        d.pump(&ctx);
+        d.stop();
+        d.want(&[two.clone(), one.clone()], None, 1.0, none);
+        assert_eq!(d.queue.len(), 1, "the pair in hand is not run again");
+        d.settle();
+        assert!(d.get(&two).is_some() && d.get(&one).is_some());
+        // `3` pinned, `1` pruned: `2` is now the oldest.
+        let (three, oldest) = (pair("3.ondin", Some("2.ondin")), pair("2.ondin", None));
+        d.want(&[three, oldest], None, 2.0, none);
+        assert!(d.get(&one).is_none() && d.get(&two).is_none(), "pruned");
     }
 
     /// The summary line names two pages and how many more, totals the counts in the

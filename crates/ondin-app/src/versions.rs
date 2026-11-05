@@ -18,7 +18,7 @@ use crate::app::OndinApp;
 use crate::compare::{self, Pick};
 use crate::library::{clock, store};
 use crate::theme::{self, color, icon};
-use crate::version_diffs::{Brief, Counts, Later, Pair, Part, Summary};
+use crate::version_diffs::{Brief, Counts, LINES_SHOWN, Later, Pair, Part, Summary};
 use eframe::egui;
 use ondin_core::diff::Status;
 use std::path::{Path, PathBuf};
@@ -45,8 +45,6 @@ const LINE1_Y: f32 = 15.5;
 const LINE2_Y: f32 = 33.5;
 /// A line of an opened row's list.
 const LIST_LINE_H: f32 = 20.0;
-/// An opened row lists this many layers a page, then says how many more.
-const LINES_SHOWN: usize = 4;
 /// How long a summary may take before its placeholder shows, so a fast one never
 /// flickers.
 const PLACEHOLDER_AFTER: f64 = 0.15;
@@ -632,6 +630,8 @@ struct Group {
     counts: Counts,
     /// Each line's status, trail, name and what changed.
     lines: Vec<(Status, String, String, String)>,
+    /// How many lines past those listed it has.
+    more: usize,
 }
 
 /// An opened row's groups: its pages in the document's order, then *Document*.
@@ -654,6 +654,7 @@ fn groups(brief: &Brief, private: bool) -> Vec<Group> {
                     false => (l.status, l.trail.clone(), l.name.clone(), l.what.clone()),
                 })
                 .collect(),
+            more: page.more,
         })
         .collect();
     if !brief.document.is_empty() {
@@ -680,19 +681,23 @@ fn groups(brief: &Brief, private: bool) -> Vec<Group> {
                     (item.status, String::new(), name, String::new())
                 })
                 .collect(),
+            more: 0,
         });
     }
     out
 }
 
+impl Group {
+    /// How many lines past the first [`LINES_SHOWN`] it has.
+    fn past_shown(&self) -> usize {
+        (self.lines.len() + self.more).saturating_sub(LINES_SHOWN)
+    }
+}
+
 /// A group's height in an opened row.
 fn group_h(g: &Group) -> f32 {
     let shown = g.lines.len().min(LINES_SHOWN) as f32;
-    let more = if g.lines.len() > LINES_SHOWN {
-        3.0 + 14.0
-    } else {
-        0.0
-    };
+    let more = if g.past_shown() > 0 { 3.0 + 14.0 } else { 0.0 };
     LIST_LINE_H + shown * (3.0 + LIST_LINE_H) + more
 }
 
@@ -817,9 +822,9 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
             );
             y += LIST_LINE_H;
         }
-        if g.lines.len() > LINES_SHOWN {
+        if g.past_shown() > 0 {
             y += 3.0;
-            let more = g.lines.len() - LINES_SHOWN;
+            let more = g.past_shown();
             let words = match g.glyph == icon::FILE {
                 true => format!("and {more} more on {}", g.name),
                 false => format!("and {more} more"),
@@ -1106,6 +1111,7 @@ impl OndinApp {
 
     /// Keep the name typed for `naming`'s version, or report why it was not kept.
     pub(crate) fn commit_version_name(&mut self, naming: Naming) {
+        self.version_list = None;
         if let Err(e) = store::set_version_label(&naming.path, &naming.text) {
             let e = crate::private::io_error(&e);
             self.session.fail(format!("Naming the version failed: {e}"));
@@ -1177,9 +1183,14 @@ impl OndinApp {
     /// The *Version history* card, while it is open.
     pub(crate) fn version_history_dialog(&mut self, ctx: &egui::Context) {
         if !self.versions_open {
+            self.version_list = None;
             return;
         }
-        let versions = self.document_versions();
+        let versions = match &self.version_list {
+            Some(list) => Arc::clone(list),
+            None => Arc::new(self.document_versions()),
+        };
+        self.version_list = Some(Arc::clone(&versions));
         let filed = self.in_library();
         let private = crate::private::on();
         let stops = self.timeline(ctx, &versions);
@@ -2078,6 +2089,39 @@ mod tests {
             Some("Acme"),
             "the field open as it came on keeps what was typed"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The card reads the versions and their names once while it is open, and
+    /// again after a name it keeps; a name written behind its back waits.
+    ///
+    /// flip: `version_history_dialog` reading `document_versions` every frame →
+    /// fails at "read once".
+    #[test]
+    fn the_card_reads_the_versions_once_while_open() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "read-once");
+        assert!(app.save_file(true), "fixture: one pin");
+        let path = app.document_versions()[0].path.clone();
+        app.versions_open = true;
+        card_frame(&ctx, &mut app, Vec::new());
+        store::set_version_label(&path, "Behind the card").unwrap();
+        let drawn = card_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            !drawn.iter().any(|t| t == "Behind the card"),
+            "read once: {drawn:?}"
+        );
+        app.commit_version_name(Naming {
+            path,
+            text: "Sent".into(),
+            focused: false,
+        });
+        let drawn = card_frame(&ctx, &mut app, Vec::new());
+        assert!(drawn.iter().any(|t| t == "Sent"), "read again: {drawn:?}");
+        app.versions_open = false;
+        card_frame(&ctx, &mut app, Vec::new());
+        assert!(app.version_list.is_none(), "dropped with the card");
+        app.version_diffs.settle();
         let _ = std::fs::remove_dir_all(&root);
     }
 }

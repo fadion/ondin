@@ -3216,6 +3216,70 @@ fn component_uses_match_the_canvas() {
     holds_components("component-uses", &doc, &res);
 }
 
+/// A marked set's state drawn by its CSS: a *Card* set whose Hover recolours
+/// the icon, a use at rest and one forced to Hover, both written as buttons.
+///
+/// flip: `Element::states_css` writing no rules → 123.3 at the forced use's
+/// icon, which stays red.
+#[test]
+fn a_forced_state_matches_the_canvas() {
+    use ondin_core::variant::{Interaction, VariantProp, VariantSet};
+    let mut d = Doc::new();
+    let set = d.frame(None, 0.0, 200.0, 380.0, 180.0, "Chip");
+    let rest = d.card(set, (10.0, 10.0), None, |_, _| {});
+    d.apply(vec![
+        Operation::SetVariantSet {
+            id: set,
+            set: Some(VariantSet {
+                props: vec![VariantProp::new(
+                    "State",
+                    vec!["Default".into(), "Hover".into()],
+                )],
+                ..Default::default()
+            }),
+        },
+        Operation::SetVariant {
+            id: rest[0],
+            values: vec!["Default".into()],
+        },
+    ]);
+    let res = Resolved::rebuild(&d.doc);
+    let (tx, hover) = variant::add_variant(&d.doc, &res, &mut d.ids, set, Some(rest[0])).unwrap();
+    d.doc.apply(&tx).unwrap();
+    let tx = variant::set_values(&d.doc, hover, vec!["Hover".into()]).unwrap();
+    d.doc.apply(&tx).unwrap();
+    let kids = d.doc.get(hover).unwrap().children().to_vec();
+    let main = [hover, kids[0], kids[1]];
+    let blue = |d: &mut Doc, c: [NodeId; 3]| d.fill(c[1], solid(40, 90, 220, 255));
+    blue(&mut d, main);
+    let tie = variant::tie_state(&d.doc, set, 0, 1, Some(Interaction::Hover)).unwrap();
+    d.doc.apply(&tie).unwrap();
+    let board = d.frame(None, 0.0, 0.0, 380.0, 80.0, "Board");
+    for (main, x) in [(rest[0], 10.0), (hover, 200.0)] {
+        let (tx, made) = ondin_core::insert_subtrees(
+            &d.doc,
+            &mut d.ids,
+            &[ondin_core::Placement {
+                nodes: d.doc.capture_subtree(main).unwrap(),
+                parent: board,
+                index: None,
+            }],
+            Default::default(),
+        );
+        d.doc.apply(&tx).unwrap();
+        d.apply(vec![Operation::SetTransform {
+            id: made[0],
+            transform: Affine::translate((x, 10.0)),
+        }]);
+    }
+    let (doc, res) = d.done();
+    let export = html_of_components(&doc, &res, &[board]);
+    assert!(export.inlined.is_empty(), "{:?}", export.inlined);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    assert!(html.contains("data-state=\"Hover\""), "{html}");
+    holds_components("forced-state", &doc, &res);
+}
+
 /// `holds` for `html_of_components`, after three passes of `blurred`: a
 /// component's text lands at whatever x its use puts it, and at some offsets
 /// glyph antialiasing alone passes the two-pass limit (8.9 on the default use

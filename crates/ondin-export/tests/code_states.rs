@@ -421,7 +421,7 @@ fn instance_of(doc: &mut Document, ids: &mut IdSource, main: NodeId) -> NodeId {
     made[0]
 }
 
-/// [`chip`]'s set, named `name` and placed at `x` on the page: the set and its
+/// `chip`'s set, named `name` and placed at `x` on the page: the set and its
 /// rest variant.
 fn chip_set(
     doc: &mut Document,

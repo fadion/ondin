@@ -1276,4 +1276,38 @@ mod tests {
         }
         assert!(missing.is_empty(), "not in SKIPPED_AT: {missing:?}");
     }
+
+    /// One item raised among many is the one moved, found in comparisons linear
+    /// in the items: a table of every pair would make n² of them.
+    ///
+    /// flip: `moved_in_order` finding each item's place by a linear search of `a`
+    /// → fails at "comparisons".
+    #[test]
+    fn moved_in_order_compares_linearly() {
+        use std::cell::Cell;
+        thread_local!(static EQS: Cell<usize> = const { Cell::new(0) });
+        #[derive(Clone, Debug)]
+        struct Item(usize);
+        impl std::hash::Hash for Item {
+            fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+                self.0.hash(h);
+            }
+        }
+        impl PartialEq for Item {
+            fn eq(&self, other: &Self) -> bool {
+                EQS.with(|c| c.set(c.get() + 1));
+                self.0 == other.0
+            }
+        }
+        impl Eq for Item {}
+        const N: usize = 2_000;
+        let a: Vec<Item> = (0..N).map(Item).collect();
+        let mut b = a.clone();
+        let raised = b.remove(10);
+        b.push(raised);
+        EQS.with(|c| c.set(0));
+        assert_eq!(super::moved_in_order(&a, &b), [Item(10)]);
+        let eqs = EQS.with(Cell::get);
+        assert!(eqs < 20 * N, "{eqs} comparisons for {N} items");
+    }
 }

@@ -726,13 +726,11 @@ fn a_layer_added_in_the_vault_is_reported_under_it() {
     assert_eq!(block.layers[0].trail, ["Chip"]);
 }
 
-/// One layer raised among twenty thousand siblings is one order change, worked
-/// out in memory linear in the siblings: a table of every pair of them is 1.6 GB.
-///
-/// flip: `moved_in_order` by the O(n·m) table of common-run lengths → fails at
-/// the time bound.
+/// One layer raised among twenty thousand siblings is one order change. That it
+/// is worked out in linear work, not a 1.6 GB table of every pair, is pinned by
+/// `moved_in_order_compares_linearly` in `src/diff.rs`.
 #[test]
-fn a_raise_among_many_siblings_is_one_change_and_stays_small() {
+fn a_raise_among_many_siblings_is_one_change() {
     const N: usize = 20_000;
     let mut ids = IdSource::new(0xD2);
     let root = ids.mint();
@@ -748,11 +746,7 @@ fn a_raise_among_many_siblings_is_one_change_and_stays_small() {
         index: N - 1,
     }]))
     .expect("the raise");
-    let started = std::time::Instant::now();
     let d = diff(&a, &b);
-    // A timing guard: in a debug build the run is under two seconds, an O(n·m)
-    // table about ten.
-    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
     let layers = &d.pages[0].layers;
     assert_eq!(layers.len(), 1);
     assert_eq!(layers[0].id, dots[10].to_wire());

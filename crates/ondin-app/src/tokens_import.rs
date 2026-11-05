@@ -497,7 +497,7 @@ impl OndinApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return;
         }
-        let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        let enter = ui::card_enter(ctx);
         let area = ui::canvas_popup_area(ctx, egui::Id::new("tokens-import"), canvas);
         let mut act = Act::None;
         let mut changed = false;
@@ -531,7 +531,7 @@ impl OndinApp {
         if changed {
             t.why_not = self.tokens_why_not(&t);
         }
-        if enter && t.why_not.is_none() {
+        if enter && t.why_not.is_none() && matches!(act, Act::None) {
             act = Act::Apply;
         }
         match act {
@@ -1327,6 +1327,60 @@ mod tests {
         frame(&mut app, vec![escape]);
         assert!(app.tokens_import.is_none());
         assert!(app.session.doc.variables().is_empty(), "nothing applied");
+    }
+
+    /// Enter applies with nothing focused, but on a focused control it is that
+    /// control's click: tabbed onto the card's first control, Enter applies
+    /// nothing.
+    /// flip: `ui::card_enter` answering every Enter and the `Act::None` guard
+    /// dropped → fails at "applies nothing"; either alone holds for the focused
+    /// close button this reaches.
+    #[test]
+    fn enter_on_a_focused_control_does_not_apply() {
+        let (ctx, mut app) = app();
+        let path = temp_file("enter", FILE);
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(1200.0, 760.0));
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| app.tokens_import_ui(ui.ctx(), canvas));
+        };
+        app.open_tokens_import(path.clone(), false);
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        frame(&mut app, vec![]);
+        assert!(
+            ctx.memory(|m| m.focused()).is_some(),
+            "Tab reached a control"
+        );
+        frame(&mut app, vec![key(egui::Key::Enter)]);
+        assert!(app.session.doc.variables().is_empty(), "applies nothing");
+
+        // The control: with nothing focused, Enter applies.
+        app.tokens_import = None;
+        ctx.memory_mut(|m| m.surrender_focus(m.focused().unwrap_or(egui::Id::NULL)));
+        app.open_tokens_import(path, false);
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        assert!(ctx.memory(|m| m.focused()).is_none());
+        frame(&mut app, vec![key(egui::Key::Enter)]);
+        assert!(!app.session.doc.variables().is_empty(), "Enter applies");
     }
 
     /// A click on a group's header closes that group and a second opens it;

@@ -1669,6 +1669,20 @@ fn typing_inside(ctx: &egui::Context, rect: egui::Rect) -> bool {
     rect.expand(0.5).contains_rect(w.rect) && egui::TextEdit::load_state(ctx, id).is_some()
 }
 
+/// Whether this frame's `Enter` is a card's own *Apply*: pressed with nothing
+/// focused, or in a text entry. On a focused button or box `Enter` is that
+/// control's click, so a focused *Cancel* cancels rather than applies.
+pub fn card_enter(ctx: &egui::Context) -> bool {
+    if !ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        return false;
+    }
+    // Separate reads: the context lock is not re-entrant.
+    match ctx.memory(|m| m.focused()) {
+        None => true,
+        Some(id) => egui::TextEdit::load_state(ctx, id).is_some(),
+    }
+}
+
 /// [`field_row`] with an accent border, marking the paint the open picker is
 /// pointing at.
 pub fn field_row_active<R>(

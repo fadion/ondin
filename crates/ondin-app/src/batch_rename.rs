@@ -993,7 +993,7 @@ impl OndinApp {
         if escape && !popup {
             return;
         }
-        let enter = !popup && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        let enter = !popup && ui::card_enter(ctx);
         b.take_parts();
 
         let area = ui::canvas_popup_area(ctx, egui::Id::new("batch-rename"), canvas);
@@ -1056,7 +1056,7 @@ impl OndinApp {
         if modal.backdrop_response.clicked() && !popup {
             return;
         }
-        if enter {
+        if enter && matches!(act, Act::None) {
             act = Act::Rename;
         }
         match act {
@@ -2549,6 +2549,39 @@ mod tests {
         assert!(app.session.undo());
         assert_eq!(name(&app, a), "Rectangle 1");
         assert_eq!(name(&app, b), "Rectangle 2");
+    }
+
+    /// Enter on a focused control is that control's click, not *Rename*: tabbed
+    /// off the field onto a button or box, Enter renames nothing.
+    /// flip: `ui::card_enter` answering every Enter → fails at "renames nothing".
+    #[test]
+    fn enter_on_a_focused_control_does_not_rename() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        let a = named(&mut app, "Rectangle 1");
+        app.session.selection.set_one(a);
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        pass(&ctx, &mut app, Vec::new(), none);
+        pass(&ctx, &mut app, vec![egui::Event::Text("Card".into())], none);
+        settle(&ctx, &mut app);
+        let on_control = |ctx: &egui::Context| {
+            let id = ctx.memory(|m| m.focused());
+            id.is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_none())
+        };
+        for _ in 0..12 {
+            if on_control(&ctx) {
+                break;
+            }
+            pass(&ctx, &mut app, vec![key(egui::Key::Tab, none)], none);
+        }
+        assert!(on_control(&ctx), "Tab reached a control");
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter, none)], none);
+        assert_eq!(
+            app.session.doc.get(a).unwrap().name(),
+            "Rectangle 1",
+            "renames nothing"
+        );
     }
 
     /// Backspace takes a pill out whole, and Escape closes the box renaming nothing.

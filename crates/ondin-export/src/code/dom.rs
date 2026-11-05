@@ -558,6 +558,9 @@ impl Element {
         for (k, v) in &self.attrs {
             if syntax == Syntax::Jsx && *k == "src" {
                 let _ = write!(out, " src={{{}}}", super::jsx::asset_binding(v));
+            } else if syntax == Syntax::Jsx && *k == "tabindex" {
+                // React's name, a number: TypeScript refuses `tabindex`.
+                let _ = write!(out, " tabIndex={{{}}}", escape(v));
             } else {
                 let _ = write!(out, " {k}=\"{}\"", escape(v));
             }

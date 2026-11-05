@@ -1109,22 +1109,9 @@ fn sweep(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let (found, compare_rows) = swept(&ctx, &mut app, |_, a| compared(a, &scratch));
     check("compare", app, found);
-    // The footer's two buttons, the only grounds the card paints at rest. Its
-    // timeline rows are not row-audited: a row and the body it opens are one
-    // `text_a(15)` block, not `ui::list_row_ground`.
-    let mut app = with_a_rect(&ctx);
-    let found = opened(&ctx, &mut app, |_, a| with_versions(a, &scratch));
-    let at_rest = audit("version history", &found, disabled_alpha(&ctx), &mut faults);
-    let hovered = hover(&ctx, &mut app, "version history", &found, &mut faults);
-    assert!(
-        at_rest == 2 && hovered == 2,
-        "version history: the fixture is not in the state it is about — it painted \
-         {at_rest} control grounds and hovered {hovered}, not its footer's two"
-    );
-    let _ = std::fs::remove_dir_all(&scratch);
-
     // The tokens import review, on a file in its own folder per theme: two
-    // groups of rows, the filters, and the link box in the footer.
+    // groups of rows, the filters, and the link box in the footer. It runs
+    // before Version history, whose audit borrows `faults` past `check`.
     let tokens = std::env::temp_dir().join(format!(
         "ondin-audit-tokens-{}-{}",
         std::process::id(),
@@ -1144,6 +1131,19 @@ fn sweep(theme: Theme) {
     let found = opened(&ctx, &mut app, |_, a| a.open_tokens_import(tokens, false));
     assert!(app.tokens_import.is_some(), "the tokens review opened");
     check("tokens import", app, found);
+    // The footer's two buttons, the only grounds the card paints at rest. Its
+    // timeline rows are not row-audited: a row and the body it opens are one
+    // `text_a(15)` block, not `ui::list_row_ground`.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| with_versions(a, &scratch));
+    let at_rest = audit("version history", &found, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "version history", &found, &mut faults);
+    assert!(
+        at_rest == 2 && hovered == 2,
+        "version history: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds and hovered {hovered}, not its footer's two"
+    );
+    let _ = std::fs::remove_dir_all(&scratch);
 
     // A value chip's popup, then its *State ▸* flyout over it: list rows, whose
     // ground is the hover alone, so each is swept.

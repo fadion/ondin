@@ -16,7 +16,7 @@ const CPU_HOT: f32 = 80.0;
 /// The readouts' glyph size, value size, and the room between glyph and value and
 /// between two readouts.
 const GLYPH_PT: f32 = 15.0;
-const VALUE_PT: f32 = 11.5;
+const VALUE_PT: f32 = crate::ui::SMALL_PT;
 const GLYPH_GAP: f32 = 5.0;
 const READOUT_GAP: f32 = 14.0;
 /// Each value's slot, wide enough for its longest figure so the bar never shifts

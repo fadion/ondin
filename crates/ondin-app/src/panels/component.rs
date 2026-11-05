@@ -1937,9 +1937,9 @@ fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> Na
 }
 
 /// A face's name size, and the count's after it.
-const NAME_PT: f32 = 13.0;
+const NAME_PT: f32 = ui::HEAD_PT;
 /// A description note's text size, and the air above it on a card.
-const DESC_PT: f32 = 11.5;
+const DESC_PT: f32 = ui::SMALL_PT;
 const DESC_GAP: f32 = 2.0;
 /// The description and link fields' text size, every control's.
 const FIELD_PT: f32 = ui::CONTROL_PT;

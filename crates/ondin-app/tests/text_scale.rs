@@ -2,11 +2,13 @@
 //! `theme::text`'s tiers, not from literals.
 //!
 //! Reads the source, outside `ui.rs` and `theme.rs` (where the scale and the
-//! tiers are defined) and outside each file's `#[cfg(test)]` tail. Two holes, by
-//! design: a size held in a local `const` is not read (a role with a reason of
-//! its own is spelled that way, from the scale), and an off-tier ink is caught
-//! only within a few lines of a text call. A line that must keep its ink says so
-//! with a `text-ink:` comment giving the reason.
+//! tiers are defined) and outside each file's `#[cfg(test)]` tail. A local
+//! `const` given a literal and used as a text call's whole size is refused too
+//! (a role with a reason of its own is spelled from the scale, or keeps its
+//! literal with a `text-size:` comment giving the reason). Holes, by design: a
+//! size computed from a role (`ROLE + 1.0`) is not read, and an off-tier ink is
+//! caught only within a few lines of a text call. A line that must keep its ink
+//! says so with a `text-ink:` comment giving the reason.
 
 use std::path::{Path, PathBuf};
 
@@ -96,6 +98,48 @@ fn sizes(src: &str) -> Vec<(usize, String)> {
             .map(|c| literal_calls(code, c))
             .sum::<usize>();
         if hits > 0 {
+            out.push((n, line.trim().to_string()));
+        }
+    }
+    out
+}
+
+/// `(line, what)` for every `const NAME: f32 = <literal>;` in `src` that a text
+/// call in the same file takes as its whole size, so a role's value spelled
+/// again as a local is caught. A size off the scale for a reason of its own says
+/// so with a `text-size:` comment on the `const` line.
+fn const_sizes(src: &str) -> Vec<(usize, String)> {
+    let lines = live(src);
+    let mut out = Vec::new();
+    for &(n, line) in &lines {
+        if line.contains("text-size:") {
+            continue;
+        }
+        let code = line.split("//").next().unwrap_or("").trim();
+        let code = code.strip_prefix("pub(crate) ").unwrap_or(code);
+        let Some(rest) = code.strip_prefix("const ") else {
+            continue;
+        };
+        let Some((name, value)) = rest.split_once(": f32 =") else {
+            continue;
+        };
+        if !literal(value.trim().trim_end_matches(';')) {
+            continue;
+        }
+        let name = name.trim();
+        let sized = lines.iter().any(|(_, l)| {
+            let l = l.split("//").next().unwrap_or("");
+            ["proportional(", "monospace(", ".size(", "FontId::new("]
+                .iter()
+                .any(|c| {
+                    l.match_indices(c).any(|(i, _)| {
+                        let after = &l[i + c.len()..];
+                        let end = after.find([')', ',']).unwrap_or(after.len());
+                        after[..end].trim() == name
+                    })
+                })
+        });
+        if sized {
             out.push((n, line.trim().to_string()));
         }
     }
@@ -195,6 +239,20 @@ fn the_scans_flag_literals_and_nothing_else() {
         [(5, "fn live() { proportional(11.0); }".to_string())]
     );
     for src in [
+        "const NAME_PT: f32 = 13.0;\nRichText::new(x).size(NAME_PT)",
+        "    const LOCK: f32 = 10.0;\nlet f = FontId::proportional(LOCK);",
+    ] {
+        assert_eq!(const_sizes(src).len(), 1, "must flag:\n{src}");
+    }
+    for src in [
+        "const NAME_PT: f32 = ui::HEAD_PT;\nRichText::new(x).size(NAME_PT)",
+        "const GAP: f32 = 4.0;\nlet f = FontId::proportional(ui::SMALL_PT + GAP);",
+        "const RATIO_PT: f32 = 15.0; // text-size: reads first\n.size(RATIO_PT)",
+        "const W: f32 = 13.0;\nlet f = FontId::proportional(WIDE);",
+    ] {
+        assert!(const_sizes(src).is_empty(), "must not flag:\n{src}");
+    }
+    for src in [
         "p.text(at, align, s, font, theme::color::text_a(97));",
         "p.text(at, align, s, font,\n    theme::color::text_a(140));",
         "RichText::new(s).color(text_a(87))",
@@ -211,12 +269,17 @@ fn the_scans_flag_literals_and_nothing_else() {
     }
 }
 
-/// No chrome text sets a literal size.
+/// No chrome text sets a literal size, directly or through a local `const`.
+/// flip: `component.rs`'s `NAME_PT` back to `13.0` → fails here.
 #[test]
 fn text_sizes_come_from_the_scale() {
     let found: Vec<_> = sources()
         .into_iter()
-        .flat_map(|(p, s)| sizes(&s).into_iter().map(move |(n, l)| (p.clone(), n, l)))
+        .flat_map(|(p, s)| {
+            let mut hits = sizes(&s);
+            hits.extend(const_sizes(&s));
+            hits.into_iter().map(move |(n, l)| (p.clone(), n, l))
+        })
         .collect();
     assert!(
         found.is_empty(),

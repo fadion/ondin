@@ -473,7 +473,7 @@ impl Cross {
 
 /// Size of the badge's digits: the smallest that reads at 1x, where at eight the
 /// `2` of a `12` closes up.
-const BADGE_PT: f32 = 9.0;
+const BADGE_PT: f32 = 9.0; // text-size: drawn into the cursor's bitmap, not the chrome
 /// Clear space between the digits and the chip's edge, each side.
 const BADGE_PAD_PT: f32 = 1.0;
 /// Corner radius of the chip, clamped against the chip's own size in [`badge`].

@@ -38,7 +38,7 @@ const PASS: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xc0, 0x8a);
 const CHIP: egui::Color32 = egui::Color32::from_rgba_premultiplied(25, 25, 28, 209);
 /// The fix card's ratio readout: larger than the scale's titles, so the number
 /// reads first.
-const RATIO_PT: f32 = 15.0;
+const RATIO_PT: f32 = 15.0; // text-size: above the titles on purpose
 /// A badge's distance above the layer it names.
 const BADGE_LIFT: f32 = 3.0;
 /// The fix card's width.

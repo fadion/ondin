@@ -963,7 +963,7 @@ fn display_cell(p: &egui::Painter, i: usize, rect: egui::Rect, on: bool) {
     };
     let galley = p.layout_no_wrap(
         word.to_owned(),
-        egui::FontId::proportional(ui::SEGMENT_LABEL_PT + 1.0),
+        egui::FontId::proportional(ui::SMALL_PT),
         ink,
     );
     const G: f32 = 12.0;

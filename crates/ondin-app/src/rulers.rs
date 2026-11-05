@@ -26,7 +26,7 @@ const TICK_LEN: f32 = 6.0;
 /// Tick hairline width.
 const TICK_W: f32 = 1.0;
 /// The label beside a tick, and its offset along the ruler from that tick.
-const LABEL_SIZE: f32 = 7.5;
+const LABEL_SIZE: f32 = 7.5; // text-size: four digits across the 17pt bar
 const LABEL_GAP: f32 = 3.0;
 /// Inset of a label from the ruler's outer edge.
 const LABEL_INSET: f32 = 3.0;
@@ -38,7 +38,7 @@ const MIN_LABEL_PX: f64 = 50.0;
 /// The position chip a guide puts in the ruler: thickness along the guide's own
 /// axis, and the type inside it.
 const CHIP_THICKNESS: f32 = 13.0;
-const CHIP_TEXT: f32 = 8.0;
+const CHIP_TEXT: f32 = 8.0; // text-size: fits the 13pt chip inside the ruler
 /// Padding either side of a chip's number.
 ///
 /// 2.5 so a three-digit number (14.75pt at [`CHIP_TEXT`]) plus 5 clamps up to

@@ -2051,6 +2051,13 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
     remove_and_scope_ops(doc, vars, &[])
 }
 
+/// Whether a binding of family `f` detaches when its variable takes `scope`:
+/// one the scope leaves out, and for `None` (every field) one that needs a
+/// scope of its own.
+pub fn scope_drops(scope: Option<Scope>, f: Field) -> bool {
+    scope.map_or(f.needs_scope(), |s| !s.contains(f))
+}
+
 /// [`remove_ops`] for `removed`, and every `scoped` variable's fields of a
 /// family its new scope drops detached, **in one detach pass** — two passes
 /// would each write a node's whole list against the committed document, and
@@ -2065,10 +2072,9 @@ pub fn remove_and_scope_ops(
     let t = doc.variables();
     let gone = |v: VarId, f: Field| {
         removed.contains(&v)
-            || scoped.iter().any(|(s, scope)| {
-                // `None` is every field but those that need a scope.
-                *s == v && scope.map_or(f.needs_scope(), |x| !x.contains(f))
-            })
+            || scoped
+                .iter()
+                .any(|(s, scope)| *s == v && scope_drops(*scope, f))
     };
     let mut ops = detach_ops(doc, &gone);
     let vars = removed;
@@ -2097,10 +2103,12 @@ pub fn remove_and_scope_ops(
 /// value it drew, then the variable takes the scope — one transaction, so a
 /// bound field never sits outside its variable's scope. A string scoped to flex
 /// directions or wraps alone has each cell that names none set to the first
-/// family's first word ([`holds_its_words`]). Empty when `var` is not the
-/// document's own.
+/// family's first word ([`holds_its_words`]), and another variable aliasing it
+/// in that mode takes the value it read, so its own users keep their text.
+/// Empty when `var` is not the document's own.
 pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec<crate::Operation> {
-    let Some(v) = doc.variables().get(var).filter(|v| v.origin.is_none()) else {
+    let t = doc.variables();
+    let Some(v) = t.get(var).filter(|v| v.origin.is_none()) else {
         return Vec::new();
     };
     let mut ops = remove_and_scope_ops(doc, &[], &[(var, scope)]);
@@ -2110,11 +2118,22 @@ pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec
             .and_then(|s| s.fields().next())
             .and_then(|f| f.words().first().copied())
     {
-        for cell in next.cells.values_mut() {
+        for (mode, cell) in next.cells.iter_mut() {
             if let Cell::String(s) = cell
                 && !scope.is_some_and(|sc| sc.fields().any(|f| f.takes(s)))
             {
                 *cell = Cell::String(word.into());
+                for u in t.iter().filter(|u| u.id != var) {
+                    if u.cells.get(mode) == Some(&Cell::Alias(var))
+                        && let Some(kept) = t.resolve(u.id, *mode).map(Cell::from)
+                    {
+                        ops.push(crate::Operation::SetVariableCell {
+                            id: u.id,
+                            mode: *mode,
+                            cell: kept,
+                        });
+                    }
+                }
             }
         }
     }
@@ -2558,9 +2577,7 @@ pub fn copy_mode_ops(
             breakpoints: Some(next),
         });
     }
-    ops.extend(keep_kit_columns(t, c.id, id, name, |kit| {
-        t.kit_mode(kit, Some(from))
-    }));
+    ops.extend(keep_kit_columns(t, c.id, id, name, from));
     ops
 }
 
@@ -2580,42 +2597,41 @@ pub fn rename_mode_ops(doc: &crate::Document, mode: ModeId, name: &str) -> Vec<c
         id: mode,
         name: name.into(),
     }];
-    ops.extend(keep_kit_columns(t, c.id, mode, name, |kit| {
-        t.kit_mode(kit, Some(mode))
-    }));
+    ops.extend(keep_kit_columns(t, c.id, mode, name, mode));
     ops
 }
 
 /// `SetKitModes` giving document mode `mode` of collection `c`, named `name`, a
-/// mapping entry to `reads(kit)` in every kit where the name alone would map it
-/// elsewhere. Nothing when `c` is not the collection kits map from.
+/// mapping entry to the column `src` reads in every kit collection mapping from
+/// `c` where the name alone would map it elsewhere.
+///
+/// One entry per document mode serves a kit, so where two of its collections
+/// map from `c` the first that needs an entry gets it.
 fn keep_kit_columns(
     t: &Variables,
     c: CollectionId,
     mode: ModeId,
     name: &str,
-    reads: impl Fn(&str) -> Option<ModeId>,
+    src: ModeId,
 ) -> Vec<crate::Operation> {
     let mut ops = Vec::new();
     for (kit, km) in &t.kits {
-        // Only a kit whose first collection maps from `c` reads `reads`'
-        // column: `kit_mode` answers for that one.
-        let first = km.modes.first().map_or("", |m| m.collection.as_str());
-        if t.kit_onto(first).is_none_or(|onto| onto.id != c) {
-            continue;
-        }
-        let Some(want) = reads(kit) else { continue };
-        if km.map.get(&mode) == Some(&want) {
-            continue;
-        }
-        let by_name = km
-            .modes_in(first)
-            .find(|x| x.name == name)
-            .or_else(|| km.modes_in(first).next())
-            .map(|x| x.id);
-        if by_name == Some(want) && !km.map.contains_key(&mode) {
-            continue;
-        }
+        let want = km.collections().into_iter().find_map(|kc| {
+            if t.kit_onto(kc).is_none_or(|onto| onto.id != c) {
+                return None;
+            }
+            let want = t.kit_mode_at(kit, kc, &[src])?;
+            if km.map.get(&mode) == Some(&want) {
+                return None;
+            }
+            let by_name = km
+                .modes_in(kc)
+                .find(|x| x.name == name)
+                .or_else(|| km.modes_in(kc).next())
+                .map(|x| x.id);
+            (by_name != Some(want) || km.map.contains_key(&mode)).then_some(want)
+        });
+        let Some(want) = want else { continue };
         let mut next = km.clone();
         next.map.insert(mode, want);
         ops.push(crate::Operation::SetKitModes {

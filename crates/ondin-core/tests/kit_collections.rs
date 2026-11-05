@@ -6,7 +6,7 @@ use ondin_core::kit::{self};
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::meta::{DocumentMeta, KitMark};
 use ondin_core::peniko::Color;
-use ondin_core::variable::{Collection, CollectionId};
+use ondin_core::variable::{self, Collection, CollectionId};
 use ondin_core::{
     Brush, BrushSource, Cell, Document, Fill, IdSource, Mode, ModeId, NodeId, NodeKind, Operation,
     Transaction, Value, VarId, VarKind, Variable, keyed_by_position,
@@ -199,6 +199,95 @@ fn a_kits_collections_map_by_name() {
     .unwrap();
     assert_eq!(fill(&d, inst), Brush::Solid(NAVY), "Night by name");
     assert_eq!(d.mode_at(inst, spacing), Some(comfortable));
+}
+
+/// Renaming or duplicating a mode of the kit's second collection keeps the
+/// column it reads.
+/// flip: `keep_kit_columns` looking at the kit's first collection only → fails
+/// at *"duplicated"*.
+#[test]
+fn a_renamed_or_copied_mode_keeps_a_second_kit_collections_column() {
+    let mut ids = IdSource::new(0xB1);
+    let (mut l, [_, _, compact, comfy], _) =
+        two_collections(&mut ids, ["Day", "Night", "Compact", "Comfortable"]);
+    let (radius, badge) = (ids.mint_var(), ids.mint());
+    let root = l.first_page();
+    l.apply(&Transaction(vec![
+        Operation::AddVariable {
+            var: var(
+                radius,
+                "radius",
+                VarKind::Number,
+                vec![(compact, Cell::Number(2.0)), (comfy, Cell::Number(9.0))],
+            ),
+        },
+        Operation::CreateNode {
+            id: badge,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 16.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Badge".into()),
+        },
+        Operation::SetCornerVars {
+            id: badge,
+            vars: [Some(radius); 4],
+        },
+        Operation::SetComponent {
+            id: badge,
+            component: true,
+        },
+    ]))
+    .expect("the kit");
+    l.set_meta(DocumentMeta {
+        id: Some(L_ID.into()),
+        name: Some("Atlas".into()),
+        kit: Some(KitMark {
+            version: 0,
+            ..KitMark::default()
+        }),
+        ..DocumentMeta::default()
+    });
+    assert_eq!(kit::publish(&mut l, None, 1), Some(1));
+
+    let mut cids = IdSource::new(0xDD);
+    let (mut d, [_, _, _, comfortable], _) =
+        two_collections(&mut cids, ["Light", "Dark", "Compact", "Comfortable"]);
+    let page = d.first_page();
+    let (tx, inst) =
+        kit::insert(&d, &mut cids, L_ID, 1, l.published().unwrap(), badge, page).unwrap();
+    d.apply(&tx).expect("an insert of a two-collection kit");
+    d.apply(&Transaction(vec![Operation::SetModes {
+        id: page,
+        modes: vec![comfortable],
+    }]))
+    .unwrap();
+    let radius_at = |d: &Document| {
+        let v = d.get(inst).unwrap().corner_vars()[0].unwrap();
+        d.resolve_var(inst, v)
+    };
+    assert_eq!(radius_at(&d), Some(Value::Number(9.0)), "Comfortable");
+    let copy = cids.mint_mode();
+    let tx = variable::copy_mode_ops(&d, comfortable, copy, "Roomy", 2);
+    d.apply(&Transaction(tx)).expect("duplicated");
+    d.apply(&Transaction(vec![Operation::SetModes {
+        id: page,
+        modes: vec![copy],
+    }]))
+    .unwrap();
+    assert_eq!(radius_at(&d), Some(Value::Number(9.0)), "duplicated");
+    let tx = variable::rename_mode_ops(&d, comfortable, "Tight");
+    d.apply(&Transaction(tx)).expect("renamed");
+    d.apply(&Transaction(vec![Operation::SetModes {
+        id: page,
+        modes: vec![comfortable],
+    }]))
+    .unwrap();
+    assert_eq!(radius_at(&d), Some(Value::Number(9.0)), "renamed");
 }
 
 /// **An update that narrows a kit variable's scope detaches what it drops**:

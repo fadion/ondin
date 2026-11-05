@@ -505,8 +505,9 @@ impl Document {
         c.mode_for_width(width)
     }
 
-    /// A top-level frame's width, a bound one read in its page's modes — a
-    /// frame's own width cannot be read in the mode the width picks.
+    /// A top-level frame's width, a bound one read in the modes the frame and its
+    /// page set, nearest first — not through `modes_at`, which would read it in
+    /// the mode the width picks.
     fn frame_width(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
         let n = self.nodes.get(&id)?;
         let NodeKind::Artboard { size, .. } = &n.kind else {
@@ -514,10 +515,25 @@ impl Document {
         };
         let page = n.parent.and_then(|p| self.nodes.get(&p));
         match n.size_vars[0] {
-            Some(v) => match t.resolve_at(v, page.map_or(&[][..], |p| &p.modes)) {
-                Some(crate::variable::Value::Number(w)) => Some(w),
-                _ => Some(size.width),
-            },
+            Some(v) => {
+                let mut set: Vec<crate::variable::ModeId> = Vec::new();
+                for m in n
+                    .modes
+                    .iter()
+                    .chain(page.into_iter().flat_map(|p| &p.modes))
+                {
+                    if !set
+                        .iter()
+                        .any(|x| crate::variable::same_collection(t, *x, *m))
+                    {
+                        set.push(*m);
+                    }
+                }
+                match t.resolve_at(v, &set) {
+                    Some(crate::variable::Value::Number(w)) => Some(w),
+                    _ => Some(size.width),
+                }
+            }
             None => Some(size.width),
         }
     }

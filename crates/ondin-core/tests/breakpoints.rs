@@ -4,6 +4,7 @@
 
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::variable::{self, Collection, CollectionId, VarRule};
+use ondin_core::variant::{VariantProp, VariantSet};
 use ondin_core::{
     Cell, Document, GeometryPatch, IdSource, Mode, ModeId, NodeId, NodeKind, OpError, Operation,
     Transaction, Value, VarId, VarKind, Variable,
@@ -246,6 +247,98 @@ fn a_component_main_never_picks_by_width() {
         out.dirty.0.contains(&f.rect),
         "making it a main moves its mode"
     );
+}
+
+/// A top-level instance and a top-level component set are no viewports either.
+/// flip: `picks_by_width`'s `link` or `set` test removed → fails at the
+/// instance's or the set's `!picks_by_width`.
+#[test]
+fn a_top_level_instance_or_set_never_picks_by_width() {
+    let mut f = fixture();
+    let (main, copy) = (f.ids.mint(), f.ids.mint());
+    f.doc
+        .apply(&Transaction(vec![
+            frame(main, f.page, 1024.0),
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+            frame(copy, f.page, 1024.0),
+            Operation::SetLink {
+                id: copy,
+                link: Some(main),
+            },
+            Operation::SetComponent {
+                id: f.card,
+                component: true,
+            },
+            Operation::SetVariantSet {
+                id: f.home,
+                set: Some(VariantSet {
+                    props: vec![VariantProp::new("Size", vec!["Large".into()])],
+                    ..Default::default()
+                }),
+            },
+            Operation::SetVariant {
+                id: f.card,
+                values: vec!["Large".into()],
+            },
+        ]))
+        .expect("an instance and a set at the top level");
+    for id in [copy, f.home] {
+        assert!(!f.doc.picks_by_width(id));
+        assert_eq!(f.doc.width_pick(id), None);
+        assert_eq!(f.doc.mode_at(id, f.bp), Some(f.mobile), "the default");
+    }
+}
+
+/// A frame whose width is bound to a number of another collection picks by
+/// the width it draws: the number read in the frame's own modes, not only its
+/// page's.
+#[test]
+fn a_bound_frame_width_picks_by_the_width_it_draws() {
+    let mut f = fixture();
+    let (dark, screen) = (f.ids.mint_mode(), f.ids.mint_var());
+    let light = f
+        .doc
+        .variables()
+        .collection(CollectionId::FIRST)
+        .unwrap()
+        .modes[0]
+        .id;
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: mode(dark, "Dark"),
+                index: 1,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: screen,
+                    name: "screen".into(),
+                    kind: VarKind::Number,
+                    cells: [(light, Cell::Number(375.0)), (dark, Cell::Number(1440.0))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetSizeVars {
+                id: f.home,
+                vars: [Some(screen), None],
+            },
+            Operation::SetModes {
+                id: f.home,
+                modes: vec![dark],
+            },
+        ]))
+        .expect("a frame bound to a two-mode width");
+    assert_eq!(f.doc.width_mode(f.home), Some(f.desktop));
+    assert_eq!(f.doc.width_pick(f.home), Some(f.desktop));
+    assert_eq!(gap_at(&f, f.rect), 64.0);
 }
 
 /// While a frame is previewed at another width, a read through the previewed

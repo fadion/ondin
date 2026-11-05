@@ -8,7 +8,7 @@ use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::variable::{self, Collection, Field, Scope, VarRule};
 use ondin_core::{
     Cell, Document, GeometryPatch, IdSource, Mode, ModeId, NodeId, NodeKind, OpError, Operation,
-    Transaction, VarId, VarKind, Variable, build,
+    Transaction, Value, VarId, VarKind, Variable, build,
 };
 
 /// Breakpoint (Mobile, Tablet ≥ 768) picked by width; *Home* a top-level frame
@@ -221,6 +221,46 @@ fn a_direction_string_holds_only_its_words() {
     assert_eq!(
         FlexWrap::from_word("wrap-reverse"),
         Some(FlexWrap::WrapReverse)
+    );
+}
+
+/// Scoping a string to direction words leaves a variable aliasing it reading
+/// what it read: the rewritten cell's old value is written into the alias.
+/// flip: `scope_ops` without its alias pass → fails at *"Go kept"*.
+#[test]
+fn scoping_a_string_to_words_keeps_what_its_aliases_read() {
+    let mut f = fixture();
+    let text = IdSource::new(0xF2).mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: Variable {
+                id: text,
+                name: "button/text".into(),
+                kind: VarKind::String,
+                cells: [
+                    (f.mobile, Cell::Alias(f.loose)),
+                    (f.tablet, Cell::Alias(f.loose)),
+                ]
+                .into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        }]))
+        .expect("an alias of label");
+    let ops = variable::scope_ops(&f.doc, f.loose, Some(Scope::of([Field::FlexDirection])));
+    f.doc.apply(&Transaction(ops)).expect("scoped");
+    let t = f.doc.variables();
+    assert_eq!(
+        t.resolve(text, f.tablet),
+        Some(Value::String("Go".into())),
+        "Go kept"
+    );
+    assert_eq!(
+        t.get(text).unwrap().cells[&f.mobile],
+        Cell::Alias(f.loose),
+        "a word the scope takes stays an alias"
     );
 }
 

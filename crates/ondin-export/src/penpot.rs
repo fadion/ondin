@@ -433,7 +433,7 @@ impl Writer<'_> {
             self.paints(&mut shape, id, node, &paint_space);
         }
         self.common(&mut shape, id, node);
-        self.exports(&mut shape, node, extent);
+        self.exports(&mut shape, id, node);
         if !node.grids().is_empty() {
             self.approximate("Layout grids, left out");
         }
@@ -447,14 +447,22 @@ impl Writer<'_> {
     /// A layer's export settings as Penpot's `exports`: a format, a multiplier and
     /// a suffix. The suffix is the one Ondin would name the file with, so a 2× row
     /// with none typed still writes `@2x`. A width or height becomes the multiplier
-    /// it asks for at the layer's extent; a prefix and a background have no place.
-    fn exports(&mut self, s: &mut Value, node: &Node, extent: Option<Rect>) {
+    /// it asks for on the box Ondin's own export frames (`plan::framed_box`), 1×
+    /// for a layer with none. Penpot has no place for a prefix, a background, a
+    /// quality, a trim, a square pad or outlined text; each that would act is
+    /// reported.
+    fn exports(&mut self, s: &mut Value, id: NodeId, node: &Node) {
         if node.exports().is_empty() {
             return;
         }
-        let size = extent.map_or(Size::new(1.0, 1.0), |r| r.size());
+        let framed = crate::plan::framed_box(self.doc, self.res, id);
         let mut rows = Vec::new();
         for spec in node.exports() {
+            let scale = match (spec.scale, framed) {
+                (ExportScale::Times(n), _) => f64::from(n),
+                (by, Some(r)) => by.factor(r.width(), r.height()),
+                (_, None) => 1.0,
+            };
             if !matches!(spec.scale, ExportScale::Times(_)) {
                 self.approximate("Export sizes by width or height, as a multiplier");
             }
@@ -464,6 +472,11 @@ impl Writer<'_> {
             if spec.background != Default::default() {
                 self.approximate("Export backgrounds, left out");
             }
+            if crate::plan::acting_extras(spec) {
+                self.approximate(
+                    "Export quality, trimming, square padding and outlined text, left out",
+                );
+            }
             rows.push(json!({
                 "type": match spec.format {
                     ExportFormat::Png => "png",
@@ -472,7 +485,7 @@ impl Writer<'_> {
                     ExportFormat::Svg => "svg",
                     ExportFormat::Pdf => "pdf",
                 },
-                "scale": spec.scale.factor(size.width, size.height),
+                "scale": scale,
                 "suffix": spec.effective_suffix(),
             }));
         }

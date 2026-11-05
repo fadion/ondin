@@ -277,27 +277,43 @@ fn export_settings_read_back_as_they_were() {
     assert_eq!(ours[0].value, theirs[0].value);
 }
 
-/// A row Penpot cannot hold exactly is still written, and named in the report.
-/// flip: `exports` skipping the width check → fails at the report.
+/// A row Penpot cannot hold exactly is still written, and named in the report:
+/// a width becomes the multiplier Ondin's own export renders at, measured on the
+/// ink a shadow widens.
+/// flip: `exports` measuring the layer's extent instead of `plan::framed_box` →
+/// fails at the scale.
 #[test]
 fn an_export_by_width_goes_out_as_a_multiplier_and_is_reported() {
     let mut f = fixture();
     let screen = named(&f.doc, "Screen");
-    // The screen is 480 wide: 1440 pixels across asks for 3×.
     let mut spec = ondin_core::ExportSpec::new(
         ondin_core::ExportFormat::Jpeg,
         ondin_core::ExportScale::Width(1440),
     );
     spec.prefix = "web/".into();
+    spec.quality = 60;
+    let shadow = ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+        offset: ondin_core::kurbo::Vec2::ZERO,
+        blur: 0.0,
+        spread: 20.0,
+        color: ondin_core::peniko::Color::from_rgba8(0, 0, 0, 80),
+        blend: ondin_core::BlendMode::Normal,
+    }));
     f.doc
         .apply(&ondin_core::Transaction(vec![
             ondin_core::Operation::SetExports {
                 id: screen,
                 exports: ondin_core::keyed_by_position([spec]),
             },
+            ondin_core::Operation::SetEffects {
+                id: screen,
+                effects: ondin_core::keyed_by_position([shadow]),
+            },
         ]))
-        .expect("set the screen's export");
+        .expect("set the screen's export and shadow");
     f.res = ondin_core::Resolved::rebuild(&f.doc);
+    let ink = f.res.ink_bounds(screen).expect("the screen's ink").width();
+    assert!(ink > 480.0 + 1.0, "the shadow widens the ink: {ink}");
     let out = ondin_export::penpot::export(&f.doc, &f.res, "Fixture").unwrap();
     let z = unzip(&out.bytes);
     let row = z
@@ -306,10 +322,12 @@ fn an_export_by_width_goes_out_as_a_multiplier_and_is_reported() {
         .find_map(|v| v.get("exports"))
         .expect("the screen's exports");
     assert_eq!(row[0]["type"], "jpeg");
-    assert!((row[0]["scale"].as_f64().unwrap() - 3.0).abs() < 1e-3);
+    let scale = row[0]["scale"].as_f64().unwrap();
+    assert!((scale - 1440.0 / ink).abs() < 1e-6, "{scale} against {ink}");
     for line in [
         "Export sizes by width or height, as a multiplier",
         "Export prefixes, left out",
+        "Export quality, trimming, square padding and outlined text, left out",
     ] {
         assert!(out.approximated.iter().any(|s| s == line), "{line}");
     }

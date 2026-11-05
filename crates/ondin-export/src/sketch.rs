@@ -559,7 +559,8 @@ impl Writer<'_> {
     }
 
     /// A layer's export settings as Sketch's export presets. Sketch names a file
-    /// by a suffix or a prefix, not both.
+    /// by a suffix or a prefix, not both; the suffix is the one Ondin names the
+    /// file with, so an untyped 2× row writes `@2x`.
     fn exports(&mut self, node: &Node) -> Value {
         use ondin_core::{ExportFormat, ExportScale};
         let mut formats = Vec::new();
@@ -570,7 +571,7 @@ impl Writer<'_> {
                 ExportScale::Height(h) => (1.0, h, 2),
             };
             let (name, scheme) = match (spec.prefix.is_empty(), spec.suffix.is_empty()) {
-                (true, _) => (spec.suffix.clone(), 0),
+                (true, _) => (spec.effective_suffix(), 0),
                 (false, true) => (spec.prefix.clone(), 1),
                 (false, false) => {
                     self.approximate(
@@ -581,6 +582,11 @@ impl Writer<'_> {
             };
             if spec.background != Default::default() {
                 self.approximate("Export backgrounds, left out");
+            }
+            if crate::plan::acting_extras(spec) {
+                self.approximate(
+                    "Export quality, trimming, square padding and outlined text, left out",
+                );
             }
             formats.push(json!({
                 "_class": "exportFormat",

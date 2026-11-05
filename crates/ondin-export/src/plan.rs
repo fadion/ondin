@@ -154,11 +154,22 @@ pub fn slice_region(doc: &Document, res: &Resolved, node: NodeId) -> Option<(Rec
 /// The world box an export of `node` is framed on: a slice's own box, else the
 /// layer's `ink_bounds`, because `png::raster_of` frames from it (§5.3a) and the
 /// editing box would be off by the reach of a shadow.
-fn framed_box(doc: &Document, res: &Resolved, node: NodeId) -> Option<Rect> {
+pub(crate) fn framed_box(doc: &Document, res: &Resolved, node: NodeId) -> Option<Rect> {
     match slice_region(doc, res, node) {
         Some((view, _)) => Some(view),
         None => res.ink_bounds(node),
     }
+}
+
+/// Whether `spec` sets a quality, a trim, a square pad or outlined text that
+/// changes its file: what the editable writers (Penpot, Sketch) have no place
+/// for, so they report it. Each counts only on the formats it acts on.
+pub(crate) fn acting_extras(spec: &ondin_core::ExportSpec) -> bool {
+    let plain = ondin_core::ExportSpec::new(spec.format, spec.scale);
+    let raster = spec.format.is_raster();
+    (spec.format == ondin_core::ExportFormat::Jpeg && spec.quality != plain.quality)
+        || (raster && (spec.trim || spec.pad_square))
+        || (!raster && spec.text != plain.text)
 }
 
 /// Render one planned file to bytes. `None` when the layer has no bounds to

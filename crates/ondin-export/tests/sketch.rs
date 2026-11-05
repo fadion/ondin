@@ -443,10 +443,10 @@ fn the_same_document_writes_the_same_file() {
     assert!(a.bytes == b.bytes);
 }
 
-/// Export settings come back through `sketch_in` as they went out, a prefix and
-/// a typed suffix on rows of their own included.
+/// Export settings go out named as Ondin names their files and come back through
+/// `sketch_in` as they went out, a prefix and a typed suffix included.
 /// flip: `Writer::exports` writing every row's `namingScheme` as 0 → fails at
-/// the prefixed row.
+/// the read-back's prefixed row; writing the raw suffix → fails at the names.
 #[test]
 fn export_settings_read_back_as_they_were() {
     let mut f = fixture();
@@ -479,6 +479,28 @@ fn export_settings_read_back_as_they_were() {
         .expect("set the screen's exports");
     f.res = ondin_core::Resolved::rebuild(&f.doc);
     let out = ondin_export::sketch::export(&f.doc, &f.res, "Fixture").unwrap();
+    fn preset_names(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Object(o) => {
+                if o.get("_class").and_then(Value::as_str) == Some("exportFormat") {
+                    out.push(s(v, "name").to_owned());
+                }
+                o.values().for_each(|c| preset_names(c, out));
+            }
+            Value::Array(a) => a.iter().for_each(|c| preset_names(c, out)),
+            _ => {}
+        }
+    }
+    let mut names = Vec::new();
+    unzip(&out.bytes)
+        .json
+        .values()
+        .for_each(|v| preset_names(v, &mut names));
+    assert_eq!(
+        names,
+        ["@2x", "icons/", "-big"],
+        "named as Ondin names them"
+    );
     let mut ids = IdSource::new(0x9F);
     let back = ondin_core::sketch_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
         .expect("read back");

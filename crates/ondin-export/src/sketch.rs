@@ -387,8 +387,8 @@ impl Writer<'_> {
                     let mut layers = bg;
                     layers.extend(self.children(id, inner, Container::Inner));
                     g["layers"] = Value::Array(layers);
-                    g["style"] = self.effects_style(id, node, &lid);
                     // The paint layer carries the paint; the group the rest.
+                    g["style"] = self.effects_style(id, node, &lid);
                     self.flags(&mut g, id, node);
                     return Some(g);
                 }
@@ -528,16 +528,19 @@ impl Writer<'_> {
         if node.mask() && doc.shown(id) {
             l["hasClippingMask"] = json!(true);
             match node.mask_mode() {
-                // Sketch draws an outline mask's paint; Ondin's paints nothing.
+                // Sketch draws an outline mask's paint and effects; Ondin's
+                // paints nothing.
                 MaskMode::Shape => {
                     l["clippingMaskMode"] = json!(0);
-                    if let Some(fills) = l
-                        .get_mut("style")
-                        .and_then(|st| st.get_mut("fills"))
-                        .and_then(Value::as_array_mut)
-                    {
-                        for f in fills {
-                            f["isEnabled"] = json!(false);
+                    if let Some(st) = l.get_mut("style") {
+                        for key in ["fills", "borders", "shadows", "innerShadows"] {
+                            let paints = st.get_mut(key).and_then(Value::as_array_mut);
+                            for p in paints.into_iter().flatten() {
+                                p["isEnabled"] = json!(false);
+                            }
+                        }
+                        if let Some(blur) = st.get_mut("blur") {
+                            blur["isEnabled"] = json!(false);
                         }
                     }
                 }
@@ -550,12 +553,12 @@ impl Writer<'_> {
         }
         l["resizingConstraint"] = json!(constraint(node.insets()));
         l["exportOptions"] = self.exports(node);
-    }
-
-    /// A layer's export settings as Sketch's export presets. Sketch names a file
         if !node.grids().is_empty() {
             self.approximate("Layout grids, left out");
         }
+    }
+
+    /// A layer's export settings as Sketch's export presets. Sketch names a file
     /// by a suffix or a prefix, not both.
     fn exports(&mut self, node: &Node) -> Value {
         use ondin_core::{ExportFormat, ExportScale};
@@ -655,7 +658,7 @@ impl Writer<'_> {
         if *corner_smoothing > 0.0 {
             self.approximate("Corner smoothing, at Sketch's own amount");
         }
-        let st = self.style_of(id, node, &lid, (&Paint::Box(size), world), &r);
+        let st = self.paint_style(id, node, &lid, (&Paint::Box(size), world), &r);
         r["style"] = st;
         // An outline mask that also paints: Sketch draws its fill under what it
         // clips, which is the frame's own fill under its content.
@@ -750,11 +753,31 @@ impl Writer<'_> {
                     | Operation::SetInsets { .. }
                     | Operation::SetLayoutItem { .. }
                         if id == root => {}
+                    // A string override carries no runs, so the copy's must be
+                    // its source's.
                     Operation::SetText { .. } => {
-                        let NodeKind::Text { content, .. } = n.kind() else {
+                        let NodeKind::Text {
+                            content,
+                            spans,
+                            para_spans,
+                            ..
+                        } = n.kind()
+                        else {
                             return None;
                         };
-                        let path = self.override_path(n.link()?, main)?;
+                        let source = n.link()?;
+                        let NodeKind::Text {
+                            spans: s_spans,
+                            para_spans: s_paras,
+                            ..
+                        } = doc.get(source)?.kind()
+                        else {
+                            return None;
+                        };
+                        if spans != s_spans || para_spans != s_paras {
+                            return None;
+                        }
+                        let path = self.override_path(source, main)?;
                         out.push(json!({
                             "_class": "overrideValue",
                             "overrideName": format!("{path}_stringValue"),
@@ -768,20 +791,45 @@ impl Writer<'_> {
         Some(out)
     }
 
-    /// The override path of `source`, a layer inside `main`'s tree: its own id,
-    /// or the nested instance's id and its path inside that one's main.
+    /// The override path of `source`, a layer inside `main`'s tree: the
+    /// outermost nested copy holding it that `main`'s master writes as an
+    /// instance, then its path inside that copy's main; with none, its own id,
+    /// since a copy written plain holds its layers under their own ids.
     fn override_path(&self, source: NodeId, main: NodeId) -> Option<String> {
+        use ondin_core::component::{instance_root, main_of};
         let doc = self.doc;
-        let nested = ondin_core::component::instance_root(doc, source).filter(|&r| r != main);
-        match nested {
-            None => Some(uuid(&["node", &source.to_wire()])),
-            Some(r) => {
-                let inner_main = ondin_core::component::main_of(doc, r)?;
-                let link = doc.get(source)?.link()?;
-                let rest = self.override_path(link, inner_main)?;
-                Some(format!("{}/{rest}", self.instance_id(r)))
-            }
+        let mut above = Vec::new();
+        let mut at = Some(source);
+        while let Some(id) = at.filter(|&a| a != main) {
+            above.push(id);
+            at = doc.get(id)?.parent();
         }
+        let nested = above.into_iter().rev().find(|&r| {
+            instance_root(doc, r) == Some(r)
+                && main_of(doc, r).is_some_and(|m| {
+                    self.symbols.contains_key(&m) && self.text_overrides(r, m).is_some()
+                })
+        });
+        let Some(r) = nested else {
+            return Some(uuid(&["node", &source.to_wire()]));
+        };
+        let inner_main = main_of(doc, r)?;
+        // `source`'s counterpart in that main: its links run one level per hop.
+        let within = |mut x: Option<NodeId>| {
+            while let Some(id) = x {
+                if id == inner_main {
+                    return true;
+                }
+                x = doc.get(id).and_then(Node::parent);
+            }
+            false
+        };
+        let mut link = doc.get(source)?.link()?;
+        while !within(Some(link)) {
+            link = doc.get(link)?.link()?;
+        }
+        let rest = self.override_path(link, inner_main)?;
+        Some(format!("{}/{rest}", self.instance_id(r)))
     }
 
     /// The id a node written as an instance carries.
@@ -828,13 +876,43 @@ impl Writer<'_> {
         id: NodeId,
         node: &Node,
         lid: &str,
-        (space, world): (&Paint, Affine),
+        place: (&Paint, Affine),
         layer: &Value,
     ) -> Value {
+        let mut st = self.effects_style(id, node, lid);
+        self.paint_into(&mut st, id, node, place, layer);
+        st
+    }
+
+    /// A frame's paint layer's style: its fills and borders only, since the
+    /// group, artboard or instance it leads carries the frame's effects, opacity
+    /// and blend, and Sketch would apply them twice.
+    fn paint_style(
+        &mut self,
+        id: NodeId,
+        node: &Node,
+        lid: &str,
+        place: (&Paint, Affine),
+        layer: &Value,
+    ) -> Value {
+        let mut st = style(&format!("{lid}/style"), Vec::new(), Vec::new());
+        self.paint_into(&mut st, id, node, place, layer);
+        st
+    }
+
+    /// A layer's fills, borders and winding rule, written into `st`.
+    fn paint_into(
+        &mut self,
+        st: &mut Value,
+        id: NodeId,
+        node: &Node,
+        (space, world): (&Paint, Affine),
+        layer: &Value,
+    ) {
         let frame = frame_rect(layer);
         let to_frac = space.to_fraction(frame, world);
         let Some(paint) = ondin_core::paint_box::node_paint(self.doc, self.res, id) else {
-            return self.effects_style(id, node, lid);
+            return;
         };
         let own = node.paint();
         let mut fills = Vec::new();
@@ -859,7 +937,6 @@ impl Writer<'_> {
                 borders.push(v);
             }
         }
-        let mut st = self.effects_style(id, node, lid);
         st["fills"] = Value::Array(fills);
         st["borders"] = Value::Array(borders);
         if let Some(first) = paint.strokes.first() {
@@ -870,7 +947,6 @@ impl Writer<'_> {
             FillRule::EvenOdd => 1,
             FillRule::NonZero => 0,
         });
-        st
     }
 
     /// The options every border of a layer shares in Sketch, from its first.

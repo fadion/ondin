@@ -78,6 +78,13 @@ pub(crate) struct FindBox {
     resume: Option<(NodeId, usize)>,
     /// A node whose match was stepped to on another page, revealed once there.
     reveal: Option<NodeId>,
+    /// The match the list last scrolled into view: scrolled to once, so the wheel
+    /// can take the list away from it.
+    scrolled: Option<(NodeId, Range<usize>)>,
+    /// The Selection scope's layers and the selection a row's double-click put in
+    /// their place, kept while that selection stands, so editing a match does not
+    /// narrow the list to its layer.
+    pin: Option<(Vec<NodeId>, Vec<NodeId>)>,
     /// What *All* wrote, said until the query changes.
     done: Option<String>,
     /// Each layer's match highlights in text-local space, per revision.
@@ -122,6 +129,12 @@ impl FindBox {
     fn current_hit(&self) -> Option<&Hit> {
         self.found.hits.get(self.current)
     }
+
+    /// The scope the last search ran in: Selection with nothing selected is the
+    /// page.
+    fn searched(&self) -> In {
+        self.found.key.as_ref().map_or(self.scope, |k| k.scope)
+    }
 }
 
 impl OndinApp {
@@ -144,6 +157,7 @@ impl OndinApp {
             };
             f.current = 0;
             f.done = None;
+            f.pin = None;
         }
         f.open = true;
         f.focus = true;
@@ -179,10 +193,23 @@ impl OndinApp {
         self.find.reveal = None;
     }
 
+    /// The layers the Selection scope looks under: the selection, or what it was
+    /// before a row's double-click while the selection that made stands.
+    fn find_roots(&mut self) -> Vec<NodeId> {
+        let live = self.session.selection.ids();
+        match &self.find.pin {
+            Some((roots, made)) if made.as_slice() == live => roots.clone(),
+            _ => {
+                self.find.pin = None;
+                live.to_vec()
+            }
+        }
+    }
+
     /// Find again when the document, the page, the selection or the query moved.
     fn refresh_find(&mut self) {
+        let selection = self.find_roots();
         let f = &mut self.find;
-        let selection = self.session.selection.ids().to_vec();
         // Selection with nothing selected looks on the page.
         let scope = match f.scope {
             In::Selection if selection.is_empty() => In::Page,
@@ -339,8 +366,13 @@ impl OndinApp {
         let Some(hit) = self.find.found.hits.get(i).cloned() else {
             return;
         };
+        let roots = self.find_roots();
         self.show_hit(i);
         self.begin_edit_text(Some(hit.node), None);
+        let made = self.session.selection.ids();
+        if self.find.searched() == In::Selection && made != roots.as_slice() {
+            self.find.pin = Some((roots, made.to_vec()));
+        }
         if let Some(t) = self.text.as_mut().filter(|t| t.id == hit.node) {
             t.editor.select_range(hit.range);
         }
@@ -384,7 +416,7 @@ impl OndinApp {
         }
 
         let (anchor, max_h) = self.canvas_card_place(ctx);
-        let selected = self.session.selection.ids().len();
+        let selected = self.find_roots().len();
         let names: Vec<(String, String)> = self
             .find
             .found
@@ -404,6 +436,8 @@ impl OndinApp {
             .map(|h| row_text(&self.session.doc, h))
             .collect();
         let f = &mut self.find;
+        let current = f.current_hit().map(|h| (h.node, h.range.clone()));
+        let scroll = f.reveal.is_none() && current.is_some() && current != f.scrolled;
         egui::Area::new(egui::Id::new("find-box"))
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::RIGHT_TOP)
@@ -423,7 +457,10 @@ impl OndinApp {
                         return;
                     }
                     ui::card_rule(ui);
-                    list(ui, f, &names, &rows, &mut act);
+                    list(ui, f, &names, &rows, scroll, &mut act);
+                    if scroll {
+                        f.scrolled = current;
+                    }
                     if !f.found.hits.is_empty() {
                         ui::card_rule(ui);
                         footer(ui, f);
@@ -439,7 +476,7 @@ impl OndinApp {
             Some(Act::Replace) => self.replace_current(),
             Some(Act::All) => self.replace_all(),
             Some(Act::Widen) => {
-                self.find.scope = match self.find.scope {
+                self.find.scope = match self.find.searched() {
                     In::Selection => In::Page,
                     _ => In::All,
                 };
@@ -745,13 +782,15 @@ pub(crate) fn button_w(ui: &egui::Ui, label: &str) -> f32 {
     g.size().x + 28.0
 }
 
-/// The list: matches grouped by page, a long list scrolling inside the box. With
-/// none, what was looked for and the step that widens the scope.
+/// The list: matches grouped by page, a long list scrolling inside the box, the
+/// current row scrolled into view when `scroll`. With none, what was looked in and
+/// the step that widens the scope.
 fn list(
     ui: &mut egui::Ui,
     f: &FindBox,
     names: &[(String, String)],
     rows: &[RowText],
+    scroll: bool,
     act: &mut Option<Act>,
 ) {
     if f.find.is_empty() {
@@ -770,13 +809,13 @@ fn list(
                     );
                     return;
                 }
-                let place = match f.scope {
+                let place = match f.searched() {
                     In::Selection => "the selection",
                     In::Page => "this page",
                     In::All => "any page",
                 };
                 ui::empty_note(ui, &format!("No layers in {place} match"));
-                let widen = match f.scope {
+                let widen = match f.searched() {
                     In::Selection => Some("Search this page"),
                     In::Page => Some("Search all pages"),
                     In::All => None,
@@ -812,7 +851,7 @@ fn list(
                         let current = i == f.current;
                         let resp =
                             result_row(ui, h, &names[i].1, &rows[i], current, f.inside_instances);
-                        if current && f.reveal.is_none() {
+                        if current && scroll {
                             resp.scroll_to_me(None);
                         }
                         if crate::ui::double_clicked(ui, &resp) {
@@ -1355,6 +1394,131 @@ mod tests {
         assert!(f.app.text.is_none() && f.app.find.open, "the edit first");
         f.app.escape(&ctx);
         assert!(!f.app.find.open, "then the box");
+    }
+
+    /// **On Selection, a row's double-click keeps the list to the selection it
+    /// searched**, through the edit and after it, until the person selects anew.
+    ///
+    /// flip: `find_roots` reading the live selection alone → fails at "still the
+    /// selection's".
+    #[test]
+    fn editing_a_match_on_selection_keeps_the_scope() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set(vec![f.headline, f.note]);
+        f.app.open_find(false);
+        assert_eq!(f.app.find.scope, In::Selection);
+        f.app.find.find = "team".into();
+        run(&mut f.app, &ctx, Vec::new());
+        assert_eq!(f.app.find.found.hits.len(), 3);
+        f.app.edit_hit(0);
+        assert_eq!(
+            f.app.session.selection.ids(),
+            [f.headline],
+            "the edit selects"
+        );
+        run(&mut f.app, &ctx, Vec::new());
+        assert_eq!(f.app.find.found.hits.len(), 3, "still the selection's");
+        f.app.escape(&ctx);
+        run(&mut f.app, &ctx, Vec::new());
+        assert_eq!(f.app.find.found.hits.len(), 3, "after the edit");
+        f.app.session.selection.set(vec![f.note]);
+        run(&mut f.app, &ctx, Vec::new());
+        assert_eq!(f.app.find.found.hits.len(), 1, "a new selection");
+    }
+
+    /// **With Selection lit but nothing selected, an empty list names the page it
+    /// searched** and widens to all pages.
+    ///
+    /// flip: `list` naming `FindBox::scope` rather than `searched` → fails at the
+    /// note.
+    #[test]
+    fn an_empty_selection_scope_says_this_page() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set(vec![f.headline]);
+        f.app.open_find(false);
+        assert_eq!(f.app.find.scope, In::Selection);
+        f.app.session.selection.set(Vec::new());
+        f.app.find.find = "zebra".into();
+        let mut out = None;
+        for _ in 0..3 {
+            out = Some(drawn(&mut f.app, &ctx));
+        }
+        let painted: Vec<String> = texts(&out.unwrap()).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.iter().any(|t| t == "No layers in this page match"),
+            "the note: {painted:?}"
+        );
+        assert!(
+            painted.iter().any(|t| t == "Search all pages"),
+            "{painted:?}"
+        );
+    }
+
+    /// **The wheel scrolls the list away from the current match and it stays
+    /// away**: the current row is scrolled into view once, not every frame.
+    ///
+    /// flip: `list` scrolling to the current row on every frame → fails at "stays
+    /// scrolled".
+    #[test]
+    fn the_wheel_scrolls_the_list_away_from_the_current_match() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        let page = f.app.session.page;
+        let many: Vec<Operation> = (0..40)
+            .map(|i| Operation::CreateNode {
+                id: f.app.session.ids.mint(),
+                parent: page,
+                index: 0,
+                kind: text("team"),
+                transform: None,
+                name: Some(format!("Copy {i}")),
+            })
+            .collect();
+        assert!(f.app.session.commit(Transaction(many)));
+        f.app.open_find(false);
+        f.app.find.find = "team".into();
+        for _ in 0..3 {
+            run(&mut f.app, &ctx, Vec::new());
+        }
+        let name =
+            crate::private::layer(&f.app.session.doc, f.app.find.found.hits[0].node).into_owned();
+        let row = |out: &egui::FullOutput| {
+            texts(out)
+                .into_iter()
+                .find(|(t, _)| *t == name)
+                .map(|(_, r)| r.top())
+                .expect("the current row")
+        };
+        let before = row(&drawn(&mut f.app, &ctx));
+        let area = ctx
+            .memory(|m| m.area_rect(egui::Id::new("find-box")))
+            .expect("drawn");
+        assert!(
+            area.y_range().contains(before),
+            "the current row in view first"
+        );
+        let over = area.center_bottom() - egui::vec2(0.0, 60.0);
+        run(&mut f.app, &ctx, vec![egui::Event::PointerMoved(over)]);
+        let wheel = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -80.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for _ in 0..8 {
+            run(&mut f.app, &ctx, vec![wheel.clone()]);
+        }
+        for _ in 0..30 {
+            run(&mut f.app, &ctx, Vec::new());
+        }
+        let after = row(&drawn(&mut f.app, &ctx));
+        assert_eq!(f.app.find.current, 0);
+        assert!(after < before - 100.0, "stays scrolled: {before} → {after}");
     }
 
     /// **Each match's highlight lies over its own glyphs**: the second *team* of

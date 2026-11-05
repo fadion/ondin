@@ -1206,8 +1206,7 @@ pub(crate) fn field_edit<'t>(
     text: &'t mut dyn egui::TextBuffer,
 ) -> (egui::Rect, egui::TextEdit<'t>) {
     let font = egui::FontId::proportional(ui::CONTROL_PT);
-    let mut frame = ui::edit_frame(ui, &font, rect.height(), ui::FIELD_PAD_X);
-    frame.inner_margin.right = 0;
+    let frame = ui::edit_frame(ui, &font, rect.height(), ui::FIELD_PAD_X).right(0.0);
     let at = egui::Rect::from_min_max(
         rect.min,
         egui::pos2(rect.right() - 4.0 - right, rect.bottom()),
@@ -1216,8 +1215,8 @@ pub(crate) fn field_edit<'t>(
         clippy::disallowed_methods,
         reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
     )]
-    let edit = egui::TextEdit::singleline(text)
-        .frame(frame)
+    let edit = frame
+        .on(egui::TextEdit::singleline(text))
         .desired_width(at.width() - ui::FIELD_PAD_X)
         .font(font);
     (at, edit)

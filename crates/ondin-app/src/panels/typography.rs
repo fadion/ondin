@@ -1095,14 +1095,15 @@ impl OndinApp {
                 clippy::disallowed_methods,
                 reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
             )]
-            let out = ui.add_enabled(
-                !read_only,
-                egui::TextEdit::singleline(&mut text)
-                    .id(edit_id)
-                    .frame(pad)
-                    .desired_width(f32::INFINITY)
-                    .font(font),
-            );
+            let out = ui
+                .add_enabled_ui(!read_only, |ui| {
+                    pad.add(
+                        ui,
+                        f32::INFINITY,
+                        egui::TextEdit::singleline(&mut text).id(edit_id).font(font),
+                    )
+                })
+                .inner;
             field = Some(out);
             ui.max_rect()
         });
@@ -2441,10 +2442,10 @@ impl OndinApp {
                         clippy::disallowed_methods,
                         reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
                     )]
-                    let resp = ui.add(
+                    let resp = pad.add(
+                        ui,
+                        62.0,
                         egui::TextEdit::singleline(&mut text)
-                            .frame(pad)
-                            .desired_width(62.0)
                             .char_limit(ui::COLOUR_CHAR_LIMIT)
                             .font(font),
                     );
@@ -8200,6 +8201,44 @@ mod content_row_tests {
         frame(&mut app, vec![press(true)]);
         frame(&mut app, vec![press(false)]);
         assert!(app.field_menu.is_some(), "the field menu");
+    }
+
+    /// The Content text sits on the row's centre, where its badge does.
+    ///
+    /// flip: `ui::edit_frame` padding one point more below the line than above →
+    /// fails, half a point high.
+    #[test]
+    fn the_content_text_sits_on_the_rows_centre() {
+        let (ctx, mut app, id) = app_with_text();
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        let mut row = egui::Rect::NOTHING;
+        let mut out = None;
+        for _ in 0..3 {
+            out = Some(ctx.run_ui(Default::default(), |ui| {
+                ui.set_width(240.0);
+                let top = ui.cursor().min;
+                app.type_content_row(ui, &subject, &None);
+                row = egui::Rect::from_min_max(top, ui.min_rect().max);
+            }));
+        }
+        assert_eq!(row.height(), ROW_H, "fixture: the row is laid out");
+        let text = out
+            .expect("a frame ran")
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text() == "hello" => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .expect("the field draws the content");
+        assert!(
+            (text.center().y - row.center().y).abs() < 0.01,
+            "text centred at {}, the row at {}",
+            text.center().y,
+            row.center().y
+        );
     }
 }
 

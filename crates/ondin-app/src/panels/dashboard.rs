@@ -2097,12 +2097,12 @@ impl OndinApp {
             ));
             p.add(star_shape(at, STAR_R, theme::color::star()));
         }
-        // The field's text lands on the painted name: the inset to its left, and half
-        // a point down, since the field floors the odd point of air above its line.
+        // The field's text lands on the painted name: the inset to its left, and the
+        // box centred on the name's line.
         let name_box = egui::Rect::from_min_size(
             egui::pos2(
                 rect.left() + 12.0 - ui::INLINE_EDIT_PAD_X,
-                thumb.bottom() + 5.5,
+                thumb.bottom() + 5.0,
             ),
             egui::vec2(w - 42.0, 20.0),
         );

@@ -1944,11 +1944,11 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
                     clippy::disallowed_methods,
                     reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
                 )]
-                let _ = ui.add(
+                let _ = pad.add(
+                    ui,
+                    ui.available_width() - eye_w,
                     egui::TextEdit::singleline(&mut card.token)
                         .password(!card.show_token)
-                        .frame(pad)
-                        .desired_width(ui.available_width() - eye_w)
                         .font(font)
                         .hint_text(egui::RichText::new("figd_…").size(ui::CONTROL_PT)),
                 );

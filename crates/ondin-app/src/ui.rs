@@ -1716,10 +1716,10 @@ pub fn text_field(
     let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
     // The row paints the typing edge (`framed_row`).
     field_row_inset(ui, size, 0.0, 0.0, |ui| {
-        ui.add(
+        frame.add(
+            ui,
+            f32::INFINITY,
             egui::TextEdit::singleline(text)
-                .frame(frame)
-                .desired_width(f32::INFINITY)
                 .font(font)
                 .hint_text(egui::RichText::new(hint).size(pt)),
         )
@@ -1767,8 +1767,7 @@ pub fn search_box(
     let scale = Scale::of(size.y);
     let pt = scale.text_pt();
     let font = egui::FontId::proportional(pt);
-    let mut frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
-    frame.inner_margin.left = 0;
+    let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X).left(0.0);
     let clear_side = SEARCH_CLEAR.min(size.y - 8.0);
     // The row paints the typing edge (`framed_row`).
     field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
@@ -1793,11 +1792,11 @@ pub fn search_box(
                     ui.add_space(SEARCH_CLEAR_INSET);
                     search_clear(ui, clear_side, scale.glyph_pt() - 2.0)
                 };
-                let edit = ui.add(
+                let edit = frame.add(
+                    ui,
+                    f32::INFINITY,
                     egui::TextEdit::singleline(text)
                         .id(id)
-                        .frame(frame)
-                        .desired_width(f32::INFINITY)
                         .font(font)
                         .hint_text(egui::RichText::new(hint).size(pt)),
                 );
@@ -1861,9 +1860,9 @@ pub fn inline_edit(
     let frame = edit_frame(ui, &font, rect.height(), INLINE_EDIT_PAD_X);
     let resp = ui.put(
         rect,
-        egui::TextEdit::singleline(text)
+        frame
+            .on(egui::TextEdit::singleline(text))
             .id(id)
-            .frame(frame)
             .desired_width(rect.width() - INLINE_EDIT_PAD_X * 2.0)
             .font(font),
     );
@@ -1989,24 +1988,81 @@ pub fn list_row_ground(painter: &egui::Painter, rect: egui::Rect, lit: bool, hov
     segment_ground(painter, rect, lit, hovered);
 }
 
-/// The frame a frameless `TextEdit` in a field row takes: padding that makes the
-/// edit `h` tall — the row's content height — with its line centred, and `x` on
-/// either side for a row whose own inset is zero. The padding is part of the
-/// edit, so a press anywhere on the row's height focuses it and the pointer is an
-/// I-beam there; with `Frame::NONE` the edit is one line tall and the bands above
-/// and below it are dead.
-pub fn edit_frame(ui: &egui::Ui, font: &egui::FontId, h: f32, x: f32) -> egui::Frame {
+/// The frame a frameless `TextEdit` in a field row takes, for a row whose content
+/// is `h` tall, with `x` on either side for a row whose own inset is zero. The
+/// edit fills the row's height and its line sits on the row's centre, where the
+/// labels and glyphs beside it sit; the padding is the edit's, so a press
+/// anywhere on that height focuses it and the pointer is an I-beam there. With
+/// `Frame::NONE` the edit is one line tall and the bands above and below it are
+/// dead.
+pub fn edit_frame(ui: &egui::Ui, font: &egui::FontId, h: f32, x: f32) -> EditFrame {
     let row = ui.fonts_mut(|f| f.row_height(font));
-    // Rounded down on both sides: a pixel over `h` would grow the row.
-    let spare = (h - row).max(0.0);
-    let top = (spare / 2.0).floor();
-    let bottom = (spare - top).floor();
-    egui::Frame::NONE.inner_margin(egui::Margin {
-        left: x as i8,
-        right: x as i8,
-        top: top as i8,
-        bottom: bottom as i8,
-    })
+    // Rounded down: a point over `h` would grow the row.
+    let y = ((h - row).max(0.0) / 2.0).floor() as i8;
+    EditFrame {
+        frame: egui::Frame::NONE.inner_margin(egui::Margin {
+            left: x as i8,
+            right: x as i8,
+            top: y,
+            bottom: y,
+        }),
+        h,
+    }
+}
+
+/// An [`edit_frame`]: whole-point padding, the same above and below the line, and
+/// the row height it was made for.
+///
+/// A line is not whole points, so the padding alone leaves the edit short of the
+/// row, and padding uneven by a point puts the line half a point off the row's
+/// centre. So the edit is always stretched over a box of the row's height, with
+/// its line centred in it: [`Self::show`] lays that box in a row, and
+/// [`Self::on`] is for an edit `put` or `place`d over a box already.
+#[derive(Clone, Copy, Debug)]
+pub struct EditFrame {
+    frame: egui::Frame,
+    h: f32,
+}
+
+impl EditFrame {
+    /// The inset before the text, for a row whose lead (a glyph, a prefix) is
+    /// part of the edit.
+    pub fn left(mut self, x: f32) -> Self {
+        self.frame.inner_margin.left = x as i8;
+        self
+    }
+
+    /// The inset after the text.
+    pub fn right(mut self, x: f32) -> Self {
+        self.frame.inner_margin.right = x as i8;
+        self
+    }
+
+    /// `edit` in this frame, its line centred in the box it is stretched over.
+    pub fn on<'t>(self, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
+        edit.frame(self.frame).vertical_align(egui::Align::Center)
+    }
+
+    /// `edit` in this frame, laid in `ui` over a box `w` wide (at most what is
+    /// left) and the row's height.
+    pub fn show(
+        self,
+        ui: &mut egui::Ui,
+        w: f32,
+        edit: egui::TextEdit<'_>,
+    ) -> egui::text_edit::TextEditOutput {
+        let size = egui::vec2(w.min(ui.available_width()), self.h);
+        let stretch = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+        ui.allocate_ui_with_layout(size, stretch, |ui| {
+            self.on(edit).desired_width(size.x).show(ui)
+        })
+        .inner
+    }
+
+    /// [`Self::show`]'s response.
+    pub fn add(self, ui: &mut egui::Ui, w: f32, edit: egui::TextEdit<'_>) -> egui::Response {
+        self.show(ui, w, edit).response.response
+    }
 }
 
 /// How far a value field's number travels per point of pointer movement,
@@ -6006,6 +6062,74 @@ mod logo_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An `edit_frame`d edit fills its row's height with its line on the row's
+    /// centre, both shown in a field row beside a label and `put` over a box.
+    ///
+    /// flip: `edit_frame` padding one point more below the line than above, or
+    /// `EditFrame::on` without `vertical_align` → fails at the row's line.
+    #[test]
+    fn an_edit_frames_line_sits_on_the_rows_centre() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let font = egui::FontId::proportional(CONTROL_PT);
+        let boxed = egui::Rect::from_min_size(egui::pos2(10.0, 100.0), egui::vec2(200.0, 22.0));
+        let (mut row, mut put) = (None, None);
+        let out = ctx.run_ui(Default::default(), |ui| {
+            let (mut a, mut b) = ("In a row".to_string(), "In a box".to_string());
+            field_row(ui, egui::vec2(200.0, CONTROL_H), |ui| {
+                ui.label(egui::RichText::new("Label").font(font.clone()));
+                let pad = edit_frame(ui, &font, CONTROL_H - FIELD_BORDER_H, 0.0);
+                row = Some(pad.add(
+                    ui,
+                    f32::INFINITY,
+                    egui::TextEdit::singleline(&mut a).font(font.clone()),
+                ));
+            });
+            let pad = edit_frame(ui, &font, boxed.height(), 0.0);
+            put = Some(
+                ui.put(
+                    boxed,
+                    pad.on(egui::TextEdit::singleline(&mut b))
+                        .font(font.clone()),
+                ),
+            );
+        });
+        let mid = |want: &str| {
+            out.shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::Shape::Text(t) if t.galley.text() == want => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center().y)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{want:?} is drawn"))
+        };
+        assert!(
+            (mid("In a row") - mid("Label")).abs() < 0.01,
+            "row: {} against the label's {}",
+            mid("In a row"),
+            mid("Label")
+        );
+        assert!(
+            (mid("In a box") - boxed.center().y).abs() < 0.01,
+            "box: {} against {}",
+            mid("In a box"),
+            boxed.center().y
+        );
+        assert_eq!(
+            put.expect("the box drew").rect,
+            boxed,
+            "the edit takes the whole box"
+        );
+        assert_eq!(
+            row.expect("the row drew").rect.height(),
+            CONTROL_H - FIELD_BORDER_H,
+            "the edit takes the row's whole height"
+        );
+    }
 
     /// A stored value outside a field's range is shown, not rewritten, and an event-free frame reports no change.
     ///

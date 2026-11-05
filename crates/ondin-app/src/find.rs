@@ -1126,8 +1126,7 @@ fn field(
     let lead = ui::FIELD_PAD_X + ui::CONTROL_GLYPH_PT + GLYPH_GAP;
     let inner = egui::Rect::from_min_max(rect.min, egui::pos2(end - note_w, rect.bottom()));
     let font = egui::FontId::proportional(ui::CONTROL_PT);
-    let mut frame = ui::edit_frame(ui, &font, rect.height(), 0.0);
-    frame.inner_margin.left = lead as i8;
+    let frame = ui::edit_frame(ui, &font, rect.height(), 0.0).left(lead);
     // `place`, not `put`: in a row, `put` leaves the cursor at the text's end,
     // short of the note, and the buttons after the field land on it.
     #[expect(
@@ -1136,9 +1135,9 @@ fn field(
     )]
     let resp = ui.place(
         inner,
-        egui::TextEdit::singleline(text)
+        frame
+            .on(egui::TextEdit::singleline(text))
             .id(id)
-            .frame(frame)
             .desired_width(inner.width() - lead)
             .return_key(None)
             .font(font)

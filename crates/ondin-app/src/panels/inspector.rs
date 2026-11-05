@@ -6407,11 +6407,11 @@ impl OndinApp {
             ));
             let font = egui::FontId::proportional(ui::CONTROL_PT);
             let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
-            ui.add(
+            pad.add(
+                ui,
+                f32::INFINITY,
                 egui::TextEdit::singleline(&mut text)
                     .id(egui::Id::new(("stroke-dash-list", index)))
-                    .desired_width(ui.available_width())
-                    .frame(pad)
                     .hint_text(egui::RichText::new("5, 10").size(ui::CONTROL_PT))
                     .font(font),
             )
@@ -8638,14 +8638,15 @@ impl OndinApp {
             clippy::disallowed_methods,
             reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
         )]
-        let out = egui::TextEdit::singleline(&mut text)
-            .id(edit_id)
-            .frame(ui::edit_frame(ui, &font, row_h, 0.0))
-            .desired_width(62.0)
-            .char_limit(limit)
-            .font(font.clone())
-            .layouter(&mut layouter)
-            .show(ui);
+        let out = ui::edit_frame(ui, &font, row_h, 0.0).show(
+            ui,
+            62.0,
+            egui::TextEdit::singleline(&mut text)
+                .id(edit_id)
+                .char_limit(limit)
+                .font(font.clone())
+                .layouter(&mut layouter),
+        );
         let at = super::binding::refused(table, VarKind::Color, &text).map(|r| r.1);
         super::binding::underline_refusal(ui, &out, at);
         let resp = out.response;

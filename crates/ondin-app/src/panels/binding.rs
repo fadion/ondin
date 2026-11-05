@@ -1783,13 +1783,14 @@ impl OndinApp {
                 clippy::disallowed_methods,
                 reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
             )]
-            let out = egui::TextEdit::singleline(&mut rt.text)
-                .id(edit_id)
-                .frame(ui::edit_frame(ui, &font, 28.0 - ui::FIELD_BORDER_H, 0.0))
-                .desired_width(f32::INFINITY)
-                .font(font.clone())
-                .layouter(&mut layouter)
-                .show(ui);
+            let out = ui::edit_frame(ui, &font, 28.0 - ui::FIELD_BORDER_H, 0.0).show(
+                ui,
+                f32::INFINITY,
+                egui::TextEdit::singleline(&mut rt.text)
+                    .id(edit_id)
+                    .font(font.clone())
+                    .layouter(&mut layouter),
+            );
             let at = refused(table, key.kind(), &rt.text).map(|r| r.1);
             underline_refusal(ui, &out, at);
             field = Some(out.response);

@@ -1216,11 +1216,11 @@ impl OndinApp {
                 ));
                 let font = egui::FontId::proportional(ui::CONTROL_PT);
                 let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
-                ui.add(
+                pad.add(
+                    ui,
+                    f32::INFINITY,
                     egui::TextEdit::singleline(&mut text)
                         .id(egui::Id::new((part.id_salt(), index)))
-                        .desired_width(ui.available_width())
-                        .frame(pad)
                         .hint_text(egui::RichText::new(hint).size(ui::CONTROL_PT))
                         .font(font),
                 )

@@ -766,6 +766,7 @@ impl OndinApp {
             ui::CONTROL_H - ui::FIELD_BORDER_H,
             ui::FIELD_PAD_X,
         );
+        let edit_id = ui.id().with(("description", id));
         #[expect(
             clippy::disallowed_methods,
             reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
@@ -773,16 +774,18 @@ impl OndinApp {
         let framed = ui::field_frame()
             .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
-                ui.add_enabled(
-                    !private,
-                    egui::TextEdit::multiline(&mut text)
-                        .id(ui.id().with(("description", id)))
-                        .frame(pad)
-                        .desired_rows(1)
-                        .desired_width(f32::INFINITY)
-                        .font(font)
-                        .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
-                )
+                ui.add_enabled_ui(!private, |ui| {
+                    pad.add(
+                        ui,
+                        f32::INFINITY,
+                        egui::TextEdit::multiline(&mut text)
+                            .id(edit_id)
+                            .desired_rows(1)
+                            .font(font)
+                            .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
+                    )
+                })
+                .inner
             });
         let resp = framed.inner;
         if resp.has_focus() {
@@ -872,16 +875,19 @@ impl OndinApp {
                     clippy::disallowed_methods,
                     reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
                 )]
-                let resp = ui.add_enabled(
-                    !private,
-                    egui::TextEdit::singleline(&mut text)
-                        .id(field_id)
-                        .frame(pad)
-                        .desired_width(room.max(12.0))
-                        .font(font)
-                        .text_color_opt(ring)
-                        .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
-                );
+                let resp = ui
+                    .add_enabled_ui(!private, |ui| {
+                        pad.add(
+                            ui,
+                            room.max(12.0),
+                            egui::TextEdit::singleline(&mut text)
+                                .id(field_id)
+                                .font(font)
+                                .text_color_opt(ring)
+                                .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
+                        )
+                    })
+                    .inner;
                 if open
                     && ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
                         .on_hover_text("Open in browser")
@@ -2664,6 +2670,71 @@ mod tests {
         assert!(
             (link.right() - desc.right()).abs() < 0.5,
             "{desc:?} {link:?}"
+        );
+    }
+
+    /// **The description field is a text field's height with its line on the
+    /// centre**, and a longer description grows it.
+    ///
+    /// flip: `description_field` adding `pad.on(…)` with `ui.add` rather than
+    /// `pad.add` → fails at "a text field's height".
+    #[test]
+    fn the_description_line_sits_on_its_fields_centre() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set_one(f.m);
+        // The line box of the text `s` and the smallest field ground holding it.
+        let line_and_ground = |out: &egui::FullOutput, s: &str| {
+            fn walk(
+                shape: &egui::Shape,
+                s: &str,
+                out: &mut Vec<egui::Rect>,
+                line: &mut Option<egui::Rect>,
+            ) {
+                match shape {
+                    egui::Shape::Rect(r) if r.fill == theme::color::field() => out.push(r.rect),
+                    egui::Shape::Text(t) if t.galley.text() == s => {
+                        *line = Some(t.galley.rect.translate(t.pos.to_vec2()))
+                    }
+                    egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, s, out, line)),
+                    _ => {}
+                }
+            }
+            let (mut rects, mut line) = (Vec::new(), None);
+            for cs in &out.shapes {
+                walk(&cs.shape, s, &mut rects, &mut line);
+            }
+            let line = line.unwrap_or_else(|| panic!("{s} is drawn"));
+            let ground = rects
+                .into_iter()
+                .filter(|r| r.contains(line.center()))
+                .min_by(|a, b| a.area().total_cmp(&b.area()))
+                .unwrap_or_else(|| panic!("no ground under {s}"));
+            (line, ground)
+        };
+        let (line, ground) = line_and_ground(&settle(&mut f.app, &ctx), "Add a description");
+        assert!(
+            (ground.height() - ui::CONTROL_H).abs() < 0.01,
+            "a text field's height: {ground:?}"
+        );
+        assert!(
+            (line.center().y - ground.center().y).abs() < 0.01,
+            "the line on the centre: {line:?} in {ground:?}"
+        );
+        let long = "First line\nSecond line\nThird line";
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetDescription {
+                    of: ondin_core::Described::Node(f.m),
+                    text: long.into(),
+                }]))
+        );
+        let (_, grown) = line_and_ground(&settle(&mut f.app, &ctx), long);
+        assert!(
+            grown.height() > ui::CONTROL_H + 20.0,
+            "three lines grow the field: {grown:?}"
         );
     }
 

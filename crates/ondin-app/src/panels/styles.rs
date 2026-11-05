@@ -658,9 +658,9 @@ impl OndinApp {
             egui::vec2(14.0, 14.0),
         );
         paint_preview(p, &self.session.doc, style, sw);
-        // **The capsule's whole height, its row centred by the edit's own
-        // padding**: `place` stretches the edit over the box with its row at the
-        // top, and padding that is the edit's takes a press anywhere on it.
+        // **The capsule's whole height, its row centred in it**: `place`
+        // stretches the edit over the box, and padding that is the edit's takes
+        // a press anywhere on it.
         // `place`, not `put`: the capsule is allocated already.
         let font = egui::FontId::proportional(ui::CONTROL_PT);
         let field = egui::Rect::from_min_max(
@@ -675,9 +675,8 @@ impl OndinApp {
         )]
         let edit = ui.place(
             field,
-            egui::TextEdit::singleline(&mut n.text)
+            pad.on(egui::TextEdit::singleline(&mut n.text))
                 .id(id)
-                .frame(pad)
                 .font(font)
                 .text_color(theme::text::strong()),
         );

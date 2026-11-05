@@ -4300,24 +4300,22 @@ fn edit_field(
         clippy::disallowed_methods,
         reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
     )]
-    let mut edit = egui::TextEdit::singleline(text)
-        .id(id)
-        .frame(crate::ui::edit_frame(
-            ui,
-            &egui::FontId::proportional(pt),
-            r.height(),
-            ui::INLINE_EDIT_PAD_X,
-        ))
-        .font(egui::FontId::proportional(pt))
-        .layouter(&mut layouter);
+    let mut edit = ui::edit_frame(
+        ui,
+        &egui::FontId::proportional(pt),
+        r.height(),
+        ui::INLINE_EDIT_PAD_X,
+    )
+    .on(egui::TextEdit::singleline(text))
+    .id(id)
+    .font(egui::FontId::proportional(pt))
+    .layouter(&mut layouter);
     if let Some(h) = hint {
         edit = edit.hint_text(h);
     }
-    // **Over the whole of `r`, its text inset and centred by the edit's own
-    // frame** (`ui::edit_frame`):
-    // `centered_and_justified` stretches the edit to the box with its row at the
-    // top, so the padding is what centres it, and being the edit's, it takes a
-    // press anywhere in the box.
+    // **Over the whole of `r`, its text inset and centred** (`ui::edit_frame`):
+    // `centered_and_justified` stretches the edit to the box, and the padding,
+    // being the edit's, takes a press anywhere in it.
     // **A child that leaves the parent's cursor alone**, not a scope: a scope
     // advances the cursor past what it drew, and a field inside a row the
     // caller had already allocated put the cursor back *above* that row's

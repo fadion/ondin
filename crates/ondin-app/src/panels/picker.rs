@@ -1272,19 +1272,15 @@ impl OndinApp {
             _ => ui.available_width() - pct_w - ROW_GAP,
         };
         let font = egui::FontId::proportional(ui::CONTROL_PT);
-        // Centred by the edit rather than padded by `ui::edit_frame`: whole-point
-        // padding puts the line half a point above the labels and numbers beside
-        // it, which centre on the row exactly.
+        let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
         #[expect(
             clippy::disallowed_methods,
             reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
         )]
-        let resp = ui.add(
+        let resp = pad.add(
+            ui,
+            width,
             egui::TextEdit::singleline(&mut text)
-                .frame(egui::Frame::NONE)
-                .min_size(egui::vec2(0.0, ROW_H - ui::FIELD_BORDER_H))
-                .vertical_align(egui::Align::Center)
-                .desired_width(width)
                 .char_limit(ui::COLOUR_CHAR_LIMIT)
                 .font(font),
         );
@@ -2968,8 +2964,8 @@ mod mixed_hex_tests {
 
     /// The hex text sits on the line of the format chooser and the opacity beside it.
     ///
-    /// flip: `colour_text_field` padded by `ui::edit_frame` again → fails, half a
-    /// point high.
+    /// flip: `ui::edit_frame` padding more below the line than above → fails, half
+    /// a point high.
     #[test]
     fn the_hex_text_shares_the_rows_line() {
         let ctx = egui::Context::default();

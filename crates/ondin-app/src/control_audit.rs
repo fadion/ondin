@@ -4,7 +4,7 @@
 //! see — a hand-painted ground is checked like a primitive's.
 
 use crate::app::OndinApp;
-use crate::theme::color;
+use crate::theme::color::{self, Theme};
 use crate::ui;
 use eframe::egui;
 use egui::epaint::{CornerRadius, RectShape, Shape, Stroke};
@@ -22,6 +22,11 @@ const SLOP: f32 = 0.5;
 /// ground caught mid-fade carries a partial alpha no standard colour has).
 fn pass(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> egui::FullOutput {
     let mut frame = eframe::Frame::_new_kittest();
+    // The app follows its prefs' theme each frame: keep it on the sweep's.
+    app.prefs.theme = match color::theme() {
+        Theme::Dark => crate::prefs::ThemePref::Dark,
+        Theme::Light => crate::prefs::ThemePref::Light,
+    };
     let time = ctx.input(|i| i.time) + 1.0;
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
@@ -153,15 +158,21 @@ enum Holds {
     /// The widget is a cell inset by a segmented track's padding and hairline:
     /// the ground is the track, which takes no hover of its own.
     Cell,
+    /// The ground spans the widget's width at its middle, shorter than it: a list
+    /// row's ground in a taller click band. The ground is the control's.
+    Row,
 }
 
 /// What a segmented track gives up round its cells, top and bottom together.
 const TRACK_INSET: f32 = ui::CONTROL_H - (ui::SEGMENT_CELL_H - 2.0);
 
-/// A card holding a button holds neither.
+/// A card holding a button holds none of them.
 fn holds(ground: Rect, widget: Rect) -> Option<Holds> {
     if !ground.expand(SLOP).contains_rect(widget) {
-        return None;
+        let row = widget.expand(SLOP).contains_rect(ground)
+            && (ground.width() - widget.width()).abs() <= SLOP
+            && (ground.center().y - widget.center().y).abs() <= SLOP;
+        return row.then_some(Holds::Row);
     }
     let short = ground.height() - widget.height();
     if short <= ui::FIELD_BORDER_H + SLOP {
@@ -269,7 +280,7 @@ fn grounds(ctx: &egui::Context, out: &egui::FullOutput) -> Vec<Ground> {
         }
         let whole: Vec<Control> = held
             .iter()
-            .filter(|(_, h)| *h == Holds::Whole)
+            .filter(|(_, h)| *h != Holds::Cell)
             .map(|(c, _)| *c)
             .collect();
         let at = found
@@ -745,7 +756,7 @@ fn swept(
         let out = pass(ctx, app, Vec::new());
         let under = grounds(ctx, &out)
             .into_iter()
-            .find(|g| holds(g.rect, c.rect) == Some(Holds::Whole));
+            .find(|g| holds(g.rect, c.rect).is_some_and(|h| h != Holds::Cell));
         if let Some(g) = under
             && !resting.iter().chain(&rows).any(|r| r.rect == g.rect)
         {
@@ -889,11 +900,27 @@ fn audit(name: &str, found: &[Ground], dim: f32, faults: &mut Vec<String>) -> us
 /// egui's `disabled_alpha` is the standard's Disabled under a disabled `Ui`.
 ///
 /// flip: `ui::button_face` rounding to 4 → fails at the faults assertion, a
-/// "corner off the standard" for every field button.
+/// "corner off the standard" for every field button; `colour_review`'s row
+/// ground 20 tall → a list row's fault for each of its rows.
 #[test]
 fn every_control_ground_is_on_the_standard() {
+    sweep(Theme::Dark);
+}
+
+/// `every_control_ground_is_on_the_standard` in the light theme, where a ground
+/// painted with a dark-theme literal or a wrong `by_theme` twin is off the standard.
+/// flip: `ui::button_face` resting on `by_theme(field(), accent_a(10))` → fails
+/// here only, a "fill off the standard".
+#[test]
+fn every_control_ground_is_on_the_standard_in_the_light_theme() {
+    sweep(Theme::Light);
+}
+
+/// Every surface's grounds, audited and hovered with the chrome in `theme`.
+fn sweep(theme: Theme) {
     let ctx = egui::Context::default();
     crate::theme::install(&ctx);
+    crate::theme::apply(&ctx, theme);
     let mut faults = Vec::new();
     let mut seen = Vec::new();
     let mut check = |name: &'static str, mut app: OndinApp, found: Vec<Ground>| {
@@ -940,7 +967,8 @@ fn every_control_ground_is_on_the_standard() {
     let found = opened(&ctx, &mut app, |c, a| a.open_batch_rename(c, None));
     check("batch rename", app, found);
     let mut app = with_a_rect(&ctx);
-    let found = opened(&ctx, &mut app, |_, a| {
+    // Swept: its rows paint a ground under the pointer only.
+    let (found, review_rows) = swept(&ctx, &mut app, |_, a| {
         // A colour a hair from the rect's fill, so a group shows unfolded.
         let id = a.session.selection.ids()[0];
         let fill = |r, g, b| {
@@ -974,6 +1002,26 @@ fn every_control_ground_is_on_the_standard() {
                 fills: fill(1, 1, 1),
             },
         ])));
+        // A third member, so the sweep has more than two rows to hover.
+        let third = a.session.ids.mint();
+        assert!(a.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: third,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetFills {
+                id: third,
+                fills: fill(1, 2, 1),
+            },
+        ])));
         // On the document: nothing selected.
         a.session.selection.set(Vec::new());
         a.open_colour_review();
@@ -983,6 +1031,9 @@ fn every_control_ground_is_on_the_standard() {
     let mut app = with_a_set(&ctx);
     let found = inspector(&ctx, &mut app);
     check("variants card", app, found);
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| a.toggle_var_browser());
+    check("variables browser", app, found);
 
     // A value chip's popup, then its *State ▸* flyout over it: list rows, whose
     // ground is the hover alone, so each is swept.
@@ -998,6 +1049,14 @@ fn every_control_ground_is_on_the_standard() {
         }
         rows_seen.push((name, rows.len()));
     };
+    // Its list rows alone: the card-wide grounds off the inspector, which the
+    // cleared selection restyled too. A segment cell's hover is no list row.
+    let column = OndinApp::inspector_column(Rect::from_min_size(egui::Pos2::ZERO, SCREEN));
+    let review_rows: Vec<Ground> = review_rows
+        .into_iter()
+        .filter(|g| g.rect.width() > 200.0 && !column.contains(g.rect.center()))
+        .collect();
+    rows_audit("colour review", &review_rows, &mut faults);
     let chip = |c: &egui::Context, a: &mut OndinApp| {
         let at = painted_at(c, a, "Hover");
         open_popup_at(c, a, at);

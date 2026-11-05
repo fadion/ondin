@@ -12,4 +12,12 @@ disallowed-methods = [
     { path = "egui::Ui::checkbox", reason = "a tick is ui::tick_box, a switch ui::switch_row" },
     { path = "egui::Ui::radio_value", reason = "a choice of a few is ui::segmented" },
     { path = "egui::Ui::text_edit_singleline", reason = "a text entry is ui::text_field, ui::search_box or ui::inline_edit" },
+    { path = "egui::Ui::text_edit_multiline", reason = "a text entry is built in ui.rs, which carries the field ground and the typing edge" },
+    { path = "egui::DragValue::from_get_set", reason = "a number is ui::value_field*, which carries the ground, the scrub strip and the typing edge" },
+    { path = "egui::Checkbox::new", reason = "a tick is ui::tick_box, a switch ui::switch_row" },
+    { path = "egui::Checkbox::without_text", reason = "a tick is ui::tick_box, a switch ui::switch_row" },
+    { path = "egui::Slider::new", reason = "a slider is ui::slider" },
+    { path = "egui::RadioButton::new", reason = "a choice of a few is ui::segmented" },
+    { path = "egui::Ui::radio", reason = "a choice of a few is ui::segmented" },
+    { path = "egui::Ui::toggle_value", reason = "an on/off button is ui::field_button with FieldButton::On, or ui::toggle_row" },
 ]

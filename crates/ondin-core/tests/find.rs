@@ -4,8 +4,8 @@
 use ondin_core::find::{self, Query, Scope};
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::{
-    CharAttr, CharSpans, Document, IdSource, NodeId, NodeKind, Operation, Placement, TextSizing,
-    TextStyle, Transaction,
+    Cell, CharAttr, CharSpans, Document, IdSource, Mode, NodeId, NodeKind, Operation, Placement,
+    TextSizing, TextStyle, Transaction, VarKind, Variable,
 };
 
 fn style() -> TextStyle {
@@ -65,6 +65,8 @@ struct F {
     label: NodeId,
     copy_label: NodeId,
     hint: NodeId,
+    draft: NodeId,
+    scrap: NodeId,
 }
 
 fn fixture() -> F {
@@ -153,6 +155,8 @@ fn fixture() -> F {
         label,
         copy_label,
         hint,
+        draft,
+        scrap,
     }
 }
 
@@ -190,6 +194,84 @@ fn all_pages_finds_each_match_with_what_stands_in_its_way() {
     assert_eq!(under.len(), 1, "case ignored, the selection only");
     let case = Query::new("TEAM", "", true, false, false, false).unwrap();
     assert!(find::find(&f.doc, &Scope::Page(f.pricing), &case).is_empty());
+}
+
+/// **All pages keeps the draft in view**, and only that one.
+///
+/// flip: `Scope::Pages` dropping its `here` arm → fails at "the draft in view".
+#[test]
+fn all_pages_from_a_draft_finds_the_draft() {
+    let f = fixture();
+    let hits = find::find(&f.doc, &Scope::Pages { here: f.draft }, &q("team", ""));
+    assert!(
+        hits.iter().any(|h| h.node == f.scrap && h.page == f.draft),
+        "the draft in view"
+    );
+    let elsewhere = find::find(&f.doc, &Scope::Pages { here: f.pricing }, &q("team", ""));
+    assert!(elsewhere.iter().all(|h| h.node != f.scrap));
+}
+
+/// **A text whose content is bound to a variable is no match**, so a replace
+/// never writes over its binding.
+///
+/// flip: `find` without its `TEXT_CONTENT` test → fails at "bound, skipped".
+#[test]
+fn a_bound_content_is_skipped() {
+    let mut f = fixture();
+    let mut ids = IdSource::new(0xF2);
+    let (mode, var) = (ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: Vec::new(),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "copy/plans".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Plans for every team".into()))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .unwrap();
+    let bind = ondin_core::bind_text_ops(
+        &f.doc,
+        f.headline,
+        ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_CONTENT, var),
+    );
+    f.doc.apply(&Transaction(bind)).unwrap();
+    // A placeholder that would match, so the skip is what keeps it out.
+    f.doc
+        .apply(&Transaction(vec![Operation::SetText {
+            id: f.headline,
+            content: "Plans for every team".into(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        }]))
+        .unwrap();
+    let bound = |doc: &Document| {
+        doc.get(f.headline).unwrap().text_vars()[ondin_core::variable::TEXT_CONTENT]
+    };
+    assert_eq!(bound(&f.doc), Some(var));
+    let query = q("team", "crew");
+    let hits = find::find(&f.doc, &Scope::Page(f.pricing), &query);
+    assert!(hits.iter().all(|h| h.node != f.headline), "bound, skipped");
+    f.doc
+        .apply(&find::replace(&f.doc, &hits, &query, false).tx)
+        .unwrap();
+    assert_eq!(content(&f.doc, f.headline), "Plans for every team");
+    assert_eq!(bound(&f.doc), Some(var));
 }
 
 /// **Whole words leaves *teams* alone**; without it the match is inside the word.

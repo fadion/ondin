@@ -894,18 +894,15 @@ fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
             (egui::Key::R, ondin_core::TextAlign::End),
             (egui::Key::J, ondin_core::TextAlign::Justify),
         ] {
-            // `C` is read from the release: `egui_winit`'s `is_copy_command`
-            // ignores Shift, so `Ctrl+Shift+C` never arrives as a press.
+            // `C` is read from the release, with the release's own modifiers:
+            // `egui_winit`'s `is_copy_command` ignores Shift, so `Ctrl+Shift+C`
+            // never arrives as a press.
             let fired = if key == egui::Key::C {
-                i.key_released(key)
+                released_with(i, key).is_some_and(|e| e.command && !e.alt && e.shift)
             } else {
-                i.key_pressed(key)
+                cmd_only && m.shift && i.key_pressed(key)
             };
-            on(
-                cmd_only && m.shift && fired,
-                TextChord::Align(align),
-                &mut out,
-            );
+            on(fired, TextChord::Align(align), &mut out);
         }
 
         // The four document chords. `OndinApp::dispatch` finishes the text
@@ -973,6 +970,22 @@ fn discovery_chord(i: &egui::InputState) -> Option<Action> {
     }
     (cmd_only && !m.shift && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::Slash)))
         .then_some(Action::Palette)
+}
+
+/// The modifiers `key` was let go with this frame, as its own release event carries
+/// them. A chord read off its release, because `egui_winit` swallows the press
+/// (`V`, `C`, `X` with Ctrl), checks these and never the frame's `i.modifiers`: a
+/// quick tap lets go of Ctrl in the same frame, and the frame then reads it as up.
+fn released_with(i: &egui::InputState, key: egui::Key) -> Option<egui::Modifiers> {
+    i.events.iter().find_map(|e| match e {
+        egui::Event::Key {
+            key: k,
+            pressed: false,
+            modifiers,
+            ..
+        } if *k == key => Some(*modifiers),
+        _ => None,
+    })
 }
 
 fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
@@ -1114,7 +1127,8 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         // excludes Alt, so it cannot double with [`Action::PasteRelease`].
         // No `!m.shift` here, deliberately: Alt beats Shift on a paste
         // (`a_property_paste_is_not_also_a_paste_in_place`).
-        if cmd && m.alt && i.key_released(egui::Key::V) {
+        let v_up = released_with(i, egui::Key::V);
+        if v_up.is_some_and(|e| e.command && e.alt) {
             out.push(Action::PasteProperties);
         }
         // The release is its own action because it is a weaker witness than the
@@ -1126,7 +1140,7 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         // but `dispatch` acts on it only when the clipboard has no text, i.e. when
         // `Event::Paste` did not fire, and then `paste` and `paste_in_place` both
         // open on `paste_image(None)`.
-        if cmd_only && i.key_released(egui::Key::V) {
+        if v_up.is_some_and(|e| e.command && !e.alt) {
             out.push(Action::PasteRelease);
         }
         // `!m.shift`: `docs/shortcuts.md` §11 binds `Shift+D` to reverse subpath
@@ -1212,15 +1226,11 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             (egui::Key::X, ondin_core::BoolOp::Exclude),
         ] {
             let fired = if key == egui::Key::X {
-                i.key_released(key)
+                released_with(i, key).is_some_and(|e| e.command && e.alt && !e.shift)
             } else {
-                i.key_pressed(key)
+                cmd && m.alt && !m.shift && i.key_pressed(key)
             };
-            on(
-                cmd && m.alt && !m.shift && fired,
-                Action::Boolean(op),
-                &mut out,
-            );
+            on(fired, Action::Boolean(op), &mut out);
         }
 
         // --- z-order (Illustrator/Sketch bracket convention) ---
@@ -4021,5 +4031,67 @@ mod host_chord_tests {
                 "{chord} steps {way}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod release_chord_tests {
+    use super::tests::{actions, release};
+    use super::*;
+
+    /// A chord read off its release fires when Ctrl is let go in the same frame:
+    /// the release carries Ctrl, the frame already reports it up. A quick ⌘V with
+    /// a picture on the clipboard arrives so.
+    ///
+    /// flip: the `V` arms in `normal_mode` reading `cmd_only` from `i.modifiers`
+    /// again → fails at "Ctrl+V".
+    #[test]
+    fn a_release_chord_reads_its_own_modifiers() {
+        let with = |m: egui::Modifiers| egui::Modifiers {
+            command: true,
+            ctrl: true,
+            ..m
+        };
+        let none = egui::Modifiers::NONE;
+        let shift = with(egui::Modifiers::SHIFT);
+        let alt = with(egui::Modifiers::ALT);
+        let cmd = with(none);
+        for (label, mode, k, held, want) in [
+            (
+                "Ctrl+V",
+                Mode::Normal,
+                egui::Key::V,
+                cmd,
+                Action::PasteRelease,
+            ),
+            (
+                "Ctrl+Alt+V",
+                Mode::Normal,
+                egui::Key::V,
+                alt,
+                Action::PasteProperties,
+            ),
+            (
+                "Ctrl+Alt+X",
+                Mode::Normal,
+                egui::Key::X,
+                alt,
+                Action::Boolean(ondin_core::BoolOp::Exclude),
+            ),
+            (
+                "Ctrl+Shift+C",
+                Mode::TextInsert,
+                egui::Key::C,
+                shift,
+                Action::TextStyle(TextChord::Align(ondin_core::TextAlign::Center)),
+            ),
+        ] {
+            let got = actions(mode, vec![release(k, held)], none);
+            assert!(got.contains(&want), "{label}: {got:?}");
+        }
+        assert!(
+            actions(Mode::Normal, vec![release(egui::Key::V, none)], cmd).is_empty(),
+            "a bare V let go while Ctrl is down is no paste"
+        );
     }
 }

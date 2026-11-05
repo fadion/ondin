@@ -55,11 +55,14 @@ is `"`, also variantless).
 `is_cut_command` / `is_copy_command` / `is_paste_command` test `command && Key::X|C|V` and the
 caller returns, so those keys never arrive as presses while Ctrl is down. **Every
 clipboard-adjacent binding resolves from `Event::Cut`/`Copy`/`Paste` plus that frame's
-`i.modifiers`**: `Ctrl+Shift+V`, `Ctrl+Alt+C`, and the paste-properties and Exclude chords below.
+`i.modifiers`**, or from the key's release: `Ctrl+Shift+V`, `Ctrl+Alt+C`, and the
+paste-properties and Exclude chords below.
 
 **The key coming back up survives**: the guards sit inside `if pressed`, so the release arrives
 as an ordinary `Key { pressed: false }`. That is how Exclude (`Ctrl+Alt+X`), paste-properties
-(`Ctrl+Alt+V`), an image paste (§15 D183) and text centre-align (`Ctrl+Shift+C`, §10) are read.
+(`Ctrl+Alt+V`), an image paste (§15 D183) and text centre-align (`Ctrl+Shift+C`, §10) are read,
+each against the modifiers **the release itself carries** (`input::released_with`), never the
+frame's: a quick tap lets go of Ctrl in the same frame, and the frame then reads it as up.
 
 ⚠️ **A binding that reads both spellings fires twice, a frame apart** (§15 D219). `Ctrl+V` over
 text emits the event on the press frame and the release later; a same-frame guard cannot see

@@ -6549,8 +6549,14 @@ impl OndinApp {
         if !clipboard_is_reachable() {
             return false;
         }
-        let Some(Ok(img)) = with_clipboard(|c| c.get_image()) else {
-            return false;
+        let img = match with_clipboard(|c| c.get_image()) {
+            Some(Ok(img)) => img,
+            // No picture on the clipboard is the text paste's ordinary path.
+            Some(Err(arboard::Error::ContentNotAvailable)) | None => return false,
+            Some(Err(e)) => {
+                log::warn!(target: "ondin", "pasting a picture: the clipboard read failed: {e}");
+                return false;
+            }
         };
         let (w, h) = (img.width as u32, img.height as u32);
         if w == 0 || h == 0 {

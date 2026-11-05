@@ -675,6 +675,9 @@ pub struct OndinApp {
     /// A picker the `+` on a Fill or Stroke header asked for, parked until the new row
     /// is laid out; [`Self::paint_row`] claims it next frame with the row's anchor.
     pub(crate) pending_picker: Option<(NodeId, PaintSlot)>,
+    /// The colour a run of picker key steps reached and the control stepped, joined
+    /// to the recent colours once the keyboard leaves that control (`picker_ui`).
+    pub(crate) key_colour: Option<(egui::Id, ondin_core::peniko::Color)>,
     /// A paint row's hex field mid-edit, so a colour can be typed or pasted without
     /// being reparsed and recommitted on every keystroke.
     pub(crate) paint_hex: Option<(NodeId, crate::panels::PaintSlot, String)>,
@@ -1592,6 +1595,7 @@ impl OndinApp {
             paint_hex: None,
             scale_pct: 100.0,
             paint_auto_collapsed: HashSet::new(),
+            key_colour: None,
             synced_selection: Default::default(),
             stroke_menu: None,
             effect_menu: None,

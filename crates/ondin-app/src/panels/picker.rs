@@ -342,6 +342,14 @@ impl OndinApp {
     /// Draw the picker if one is open. Closes itself when its target has gone
     /// (the layer was deleted, or the fill row it points at was removed).
     pub(crate) fn picker_ui(&mut self, ctx: &egui::Context) {
+        // A run of key steps ends when the keyboard leaves its control, the picker
+        // closed or not; only then does its colour join the recent ones.
+        if let Some((control, colour)) = self.key_colour
+            && ctx.memory(|m| m.focused()) != Some(control)
+        {
+            self.key_colour = None;
+            self.remember_colour(colour);
+        }
         let Some(p) = &self.picker else { return };
         let (node, slot, spawn, placed) = (p.node, p.slot, p.spawn, p.placed);
         // The picker belongs to the layer it was opened from, so it goes away when
@@ -913,6 +921,7 @@ impl OndinApp {
                 ),
                 egui::StrokeKind::Outside,
             );
+            pointer_takes_over(&resp);
             if (resp.clicked() || resp.drag_started())
                 && let Some(pk) = &mut self.picker
             {
@@ -922,10 +931,12 @@ impl OndinApp {
             if resp.secondary_clicked() && stops.len() > 2 {
                 remove = Some(i);
             }
-            // The keyboard's half: the focused stop is the selected one, the arrows
-            // move it, `Delete` removes it.
+            // The keyboard's half: a stop the focus arrives on is selected, the
+            // arrows move the focused one, `Delete` removes it. On arrival only, or
+            // a held focus would take the selection back from a stop the pointer chose.
             if resp.has_focus() {
-                if i != selected
+                if resp.gained_focus()
+                    && i != selected
                     && let Some(pk) = &mut self.picker
                 {
                     pk.stop = i;
@@ -1004,6 +1015,7 @@ impl OndinApp {
         let hsv = self.hsv_of(current);
         let (rect, resp) =
             ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
+        pointer_takes_over(&resp);
         let p = ui.painter();
         ui::paint_sv_plane(p, rect, hsv.h);
         mask_corners(p, rect, 5.0, color::card());
@@ -1029,7 +1041,8 @@ impl OndinApp {
             let step = key_step(keys);
             let s = (hsv.s + f32::from(keys.x) * step).clamp(0.0, 1.0);
             let v = (hsv.v - f32::from(keys.y) * step).clamp(0.0, 1.0);
-            self.key_stop_colour(node, slot, brush, index, Hsv::new(hsv.h, s, v, hsv.a));
+            let next = Hsv::new(hsv.h, s, v, hsv.a);
+            self.key_stop_colour(resp.id, node, slot, brush, index, next);
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -1065,7 +1078,8 @@ impl OndinApp {
         if keys.any() {
             // Short of 1: a hue of 1 is red again, and the knob would jump home.
             let h = (hsv.h + f32::from(keys.x) * key_step(keys)).clamp(0.0, 0.999);
-            self.key_stop_colour(node, slot, brush, index, Hsv::new(h, hsv.s, hsv.v, hsv.a));
+            let next = Hsv::new(h, hsv.s, hsv.v, hsv.a);
+            self.key_stop_colour(resp.id, node, slot, brush, index, next);
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -1097,7 +1111,8 @@ impl OndinApp {
         let keys = ui::arrow_keys(ui, &resp, true, false);
         if keys.any() {
             let a = (hsv.a + f32::from(keys.x) * key_step(keys)).clamp(0.0, 1.0);
-            self.key_stop_colour(node, slot, brush, index, Hsv::new(hsv.h, hsv.s, hsv.v, a));
+            let next = Hsv::new(hsv.h, hsv.s, hsv.v, a);
+            self.key_stop_colour(resp.id, node, slot, brush, index, next);
         }
     }
     /// A 9pt slider track in a 15pt row, so the knob clears it vertically.
@@ -1112,6 +1127,7 @@ impl OndinApp {
             egui::vec2(width, TRACK_H + 6.0),
             egui::Sense::click_and_drag(),
         );
+        pointer_takes_over(&resp);
         let rect = egui::Rect::from_min_size(
             egui::pos2(row.min.x, row.center().y - TRACK_H * 0.5),
             egui::vec2(width, TRACK_H),
@@ -1781,6 +1797,7 @@ impl OndinApp {
     /// committed at once, the steps of one run folding into one undo step.
     fn key_stop_colour(
         &mut self,
+        control: egui::Id,
         node: NodeId,
         slot: PaintSlot,
         brush: &Brush,
@@ -1800,7 +1817,8 @@ impl OndinApp {
         }
         stops[index].1 = hsv.to_color();
         self.write_slot_step(node, slot, paint::with_stops(brush, stops), "colour-keys");
-        self.remember_colour(hsv.to_color());
+        // Remembered once the run ends, not a shade a press (`picker_ui`).
+        self.key_colour = Some((control, hsv.to_color()));
     }
     /// Commit a slot edit driven by a pointer gesture: the **press** shows the colour
     /// at once, a drag keeps showing it, and the release commits.
@@ -1848,6 +1866,14 @@ impl OndinApp {
             return false;
         }
         self.valve_slot(resp, node, slot, brush)
+    }
+}
+/// A mouse drag starting on a focused picker control gives up the focus, so the
+/// valve sees the drag end: it counts a focused control as still being edited,
+/// and the pointer stops calling it once the button is up.
+fn pointer_takes_over(resp: &egui::Response) {
+    if resp.drag_started() && resp.has_focus() {
+        resp.surrender_focus();
     }
 }
 /// One arrow's step on a picker control's 0–1 scale: a hundredth, a tenth with
@@ -3854,8 +3880,58 @@ mod text_colour_route_tests {
         );
     }
 
-    /// **A run of arrow steps on the focused plane is one undo step**, for a text
-    /// layer's colour too, whose write goes per character.
+    /// A mouse drag on a plane the keyboard focused commits on release, as an unfocused one does.
+    /// flip: drop `pointer_takes_over` from `sv_plane` → fails at "the drag wrote a colour".
+    #[test]
+    fn a_drag_on_a_focused_plane_still_commits() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = text_app(&ctx);
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        let (plane, rect) = ctx
+            .viewport(|v| {
+                v.this_pass
+                    .widgets
+                    .get_layer(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        super::layer_id(),
+                    ))
+                    .filter(|w| w.sense.is_focusable() && w.sense.senses_drag())
+                    .max_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+                    .map(|w| (w.id, w.rect))
+            })
+            .expect("the plane is drawn");
+        ctx.memory_mut(|m| m.request_focus(plane));
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        let depth = app.session.history.undo_depth();
+
+        let from = rect.center();
+        let button = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(from)]);
+        frame(&ctx, &mut app, vec![button(from, true)]);
+        let mut at = from;
+        for _ in 0..4 {
+            at += egui::vec2(10.0, 8.0);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        frame(&ctx, &mut app, vec![button(at, false)]);
+        frame(&ctx, &mut app, Vec::new());
+
+        assert!(text_rgba(&app, id).is_some(), "the drag wrote a colour");
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth + 1,
+            "the drag committed"
+        );
+    }
+
+    /// A run of arrow steps on a text layer's colour, written per character, is one undo step.
     /// flip: `write_slot_step` sends a per-character slot to `write_slot` → fails at
     /// "one undo step".
     #[test]

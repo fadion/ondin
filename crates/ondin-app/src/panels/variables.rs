@@ -5628,6 +5628,73 @@ mod tests {
         pass(ctx, app, vec![button(false)], draw);
     }
 
+    /// Focus the topmost clickable widget under the text `s` the browser draws,
+    /// then press `F2` on it; what the browser is editing afterwards.
+    fn f2_on(ctx: &egui::Context, app: &mut OndinApp, s: &str) -> Option<Edit> {
+        let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
+        app.var_browser.as_mut().unwrap().edit = None;
+        let mut shapes = vec![];
+        for _ in 0..3 {
+            shapes = pass(ctx, app, vec![], draw);
+        }
+        let at = last_text(&shapes, s).unwrap_or_else(|| panic!("{s:?} is drawn"));
+        let hit = ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws.iter())
+                .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+                .last()
+                .map(|w| w.id)
+        });
+        ctx.memory_mut(|m| m.request_focus(hit.expect("a clickable widget")));
+        pass(ctx, app, vec![], draw);
+        let f2 = egui::Event::Key {
+            key: egui::Key::F2,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        pass(ctx, app, vec![f2], draw);
+        app.var_browser.as_ref().unwrap().edit.clone()
+    }
+
+    /// `F2` on a focused variable name, group row, mode header (*Value* while it
+    /// is the only one) or colour cell opens it for typing, as a double-click does.
+    /// flip: `var_row` dropping the name's `rename_key` → fails at "the name".
+    #[test]
+    fn f2_on_a_focused_browser_row_opens_it_for_typing() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        let v = the_only_var(&app);
+        assert!(
+            app.commit_edit(Transaction(vec![Operation::SetVariableName {
+                id: v.id,
+                name: "brand/ink".into(),
+            }]))
+        );
+        let hex = ui::hex_of(Color::WHITE);
+        assert!(
+            matches!(f2_on(&ctx, &mut app, "ink"), Some(Edit::Name { var, .. }) if var == v.id),
+            "the name"
+        );
+        assert!(
+            matches!(f2_on(&ctx, &mut app, "brand"), Some(Edit::Group { path, .. }) if path == "brand"),
+            "the group row"
+        );
+        assert!(
+            matches!(f2_on(&ctx, &mut app, "Value"), Some(Edit::Mode { .. })),
+            "the mode header"
+        );
+        assert!(
+            matches!(f2_on(&ctx, &mut app, &hex), Some(Edit::Cell { var, .. }) if var == v.id),
+            "the colour cell"
+        );
+    }
+
     /// **A colour cell opens the colour popup, whose *Variables* tab makes it an
     /// alias and whose *Solid* writes the colour back** (D1038 G-series, §15
     /// D1052), each through the real clicks: the browser's cell, then the

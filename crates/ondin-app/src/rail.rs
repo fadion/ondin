@@ -303,6 +303,8 @@ mod tests {
         app: OndinApp,
         group: Group,
         slot: egui::Rect,
+        /// The modifiers held through every frame.
+        modifiers: egui::Modifiers,
     }
 
     impl Rig {
@@ -315,6 +317,7 @@ mod tests {
                 app,
                 group,
                 slot: egui::Rect::NOTHING,
+                modifiers: egui::Modifiers::NONE,
             };
             rig.frame(0.0, Vec::new());
             rig.frame(0.0, Vec::new());
@@ -329,6 +332,7 @@ mod tests {
                 )),
                 time: Some(time),
                 events,
+                modifiers: self.modifiers,
                 ..Default::default()
             };
             let (app, group) = (&mut self.app, self.group);
@@ -454,6 +458,39 @@ mod tests {
             Member::Frame,
             "`F` takes it back"
         );
+    }
+
+    /// `Alt+↓` on the focused slot opens its row, as a right-click does.
+    /// flip: `rail_group` dropping its `list_key` → fails at "Alt+Down opens the row".
+    #[test]
+    fn alt_down_on_a_focused_slot_opens_its_row() {
+        let mut rig = Rig::new(Group::Frame);
+        let at = rig.slot.center();
+        let slot = rig.ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws.iter())
+                .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+                .last()
+                .map(|w| w.id)
+        });
+        rig.ctx
+            .memory_mut(|m| m.request_focus(slot.expect("the slot")));
+        rig.frame(1.0, Vec::new());
+        assert!(rig.app.rail.flyout.is_none(), "fixture: closed");
+        let tool = rig.app.tool;
+        rig.modifiers = egui::Modifiers::ALT;
+        let down = egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::ALT,
+        };
+        rig.frame(1.1, vec![down]);
+        assert!(rig.app.rail.flyout.is_some(), "Alt+Down opens the row");
+        assert_eq!(rig.app.tool, tool, "and arms nothing");
     }
 
     /// `V` is the pointer with a box marquee; `Q` flips the marquee and arms Select

@@ -694,6 +694,57 @@ fn with_a_set(ctx: &egui::Context) -> OndinApp {
     app
 }
 
+/// The rect's document saved to `scratch`, then the rect renamed and two more
+/// added, and the two compared: the bar and the changes card, three rows.
+fn compared(app: &mut OndinApp, scratch: &std::path::Path) {
+    let version = scratch.join("before.ondin");
+    std::fs::write(&version, ondin_core::io::save(&app.session.doc).unwrap()).unwrap();
+    let id = app.session.selection.ids()[0];
+    let parent = app.session.page;
+    let mut ops = vec![Operation::SetName {
+        id,
+        name: "Tile".into(),
+    }];
+    for (x, name) in [(200.0, "Badge"), (300.0, "Chip")] {
+        ops.push(Operation::CreateNode {
+            id: app.session.ids.mint(),
+            parent,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, 0.0))),
+            name: Some(name.into()),
+        });
+    }
+    app.session
+        .try_commit(Transaction(ops))
+        .expect("three changes");
+    app.compare_with(
+        crate::compare::Pick {
+            path: version,
+            title: "Before".into(),
+            when: None,
+        },
+        None,
+    );
+    assert!(app.session.compare.is_some(), "fixture: the compare opens");
+}
+
+/// The rect's document filed in a library at `scratch` with two versions pinned,
+/// and Version history open on them.
+fn with_versions(app: &mut OndinApp, scratch: &std::path::Path) {
+    let root = scratch.join("library");
+    app.prefs.base_folder = Some(root.clone());
+    app.library = crate::library::state::Library::open(root);
+    assert!(app.save_file(true), "fixture: filed and pinned");
+    assert!(app.pin_saved_version().is_some(), "fixture: a second pin");
+    assert_eq!(app.document_versions().len(), 2, "fixture: two rows");
+    app.versions_open = true;
+}
+
 /// The centre of the text `label` painted in the inspector's column.
 fn painted_at(ctx: &egui::Context, app: &mut OndinApp, label: &str) -> egui::Pos2 {
     let column = OndinApp::inspector_column(Rect::from_min_size(egui::Pos2::ZERO, SCREEN));
@@ -778,6 +829,16 @@ fn row_fault(g: &Ground) -> Option<String> {
     let rung = (g.rect.height() - ui::MENU_ROW_H).abs() <= SLOP && uniform(g.radius) == Some(4);
     if !rung {
         return Some("not a list row's height and corner".into());
+    }
+    (g.fill != list_hover() || g.stroke != Stroke::NONE).then(|| "not the list row's hover".into())
+}
+
+/// `row_fault` for a row of several lines: a list row's corner and hover, at
+/// least a list row's height.
+fn tall_row_fault(g: &Ground) -> Option<String> {
+    let rung = g.rect.height() >= ui::MENU_ROW_H - SLOP && uniform(g.radius) == Some(4);
+    if !rung {
+        return Some("not a list row's corner".into());
     }
     (g.fill != list_hover() || g.stroke != Stroke::NONE).then(|| "not the list row's hover".into())
 }
@@ -1034,6 +1095,33 @@ fn sweep(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| a.toggle_var_browser());
     check("variables browser", app, found);
+    let scratch = std::env::temp_dir().join(format!(
+        "ondin-audit-{}-{}",
+        std::process::id(),
+        match theme {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+        }
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("a scratch folder");
+    // The bar and the changes card; its rows are swept below.
+    let mut app = with_a_rect(&ctx);
+    let (found, compare_rows) = swept(&ctx, &mut app, |_, a| compared(a, &scratch));
+    check("compare", app, found);
+    // The footer's two buttons, the only grounds the card paints at rest. Its
+    // timeline rows are not row-audited: a row and the body it opens are one
+    // `text_a(15)` block, not `ui::list_row_ground`.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| with_versions(a, &scratch));
+    let at_rest = audit("version history", &found, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "version history", &found, &mut faults);
+    assert!(
+        at_rest == 2 && hovered == 2,
+        "version history: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds and hovered {hovered}, not its footer's two"
+    );
+    let _ = std::fs::remove_dir_all(&scratch);
 
     // The tokens import review, on a file in its own folder per theme: two
     // groups of rows, the filters, and the link box in the footer.
@@ -1123,6 +1211,19 @@ fn sweep(theme: Theme) {
             g.rect.width()
         ));
     }
+    // The changes card's rows, a line of values under each title: a list row's
+    // corner and hover at their own height. The bar's segment cells and the
+    // card's icon buttons are narrower.
+    let compare_rows: Vec<Ground> = compare_rows
+        .into_iter()
+        .filter(|g| g.rect.width() > 200.0)
+        .collect();
+    for g in &compare_rows {
+        if let Some(why) = tall_row_fault(g) {
+            faults.push(format!("compare: {why}: {g}"));
+        }
+    }
+    rows_seen.push(("compare", compare_rows.len()));
 
     for (name, n) in &rows_seen {
         assert!(

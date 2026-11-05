@@ -238,19 +238,6 @@ fn name_field(ui: &mut egui::Ui, rect: egui::Rect, n: &mut Naming) -> bool {
     resp.lost_focus()
 }
 
-/// A status tag, the compare card's: its hue, and its sign in the tag's ink.
-fn tag(p: &egui::Painter, at: egui::Rect, status: Status) {
-    let (hue, ink, sign) = compare::look(status);
-    p.rect_filled(at, 2.0, hue);
-    p.text(
-        at.center(),
-        egui::Align2::CENTER_CENTER,
-        sign,
-        egui::FontId::proportional(crate::ui::CAPTION_PT),
-        ink,
-    );
-}
-
 /// `counts` as runs of a line: `~5`, `+2`, `−3`, each in its status's hue.
 fn count_runs(counts: Counts) -> Vec<(String, egui::Color32)> {
     counts
@@ -800,8 +787,11 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
         for (status, trail, name, what) in g.lines.iter().take(LINES_SHOWN) {
             y += 3.0;
             let cy = centre(y);
-            let at = egui::Rect::from_center_size(egui::pos2(x0 + 7.0, cy), egui::vec2(12.0, 12.0));
-            tag(&p, at, *status);
+            let at = egui::Rect::from_center_size(
+                egui::pos2(x0 + 7.0, cy),
+                egui::Vec2::splat(compare::TAG_SMALL),
+            );
+            compare::paint_tag(&p, at, *status);
             let what = match what.is_empty() {
                 true => String::new(),
                 false => format!(" · {what}"),

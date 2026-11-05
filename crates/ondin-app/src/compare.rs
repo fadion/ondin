@@ -468,6 +468,30 @@ pub(crate) fn look(status: Status) -> (egui::Color32, egui::Color32, &'static st
     }
 }
 
+/// The side of a row's status tag; a folded line's and version history's is
+/// [`TAG_SMALL`].
+pub(crate) const TAG: f32 = 16.0;
+pub(crate) const TAG_SMALL: f32 = 12.0;
+
+/// A status tag: its sign in the tag's ink on a square of its hue, sized by
+/// `at` — [`TAG`] with a `SMALL_PT` sign, anything smaller a [`TAG_SMALL`] one
+/// with a `CAPTION_PT` sign.
+pub(crate) fn paint_tag(p: &egui::Painter, at: egui::Rect, status: Status) {
+    let (hue, ink, sign) = look(status);
+    let (radius, pt) = match at.width() < TAG {
+        true => (2.0, crate::ui::CAPTION_PT),
+        false => (3.0, crate::ui::SMALL_PT),
+    };
+    p.rect_filled(at, radius, hue);
+    p.text(
+        at.center(),
+        egui::Align2::CENTER_CENTER,
+        sign,
+        egui::FontId::proportional(pt),
+        ink,
+    );
+}
+
 /// A change outside every page: added with no value before, removed with none after.
 fn status_of(c: &Change) -> Status {
     match (&c.before, &c.after) {
@@ -1540,17 +1564,9 @@ fn row_ui(
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
     let p = ui.painter();
     crate::ui::list_row_ground(p, rect, current, resp.hovered());
-    let (hue, ink, sign) = look(row.status);
     let tag =
-        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::vec2(16.0, 16.0));
-    p.rect_filled(tag, 3.0, hue);
-    p.text(
-        tag.center(),
-        egui::Align2::CENTER_CENTER,
-        sign,
-        egui::FontId::proportional(crate::ui::SMALL_PT),
-        ink,
-    );
+        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::Vec2::splat(TAG));
+    paint_tag(p, tag, row.status);
     let mut title = name.to_string();
     if row.inside > 0 {
         title.push_str(&format!(" · {} inside", row.inside));
@@ -1612,17 +1628,11 @@ fn row_ui(
                 p.galley(egui::pos2(x, y), galley, theme::text::muted());
             }
             Line::Layer(status, name) => {
-                let (hue, ink, sign) = look(*status);
-                let tag =
-                    egui::Rect::from_min_size(egui::pos2(left, y + 1.0), egui::vec2(12.0, 12.0));
-                p.rect_filled(tag, 2.0, hue);
-                p.text(
-                    tag.center(),
-                    egui::Align2::CENTER_CENTER,
-                    sign,
-                    egui::FontId::proportional(crate::ui::CAPTION_PT),
-                    ink,
+                let tag = egui::Rect::from_min_size(
+                    egui::pos2(left, y + 1.0),
+                    egui::Vec2::splat(TAG_SMALL),
                 );
+                paint_tag(p, tag, *status);
                 let x = left + FOLDED_INDENT;
                 let galley = one_line(
                     ui,
@@ -1644,17 +1654,9 @@ fn off_canvas_row(ui: &mut egui::Ui, c: &Change, private: bool) {
         egui::Sense::hover(),
     );
     let p = ui.painter();
-    let (hue, ink, sign) = look(status_of(c));
     let tag =
-        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::vec2(16.0, 16.0));
-    p.rect_filled(tag, 3.0, hue);
-    p.text(
-        tag.center(),
-        egui::Align2::CENTER_CENTER,
-        sign,
-        egui::FontId::proportional(crate::ui::SMALL_PT),
-        ink,
-    );
+        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::Vec2::splat(TAG));
+    paint_tag(p, tag, status_of(c));
     let x = tag.right() + 7.0;
     let galley = one_line(
         ui,
@@ -1836,6 +1838,40 @@ mod tests {
     use super::*;
     use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
     use ondin_core::{NodeKind, Operation, Transaction};
+
+    /// A status tag takes its corner and sign size from its side: 16pt with a
+    /// `SMALL_PT` sign, 12pt with a `CAPTION_PT` one.
+    #[test]
+    fn a_status_tag_is_sized_by_its_side() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut got = Vec::new();
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            for side in [TAG, TAG_SMALL] {
+                let at = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::Vec2::splat(side));
+                paint_tag(ui.painter(), at, Status::Added);
+            }
+        });
+        for c in &out.shapes {
+            match &c.shape {
+                egui::Shape::Rect(r) => got.push(("rect", r.corner_radius.nw as f32)),
+                egui::Shape::Text(t) => {
+                    got.push(("text", t.galley.job.sections[0].format.font_id.size))
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            got,
+            [
+                ("rect", 3.0),
+                ("text", crate::ui::SMALL_PT),
+                ("rect", 2.0),
+                ("text", crate::ui::CAPTION_PT),
+            ]
+        );
+    }
 
     fn boxed(id: NodeId, parent: NodeId, name: &str, at: (f64, f64), frame: bool) -> Operation {
         let (size, corner_radii) = (Size::new(40.0, 40.0), RoundedRectRadii::default());

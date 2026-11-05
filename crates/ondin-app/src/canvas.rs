@@ -1014,6 +1014,56 @@ fn autopan_axis(p: f32, min: f32, max: f32) -> f32 {
     crate::ui::edge_scroll_speed(p, min, max, AUTOPAN_BAND, AUTOPAN_MAX)
 }
 
+/// Whether `Space` is held for the canvas (the pan, a create drag's reposition).
+/// Not while a control holds the keyboard: there `Space` presses the control, and
+/// one key must not do both.
+fn space_down(ui: &egui::Ui) -> bool {
+    // Two reads, never nested: the context lock is not re-entrant.
+    let control = ui.ctx().memory(|m| m.focused()).is_some();
+    !control && ui.input(|i| i.key_down(egui::Key::Space))
+}
+
+#[cfg(test)]
+mod space_down_tests {
+    use eframe::egui;
+
+    /// `Space` held arms the canvas until a control holds the keyboard, whose
+    /// press it is then.
+    #[test]
+    fn a_focused_control_keeps_space_from_the_canvas() {
+        let ctx = egui::Context::default();
+        let space = egui::Event::Key {
+            key: egui::Key::Space,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frame = |events: Vec<egui::Event>, focus: bool| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let mut seen = false;
+            let _ = ctx.run_ui(input, |ui| {
+                let id = ui.make_persistent_id("control");
+                let _ = ui.interact(ui.max_rect(), id, egui::Sense::click());
+                if focus {
+                    ui.memory_mut(|m| m.request_focus(id));
+                }
+                seen = super::space_down(ui);
+            });
+            seen
+        };
+        assert!(
+            frame(vec![space.clone()], false),
+            "the control: nothing focused, Space is the canvas's"
+        );
+        frame(Vec::new(), true);
+        assert!(!frame(vec![space], true), "a focused control keeps Space");
+    }
+}
+
 /// One auto-scroll frame, as the argument [`Camera::pan_pixels`] takes (device
 /// px), or `None` when the pointer is clear of both bands on both axes.
 ///
@@ -1707,7 +1757,8 @@ impl OndinApp {
             return;
         }
 
-        let (space, middle) = ui.input(|i| (i.key_down(egui::Key::Space), i.pointer.middle_down()));
+        let space = space_down(ui);
+        let middle = ui.input(|i| i.pointer.middle_down());
         let panning = matches!(self.drag, Drag::Pan);
         // Space repositions a shape being drawn instead (`reshape_create`).
         let armed = ((space && self.mode == Mode::Normal) || self.tool == Tool::Hand)
@@ -2004,13 +2055,8 @@ impl OndinApp {
         }
 
         let handles = self.selection_handles(rect, ppp);
-        let (shift, alt, space) = ui.input(|i| {
-            (
-                i.modifiers.shift,
-                i.modifiers.alt,
-                i.key_down(egui::Key::Space),
-            )
-        });
+        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+        let space = space_down(ui);
         // Space arms a pan from any tool, so it outranks the tool's own gesture.
         let panning_armed =
             space || self.tool == Tool::Hand || resp.dragged_by(egui::PointerButton::Middle);
@@ -3817,9 +3863,9 @@ impl OndinApp {
     /// `dispatch` drops a `Nudge` while a create drag is up, so the arrows do not
     /// also move the selection.
     fn reshape_create(&mut self, ui: &egui::Ui, world: Point) {
-        let (space, up, down) = ui.input(|i| {
+        let space = space_down(ui);
+        let (up, down) = ui.input(|i| {
             (
-                i.key_down(egui::Key::Space),
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
             )

@@ -7,8 +7,8 @@ use objc2_app_kit::NSSpellChecker;
 use objc2_foundation::{NSLocale, NSRange, NSString};
 
 /// A word no dictionary holds. A listed language that accepts it checks nothing
-/// (on macOS 26 a third of them, Greek and Arabic among them, pass any word,
-/// their own script's nonsense included) and would hide every typo in a union.
+/// (some, Greek and Arabic among them, pass any word, their own script's
+/// nonsense included) and would hide every typo in a union.
 const NONSENSE: &str = "qzxqzxqzx";
 
 pub(super) struct MacOs {
@@ -137,7 +137,7 @@ mod tests {
     /// No language the backend keeps passes a word no dictionary holds.
     ///
     /// flip: `MacOs::new` keeping every language → fails at "checks nothing",
-    /// only on a Mac whose checker lists a dead dictionary (macOS 26 lists many).
+    /// only on a Mac whose checker lists a dead dictionary.
     #[test]
     fn a_dictionary_that_passes_any_word_is_left_out() {
         let b = MacOs::new().expect("the macOS checker");

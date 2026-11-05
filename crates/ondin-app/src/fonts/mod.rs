@@ -1516,7 +1516,7 @@ fn families_over_budget(
 
 /// The families the picker lists: one name per face, the first, which `fontdb`
 /// sets to the English one. A face also carries its name in other languages
-/// (macOS's system font has some thirty), and each would be a row of its own;
+/// (macOS's system font has dozens), and each would be a row of its own;
 /// [`system_faces`] still finds a face by any of them.
 fn listed_families(db: &fontdb::Database) -> BTreeSet<String> {
     db.faces()

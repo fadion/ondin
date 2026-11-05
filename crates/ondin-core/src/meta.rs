@@ -88,6 +88,11 @@ pub struct TokensLink {
     /// The file's absolute path on the machine that linked it.
     pub path: String,
     pub applied: serde_json::Value,
+    /// The collection the file's tokens that name none landed in, so a later
+    /// review lands them there again whichever collection is on show. Absent:
+    /// the one on show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<crate::variable::CollectionId>,
 }
 
 fn sharing_by_default() -> bool {

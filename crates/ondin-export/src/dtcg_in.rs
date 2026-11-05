@@ -946,10 +946,24 @@ pub struct Row {
 #[derive(Clone, Debug, PartialEq)]
 enum Item {
     Mode(usize),
-    Var { plan: usize, token: usize },
-    Remove { var: VarId, path: Vec<String> },
-    Style { plan: usize, token: usize },
-    Kit { token: usize },
+    /// The file's minimum widths for one collection's modes, by
+    /// [`Review::widths`] index.
+    Widths(usize),
+    Var {
+        plan: usize,
+        token: usize,
+    },
+    Remove {
+        var: VarId,
+        path: Vec<String>,
+    },
+    Style {
+        plan: usize,
+        token: usize,
+    },
+    Kit {
+        token: usize,
+    },
 }
 
 /// A token file compared with a document.
@@ -972,6 +986,11 @@ pub struct Review {
     /// The minimum widths the file gives a collection's modes, by mode name,
     /// for each collection it lands in that it picks by width.
     widths: Vec<(CollectionId, BTreeMap<String, f64>)>,
+    /// Where a collection of the file lands: one that names none in `into`,
+    /// a named one in the collection of its name here, made or not — so
+    /// [`Self::since`] can find an older file's collection's landing too.
+    into: CollectionId,
+    named: Vec<(String, CollectionId)>,
     /// Every variable the file reaches, changed or not: an unchanged one still
     /// takes its values for an added mode.
     vars: Vec<Wanted>,
@@ -1668,6 +1687,7 @@ pub fn review(
     }
     rows.sort_by_key(|r| order.iter().position(|g| *g == r.group));
 
+    let mode_columns: Vec<ModeId> = columns.iter().map(|(_, m)| *m).collect();
     let mut columns: Vec<String> = columns.into_iter().map(|(n, _)| n).collect();
     if columns.is_empty() {
         columns.push("Value".to_string());
@@ -1679,7 +1699,13 @@ pub fn review(
         .filter(|(fc, _)| !fc.widths.is_empty())
         .map(|(fc, c)| (*c, fc.widths.clone()))
         .collect();
-    Ok(Review {
+    let named = t
+        .collections()
+        .iter()
+        .chain(&added_collections)
+        .map(|c| (c.name.clone(), c.id))
+        .collect();
+    let mut review = Review {
         columns,
         rows,
         left_out,
@@ -1687,10 +1713,14 @@ pub fn review(
         added_modes,
         added_collections,
         widths,
+        into,
+        named,
         vars,
         styles,
         fresh,
-    })
+    };
+    review.width_rows(doc, &mode_columns, labelled);
+    Ok(review)
 }
 
 /// What a style token's references are read against.
@@ -2078,21 +2108,114 @@ impl Review {
                 .and_then(|id| old.tokens.iter().find(|o| o.id == Some(id)))
                 .or_else(|| old.tokens.iter().find(|o| o.path == tk.path))
         };
-        let modes = &self.added_modes;
-        self.rows.retain(|r| match &r.item {
-            Item::Mode(i) => !old
-                .collections
-                .iter()
-                .any(|c| c.modes.contains(&modes[*i].1.name)),
-            Item::Var { token, .. } | Item::Style { token, .. } | Item::Kit { token } => {
-                let tk = &file.tokens[*token];
-                before(tk) != Some(tk)
+        // The old file's collections that land in `c`: a mode or a width is
+        // matched within its collection, never in a sibling of the same name.
+        let (into, named) = (self.into, &self.named);
+        let landed_in = |c: CollectionId| {
+            old.collections.iter().filter(move |oc| {
+                let at = match &oc.name {
+                    None => Some(into),
+                    Some(n) => named.iter().find(|(x, _)| x == n).map(|(_, id)| *id),
+                };
+                at == Some(c)
+            })
+        };
+        let keep: Vec<bool> = self
+            .rows
+            .iter()
+            .map(|r| match &r.item {
+                Item::Mode(i) => {
+                    let (c, m) = &self.added_modes[*i];
+                    !landed_in(*c).any(|oc| oc.modes.contains(&m.name))
+                }
+                Item::Widths(w) => {
+                    let (c, now) = &self.widths[*w];
+                    !landed_in(*c).any(|oc| oc.widths == *now)
+                }
+                Item::Var { token, .. } | Item::Style { token, .. } | Item::Kit { token } => {
+                    let tk = &file.tokens[*token];
+                    before(tk) != Some(tk)
+                }
+                Item::Remove { var, path } => old
+                    .tokens
+                    .iter()
+                    .any(|o| o.id == Some(var.0) || o.path == *path),
+            })
+            .collect();
+        let mut keep = keep.into_iter();
+        self.rows.retain(|_| keep.next().unwrap_or(true));
+    }
+
+    /// A row for each collection whose minimum widths the file changes, under
+    /// its modes' columns, after the mode rows: unticked, the widths are left
+    /// as they are. `modes` is the columns' modes.
+    fn width_rows(&mut self, doc: &Document, modes: &[ModeId], labelled: bool) {
+        let t = doc.variables();
+        let every_mode = vec![true; self.added_modes.len()];
+        let written = |widths_on: &[bool]| -> Vec<(CollectionId, Option<variable::Breakpoints>)> {
+            self.breakpoint_ops(doc, &every_mode, widths_on)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::SetBreakpoints { id, breakpoints } => Some((id, breakpoints)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let with = written(&vec![true; self.widths.len()]);
+        let without = written(&vec![false; self.widths.len()]);
+        let mut rows = Vec::new();
+        for (w, (c, _)) in self.widths.iter().enumerate() {
+            let Some((_, Some(b))) = with.iter().find(|(x, _)| x == c) else {
+                continue;
+            };
+            if without.iter().any(|(x, o)| x == c && o.as_ref() == Some(b)) {
+                continue;
             }
-            Item::Remove { var, path } => old
-                .tokens
+            let held = t.collection(*c).and_then(|x| x.breakpoints.clone());
+            let shown = |px: f64| Shown {
+                text: number(px),
+                swatch: None,
+            };
+            let cells = modes
                 .iter()
-                .any(|o| o.id == Some(var.0) || o.path == *path),
-        });
+                .map(|m| Column {
+                    old: held
+                        .as_ref()
+                        .and_then(|h| h.get(m))
+                        .filter(|px| b.get(m) != Some(*px))
+                        .map(|px| shown(*px)),
+                    new: b.get(m).map(|px| shown(*px)),
+                })
+                .collect();
+            let cname = t
+                .collection(*c)
+                .or_else(|| self.added_collections.iter().find(|x| x.id == *c))
+                .map(|x| x.name.clone())
+                .unwrap_or_default();
+            rows.push(Row {
+                change: match held {
+                    Some(_) => Change::Changed,
+                    None => Change::Added,
+                },
+                group: "Modes".to_string(),
+                name: match labelled {
+                    true => format!("Breakpoints of {cname}"),
+                    false => "Breakpoints".to_string(),
+                },
+                sub: held
+                    .is_none()
+                    .then(|| "each frame picks its mode by its width".to_string()),
+                cells,
+                ticked: true,
+                item: Item::Widths(w),
+            });
+        }
+        let at = self
+            .rows
+            .iter()
+            .rposition(|r| matches!(r.item, Item::Mode(_)))
+            .map_or(0, |i| i + 1);
+        self.rows.splice(at..at, rows);
     }
 
     /// The rows that can be applied: all but a kit's.
@@ -2101,11 +2224,12 @@ impl Review {
     }
 
     /// The widths of each collection picked by width once the modes `on`
-    /// marks are added: the file's, by mode name, where they cover every mode
-    /// from 0 ascending and no other collection is picked by width; else, for
-    /// a collection already picked by width, its own, each added mode starting
+    /// marks are added: the file's, by mode name, where its widths row is
+    /// ticked in `widths_on`, they cover every mode from 0 ascending and no
+    /// other collection is picked by width; else, for a collection already
+    /// picked by width, its own, each added mode starting
     /// [`variable::WIDTH_STEP`] past the one before. After the `AddMode`s.
-    fn breakpoint_ops(&self, doc: &Document, on: &[bool]) -> Vec<Operation> {
+    fn breakpoint_ops(&self, doc: &Document, on: &[bool], widths_on: &[bool]) -> Vec<Operation> {
         let t = doc.variables();
         let mut out = Vec::new();
         let mut landed: Vec<CollectionId> = self.widths.iter().map(|(c, _)| *c).collect();
@@ -2133,8 +2257,9 @@ impl Review {
             let file = self
                 .widths
                 .iter()
-                .find(|(x, _)| *x == c)
-                .and_then(|(_, w)| {
+                .zip(widths_on)
+                .find(|((x, _), on)| *x == c && **on)
+                .and_then(|((_, w), _)| {
                     modes
                         .iter()
                         .map(|m| Some((m.id, *w.get(&m.name)?)))
@@ -2178,6 +2303,7 @@ impl Review {
         let on = |i: usize| ticked.get(i).copied().unwrap_or(false);
         let t = doc.variables();
         let mut modes_on = vec![false; self.added_modes.len()];
+        let mut widths_on = vec![false; self.widths.len()];
         let mut vars_on = BTreeSet::new();
         let mut styles_on = BTreeSet::new();
         let mut removed = Vec::new();
@@ -2187,6 +2313,7 @@ impl Review {
             }
             match &r.item {
                 Item::Mode(m) => modes_on[*m] = true,
+                Item::Widths(w) => widths_on[*w] = true,
                 Item::Var { plan, .. } => {
                     vars_on.insert(*plan);
                 }
@@ -2278,7 +2405,7 @@ impl Review {
             });
             *at += 1;
         }
-        ops.extend(self.breakpoint_ops(doc, &modes_on));
+        ops.extend(self.breakpoint_ops(doc, &modes_on, &widths_on));
         for p in &vars_on {
             let w = &self.vars[*p];
             let var = shaped(&w.var);
@@ -2382,22 +2509,10 @@ impl Review {
     }
 }
 
-/// Every variable a style's value binds.
+/// Every variable a style's value binds: core's own list, a layout's flow
+/// bindings with its gaps.
 fn style_vars(v: &StyleValue) -> Vec<VarId> {
-    let mut out = Vec::new();
-    match v {
-        StyleValue::Fills(l) => out.extend(l.iter().filter_map(|f| f.brush.var())),
-        StyleValue::Strokes(l) => {
-            for s in l {
-                out.extend(s.brush.var());
-                out.extend(s.width_var);
-            }
-        }
-        StyleValue::Effects(l) => out.extend(l.iter().flat_map(|e| e.vars.into_iter().flatten())),
-        StyleValue::Layout(l) => out.extend(l.spacing_vars.into_iter().flatten()),
-        StyleValue::Text(_) => {}
-    }
-    out
+    v.vars()
 }
 
 fn style_reads(v: &StyleValue, var: VarId) -> bool {

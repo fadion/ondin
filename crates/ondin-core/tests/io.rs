@@ -2476,21 +2476,35 @@ fn a_filed_document_round_trips_its_library_identity() {
     assert_eq!(io::save(&loaded).unwrap(), bytes);
 }
 
-/// A linked tokens file and its last-applied copy survive a save, and re-save
-/// byte-identically; a document linked to none writes no key.
+/// A linked tokens file, its last-applied copy and its landing collection
+/// survive a save, and re-save byte-identically; a document linked to none
+/// writes no key, and a link saved without `into` loads with none.
 #[test]
 fn a_tokens_link_round_trips() {
     let (mut doc, _root) = rich_document();
     let plain = String::from_utf8(io::save(&doc).unwrap()).unwrap();
     assert!(!plain.contains("tokens_link"), "{plain}");
-    doc.set_tokens_link(Some(ondin_core::meta::TokensLink {
+    let mut ids = ondin_core::IdSource::new(7);
+    let link = ondin_core::meta::TokensLink {
         path: "C:/work/tokens.json".into(),
         applied: serde_json::json!({ "space": { "s": { "$type": "number", "$value": 4 } } }),
-    }));
+        into: Some(ids.mint_collection()),
+    };
+    doc.set_tokens_link(Some(link.clone()));
     let bytes = io::save(&doc).unwrap();
     let loaded = io::load(&bytes).unwrap();
     assert_eq!(loaded.tokens_link(), doc.tokens_link());
     assert_eq!(io::save(&loaded).unwrap(), bytes);
+
+    doc.set_tokens_link(Some(ondin_core::meta::TokensLink { into: None, ..link }));
+    let bare = io::save(&doc).unwrap();
+    assert!(
+        !String::from_utf8(bare.clone())
+            .unwrap()
+            .contains("\"into\""),
+        "an absent landing writes no key"
+    );
+    assert_eq!(io::load(&bare).unwrap().tokens_link().unwrap().into, None);
 }
 
 /// A document filed under only *some* of the block writes only those keys.

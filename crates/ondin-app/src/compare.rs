@@ -2410,6 +2410,7 @@ mod tests {
         let link = ondin_core::meta::TokensLink {
             path: "C:/work/tokens.json".into(),
             applied: serde_json::json!({}),
+            into: None,
         };
         f.app.session.doc.set_tokens_link(Some(link.clone()));
         open(&mut f);

@@ -41,6 +41,9 @@ pub(crate) struct TokensImport {
     path: PathBuf,
     /// The file as read, kept to record it as applied when linked.
     text: String,
+    /// The collection the file's tokens that name none land in, recorded with
+    /// the link.
+    into: ondin_core::variable::CollectionId,
     review: Review,
     ticked: Vec<bool>,
     filter: Option<Change>,
@@ -73,8 +76,56 @@ pub(crate) struct TokensWatch {
     later: Option<(String, Stat)>,
 }
 
-/// A file's [`Stat`]; `None` when it cannot be read.
+/// The most of a tokens file read: far past any real one, short of a stream
+/// that never ends.
+const MAX_READ: u64 = 16 * 1024 * 1024;
+
+/// Whether a path a document carries may be looked at: absolute, on a local
+/// drive and not a device name. The document is untrusted, and on Windows even
+/// a stat of `\\host\share` sends the user's credentials to that host.
+fn local_path(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    if !path.is_absolute() {
+        return false;
+    }
+    let local = match path.components().next() {
+        Some(Component::Prefix(p)) => matches!(p.kind(), Prefix::Disk(_)),
+        Some(Component::RootDir) => !cfg!(windows),
+        _ => false,
+    };
+    // `C:\any\NUL.json` is the null device on Windows.
+    let device = path.file_stem().is_some_and(|s| {
+        let s = s.to_string_lossy().to_ascii_uppercase();
+        let s = s.split('.').next().unwrap_or_default();
+        matches!(s, "CON" | "PRN" | "AUX" | "NUL")
+            || (s.len() == 4
+                && (s.starts_with("COM") || s.starts_with("LPT"))
+                && s.as_bytes()[3].is_ascii_digit())
+    });
+    local && !(cfg!(windows) && device)
+}
+
+/// The linked file's text: a regular local file, read to at most `cap` bytes;
+/// `None` for anything else — a share, a device, a pipe, a stream with no end.
+fn read_linked(path: &Path, cap: u64) -> Option<String> {
+    use std::io::Read;
+    if !local_path(path) || !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(cap + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    (text.len() as u64 <= cap).then_some(text)
+}
+
+/// A file's [`Stat`]; `None` when it cannot be read or is not a local file.
 fn on_disk(path: &Path) -> Stat {
+    if !local_path(path) {
+        return None;
+    }
     let m = std::fs::metadata(path).ok()?;
     let modified = m
         .modified()
@@ -104,7 +155,7 @@ fn where_label(path: &Path) -> (String, String) {
 /// What the linked file changed since it was last applied, counted against
 /// `doc` with ids that are thrown away.
 fn linked_changes(doc: &ondin_core::Document, link: &TokensLink) -> usize {
-    let Ok(text) = std::fs::read_to_string(&link.path) else {
+    let Some(text) = read_linked(Path::new(&link.path), MAX_READ) else {
         return 0;
     };
     let (Ok(file), Ok(old)) = (
@@ -114,7 +165,8 @@ fn linked_changes(doc: &ondin_core::Document, link: &TokensLink) -> usize {
         return 0;
     };
     let mut ids = IdSource::new(0x70C3);
-    match dtcg_in::review(doc, &file, doc.variables().first_collection().id, &mut ids) {
+    let into = link.into.unwrap_or(doc.variables().first_collection().id);
+    match dtcg_in::review(doc, &file, into, &mut ids) {
         Ok(mut r) => {
             r.since(&file, &old);
             r.changes()
@@ -181,9 +233,15 @@ impl OndinApp {
 
     /// Read `path` and open its review; a file that is not DTCG is refused on
     /// the status line with the first reason and where.
+    /// The linked file's path came from the document, so it is read only as
+    /// [`read_linked`] allows.
     pub(crate) fn open_tokens_import(&mut self, path: PathBuf, from_link: bool) {
         let (name, _) = where_label(&path);
-        match std::fs::read_to_string(&path) {
+        let text = match from_link {
+            true => read_linked(&path, MAX_READ).ok_or_else(|| "not a local file".to_string()),
+            false => std::fs::read_to_string(&path).map_err(|e| e.to_string()),
+        };
+        match text {
             Ok(text) => self.open_tokens_text(path, text, true, from_link),
             Err(e) => self.session.info(format!("Could not read {name}: {e}")),
         }
@@ -210,7 +268,13 @@ impl OndinApp {
                 return;
             }
         };
-        let into = self.shown_collection();
+        let held = self.session.doc.tokens_link().cloned();
+        // A linked file lands where it was applied, whichever collection is on show.
+        let into = held
+            .as_ref()
+            .and_then(|l| l.into)
+            .filter(|c| from_link && self.session.doc.variables().collection(*c).is_some())
+            .unwrap_or_else(|| self.shown_collection());
         let mut review =
             match dtcg_in::review(&self.session.doc, &file, into, &mut self.session.ids) {
                 Ok(r) => r,
@@ -219,7 +283,6 @@ impl OndinApp {
                     return;
                 }
             };
-        let held = self.session.doc.tokens_link().cloned();
         let same = held
             .as_ref()
             .is_some_and(|l| Path::new(&l.path) == path.as_path());
@@ -236,6 +299,7 @@ impl OndinApp {
         let mut t = TokensImport {
             path,
             text,
+            into,
             review,
             ticked,
             filter: None,
@@ -302,6 +366,7 @@ impl OndinApp {
                 let link = TokensLink {
                     path: t.path.to_string_lossy().into_owned(),
                     applied,
+                    into: Some(t.into),
                 };
                 if held.as_ref() != Some(&link) {
                     self.session.doc.set_tokens_link(Some(link));
@@ -1177,6 +1242,58 @@ mod tests {
         assert_eq!(names, ["space.gutter"]);
     }
 
+    /// A linked file's review lands where the link was applied, not in the
+    /// collection on show: its colour is changed in place, not minted again there.
+    /// flip: `open_tokens_text` landing a linked review in `shown_collection()` →
+    /// fails at "one brand/500".
+    #[test]
+    fn a_linked_review_lands_where_the_link_was_applied() {
+        use ondin_core::variable::{Collection, Mode};
+        let (_ctx, mut app) = app();
+        let path = temp_file("landing", FILE);
+        app.open_tokens_import(path.clone(), false);
+        apply(&mut app);
+        let theme = app.session.doc.variables().first_collection().id;
+        let ids = &mut app.session.ids;
+        let (spacing, base, gap) = (ids.mint_collection(), ids.mint_mode(), ids.mint_var());
+        assert!(app.session.commit(Transaction(vec![
+            ondin_core::Operation::AddCollection {
+                collection: Collection {
+                    id: spacing,
+                    name: "Spacing".into(),
+                    modes: vec![Mode {
+                        id: base,
+                        name: "Base".into(),
+                    }],
+                    breakpoints: None,
+                },
+                index: 1,
+            },
+            ondin_core::Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: gap,
+                    name: "gap".into(),
+                    kind: ondin_core::VarKind::Number,
+                    cells: [(base, ondin_core::Cell::Number(4.0))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ])));
+        app.open_scope(gap);
+        assert_eq!(app.shown_collection(), spacing, "Spacing is on show");
+        std::fs::write(&path, FILE.replace("#6d8cd9", "#ff0000")).unwrap();
+        app.open_linked_tokens();
+        apply(&mut app);
+        let t = app.session.doc.variables();
+        let brands: Vec<_> = t.iter().filter(|v| v.name == "brand/500").collect();
+        assert_eq!(brands.len(), 1, "one brand/500");
+        assert_eq!(t.collection_of(brands[0].id).map(|c| c.id), Some(theme));
+        assert_eq!(brands[0].cells.len(), 2, "its Light and Dark");
+    }
+
     /// The review draws frame after frame without closing itself, its rows under
     /// their group headers, and `Escape` closes it applying nothing.
     #[test]
@@ -1308,6 +1425,45 @@ mod tests {
         let _ = ctx.run_ui(input, |ui| app.take_dropped_images(ui.ctx()));
         let t = app.tokens_import.as_ref().expect("the review opened");
         assert!(!t.linkable && !t.link);
+    }
+
+    /// A link's path is looked at only when it is a local regular file: never a
+    /// share, a device or a relative path, and a file past the cap is not read.
+    /// flip: `local_path` answering `true` for a UNC prefix → fails at "a share".
+    #[test]
+    fn a_link_is_read_only_from_a_local_file() {
+        for p in [
+            r"\\attacker.example\s\tokens.json",
+            "//attacker.example/s/tokens.json",
+        ] {
+            assert!(!local_path(Path::new(p)), "a share: {p}");
+            assert_eq!(on_disk(Path::new(p)), None, "never stat'd: {p}");
+        }
+        assert!(!local_path(Path::new("tokens.json")), "a relative path");
+        #[cfg(windows)]
+        for p in [
+            r"\\?\C:\t\tokens.json",
+            r"\\.\pipe\tokens",
+            r"C:\t\NUL.json",
+            r"C:\t\com1",
+        ] {
+            assert!(
+                !local_path(Path::new(p)),
+                "a device or a verbatim path: {p}"
+            );
+        }
+        #[cfg(unix)]
+        assert_eq!(
+            read_linked(Path::new("/dev/zero"), MAX_READ),
+            None,
+            "a device"
+        );
+        let path = temp_file("local", FILE);
+        assert!(local_path(&path));
+        assert_eq!(read_linked(&path, MAX_READ).as_deref(), Some(FILE));
+        assert_eq!(read_linked(&path, 8), None, "past the cap");
+        let dir = path.parent().unwrap();
+        assert_eq!(read_linked(dir, MAX_READ), None, "a folder");
     }
 
     /// A file that is not tokens is refused on the status line, and nothing opens.

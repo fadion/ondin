@@ -490,6 +490,84 @@ fn since_keeps_only_what_the_file_changed() {
     assert_eq!(r.changes(), 1);
 }
 
+/// `since` offers a removal only of a token the old file held, and an added
+/// mode only when the old file lacked it: a variable the document added since
+/// and a mode both files have are left alone.
+/// flip: `since`'s removal arm keeping every row → fails at "added since".
+#[test]
+fn since_keeps_a_removal_and_a_mode_only_when_the_file_changed_them() {
+    let mut d = doc();
+    let mut applied = exported(&d);
+    let with_mode = |v: &mut Value, name: &str| {
+        v["$extensions"]["io.github.fadion.ondin"]["modes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": name }));
+    };
+    with_mode(&mut applied, "Sepia");
+    // The document adds a variable the file never had.
+    let extra = d.ids.mint_var();
+    d.doc
+        .apply(&Transaction(vec![add_var(
+            extra,
+            "extra",
+            VarKind::Number,
+            vec![(d.light, Cell::Number(1.0)), (d.dark, Cell::Number(1.0))],
+        )]))
+        .unwrap();
+    let mut now = applied.clone();
+    now.as_object_mut().unwrap().remove("count");
+    with_mode(&mut now, "High contrast");
+    let mut r = reviewed(&mut d, &now);
+    let before: Vec<String> = names(&r).into_iter().map(|(n, _)| n).collect();
+    assert!(
+        before.contains(&"extra".to_string()) && before.contains(&"count".to_string()),
+        "both removals are offered before `since`: {before:?}"
+    );
+    r.since(&read(&now), &read(&applied));
+    let after: Vec<String> = names(&r).into_iter().map(|(n, _)| n).collect();
+    assert!(
+        !after.contains(&"extra".to_string()),
+        "added since: {after:?}"
+    );
+    assert!(after.contains(&"count".to_string()), "the file dropped it");
+    assert!(after.contains(&"Adds mode \u{201c}High contrast\u{201d}".to_string()));
+    assert!(
+        !after.contains(&"Adds mode \u{201c}Sepia\u{201d}".to_string()),
+        "both files have it: {after:?}"
+    );
+}
+
+/// A layout style's bound direction is a reader: a removal of its variable says
+/// so.
+/// flip: `style_vars` leaving out a layout's flow bindings → fails here.
+#[test]
+fn a_layout_styles_flow_binding_reads_its_variable() {
+    let mut d = doc();
+    let label = d.doc.variables().by_name("copy/label").unwrap().id;
+    let mut v = exported(&d);
+    // A string rides in the extension's `variables`, by name.
+    v["$extensions"]["io.github.fadion.ondin"]["variables"]
+        .as_object_mut()
+        .unwrap()
+        .remove("copy/label")
+        .expect("the export wrote it");
+    let layout = StyleValue::Layout(Box::new(ondin_core::style::LayoutStyle {
+        display: ondin_core::container::Display::Flex(ondin_core::container::Flex {
+            direction_var: Some(label),
+            ..Default::default()
+        }),
+        spacing_vars: Default::default(),
+    }));
+    let op = add_style(&mut d.ids, "Stack", layout);
+    d.doc.apply(&Transaction(vec![op])).unwrap();
+    let r = reviewed(&mut d, &v);
+    assert_eq!(
+        row(&r, "copy.label").sub.as_deref(),
+        Some("read by 1 style")
+    );
+}
+
 /// A border's width read by reference binds the stroke style to the variable,
 /// and a fill bound to a colour variable stays bound — both from the export's
 /// `styles` group.

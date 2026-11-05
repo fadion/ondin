@@ -1525,10 +1525,26 @@ impl OndinApp {
         if let Some((from, step)) = self.layers_focus_step.take()
             && let Some(i) = flat.iter().position(|r| r.id == from)
         {
-            let j = i
-                .saturating_add_signed(isize::from(step))
-                .min(flat.len() - 1);
-            if j != i {
+            // The nearest row that way whose layer is still there, else the other way
+            // after a delete: one also takes an open group's own rows.
+            let doc = &self.session.doc;
+            let alive = |j: usize| doc.get(flat[j].id).is_some();
+            let nearest = |step: isize| {
+                let mut j = i;
+                loop {
+                    let k = j.saturating_add_signed(step).min(flat.len() - 1);
+                    if k == j {
+                        return None;
+                    }
+                    j = k;
+                    if alive(j) {
+                        return Some(j);
+                    }
+                }
+            };
+            let step = isize::from(step);
+            let to = nearest(step).or_else(|| (!alive(i)).then(|| nearest(-step)).flatten());
+            if let Some(j) = to {
                 let to = row_id(flat[j].id);
                 ui.interact(rows[j].rect, to, egui::Sense::click_and_drag());
                 ui.memory_mut(|m| m.request_focus(to));
@@ -2182,6 +2198,26 @@ impl OndinApp {
         };
         if step != 0 {
             self.layers_focus_step = Some((id, step));
+        }
+        // `Delete` on the focused row deletes as the keymap's does: the selection when
+        // the row is in it, else the row alone. The focus goes to the row that takes
+        // its place, or the one above when it was the last.
+        let delete = !renaming
+            && resp.has_focus()
+            && ui.input(|i| {
+                i.modifiers.is_none()
+                    && (i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            });
+        if delete {
+            if !self.session.selection.contains(id) {
+                self.session.selection.set_one(id);
+                self.layers_synced_selection = self.session.selection.ids().to_vec();
+            }
+            self.delete_selection();
+            if self.session.doc.get(id).is_none() {
+                self.layers_focus_step = Some((id, 1));
+            }
+            return;
         }
         if clicked || keyed.is_some() {
             // `interact_pointer_pos`, not the hover-based `under`: they can
@@ -6670,6 +6706,52 @@ mod keyboard_row_tests {
             app.renaming_layer.as_ref().map(|r| r.0),
             Some(rows[0]),
             "F2 renames it"
+        );
+    }
+
+    /// `Delete` on a focused row it is not selected with deletes that row alone and
+    /// hands the focus to the row below; on the last row, to the one above; on a
+    /// selected row, the whole selection goes.
+    /// flip: `tree_rows` stops falling back the other way → fails at "the one above".
+    #[test]
+    fn delete_on_the_focused_row_deletes_and_keeps_the_focus_in_the_tree() {
+        let ctx = egui::Context::default();
+        let (mut app, rows) = focused_tree(&ctx, 4);
+        app.session.selection.set_one(rows[3]);
+        let delete = || vec![key(egui::Key::Delete, egui::Modifiers::NONE)];
+        frame(&ctx, &mut app, delete());
+        frame(&ctx, &mut app, Vec::new());
+        assert!(
+            app.session.doc.get(rows[0]).is_none(),
+            "the focused row went"
+        );
+        assert!(
+            app.session.doc.get(rows[3]).is_some(),
+            "not the selection it was not in"
+        );
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(row_id(rows[1])),
+            "the row below"
+        );
+
+        ctx.memory_mut(|m| m.request_focus(row_id(rows[3])));
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, delete());
+        frame(&ctx, &mut app, Vec::new());
+        assert!(app.session.doc.get(rows[3]).is_none(), "the last row went");
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(row_id(rows[2])),
+            "the one above"
+        );
+
+        app.session.selection.set(vec![rows[1], rows[2]]);
+        frame(&ctx, &mut app, delete());
+        assert!(
+            app.session.doc.get(rows[1]).is_none() && app.session.doc.get(rows[2]).is_none(),
+            "a selected row's Delete takes the selection"
         );
     }
 }

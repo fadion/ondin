@@ -3526,8 +3526,8 @@ pub fn arrow_keys(ui: &egui::Ui, resp: &egui::Response, x: bool, y: bool) -> Arr
     })
 }
 
-/// Whether the focused control `resp` was asked to rename what it stands for:
-/// `F2` or `Ctrl+R`, the keys rename has everywhere else.
+/// Whether the focused control `resp` was asked to rename what it stands for, or
+/// to type into the cell it is: `F2` or `Ctrl+R`, the keys rename has everywhere.
 pub fn rename_key(ui: &egui::Ui, resp: &egui::Response) -> bool {
     resp.has_focus()
         && ui.input(|i| {

@@ -367,9 +367,9 @@ the control's (`design/app-chrome.md`, *Two kinds of focus*):
 | `Enter` · `Space` | press it, as a click does |
 | `Shift+F10` | right-click it: its menu, where the pointer's would open (`ui::menu_key_as_right_click`) |
 | `Alt+↓` | open the list behind it: a split button's choices, a tool group's members (`ui::list_key`) |
-| `F2` · `Ctrl+R` | rename the row: a layer, a page, a variable, a mode, a group (`ui::rename_key`) |
+| `F2` · `Ctrl+R` | rename the row: a layer, a page, a variable, a mode, a group; type into a variable's colour cell (`ui::rename_key`) |
 | arrows | a slider, the picker's plane and tracks, a gradient stop: a hundredth of the range, a tenth with `Shift` (`ui::arrow_keys`). Elsewhere egui moves the focus to the neighbour that way |
-| `Delete` | a gradient stop: remove it (not below two) |
+| `Delete` | a gradient stop: remove it (not below two). A layers row: delete the selection when the row is in it, else the row |
 | `Escape` | drop the focus, or close the surface it is in |
 
 A layers row adds `→`/`←` (open, fold), `↑`/`↓` (the next row, past the rows in view) and

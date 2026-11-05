@@ -3860,7 +3860,8 @@ fn var_row(
             mode: m.id,
             text: cell_text(table, c),
         };
-        if colour && ui::double_clicked(ui, &cell_resp) {
+        // `F2` types into the focused cell, as a spreadsheet's does.
+        if colour && (ui::double_clicked(ui, &cell_resp) || ui::rename_key(ui, &cell_resp)) {
             acts.push(Act::StartEdit(start));
         } else if colour && cell_resp.clicked() {
             acts.push(Act::OpenPicker(

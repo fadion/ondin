@@ -80,7 +80,8 @@ windows.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading.workspace = true
 
-# Spell check's `NSSpellChecker` (`spell::macos`).
+# Spell check's `NSSpellChecker` (`spell::macos`), and the OS's open-documents
+# event (`open_event`).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-foundation.workspace = true

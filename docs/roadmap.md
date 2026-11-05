@@ -85,14 +85,10 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 ## Later · Platform and dependencies
 
 - **`Event::Zoom` and touchscreen pinch** (§15 D822) — trigger: a Mac or a touch device.
-- **Double-click to open on macOS.** Finder sends an `application:openURLs:` event, which winit 0.30
-  does not expose, and the `.app`'s `Info.plist` (written by `vpk`) declares no
-  `CFBundleDocumentTypes`. Windows and Linux are built (`app-chrome.md`, *Opening a document from
-  the OS*); `ondin <file>` works everywhere. Trigger: a Mac to test on, or a winit that delivers it.
-- **One file in two Ondin processes.** A second launch (`ondin <file>`, a double-click) opens a
-  file another process already has open, and the two save over each other; one window guards
-  only its own tabs (`tab_of_file`). Needs a lock beside the file, or single-instance forwarding
-  of the open to the running window.
+- **One file in two Ondin processes.** A second launch (`ondin <file>`, or a double-click on Windows
+  and Linux) opens a file another process already has open, and the two save over each other; one
+  window guards only its own tabs (`tab_of_file`). Needs a lock beside the file, or
+  single-instance forwarding of the open to the running window.
 - **Eyedropper: sampling outside the window** with the same loupe.
   Needs a capture path per OS (Windows has no system picker), and an off-window sample needs
   converting from the display's space to sRGB. Inside the window is built (`tools.md`, *The

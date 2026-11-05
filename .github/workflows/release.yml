@@ -221,35 +221,16 @@ jobs:
           Copy-Item licenses/*.txt dist/
           Compress-Archive -Path dist/* -DestinationPath "ondin-${{ github.ref_name }}-${{ matrix.target }}.zip"
 
-      # macOS gets no archive of its own: `vpk` builds the .app, and the .dmg
-      # below is the macOS deliverable. This stages only what the bundle holds.
-      - name: Stage the payload (macOS)
+      # macOS gets no archive of its own: the .dmg below is the macOS deliverable.
+      # The .app is built here, Info.plist with its document type, icon and
+      # notices included, and `vpk` packs it as it is. The icon is made from
+      # `icon-1024.png` on the runner, as only macOS can build an .icns.
+      - name: Build Ondin.app (macOS)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           mkdir dist
-          cp target/release/ondin dist/
-          cp LICENSE THIRD-PARTY-NOTICES.md README.md dist/
-          cp crates/ondin-core/assets/fonts/OFL.txt dist/Inter-OFL.txt
-          cp licenses/*.txt dist/
-
-      # `vpk` wants an .icns on macOS, and only macOS can build one, so the PNG
-      # stays the single source rather than a second icon checked in beside it.
-      # The whole set up to 512@2x, so a Retina Dock draws artwork rather than an
-      # upscale — which is why the source is `icon-1024.png`: 512@2x consumes it
-      # whole. (Until 2026-10-03 the largest artwork was 256 and the set stopped
-      # at 128@2x.) Schemaic's step, on the same icon set.
-      - name: Build the .icns (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          mkdir -p icon.iconset
-          for sz in 16 32 128 256 512; do
-            sips -z $sz $sz icons/icon-1024.png --out "icon.iconset/icon_${sz}x${sz}.png" >/dev/null
-            sips -z $((sz * 2)) $((sz * 2)) icons/icon-1024.png --out "icon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
-          done
-          iconutil -c icns icon.iconset -o icon.icns
-          ls -l icon.icns
+          bash packaging/macos/build-app.sh "$VPK_VERSION" target/release/ondin dist
 
       # ── Velopack: the self-updating artifacts ────────────────────────────
       # A per-user Setup.exe that installs to %LocalAppData% with no UAC prompt,
@@ -330,21 +311,22 @@ jobs:
             --delta None
 
       # Unsigned and un-notarized, as the Windows installer is: Gatekeeper is the
-      # cost, and the README says how past it. `--bundleId` is the same reverse-DNS
-      # id the window, the desktop entry and AppStream use — one identity on every
-      # platform. No `--noPortable`: its zip is the one predictable place the
-      # finished .app can be found, which the .dmg step below unpacks.
+      # cost, and the README says how past it. A `--packDir` ending in `.app` is
+      # used as it is, so the bundle's own Info.plist ships; `--bundleId` repeats
+      # its id, the one the window, the desktop entry and AppStream use. No
+      # `--noPortable`: its zip is the one predictable place the finished .app
+      # can be found, which the .dmg step below unpacks.
       - name: Package with Velopack (macOS)
         if: runner.os == 'macOS'
         run: |
           vpk pack \
             --packId Ondin \
             --packVersion "$VPK_VERSION" \
-            --packDir dist \
+            --packDir dist/Ondin.app \
             --mainExe ondin \
             --packTitle Ondin \
             --packAuthors "Ondin contributors" \
-            --icon icon.icns \
+            --icon dist/Ondin.app/Contents/Resources/icon.icns \
             --bundleId io.github.fadion.Ondin \
             --channel ${{ matrix.channel }} \
             --delta None
@@ -362,6 +344,12 @@ jobs:
           set -euo pipefail
           rm -rf dmg-root && mkdir -p dmg-root
           ditto -x -k "Releases/Ondin-${{ matrix.channel }}-Portable.zip" dmg-root
+          # The shipped app must still say it opens .ondin files, whatever `vpk`
+          # did to the bundle it was given.
+          plist=dmg-root/Ondin.app/Contents/Info.plist
+          test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeIdentifier raw "$plist")" = io.github.fadion.Ondin.document
+          test "$(plutil -extract CFBundleDocumentTypes.0.LSItemContentTypes.0 raw "$plist")" = io.github.fadion.Ondin.document
+          test "$(plutil -extract CFBundleShortVersionString raw "$plist")" = "$VPK_VERSION"
           ln -s /Applications dmg-root/Applications
           hdiutil create -volname Ondin -srcfolder dmg-root -ov -format UDZO \
             "Releases/Ondin-${{ matrix.channel }}.dmg"

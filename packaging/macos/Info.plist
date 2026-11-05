@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Ondin.app's Info.plist, copied in by build-app.sh, which writes both version
+  keys from the release version. The bundle id is the app id used on every
+  platform (`chrome::APP_ID`).
+
+  The document type makes Finder open a .ondin with Ondin, and the app reads the
+  open event (`open_event`). The type conforms to public.json, as the Linux MIME
+  type subclasses application/json, so a text editor stays on offer beside it.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>ondin</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.github.fadion.Ondin</string>
+  <key>CFBundleName</key>
+  <string>Ondin</string>
+  <key>CFBundleDisplayName</key>
+  <string>Ondin</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>0.0.0</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Ondin document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>icon</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>io.github.fadion.Ondin.document</string>
+      </array>
+    </dict>
+  </array>
+
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>io.github.fadion.Ondin.document</string>
+      <key>UTTypeDescription</key>
+      <string>Ondin document</string>
+      <key>UTTypeIconFile</key>
+      <string>icon</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.json</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>ondin</string>
+        </array>
+        <key>public.mime-type</key>
+        <array>
+          <string>application/x-ondin</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

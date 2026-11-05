@@ -61,9 +61,9 @@ The non-negotiable rules of the Ondin architecture (original §4, numbering pres
 
 12. **The app's distribution identity never changes once shipped.** Installed copies find updates by these values; renaming one orphans every install with no route back to those users. (D956, D957)
     - Velopack `--packId Ondin` and channels `win-x64`, `linux-x64`, `osx-arm64`.
-    - Reverse-DNS id `io.github.fadion.Ondin` (`chrome::APP_ID`: Wayland app id, X11 class, desktop entry, AppStream metadata, icons, macOS `--bundleId`).
+    - Reverse-DNS id `io.github.fadion.Ondin` (`chrome::APP_ID`: Wayland app id, X11 class, desktop entry, AppStream metadata, icons, macOS `CFBundleIdentifier` in `packaging/macos/Info.plist`, repeated by `--bundleId`).
     - Release feed `https://github.com/fadion/ondin` and opt-out `ONDIN_NO_UPDATE_CHECK` (`update.rs`).
-    - The document type: Windows ProgID `Ondin.Document` (`file_type.rs`) and MIME type `application/x-ondin` (`packaging/linux`); a rename leaves the old association behind.
+    - The document type: Windows ProgID `Ondin.Document` (`file_type.rs`), MIME type `application/x-ondin` (`packaging/linux`) and macOS type `io.github.fadion.Ondin.document` (`packaging/macos/Info.plist`); a rename leaves the old association behind.
     - Package repositories' base URL `https://fadion.github.io/ondin`, keyring path, `Origin: Ondin`, `Suite: stable`, `main`/`amd64`.
     - A new platform adds a channel; it never renames one.
     - Guards: `release.yml` refuses an unknown channel; a test pins the feed and opt-out; a `pages.yml` step compares repository values across their copies; `machine_dir::tests` reads every `--packId` from `release.yml` and demands `Ondin`. The app id has no check at all.

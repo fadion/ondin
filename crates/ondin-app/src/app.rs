@@ -1760,6 +1760,14 @@ impl eframe::App for OndinApp {
         // `disk_results` or ticks (`go_to_dashboard` compensates one). A library file
         // read off the frame lands here, before the screen it switches to is drawn.
         self.poll_open(ui.ctx());
+        // Files the OS asked to open while the window runs, on either screen, as
+        // `ondin <file>` opens them; a modal holds them back, as it does a drop.
+        #[cfg(target_os = "macos")]
+        if !self.modal_is_up() {
+            for path in crate::open_event::take() {
+                self.open_path(&path);
+            }
+        }
         // Before every early return, so an export landing behind the library, a
         // tab still being read or present mode is reported when it lands.
         self.poll_exports();

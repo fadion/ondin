@@ -114,6 +114,8 @@ mod measure;
 mod menu;
 mod meter;
 mod minimap;
+#[cfg(target_os = "macos")]
+mod open_event;
 mod pages;
 mod palette;
 mod panels;
@@ -1379,10 +1381,22 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
         persistence_path: dirs::config_dir().map(|d| d.join("ondin").join("window.ron")),
         ..Default::default()
     };
+    #[cfg(target_os = "macos")]
+    open_event::install();
     eframe::run_native(
         "Ondin",
         options,
-        Box::new(|cc| Ok(Box::new(app::OndinApp::new(cc, open)))),
+        Box::new(|cc| {
+            // A launch by the OS's open event has queued its files by now, as AppKit
+            // delivers it before the window is made; the first opens as `ondin <file>`
+            // does, and a frame takes the rest.
+            #[cfg(target_os = "macos")]
+            let open = {
+                open_event::wake_with(&cc.egui_ctx);
+                open.or_else(open_event::take_first)
+            };
+            Ok(Box::new(app::OndinApp::new(cc, open)))
+        }),
     )
 }
 

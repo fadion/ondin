@@ -10153,6 +10153,27 @@ impl OndinApp {
         self.in_flight.grid_paint = None;
         self.retarget_after(slot, &brush);
     }
+    /// [`Self::write_slot`] for one key step: consecutive steps of `verb` fold into
+    /// one undo step, as a nudge's do. A per-character slot has no run and commits
+    /// each step.
+    pub(crate) fn write_slot_step(
+        &mut self,
+        id: NodeId,
+        slot: PaintSlot,
+        brush: Brush,
+        verb: &'static str,
+    ) {
+        if slot.char_scoped().is_some() {
+            self.write_slot(id, slot, brush);
+            return;
+        }
+        let tx = self.slot_transaction(id, slot, brush.clone());
+        self.name_slot_step(slot);
+        self.note_edit(None, &tx);
+        self.session.commit_run(tx, verb);
+        self.in_flight.grid_paint = None;
+        self.retarget_after(slot, &brush);
+    }
     /// Show a slot edit without committing it — the third slot verb, for the frames a
     /// pointer is **down** on a colour control but has not yet travelled far enough
     /// for egui to call it a drag. Returns whether it had anything to preview.

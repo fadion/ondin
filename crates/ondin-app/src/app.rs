@@ -561,6 +561,9 @@ pub struct OndinApp {
     pub(crate) opacity_entry: Option<OpacityEntry>,
     /// A layer row being renamed in place; buffered so one rename is one undo step.
     pub(crate) renaming_layer: Option<(NodeId, String)>,
+    /// A focused layer row's `↑`/`↓` this frame: the row and the step. The tree
+    /// moves the focus after its rows, since the next row may lie out of view.
+    pub(crate) layers_focus_step: Option<(NodeId, i8)>,
     /// The selection the layers tree last reacted to, so it notices a change made
     /// elsewhere and reveals it once.
     pub(crate) layers_synced_selection: Vec<NodeId>,
@@ -1460,6 +1463,7 @@ impl OndinApp {
             private_polled: None,
             opacity_entry: None,
             renaming_layer: None,
+            layers_focus_step: None,
             pages: Default::default(),
             history_pane: Default::default(),
             layers_synced_selection: Vec::new(),

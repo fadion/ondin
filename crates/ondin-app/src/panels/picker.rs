@@ -922,6 +922,28 @@ impl OndinApp {
             if resp.secondary_clicked() && stops.len() > 2 {
                 remove = Some(i);
             }
+            // The keyboard's half: the focused stop is the selected one, the arrows
+            // move it, `Delete` removes it.
+            if resp.has_focus() {
+                if i != selected
+                    && let Some(pk) = &mut self.picker
+                {
+                    pk.stop = i;
+                    pk.hex = None;
+                }
+                let delete = ui.input(|k| {
+                    k.key_pressed(egui::Key::Delete) || k.key_pressed(egui::Key::Backspace)
+                });
+                if delete && stops.len() > 2 {
+                    remove = Some(i);
+                }
+                let keys = ui::arrow_keys(ui, &resp, true, false);
+                if keys.any() {
+                    let mut next = stops.clone();
+                    next[i].0 = (*off + f32::from(keys.x) * key_step(keys)).clamp(0.0, 1.0);
+                    self.write_slot_step(node, slot, paint::with_stops(brush, next), "stop-keys");
+                }
+            }
             // A plain click only selects the stop; only a drag moves it, so that
             // reaching for a stop's colour never nudges its offset.
             if (resp.dragged() || resp.drag_stopped())
@@ -939,6 +961,11 @@ impl OndinApp {
             && let Some(pos) = bar_resp.interact_pointer_pos()
         {
             add_stop = Some(((pos.x - bar.min.x) / bar.width()).clamp(0.0, 1.0));
+        }
+        // `Enter` on the focused bar adds one halfway from the selected stop to the
+        // next, or to the one before when it is the last.
+        if bar_resp.clicked() && bar_resp.interact_pointer_pos().is_none() {
+            add_stop = keyed_stop(&stops, selected);
         }
         if let Some(t) = add_stop {
             let mut next = stops.clone();
@@ -996,6 +1023,14 @@ impl OndinApp {
             let next = Hsv::new(hsv.h, s, v, hsv.a);
             self.write_stop_colour(&resp, node, slot, brush, index, next);
         }
+        // Focused, the arrows walk the plane: saturation across, brightness up.
+        let keys = ui::arrow_keys(ui, &resp, true, true);
+        if keys.any() {
+            let step = key_step(keys);
+            let s = (hsv.s + f32::from(keys.x) * step).clamp(0.0, 1.0);
+            let v = (hsv.v - f32::from(keys.y) * step).clamp(0.0, 1.0);
+            self.key_stop_colour(node, slot, brush, index, Hsv::new(hsv.h, s, v, hsv.a));
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn hue_slider(
@@ -1026,6 +1061,12 @@ impl OndinApp {
             let next = Hsv::new(h, hsv.s, hsv.v, hsv.a);
             self.write_stop_colour(&resp, node, slot, brush, index, next);
         }
+        let keys = ui::arrow_keys(ui, &resp, true, false);
+        if keys.any() {
+            // Short of 1: a hue of 1 is red again, and the knob would jump home.
+            let h = (hsv.h + f32::from(keys.x) * key_step(keys)).clamp(0.0, 0.999);
+            self.key_stop_colour(node, slot, brush, index, Hsv::new(h, hsv.s, hsv.v, hsv.a));
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn alpha_slider(
@@ -1052,6 +1093,11 @@ impl OndinApp {
             let a = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
             let next = Hsv::new(hsv.h, hsv.s, hsv.v, a);
             self.write_stop_colour(&resp, node, slot, brush, index, next);
+        }
+        let keys = ui::arrow_keys(ui, &resp, true, false);
+        if keys.any() {
+            let a = (hsv.a + f32::from(keys.x) * key_step(keys)).clamp(0.0, 1.0);
+            self.key_stop_colour(node, slot, brush, index, Hsv::new(hsv.h, hsv.s, hsv.v, a));
         }
     }
     /// A 9pt slider track in a 15pt row, so the knob clears it vertically.
@@ -1731,6 +1777,31 @@ impl OndinApp {
             self.remember_colour(hsv.to_color());
         }
     }
+    /// [`Self::write_stop_colour`] for an arrow key on a focused plane or track:
+    /// committed at once, the steps of one run folding into one undo step.
+    fn key_stop_colour(
+        &mut self,
+        node: NodeId,
+        slot: PaintSlot,
+        brush: &Brush,
+        index: usize,
+        hsv: Hsv,
+    ) {
+        if self.gesture_cancelled {
+            return;
+        }
+        if let Some(p) = &mut self.picker {
+            p.intent = Some((hsv, hsv.to_color().to_rgba8().to_u8_array()));
+            p.hex = None;
+        }
+        let mut stops = paint::stops_of(brush);
+        if index >= stops.len() {
+            return;
+        }
+        stops[index].1 = hsv.to_color();
+        self.write_slot_step(node, slot, paint::with_stops(brush, stops), "colour-keys");
+        self.remember_colour(hsv.to_color());
+    }
     /// Commit a slot edit driven by a pointer gesture: the **press** shows the colour
     /// at once, a drag keeps showing it, and the release commits.
     ///
@@ -1778,6 +1849,28 @@ impl OndinApp {
         }
         self.valve_slot(resp, node, slot, brush)
     }
+}
+/// One arrow's step on a picker control's 0–1 scale: a hundredth, a tenth with
+/// `Shift`.
+fn key_step(keys: ui::Arrows) -> f32 {
+    if keys.coarse { 0.1 } else { 0.01 }
+}
+/// Where `Enter` on the stop bar adds a stop: halfway from stop `selected` to the
+/// next one along the bar, or to the one before when none follows. `None` with
+/// fewer than two stops.
+fn keyed_stop(stops: &[(f32, Color)], selected: usize) -> Option<f32> {
+    let at = stops.get(selected)?.0;
+    let after = stops
+        .iter()
+        .map(|s| s.0)
+        .filter(|&o| o > at)
+        .reduce(f32::min);
+    let before = stops
+        .iter()
+        .map(|s| s.0)
+        .filter(|&o| o < at)
+        .reduce(f32::max);
+    after.or(before).map(|o| (at + o) / 2.0)
 }
 /// A slider knob: a filled circle in the value's own colour, ringed white.
 fn slider_knob(p: &egui::Painter, track: egui::Rect, t: f32, fill: egui::Color32) {
@@ -2074,6 +2167,31 @@ mod handle_tests {
             ),
             Hsv::from_color(elsewhere),
             "a stale intent must not describe someone else's colour"
+        );
+    }
+}
+
+#[cfg(test)]
+mod keyed_stop_tests {
+    use super::*;
+
+    /// `Enter` on the stop bar adds halfway to the next stop along the bar, else
+    /// to the one before, whatever order the stops are stored in.
+    #[test]
+    fn a_keyed_stop_lands_halfway_to_the_neighbour() {
+        let c = Color::from_rgba8(0, 0, 0, 255);
+        let stops = [(0.8, c), (0.0, c), (0.4, c)];
+        assert_eq!(keyed_stop(&stops, 1), Some(0.2), "from 0 toward 0.4");
+        assert_eq!(keyed_stop(&stops, 2), Some(0.6), "from 0.4 toward 0.8");
+        assert_eq!(
+            keyed_stop(&stops, 0),
+            Some(0.6),
+            "the last goes back toward 0.4"
+        );
+        assert_eq!(
+            keyed_stop(&stops[..1], 0),
+            None,
+            "one stop has no neighbour"
         );
     }
 }

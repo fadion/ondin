@@ -371,6 +371,36 @@ impl RowTargets {
     }
 }
 
+/// The control a key on the focused row `resp` presses: `→` opens a folded group
+/// and `←` folds an open one (the caret), `Ctrl+Shift+H` the eye, `Ctrl+Shift+L`
+/// the lock, the chords hide and lock answer to everywhere. And the row `↑`/`↓`
+/// step the focus by, which the tree moves (`OndinApp::tree_rows`).
+fn row_keys(
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    has_children: bool,
+    expanded: bool,
+) -> (Option<RowHit>, i8) {
+    let keys = crate::ui::arrow_keys(ui, resp, true, true);
+    if has_children && (keys.x > 0 && !expanded || keys.x < 0 && expanded) {
+        return (Some(RowHit::Caret), keys.y);
+    }
+    if !resp.has_focus() {
+        return (None, 0);
+    }
+    let hit = ui.input(|i| {
+        let chord = i.modifiers.command && i.modifiers.shift && !i.modifiers.alt;
+        if chord && i.key_pressed(egui::Key::H) {
+            Some(RowHit::Eye)
+        } else if chord && i.key_pressed(egui::Key::L) {
+            Some(RowHit::Lock)
+        } else {
+            None
+        }
+    });
+    (hit, keys.y)
+}
+
 /// The one remark a resting row makes at its right-hand end.
 enum RowBadge {
     /// An artboard's `800 × 600`.
@@ -1469,6 +1499,13 @@ impl OndinApp {
         {
             paint.push(i);
         }
+        // The row the keyboard is on, too, so scrolling it away keeps its focus.
+        let focused = ui.ctx().memory(|m| m.focused());
+        if let Some(i) = focused.and_then(|f| flat.iter().position(|r| row_id(r.id) == f))
+            && !paint.contains(&i)
+        {
+            paint.push(i);
+        }
         if let Some(drag) = &self.layer_drag {
             for id in &drag.ids {
                 if let Some(&i) = index.get(id)
@@ -1481,6 +1518,22 @@ impl OndinApp {
         let stamp = self.collapsed.stamp;
         for i in paint {
             self.layers_row(ui, flat[i], &mut rows[i]);
+        }
+        // A focused row's `↑`/`↓`: the next row may be out of view and undrawn, so
+        // it is registered here, focused and scrolled to. Registered first: AccessKit
+        // panics on a focus that names no widget of this frame.
+        if let Some((from, step)) = self.layers_focus_step.take()
+            && let Some(i) = flat.iter().position(|r| r.id == from)
+        {
+            let j = i
+                .saturating_add_signed(isize::from(step))
+                .min(flat.len() - 1);
+            if j != i {
+                let to = row_id(flat[j].id);
+                ui.interact(rows[j].rect, to, egui::Sense::click_and_drag());
+                ui.memory_mut(|m| m.request_focus(to));
+                ui.scroll_to_rect(rows[j].rect, None);
+            }
         }
         // A caret clicked this frame folds rows the walk has already placed.
         if self.collapsed.stamp != stamp {
@@ -1843,8 +1896,10 @@ impl OndinApp {
         let lock_x = right - LOCK_INSET;
         let eye_x = lock_x - EYE_PITCH;
         // Also while bound (§15 D1060), as a hidden layer's eye is.
-        let show_eye = hovered || !visible || bound_eye;
-        let show_lock = hovered || locked;
+        // The keyboard on the row shows them as the pointer does: they are its keys.
+        let near = hovered || resp.has_focus();
+        let show_eye = near || !visible || bound_eye;
+        let show_lock = near || locked;
         let targets = RowTargets {
             caret: has_children.then_some(caret_x),
             eye: show_eye.then_some(eye_x),
@@ -2105,7 +2160,8 @@ impl OndinApp {
         // Double-click renames in place. Counted by `ui::double_clicked`, so a
         // click on one row and a fast double-click on the next still renames
         // it (§15 D986).
-        if crate::ui::double_clicked(ui, &resp) {
+        // So do `F2` and `Ctrl+R` on the focused row, the keys rename has elsewhere.
+        if crate::ui::double_clicked(ui, &resp) || (!renaming && crate::ui::rename_key(ui, &resp)) {
             self.renaming_layer = Some((id, name.clone()));
             // Focus is the field's business: see `layer_rename_field`.
         }
@@ -2115,10 +2171,24 @@ impl OndinApp {
 
         // The click that dismisses an open menu is spent dismissing it (R4), the
         // tab menu's included.
-        if resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up {
+        let clicked =
+            resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up;
+        // The focused row's keys for its own controls: `→`/`←` open and fold it,
+        // and the hide and lock chords act on this row, as its eye and lock do.
+        let (keyed, step) = if renaming {
+            (None, 0)
+        } else {
+            row_keys(ui, &resp, has_children, expanded)
+        };
+        if step != 0 {
+            self.layers_focus_step = Some((id, step));
+        }
+        if clicked || keyed.is_some() {
             // `interact_pointer_pos`, not the hover-based `under`: they can
-            // differ on a touch or click-through frame.
-            match resp.interact_pointer_pos().and_then(|q| targets.at(q.x)) {
+            // differ on a touch or click-through frame. A keyboard click has none
+            // and selects.
+            let hit = keyed.or_else(|| resp.interact_pointer_pos().and_then(|q| targets.at(q.x)));
+            match hit {
                 Some(RowHit::Caret) => {
                     if expanded {
                         self.collapsed.insert(id);
@@ -6475,6 +6545,131 @@ mod bound_eye_tests {
         assert!(
             size.right() <= eye.left(),
             "the size ends before the eye: {size:?} against {eye:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod keyboard_row_tests {
+    //! A focused layer row answers the keys for its own controls, and `↑`/`↓`
+    //! walk the tree past the rows in view.
+
+    use super::autoscroll_ownership_tests::{VIEW, app_with_rows};
+    use super::*;
+    use crate::app::OndinApp;
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// One frame of the tree in a scroll area; the offset after it. The input's
+    /// modifiers are the first key's, as a held chord's are.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> f32 {
+        let mut offset = 0.0;
+        let modifiers = events
+            .iter()
+            .find_map(|e| match e {
+                egui::Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(VIEW),
+                events,
+                modifiers,
+                ..Default::default()
+            },
+            |ui| {
+                let out = egui::ScrollArea::vertical()
+                    .id_salt("keyboard-probe")
+                    .show(ui, |ui| app.layers_tree(ui));
+                offset = out.state.offset.y;
+            },
+        );
+        offset
+    }
+
+    /// A tree of `n` rows with the top one focused; the rows top to bottom.
+    fn focused_tree(ctx: &egui::Context, n: usize) -> (OndinApp, Vec<NodeId>) {
+        let mut app = app_with_rows(ctx, n);
+        app.layer_drag = None;
+        frame(ctx, &mut app, Vec::new());
+        let rows: Vec<NodeId> = app.layers_flat.rows.iter().map(|r| r.id).collect();
+        ctx.memory_mut(|m| m.request_focus(row_id(rows[0])));
+        for _ in 0..2 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        (app, rows)
+    }
+
+    /// `↓` walks the focus row by row past the last row in view, scrolling it in.
+    /// flip: `tree_rows` stops drawing the focused row out of view → fails at "past
+    /// the view". Registering the next row before focusing it is not covered: egui
+    /// forgives one undrawn frame, and the AccessKit tree it keeps whole is off here.
+    #[test]
+    fn down_walks_the_focus_past_the_rows_in_view() {
+        let ctx = egui::Context::default();
+        let (mut app, rows) = focused_tree(&ctx, 40);
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(row_id(rows[0])),
+            "the fixture focuses the top row"
+        );
+        let mut offset = 0.0;
+        for _ in 0..12 {
+            frame(
+                &ctx,
+                &mut app,
+                vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            offset = frame(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(row_id(rows[12])),
+            "past the view"
+        );
+        assert!(offset > 0.0, "the tree scrolled to the focused row");
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+        );
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(row_id(rows[11])),
+            "and ↑ back"
+        );
+    }
+
+    /// The hide and lock chords act on the focused row, and `F2` renames it.
+    #[test]
+    fn the_focused_row_hides_locks_and_renames_from_the_keys() {
+        let ctx = egui::Context::default();
+        let (mut app, rows) = focused_tree(&ctx, 3);
+        let chord = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        frame(&ctx, &mut app, vec![key(egui::Key::H, chord)]);
+        assert!(!app.session.doc.shown(rows[0]), "Ctrl+Shift+H hid the row");
+        frame(&ctx, &mut app, vec![key(egui::Key::L, chord)]);
+        let locked = app.session.doc.get(rows[0]).is_some_and(|n| n.locked());
+        assert!(locked, "Ctrl+Shift+L locked it");
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::F2, egui::Modifiers::NONE)],
+        );
+        assert_eq!(
+            app.renaming_layer.as_ref().map(|r| r.0),
+            Some(rows[0]),
+            "F2 renames it"
         );
     }
 }

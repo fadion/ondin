@@ -3464,6 +3464,75 @@ pub fn keep_focus_in_view(ui: &egui::Ui) {
     }
 }
 
+/// The arrow keys a focused control reads for itself this frame: `-1`, `0` or `1`
+/// on each axis (`y` down the screen), and whether `Shift` asks the coarse step.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Arrows {
+    pub x: i8,
+    pub y: i8,
+    pub coarse: bool,
+}
+
+impl Arrows {
+    /// Whether any arrow this control reads was pressed.
+    pub fn any(self) -> bool {
+        self.x != 0 || self.y != 0
+    }
+}
+
+/// The arrows on the axes `x` and `y` name, for a control that moves a value with
+/// them (a slider, a plane, a tree row's fold) while `resp` holds the focus. They
+/// are taken from egui, which otherwise moves the focus to the neighbour that way;
+/// the other axis still does. Bare or with `Shift`; any other modifier is not
+/// read. Nothing without the focus.
+pub fn arrow_keys(ui: &egui::Ui, resp: &egui::Response, x: bool, y: bool) -> Arrows {
+    if !resp.has_focus() {
+        return Arrows::default();
+    }
+    ui.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            resp.id,
+            egui::EventFilter {
+                horizontal_arrows: x,
+                vertical_arrows: y,
+                ..Default::default()
+            },
+        );
+    });
+    ui.input(|i| {
+        let m = i.modifiers;
+        if !(m.is_none() || m.shift_only()) {
+            return Arrows::default();
+        }
+        let step = |less: egui::Key, more: egui::Key| {
+            i8::from(i.key_pressed(more)) - i8::from(i.key_pressed(less))
+        };
+        Arrows {
+            x: if x {
+                step(egui::Key::ArrowLeft, egui::Key::ArrowRight)
+            } else {
+                0
+            },
+            y: if y {
+                step(egui::Key::ArrowUp, egui::Key::ArrowDown)
+            } else {
+                0
+            },
+            coarse: m.shift,
+        }
+    })
+}
+
+/// Whether the focused control `resp` was asked to rename what it stands for:
+/// `F2` or `Ctrl+R`, the keys rename has everywhere else.
+pub fn rename_key(ui: &egui::Ui, resp: &egui::Response) -> bool {
+    resp.has_focus()
+        && ui.input(|i| {
+            i.modifiers.is_none() && i.key_pressed(egui::Key::F2)
+                || i.modifiers.command_only() && i.key_pressed(egui::Key::R)
+        })
+}
+
 /// This frame's `Tab` going down: `Some(true)` with `Shift`, `Some(false)` alone,
 /// `None` without one or with another modifier.
 fn tab_pressed(events: &[egui::Event]) -> Option<bool> {
@@ -4302,6 +4371,7 @@ const SLIDER_RAIL_H: f32 = 3.0;
 /// Hand-painted: this rail and knob are out of reach of `Spacing` and
 /// `Visuals` without restyling every `egui::Slider`. The knob's centre travels
 /// between `half..width - half` so a knob touching the end never reads as short.
+/// Focused, `←`/`→` move it a hundredth of the range, a tenth with `Shift`.
 pub fn slider(
     ui: &mut egui::Ui,
     width: f32,
@@ -4320,6 +4390,16 @@ pub fn slider(
     {
         let t = f64::from(((pos.x - rect.left() - half) / travel).clamp(0.0, 1.0));
         let next = lo + t * (hi - lo);
+        if next != *value {
+            *value = next;
+            resp.mark_changed();
+        }
+    }
+    // Focused, ←/→ step a hundredth of the range, a tenth with `Shift`.
+    let keys = arrow_keys(ui, &resp, true, false);
+    if keys.any() && hi > lo {
+        let step = (hi - lo) / if keys.coarse { 10.0 } else { 100.0 };
+        let next = (*value + f64::from(keys.x) * step).clamp(lo, hi);
         if next != *value {
             *value = next;
             resp.mark_changed();
@@ -5297,6 +5377,60 @@ mod keyboard_focus_tests {
 
         let ((_, digits), _, _) = run(false);
         assert!(digits, "unmarked: Tab goes straight to the digits");
+    }
+
+    /// A focused slider takes `←`/`→` as a hundredth of its range, a tenth with
+    /// `Shift`, and keeps the focus where egui would move it to a neighbour.
+    #[test]
+    fn a_focused_slider_steps_on_the_arrows_and_keeps_the_focus() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut value = 500.0_f64;
+        let frame = |value: &mut f64, events: Vec<egui::Event>, shift: bool| {
+            let mut id = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    modifiers: match shift {
+                        true => egui::Modifiers::SHIFT,
+                        false => egui::Modifiers::NONE,
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    let resp = ui.horizontal(|ui| {
+                        let resp = slider(ui, 200.0, value, 100.0..=900.0);
+                        // A neighbour to the right, for egui's arrow walk to reach.
+                        let _ = field_button(ui, icon::X, 28.0, FieldButton::Off);
+                        resp
+                    });
+                    id = Some(resp.inner.id);
+                },
+            );
+            id.expect("drawn")
+        };
+        let right = |shift: bool| egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: match shift {
+                true => egui::Modifiers::SHIFT,
+                false => egui::Modifiers::NONE,
+            },
+        };
+        let slider_id = frame(&mut value, Vec::new(), false);
+        ctx.memory_mut(|m| m.request_focus(slider_id));
+        frame(&mut value, Vec::new(), false);
+        frame(&mut value, vec![right(false)], false);
+        frame(&mut value, vec![right(true)], true);
+        frame(&mut value, Vec::new(), false);
+        assert_eq!(value, 588.0, "8 for →, 80 for Shift+→ over a range of 800");
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(slider_id),
+            "the arrows stayed its"
+        );
     }
 }
 

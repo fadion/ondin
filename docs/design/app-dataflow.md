@@ -85,6 +85,11 @@ and picking one converts the paint, stops kept and geometry reframed on the box.
 
 Ends, centres and radii are dragged on the canvas, not in the picker (`tools.md`, gradient handles).
 The stop bar follows the row; the selected stop (`Picker::stop`) is shared with the canvas's dots.
+From the keys: a focused stop is the selected one, `←`/`→` move it and `Delete` removes it (not
+below two); `Enter` on the bar adds one halfway to the selected stop's next neighbour
+(`picker::keyed_stop`). The plane takes the four arrows (saturation, brightness) and the tracks
+`←`/`→`. A key step commits at once, and a run of them folds into one undo step
+(`OndinApp::write_slot_step`, `EditorSession::commit_run`), as a nudge's does.
 
 **The value row** (`hex_row`): the pick button, the format chooser, the colour in that format, the
 opacity.

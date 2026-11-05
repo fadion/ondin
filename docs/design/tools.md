@@ -133,7 +133,7 @@ lists exist:
 - A click that dismisses a menu is spent on the dismissal: the canvas skips its mode input and a layers row its click. The library screen's ⋮ popup and project-filter dropdown follow the rule (§9.5).
 
 **Escape and menus** (R3): an open menu is the first thing Escape unwinds, and the press is consumed.
-`<OndinApp as eframe::App>::ui` handles the key and returns without calling `escape`;
+`OndinApp::frame_body` handles the key and returns without calling `escape`;
 `input::resolve` does not run while a menu is open. In focus mode the first Escape closes the menu
 and the second leaves focus mode.
 

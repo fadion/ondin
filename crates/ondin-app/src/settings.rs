@@ -112,7 +112,7 @@ impl Settings {
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
-    /// is open (`theme::follow` in `<OndinApp as eframe::App>::ui`).
+    /// is open (`theme::follow` in `OndinApp::frame_body`).
     pub(crate) fn theme(&self) -> ThemePref {
         self.theme
     }
@@ -180,7 +180,7 @@ impl OndinApp {
     /// Draw the modal, if it is open, and act on whichever way it was closed.
     ///
     /// The keymap is silenced while this is open (the guard in
-    /// `<OndinApp as eframe::App>::ui`); otherwise an arrow key would nudge the
+    /// `OndinApp::frame_body`); otherwise an arrow key would nudge the
     /// selection behind the backdrop.
     pub(crate) fn settings_ui(&mut self, ctx: &egui::Context) {
         let Some(mut draft) = self.settings.clone() else {

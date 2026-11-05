@@ -134,7 +134,7 @@ Plain only; numpad digits work (`Key::Num0`–`Num9`). Applies via `build::set_o
 an empty selection.
 
 - **The window needs a repaint to close**: the pending first digit schedules
-  `request_repaint_after(remaining)`, folded into `<OndinApp as eframe::App>::ui` through
+  `request_repaint_after(remaining)`, folded into `OndinApp::frame_body` through
   `fold_opacity_entry` (§15 D698).
 - **The first digit is a preview, not a commit**, so `4`,`5` leaves one history step reading 45%.
   The window shutting commits — by a second digit or the deadline (`OPACITY_DIGIT_WINDOW`).
@@ -481,7 +481,7 @@ decoration — the one row whose semantics differ from every app it is borrowed 
 **`Tab` is not a keymap binding**, which keeps it clear of `Tab` stepping the point selection
 (§11, §15 D123). `text_insert_mode` resolves **no bare key**; that rule, not an empty `Vec`, is
 the separation. It is claimed **whether or not it moves anything**: a `Tab` reaching egui moves the
-focus ring and swallows the next keystroke. `took_tab` in `<OndinApp as eframe::App>::ui` hands focus
+focus ring and swallows the next keystroke. `took_tab` in `OndinApp::frame_body` hands focus
 back (§15 D698).
 
 **Modality carries load here.** `Ctrl+U` (snap to shapes), `Ctrl+Shift+L` (lock), `Alt`+arrows

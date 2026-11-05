@@ -3080,7 +3080,7 @@ mod boolean_key_tests {
                 let _ = ui.button("one");
                 let _ = ui.button("two");
             });
-            // What `<OndinApp as eframe::App>::ui` does at the end of a frame it
+            // What `OndinApp::frame_body` does at the end of a frame it
             // took Tab in.
             if surrender && let Some(id) = ctx.memory(|m| m.focused()) {
                 ctx.memory_mut(|m| m.surrender_focus(id));

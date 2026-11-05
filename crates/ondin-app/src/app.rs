@@ -441,7 +441,7 @@ pub struct OndinApp {
     /// system clipboard.
     pub(crate) property_clipboard: Option<ondin_core::build::Properties>,
     /// Which of the app's two screens is showing, the library or the editor:
-    /// `<OndinApp as eframe::App>::ui` returns early on it.
+    /// `OndinApp::frame_body` returns early on it.
     pub(crate) view: View,
     /// The library: base folder, projects, documents. Scanned when the dashboard is
     /// entered, not per frame; held in the editor for the save root and breadcrumb.
@@ -1698,8 +1698,19 @@ impl eframe::App for OndinApp {
         crate::ui::menu_key_as_right_click(ctx, raw_input);
     }
 
+    /// One pass: [`OndinApp::frame_body`], then on macOS the record of unsaved
+    /// work a quit reads, taken after every early return of the body so an edit
+    /// made anywhere in the frame counts.
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.frame_body(ui, frame);
+        #[cfg(target_os = "macos")]
+        crate::quit::set_unsaved(self.any_unsaved());
+    }
+}
+
+impl OndinApp {
     /// The frame body: everything the app draws and decides, once per pass.
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn frame_body(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Before any widget runs; dropped after the last, on every return below. A
         // text session's or a path's `Tab` stays the canvas's under an open popover.
@@ -1747,10 +1758,7 @@ impl eframe::App for OndinApp {
         // Both screens are the same window, and the updater reports to both bars.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
         #[cfg(target_os = "macos")]
-        {
-            crate::traffic_lights::place(_frame);
-            crate::quit::set_unsaved(self.any_unsaved());
-        }
+        crate::traffic_lights::place(_frame);
         self.updater.poll();
 
         // Before the dashboard's early return, so a font installed while the library
@@ -12958,7 +12966,7 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A modal owns the keyboard: the gate in `<OndinApp as eframe::App>::ui` must
+    /// A modal owns the keyboard: the gate in `OndinApp::frame_body` must
     /// cover every modal, since `egui_wants_keyboard_input()` is false for a modal of
     /// buttons. The no-modal row is the positive control. flip: narrow the arm to `self.settings.is_some()` → fails at the
     /// `confirming_close` row

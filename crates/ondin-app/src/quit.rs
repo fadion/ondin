@@ -31,7 +31,13 @@ extern "C-unwind" fn should_terminate(
     _cmd: Sel,
     _sender: *mut AnyObject,
 ) -> usize {
-    if !UNSAVED.load(Ordering::Relaxed) {
+    answer(UNSAVED.load(Ordering::Relaxed))
+}
+
+/// The answer to a quit, given whether work is unsaved; with some, the window
+/// is asked to close, which puts the question.
+fn answer(unsaved: bool) -> usize {
+    if !unsaved {
         return TERMINATE_NOW;
     }
     if let Some(ctx) = WAKE.get() {
@@ -83,7 +89,7 @@ pub(crate) fn install(ctx: &egui::Context) {
     }
 }
 
-/// Record whether a quit now would lose work. Called every frame.
+/// Record whether a quit now would lose work. Called at the end of every frame.
 pub(crate) fn set_unsaved(unsaved: bool) {
     UNSAVED.store(unsaved, Ordering::Relaxed);
 }
@@ -91,26 +97,23 @@ pub(crate) fn set_unsaved(unsaved: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use objc2_foundation::NSObject;
 
     /// A quit goes ahead with nothing unsaved and is called off with unsaved work.
+    /// It asks `answer`, not `UNSAVED`, which every test driving a frame writes.
     ///
-    /// flip: `should_terminate` answering `TERMINATE_NOW` whatever `UNSAVED` says
-    /// → fails at "unsaved work calls the quit off".
+    /// flip: `answer` returning `TERMINATE_NOW` whatever it is given → fails at
+    /// "unsaved work calls the quit off".
     #[test]
     fn a_quit_waits_for_the_question_only_when_work_is_unsaved() {
-        let app = NSObject::new();
-        let ask = || {
-            should_terminate(
-                &app,
-                sel!(applicationShouldTerminate:),
-                std::ptr::null_mut(),
-            )
-        };
-        set_unsaved(false);
-        assert_eq!(ask(), TERMINATE_NOW, "nothing unsaved: the quit goes ahead");
-        set_unsaved(true);
-        assert_eq!(ask(), TERMINATE_CANCEL, "unsaved work calls the quit off");
-        set_unsaved(false);
+        assert_eq!(
+            answer(false),
+            TERMINATE_NOW,
+            "nothing unsaved: the quit goes ahead"
+        );
+        assert_eq!(
+            answer(true),
+            TERMINATE_CANCEL,
+            "unsaved work calls the quit off"
+        );
     }
 }

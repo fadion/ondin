@@ -1535,10 +1535,7 @@ fn line_up(doc: &Document, r: NodeId, s: NodeId) -> Result<(), (String, Option<N
             continue;
         }
         let i = place[&x];
-        if let (NodeKind::Text { content: a, .. }, NodeKind::Text { content: b, .. }) =
-            (&doc.get(x).expect("found").kind, &cn.kind)
-            && a != b
-        {
+        if drawn_text(doc.get(x).expect("found")) != drawn_text(cn) {
             return Err((format!("the text of {} differs", named(cn)), Some(c)));
         }
         if let Some((before, b)) = last
@@ -1551,6 +1548,34 @@ fn line_up(doc: &Document, r: NodeId, s: NodeId) -> Result<(), (String, Option<N
         last = Some((i, c));
     }
     Ok(())
+}
+
+/// [`drawn_text`]'s answer: the bound variable, the cased content, and each
+/// run with whether it is styled apart.
+type DrawnText = (
+    Option<crate::variable::VarId>,
+    String,
+    Vec<(std::ops::Range<usize>, bool)>,
+);
+
+/// What a code export writes a text layer's content as, which two states must
+/// share to pair: the variable it is bound to, the content as cased, and its
+/// runs, each marked by whether it is styled apart from the layer, since such a
+/// run is an element of its own. `None` for a layer that is no text.
+fn drawn_text(n: &Node) -> Option<DrawnText> {
+    let NodeKind::Text {
+        content,
+        style,
+        spans,
+        ..
+    } = &n.kind
+    else {
+        return None;
+    };
+    let runs = spans.runs(style, content.len());
+    let cased = crate::text::cased_text(content, &runs).unwrap_or_else(|| content.clone());
+    let cuts = runs.into_iter().map(|(r, s)| (r, s != **style)).collect();
+    Some((n.text_vars()[crate::variable::TEXT_CONTENT], cased, cuts))
 }
 
 // ── Switching an instance to another variant ──────────────────────────────────

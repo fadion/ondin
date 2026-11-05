@@ -676,7 +676,8 @@ written as, read only while a property holds ties.
 - `unpaired_states(doc, set) -> Vec<Unpaired { variant, why, layer }>` lists each state variant whose
   layers do not line up with its rest variant (the one with the same values of every other property):
   no rest variant, other text, or another order (*“Label” moves before “Bg”*, naming the layer moved
-  ahead). Layers pair by lineage key, whichever side recorded it (rest may be the copy), else name
+  ahead). Text is other where its bound variable, its cased content or its runs styled apart from the
+  layer differ, since the code export writes each such run as an element of its own. Layers pair by lineage key, whichever side recorded it (rest may be the copy), else name
   path. A layer only one side draws is a show or hide, and one of another kind is a swap (rest's
   hidden, the state's shown), as the code export writes them; neither is a failure.
 - A set saved before lineage keys is not stamped when tied: its layers pair by name path until a

@@ -2194,6 +2194,42 @@ fn a_state_layer_of_another_kind_is_a_swap() {
     assert!(found.is_empty(), "a swap pairs: {found:?}");
 }
 
+/// A state whose label has a run styled apart from rest's does not pair, as the
+/// code export, which writes that run as an element of its own, finds too.
+///
+/// flip: `line_up` comparing the stored content only → fails at "the bold run".
+#[test]
+fn a_state_whose_text_gains_a_styled_run_does_not_pair() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, hover) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    f.commit(
+        variant::set_values(&f.doc, hover, strs(&["Small", "Hover"]))
+            .unwrap()
+            .0,
+    );
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(variant::Interaction::Hover)).unwrap();
+    f.commit(tx.0);
+    assert!(variant::unpaired_states(&f.doc, f.s).is_empty());
+    let label = f.kids(hover)[1];
+    let NodeKind::Text { content, style, .. } = f.doc.get(label).unwrap().kind() else {
+        panic!("the label is a text")
+    };
+    let mut spans = ondin_core::CharSpans::default();
+    spans.set(0..1, ondin_core::CharAttr::Weight(700), &**style);
+    f.commit(vec![Operation::SetText {
+        id: label,
+        content: content.clone(),
+        spans,
+        para_spans: Default::default(),
+    }]);
+    let found = variant::unpaired_states(&f.doc, f.s);
+    assert_eq!(found.len(), 1, "the bold run: {found:?}");
+    assert_eq!(found[0].why, "the text of “Label” differs");
+}
+
 /// Copying a whole set keeps its variants' layers paired even where the layer
 /// their shared key names was deleted.
 ///

@@ -1069,15 +1069,21 @@ impl OndinApp {
 
 /// A list item's reserved 14-pt trailing slot: empty while the item follows its
 /// main, the dot when it differs, `+` when it is the instance's own, ↺ on an
-/// overridden item whose row is `hot`; answers whether that was clicked.
+/// overridden item whose row is `hot` or which the keyboard has focused; answers
+/// whether that was clicked. Only the ↺ is a tab stop.
 /// ⚠️ **`hot` comes from the caller**: this right-to-left run's own box begins
 /// past the row's label.
 pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, hot: bool) -> bool {
     use ondin_core::reset::ItemState;
+    let sense = match state {
+        ItemState::Overridden => egui::Sense::click(),
+        ItemState::Follows | ItemState::Local => egui::Sense::hover(),
+    };
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(14.0, ui.max_rect().height().min(ui::CONTROL_H)),
-        egui::Sense::click(),
+        sense,
     );
+    let hot = hot || resp.has_focus();
     let p = ui.painter();
     match state {
         ItemState::Follows => false,

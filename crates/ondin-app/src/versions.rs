@@ -354,13 +354,14 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         egui::Sense::hover(),
     );
     let id = egui::Id::new(("version-row", &s.key));
-    let sense = match s.openable() {
-        true => egui::Sense::click(),
-        false => egui::Sense::hover(),
-    };
-    let resp = ui.interact(rect, id, sense);
+    // A tab stop even when it cannot open: its focus is the keyboard's way to the
+    // buttons it shows.
+    let resp = ui.interact(rect, id, egui::Sense::click());
     let editing = look.naming.is_some();
-    let pointed = ui.rect_contains_pointer(rect) || resp.has_focus() || look.held;
+    // Last frame's focus too: on the frame `Tab` leaves the row for its first
+    // button, the buttons must already be drawn to take it.
+    let focused = resp.has_focus() || ui.ctx().memory(|m| m.had_focus_last_frame(id));
+    let pointed = ui.rect_contains_pointer(rect) || focused || look.held;
     let version = s.place.is_some();
     let buttons = version && (pointed || (look.opened && !look.elsewhere) || editing);
     out.pointed = version && pointed;
@@ -601,7 +602,7 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         }
         _ => {}
     }
-    if out.press.is_none() && resp.clicked() {
+    if out.press.is_none() && resp.clicked() && s.openable() {
         out.press = Some(Press::Toggle);
     }
     out

@@ -1430,13 +1430,17 @@ pub fn section_head_full(
         over.max.x = over.max.x.max(ui.max_rect().right());
         // Not when `sense` is false: the whole-card target would take the press.
         let hovered = sense && ui.rect_contains_pointer(over);
-        let p = ui.painter();
-        if hovered {
-            let target = ui.interact(
+        // Registered whenever the head senses, so `Tab` reaches it; shown while the
+        // pointer is over the head or the keyboard is on it.
+        let target = sense.then(|| {
+            ui.interact(
                 slot,
                 ui.id().with(("section-reset", label)),
                 egui::Sense::click(),
-            );
+            )
+        });
+        let p = ui.painter();
+        if let Some(target) = target.filter(|t| hovered || t.has_focus()) {
             let ground = if target.hovered() {
                 color::hover()
             } else {
@@ -2925,8 +2929,12 @@ fn value_field_f64_marked(
             let lead_resp = ui.interact(
                 strip,
                 ui.auto_id_with("prefix-scrub"),
-                // Not `click_and_drag()`, which is `FOCUSABLE`: no tab stop here.
-                egui::Sense::CLICK | egui::Sense::DRAG,
+                // A scrub strip is no tab stop (the number is); a marked field's ↺ is
+                // one, ahead of the number, so the keyboard can reset it too.
+                match mark {
+                    Some(_) => egui::Sense::CLICK | egui::Sense::DRAG | egui::Sense::FOCUSABLE,
+                    None => egui::Sense::CLICK | egui::Sense::DRAG,
+                },
             );
             // The plain arrow while the slot is a marked field's ↺, unless dragging.
             let cursor = match mark {
@@ -2987,6 +2995,8 @@ fn value_field_f64_marked(
                     *value = settled;
                 }
             }
+            // Read before the union, which answers for both.
+            let (typing, reset_focused) = (resp.has_focus(), lead_resp.has_focus());
             resp = resp.union(lead_resp);
             if nudged || *value != before {
                 resp.mark_changed();
@@ -2997,7 +3007,7 @@ fn value_field_f64_marked(
                 None => {
                     ui.painter().galley(at, lead, theme::text::faint());
                 }
-                Some(_) if ui.rect_contains_pointer(strip.union(resp.rect)) => {
+                Some(_) if reset_focused || ui.rect_contains_pointer(strip.union(resp.rect)) => {
                     ui.painter().text(
                         strip.left_center() + egui::vec2(lead.size().x / 2.0, 0.0),
                         egui::Align2::CENTER_CENTER,
@@ -3031,10 +3041,13 @@ fn value_field_f64_marked(
                 let mut ink = theme::text::faint();
                 if s.clickable {
                     // Sensed before it is painted, so the ink is this frame's answer;
-                    // wide, since two characters are small to aim at. No `FOCUSABLE`
-                    // (a tab stop) and no pointing hand: the chrome never sets one.
-                    let hit =
-                        ui.interact(hit_rect, ui.auto_id_with("unit-suffix"), egui::Sense::CLICK);
+                    // wide, since two characters are small to aim at. A tab stop after
+                    // the number: some units (a size's Fixed, Hug, Fill) have no other way in.
+                    let hit = ui.interact(
+                        hit_rect,
+                        ui.auto_id_with("unit-suffix"),
+                        egui::Sense::click(),
+                    );
                     let hit = if s.tooltip.is_empty() {
                         hit
                     } else {
@@ -3053,15 +3066,16 @@ fn value_field_f64_marked(
                 );
                 ui.painter().galley(at, galley, ink);
             }
-            (resp, unit)
+            (resp, unit, typing)
         })
     });
 
-    // Painted after the row, on top of the field's own hairline.
-    if scope.inner.0.has_focus() {
+    // Painted after the row, on top of the field's own hairline. The number's focus
+    // only: a focused ↺ is keyboard focus, which the ring shows.
+    let (resp, unit, typing) = scope.inner;
+    if typing {
         typing_edge(ui, scope.response.rect);
     }
-    let (resp, unit) = scope.inner;
     (resp, unit, reset)
 }
 
@@ -3905,7 +3919,8 @@ pub fn grip(ui: &mut egui::Ui, enabled: bool, row_h: f32) -> egui::Response {
             ),
             egui::pos2(rect.right(), rect.center().y + row_h / 2.0),
         );
-        ui.interact(hit, resp.id.with("grab"), egui::Sense::drag())
+        // The bare flag: `Sense::drag()` adds `FOCUSABLE`, a tab stop no key can use.
+        ui.interact(hit, resp.id.with("grab"), egui::Sense::DRAG)
     } else {
         resp
     };
@@ -5218,6 +5233,67 @@ mod keyboard_focus_tests {
             Some(f.popover[1]),
             "and the click did not focus"
         );
+    }
+
+    /// A marked field's ↺ is the stop before its number, and `Enter` on it resets
+    /// as a click does; an unmarked field's strip is no stop at all.
+    #[test]
+    fn the_keyboard_reaches_a_marked_fields_reset() {
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Whether the ↺ fired, and whether the digits hold the focus.
+        let run = |marked: bool| {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let frame = |events: Vec<egui::Event>| {
+                let mut out = (false, false);
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let mark = marked.then_some(FieldMark { tip: "Reset" });
+                        let mut v = 4.0;
+                        let size = egui::vec2(120.0, CONTROL_H);
+                        let (resp, reset) = value_field_marked(
+                            ui,
+                            size,
+                            Prefix::Text("X"),
+                            mark,
+                            &mut v,
+                            Scrub::whole(0.5),
+                            |d| d,
+                        );
+                        let id = ui.ctx().memory(|m| m.focused());
+                        let digits =
+                            id.is_some_and(|id| egui::TextEdit::load_state(ui.ctx(), id).is_some());
+                        out = (reset, digits && resp.has_focus());
+                    },
+                );
+                out
+            };
+            frame(Vec::new());
+            frame(vec![key(egui::Key::Tab)]);
+            let landed = frame(Vec::new());
+            let pressed = frame(vec![key(egui::Key::Enter)]);
+            (landed, pressed, ctx.memory(|m| m.focused()).is_some())
+        };
+
+        let ((_, digits), (reset, _), focused) = run(true);
+        assert!(
+            focused && !digits,
+            "marked: Tab lands on the ↺, not in the digits"
+        );
+        assert!(reset, "Enter on the ↺ resets");
+
+        let ((_, digits), _, _) = run(false);
+        assert!(digits, "unmarked: Tab goes straight to the digits");
     }
 }
 
@@ -7164,7 +7240,8 @@ mod transform_row_tests {
         );
     }
 
-    /// Tab goes from one field's digits to the next field's and stops on no other rect (prefix strip, unit).
+    /// Tab goes from one field's digits to the next field's, then to a clickable
+    /// unit, and stops on no other rect (the prefix strip).
     ///
     /// `None` in the sweep is egui's own end-of-list gap.
     #[test]
@@ -7172,13 +7249,13 @@ mod transform_row_tests {
         let (order, unknown) = tab_sweep();
         assert!(
             unknown.is_empty(),
-            "tab stopped on {} rect(s) that are not a field's digits: {unknown:?}",
+            "tab stopped on {} rect(s) that are not a field's digits or unit: {unknown:?}",
             unknown.len()
         );
         assert_eq!(
-            order.iter().flatten().take(2).collect::<Vec<_>>(),
-            ["X digits", "Y digits"],
-            "X should reach Y in one press; full sweep was {order:?}"
+            order.iter().flatten().take(3).collect::<Vec<_>>(),
+            ["X digits", "Y digits", "Y unit"],
+            "X should reach Y in one press, and its unit in the next; full sweep was {order:?}"
         );
     }
 
@@ -7209,7 +7286,7 @@ mod transform_row_tests {
                             Scrub::whole(0.5),
                             |d| d,
                         );
-                        let ry = value_field_suffixed(
+                        let (ry, unit) = value_field_unit(
                             ui,
                             egui::vec2(fw, H),
                             Prefix::Text("Y"),
@@ -7221,11 +7298,11 @@ mod transform_row_tests {
                             &mut a,
                             Scrub::whole(0.5),
                             |d| d,
-                        )
-                        .0;
+                        );
                         if ids.is_empty() {
                             ids.push((rx.id, "X digits".into()));
                             ids.push((ry.id, "Y digits".into()));
+                            ids.push((unit.expect("clickable").id, "Y unit".into()));
                         }
                     });
                 },

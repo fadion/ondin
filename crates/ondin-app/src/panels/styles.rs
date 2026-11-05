@@ -322,7 +322,15 @@ fn capsule(
         ui.id().with(("style-capsule", style.id)),
         egui::Sense::click(),
     );
-    let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
+    let chip_id = ui.id().with(("style-capsule-chip", style.id));
+    // The keyboard on the capsule or its chip opens it as the pointer does, so `Tab`
+    // reaches the chip and keeps it drawn while it holds the focus.
+    // Last frame's focus too: on the frame `Tab` leaves the capsule, the chip must
+    // already be drawn to be the next stop.
+    let keyboard = ui.ctx().memory(|m| {
+        m.has_focus(chip_id) || m.has_focus(resp.id) || m.had_focus_last_frame(resp.id)
+    });
+    let hovered = resp.hovered() || ui.rect_contains_pointer(rect) || keyboard;
     let p = ui.painter();
     p.rect_filled(
         rect,
@@ -395,11 +403,7 @@ fn capsule(
         theme::text::strong(),
     );
     if hovered {
-        let target = ui.interact(
-            chip,
-            ui.id().with(("style-capsule-chip", style.id)),
-            egui::Sense::click(),
-        );
+        let target = ui.interact(chip, chip_id, egui::Sense::click());
         let p = ui.painter();
         p.rect_filled(
             chip,

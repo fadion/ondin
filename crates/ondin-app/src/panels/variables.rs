@@ -3649,7 +3649,8 @@ fn var_row(
     let table = doc.variables();
     let w = b.inner_w;
     let id = ui.id().with(("var-row", v.id));
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
+    // The bare flag: the name and the cells are the row's tab stops.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::CLICK);
     let menu_open = matches!(&b.menu, Some((Menu::Var(m), _)) if *m == v.id);
     // Not the row's own response for the hover: the name's and the cells' hit
     // areas lie over it and take it.

@@ -734,7 +734,8 @@ impl OndinApp {
             return;
         }
         let band = rect.expand2(egui::vec2(0.0, DIVIDER_GRAB / 2.0));
-        let resp = ui.interact(band, egui::Id::new("pages-divider"), egui::Sense::drag());
+        // The bare flag: `Sense::drag()` adds `FOCUSABLE`, a tab stop no key can use.
+        let resp = ui.interact(band, egui::Id::new("pages-divider"), egui::Sense::DRAG);
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }

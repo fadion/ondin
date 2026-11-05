@@ -1514,6 +1514,16 @@ fn families_over_budget(
     drop
 }
 
+/// The families the picker lists: one name per face, the first, which `fontdb`
+/// sets to the English one. A face also carries its name in other languages
+/// (macOS's system font has some thirty), and each would be a row of its own;
+/// [`system_faces`] still finds a face by any of them.
+fn listed_families(db: &fontdb::Database) -> BTreeSet<String> {
+    db.faces()
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect()
+}
+
 /// Enumerate the machine's fonts on a background thread; the receiver gets one
 /// [`SystemScan`] and then closes.
 fn spawn_system_scan(ctx: &egui::Context) -> Receiver<SystemScan> {
@@ -1522,12 +1532,7 @@ fn spawn_system_scan(ctx: &egui::Context) -> Receiver<SystemScan> {
     std::thread::spawn(move || {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
-        let mut families = BTreeSet::new();
-        for face in db.faces() {
-            for (name, _lang) in &face.families {
-                families.insert(name.clone());
-            }
-        }
+        let families = listed_families(&db);
         if tx.send(SystemScan { db, families }).is_ok() {
             ctx.request_repaint();
         }
@@ -3786,5 +3791,36 @@ mod tests {
             "reported as Roboto"
         );
         assert!(!poll.fallback);
+    }
+
+    /// A face's name in other languages is no row of its own: the picker lists
+    /// each face once, by its first (English) name.
+    ///
+    /// flip: `listed_families` taking every name of a face → fails at "one row".
+    #[test]
+    fn a_face_is_listed_once_by_its_english_name() {
+        let face = |names: &[(&str, fontdb::Language)]| fontdb::FaceInfo {
+            id: fontdb::ID::dummy(),
+            source: fontdb::Source::Binary(std::sync::Arc::new(Vec::<u8>::new())),
+            index: 0,
+            families: names.iter().map(|(n, l)| ((*n).to_string(), *l)).collect(),
+            post_script_name: String::new(),
+            style: fontdb::Style::Normal,
+            weight: fontdb::Weight::NORMAL,
+            stretch: fontdb::Stretch::Normal,
+            monospaced: false,
+        };
+        let mut db = fontdb::Database::new();
+        db.push_face_info(face(&[
+            ("System Font", fontdb::Language::English_UnitedStates),
+            ("Systemschrift", fontdb::Language::German_Germany),
+            ("システムフォント", fontdb::Language::Japanese_Japan),
+        ]));
+        db.push_face_info(face(&[("Inter", fontdb::Language::English_UnitedStates)]));
+        assert_eq!(
+            listed_families(&db),
+            BTreeSet::from(["Inter".to_string(), "System Font".to_string()]),
+            "one row per face"
+        );
     }
 }

@@ -71,6 +71,9 @@ pub(crate) struct ColourReview {
     pub(crate) open: bool,
     /// Review the selection; with nothing selected the document is reviewed.
     selection: bool,
+    /// The selection a reticle made, and the one the card keeps reviewing while
+    /// it stands: selecting a colour's users is no change of scope.
+    reticle: Option<(Vec<NodeId>, Vec<NodeId>)>,
     unfolded: Unfolded,
     /// The target picked in each group, by its anchor.
     targets: HashMap<Key, Key>,
@@ -240,13 +243,22 @@ impl OndinApp {
             r.unfolded = Unfolded::First;
             r.naming = None;
             r.menu = false;
+            r.reticle = None;
         }
         r.open = true;
     }
 
     /// Take the census again when the document, the scope or the threshold moved.
     fn refresh_colour_review(&mut self) {
-        let selection = self.session.selection.ids().to_vec();
+        let live = self.session.selection.ids();
+        let r = &mut self.colour_review;
+        let selection = match &r.reticle {
+            Some((made, kept)) if made == live => kept.clone(),
+            _ => {
+                r.reticle = None;
+                live.to_vec()
+            }
+        };
         let on_selection = self.colour_review.selection && !selection.is_empty();
         let key = (
             self.session.revision(),
@@ -333,7 +345,10 @@ impl OndinApp {
         match act {
             None => {}
             Some(Act::Close) => r.open = false,
-            Some(Act::Scope(selection)) => r.selection = selection,
+            Some(Act::Scope(selection)) => {
+                r.selection = selection;
+                r.reticle = None;
+            }
             Some(Act::Threshold(t)) => {
                 if self.prefs.colour_review != t {
                     self.prefs.colour_review = t;
@@ -509,7 +524,17 @@ impl OndinApp {
         } else {
             here
         };
+        let r = &self.colour_review;
+        let kept = match &r.reticle {
+            Some((made, kept)) if made == self.session.selection.ids() => kept.clone(),
+            _ => self.session.selection.ids().to_vec(),
+        };
         self.select_by_color(ids);
+        // Nothing selected before reviews the document, and still does.
+        if self.colour_review.selection {
+            let made = self.session.selection.ids().to_vec();
+            self.colour_review.reticle = Some((made, kept));
+        }
     }
 }
 
@@ -1704,5 +1729,26 @@ mod tests {
             shown = texts_at(&mut f.app, &ctx, Some(tick));
         }
         assert!(!hint(&shown), "over the box: {shown:?}");
+    }
+
+    /// On *Selection*, a reticle's selection keeps the card on what it was
+    /// reviewing; a selection made anywhere else re-scopes it.
+    /// flip: `refresh_colour_review` keying on the live selection alone → fails
+    /// at "the group stays".
+    #[test]
+    fn a_reticle_on_the_selection_scope_keeps_the_group() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set(vec![f.a, f.b]);
+        f.app.open_colour_review();
+        run(&mut f.app, &ctx);
+        assert_eq!(f.app.colour_review.groups_shown(), 1, "A and B");
+        f.app.colour_review_act(&ctx, Some(Act::Select(vec![f.b])));
+        assert_eq!(f.app.session.selection.ids(), &[f.b], "B's user selected");
+        run(&mut f.app, &ctx);
+        assert_eq!(f.app.colour_review.groups_shown(), 1, "the group stays");
+        f.app.session.selection.set(vec![f.a]);
+        run(&mut f.app, &ctx);
+        assert_eq!(f.app.colour_review.groups_shown(), 0, "a new scope");
     }
 }

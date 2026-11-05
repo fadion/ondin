@@ -625,7 +625,8 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   capsule (a kit's reads *Kit · name*, the kit masked in private mode as on every kit surface),
   *kept* on a bound member that is not the target, uses, *anchor* or *Δ x.x*, and a reticle
   selecting that colour's users on this page, else on the first one's page, through
-  `select_by_color`. Rows wear `ui::list_row_ground`, hovered under the pointer and lit on the
+  `select_by_color`; on *Selection* the card keeps reviewing what was selected before
+  (`ColourReview::reticle`) until the selection changes some other way. Rows wear `ui::list_row_ground`, hovered under the pointer and lit on the
   target; a click anywhere on a member row but its box and reticle makes it the target. The row
   says so through the foot rather than a tooltip: while the pointer is on another member's row
   (not on its box or reticle), the foot's left reads *Click to merge into X instead*.

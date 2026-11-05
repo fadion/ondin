@@ -125,6 +125,8 @@ mod prefs;
 mod present;
 mod preview;
 mod private;
+#[cfg(target_os = "macos")]
+mod quit;
 mod rail;
 mod reader;
 mod render_cli;
@@ -1389,6 +1391,9 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
         "Ondin",
         options,
         Box::new(|cc| {
+            // A quit becomes the window's close request, so unsaved work is asked about.
+            #[cfg(target_os = "macos")]
+            quit::install(&cc.egui_ctx);
             // A launch by the OS's open event has queued its files by now, as AppKit
             // delivers it before the window is made; the first opens as `ondin <file>`
             // does, and a frame takes the rest.

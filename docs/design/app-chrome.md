@@ -107,6 +107,8 @@ ondin-app/src/
 ├─ main.rs          CLI: gui (default) | <file> | export | render | diff | check | merge | tokens | serve | mcp-proxy; `reader` (hidden, dispatched before the Velopack hook and the instance count); Velopack hook; eframe bootstrap
 ├─ file_type.rs     Windows: the .ondin file type, registered by Velopack's install/update hooks
 ├─ open_event.rs    macOS: the `odoc` Apple Event (Finder double-click, Dock drop), queued for `open_path`
+├─ quit.rs          macOS: a quit with unsaved work becomes the window's close request, so it asks
+├─ traffic_lights.rs macOS: the traffic lights centred on the tab strip
 ├─ render_cli.rs    `ondin render`: a component per CSV row, every frame per mode
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
 ├─ chrome.rs        caption buttons, drag strip, resize edges per host; focus strip

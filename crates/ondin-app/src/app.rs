@@ -1747,7 +1747,10 @@ impl eframe::App for OndinApp {
         // Both screens are the same window, and the updater reports to both bars.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
         #[cfg(target_os = "macos")]
-        crate::traffic_lights::place(_frame);
+        {
+            crate::traffic_lights::place(_frame);
+            crate::quit::set_unsaved(self.any_unsaved());
+        }
         self.updater.poll();
 
         // Before the dashboard's early return, so a font installed while the library

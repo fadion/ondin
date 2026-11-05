@@ -1634,6 +1634,18 @@ impl RenderOverrides {
                 self.set_kind(doc, res, n, drawn);
                 self.mark_moved(doc, n);
             }
+            // Bound size limits the same way, stored resolved and unbound: the
+            // layout view resolves an override's item again in the committed
+            // table, which would undo the preview's numbers.
+            if let Some(node) = doc.get(n) {
+                let base = self.get(n).and_then(|o| o.item).unwrap_or(*node.item());
+                if base.limit_vars.iter().any(Option::is_some) {
+                    let mut drawn = doc.limits_drawn_in(t, n, base);
+                    drawn.limit_vars = Default::default();
+                    self.entry(n).item = Some(drawn);
+                    self.mark_moved(doc, n);
+                }
+            }
             // A bound visibility the same way.
             if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
                 self.entry(n).visible = Some(doc.shown_in(t, n));

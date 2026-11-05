@@ -5786,6 +5786,108 @@ fn a_frame_dragged_across_a_breakpoint_previews_in_its_new_mode() {
     assert_preview_matches_commit(&doc, &resize(900.0), "dragged within Tablet");
 }
 
+/// A flex child's bound min width, under a frame dragged across a breakpoint,
+/// lays out at the new mode's number in the preview, as the commit does.
+///
+/// flip: `redraw_reading` without its item arm → fails *"limit dragged under
+/// 768: preview diverged from commit"*.
+#[test]
+fn a_bound_limit_dragged_across_a_breakpoint_previews_in_its_new_mode() {
+    use ondin_core::container::{Dimension, Display, Flex, LayoutItem};
+    use ondin_core::variable::{Cell, Collection, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xBF);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (home, tile) = (ids.mint(), ids.mint());
+    let (mobile, tablet) = (ids.mint_mode(), ids.mint_mode());
+    let (bp, var) = (ids.mint_collection(), ids.mint_var());
+    let node = |id, parent, kind| Operation::CreateNode {
+        id,
+        parent,
+        index: 0,
+        kind,
+        transform: None,
+        name: None,
+    };
+    doc.apply(&Transaction(vec![
+        node(
+            home,
+            root,
+            NodeKind::Artboard {
+                size: Size::new(1024.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        ),
+        node(
+            tile,
+            home,
+            NodeKind::Rect {
+                size: Size::new(50.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        ),
+        Operation::SetFills {
+            id: tile,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 10, 10, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetDisplay {
+            id: home,
+            display: Some(Display::Flex(Flex::default())),
+        },
+        Operation::AddCollection {
+            collection: Collection {
+                id: bp,
+                name: "Breakpoint".into(),
+                modes: vec![
+                    Mode {
+                        id: mobile,
+                        name: "Mobile".into(),
+                    },
+                    Mode {
+                        id: tablet,
+                        name: "Tablet".into(),
+                    },
+                ],
+                breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+            },
+            index: 1,
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "tile/min".into(),
+                kind: VarKind::Number,
+                cells: [(mobile, Cell::Number(100.0)), (tablet, Cell::Number(300.0))].into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::SetLayoutItem {
+            id: tile,
+            item: LayoutItem {
+                min_width: Dimension::Px(0.0),
+                limit_vars: [Some(var), None, None, None],
+                ..Default::default()
+            },
+        },
+    ]))
+    .unwrap();
+    let resize = |w: f64| {
+        Transaction(vec![Operation::SetGeometry {
+            id: home,
+            geometry: GeometryPatch::Size(Size::new(w, 300.0)),
+        }])
+    };
+    assert_preview_matches_commit(&doc, &resize(700.0), "limit dragged under 768");
+}
+
 /// A frame whose own width is bound, dragged across a breakpoint, draws its own
 /// bound fill in the new mode too, its size as the drag writes it.
 ///

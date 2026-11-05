@@ -22,6 +22,7 @@
 
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
+use crate::export::{ExportFormat, ExportScale, ExportSpec};
 use crate::foreign::{Archive, Names, Tally, Unmapped, arr, b_of, num, sniff, solid, str_of};
 use crate::id::{IdSource, NodeId};
 use crate::image::{GradientBrush, ImageFit, ImageId, image_brush};
@@ -420,9 +421,6 @@ impl Builder<'_> {
         if !arr(&shape, "interactions").is_empty() {
             self.count("Prototype interactions", 1, "", "Left out");
         }
-        if !arr(&shape, "exports").is_empty() {
-            self.count("Export settings", 1, "layers", "Left out");
-        }
         if matches!(str_of(&shape, "layout"), "flex" | "grid") {
             self.count(
                 "Flex and grid layout",
@@ -529,6 +527,7 @@ impl Builder<'_> {
             });
         }
         self.style(id, &shape, kind, size);
+        self.exports(id, &shape);
         if let Some(c) = ink {
             self.push(Operation::SetFills {
                 id,
@@ -580,6 +579,42 @@ impl Builder<'_> {
             });
         }
         true
+    }
+
+    /// A shape's `exports` (`{type, scale, suffix}`) as its export settings. A
+    /// suffix that is only the scale's own marker (`@2x`) is left for Ondin to
+    /// add; a format Ondin cannot write is counted and left out.
+    fn exports(&mut self, id: NodeId, shape: &Value) {
+        let mut exports = Vec::new();
+        for e in arr(shape, "exports") {
+            let format = match str_of(e, "type").trim_start_matches(':') {
+                "png" => ExportFormat::Png,
+                "jpeg" | "jpg" => ExportFormat::Jpeg,
+                "webp" => ExportFormat::Webp,
+                "svg" => ExportFormat::Svg,
+                "pdf" => ExportFormat::Pdf,
+                _ => {
+                    self.count("Export formats Ondin lacks", 1, "", "Left out");
+                    continue;
+                }
+            };
+            let scale = match num_or(e, "scale", 1.0) as f32 {
+                s if s.is_finite() && s > 0.0 => ExportScale::Times(s),
+                _ => ExportScale::Times(1.0),
+            };
+            let mut spec = ExportSpec::new(format, scale);
+            let suffix = str_of(e, "suffix");
+            if suffix != scale.marker() {
+                spec.suffix = suffix.to_owned();
+            }
+            exports.push(spec);
+        }
+        if !exports.is_empty() {
+            self.push(Operation::SetExports {
+                id,
+                exports: keyed_by_position(exports),
+            });
+        }
     }
 
     /// A shape's paints, effects, opacity and blend onto `id`. A text's colour

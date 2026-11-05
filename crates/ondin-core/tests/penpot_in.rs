@@ -105,6 +105,36 @@ fn solid(doc: &Document, id: NodeId) -> BrushSource {
     doc.get(id).unwrap().paint().fills[0].brush.clone()
 }
 
+/// A shape's `exports` land as its export settings: a typed suffix kept, the
+/// scale's own marker left for Ondin to add, a format Ondin lacks counted.
+/// flip: `exports` not reading `exports` → fails at the rows' count.
+#[test]
+fn export_settings_land_with_their_format_scale_and_suffix() {
+    let mut icon = shape("I", "rect", ROOT, (0.0, 0.0, 24.0, 24.0));
+    icon["exports"] = json!([
+        { "type": "png", "scale": 2, "suffix": "@2x" },
+        { "type": "jpeg", "scale": 1, "suffix": "-dark" },
+        { "type": "avif", "scale": 1, "suffix": "" },
+    ]);
+    let r = import(export(&["I"], vec![icon], &[]));
+    let rows: Vec<ondin_core::ExportSpec> = r
+        .doc
+        .get(one(&r.doc, "I"))
+        .unwrap()
+        .exports()
+        .iter()
+        .map(|k| k.value.clone())
+        .collect();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows[0].format, ondin_core::ExportFormat::Png);
+    assert_eq!(rows[0].scale, ondin_core::ExportScale::Times(2.0));
+    assert_eq!(rows[0].suffix, "", "the marker is Ondin's to add");
+    assert_eq!(rows[1].format, ondin_core::ExportFormat::Jpeg);
+    assert_eq!(rows[1].suffix, "-dark");
+    let what: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+    assert_eq!(what, ["Export formats Ondin lacks"]);
+}
+
 /// A board on the page and a rect in it, both stored in page space, land with
 /// the rect placed in the board's space; a turned rect turns about its centre.
 #[test]

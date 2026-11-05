@@ -250,6 +250,33 @@ fn export_settings_go_out_as_penpots_exports() {
     );
 }
 
+/// Export settings come back through `penpot_in` as they went out: the `@2x` the
+/// writer spelled out is the scale's own marker again, not a typed suffix.
+/// flip: `penpot_in`'s `exports` keeping a suffix equal to the marker → fails at
+/// the spec.
+#[test]
+fn export_settings_read_back_as_they_were() {
+    let f = fixture();
+    let out = ondin_export::penpot::export(&f.doc, &f.res, "Fixture").unwrap();
+    let mut ids = IdSource::new(0x9F);
+    let back = ondin_core::penpot_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
+        .expect("read back");
+    let theirs: Vec<_> = f
+        .doc
+        .get(named(&f.doc, "Screen"))
+        .unwrap()
+        .exports()
+        .to_vec();
+    let ours: Vec<_> = back
+        .doc
+        .get(named(&back.doc, "Screen"))
+        .unwrap()
+        .exports()
+        .to_vec();
+    assert_eq!(ours.len(), 1, "the screen's one row came back");
+    assert_eq!(ours[0].value, theirs[0].value);
+}
+
 /// A row Penpot cannot hold exactly is still written, and named in the report.
 /// flip: `exports` skipping the width check → fails at the report.
 #[test]

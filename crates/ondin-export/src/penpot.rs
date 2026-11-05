@@ -25,9 +25,9 @@ use ondin_core::container::{AlignContent, AlignItems, Dimension, Display, Justif
 use ondin_core::kurbo::{Affine, Point, Rect, Shape, Size, Vec2};
 use ondin_core::peniko::{Color, Extend, GradientKind};
 use ondin_core::{
-    BlendMode, BoolOp, Brush, Document, EffectKind, ImageFit, ImageFormat, ImageId, Length,
-    MaskMode, Node, NodeId, NodeKind, Operation, Resolved, Stroke, StrokeAlign, TextAlign,
-    TextCase, TextSizing, TextStyle, VarId, VarKind, VerticalAlign,
+    BlendMode, BoolOp, Brush, Document, EffectKind, ExportFormat, ExportScale, ImageFit,
+    ImageFormat, ImageId, Length, MaskMode, Node, NodeId, NodeKind, Operation, Resolved, Stroke,
+    StrokeAlign, TextAlign, TextCase, TextSizing, TextStyle, VarId, VarKind, VerticalAlign,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -433,9 +433,7 @@ impl Writer<'_> {
             self.paints(&mut shape, id, node, &paint_space);
         }
         self.common(&mut shape, id, node);
-        if !node.exports().is_empty() {
-            self.approximate("Export settings, left out");
-        }
+        self.exports(&mut shape, node, extent);
         if !node.grids().is_empty() {
             self.approximate("Layout grids, left out");
         }
@@ -444,6 +442,41 @@ impl Writer<'_> {
         self.component(&mut shape, id, node, page);
         out.push((sid.clone(), shape));
         Some(Written { id: sid, extent })
+    }
+
+    /// A layer's export settings as Penpot's `exports`: a format, a multiplier and
+    /// a suffix. The suffix is the one Ondin would name the file with, so a 2× row
+    /// with none typed still writes `@2x`. A width or height becomes the multiplier
+    /// it asks for at the layer's extent; a prefix and a background have no place.
+    fn exports(&mut self, s: &mut Value, node: &Node, extent: Option<Rect>) {
+        if node.exports().is_empty() {
+            return;
+        }
+        let size = extent.map_or(Size::new(1.0, 1.0), |r| r.size());
+        let mut rows = Vec::new();
+        for spec in node.exports() {
+            if !matches!(spec.scale, ExportScale::Times(_)) {
+                self.approximate("Export sizes by width or height, as a multiplier");
+            }
+            if !spec.prefix.is_empty() {
+                self.approximate("Export prefixes, left out");
+            }
+            if spec.background != Default::default() {
+                self.approximate("Export backgrounds, left out");
+            }
+            rows.push(json!({
+                "type": match spec.format {
+                    ExportFormat::Png => "png",
+                    ExportFormat::Jpeg => "jpeg",
+                    ExportFormat::Webp => "webp",
+                    ExportFormat::Svg => "svg",
+                    ExportFormat::Pdf => "pdf",
+                },
+                "scale": spec.scale.factor(size.width, size.height),
+                "suffix": spec.effective_suffix(),
+            }));
+        }
+        s["exports"] = json!(rows);
     }
 
     /// What every shape carries: visibility, lock, opacity, blend and effects.

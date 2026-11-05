@@ -224,11 +224,68 @@ fn the_report_names_what_penpot_cannot_hold() {
         [
             "Guides, left out",
             "Hidden fills, left out",
-            "Export settings, left out",
             "Layout grids, left out",
             "Slices, left out",
         ]
     );
+}
+
+/// A layer's export settings go out as Penpot's `exports`: the format as its
+/// keyword, the multiplier, and the suffix Ondin would name the file with.
+/// flip: `exports` writing `spec.suffix` for the suffix → fails at the 2× row.
+#[test]
+fn export_settings_go_out_as_penpots_exports() {
+    let f = fixture();
+    let out = ondin_export::penpot::export(&f.doc, &f.res, "Fixture").unwrap();
+    let z = unzip(&out.bytes);
+    let with: Vec<&serde_json::Value> = z
+        .json
+        .values()
+        .filter(|v| v.get("exports").is_some())
+        .collect();
+    assert_eq!(with.len(), 1, "only the screen carries a setting");
+    assert_eq!(
+        with[0]["exports"],
+        serde_json::json!([{ "type": "png", "scale": 2.0, "suffix": "@2x" }])
+    );
+}
+
+/// A row Penpot cannot hold exactly is still written, and named in the report.
+/// flip: `exports` skipping the width check → fails at the report.
+#[test]
+fn an_export_by_width_goes_out_as_a_multiplier_and_is_reported() {
+    let mut f = fixture();
+    let screen = named(&f.doc, "Screen");
+    // The screen is 480 wide: 1440 pixels across asks for 3×.
+    let mut spec = ondin_core::ExportSpec::new(
+        ondin_core::ExportFormat::Jpeg,
+        ondin_core::ExportScale::Width(1440),
+    );
+    spec.prefix = "web/".into();
+    f.doc
+        .apply(&ondin_core::Transaction(vec![
+            ondin_core::Operation::SetExports {
+                id: screen,
+                exports: ondin_core::keyed_by_position([spec]),
+            },
+        ]))
+        .expect("set the screen's export");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+    let out = ondin_export::penpot::export(&f.doc, &f.res, "Fixture").unwrap();
+    let z = unzip(&out.bytes);
+    let row = z
+        .json
+        .values()
+        .find_map(|v| v.get("exports"))
+        .expect("the screen's exports");
+    assert_eq!(row[0]["type"], "jpeg");
+    assert!((row[0]["scale"].as_f64().unwrap() - 3.0).abs() < 1e-3);
+    for line in [
+        "Export sizes by width or height, as a multiplier",
+        "Export prefixes, left out",
+    ] {
+        assert!(out.approximated.iter().any(|s| s == line), "{line}");
+    }
 }
 
 /// Writing the same document twice gives the same bytes.

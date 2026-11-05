@@ -1991,6 +1991,20 @@ pub fn list_row_ground(painter: &egui::Painter, rect: egui::Rect, lit: bool, hov
     segment_ground(painter, rect, lit, hovered);
 }
 
+/// [`list_row_ground`]'s corner.
+pub const LIST_ROW_RADIUS: u8 = 4;
+
+/// [`list_row_ground`]'s fill, or none at rest: for a row whose ground runs on
+/// into what it opens below it (Version history's opened row and its body), which
+/// paints its own corners.
+pub fn list_row_fill(lit: bool, hovered: bool) -> Option<egui::Color32> {
+    match (lit, hovered) {
+        (true, _) => Some(theme::color::text_a(33)),
+        (false, true) => Some(color::hover()),
+        (false, false) => None,
+    }
+}
+
 /// The frame a frameless `TextEdit` in a field row takes, for a row whose content
 /// is `h` tall, with `x` on either side for a row whose own inset is zero. The
 /// edit fills the row's height and its line sits on the row's centre, where the
@@ -4533,10 +4547,8 @@ fn segment_track(
 
 /// A segmented cell's ground: raised when `on`, tinted under the pointer.
 fn segment_ground(painter: &egui::Painter, rect: egui::Rect, on: bool, hovered: bool) {
-    if on {
-        painter.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(33));
-    } else if hovered {
-        painter.rect_filled(rect, egui::CornerRadius::same(4), color::hover());
+    if let Some(fill) = list_row_fill(on, hovered) {
+        painter.rect_filled(rect, egui::CornerRadius::same(LIST_ROW_RADIUS), fill);
     }
 }
 

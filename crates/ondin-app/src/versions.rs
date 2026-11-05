@@ -354,20 +354,23 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
     let pointed = ui.rect_contains_pointer(rect) || focused || look.held;
     let buttons = version && (pointed || (look.opened && !look.elsewhere) || editing);
     out.pointed = version && pointed;
+    // A list row's hover ground whenever it is lit, compared included: the
+    // list's lit fill would bury the rail that crosses the row.
     let lit = look.opened || look.marked || editing || (pointed && (version || s.openable()));
     let p = ui.painter().clone();
-    if lit {
+    if let Some(fill) = crate::ui::list_row_fill(false, lit) {
         let ground = rect.expand2(egui::vec2(ROW_OUTSET, 0.0));
+        let r = crate::ui::LIST_ROW_RADIUS;
         let r = match look.opened {
             true => egui::CornerRadius {
-                nw: 6,
-                ne: 6,
+                nw: r,
+                ne: r,
                 sw: 0,
                 se: 0,
             },
-            false => egui::CornerRadius::same(6),
+            false => egui::CornerRadius::same(r),
         };
-        p.rect_filled(ground, r, color::text_a(15));
+        p.rect_filled(ground, r, fill);
     }
     let same = s.same();
     let named = s.name.is_some();
@@ -690,7 +693,8 @@ fn group_h(g: &Group) -> f32 {
 
 /// Under an opened row: its diff in brief, by page, a line per changed layer, and
 /// *Show on canvas* — or, while the diff is worked out, which pair it is comparing
-/// and three pulsing lines. Answers whether *Show on canvas* was pressed.
+/// and three pulsing lines, on the opened row's ground run on below it. Answers
+/// whether *Show on canvas* was pressed.
 fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool) -> bool {
     let brief = match s.summary.as_deref() {
         Some(Summary::Changed(b)) => Some(b),
@@ -707,16 +711,19 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
     let p = ui.painter().clone();
-    p.rect_filled(
-        rect.expand2(egui::vec2(ROW_OUTSET, 0.0)),
-        egui::CornerRadius {
-            nw: 0,
-            ne: 0,
-            sw: 6,
-            se: 6,
-        },
-        color::text_a(15),
-    );
+    let r = crate::ui::LIST_ROW_RADIUS;
+    if let Some(fill) = crate::ui::list_row_fill(false, true) {
+        p.rect_filled(
+            rect.expand2(egui::vec2(ROW_OUTSET, 0.0)),
+            egui::CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: r,
+                se: r,
+            },
+            fill,
+        );
+    }
     let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
     if !last {
         p.line_segment(

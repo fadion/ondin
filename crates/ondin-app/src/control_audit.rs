@@ -1241,17 +1241,32 @@ fn sweep_on(theme: Theme) {
         "vision bar: the fixture is not in the state it is about — it painted \
          {at_rest} control grounds at rest and {hovered} under the pointer"
     );
-    // The footer's two buttons, the only grounds the card paints at rest. Its
-    // timeline rows are not row-audited: a row and the body it opens are one
-    // `text_a(15)` block, not `ui::list_row_ground`.
+    // The footer's two buttons, the only grounds the card paints at rest, and
+    // under the pointer each version's two-line row: a list row's corner and
+    // hover at its own height.
     let mut app = with_a_rect(&ctx);
-    let found = opened(&ctx, &mut app, |_, a| with_versions(a, &scratch));
+    let (found, version_rows) = swept(&ctx, &mut app, |_, a| with_versions(a, &scratch));
     let at_rest = audit("version history", &found, disabled_alpha(&ctx), &mut faults);
     let hovered = hover(&ctx, &mut app, "version history", &found, &mut faults);
     assert!(
         at_rest == 2 && hovered == 2,
         "version history: the fixture is not in the state it is about — it painted \
          {at_rest} control grounds and hovered {hovered}, not its footer's two"
+    );
+    let version_rows: Vec<Ground> = version_rows
+        .into_iter()
+        .filter(|g| g.rect.width() > 200.0)
+        .collect();
+    for g in &version_rows {
+        if let Some(why) = tall_row_fault(g) {
+            faults.push(format!("version history: {why}: {g}"));
+        }
+    }
+    assert!(
+        version_rows.len() == 2,
+        "version history: the fixture is not in the state it is about — it swept {} \
+         rows, not its two versions",
+        version_rows.len()
     );
     let _ = std::fs::remove_dir_all(&scratch);
 

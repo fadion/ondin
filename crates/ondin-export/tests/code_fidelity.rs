@@ -2384,6 +2384,120 @@ fn an_origin_setting_a_mode_keeps_its_ancestors_others() {
     assert_eq!(html.matches("data-mode=").count(), 1, "{html}");
 }
 
+/// An alias into another collection follows that collection's mode a frame
+/// sets: Theme's `gap` aliases Density's `space` (4, 12), and a row set to
+/// Comfy is 12 apart, as on the canvas. One aliasing by mode, which no block
+/// of Density can redeclare, is reported.
+///
+/// flip: `Tokens::mode_block` declaring only its own collection's variables →
+/// fails at "Comfy's block", and at 105 in the browser.
+#[test]
+fn an_alias_into_another_collection_follows_its_mode() {
+    use ondin_core::variable::{Cell, Collection, CollectionId, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let [light, dark, compact, comfy] = [(); 4].map(|_| d.ids.mint_mode());
+    let density = d.ids.mint_collection();
+    let (space, gap) = (d.ids.mint_var(), d.ids.mint_var());
+    let mode = |id, name: &str| Mode {
+        id,
+        name: name.into(),
+    };
+    let var = |id, name: &str, cells: Vec<(_, Cell)>| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Number,
+            cells: cells.into_iter().collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    d.apply(vec![
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: mode(light, "Light"),
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: mode(dark, "Dark"),
+            index: 1,
+            cells: vec![],
+        },
+        Operation::AddCollection {
+            collection: Collection {
+                id: density,
+                name: "Density".into(),
+                modes: vec![mode(compact, "Compact"), mode(comfy, "Comfy")],
+                breakpoints: None,
+            },
+            index: 1,
+        },
+        var(
+            space,
+            "space",
+            vec![(compact, Cell::Number(4.0)), (comfy, Cell::Number(12.0))],
+        ),
+        var(
+            gap,
+            "gap",
+            vec![(light, Cell::Alias(space)), (dark, Cell::Alias(space))],
+        ),
+    ]);
+    let row = d.frame(None, 0.0, 0.0, 200.0, 60.0, "Row");
+    d.fill(row, solid(250, 250, 250, 255));
+    d.apply(vec![
+        Operation::SetModes {
+            id: row,
+            modes: vec![comfy],
+        },
+        Operation::SetDisplay {
+            id: row,
+            display: Some(Display::Flex(Flex {
+                padding: [10.0; 4],
+                ..Default::default()
+            })),
+        },
+        Operation::SetSpacingVars {
+            id: row,
+            vars: [Some(gap), None, None, None, None, None],
+        },
+    ]);
+    for _ in 0..2 {
+        let r = d.rect(row, 0.0, 0.0, 40.0, 40.0, 0.0);
+        d.fill(r, solid(40, 90, 200, 255));
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[row]);
+    let tokens = String::from_utf8(export.file("tokens.css").unwrap().to_vec()).unwrap();
+    let block = &tokens[tokens.find("[data-mode~=\"comfy\"] {").expect(&tokens)..];
+    assert!(
+        block[..block.find('}').unwrap()].contains("--gap: var(--space);"),
+        "Comfy's block:\n{tokens}"
+    );
+    holds("alias-across-collections", &doc, &res);
+
+    let mut doc = doc;
+    doc.apply(&Transaction(vec![Operation::SetVariableCell {
+        id: gap,
+        mode: dark,
+        cell: Cell::Number(6.0),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let export = html_of(&doc, &res, &[row]);
+    assert_eq!(
+        export.approximated,
+        vec![
+            "variable “gap”: it aliases another collection's variables by mode, so a frame \
+             setting that collection's mode reads the page's value"
+        ],
+    );
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

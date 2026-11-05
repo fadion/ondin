@@ -238,6 +238,12 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
              plain HTML draws each layer as it is",
         );
     }
+    for name in walk.tokens.unfollowed(doc) {
+        walk.report.approximate(format!(
+            "variable “{name}”: it aliases another collection's variables by mode, \
+             so a frame setting that collection's mode reads the page's value"
+        ));
+    }
     let tokens = walk.tokens.css(doc);
     let components = walk.components.map(|c| c.list).unwrap_or_default();
     Page {

@@ -11,7 +11,8 @@
 //! **each block declaring every token, aliases included**: a custom property's
 //! `var()` is substituted on the element that declares it, so an alias declared
 //! only on `:root` keeps the default mode's value inside a `[data-mode]` subtree
-//! (measured in Chrome).
+//! (measured in Chrome). An alias of another collection reaching a block's
+//! collection is redeclared there too when it names one target in every mode.
 //!
 //! A collection picked by width is the window's instead: its default on `:root`,
 //! each other mode in an `@media (min-width: …)` block, and each mode's
@@ -304,8 +305,9 @@ impl Tokens {
         Some(out)
     }
 
-    /// One mode's block of collection `c` under `selector`: its variables, and a
-    /// kit's that map from it, in the column that mode maps to.
+    /// One mode's block of collection `c` under `selector`: its variables, other
+    /// collections' aliases reaching it, and a kit's that map from it, in the
+    /// column that mode maps to.
     fn mode_block(
         &self,
         t: &Variables,
@@ -328,7 +330,19 @@ impl Tokens {
                     t.kit_mode_at(kit, kc, mode.as_slice())
                 }
                 None if t.collection_of(*id).is_some_and(|x| x.id == c.id) => mode,
-                None => continue,
+                // An alias into this collection is redeclared here too, or the
+                // root's substitution would stand.
+                None => match one_alias(t, v) {
+                    Some(to) if reaches(t, to, c.id) => {
+                        out.push_str(&format!(
+                            "  --{}: var(--{});\n",
+                            self.name(*id),
+                            self.name(to)
+                        ));
+                        continue;
+                    }
+                    _ => continue,
+                },
             };
             if let Some(value) = col
                 .and_then(|c| v.cells.get(&c))
@@ -349,6 +363,36 @@ impl Tokens {
             }
         }
         out.push_str("}\n");
+    }
+
+    /// The variables read that alias into another collection of several modes
+    /// by a different target per mode of their own: no block of that collection
+    /// can redeclare them, so a frame setting its mode reads the root's value.
+    pub fn unfollowed<'a>(&self, doc: &'a Document) -> Vec<&'a str> {
+        let t = doc.variables();
+        let mut out = Vec::new();
+        for id in self.reached(t) {
+            let Some(v) = t.get(id).filter(|v| v.kit().is_none()) else {
+                continue;
+            };
+            let Some(own) = t.collection_of(id).map(|c| c.id) else {
+                continue;
+            };
+            if one_alias(t, v).is_some() {
+                continue;
+            }
+            let into_other = v.cells.values().any(|cell| match cell {
+                Cell::Alias(to) => t
+                    .collections()
+                    .iter()
+                    .any(|c| c.id != own && c.modes.len() > 1 && reaches(t, *to, c.id)),
+                _ => false,
+            });
+            if into_other {
+                out.push(v.name.as_str());
+            }
+        }
+        out
     }
 
     /// The variables read and every alias target they reach, in any column.
@@ -415,6 +459,41 @@ impl Tokens {
         }
         false
     }
+}
+
+/// The variable a document variable aliases in every mode of its collection,
+/// or `None` when its modes differ or one holds a value.
+fn one_alias(t: &Variables, v: &variable::Variable) -> Option<VarId> {
+    let modes = &t.collection_of(v.id)?.modes;
+    let mut to = None;
+    for m in modes {
+        match v.cells.get(&m.id) {
+            Some(Cell::Alias(x)) if to.is_none_or(|y| y == *x) => to = Some(*x),
+            _ => return None,
+        }
+    }
+    to
+}
+
+/// Whether `from`, or a variable it aliases in any mode, is in collection `c`.
+fn reaches(t: &Variables, from: VarId, c: variable::CollectionId) -> bool {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![from];
+    while let Some(at) = stack.pop() {
+        if !seen.insert(at) {
+            continue;
+        }
+        let Some(v) = t.get(at) else { continue };
+        if v.kit().is_none() && t.collection_of(at).is_some_and(|x| x.id == c) {
+            return true;
+        }
+        for cell in v.cells.values() {
+            if let Cell::Alias(next) = cell {
+                stack.push(*next);
+            }
+        }
+    }
+    false
 }
 
 /// [`Tokens::keywords`] of a variable in hand.

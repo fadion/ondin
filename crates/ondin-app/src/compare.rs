@@ -514,6 +514,9 @@ impl OndinApp {
         if self.find.open {
             self.close_find();
         }
+        // Cards that would edit: their writes are refused, so they close.
+        self.colour_review.open = false;
+        self.tokens_import = None;
         self.end_contrast();
         self.vision = None;
         self.session.clear_gesture_preview();
@@ -2345,8 +2348,9 @@ mod tests {
     /// While comparing, an edit, an undo and a chord that edits change nothing;
     /// Escape leaves, and editing works again.
     ///
-    /// flip: `commit_inner` without its compare refusal → fails at "the commit is
-    /// refused".
+    /// flip: `commit_inner` answering `Ok` for its refusal → fails at "the commit
+    /// answers that it was refused"; `jump_to` without its refusal → fails at "and a
+    /// History row's jump".
     #[test]
     fn a_compare_refuses_every_edit_and_escape_leaves_it() {
         let ctx = egui::Context::default();
@@ -2359,9 +2363,15 @@ mod tests {
             }]))
         };
         let revision = f.app.session.revision();
-        rename(&mut f.app);
+        assert!(
+            !rename(&mut f.app),
+            "the commit answers that it was refused"
+        );
         assert_eq!(f.app.session.revision(), revision, "the commit is refused");
+        assert_eq!(f.app.session.status().text, READ_ONLY);
         assert!(!f.app.session.undo(), "and the undo");
+        assert!(!f.app.session.jump_to(0), "and a History row's jump");
+        assert_eq!(f.app.session.revision(), revision, "which moves nothing");
         f.app.dispatch(&ctx, Action::SelectAll);
         assert!(f.app.session.selection.ids().is_empty(), "and a chord");
 
@@ -2380,6 +2390,40 @@ mod tests {
             revision,
             "and editing works again"
         );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// Opening a compare closes Colour review and a tokens review, and the tokens
+    /// doors, which write the link outside `apply`, refuse while it is open.
+    /// flip: `refused_by_compare` answering `false` → fails at "no review opens";
+    /// `compare_with` leaving Colour review open → fails at "Colour review closed".
+    #[test]
+    fn a_compare_closes_the_editing_cards_and_refuses_the_tokens_link() {
+        const TOKENS: &str = r#"{ "space": { "$type": "number", "s": { "$value": 4 } } }"#;
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "cards");
+        let path = PathBuf::from("tokens.json");
+        f.app.open_colour_review();
+        f.app
+            .open_tokens_text(path.clone(), TOKENS.into(), false, false);
+        assert!(f.app.tokens_import.is_some(), "the fixture's review opened");
+        let link = ondin_core::meta::TokensLink {
+            path: "C:/work/tokens.json".into(),
+            applied: serde_json::json!({}),
+        };
+        f.app.session.doc.set_tokens_link(Some(link.clone()));
+        open(&mut f);
+        assert!(!f.app.colour_review.open, "Colour review closed");
+        assert!(f.app.tokens_import.is_none(), "the tokens review closed");
+        f.app.open_tokens_text(path, TOKENS.into(), false, false);
+        assert!(f.app.tokens_import.is_none(), "no review opens");
+        f.app.unlink_tokens();
+        assert_eq!(
+            f.app.session.doc.tokens_link(),
+            Some(&link),
+            "Unlink is refused"
+        );
+        assert_eq!(f.app.session.status().text, READ_ONLY);
         let _ = std::fs::remove_file(&f.version);
     }
 

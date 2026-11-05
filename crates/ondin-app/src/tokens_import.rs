@@ -159,6 +159,9 @@ impl OndinApp {
 
     /// *Unlink*: the document stops watching its tokens file.
     pub(crate) fn unlink_tokens(&mut self) {
+        if self.session.doc.tokens_link().is_none() || self.refused_by_compare() {
+            return;
+        }
         let Some(link) = self.session.doc.tokens_link() else {
             return;
         };
@@ -195,6 +198,9 @@ impl OndinApp {
         linkable: bool,
         from_link: bool,
     ) {
+        if self.refused_by_compare() {
+            return;
+        }
         let (name, _) = where_label(&path);
         let file = match dtcg_in::parse(&text) {
             Ok(f) => f,
@@ -243,6 +249,16 @@ impl OndinApp {
         self.tokens_import = Some(t);
     }
 
+    /// Whether a compare holds the document read-only, saying so. The link is
+    /// written outside `apply`, past the session's own refusal.
+    fn refused_by_compare(&mut self) -> bool {
+        let comparing = self.session.compare.is_some();
+        if comparing {
+            self.session.fail(crate::compare::READ_ONLY);
+        }
+        comparing
+    }
+
     fn tokens_why_not(&self, t: &TokensImport) -> Option<String> {
         if ticked_count(t) == 0 {
             return None;
@@ -252,6 +268,9 @@ impl OndinApp {
 
     /// Apply the ticked rows as one undo step and record the link.
     fn commit_tokens_import(&mut self, t: &TokensImport) {
+        if self.refused_by_compare() {
+            return;
+        }
         let (name, _) = where_label(&t.path);
         let ops = match t.review.ops(&self.session.doc, &t.ticked) {
             Ok(ops) => ops,

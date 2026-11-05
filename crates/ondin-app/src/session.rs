@@ -54,6 +54,30 @@ enum Fold {
     Last,
 }
 
+/// Why a commit did not apply: the edit failed, or a compare holds the session
+/// read-only. A refusal is an `Err` so no door reports a write that never happened.
+#[derive(Debug)]
+pub enum CommitError {
+    Op(OpError),
+    /// The status line already says [`crate::compare::READ_ONLY`].
+    ReadOnly,
+}
+
+impl From<OpError> for CommitError {
+    fn from(e: OpError) -> Self {
+        Self::Op(e)
+    }
+}
+
+impl std::fmt::Display for CommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Op(e) => e.fmt(f),
+            Self::ReadOnly => f.write_str(crate::compare::READ_ONLY),
+        }
+    }
+}
+
 /// What the status line is reporting. Errors are kept distinct so the chrome
 /// can colour them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1267,9 +1291,17 @@ impl EditorSession {
     /// Commit a transaction, reporting failure through the status line instead
     /// of discarding it. Returns whether it applied.
     pub fn commit(&mut self, tx: Transaction) -> bool {
-        match self.try_commit(tx) {
+        let applied = self.try_commit(tx);
+        self.say_failure(applied)
+    }
+
+    /// `true` for a commit that applied; otherwise says why, unless the refusal
+    /// already did, and `false`.
+    fn say_failure(&mut self, applied: Result<(), CommitError>) -> bool {
+        match applied {
             Ok(()) => true,
-            Err(e) => {
+            Err(CommitError::ReadOnly) => false,
+            Err(CommitError::Op(e)) => {
                 self.fail(format!("Edit failed: {e}"));
                 false
             }
@@ -1294,13 +1326,8 @@ impl EditorSession {
         if !open {
             self.history.end_run();
         }
-        let applied = match self.commit_inner(tx, Fold::Run) {
-            Ok(()) => true,
-            Err(e) => {
-                self.fail(format!("Edit failed: {e}"));
-                false
-            }
-        };
+        let applied = self.commit_inner(tx, Fold::Run);
+        let applied = self.say_failure(applied);
         self.run = applied.then_some((verb, now));
         applied
     }
@@ -1406,7 +1433,7 @@ impl EditorSession {
     /// Commit and report the error to the caller. Empty transactions are a
     /// no-op success — tools legitimately produce them (a click that turned out
     /// not to be a drag) and they must not create an undo step.
-    pub fn try_commit(&mut self, tx: Transaction) -> Result<(), OpError> {
+    pub fn try_commit(&mut self, tx: Transaction) -> Result<(), CommitError> {
         self.commit_inner(tx, Fold::None)
     }
 
@@ -1419,18 +1446,13 @@ impl EditorSession {
             true => Fold::Last,
             false => Fold::None,
         };
-        match self.commit_inner(tx, fold) {
-            Ok(()) => true,
-            Err(e) => {
-                self.fail(format!("Edit failed: {e}"));
-                false
-            }
-        }
+        let applied = self.commit_inner(tx, fold);
+        self.say_failure(applied)
     }
 
     /// [`Self::try_commit`], with `fold` saying whether this edit may be folded into
     /// the step before it.
-    fn commit_inner(&mut self, tx: Transaction, fold: Fold) -> Result<(), OpError> {
+    fn commit_inner(&mut self, tx: Transaction, fold: Fold) -> Result<(), CommitError> {
         // Cleared first, so a commit that empties, changes nothing or fails
         // never hands the caller the one before it's detaches.
         self.last_detached = Default::default();
@@ -1442,7 +1464,7 @@ impl EditorSession {
         }
         if self.compare.is_some() {
             self.fail(crate::compare::READ_ONLY);
-            return Ok(());
+            return Err(CommitError::ReadOnly);
         }
         // **While the browser's *Edit* is open, an edit of the style's users is an
         // edit of the style** — first, so every pass below reads the style's edit and
@@ -1744,6 +1766,10 @@ impl EditorSession {
     /// fails stops the jump on the last one that applied, and the status says so.
     /// Answers whether the document moved.
     pub fn jump_to(&mut self, depth: usize) -> bool {
+        if self.compare.is_some() {
+            self.fail(crate::compare::READ_ONLY);
+            return false;
+        }
         let here = self.history.undo_depth();
         let depth = depth.min(here + self.history.redo_depth());
         let back = depth < here;

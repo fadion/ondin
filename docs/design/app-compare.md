@@ -29,12 +29,16 @@ matched by id, so a renamed or moved layer is one change.
   palette row disabled outside the library with the version card's sentence) opens the card with
   the compare buttons lit (`OndinApp::versions_compare`). A document unchanged since the version
   opens no compare and says *Nothing has changed since this version* (two the same: *These
-  versions are the same*). Opening leaves a compare already open, closes the find box, ends a
-  contrast check and a colour-vision simulation, clears any gesture preview, and takes the
-  selection aside; leaving gives it back when the compare ends on the page it opened on.
+  versions are the same*). Opening leaves a compare already open, closes the find box, Colour
+  review and a tokens review, ends a contrast check and a colour-vision simulation, clears any
+  gesture preview, and takes the selection aside; leaving gives it back when the compare ends on
+  the page it opened on.
 - **Read-only, in three layers**: the session refuses behind the doors the app closes itself.
-  - `EditorSession::commit_inner` refuses any non-empty transaction (returns `Ok` without applying)
-    and `undo`/`redo` refuse, each saying `compare::READ_ONLY` on the status line.
+  - `EditorSession::commit_inner` refuses any non-empty transaction with
+    `CommitError::ReadOnly`, so `commit` answers `false` and no door reports a write that never
+    happened; `undo`, `redo` and `jump_to` (a History row) refuse, each saying `compare::READ_ONLY`
+    on the status line. The tokens link, written outside `apply`, is refused at its doors: the
+    review does not open, and *Unlink* and Apply say `READ_ONLY`.
   - `OndinApp::dispatch` runs only what `compare::admits` (save, open, new, close and tab keys,
     settings, exports, cheatsheet, *Show in library*, version history, compare, zoom, page steps,
     private mode, Escape) and says `READ_ONLY` for the rest — silently for `Enter`, which the bar
@@ -133,7 +137,7 @@ matched by id, so a renamed or moved layer is one change.
 
 ## Traps
 
-- The session's refusal in `commit_inner`, `undo` and `redo` looks redundant beside `admits`, but
+- The session's refusal in `commit_inner`, `undo`, `redo` and `jump_to` looks redundant beside `admits`, but
   panels and canvas paths commit without going through `dispatch`.
   `a_compare_refuses_every_edit_and_escape_leaves_it` pins the commit refusal.
 - `compare_bar` runs after the canvas in `OndinApp::ui`, and the reveal with it: before it, a page's

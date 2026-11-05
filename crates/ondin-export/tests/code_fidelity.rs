@@ -2298,6 +2298,92 @@ fn a_layer_off_the_window_pins_its_width_mode_and_an_aliased_direction_is_bare()
     assert!(tokens.contains("--dir: var(--label);"), "{tokens}");
 }
 
+/// An export origin setting a mode of its own still names its ancestors' modes
+/// of the other collections, the width's pin among them: a *Card* set to Dark
+/// inside a 375 *Home* set to Comfy writes all three.
+///
+/// flip: `Walk::page_root` naming the inherited modes only for a layer setting
+/// none → fails at "every collection's".
+#[test]
+fn an_origin_setting_a_mode_keeps_its_ancestors_others() {
+    use ondin_core::variable::{Collection, CollectionId, Mode};
+    let mut d = Doc::new();
+    let [light, dark, mobile, desktop, compact, comfy] = [(); 6].map(|_| d.ids.mint_mode());
+    let (size, density) = (d.ids.mint_collection(), d.ids.mint_collection());
+    let mode = |id, name: &str| Mode {
+        id,
+        name: name.into(),
+    };
+    let collection = |id, name: &str, modes, index| Operation::AddCollection {
+        collection: Collection {
+            id,
+            name: name.into(),
+            modes,
+            breakpoints: None,
+        },
+        index,
+    };
+    d.apply(vec![
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: mode(light, "Light"),
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: mode(dark, "Dark"),
+            index: 1,
+            cells: vec![],
+        },
+        collection(
+            size,
+            "Size",
+            vec![mode(mobile, "Mobile"), mode(desktop, "Desktop")],
+            1,
+        ),
+        Operation::SetBreakpoints {
+            id: size,
+            breakpoints: Some([(mobile, 0.0), (desktop, 1024.0)].into()),
+        },
+        collection(
+            density,
+            "Density",
+            vec![mode(compact, "Compact"), mode(comfy, "Comfy")],
+            2,
+        ),
+    ]);
+    let home = d.frame(None, 0.0, 0.0, 375.0, 200.0, "Home");
+    let card = d.frame(Some(home), 10.0, 10.0, 200.0, 100.0, "Card");
+    d.apply(vec![
+        Operation::SetModes {
+            id: home,
+            modes: vec![comfy],
+        },
+        Operation::SetModes {
+            id: card,
+            modes: vec![dark],
+        },
+    ]);
+    let (doc, res) = d.done();
+    assert_eq!(doc.mode_at(card, size), Some(mobile), "Home picks Mobile");
+    let export = html_of(&doc, &res, &[card]);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    let words: std::collections::BTreeSet<&str> = html
+        .split("data-mode=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect(&html)
+        .split(' ')
+        .collect();
+    assert_eq!(
+        words,
+        ["comfy", "dark", "mobile"].into(),
+        "every collection's:\n{html}"
+    );
+    assert_eq!(html.matches("data-mode=").count(), 1, "{html}");
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

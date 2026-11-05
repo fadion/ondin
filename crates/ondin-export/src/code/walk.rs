@@ -368,14 +368,21 @@ impl Walk<'_> {
             {
                 inherited.push(m);
             }
-            if node.modes().is_empty()
-                && let Some(mode) = self.tokens.modes_attr(inherited)
-            {
-                if el.instance.is_some() {
-                    let mode = mode.to_string();
-                    el = self.with_mode(el, mode);
-                } else {
-                    el.attrs.push(("data-mode", mode.to_string()));
+            // Each collection inherits on its own: the layer's modes replace
+            // only theirs, and its `data-mode` names the rest too.
+            let own = node.modes();
+            inherited.retain(|m| {
+                !own.iter()
+                    .any(|o| ondin_core::variable::same_collection(t, *o, *m))
+            });
+            if let Some(mode) = self.tokens.modes_attr(inherited) {
+                match el.attrs.iter_mut().find(|(k, _)| *k == "data-mode") {
+                    Some((_, words)) => {
+                        words.push(' ');
+                        words.push_str(&mode);
+                    }
+                    None if el.instance.is_some() => el = self.with_mode(el, mode),
+                    None => el.attrs.push(("data-mode", mode)),
                 }
             }
             root.children.push(Child::Element(Box::new(el)));

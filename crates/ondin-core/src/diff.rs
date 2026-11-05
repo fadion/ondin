@@ -346,15 +346,23 @@ impl<'d> Differ<'d> {
             by_id
         });
         for table in &saved {
+            let vars = &table["variables"];
+            let later = vars["collections"].as_array().into_iter().flatten();
             let lists = [
-                &table["variables"]["vars"],
-                &table["variables"]["modes"],
+                &vars["vars"],
+                &vars["modes"],
+                &vars["collections"],
                 &table["styles"],
-            ];
-            for item in lists.into_iter().filter_map(Value::as_array).flatten() {
+            ]
+            .into_iter()
+            .chain(later.map(|c| &c["modes"]));
+            for item in lists.filter_map(Value::as_array).flatten() {
                 if let (Some(id), Some(name)) = (item["id"].as_str(), item["name"].as_str()) {
                     names.insert(id.to_string(), name.to_string());
                 }
+            }
+            if let Some(id) = vars["collection"].as_str() {
+                names.insert(id.to_string(), first_collection_name(table));
             }
         }
         Self {
@@ -436,15 +444,16 @@ impl<'d> Differ<'d> {
             };
             let (ca, cb) = (old.children(), parent.children());
             let moved = moved_in_order(ca, cb);
+            if moved.is_empty() {
+                continue;
+            }
+            let places = |list: &[NodeId]| -> FxHashMap<NodeId, usize> {
+                list.iter().enumerate().map(|(i, c)| (*c, i)).collect()
+            };
+            let (pa, pb) = (places(ca), places(cb));
             for id in moved {
-                let before = ca
-                    .iter()
-                    .position(|c| *c == id)
-                    .map(|i| from_top(i, ca.len()));
-                let after = cb
-                    .iter()
-                    .position(|c| *c == id)
-                    .map(|i| from_top(i, cb.len()));
+                let before = pa.get(&id).map(|i| from_top(*i, ca.len()));
+                let after = pb.get(&id).map(|i| from_top(*i, cb.len()));
                 out.insert(id, Change::new("order", before, after));
             }
         }
@@ -484,7 +493,7 @@ impl<'d> Differ<'d> {
         let mut out = Vec::new();
         if let Some(root) = b_root.and_then(|r| self.b.get(r)) {
             for child in root.children().iter().rev() {
-                self.visit(*child, changed, &mut out);
+                self.visit(*child, changed, false, &mut out);
             }
         }
         if let Some(root) = a_root {
@@ -493,10 +502,14 @@ impl<'d> Differ<'d> {
         out
     }
 
+    /// `id`'s entry and its subtree's. `in_new`: under an added layer, whose
+    /// `inside` already counts every new layer below it, so only a layer `a`
+    /// holds too — one moved in, say — is listed there.
     fn visit(
         &self,
         id: NodeId,
         changed: &FxHashMap<NodeId, Vec<Change>>,
+        in_new: bool,
         out: &mut Vec<LayerDiff>,
     ) {
         let Some(node) = self.b.get(id) else {
@@ -510,7 +523,8 @@ impl<'d> Differ<'d> {
             inside,
             changes,
         };
-        if !self.a.contains(id) {
+        let new = !self.a.contains(id);
+        if new && !in_new {
             out.push(entry(
                 Status::Added,
                 self.count_new(self.b, self.a, id) - 1,
@@ -520,7 +534,7 @@ impl<'d> Differ<'d> {
             out.push(entry(Status::Changed, 0, changes.clone()));
         }
         for child in node.children().iter().rev() {
-            self.visit(*child, changed, out);
+            self.visit(*child, changed, in_new || new, out);
         }
         if self.a.contains(id) {
             self.removed_under(id, out);
@@ -600,17 +614,68 @@ impl<'d> Differ<'d> {
                 }
                 continue;
             }
+            if key == "tokens_link" {
+                self.tokens_link(x, y, &mut out);
+                continue;
+            }
             let null = Value::Null;
+            let (x, y) = (x.unwrap_or(&null), y.unwrap_or(&null));
+            if key == "variables" {
+                // The first collection's own fields sit beside the variables:
+                // they read under the collection's name, as a later one's do.
+                let (mut x, mut y) = (x.clone(), y.clone());
+                let own = |v: &mut Value| {
+                    let mut out = Map::new();
+                    // The file skips the name at its default.
+                    out.insert("name".into(), crate::variable::FIRST_COLLECTION_NAME.into());
+                    if let Some(map) = v.as_object_mut() {
+                        for k in FIRST_COLLECTION_KEYS {
+                            if let Some(field) = map.remove(k) {
+                                out.insert(k.to_string(), field);
+                            }
+                        }
+                        // Nothing left is no variables, not an empty table added.
+                        if map.is_empty() {
+                            *v = Value::Null;
+                        }
+                    }
+                    Value::Object(out)
+                };
+                let (oa, ob) = (own(&mut x), own(&mut y));
+                let name = first_collection_name(vb);
+                let here = vec![format!("collection {}", quoted(&name))];
+                self.compare(&here, "", &oa, &ob, &mut out);
+                self.compare(&[], &key, &x, &y, &mut out);
+                continue;
+            }
             let here = self.segment(&[], &key);
-            self.compare(
-                &here,
-                &key,
-                x.unwrap_or(&null),
-                y.unwrap_or(&null),
-                &mut out,
-            );
+            self.compare(&here, &key, x, y, &mut out);
         }
         out
+    }
+
+    /// A tokens link: linked, unlinked or moved to another file, and applied again,
+    /// rather than every leaf of the file it keeps as last applied.
+    fn tokens_link(&self, x: Option<&Value>, y: Option<&Value>, out: &mut Vec<Change>) {
+        let path = |v: &Value| cut(v["path"].as_str().unwrap_or_default());
+        const WHAT: &str = "tokens link";
+        match (x, y) {
+            (None, Some(y)) => out.push(Change::new(WHAT, None, Some(path(y)))),
+            (Some(x), None) => out.push(Change::new(WHAT, Some(path(x)), None)),
+            (Some(x), Some(y)) => {
+                if x["path"] != y["path"] {
+                    out.push(Change::new(WHAT, Some(path(x)), Some(path(y))));
+                }
+                if !self.same(&x["applied"], &y["applied"]) {
+                    out.push(Change::new(
+                        WHAT,
+                        Some("applied".into()),
+                        Some("applied again".into()),
+                    ));
+                }
+            }
+            (None, None) => {}
+        }
     }
 
     /// Push a [`Change`] for every leaf of `a` and `b` that differs, under the
@@ -694,6 +759,13 @@ impl<'d> Differ<'d> {
         let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
         let (ida, idb): (Vec<String>, Vec<String>) =
             (a.iter().map(id).collect(), b.iter().map(id).collect());
+        // By id, first place first, so a list of thousands of variables is not
+        // searched once per item.
+        let mut in_a: FxHashMap<&str, usize> = FxHashMap::default();
+        for (j, x) in ida.iter().enumerate() {
+            in_a.entry(x.as_str()).or_insert(j);
+        }
+        let in_b: FxHashSet<&str> = idb.iter().map(String::as_str).collect();
         let noun = singular(key);
         let name_of = |list: &[Value], i: usize| match list[i]["name"].as_str() {
             Some(name) => format!("{noun} {}", quoted(name)),
@@ -708,7 +780,7 @@ impl<'d> Differ<'d> {
         for (i, item) in b.iter().enumerate() {
             let item_label = name_of(b, i);
             here.push(item_label.clone());
-            match ida.iter().position(|x| *x == idb[i]) {
+            match in_a.get(idb[i].as_str()).copied() {
                 Some(j) => self.compare(&here, "", &without_id(&a[j]), &without_id(item), out),
                 None => out.push(Change::new(
                     here.join(" "),
@@ -721,7 +793,7 @@ impl<'d> Differ<'d> {
         for (j, item) in a
             .iter()
             .enumerate()
-            .filter(|(j, _)| !idb.contains(&ida[*j]))
+            .filter(|(j, _)| !in_b.contains(ida[*j].as_str()))
         {
             here.push(name_of(a, j));
             out.push(Change::new(
@@ -736,7 +808,7 @@ impl<'d> Differ<'d> {
                 let kept: Vec<String> = ids
                     .iter()
                     .zip(list)
-                    .filter(|(x, _)| ida.contains(x) && idb.contains(x))
+                    .filter(|(x, _)| in_a.contains_key(x.as_str()) && in_b.contains(x.as_str()))
                     .map(|(_, v)| self.show(key, v))
                     .collect();
                 cut(&kept.join(", "))
@@ -910,41 +982,55 @@ fn trail(doc: &Document, id: NodeId) -> Vec<String> {
 
 /// The items of `b` that both sides hold but that left the longest common run
 /// of the two orders — the ones that moved, as opposed to the ones moved past.
-fn moved_in_order<T: PartialEq + Clone>(a: &[T], b: &[T]) -> Vec<T> {
-    let x: Vec<&T> = a.iter().filter(|v| b.contains(v)).collect();
-    let y: Vec<&T> = b.iter().filter(|v| a.contains(v)).collect();
+///
+/// The shared items are a permutation of each other, so the common run is the
+/// longest increasing run of `b`'s items' places in `a`: O(n log n) time and
+/// O(n) memory, since a page may hold tens of thousands of siblings.
+fn moved_in_order<T: Eq + std::hash::Hash + Clone>(a: &[T], b: &[T]) -> Vec<T> {
+    let (in_a, in_b): (FxHashSet<&T>, FxHashSet<&T>) = (a.iter().collect(), b.iter().collect());
+    let x: Vec<&T> = a.iter().filter(|v| in_b.contains(v)).collect();
+    let y: Vec<&T> = b.iter().filter(|v| in_a.contains(v)).collect();
     if x == y {
         return Vec::new();
     }
-    // The longest common subsequence, by the table of suffix lengths.
-    let (n, m) = (x.len(), y.len());
-    let mut len = vec![vec![0u32; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            len[i][j] = if x[i] == y[j] {
-                len[i + 1][j + 1] + 1
-            } else {
-                len[i + 1][j].max(len[i][j + 1])
-            };
+    let mut place: FxHashMap<&T, usize> = FxHashMap::default();
+    for (i, v) in x.iter().enumerate() {
+        place.entry(*v).or_insert(i);
+    }
+    let seq: Vec<usize> = y.iter().map(|v| place[v]).collect();
+    // `tails[k]`: the index in `seq` of the smallest end of a run of length k + 1;
+    // `back[j]`: the index before `j` in the run ending at `j`.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut back: Vec<Option<usize>> = vec![None; seq.len()];
+    for (j, &s) in seq.iter().enumerate() {
+        let k = tails.partition_point(|&t| seq[t] < s);
+        back[j] = k.checked_sub(1).map(|k| tails[k]);
+        match tails.get_mut(k) {
+            Some(t) => *t = j,
+            None => tails.push(j),
         }
     }
-    let mut kept = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    while i < n && j < m {
-        if x[i] == y[j] {
-            kept.push(y[j]);
-            i += 1;
-            j += 1;
-        } else if len[i + 1][j] >= len[i][j + 1] {
-            i += 1;
-        } else {
-            j += 1;
-        }
+    let mut kept = vec![false; seq.len()];
+    let mut at = tails.last().copied();
+    while let Some(j) = at {
+        kept[j] = true;
+        at = back[j];
     }
     y.into_iter()
-        .filter(|v| !kept.contains(v))
-        .cloned()
+        .zip(kept)
+        .filter(|(_, k)| !k)
+        .map(|(v, _)| v.clone())
         .collect()
+}
+
+/// The keys of the saved `variables` that are the first collection's own.
+const FIRST_COLLECTION_KEYS: [&str; 3] = ["collection", "name", "breakpoints"];
+
+/// The first collection's name in a saved document.
+fn first_collection_name(saved: &Value) -> String {
+    (saved["variables"]["name"].as_str())
+        .unwrap_or(crate::variable::FIRST_COLLECTION_NAME)
+        .to_string()
 }
 
 /// A layer's place among `len` siblings as the Layers panel lists them, top first.

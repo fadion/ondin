@@ -243,6 +243,47 @@ fn a_removed_frame_counts_the_layers_it_took() {
     );
 }
 
+/// A new frame holding two new layers is one entry counting them, as its
+/// deletion is; a layer it holds that was there before is listed as moved in.
+///
+/// flip: `visit` listing an added layer under an added one → fails at the
+/// entry count, `Hero › Shape` and `Hero › Line` listed too.
+#[test]
+fn an_added_frame_counts_the_layers_it_brought() {
+    let mut f = fixture();
+    let [hero, shape, line] = [(); 3].map(|_| f.ids.mint());
+    let root = f.doc.first_page();
+    let added = |into| {
+        edited(
+            &f,
+            vec![
+                frame(hero, root, 0, "Hero"),
+                rect(shape, hero, 0, "Shape", (0.0, 0.0)),
+                rect(line, hero, 1, "Line", (0.0, 0.0)),
+            ]
+            .into_iter()
+            .chain(into)
+            .collect(),
+        )
+    };
+    let d = diff(&f.doc, &added(None));
+    assert_eq!(d.pages[0].layers.len(), 1, "{}", d.text());
+    let hero_entry = layer(&d, &["Hero"]).expect("Hero is reported");
+    assert_eq!((hero_entry.status, hero_entry.inside), (Status::Added, 2));
+    assert_eq!(diff(&added(None), &f.doc).pages[0].layers.len(), 1);
+
+    let moved_in = Operation::Reparent {
+        id: f.dot,
+        new_parent: hero,
+        index: 0,
+    };
+    let d = diff(&f.doc, &added(Some(moved_in)));
+    let dot = layer(&d, &["Hero", "Dot"]).expect("Dot is reported under Hero");
+    assert_eq!(dot.status, Status::Changed);
+    assert!(dot.changes.iter().any(|c| c.what == "parent"), "{dot:?}");
+    assert_eq!(layer(&d, &["Hero"]).map(|l| l.inside), Some(2));
+}
+
 /// Raising one layer past its siblings reports that layer's order, not theirs.
 ///
 /// flip: `moved_in_order` answering every shared item whose index changed →
@@ -329,6 +370,116 @@ fn a_variable_cell_reads_by_name() {
         [change("variable “brand/500” Dark", "#0000FF", "#FF0000")],
         "{}",
         d.text()
+    );
+}
+
+/// A later collection's cell reads under its mode's name, and the first
+/// collection's own name change reads as the collection's.
+///
+/// flip: `Differ::new` leaving out the later collections' modes → fails at the
+/// first `assert_eq`, the mode read as its id.
+#[test]
+fn a_later_collections_cell_and_the_first_collections_name_read_by_name() {
+    let mut f = fixture();
+    let (theme, night, surface) = (f.ids.mint_collection(), f.ids.mint_mode(), f.ids.mint_var());
+    let a = edited(
+        &f,
+        vec![
+            Operation::AddCollection {
+                collection: ondin_core::variable::Collection {
+                    id: theme,
+                    name: "Theme".into(),
+                    modes: vec![Mode {
+                        id: night,
+                        name: "Night".into(),
+                    }],
+                    breakpoints: None,
+                },
+                index: 1,
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: surface,
+                    name: "surface".into(),
+                    kind: VarKind::Color,
+                    cells: [(night, Cell::Color(RED))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ],
+    );
+    let mut b = a.clone();
+    b.apply(&Transaction(vec![Operation::SetVariableCell {
+        id: surface,
+        mode: night,
+        cell: Cell::Color(BLUE),
+    }]))
+    .expect("the edit");
+    let d = diff(&a, &b);
+    assert_eq!(
+        d.document,
+        [change("variable “surface” Night", "#FF0000", "#0000FF")]
+    );
+
+    let mut b = a.clone();
+    b.apply(&Transaction(vec![Operation::SetCollectionName {
+        id: ondin_core::variable::CollectionId::FIRST,
+        name: "Brand".into(),
+    }]))
+    .expect("the rename");
+    let d = diff(&a, &b);
+    assert_eq!(
+        d.document,
+        [change("collection “Brand” name", "“Variables”", "“Brand”")]
+    );
+    assert_eq!(d.document[0].kind(), "collection");
+}
+
+/// A tokens file applied again is one change, not one per leaf of the copy kept
+/// of it; a link made or moved is one change naming the file.
+///
+/// flip: `document_changes` without its `tokens_link` arm → fails at the first
+/// `assert_eq`, a line per changed token.
+#[test]
+fn a_tokens_file_applied_again_is_one_change() {
+    let f = fixture();
+    let link = |path: &str, base: u32| ondin_core::meta::TokensLink {
+        path: path.into(),
+        applied: serde_json::json!({
+            "color": {
+                "a": { "$value": format!("#{base:06X}") },
+                "b": { "$value": format!("#{:06X}", base + 1) },
+                "c": { "$value": format!("#{:06X}", base + 2) },
+            }
+        }),
+    };
+    let with = |l: Option<ondin_core::meta::TokensLink>| {
+        let mut doc = f.doc.clone();
+        doc.set_tokens_link(l);
+        doc
+    };
+    let a = with(Some(link("C:/t.json", 0x10)));
+    let d = diff(&a, &with(Some(link("C:/t.json", 0x20))));
+    assert_eq!(
+        d.document,
+        [change("tokens link", "applied", "applied again")]
+    );
+    let d = diff(&with(None), &a);
+    assert_eq!(
+        d.document,
+        [Change {
+            what: "tokens link".into(),
+            before: None,
+            after: Some("C:/t.json".into()),
+        }]
+    );
+    let d = diff(&a, &with(Some(link("D:/t_2.json", 0x10))));
+    assert_eq!(
+        d.document,
+        [change("tokens link", "C:/t.json", "D:/t_2.json")]
     );
 }
 
@@ -572,4 +723,44 @@ fn a_layer_added_in_the_vault_is_reported_under_it() {
     assert_eq!(block.layers.len(), 1, "{}", d.text());
     assert_eq!(block.layers[0].status, Status::Added);
     assert_eq!(block.layers[0].trail, ["Chip"]);
+}
+
+/// One layer raised among twenty thousand siblings is one order change, worked
+/// out in memory linear in the siblings: a table of every pair of them is 1.6 GB.
+///
+/// flip: `moved_in_order` by the O(n·m) table of common-run lengths → fails at
+/// the time bound.
+#[test]
+fn a_raise_among_many_siblings_is_one_change_and_stays_small() {
+    const N: usize = 20_000;
+    let mut ids = IdSource::new(0xD2);
+    let root = ids.mint();
+    let mut a = Document::new(root);
+    let dots: Vec<NodeId> = (0..N).map(|_| ids.mint()).collect();
+    let ops = (dots.iter().enumerate())
+        .map(|(i, id)| rect(*id, root, i, "Dot", (0.0, 0.0)))
+        .collect();
+    a.apply(&Transaction(ops)).expect("the dots");
+    let mut b = a.clone();
+    b.apply(&Transaction(vec![Operation::Reorder {
+        id: dots[10],
+        index: N - 1,
+    }]))
+    .expect("the raise");
+    let started = std::time::Instant::now();
+    let d = diff(&a, &b);
+    // A timing guard: in a debug build the run is under two seconds, an O(n·m)
+    // table about ten.
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    let layers = &d.pages[0].layers;
+    assert_eq!(layers.len(), 1);
+    assert_eq!(layers[0].id, dots[10].to_wire());
+    assert_eq!(
+        layers[0].changes,
+        [change(
+            "order",
+            "19990 of 20000 from the top",
+            "1 of 20000 from the top"
+        )]
+    );
 }

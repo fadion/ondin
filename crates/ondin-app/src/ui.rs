@@ -3714,7 +3714,8 @@ pub struct SplitButton {
 /// Colour review's *Merge*. One [`button_face`] of `h`, [`FieldButton::Primary`]
 /// while `enabled`, with a hairline before the caret; which end a click landed
 /// on decides what it asks. Unavailable, the face is an ordinary button with the
-/// word dimmed, and the caret still opens the choices.
+/// word dimmed, and the caret still opens the choices. One tab stop: `Enter`
+/// asks the action, `Alt+↓` the caret, as a dropdown opens.
 pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> SplitButton {
     let font = egui::FontId::proportional(Scale::of(h).text_pt());
     // The placeholder, so the word takes the face's ink when it is painted.
@@ -3750,9 +3751,11 @@ pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> Spl
         theme::icon_font(12.0),
         ink,
     );
+    let alt_down =
+        resp.has_focus() && ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowDown));
     SplitButton {
         action: resp.clicked() && !on_caret,
-        caret: resp.clicked() && on_caret,
+        caret: resp.clicked() && on_caret || alt_down,
         resp,
         caret_rect,
     }

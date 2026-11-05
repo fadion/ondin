@@ -11,10 +11,12 @@ reads true.
 
 ## Now
 
-- **Tab reaches every control.** The inspector, the popovers and the panels are a mix today: some
-  controls are tab stops and some are painted rects that sense the pointer only. Every control and
-  field joins the Tab order in reading order, with `ui::focus_ring` showing where focus is, and
-  Return/Space acting on a focused button as a click does (`app-chrome.md`, *Two kinds of focus*).
+- **The keyboard's last pointer-only gestures.** Every control is a tab stop now
+  (`app-chrome.md`, *Two kinds of focus*); what a focused one still cannot do from the keys: a
+  layers row's caret, eye and lock (one stop that `Enter` selects); the colour picker's gradient
+  stops (add, move, remove) and its plane and tracks, which take no arrows; `ui::slider`, likewise;
+  renaming a variable, a mode, a group or a page, which only a double-click starts; and a tool
+  group's flyout, which opens by press-and-hold (its tools have letters).
 
 ## Illustrations
 

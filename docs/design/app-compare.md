@@ -68,7 +68,7 @@ matched by id, so a renamed or moved layer is one change.
   the bar while no modal, palette or text field has the keyboard. `O` toggles the overlay under
   the same conditions, taken before the keymap and consumed (`compare_overlay_key`), since it is
   the Ellipse tool's letter and would otherwise reach `dispatch` and its read-only sentence.
-  `Escape` leaves: a rung of `OndinApp::escape` just below the find box.
+  `Escape` leaves: a rung of `OndinApp::escape` just below colour review.
 - **The overlay** is on whenever a compare opens. Off, no mark, tag or ghost is drawn and a click
   on the canvas picks none; the Swipe handle, its pills, the frame labels and the card stay. A row
   picked in the card turns it back on (`show_card_row`) and steps to it; the bar's steps and

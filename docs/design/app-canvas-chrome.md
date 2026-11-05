@@ -243,7 +243,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
     (`OndinApp::panels_flyout`, a `ui::flyout`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
     *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
     stay together;
-  - *Check contrast* and *Simulate colour blindness*, each ticked while on and never remembered.
+  - *Check contrast* and *Simulate colour blindness*, each ticked while on and never remembered,
+    then *Colour review*, a check row that never ticks and opens the review card.
 
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips

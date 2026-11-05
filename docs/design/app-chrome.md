@@ -145,6 +145,8 @@ ondin-app/src/
 ├─ find.rs          find and replace in text: the box, its list, the canvas's match marks (app-canvas-chrome.md)
 ├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)
 ├─ vision.rs        colour-blind simulation mode: the target frame, its device region, the bar and deficiency menu (app-canvas-chrome.md)
+├─ colour_review.rs colour review: the card listing near-identical colours and merging each group (app-canvas-chrome.md)
+├─ spell/           spell check while editing text: the OS's checker on a worker, one arm per platform (text.md)
 ├─ spacing.rs       spacing handles: a flex or grid container's gaps and padding dragged on the canvas
 ├─ loose_spacing.rs spacing handles on a loose selection in a row, column or grid: gaps dragged, layers reordered (layout.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)

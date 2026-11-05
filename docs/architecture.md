@@ -33,10 +33,10 @@ Read the file for the exact wording before relying on one.
 | `core-ops.md` | 5.6–5.10 | Transform and resize semantics, operations, builders (`build.rs`), layer names, history, `Resolved`, queries |
 | `effects.md` | 5.3a, 6.4 | Layer effects: model and render passes |
 | `layout.md` | 5.3b, 5.3c | Layout grids; container layout (flexbox, grid, insets) |
-| `components.md` | 5.3d | Components, instances, overrides, variants, swap, reset |
+| `components.md` | 5.3d | Components, instances, overrides, variants, swap, reset, interaction states, lineage keys, documentation links |
 | `kits.md` | 5.3e | Kits: shared component libraries |
 | `styles-variables.md` | 5.3f | Variables, collections and modes (a collection picked by width), scope, bindings, styles, design tokens import and the linked tokens file |
-| `text.md` | 5.4, 5.4a | The text node and fonts |
+| `text.md` | 5.4, 5.4a | The text node and fonts, spell check |
 | `images.md` | 5.5a | Images |
 | `io.md` | 5.11, 5.11a | Save format, schema migration, clipboard envelope, the library block |
 | **Render, export, MCP** | | |

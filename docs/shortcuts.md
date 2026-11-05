@@ -347,7 +347,7 @@ top. `present_ui` reads these and nothing else: `OndinApp::ui` returns before `i
 | `Enter` / `Shift+Enter` | next / previous change, round the ends |
 | `\` (no modifiers) | toggle Then and Now |
 | `O` (no modifiers) | toggle the overlay (the change marks) |
-| `Escape` | leave (a rung of `OndinApp::escape`, below the find box) |
+| `Escape` | leave (a rung of `OndinApp::escape`, below colour review) |
 
 `compare_bar` reads the first two while no modal, palette or text field has the keyboard;
 `compare_overlay_key` takes `O` under the same conditions before the keymap and consumes it, so
@@ -512,7 +512,8 @@ focus mode → a bindable field's menu / `--` list / mode menu → a style card'
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
-variables browser (inner rungs first) → a text session → the find box → a compare → the pen →
+variables browser (inner rungs first) → a text session → the find box → colour review (its own
+inner rungs first) → a compare → the pen →
 **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
 Offset card (`offset_card`) → pen bias armed over an edit → the point selection → the pivot handle → the entered group (selects it) → a tool that is

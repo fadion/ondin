@@ -1059,6 +1059,9 @@ pub const SMALL_PT: f32 = 11.5;
 /// dropdown's choice and its list rows (egui's `TextStyle::Button`).
 pub const CONTROL_PT: f32 = 12.0;
 
+/// egui's `TextStyle::Body`: a tooltip's text and a label given no size.
+pub const BODY_PT: f32 = CONTROL_PT;
+
 /// A surface's lead line: the inspector's layer name, the tab's document path,
 /// the palette's query.
 pub const HEAD_PT: f32 = 13.0;

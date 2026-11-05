@@ -173,11 +173,17 @@ impl Speller {
         at: usize,
     ) -> Option<Misspelling> {
         let jobs = self.jobs.as_ref()?;
-        let (run, tag) = runs.iter().find(|(r, _)| r.start <= at && at <= r.end)?;
-        let (r, word) = words(text.get(run.clone())?).find_map(|(r, w)| {
-            let r = run.start + r.start..run.start + r.end;
-            (r.start <= at && at <= r.end).then_some((r, w))
-        })?;
+        // Two runs hold `at` when it is their shared boundary, and the word may
+        // start the later one.
+        let (r, word, tag) = runs
+            .iter()
+            .filter(|(r, _)| r.start <= at && at <= r.end)
+            .find_map(|(run, tag)| {
+                words(text.get(run.clone())?).find_map(|(r, w)| {
+                    let r = run.start + r.start..run.start + r.end;
+                    (r.start <= at && at <= r.end).then_some((r, w, tag))
+                })
+            })?;
         let key = (tag.clone(), normalized(word));
         if self.verdicts.lock().ok()?.get(&key) != Some(&Verdict::Misspelled) {
             return None;
@@ -206,7 +212,8 @@ impl Speller {
 
 /// The checkable words of `text` with their byte ranges: a word holds a letter,
 /// no digit and no `.`, `_`, `@`, `/` or `:` (a number, a file name, an address),
-/// is two characters or more and is not all capitals (an acronym). Quotes at
+/// is two characters or more and is not all capitals (an acronym); a script
+/// without case, such as Arabic, has no capitals and is checked. Quotes at
 /// either end are not part of it; an apostrophe inside is.
 pub(crate) fn words(text: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
     text.split_word_bound_indices().filter_map(|(at, w)| {
@@ -216,7 +223,7 @@ pub(crate) fn words(text: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
         let word = trimmed.trim_end_matches(quote);
         let checkable = word.chars().nth(1).is_some()
             && word.chars().any(char::is_alphabetic)
-            && word.chars().any(char::is_lowercase)
+            && (word.chars().any(char::is_lowercase) || !word.chars().any(char::is_uppercase))
             && !word
                 .chars()
                 .any(|c| c.is_numeric() || matches!(c, '.' | '_' | '@' | '/' | ':'));
@@ -441,6 +448,30 @@ mod tests {
         assert_eq!(got, ["The", "cat", "don’t", "sat"]);
         let (r, _) = words(text).nth(1).unwrap();
         assert_eq!(&text[r], "cat", "the range is the word's, quotes outside");
+    }
+
+    /// A script without case has no capitals, so its words are not acronyms.
+    ///
+    /// flip: `words` asking for a lowercase letter again → fails at "Arabic".
+    #[test]
+    fn words_in_a_caseless_script_are_checked() {
+        let got: Vec<&str> = words("مرحبا بالعالم NASA").map(|(_, w)| w).collect();
+        assert_eq!(got, ["مرحبا", "بالعالم"], "Arabic");
+    }
+
+    /// The first glyph of a word that starts a language run finds the word, though
+    /// the run before ends at the same byte.
+    ///
+    /// flip: `misspelling_at` taking only the first run holding the index → fails
+    /// at "the word starting the run".
+    #[test]
+    fn a_misspelling_starting_a_run_is_found_at_its_first_byte() {
+        let (s, _) = fake();
+        let text = "the cat cta";
+        let runs = vec![(0..8, None), (8..11, Some("en".to_string()))];
+        settle(&s, text, &runs);
+        let m = s.misspelling_at(text, &runs, 8);
+        assert_eq!(m.map(|m| m.range), Some(8..11), "the word starting the run");
     }
 
     /// Untagged text is checked in the system languages; the misspelled word comes

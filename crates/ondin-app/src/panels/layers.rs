@@ -1499,12 +1499,19 @@ impl OndinApp {
         {
             paint.push(i);
         }
-        // The row the keyboard is on, too, so scrolling it away keeps its focus.
+        // The row the keyboard is on, too, so scrolling it away keeps its focus;
+        // after a delete, scrolled to now that the rows it took are gone.
         let focused = ui.ctx().memory(|m| m.focused());
-        if let Some(i) = focused.and_then(|f| flat.iter().position(|r| row_id(r.id) == f))
-            && !paint.contains(&i)
+        let (on, scroll) = self.layers_focused_row.take().unzip();
+        if let Some(n) = on.filter(|n| focused == Some(row_id(*n)))
+            && let Some(&i) = index.get(&n)
         {
-            paint.push(i);
+            if !paint.contains(&i) {
+                paint.push(i);
+            }
+            if scroll == Some(true) {
+                ui.scroll_to_rect(rows[i].rect, None);
+            }
         }
         if let Some(drag) = &self.layer_drag {
             for id in &drag.ids {
@@ -1548,7 +1555,13 @@ impl OndinApp {
                 let to = row_id(flat[j].id);
                 ui.interact(rows[j].rect, to, egui::Sense::click_and_drag());
                 ui.memory_mut(|m| m.request_focus(to));
-                ui.scroll_to_rect(rows[j].rect, None);
+                // After a delete this frame's rows still hold the deleted ones, so
+                // the scroll waits for the next frame's (above).
+                let deleted = !alive(i);
+                if !deleted {
+                    ui.scroll_to_rect(rows[j].rect, None);
+                }
+                self.layers_focused_row = Some((flat[j].id, deleted));
             }
         }
         // A caret clicked this frame folds rows the walk has already placed.
@@ -2189,6 +2202,10 @@ impl OndinApp {
         // tab menu's included.
         let clicked =
             resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up;
+        // Noted for the next frame's walk, which keeps this row drawn out of view.
+        if resp.has_focus() && self.layers_focused_row.is_none() {
+            self.layers_focused_row = Some((id, false));
+        }
         // The focused row's keys for its own controls: `→`/`←` open and fold it,
         // and the hide and lock chords act on this row, as its eye and lock do.
         let (keyed, step) = if renaming {
@@ -6709,9 +6726,7 @@ mod keyboard_row_tests {
         );
     }
 
-    /// `Delete` on a focused row it is not selected with deletes that row alone and
-    /// hands the focus to the row below; on the last row, to the one above; on a
-    /// selected row, the whole selection goes.
+    /// `Delete` on a focused row deletes it (or the selection it is in) and hands the focus on.
     /// flip: `tree_rows` stops falling back the other way → fails at "the one above".
     #[test]
     fn delete_on_the_focused_row_deletes_and_keeps_the_focus_in_the_tree() {

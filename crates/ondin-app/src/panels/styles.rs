@@ -1103,6 +1103,7 @@ impl OndinApp {
                                     pick = Some(s.id);
                                 }
                             }
+                            ui::keep_focus_in_view(ui);
                         });
                 });
             })

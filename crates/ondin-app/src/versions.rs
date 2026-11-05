@@ -354,15 +354,19 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
         egui::Sense::hover(),
     );
     let id = egui::Id::new(("version-row", &s.key));
-    // A tab stop even when it cannot open: its focus is the keyboard's way to the
-    // buttons it shows.
-    let resp = ui.interact(rect, id, egui::Sense::click());
+    // A tab stop when it opens or shows buttons, which its focus is the keyboard's
+    // way to; *Now* does neither.
+    let version = s.place.is_some();
+    let sense = match s.openable() || version {
+        true => egui::Sense::click(),
+        false => egui::Sense::hover(),
+    };
+    let resp = ui.interact(rect, id, sense);
     let editing = look.naming.is_some();
     // Last frame's focus too: on the frame `Tab` leaves the row for its first
     // button, the buttons must already be drawn to take it.
     let focused = resp.has_focus() || ui.ctx().memory(|m| m.had_focus_last_frame(id));
     let pointed = ui.rect_contains_pointer(rect) || focused || look.held;
-    let version = s.place.is_some();
     let buttons = version && (pointed || (look.opened && !look.elsewhere) || editing);
     out.pointed = version && pointed;
     let lit = look.opened || look.marked || editing || (pointed && (version || s.openable()));
@@ -1334,6 +1338,7 @@ impl OndinApp {
                     if versions.is_empty() {
                         empty_rows(ui, filed, pins);
                     }
+                    crate::ui::keep_focus_in_view(ui);
                 });
             ui.add_space(12.0);
             match card_foot(ui, pins) {

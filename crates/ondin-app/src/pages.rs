@@ -717,6 +717,7 @@ impl OndinApp {
                             bottom: LIST_FOOT as i8,
                         })
                         .show(ui, |ui| self.page_rows(ui));
+                    ui::keep_focus_in_view(ui);
                 });
             crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::panel());
             // The divider sits on the list's edge: item spacing there would be a band

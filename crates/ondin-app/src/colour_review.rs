@@ -681,6 +681,7 @@ fn list(
                         }
                     }
                 });
+            ui::keep_focus_in_view(ui);
         });
     previewed
 }
@@ -1059,8 +1060,6 @@ fn foot(
         .order(egui::Order::Foreground)
         .fixed_pos(ui::dropdown_place(ui.ctx(), under, size, ui::MENU_GAP))
         .show(ui.ctx(), |ui| {
-            // Over the card, so its `Tab` walks these rows while the menu is open.
-            ui::hold_tab(ui);
             ui::menu_frame(5.0).show(ui, |ui| {
                 ui.set_width(ui::menu_inner_w(MENU_W, 5.0));
                 ui.spacing_mut().item_spacing.y = 1.0;

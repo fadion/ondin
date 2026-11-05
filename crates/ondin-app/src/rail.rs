@@ -239,7 +239,6 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                ui::hold_tab(ui);
                 ui::menu_frame(PAD).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = GAP;

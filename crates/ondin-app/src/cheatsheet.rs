@@ -505,6 +505,7 @@ impl OndinApp {
                             );
                         }
                     });
+                    crate::ui::keep_focus_in_view(ui);
                 });
             footer(ui);
             crate::ui::hold_tab(ui);

@@ -738,6 +738,7 @@ fn list(
                             (false, false) => _ = collapsed.insert(g),
                         }
                     }
+                    ui::keep_focus_in_view(ui);
                 });
         });
     changed

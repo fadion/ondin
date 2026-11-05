@@ -822,6 +822,7 @@ fn list(
                         }
                     }
                 });
+            crate::ui::keep_focus_in_view(ui);
         });
 }
 

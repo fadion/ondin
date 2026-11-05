@@ -556,6 +556,7 @@ impl OndinApp {
                             } else {
                                 browse(ui, &local, &shown, &picker.open, &mut out);
                             }
+                            ui::keep_focus_in_view(ui);
                         });
                 });
             })

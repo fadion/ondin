@@ -661,6 +661,7 @@ impl OndinApp {
                                                 ),
                                             }
                                         }
+                                        ui::keep_focus_in_view(ui);
                                     });
                             }
                         }
@@ -3188,6 +3189,7 @@ fn styles_tab(
                     }
                 }
             }
+            ui::keep_focus_in_view(ui);
         });
 }
 

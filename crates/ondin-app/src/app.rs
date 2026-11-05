@@ -3388,8 +3388,8 @@ impl OndinApp {
                             self.session.selection.set_one(frame);
                             let name = crate::private::layer(&self.session.doc, frame).into_owned();
                             self.session.info(format!(
-                                "Created “{name}” — {wrapped} layer{} wrapped in a frame · Ctrl+Z to undo",
-                                if wrapped == 1 { "" } else { "s" }
+                                "Created “{name}” — {} wrapped in a frame · Ctrl+Z to undo",
+                                crate::ui::count(wrapped, "layer")
                             ));
                         }
                     }
@@ -3635,9 +3635,8 @@ impl OndinApp {
                     self.session.selection.set_one(set);
                     let name = crate::private::layer(&self.session.doc, set).into_owned();
                     self.session.info(format!(
-                        "Combined {} main{} into set “{name}” · Ctrl+Z to undo",
-                        mains.len(),
-                        if mains.len() == 1 { "" } else { "s" }
+                        "Combined {} into set “{name}” · Ctrl+Z to undo",
+                        crate::ui::count(mains.len(), "main")
                     ));
                 }
             }
@@ -4432,8 +4431,8 @@ impl OndinApp {
         self.session.info(match (d.detached, d.name) {
             (0, _) => "Cut".to_string(),
             (n, Some(name)) => format!(
-                "Cut “{name}” — {n} instance{} will follow it on paste",
-                if n == 1 { "" } else { "s" }
+                "Cut “{name}” — {} will follow it on paste",
+                crate::ui::count(n, "instance")
             ),
             (n, None) => format!(
                 "Cut {} — {} will follow on paste",
@@ -5117,8 +5116,8 @@ impl OndinApp {
             let mut said = format!("{verb} {}", crate::ui::count(created.len(), "layer"));
             if detached > 0 {
                 said.push_str(&format!(
-                    " · {detached} instance{} detached — {} not in this document",
-                    if detached == 1 { "" } else { "s" },
+                    " · {} detached — {} not in this document",
+                    crate::ui::count(detached, "instance"),
                     if detached == 1 {
                         "its main is"
                     } else {
@@ -5224,8 +5223,8 @@ impl OndinApp {
         };
         self.session.info(match (d.guides, d.detached, d.name) {
             (_, n @ 1.., Some(name)) => format!(
-                "Deleted “{name}” — {n} instance{} detached · Ctrl+Z to undo",
-                if n == 1 { "" } else { "s" }
+                "Deleted “{name}” — {} detached · Ctrl+Z to undo",
+                crate::ui::count(n, "instance")
             ),
             (_, n @ 1.., None) => format!(
                 "Deleted {} — {} detached · Ctrl+Z to undo",

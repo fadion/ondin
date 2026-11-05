@@ -988,11 +988,11 @@ impl OndinApp {
         let mut pick: Option<StyleId> = enter
             .then(|| rows.get(pk.highlight).map(|s| s.id))
             .flatten();
-        let pos = ui::menu_place(
-            ctx,
-            egui::pos2(menu_left(pk.under), pk.under.bottom() + 6.0),
-            egui::vec2(PICKER_W, STYLE_LIST_H + 40.0),
-        );
+        // Placed as a dropdown, from the head's span at the picker's width, so short
+        // of room below it opens above the head instead of over it.
+        let left = menu_left(pk.under);
+        let head = egui::Rect::from_x_y_ranges(left..=left + PICKER_W, pk.under.y_range());
+        let pos = ui::dropdown_place(ctx, head, egui::vec2(PICKER_W, STYLE_LIST_H + 40.0), 6.0);
         let slot_word = pk.slot.title().to_lowercase();
         let rect = egui::Area::new(egui::Id::new("style-picker"))
             .order(egui::Order::Tooltip)
@@ -1004,7 +1004,7 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let search = ui::search_box(
                         ui,
-                        egui::vec2(PICKER_W - 8.0, ui::CONTROL_H),
+                        egui::vec2(ui.available_width(), ui::CONTROL_H),
                         &mut pk.query,
                         &format!("Search {slot_word} styles"),
                         egui::Id::new("style-picker-search"),
@@ -1540,6 +1540,34 @@ mod tests {
         assert!(full > STYLE_LIST_H, "fixture: the list is laid out, {full}");
         assert_eq!(height(&mut app, "zzz"), full, "matching nothing");
         assert_eq!(height(&mut app, ""), full, "and cleared again");
+    }
+
+    /// Short of room below, the picker opens above the head it hangs from rather
+    /// than over it, and it paints the width it was placed for.
+    /// flip: `style_picker_ui` placing with `menu_place` → fails at "above the head".
+    #[test]
+    fn the_picker_opens_above_a_head_near_the_bottom() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        app.style_naming = None;
+        let under = egui::Rect::from_min_size(egui::pos2(900.0, 740.0), egui::vec2(20.0, 20.0));
+        app.style_picker = Some(StylePicker {
+            slot: StyleSlot::Fills,
+            targets: vec![b],
+            under,
+            query: String::new(),
+            focus: false,
+            highlight: 0,
+        });
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("style-picker")))
+            .expect("drawn");
+        assert!(card.bottom() <= under.top(), "above the head: {card:?}");
+        assert_eq!(card.width(), PICKER_W, "the width it was placed for");
     }
 
     /// **The picker's highlight previews on the canvas and `Enter` applies it**.

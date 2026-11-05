@@ -1074,6 +1074,9 @@ pub const HEADING_PT: f32 = 17.0;
 /// [`COMBO_CHEVRON_PT`].
 pub const CONTROL_GLYPH_PT: f32 = 15.0;
 
+/// [`CONTROL_GLYPH_PT`]'s twin in a [`TOOLBAR_H`] control.
+pub const TOOLBAR_GLYPH_PT: f32 = 14.0;
+
 /// How tall a control is in a bar laid over the canvas (Compare, Contrast) or a
 /// top-bar pill: [`Scale::Toolbar`].
 pub const TOOLBAR_H: f32 = 24.0;
@@ -1107,7 +1110,7 @@ impl Scale {
     pub fn glyph_pt(self) -> f32 {
         match self {
             Self::Card => CONTROL_GLYPH_PT,
-            Self::Toolbar => 14.0,
+            Self::Toolbar => TOOLBAR_GLYPH_PT,
         }
     }
 
@@ -1115,7 +1118,7 @@ impl Scale {
     pub fn text_pt(self) -> f32 {
         match self {
             Self::Card => CONTROL_PT,
-            Self::Toolbar => 11.5,
+            Self::Toolbar => SMALL_PT,
         }
     }
 }
@@ -1937,7 +1940,7 @@ pub fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) -> eg
 pub const FIELD_TOGGLE: egui::Vec2 = egui::vec2(24.0, CONTROL_H - 6.0);
 
 /// A switch that lives inside a text field (Find's and Batch rename's `Aa`, `.*`,
-/// `Ab`): lit as a [`segmented`] cell is, with `text` at 11pt (`mono` for the
+/// `Ab`): lit as a [`segmented`] cell is, with `text` at [`SMALL_PT`] (`mono` for the
 /// regex dot-star). Flips `on` on a click; `tip` says what it matches.
 pub fn field_toggle(
     ui: &mut egui::Ui,
@@ -3004,7 +3007,7 @@ fn value_field_f64_marked(
                 }
             }
             // Read before the union, which answers for both.
-            let (typing, reset_focused) = (resp.has_focus(), lead_resp.has_focus());
+            let reset_focused = lead_resp.has_focus();
             resp = resp.union(lead_resp);
             if nudged || *value != before {
                 resp.mark_changed();
@@ -3074,16 +3077,13 @@ fn value_field_f64_marked(
                 );
                 ui.painter().galley(at, galley, ink);
             }
-            (resp, unit, typing)
+            (resp, unit)
         })
     });
 
-    // Painted after the row, on top of the field's own hairline. The number's focus
-    // only: a focused ↺ is keyboard focus, which the ring shows.
-    let (resp, unit, typing) = scope.inner;
-    if typing {
-        typing_edge(ui, scope.response.rect);
-    }
+    // The row paints the typing edge (`framed_row`): the number's focus only, as a
+    // focused ↺ is keyboard focus, which the ring shows.
+    let (resp, unit) = scope.inner;
     (resp, unit, reset)
 }
 
@@ -3794,7 +3794,7 @@ pub fn label_button(
     resp
 }
 
-/// [`label_button`] with a `note` after its word, in 11pt mono and
+/// [`label_button`] with a `note` after its word, in [`SMALL_PT`] mono and
 /// [`theme::text::faint()`] — never the accent — sized by
 /// [`label_button_noted_w`]: a set's value chip naming the state it is tied to.
 pub fn label_button_noted(
@@ -5554,6 +5554,56 @@ mod keyboard_focus_tests {
 
         let ((_, digits), _, _) = run(false);
         assert!(digits, "unmarked: Tab goes straight to the digits");
+    }
+
+    /// A value field being typed in wears one typing edge, the row's.
+    /// flip: `value_field_f64_marked` paints its own `typing_edge` again → fails at "one".
+    #[test]
+    fn a_typed_value_field_wears_one_typing_edge() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let frame = |events: Vec<egui::Event>| {
+            let raw = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(raw, |ui| {
+                let mut v = 4.0;
+                let size = egui::vec2(120.0, CONTROL_H);
+                let _ = value_field(
+                    ui,
+                    size,
+                    Prefix::Text("X"),
+                    &mut v,
+                    Scrub::whole(0.5),
+                    |d| d,
+                );
+            })
+        };
+        frame(Vec::new());
+        frame(vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let out = frame(Vec::new());
+        let mut edges = 0;
+        let mut count = |s: &egui::Shape| {
+            if let egui::Shape::Rect(r) = s
+                && r.stroke.color == color::accent_700()
+            {
+                edges += 1;
+            }
+        };
+        for c in &out.shapes {
+            match &c.shape {
+                egui::Shape::Vec(v) => v.iter().for_each(&mut count),
+                s => count(s),
+            }
+        }
+        assert_eq!(edges, 1, "one");
     }
 
     /// A focused slider steps on `←`/`→` (a hundredth, a tenth with `Shift`) and keeps the focus.

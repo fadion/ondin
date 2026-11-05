@@ -1278,7 +1278,7 @@ impl OndinApp {
                     if c.own_search {
                         let resp = ui::search_box(
                             ui,
-                            egui::vec2(LIST_W - 8.0, ui::CONTROL_H),
+                            egui::vec2(ui.available_width(), ui::CONTROL_H),
                             &mut c.query,
                             "Search variables",
                             egui::Id::new("var-complete-search"),
@@ -2456,7 +2456,8 @@ fn list_row(
     query: &str,
     lit: bool,
 ) -> egui::Response {
-    let w = LIST_W - 8.0;
+    // The card's column, as `menu_inner_w` sets it: a wider row grows the card.
+    let w = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ui::MENU_ROW_H), egui::Sense::click());
     let p = ui.painter();
     ui::list_row_ground(p, rect, lit, resp.hovered());
@@ -2782,6 +2783,22 @@ mod tests {
         assert!(full > VAR_LIST_H, "fixture: the list is laid out, {full}");
         assert_eq!(height(&mut app, "zzz"), full, "matching nothing");
         assert_eq!(height(&mut app, ""), full, "and cleared again");
+    }
+
+    /// The list opened with a search of its own paints the width it was placed for.
+    /// flip: the search box sized `LIST_W - 8.0` → fails at the width.
+    #[test]
+    fn the_searched_variable_list_is_its_placed_width() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let under = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(80.0, 20.0));
+        app.open_complete(&ctx, FieldKey::Radius { id: rect }, under);
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |_| app.var_complete_ui(&ctx));
+        }
+        assert!(app.var_complete.as_ref().is_some_and(|c| c.own_search));
+        let card = ctx.memory(|m| m.area_rect(egui::Id::new("var-complete")));
+        assert_eq!(card.expect("drawn").width(), LIST_W);
     }
 
     /// **The arrows scroll the `--` list to the row they light** (§15 D1084):

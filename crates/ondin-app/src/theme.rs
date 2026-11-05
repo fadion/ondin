@@ -1457,25 +1457,27 @@ pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) -> bool {
 fn install_style_into(style: &mut egui::Style) {
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
-    // Compact type scale: body is 12.5pt, a control's text 12.
+    // egui's text styles, from the chrome's type scale (`ui::*_PT`). Body, a
+    // tooltip's and an unsized label's, is the one size off it.
+    use crate::ui::{CAPTION_PT, CONTROL_PT, HEAD_PT};
     style.text_styles = [
         (
             TextStyle::Heading,
-            FontId::new(13.0, FontFamily::Proportional),
+            FontId::new(HEAD_PT, FontFamily::Proportional),
         ),
         (TextStyle::Body, FontId::new(12.5, FontFamily::Proportional)),
-        // `ui::CONTROL_PT`: a button's word, a dropdown row, a `DragValue`'s number.
+        // A button's word, a dropdown row, a `DragValue`'s number.
         (
             TextStyle::Button,
-            FontId::new(12.0, FontFamily::Proportional),
+            FontId::new(CONTROL_PT, FontFamily::Proportional),
         ),
         (
             TextStyle::Small,
-            FontId::new(10.5, FontFamily::Proportional),
+            FontId::new(CAPTION_PT, FontFamily::Proportional),
         ),
         (
             TextStyle::Monospace,
-            FontId::new(12.0, FontFamily::Monospace),
+            FontId::new(CONTROL_PT, FontFamily::Monospace),
         ),
     ]
     .into();

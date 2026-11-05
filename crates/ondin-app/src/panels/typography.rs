@@ -3104,8 +3104,11 @@ impl OndinApp {
             return;
         }
         // Handed over every frame: `current` reads through the preview, so a
-        // `value != current` guard would be false on the release frame.
-        self.axis_valve(&resp, subject, axis, coords, value, clear_at_default);
+        // `value != current` guard would be false on the release frame. Engaged by
+        // the drag alone: its keys commit above, so a drag of a slider that already
+        // has the focus commits on release rather than when the focus leaves.
+        let next = axis_coords_after(axis, coords, value, clear_at_default);
+        self.char_valve_engaged(&resp, resp.dragged(), subject, CharAttr::Variations(next));
     }
 
     /// Write one axis coordinate, if it moved.
@@ -3849,6 +3852,19 @@ impl OndinApp {
     /// does not commit `4` on its way. No arm commits on a bare `changed()`.
     /// (§15 D316, D812)
     fn char_valve(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: CharAttr) {
+        let engaged = resp.dragged() || resp.has_focus();
+        self.char_valve_engaged(resp, engaged, subject, attr);
+    }
+
+    /// [`Self::char_valve`], told whether the control is engaged: a control whose
+    /// keys commit on their own (the axis slider) is engaged by its drag alone.
+    fn char_valve_engaged(
+        &mut self,
+        resp: &egui::Response,
+        engaged: bool,
+        subject: &TypeSubject,
+        attr: CharAttr,
+    ) {
         if subject.partial {
             self.arm_session_scrub(resp, subject.id);
             if resp.changed() {
@@ -3861,7 +3877,6 @@ impl OndinApp {
         // Built unconditionally: `subject` reads through the preview, so an equality
         // guard would withhold the release-frame commit. The engagement is read before
         // the `gesture_cancelled` bail so a cancelled frame spends the transition.
-        let engaged = resp.dragged() || resp.has_focus();
         let was_engaged = resp.ctx.data_mut(|d| {
             let id = resp.id.with("char-valve-engaged");
             let was = d.get_temp::<bool>(id).unwrap_or(false);
@@ -10083,6 +10098,62 @@ mod axis_valve_tests {
             app.session.history.undo_depth() - depth0,
             1,
             "one undo step"
+        );
+    }
+
+    /// A drag of an axis slider that already holds the focus commits on release,
+    /// so a save or an undo while it keeps the focus sees it.
+    /// flip: `axis_slider` engaging its valve on `has_focus()` too → fails at "no preview left".
+    #[test]
+    fn a_drag_of_a_focused_axis_slider_commits_on_release() {
+        let (ctx, mut app, id, _) = app_with_wght(500.0);
+        let slider = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            let coords = attr!(&subject, Variations, Variations);
+            let mut out = (None, egui::Rect::NOTHING);
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let r = ui.max_rect();
+                    app.axis_slider(ui, &subject, &wght(), &coords, 200.0, true);
+                    let used = ui.min_rect();
+                    out = (ui.ctx().memory(|m| m.focused()), used.intersect(r));
+                },
+            );
+            out
+        };
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        slider(&mut app, Vec::new());
+        slider(&mut app, vec![tab]);
+        let (focused, rect) = slider(&mut app, Vec::new());
+        assert!(focused.is_some(), "the fixture: Tab focused the slider");
+        let (from, to) = (rect.center(), rect.center() + egui::vec2(40.0, 0.0));
+        slider(&mut app, vec![egui::Event::PointerMoved(from)]);
+        slider(&mut app, vec![click(from, true)]);
+        slider(
+            &mut app,
+            vec![egui::Event::PointerMoved(
+                rect.center() + egui::vec2(20.0, 0.0),
+            )],
+        );
+        slider(&mut app, vec![egui::Event::PointerMoved(to)]);
+        slider(&mut app, vec![click(to, false)]);
+        slider(&mut app, Vec::new());
+        assert_eq!(slider(&mut app, Vec::new()).0, focused, "still focused");
+        assert!(!app.session.has_gesture_preview(), "no preview left");
+        assert!(
+            stored_wght(&app, id).is_some_and(|w| w > 500.0),
+            "committed on release: {:?}",
+            stored_wght(&app, id)
         );
     }
 

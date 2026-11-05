@@ -379,11 +379,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
             (TokenKind::Style(_), _) => Lead::Glyph(icon::SWATCHES),
         };
         let tail = if t.detach > 0 {
-            Tail::Text(format!(
-                "{} layer{} detach",
-                t.detach,
-                if t.detach == 1 { "" } else { "s" }
-            ))
+            Tail::Text(format!("{} detach", crate::ui::count(t.detach, "layer")))
         } else {
             match (t.kind, &t.old, &t.new) {
                 (TokenKind::Style(_), ..) => Tail::Text("style".into()),

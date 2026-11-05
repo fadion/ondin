@@ -790,10 +790,9 @@ impl OndinApp {
             status: "Unavailable".into(),
             used,
             note: Some(format!(
-                "Not found in your library folder. The {} component{} already in this \
+                "Not found in your library folder. The {} already in this \
                  document keep working, and you can still insert them.",
-                copies.len(),
-                if copies.len() == 1 { "" } else { "s" }
+                ui::count(copies.len(), "component")
             )),
             groups,
         }

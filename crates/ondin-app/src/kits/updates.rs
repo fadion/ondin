@@ -255,7 +255,7 @@ impl OndinApp {
         let text = if quiet {
             n.to_string()
         } else {
-            format!("{n} kit update{}", if n == 1 { "" } else { "s" })
+            ui::count(n, "kit update")
         };
         let scale = ui::Scale::Toolbar;
         let glyph_pt = scale.glyph_pt();
@@ -287,10 +287,7 @@ impl OndinApp {
             fg,
         );
         let resp = resp.on_hover_text(if quiet {
-            format!(
-                "{n} kit update{} · click to review",
-                if n == 1 { "" } else { "s" }
-            )
+            format!("{} · click to review", ui::count(n, "kit update"))
         } else {
             "Kits this document uses have published updates".to_string()
         });
@@ -323,8 +320,8 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
                 egui::RichText::new(format!(
-                    "{n} kit{} {} updates",
-                    if n == 1 { "" } else { "s" },
+                    "{} {} updates",
+                    ui::count(n, "kit"),
                     if n == 1 { "has" } else { "have" }
                 ))
                 .size(ui::CONTROL_PT)
@@ -343,7 +340,7 @@ impl OndinApp {
             if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
                 && n > 0
             {
-                let layers = format!("{n} layer{}", if n == 1 { "" } else { "s" });
+                let layers = ui::count(n, "layer");
                 ui.label(
                     egui::RichText::new(match one {
                         Some(name) => format!("{layers} using {name} keep its values."),
@@ -355,8 +352,8 @@ impl OndinApp {
             }
             ui.label(
                 egui::RichText::new(format!(
-                    "Changes {instances} instance{}. Your overrides stay.",
-                    if instances == 1 { "" } else { "s" }
+                    "Changes {}. Your overrides stay.",
+                    ui::count(instances, "instance")
                 ))
                 .size(ui::SMALL_PT)
                 .color(theme::text::dim()),
@@ -709,11 +706,7 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
         Some(h) if !h.is_empty() => h,
         Some(_) => "No component you use changes".to_string(),
         None if w.mains == 0 => "Its variables and styles".to_string(),
-        None => format!(
-            "{} component{}",
-            w.mains,
-            if w.mains == 1 { "" } else { "s" }
-        ),
+        None => ui::count(w.mains, "component"),
     };
     ui.label(
         egui::RichText::new(line)

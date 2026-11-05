@@ -207,13 +207,9 @@ impl OndinApp {
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(format!(
-                    "Affects {} instance{} of {name} here. Their overrides stay.",
-                    if instances == 1 {
-                        "the 1".to_string()
-                    } else {
-                        format!("all {instances}")
-                    },
-                    if instances == 1 { "" } else { "s" }
+                    "Affects {} {} of {name} here. Their overrides stay.",
+                    if instances == 1 { "the" } else { "all" },
+                    crate::ui::count(instances, "instance")
                 ))
                 .size(crate::ui::CONTROL_PT)
                 .color(theme::text::dim()),

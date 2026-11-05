@@ -1189,8 +1189,8 @@ impl OndinApp {
         if !already.is_empty() {
             let n = already.len();
             why.push(format!(
-                "{n} document{} already in the library {} left out",
-                if n == 1 { "" } else { "s" },
+                "{} already in the library {} left out",
+                ui::count(n, "document"),
                 if n == 1 { "was" } else { "were" }
             ));
         }

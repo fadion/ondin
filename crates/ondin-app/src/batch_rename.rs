@@ -753,11 +753,10 @@ fn count_label(scope: Scope, plan: &Plan) -> String {
         ),
         Scope::Page => format!("{} of {} match", count(plan.listed), count(plan.searched)),
         Scope::Document => format!(
-            "{} of {} match · {} page{}",
+            "{} of {} match · {}",
             count(plan.listed),
             count(plan.searched),
-            plan.pages,
-            if plan.pages == 1 { "" } else { "s" }
+            ui::count(plan.pages, "page")
         ),
     }
 }

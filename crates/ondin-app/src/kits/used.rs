@@ -146,10 +146,9 @@ impl OndinApp {
                         );
                         ui.label(
                             egui::RichText::new(format!(
-                                "{} · {} instance{}",
+                                "{} · {}",
                                 u.location,
-                                u.instances,
-                                if u.instances == 1 { "" } else { "s" }
+                                crate::ui::count(u.instances, "instance")
                             ))
                             .size(crate::ui::SMALL_PT)
                             .color(theme::text::dim()),
@@ -259,9 +258,9 @@ impl OndinApp {
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(format!(
-                    "{n} component{} become{} mains in this document that you can edit. They \
+                    "{} become{} mains in this document that you can edit. They \
                      stop receiving updates from {}.",
-                    if n == 1 { "" } else { "s" },
+                    crate::ui::count(n, "component"),
                     if n == 1 { "s" } else { "" },
                     u.name
                 ))
@@ -271,9 +270,8 @@ impl OndinApp {
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(format!(
-                    "{} instance{}. Overrides stay. You can undo this.",
-                    u.instances,
-                    if u.instances == 1 { "" } else { "s" }
+                    "{}. Overrides stay. You can undo this.",
+                    crate::ui::count(u.instances, "instance")
                 ))
                 .size(crate::ui::CONTROL_PT)
                 .color(theme::text::dim()),

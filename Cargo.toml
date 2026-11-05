@@ -252,8 +252,16 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "std",
   "NSApplication",
+  "NSButton",
+  "NSControl",
+  "NSResponder",
   "NSSpellChecker",
+  "NSView",
+  "NSWindow",
 ] }
+# The macOS window behind eframe's frame, for the traffic lights
+# (`ondin-app`'s `traffic_lights`). In the lock through winit at this version.
+raw-window-handle = "0.6.2"
 # The icon *inside* `ondin.exe` — the one Explorer, a pinned taskbar button and a
 # file association draw, none of which have a window to read a runtime icon from.
 # A **build** dependency, and the only one in the workspace: it shells out to the

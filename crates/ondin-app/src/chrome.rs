@@ -12,7 +12,8 @@
 //!   Aero Snap works.
 //! - **macOS** — decorations kept, the title bar transparent over a full-size
 //!   content view: the native traffic lights and resize border stay, and the
-//!   app's bar keeps clear of the lights.
+//!   app's bar keeps clear of the lights, which `traffic_lights` centres on
+//!   the tab strip.
 
 use egui::{Color32, CursorIcon, Id, Order, Pos2, Rect, ResizeDirection, Sense, Stroke, Vec2};
 

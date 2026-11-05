@@ -80,12 +80,13 @@ windows.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading.workspace = true
 
-# Spell check's `NSSpellChecker` (`spell::macos`), and the OS's open-documents
-# event (`open_event`).
+# Spell check's `NSSpellChecker` (`spell::macos`), the OS's open-documents
+# event (`open_event`), and the traffic lights' place (`traffic_lights`).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
+raw-window-handle.workspace = true
 
 # The same question on the two Unix platforms that ship: the library's local
 # dates, through `localtime_r` (`library::clock::local_offset`, §15 D959), and the

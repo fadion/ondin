@@ -1262,11 +1262,17 @@ fn sweep_on(theme: Theme) {
             faults.push(format!("version history: {why}: {g}"));
         }
     }
+    // *Now* joins them once its summary is in and it opens, which is timing.
     assert!(
-        version_rows.len() == 2,
+        version_rows.len() >= 2,
         "version history: the fixture is not in the state it is about — it swept {} \
-         rows, not its two versions",
-        version_rows.len()
+         rows, not its two versions at least: {}",
+        version_rows.len(),
+        version_rows
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
     let _ = std::fs::remove_dir_all(&scratch);
 

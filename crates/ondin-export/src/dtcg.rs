@@ -336,15 +336,22 @@ impl Writer<'_> {
 
     /// The `$type` a token of `v` declares. An alias declares the type of the
     /// token its reference ends at, since DTCG requires a reference to resolve
-    /// to a token of its own type; anything else, [`Self::own_type`].
+    /// to a token of its own type; anything else, [`Self::own_type`]. A chain
+    /// that cycles across modes ends at the cycle's lowest id, wherever it is
+    /// entered, so every token of one cycle declares one type.
     fn type_of(&self, v: &Variable) -> &'static str {
-        // Followed with a seen set: a chain could cycle across modes.
-        let mut seen = BTreeSet::new();
+        let mut walked: Vec<&Variable> = Vec::new();
         let mut at = v;
         while let Some(to) = self.alias_target(at) {
-            if !seen.insert(at.id) {
+            if let Some(i) = walked.iter().position(|w| w.id == at.id) {
+                at = walked[i..]
+                    .iter()
+                    .copied()
+                    .min_by_key(|w| w.id)
+                    .unwrap_or(at);
                 break;
             }
+            walked.push(at);
             at = to;
         }
         self.own_type(at)

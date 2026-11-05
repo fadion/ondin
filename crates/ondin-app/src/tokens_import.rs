@@ -82,15 +82,22 @@ const MAX_READ: u64 = 16 * 1024 * 1024;
 
 /// Whether a path a document carries may be looked at: absolute, on a local
 /// drive and not a device name. The document is untrusted, and on Windows even
-/// a stat of `\\host\share` sends the user's credentials to that host.
+/// a stat of `\\host\share` sends the user's credentials to that host; on Unix
+/// a stat under the automount roots `/net/<host>` and `/Network` contacts the
+/// host, from the UI thread.
 fn local_path(path: &Path) -> bool {
     use std::path::{Component, Prefix};
     if !path.is_absolute() {
         return false;
     }
-    let local = match path.components().next() {
+    let mut parts = path.components();
+    let local = match parts.next() {
         Some(Component::Prefix(p)) => matches!(p.kind(), Prefix::Disk(_)),
-        Some(Component::RootDir) => !cfg!(windows),
+        Some(Component::RootDir) => {
+            !cfg!(windows)
+                && !matches!(parts.next(), Some(Component::Normal(r))
+                    if r.eq_ignore_ascii_case("net") || r.eq_ignore_ascii_case("network"))
+        }
         _ => false,
     };
     // `C:\any\NUL.json` is the null device on Windows.
@@ -1523,16 +1530,31 @@ mod tests {
 
     /// A link's path is looked at only when it is a local regular file: never a
     /// share, a device or a relative path, and a file past the cap is not read.
-    /// flip: `local_path` answering `true` for a UNC prefix → fails at "a share".
+    /// flip: `local_path` answering `true` for a UNC prefix (on Unix, for an
+    /// automount root) → fails at "a share".
     #[test]
     fn a_link_is_read_only_from_a_local_file() {
-        for p in [
+        // On Unix `//host/s` is an ordinary absolute path and `\\host\s` a
+        // relative one; only Windows reads either as a share.
+        #[cfg(windows)]
+        let shares = [
             r"\\attacker.example\s\tokens.json",
             "//attacker.example/s/tokens.json",
-        ] {
+        ];
+        #[cfg(not(windows))]
+        let shares = [
+            "/net/attacker.example/s/tokens.json",
+            "/Network/Servers/attacker.example/tokens.json",
+        ];
+        for p in shares {
             assert!(!local_path(Path::new(p)), "a share: {p}");
             assert_eq!(on_disk(Path::new(p)), None, "never stat'd: {p}");
         }
+        #[cfg(not(windows))]
+        assert!(
+            local_path(Path::new("/netstore/tokens.json")),
+            "only the automount roots"
+        );
         assert!(!local_path(Path::new("tokens.json")), "a relative path");
         #[cfg(windows)]
         for p in [

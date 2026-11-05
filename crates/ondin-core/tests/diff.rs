@@ -455,6 +455,7 @@ fn a_tokens_file_applied_again_is_one_change() {
                 "c": { "$value": format!("#{:06X}", base + 2) },
             }
         }),
+        into: None,
     };
     let with = |l: Option<ondin_core::meta::TokensLink>| {
         let mut doc = f.doc.clone();

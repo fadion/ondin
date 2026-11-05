@@ -2019,6 +2019,15 @@ impl OndinApp {
                     .flat_map(|(_, ids)| ids)
                     .collect::<std::collections::BTreeSet<_>>()
                     .len();
+                if let Some(held) = var::scope_held_by(doc, v, scope) {
+                    let name = |id| table.get(id).map_or("", |v| v.name.as_str());
+                    self.session.info(format!(
+                        "{} reads {} from another collection, so its words cannot change.",
+                        name(held),
+                        name(v)
+                    ));
+                    return;
+                }
                 let ops = var::scope_ops(doc, v, scope);
                 if ops.is_empty() {
                     return;

@@ -264,6 +264,57 @@ fn scoping_a_string_to_words_keeps_what_its_aliases_read() {
     );
 }
 
+/// A string another collection aliases is not scoped to direction words: that
+/// alias reads it per mode of the string's own collection, which no literal of
+/// its own could keep, so the narrowing is refused and names it.
+/// flip: `scope_ops` without its `scope_held_by` refusal → fails at "refused".
+#[test]
+fn a_string_aliased_from_another_collection_is_not_scoped_to_words() {
+    let mut f = fixture();
+    let mut ids = IdSource::new(0xF3);
+    let (theme, light, text) = (ids.mint_collection(), ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddCollection {
+                collection: Collection {
+                    id: theme,
+                    name: "Theme".into(),
+                    modes: vec![Mode {
+                        id: light,
+                        name: "Light".into(),
+                    }],
+                    breakpoints: None,
+                },
+                index: 2,
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: text,
+                    name: "button/text".into(),
+                    kind: VarKind::String,
+                    cells: [(light, Cell::Alias(f.loose))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .expect("a second collection aliasing label");
+    let words = Some(Scope::of([Field::FlexDirection]));
+    assert_eq!(variable::scope_held_by(&f.doc, f.loose, words), Some(text));
+    assert!(
+        variable::scope_ops(&f.doc, f.loose, words).is_empty(),
+        "refused"
+    );
+    let any = Some(Scope::of([Field::Content]));
+    assert_eq!(
+        variable::scope_held_by(&f.doc, f.loose, any),
+        None,
+        "a scope that keeps every word is not held"
+    );
+}
+
 /// A layout written with the binding kept stays bound when it writes what is
 /// drawn or the literal; a new direction detaches it, a cleared binding stays
 /// cleared.

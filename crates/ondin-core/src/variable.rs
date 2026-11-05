@@ -2098,6 +2098,26 @@ pub fn remove_and_scope_ops(
     ops
 }
 
+/// A variable in another collection aliasing `var`, when narrowing `var` to
+/// `scope` would rewrite its words ([`holds_its_words`]). Such an alias reads
+/// `var` in the mode in force for `var`'s collection, so no literal of its own
+/// could keep its text: [`scope_ops`] refuses the narrowing instead.
+pub fn scope_held_by(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Option<VarId> {
+    let t = doc.variables();
+    let v = t.get(var)?;
+    if holds_its_words(&Variable { scope, ..v.clone() }) {
+        return None;
+    }
+    let home = t.collection_of(var).map(|c| c.id);
+    t.iter()
+        .find(|u| {
+            u.id != var
+                && t.collection_of(u.id).map(|c| c.id) != home
+                && u.cells.values().any(|c| *c == Cell::Alias(var))
+        })
+        .map(|u| u.id)
+}
+
 /// The operations narrowing `var`'s scope to `scope` (`None` every field):
 /// every field of a family it leaves that is bound to `var` detaches to the
 /// value it drew, then the variable takes the scope — one transaction, so a
@@ -2105,12 +2125,16 @@ pub fn remove_and_scope_ops(
 /// directions or wraps alone has each cell that names none set to the first
 /// family's first word ([`holds_its_words`]), and another variable aliasing it
 /// in that mode takes the value it read, so its own users keep their text.
-/// Empty when `var` is not the document's own.
+/// Empty when `var` is not the document's own, or another collection's alias
+/// holds it ([`scope_held_by`]).
 pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec<crate::Operation> {
     let t = doc.variables();
     let Some(v) = t.get(var).filter(|v| v.origin.is_none()) else {
         return Vec::new();
     };
+    if scope_held_by(doc, var, scope).is_some() {
+        return Vec::new();
+    }
     let mut ops = remove_and_scope_ops(doc, &[], &[(var, scope)]);
     let mut next = Variable { scope, ..v.clone() };
     if !holds_its_words(&next)

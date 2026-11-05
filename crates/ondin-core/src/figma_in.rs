@@ -581,8 +581,9 @@ impl Builder<'_> {
         self.exports(id, n);
     }
 
-    /// A node's `exportSettings` as its export settings. A suffix that is only
-    /// the scale's own marker (`@2x`) is left for Ondin to add.
+    /// A node's `exportSettings` as its export settings, the suffix through
+    /// `ExportSpec::take_foreign_suffix`: the marker Ondin derives is left for it
+    /// to add, and a raster named without one is counted.
     fn exports(&mut self, id: NodeId, n: &Value) {
         let mut exports = Vec::new();
         for e in arr(n, "exportSettings") {
@@ -605,9 +606,13 @@ impl Builder<'_> {
                 _ => ExportScale::Times(1.0),
             };
             let mut spec = ExportSpec::new(format, scale);
-            let suffix = str_of(e, "suffix");
-            if suffix != scale.marker() {
-                spec.suffix = suffix.to_owned();
+            if spec.take_foreign_suffix(str_of(e, "suffix")) {
+                self.count(
+                    "Export names without their scale",
+                    1,
+                    "",
+                    "Given its marker",
+                );
             }
             exports.push(spec);
         }

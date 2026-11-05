@@ -107,7 +107,11 @@ fn solid(doc: &Document, id: NodeId) -> BrushSource {
 
 /// A shape's `exports` land as its export settings: a typed suffix kept, the
 /// scale's own marker left for Ondin to add, a format Ondin lacks counted.
-/// flip: `exports` not reading `exports` → fails at the rows' count.
+/// A vector's `@2x` is typed, since Ondin derives none for it; a 2× PNG named
+/// plainly gains Ondin's marker, which is counted.
+/// flip: `exports` not reading `exports` → fails at the rows' count;
+/// `take_foreign_suffix` comparing with the scale's marker alone → fails at the
+/// SVG row.
 #[test]
 fn export_settings_land_with_their_format_scale_and_suffix() {
     let mut icon = shape("I", "rect", ROOT, (0.0, 0.0, 24.0, 24.0));
@@ -115,6 +119,8 @@ fn export_settings_land_with_their_format_scale_and_suffix() {
         { "type": "png", "scale": 2, "suffix": "@2x" },
         { "type": "jpeg", "scale": 1, "suffix": "-dark" },
         { "type": "avif", "scale": 1, "suffix": "" },
+        { "type": "svg", "scale": 2, "suffix": "@2x" },
+        { "type": "png", "scale": 3, "suffix": "" },
     ]);
     let r = import(export(&["I"], vec![icon], &[]));
     let rows: Vec<ondin_core::ExportSpec> = r
@@ -125,14 +131,23 @@ fn export_settings_land_with_their_format_scale_and_suffix() {
         .iter()
         .map(|k| k.value.clone())
         .collect();
-    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows.len(), 4, "{rows:?}");
     assert_eq!(rows[0].format, ondin_core::ExportFormat::Png);
     assert_eq!(rows[0].scale, ondin_core::ExportScale::Times(2.0));
     assert_eq!(rows[0].suffix, "", "the marker is Ondin's to add");
     assert_eq!(rows[1].format, ondin_core::ExportFormat::Jpeg);
     assert_eq!(rows[1].suffix, "-dark");
+    assert_eq!(rows[2].format, ondin_core::ExportFormat::Svg);
+    assert_eq!(rows[2].suffix, "@2x", "a vector derives no marker");
+    assert_eq!(rows[3].effective_suffix(), "@3x");
     let what: Vec<&str> = r.report.iter().map(|u| u.what).collect();
-    assert_eq!(what, ["Export formats Ondin lacks"]);
+    assert_eq!(
+        what,
+        [
+            "Export formats Ondin lacks",
+            "Export names without their scale"
+        ]
+    );
 }
 
 /// A board on the page and a rect in it, both stored in page space, land with

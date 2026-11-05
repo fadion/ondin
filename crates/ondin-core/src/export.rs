@@ -100,6 +100,23 @@ impl ExportSpec {
         }
     }
 
+    /// Take `suffix`, the name another tool's file puts after the layer's, onto a
+    /// spec whose own suffix is empty: kept when it differs from the marker this
+    /// spec derives, left empty when it is that marker. Answers true when the
+    /// other tool's name is empty where this spec derives one (a 2× PNG named
+    /// plainly), which Ondin cannot spell, so its file gains the marker.
+    pub fn take_foreign_suffix(&mut self, suffix: &str) -> bool {
+        let derived = self.effective_suffix();
+        match (suffix == derived, suffix.is_empty()) {
+            (true, _) => false,
+            (false, true) => true,
+            (false, false) => {
+                self.suffix = suffix.to_owned();
+                false
+            }
+        }
+    }
+
     /// The stem this spec gives a layer called `name` — prefix, name, marker, and
     /// no extension.
     ///

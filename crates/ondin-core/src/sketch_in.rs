@@ -726,9 +726,10 @@ impl Builder<'_> {
     }
 
     /// A layer's export presets as its export settings. Sketch's `name` is put
-    /// after the layer's name or, by its naming scheme, before it; the scale's
-    /// own marker (`@2x`) is left for Ondin to add. A format Ondin cannot write is
-    /// counted and left out.
+    /// after the layer's name or, by its naming scheme, before it; a suffix goes
+    /// through `ExportSpec::take_foreign_suffix`, so the marker Ondin derives is
+    /// left for it to add and a raster named without one is counted. A format
+    /// Ondin cannot write is counted and left out.
     fn exports(&mut self, id: NodeId, layer: &Value) {
         let mut exports = Vec::new();
         for f in arr_in(layer, &["exportOptions", "exportFormats"]) {
@@ -754,12 +755,21 @@ impl Builder<'_> {
             };
             let mut spec = ExportSpec::new(format, scale);
             let name = str_of(f, "name");
-            if !name.is_empty() && name != scale.marker() {
-                if f.get("namingScheme").and_then(Value::as_i64) == Some(1) {
+            let prefixed = f.get("namingScheme").and_then(Value::as_i64) == Some(1);
+            let suffix = match prefixed && !name.is_empty() {
+                true => {
                     spec.prefix = name.to_owned();
-                } else {
-                    spec.suffix = name.to_owned();
+                    ""
                 }
+                false => name,
+            };
+            if spec.take_foreign_suffix(suffix) {
+                self.count(
+                    "Export names without their scale",
+                    1,
+                    "",
+                    "Given its marker",
+                );
             }
             exports.push(spec);
         }

@@ -3383,7 +3383,7 @@ impl OndinApp {
         }
         // Enter needs a name, as the disabled button does, or it would close the
         // card and silently drop the colour and folder chosen.
-        if ctx.input(|i| i.key_pressed(egui::Key::Enter))
+        if ui::card_enter(ctx)
             && self
                 .dash
                 .new_project
@@ -3487,7 +3487,7 @@ impl OndinApp {
             cancel = true;
         }
         // Enter needs a name, or it would close the card and silently drop the edits.
-        if ctx.input(|i| i.key_pressed(egui::Key::Enter))
+        if ui::card_enter(ctx)
             && self
                 .dash
                 .edit_project
@@ -5188,6 +5188,45 @@ mod tests {
             "the card and its colour stay"
         );
         assert!(app.library.projects.projects.is_empty(), "nothing created");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Enter on a focused swatch in *New project* picks that colour and creates
+    /// nothing: it is the swatch's click, not the card's *Create project*.
+    /// flip: `new_project_modal` reading a raw `key_pressed(Enter)` → fails at
+    /// "nothing created".
+    #[test]
+    fn enter_on_a_focused_swatch_does_not_create_the_project() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "np-enter-swatch");
+        app.dash.new_project = Some(NewProject {
+            name: "Marketing".into(),
+            color: 3,
+            folder: false,
+            ..NewProject::default()
+        });
+        let _ = galleys(&mut app, &ctx);
+        let in_text = |ctx: &egui::Context| {
+            let id = ctx.memory(|m| m.focused());
+            id.is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some())
+        };
+        assert!(in_text(&ctx), "the fixture: the name field has the caret");
+        press(&mut app, &ctx, egui::Key::Tab);
+        let _ = galleys(&mut app, &ctx);
+        let focused = ctx.memory(|m| m.focused());
+        assert!(
+            focused.is_some() && !in_text(&ctx),
+            "the fixture: Tab reached the first swatch"
+        );
+        press(&mut app, &ctx, egui::Key::Enter);
+        let _ = galleys(&mut app, &ctx);
+        assert!(app.library.projects.projects.is_empty(), "nothing created");
+        assert_eq!(
+            app.dash.new_project.as_ref().map(|np| np.color),
+            Some(0),
+            "the swatch took the click"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

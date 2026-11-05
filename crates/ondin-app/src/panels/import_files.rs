@@ -1521,7 +1521,7 @@ impl OndinApp {
         if modal.should_close() && act.is_none() {
             act = Some(CardAct::Close);
         }
-        if act.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        if act.is_none() && ui::card_enter(ctx) {
             act = match self.dash.import.as_ref().map(|c| (&c.step, &c.field)) {
                 Some((Step::Form, Field::Link { .. })) => Some(CardAct::Fetch),
                 Some((Step::Form, _)) => Some(CardAct::Import),
@@ -1729,20 +1729,16 @@ fn form(
                 .size(settings::CAPTION_PT)
                 .color(theme::text::faint()),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let state = if ready {
-                FieldButton::Primary
-            } else {
-                FieldButton::Disabled
-            };
-            if settings::text_button(ui, "Import", state).clicked() && ready {
-                *act = Some(CardAct::Import);
-            }
-            if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                *act = Some(CardAct::Close);
-            }
-        });
+        let state = if ready {
+            FieldButton::Primary
+        } else {
+            FieldButton::Disabled
+        };
+        match settings::footer_row(ui, &[("Cancel", FieldButton::Off), ("Import", state)]) {
+            Some(0) => *act = Some(CardAct::Close),
+            Some(_) => *act = Some(CardAct::Import),
+            None => {}
+        }
     });
 }
 
@@ -2387,17 +2383,15 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
         {
             *act = Some(CardAct::Copy);
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            if o.open.is_some()
-                && settings::text_button(ui, "Open document", FieldButton::Primary).clicked()
-            {
-                *act = Some(CardAct::Open);
-            }
-            if settings::text_button(ui, "Done", FieldButton::Off).clicked() {
-                *act = Some(CardAct::Done);
-            }
-        });
+        let mut buttons = vec![("Done", FieldButton::Off)];
+        if o.open.is_some() {
+            buttons.push(("Open document", FieldButton::Primary));
+        }
+        match settings::footer_row(ui, &buttons) {
+            Some(0) => *act = Some(CardAct::Done),
+            Some(_) => *act = Some(CardAct::Open),
+            None => {}
+        }
     });
 }
 
@@ -2711,6 +2705,134 @@ mod tests {
         card.options.pages[0] = true;
         card.options.name = "  ".into();
         assert!(!card.ready());
+    }
+
+    /// Enter on a focused tick box is that box's click, not *Import*: tabbed onto
+    /// a page's tick, Enter unticks it and files nothing.
+    /// flip: `import_modal` reading a raw `key_pressed(Enter)` → fails at "the card
+    /// stays on its form".
+    #[test]
+    fn enter_on_a_focused_option_does_not_import() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx, "enter");
+        let source = two_pages(&mut f, "Doc");
+        f.app.fill_import(&ctx, vec![source]);
+        f.app.settle_import();
+        let (runs, _) = drawn(&mut f, &ctx);
+        let archive = runs
+            .iter()
+            .find(|(_, t)| t == "Archive")
+            .expect("the second page's row is drawn")
+            .0
+            .center()
+            .y;
+        let frame = |f: &mut Fixture, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| f.app.import_modal(ui.ctx()));
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let on_tick = |ctx: &egui::Context| {
+            let id = ctx.memory(|m| m.focused());
+            id.and_then(|id| ctx.read_response(id))
+                .is_some_and(|r| r.rect.y_range().contains(archive))
+        };
+        for _ in 0..30 {
+            if on_tick(&ctx) {
+                break;
+            }
+            frame(&mut f, vec![key(egui::Key::Tab)]);
+            frame(&mut f, Vec::new());
+        }
+        assert!(on_tick(&ctx), "the fixture: Tab reached the Archive tick");
+        frame(&mut f, vec![key(egui::Key::Enter)]);
+        frame(&mut f, Vec::new());
+        f.app.settle_import();
+        assert!(
+            matches!(
+                f.app.dash.import.as_ref().map(|c| &c.step),
+                Some(Step::Form)
+            ),
+            "the card stays on its form"
+        );
+        assert_eq!(
+            f.app.dash.import.as_ref().map(|c| c.options.pages.clone()),
+            Some(vec![true, false]),
+            "the tick took the click"
+        );
+        assert!(listed(&f).is_empty(), "files nothing");
+    }
+
+    /// `Tab` reaches the form's footer the way it reads: *Cancel*, then *Import*.
+    /// flip: `form` laying its buttons in a `right_to_left` row → fails at "left to right".
+    #[test]
+    fn tab_walks_the_import_footer_left_to_right() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx, "tab");
+        let source = two_pages(&mut f, "Doc");
+        f.app.fill_import(&ctx, vec![source]);
+        f.app.settle_import();
+        let frame = |f: &mut Fixture, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| f.app.import_modal(ui.ctx()));
+            ctx.memory(|m| m.focused())
+                .and_then(|id| ctx.read_response(id))
+                .map(|r| r.rect)
+        };
+        let tab = || {
+            vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(&mut f, Vec::new());
+        let mut stops: Vec<egui::Rect> = Vec::new();
+        for _ in 0..40 {
+            frame(&mut f, tab());
+            if let Some(at) = frame(&mut f, Vec::new())
+                && !stops.contains(&at)
+            {
+                stops.push(at);
+            }
+        }
+        let foot = stops.iter().map(|r| r.center().y).fold(f32::MIN, f32::max);
+        let footer: Vec<_> = stops
+            .iter()
+            .filter(|r| (r.center().y - foot).abs() < 1.0)
+            .collect();
+        assert_eq!(
+            footer.len(),
+            2,
+            "the fixture: both buttons are tab stops: {stops:?}"
+        );
+        assert!(
+            footer[0].center().x < footer[1].center().x,
+            "left to right: {footer:?}"
+        );
     }
 
     /// A file already in the library is refused in the field rather than copied

@@ -1000,7 +1000,7 @@ fn key_chip(ui: &mut egui::Ui, key: &str) {
 }
 
 /// The card's foot: how a version is saved — said only while `Ctrl+S` pins one
-/// (`pins`) — *Save named version…* and *Close*. Answers which was pressed:
+/// (`pins`) — *Close* and *Save named version…*. Answers which was pressed:
 /// `Some(true)` to save a named version, `Some(false)` to close.
 fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
     let rule = ui.cursor().min.y;
@@ -1023,18 +1023,9 @@ fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
                     .color(theme::text::dim()),
             );
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let off = crate::ui::FieldButton::Off;
-            if crate::settings::text_button(ui, "Close", off).clicked() {
-                return Some(false);
-            }
-            if crate::settings::text_button(ui, "Save named version…", off).clicked() {
-                return Some(true);
-            }
-            None
-        })
-        .inner
+        let off = crate::ui::FieldButton::Off;
+        crate::settings::footer_row(ui, &[("Close", off), ("Save named version…", off)])
+            .map(|i| i == 1)
     })
     .inner
 }

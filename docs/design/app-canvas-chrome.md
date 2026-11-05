@@ -74,8 +74,8 @@ marks the original that stays. Toggles live with the key.
 - **Input.** A press outside the box centres the camera there and carries on as a drag; a press
   inside picks the box up. The canvas follows the drag frame by frame; the fit is frozen at the
   press, so the map holds still under the pointer, and a dashed ghost marks where the box started.
-  A right-click during the drag puts the camera back. The wheel, any axis or modifier, zooms around
-  the world point under the pointer (`Camera::zoom_by` anchored at that point's canvas position,
+  A right-click during the drag puts the camera back. The wheel, any axis or modifier, and a pinch zoom
+  around the world point under the pointer (`Camera::zoom_by` anchored at that point's canvas position,
   even off-screen). Double-click zooms to fit the page. Hovering a top-level frame outside the box
   shows its name as a tooltip, the only text the map shows. Cursor: grab over the box, grabbing
   while dragging.
@@ -825,8 +825,9 @@ runs (`pages` names each frame's page, index for index).
   `stop_presenting` leaves fullscreen unless the window was fullscreen before. A shown frame that no
   longer resolves ends it.
 - **Zoom**, because a tall frame fitted to the screen's height is too small to read. `Ctrl`+wheel
-  (or `Alt`+wheel) zooms in at the cursor; the plain wheel and `Shift`+wheel then scroll. The wheel
-  is parsed as the canvas parses it (`canvas::wheel_travel`, `canvas::wheel_zoom_factor`).
+  (or `Alt`+wheel) or a pinch zooms in at the cursor; the plain wheel and `Shift`+wheel then scroll.
+  The wheel and the pinch are read as the canvas reads them (`canvas::wheel_travel`,
+  `canvas::wheel_zoom_factor`, `canvas::pinch_zoom`).
   `hold_on_frame` holds the view on the frame, every frame so a resize refits: on each axis the
   frame stays centred while it is narrower than the screen, and once wider its edges stay outside
   the screen's. Zooming out to the fit or past it is the fit (`view` back to `None`). The zoom is

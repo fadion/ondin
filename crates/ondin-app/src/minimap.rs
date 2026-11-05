@@ -243,23 +243,20 @@ impl OndinApp {
         if crate::ui::double_clicked(ui, resp) {
             self.zoom_to(self.document_bounds());
         }
-        // The wheel zooms, on any axis and with any modifier, around the world point
-        // under the pointer.
+        // The wheel zooms, on any axis and with any modifier, and so does a pinch,
+        // around the world point under the pointer.
         if let Some(p) = resp.hover_pos()
             && self.minimap.drag.is_none()
         {
             let (pan, zoom) = crate::canvas::wheel_travel(&ctx, map.height());
-            let amount = pan.x + pan.y + zoom;
-            if amount != 0.0 {
+            let factor = crate::canvas::wheel_zoom_factor(pan.x + pan.y + zoom)
+                * crate::canvas::pinch_zoom(&ctx);
+            if factor != 1.0 {
                 let anchor = self
                     .session
                     .camera
                     .world_to_screen(fit.to_world(p), self.canvas_px);
-                self.session.camera.zoom_by(
-                    crate::canvas::wheel_zoom_factor(amount),
-                    anchor,
-                    self.canvas_px,
-                );
+                self.session.camera.zoom_by(factor, anchor, self.canvas_px);
             }
         }
 
@@ -680,6 +677,29 @@ mod tests {
         assert!(
             (after - before).hypot() < 2.0_f64.sqrt(),
             "{after:?} vs {before:?}"
+        );
+    }
+
+    /// A trackpad pinch over the map zooms the canvas by its factor, as the wheel
+    /// there does.
+    ///
+    /// flip: `minimap_map` dropping its `pinch_zoom` factor → fails at "a pinch
+    /// over the map zooms by its factor".
+    #[test]
+    fn a_pinch_over_the_map_zooms_the_canvas() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_map(&ctx);
+        let (_, fit) = app.minimap.seen.expect("drawn");
+        let p = fit.to_map(Point::new(6200.0, 2150.0));
+        let zoom = app.session.camera.zoom;
+
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+        frame(&ctx, &mut app, vec![egui::Event::Zoom(0.5)]);
+
+        assert!(
+            (app.session.camera.zoom / zoom - 0.5).abs() < 1e-6,
+            "a pinch over the map zooms by its factor: {} from {zoom}",
+            app.session.camera.zoom
         );
     }
 

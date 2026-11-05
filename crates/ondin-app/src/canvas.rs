@@ -7574,10 +7574,9 @@ impl OndinApp {
     }
 
     /// The wheel: scroll pans, `Shift`+scroll pans sideways, `Ctrl`+scroll zooms
-    /// at the cursor. Read from raw `MouseWheel` events, so a zoom notch is a step,
-    /// and gated on hover since `Context::input` is global. A trackpad pinch
-    /// arrives as `Ctrl`+wheel (winit raises `PinchGesture` only on macOS/iOS), so
-    /// `egui::Event::Zoom` is not handled.
+    /// at the cursor, and so does a trackpad pinch ([`pinch_zoom`]). Read from raw
+    /// `MouseWheel` events, so a zoom notch is a step, and gated on hover since
+    /// `Context::input` is global.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         // The canvas's own overlay areas (origin fields, *Done* pill) must not
         // swallow the wheel; every other overlay keeps it.
@@ -7594,20 +7593,19 @@ impl OndinApp {
             return;
         };
         let (pan, zoom) = wheel_travel(ui.ctx(), rect.height());
+        let factor = wheel_zoom_factor(zoom) * pinch_zoom(ui.ctx());
 
         if pan != egui::Vec2::ZERO {
             self.session
                 .camera
                 .pan_pixels(Vec2::new((pan.x * ppp) as f64, (pan.y * ppp) as f64));
         }
-        if zoom != 0.0 {
+        if factor != 1.0 {
             let local = Vec2::new(
                 ((hover.x - rect.min.x) * ppp) as f64,
                 ((hover.y - rect.min.y) * ppp) as f64,
             );
-            self.session
-                .camera
-                .zoom_by(wheel_zoom_factor(zoom), local, self.canvas_px);
+            self.session.camera.zoom_by(factor, local, self.canvas_px);
         }
     }
 
@@ -10155,6 +10153,23 @@ pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) 
 /// notches. Clamped: a trackpad can deliver a whole gesture in one frame.
 pub(crate) fn wheel_zoom_factor(zoom: f32) -> f64 {
     (f64::from(zoom) / 600.0).exp().clamp(0.2, 5.0)
+}
+
+/// This frame's trackpad pinch as a zoom factor, `1.0` with none. macOS sends a
+/// pinch as a gesture, which egui hands on as `Event::Zoom`; Windows sends it as
+/// `Ctrl`+wheel, which [`wheel_travel`] reads, so neither is counted twice.
+/// Clamped as [`wheel_zoom_factor`] is.
+pub(crate) fn pinch_zoom(ctx: &egui::Context) -> f64 {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|ev| match ev {
+                egui::Event::Zoom(f) => Some(f64::from(*f)),
+                _ => None,
+            })
+            .product::<f64>()
+            .clamp(0.2, 5.0)
+    })
 }
 
 /// The layer the origin fields for `id` live in, shared by `origin_fields` and
@@ -23825,5 +23840,65 @@ mod pixel_preview_tests {
             let (_, moved, _) = pixel_preview(&camera, px).expect("on");
             assert_eq!(moved, size, "a pan keeps the size, at step {step}");
         }
+    }
+}
+
+#[cfg(test)]
+mod pinch_tests {
+    use super::*;
+
+    const SIZE: egui::Vec2 = egui::vec2(400.0, 300.0);
+
+    /// One frame of `wheel_input` alone, over a canvas-shaped response.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let resp = ui.interact(rect, egui::Id::new("pinch-canvas"), egui::Sense::hover());
+                app.wheel_input(ui, &resp, rect, 1.0);
+            },
+        );
+    }
+
+    /// A trackpad pinch zooms the canvas by its factor around the point under the
+    /// cursor, and a frame without one leaves the zoom alone.
+    ///
+    /// flip: `wheel_input` dropping its `pinch_zoom` factor → fails at "a pinch
+    /// zooms in by its factor".
+    #[test]
+    fn a_pinch_zooms_the_canvas_around_the_cursor() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.canvas_px = (SIZE.x as u32, SIZE.y as u32);
+        let at = egui::pos2(300.0, 90.0);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        let anchor = Vec2::new(f64::from(at.x), f64::from(at.y));
+        let zoom = app.session.camera.zoom;
+        let under = app.session.camera.screen_to_world(anchor, app.canvas_px);
+
+        frame(&ctx, &mut app, vec![egui::Event::Zoom(1.5)]);
+        assert!(
+            (app.session.camera.zoom / zoom - 1.5).abs() < 1e-6,
+            "a pinch zooms in by its factor: {} from {zoom}",
+            app.session.camera.zoom
+        );
+        let after = app.session.camera.world_to_screen(under, app.canvas_px);
+        // Within the device pixel per axis that the camera's rounded corner allows.
+        assert!(
+            (after - anchor).hypot() < 2.0_f64.sqrt(),
+            "around the cursor: {after:?} vs {anchor:?}"
+        );
+
+        let zoomed = app.session.camera.zoom;
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(app.session.camera.zoom, zoomed, "and no pinch, no zoom");
     }
 }

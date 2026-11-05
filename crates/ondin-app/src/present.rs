@@ -338,6 +338,7 @@ impl crate::app::OndinApp {
             zoom: fit_zoom(bounds, px),
         };
         let (pan, zoom) = crate::canvas::wheel_travel(&ctx, rect.height());
+        let factor = crate::canvas::wheel_zoom_factor(zoom) * crate::canvas::pinch_zoom(&ctx);
         let Some(p) = self.presenting.as_mut() else {
             return;
         };
@@ -355,10 +356,10 @@ impl crate::app::OndinApp {
             .unwrap_or(fitted);
         }
         view.pan_pixels(Vec2::new(f64::from(pan.x * ppp), f64::from(pan.y * ppp)));
-        if zoom != 0.0 {
+        if factor != 1.0 {
             let at = ctx.pointer_hover_pos().unwrap_or(rect.center()) - rect.min;
             let at = Vec2::new(f64::from(at.x * ppp), f64::from(at.y * ppp));
-            view.zoom_by(crate::canvas::wheel_zoom_factor(zoom), at, px);
+            view.zoom_by(factor, at, px);
         }
         // Every frame, not only on a wheel: a window resize changes the fit.
         p.view = hold_on_frame(view, bounds, px);

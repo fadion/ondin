@@ -1,42 +1,26 @@
-//! Canvas cursors that no OS provides a usable one for, as real cursor bitmaps.
+//! The canvas cursors: every pointer shown over the canvas, the arrow included,
+//! drawn by the app so each one can say what a press there would do.
 //!
-//! Only the text I-beam stays a stock cursor, set from `CursorIcon` in `canvas.rs`.
-//! The rest are here:
+//! Each cursor is a base drawing with at most one badge, both vector drawings on a
+//! 32-point box ([`Glyph`]). [`Cursors::image`] rasterizes one per (cursor, pointer
+//! size, display scale) and hands it to egui as a real OS cursor, so it neither lags
+//! the pointer nor clips at the window edge. A `CursorIcon` is still set alongside
+//! every bitmap as the fallback when rasterizing fails.
 //!
-//! - **The hands.** winit maps both `Grab` and `Grabbing` onto Windows'
-//!   `IDC_SIZEALL` move arrow, so the two pan states would be identical.
-//! - **The pen and the pencil.** `CursorIcon` has neither.
-//! - **The crosshair.** `IDC_CROSS` is 32 texels across, about twice what a design
-//!   tool uses.
-//! - **The rotate arc.** `CursorIcon` has no rotate, and no icon set has a
-//!   two-headed arc (see [`rotate_arc`]).
-//! - **The Scale box and the discard bin** ([`Bitmap::Scale`], [`Bitmap::Discard`]).
-//! - **The loaded Image cursor**, the crosshair with a count badge
-//!   ([`Bitmap::Loaded`]).
-//!
-//! The hands, pen, pencil, Scale box and bin are rasterized from the icon glyphs the
-//! tool rail uses, so a tool's cursor and its rail button are one drawing (the
-//! hands filled, so they read over artwork); the crosshair, the rotate arc and the
-//! badge are drawn outright. Both paths meet at [`compose`], which gives them a
-//! common white core and dark rim.
-//!
-//! egui hands the result to the OS as a true cursor via
-//! `Context::set_cursor_image`, so it neither lags the pointer nor clips at the
-//! window edge. A `CursorIcon` is still set alongside every bitmap as the fallback
-//! when rasterizing fails.
+//! A drawing is painted twice: a **rim** pass in the set's ink, the shape widened by
+//! a 1.5 pt mitred outline (strokes get square caps), then the **core** pass in its
+//! fill on top. A soft shadow goes under both, drawn into the bitmap as the OS draws
+//! one under its own pointers. Windows gets the light set (white core, dark rim),
+//! macOS and Linux the dark set, matching each OS's default pointer.
 
-use crate::theme;
 use eframe::egui;
 
-/// Which way a rotate cursor faces: a **screen** direction (y down), quantized to
+/// Which way a turned cursor faces: a **screen** direction (y down), quantized to
 /// [`Turn::STEPS`] steps of a full turn.
 ///
-/// The arc is drawn at any angle ([`rotate_arc`]), so the step only sets how finely
-/// to cache. 15° is fine enough to track a drag as a heading rather than a few
-/// discrete states. Quantizing is required: egui dedupes cursor uploads by `Arc`
-/// pointer identity, so a raw angle would upload a new cursor every frame of a
-/// rotate drag.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+/// Quantizing is required: egui dedupes cursor uploads by `Arc` pointer identity,
+/// so a raw angle would upload a new cursor every frame of a drag.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub struct Turn(u8);
 
 impl Turn {
@@ -53,14 +37,25 @@ impl Turn {
         Self(k.rem_euclid(i32::from(Self::STEPS)) as u8)
     }
 
-    /// The screen angle this step faces, in radians. Step 0 is +x, i.e. due right.
-    fn radians(self) -> f32 {
-        f32::from(self.0) / f32::from(Self::STEPS) * std::f32::consts::TAU
+    /// The same line, either way along it: a double-headed cursor turned by 180°
+    /// is the same drawing, so resize and skew cache twelve steps, not twenty-four.
+    fn axis(self) -> Self {
+        Self(self.0 % (Self::STEPS / 2))
     }
 
-    fn index(self) -> usize {
-        usize::from(self.0)
+    /// This step in degrees clockwise on screen. Step 0 is +x, due right.
+    fn degrees(self) -> f32 {
+        f32::from(self.0) * 360.0 / f32::from(Self::STEPS)
     }
+}
+
+/// Which way a guide or a gap runs on screen.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Axis {
+    /// A vertical line, dragged across.
+    Vertical,
+    /// A horizontal line, dragged up and down.
+    Horizontal,
 }
 
 /// How many images a loaded Image-tool cursor still has to place, as its badge
@@ -94,471 +89,1327 @@ impl Remaining {
     }
 }
 
-/// A cursor that has to be drawn because no OS provides a usable one.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Bitmap {
-    /// Panning is armed — space held, or the hand tool chosen.
-    HandOpen,
-    /// The view is actually being dragged.
-    HandClosed,
-    /// The pen tool, about to drop an anchor point.
-    Pen,
-    /// The pencil tool, about to draw freehand.
-    Pencil,
-    /// The Scale tool. Select and Scale differ only in what a handle drag means, so
-    /// without a cursor of its own the mode is invisible until something is scaled.
+/// What a badge says a press would do. One glyph, one meaning, across every base.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Badge {
+    /// Adds: to the selection, a guide, a point.
+    Plus,
+    /// Subtracts from the selection.
+    Minus,
+    /// Leaves a copy: a second arrow of the same size behind the first.
+    Duplicate,
+    /// Picks the deepest layer.
+    Deep,
+    /// A handle's dot.
+    Dot,
+    /// The pivot, or drawing from the centre.
+    Pivot,
+    /// Reorders a loose run.
+    Swap,
+    /// A press does nothing here.
+    No,
+    /// The Scale tool.
     Scale,
-    /// The shape tools, about to drag out a box.
-    Crosshair,
-    /// The Image tool's **loaded** cursor: the same crosshair with a badge on it
-    /// saying how many files are still to be placed.
-    ///
-    /// The count is the only thing that distinguishes this from a shape tool: a
-    /// click here plants a picture, not a box. So the badge is drawn for a single
-    /// remaining image too.
-    ///
-    /// The one badge in the app: modifier badges were declined (§15 D233) because
-    /// they would sit on a stock cursor with nothing to composite onto.
-    Loaded(Remaining),
-    /// Hovering the band just outside a corner handle, where a drag rotates.
-    /// Turned to face its handle, so it says which one has the pointer.
+    /// An anchor.
+    Anchor,
+    /// A segment.
+    Segment,
+    /// Converts a point.
+    Convert,
+    /// Bends a segment.
+    Bend,
+    /// Closes the path.
+    Close,
+    /// Continues an open end.
+    Continue,
+    /// Joins two open ends.
+    Join,
+    /// Starts a new subpath.
+    Star,
+}
+
+/// What the canvas sets: the stock cursor egui falls back to, and the drawn one.
+pub type Pointer = (egui::CursorIcon, Option<Bitmap>);
+
+/// A cursor the canvas can show.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Bitmap {
+    /// The Select tool's arrow, badged with what a press would do.
+    Arrow(Option<Badge>),
+    /// The node tool's arrow: the select arrow with its inks swapped, so the two
+    /// tools read apart at a glance.
+    Node(Option<Badge>),
+    /// A box, point-box, crop or spacing handle, along the handle's direction.
+    Resize(Turn),
+    /// Ctrl on a side handle, along the side.
+    Skew(Turn),
+    /// The band outside a corner, facing out from the pivot towards the pointer.
     Rotate(Turn),
-    /// A guide dragged back onto its ruler, where letting go deletes it. A bin says
-    /// the drop is accepted and destructive, which `NoDrop` (refused) cannot.
-    Discard,
-    /// The Text tool over the outline of a shape, where a click sets type along that
-    /// path (§15 D408).
-    ///
-    /// Drawn outright: an I-beam ("text goes here") over a curve ("along the
-    /// path"), which no icon says together and which must not be confused with the
-    /// stock `CursorIcon::Text` shown for editing existing text.
+    /// The create tools, about to drag out a box.
+    Crosshair,
+    /// A create tool with Alt held: the drag grows from its centre.
+    FromCentre,
+    /// The Image tool's loaded cursor: the crosshair with how many files are still
+    /// to be placed. The count is drawn for a single image too, since it is the only
+    /// thing telling this apart from a shape tool.
+    Loaded(Remaining),
+    /// The pen, badged with what its press does.
+    Pen(Option<Badge>),
+    /// The pencil; badged [`Badge::Continue`] over a path's open end.
+    Pencil(Option<Badge>),
+    /// The text I-beam, over text and in a text edit.
+    IBeam,
+    /// The Text tool over an outline, where a click sets type along it.
     TextOnPath,
-    /// An armed eyedropper off the canvas, where there is nothing to sample and
-    /// the loupe gives way to a pointer saying the tool is still in hand.
+    /// An armed eyedropper off the canvas, where the loupe gives way.
     Eyedropper,
+    /// A ruler, a guide, or a guide being dragged: arrows either side of the line.
+    Guide(Axis),
+    /// Alt during a guide drag: the drop leaves a copy behind.
+    CopyGuide(Axis),
+    /// A guide over its own ruler, where letting go deletes it.
+    Discard,
+    /// A loose run's gap: a bar either side of the arrows.
+    Gap(Axis),
+    /// Panning is armed: space held, the Hand tool, inside a crop.
+    Pan,
+    /// The view or the cropped image is being dragged.
+    Panning,
 }
 
 impl Bitmap {
-    /// The icon glyph this cursor is drawn from and where in it the pointer
-    /// aims — or `None` for the ones drawn from scratch.
-    ///
-    /// One function so a variant with no glyph has nowhere to put a hotspot:
-    /// [`Cursors::image`] routes the drawn variants to functions that pass their own
-    /// [`Hotspot`], and only the glyph variants reach this.
-    fn glyph_and_hotspot(self) -> Option<(&'static str, Hotspot)> {
+    /// The bitmap's drawings, in paint order, with where the pointer aims in the
+    /// 32-point box. A resize and skew of opposite headings share one drawing.
+    fn recipe(self) -> Recipe {
+        use Glyph as G;
+        let at = |g: G| Item::at(g);
+        let badge = |b: Option<Badge>, left: bool| {
+            b.map(|b| {
+                let item = Item::at(Glyph::of(b));
+                // The pen family's bodies fill the bottom-right corner.
+                match left {
+                    true => item.shifted(-15.5, 1.0),
+                    false => item,
+                }
+            })
+        };
+        let one = |items: Vec<Item>, hot: Hot| Recipe {
+            layers: vec![items],
+            hot,
+            inverted: false,
+        };
         match self {
-            // A hand grabs with its palm; the bin and the Scale box aim from the
-            // middle of the whole pointer.
-            Self::HandOpen => Some((theme::icon::HAND_FILL, Hotspot::Middle)),
-            Self::HandClosed => Some((theme::icon::HAND_GRABBING, Hotspot::Middle)),
-            // A pen draws from its nib, where the anchor point will appear.
-            Self::Pen => Some((theme::icon::PEN_NIB, Hotspot::Nib)),
-            // A pencil's lead is bottom-left too.
-            Self::Pencil => Some((theme::icon::PENCIL_SIMPLE, Hotspot::Nib)),
-            // The dropper's tip is bottom-left like the nib's, so it is mirrored
-            // the same way.
-            Self::Eyedropper => Some((theme::icon::EYEDROPPER, Hotspot::Nib)),
-            Self::Scale => Some((theme::icon::RESIZE, Hotspot::Middle)),
-            Self::Discard => Some((theme::icon::TRASH_SIMPLE, Hotspot::Middle)),
-            // Drawn outright, each naming its own aiming point: the loaded
-            // crosshair's badge and the path cursor's curve make the middle of the
-            // buffer the wrong point.
-            Self::Crosshair | Self::Rotate(_) | Self::Loaded(_) | Self::TextOnPath => None,
+            Self::Arrow(Some(Badge::Duplicate)) | Self::Node(Some(Badge::Duplicate)) => Recipe {
+                // The copy behind: drawn first, so the front arrow's rim cuts it.
+                layers: vec![
+                    vec![at(G::Arrow).shifted(DUPLICATE_OFFSET.0, DUPLICATE_OFFSET.1)],
+                    vec![at(G::Arrow)],
+                ],
+                hot: Hot::ARROW,
+                inverted: matches!(self, Self::Node(_)),
+            },
+            Self::Arrow(b) | Self::Node(b) => Recipe {
+                layers: vec![
+                    [Some(at(G::Arrow)), badge(b, false)]
+                        .into_iter()
+                        .flatten()
+                        .collect(),
+                ],
+                hot: Hot::ARROW,
+                inverted: matches!(self, Self::Node(_)),
+            },
+            Self::Resize(t) => one(vec![at(G::Resize).turned(t.axis())], Hot::MIDDLE),
+            Self::Skew(t) => one(vec![at(G::Skew).turned(t.axis())], Hot::MIDDLE),
+            // The arc is drawn bulging up, i.e. facing −y: a quarter turn back.
+            Self::Rotate(t) => one(
+                vec![at(G::Rotate).turned_by(t.degrees() + 90.0)],
+                Hot::MIDDLE,
+            ),
+            Self::Crosshair => one(vec![at(G::Cross)], Hot::MIDDLE),
+            Self::FromCentre => one(vec![at(G::Cross), at(G::Pivot)], Hot::MIDDLE),
+            Self::Loaded(_) => one(vec![at(G::Cross)], Hot::MIDDLE),
+            Self::Pen(b) => one(
+                [Some(at(G::Pen)), badge(b, true)]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                Hot::TIP,
+            ),
+            Self::Pencil(b) => one(
+                [Some(at(G::Pencil)), badge(b, true)]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                Hot::TIP,
+            ),
+            Self::IBeam => one(vec![at(G::IBeam)], Hot::MIDDLE),
+            Self::TextOnPath => one(vec![at(G::TextOnPath)], Hot(16.0, 11.5)),
+            Self::Eyedropper => one(vec![at(G::Dropper)], Hot(5.0, 5.0)),
+            Self::Guide(a) => one(vec![at(G::Guide).turned(a.turn())], Hot::MIDDLE),
+            Self::CopyGuide(a) => one(
+                vec![at(G::Guide).turned(a.turn()), at(G::Plus).shifted(1.0, 3.0)],
+                Hot::MIDDLE,
+            ),
+            Self::Discard => one(vec![at(G::Bin)], Hot::MIDDLE),
+            Self::Gap(a) => one(vec![at(G::Gap).turned(a.turn())], Hot::MIDDLE),
+            Self::Pan => one(vec![at(G::Hand)], Hot::MIDDLE),
+            Self::Panning => one(vec![at(G::Fist)], Hot::MIDDLE),
         }
     }
 }
 
-/// Where in its own bitmap a cursor points.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Hotspot {
-    Middle,
-    /// A named texel of the **coverage** field, before [`compose`] pads it with the
-    /// rim. For a buffer not symmetric about its aiming point, as the badge makes
-    /// the crosshair's.
-    At(i32, i32),
-    /// The ink nearest the top-left corner, once the glyph has been mirrored so the
-    /// pen leans like every other cursor (see [`rasterize`]). Found rather than
-    /// hard-coded, so it stays on the nib if the glyph or its size changes.
-    Nib,
+impl Axis {
+    /// The turn that stands the drawing, which is drawn vertical, along this axis.
+    fn turn(self) -> Turn {
+        match self {
+            Self::Vertical => Turn(0),
+            Self::Horizontal => Turn(Turn::STEPS / 4),
+        }
+    }
 }
 
-/// Logical size the glyph is rasterized at; the bitmap is this many points times
-/// the display scale in texels.
-const GLYPH_PT: f32 = 19.0;
-/// Outline thickness in points: one thin dark edge, enough that white line art does
-/// not vanish against a white artboard.
-///
-/// Under 1.0 on purpose: scaled and rounded, a flat `1.0` becomes two texels on
-/// 125%/150% displays. At 0.75 the rim is one texel up to 175% and two from 200%.
+/// How far the duplicate cursor's second arrow sits right and down, in points.
+const DUPLICATE_OFFSET: (f32, f32) = (5.5, 3.0);
+
+/// The side of the box every drawing is laid out on, in points at pointer size 1.
+const BOX_PT: f32 = 32.0;
+/// Half the rim's width: the shape widened by a 1.5 pt outline. Under 1.0 on
+/// purpose, so at 125% and 150% the rim stays one texel rather than rounding to two.
 const RIM_PT: f32 = 0.75;
-/// Below this fraction of covered pixels the rasterization is assumed to have
-/// failed (missing glyph, atlas miss) and the bitmap is discarded.
-const MIN_INK: f32 = 0.02;
+/// The rim's mitre limit, as SVG counts it: past this a join is bevelled.
+const MITRE_LIMIT: f32 = 8.0;
+/// The shadow's blur, its drop, and how dark it is at its densest.
+const SHADOW_BLUR_PT: f32 = 0.7;
+const SHADOW_DROP_PT: f32 = 0.6;
+const SHADOW_ALPHA: f32 = 0.32;
+/// The dark ink both sets use, slightly off black as the OS pointers are. These are
+/// the cursor's own inks, the same under either theme, so not theme colours.
+const DARK: [f32; 3] = [
+    0x12 as f32 / 255.0,
+    0x13 as f32 / 255.0,
+    0x16 as f32 / 255.0,
+];
+const LIGHT: [f32; 3] = [1.0, 1.0, 1.0];
+/// The loaded badge's digits, in points: the size whose figures fill the chip's
+/// height with a point of clear space above and below.
+const DIGIT_PT: f32 = 6.6; // text-size: drawn into the cursor's bitmap, not the chrome
 
-/// [`RIM_PT`] in physical texels. Shared with [`Cross`], which needs it to place
-/// the badge clear of the rim.
-fn rim_px(scale: f32) -> i32 {
-    ((RIM_PT * scale).round() as i32).max(1)
+/// Where in the 32-point box a cursor aims.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Hot(f32, f32);
+
+impl Hot {
+    /// The arrow's tip.
+    const ARROW: Self = Self(6.0, 4.0);
+    /// The middle of the box, for the symmetric drawings.
+    const MIDDLE: Self = Self(16.0, 16.0);
+    /// The pen's and pencil's point.
+    const TIP: Self = Self(5.5, 5.0);
 }
 
-/// One cached bitmap. The outer `Option` is "not built yet", the inner one is
-/// "built and failed" — kept apart so a glyph that cannot be rasterized is not
-/// retried on every frame of every gesture.
-type Slot = Option<Option<egui::CustomCursorImage>>;
+/// What one bitmap is made of.
+struct Recipe {
+    /// Painted in order, each rim then core, so a later layer's rim cuts an earlier
+    /// layer; within one layer the rims merge.
+    layers: Vec<Vec<Item>>,
+    hot: Hot,
+    /// The inks swapped: the node tool's arrow.
+    inverted: bool,
+}
 
-/// The drawn cursors, built on first use and kept while the display scale stays put.
+/// One drawing placed in the box: turned about the box's middle, then shifted.
+#[derive(Clone, Copy)]
+struct Item {
+    glyph: Glyph,
+    /// Degrees clockwise on screen.
+    degrees: f32,
+    shift: (f32, f32),
+}
+
+impl Item {
+    fn at(glyph: Glyph) -> Self {
+        Self {
+            glyph,
+            degrees: 0.0,
+            shift: (0.0, 0.0),
+        }
+    }
+
+    fn shifted(self, x: f32, y: f32) -> Self {
+        Self {
+            shift: (x, y),
+            ..self
+        }
+    }
+
+    fn turned(self, t: Turn) -> Self {
+        self.turned_by(t.degrees())
+    }
+
+    fn turned_by(self, degrees: f32) -> Self {
+        Self { degrees, ..self }
+    }
+
+    /// A point of the box back into the drawing's own frame.
+    fn glyph_point(&self, p: [f32; 2]) -> [f32; 2] {
+        let (x, y) = (p[0] - self.shift.0 - 16.0, p[1] - self.shift.1 - 16.0);
+        let (s, c) = (-self.degrees.to_radians()).sin_cos();
+        [x * c - y * s + 16.0, x * s + y * c + 16.0]
+    }
+}
+
+/// The drawings, on the 32-point box. Paths are SVG path data, absolute commands
+/// only (`M L H V C Q A Z`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Glyph {
+    Arrow,
+    Cross,
+    Pen,
+    Pencil,
+    Dropper,
+    IBeam,
+    TextOnPath,
+    Resize,
+    Skew,
+    Rotate,
+    Guide,
+    Gap,
+    Bin,
+    Hand,
+    Fist,
+    Plus,
+    Minus,
+    Deep,
+    Dot,
+    Pivot,
+    No,
+    Swap,
+    Scale,
+    Anchor,
+    Segment,
+    Convert,
+    Bend,
+    Close,
+    Continue,
+    Join,
+    Star,
+}
+
+impl Glyph {
+    const ALL: [Self; 31] = [
+        Self::Arrow,
+        Self::Cross,
+        Self::Pen,
+        Self::Pencil,
+        Self::Dropper,
+        Self::IBeam,
+        Self::TextOnPath,
+        Self::Resize,
+        Self::Skew,
+        Self::Rotate,
+        Self::Guide,
+        Self::Gap,
+        Self::Bin,
+        Self::Hand,
+        Self::Fist,
+        Self::Plus,
+        Self::Minus,
+        Self::Deep,
+        Self::Dot,
+        Self::Pivot,
+        Self::No,
+        Self::Swap,
+        Self::Scale,
+        Self::Anchor,
+        Self::Segment,
+        Self::Convert,
+        Self::Bend,
+        Self::Close,
+        Self::Continue,
+        Self::Join,
+        Self::Star,
+    ];
+
+    /// The badge's drawing. The duplicate badge is a whole second arrow, laid out
+    /// by [`Bitmap::recipe`], so it maps to the arrow here.
+    fn of(b: Badge) -> Self {
+        match b {
+            Badge::Plus => Self::Plus,
+            Badge::Minus => Self::Minus,
+            Badge::Duplicate => Self::Arrow,
+            Badge::Deep => Self::Deep,
+            Badge::Dot => Self::Dot,
+            Badge::Pivot => Self::Pivot,
+            Badge::Swap => Self::Swap,
+            Badge::No => Self::No,
+            Badge::Scale => Self::Scale,
+            Badge::Anchor => Self::Anchor,
+            Badge::Segment => Self::Segment,
+            Badge::Convert => Self::Convert,
+            Badge::Bend => Self::Bend,
+            Badge::Close => Self::Close,
+            Badge::Continue => Self::Continue,
+            Badge::Join => Self::Join,
+            Badge::Star => Self::Star,
+        }
+    }
+
+    fn parts(self) -> Vec<Part> {
+        use Part::*;
+        match self {
+            Self::Arrow => vec![Fill(
+                "M6 4V23.2L10.5 19L13.6 25.9L16.6 24.6L13.6 17.8H19.7Z",
+            )],
+            Self::Cross => vec![
+                Rect(15.5, 9.0, 1.0, 5.0, 0.0),
+                Rect(15.5, 18.0, 1.0, 5.0, 0.0),
+                Rect(9.0, 15.5, 5.0, 1.0, 0.0),
+                Rect(18.0, 15.5, 5.0, 1.0, 0.0),
+            ],
+            Self::Pen => vec![
+                EvenOdd(
+                    "M5.5 5L16.5 8.6L22.6 19.2L19.2 22.6L8.6 16.5Z\
+                     M14.2 13.2A1 1 0 1 0 12.2 13.2A1 1 0 1 0 14.2 13.2Z\
+                     M6.9 6.3L12.5 11.9L11.9 12.5L6.3 6.9Z",
+                ),
+                Fill("M20.4 23.8L23.8 20.4L27.4 24L24 27.4Z"),
+            ],
+            Self::Pencil => vec![
+                Fill("M5.5 5L11.3 7L7 11.3Z"),
+                Fill("M12.2 7.9L26 21.7L21.7 26L7.9 12.2Z"),
+            ],
+            Self::Dropper => vec![
+                Fill("M5 5L8.6 6.2L18.2 15.8L15.8 18.2L6.2 8.6Z"),
+                Fill("M14.6 18.6L18.6 14.6L21 17L17 21Z"),
+                Fill("M19.4 20.8L20.8 19.4L23 21.6L21.6 23Z"),
+                Circle(24.0, 24.0, 3.4),
+            ],
+            Self::IBeam => vec![
+                Fill(
+                    "M12.6 6.4C14.2 6.4 15.4 6.9 16 7.8C16.6 6.9 17.8 6.4 19.4 6.4V7.6\
+                     C17.6 7.6 16.6 8.2 16.6 9.4H15.4C15.4 8.2 14.4 7.6 12.6 7.6Z",
+                ),
+                Fill(
+                    "M12.6 25.6C14.2 25.6 15.4 25.1 16 24.2C16.6 25.1 17.8 25.6 19.4 25.6V24.4\
+                     C17.6 24.4 16.6 23.8 16.6 22.6H15.4C15.4 23.8 14.4 24.4 12.6 24.4Z",
+                ),
+                Rect(15.4, 9.0, 1.2, 14.0, 0.0),
+            ],
+            Self::TextOnPath => vec![
+                Rect(13.4, 5.8, 5.2, 1.1, 0.0),
+                Rect(15.45, 6.5, 1.1, 9.8, 0.0),
+                Rect(13.4, 16.0, 5.2, 1.1, 0.0),
+                Stroke("M9 23.8Q16 17.6 23 23.8", 1.2),
+            ],
+            Self::Resize => vec![Fill(
+                "M5 16L10 11.5V15.2H22V11.5L27 16L22 20.5V16.8H10V20.5Z",
+            )],
+            Self::Skew => vec![
+                Fill("M5 11.2H22V8.4L27 12.2L22 16V13.2H5Z"),
+                Fill("M27 19H10V16.2L5 20L10 23.8V21H27Z"),
+            ],
+            Self::Rotate => vec![
+                Stroke("M8 16.3A10 10 0 0 1 24 16.3", 1.6),
+                Fill("M6.3 18.7L9.9 17.6L6.2 15Z"),
+                Fill("M25.7 18.7L22.1 17.6L25.8 15Z"),
+            ],
+            Self::Guide => vec![
+                Rect(14.3, 8.0, 1.1, 16.0, 0.0),
+                Rect(16.6, 8.0, 1.1, 16.0, 0.0),
+                Fill("M4.5 16L8.5 12.5V15.2H13V16.8H8.5V19.5Z"),
+                Fill("M27.5 16L23.5 12.5V15.2H19V16.8H23.5V19.5Z"),
+            ],
+            Self::Gap => vec![
+                Rect(5.0, 9.5, 1.2, 13.0, 0.0),
+                Rect(25.8, 9.5, 1.2, 13.0, 0.0),
+                Fill("M7.6 16L11.1 12.6V15.2H20.9V12.6L24.4 16L20.9 19.4V16.8H11.1V19.4Z"),
+            ],
+            Self::Bin => vec![
+                Rect(9.5, 8.5, 13.0, 1.8, 0.6),
+                Rect(13.8, 6.4, 4.4, 1.6, 0.6),
+                EvenOdd(
+                    "M11 11.6H21L20 25.5C20 26.1 19.6 26.5 19 26.5H13C12.4 26.5 12 26.1 12 25.5Z\
+                     M14.2 14V23.8H15.1V14Z\
+                     M16.9 14V23.8H17.8V14Z",
+                ),
+            ],
+            Self::Hand => vec![
+                Rect(10.2, 6.5, 2.8, 11.0, 1.4),
+                Rect(13.5, 4.8, 2.8, 12.0, 1.4),
+                Rect(16.8, 5.6, 2.8, 11.5, 1.4),
+                Rect(20.1, 8.2, 2.6, 9.5, 1.3),
+                Fill(
+                    "M10.2 14.5H22.7V20.5C22.7 24.5 20.5 27 16.5 27H15C12.5 27 11 25.8 9.8 24\
+                     L6.2 18.6C5.5 17.5 5.9 16.3 6.9 15.8C7.9 15.3 9 15.7 9.6 16.6L10.2 17.6Z",
+                ),
+            ],
+            Self::Fist => vec![
+                Rect(10.2, 11.0, 2.8, 6.0, 1.4),
+                Rect(13.5, 10.0, 2.8, 7.0, 1.4),
+                Rect(16.8, 10.4, 2.8, 6.6, 1.4),
+                Rect(20.1, 11.6, 2.6, 5.6, 1.3),
+                Fill("M10.2 14.5H22.7V20.5C22.7 24.5 20.5 27 16.5 27H15C12.2 27 10.2 25 10.2 22Z"),
+            ],
+            Self::Plus => vec![Stroke("M23 20.5V27.5", 1.5), Stroke("M19.5 24H26.5", 1.5)],
+            Self::Minus => vec![Stroke("M19.5 24H26.5", 1.5)],
+            Self::Deep => vec![
+                StrokeRect(19.6, 20.6, 6.8, 6.8, 1.1),
+                Rect(21.9, 22.9, 2.2, 2.2, 0.0),
+            ],
+            Self::Dot => vec![Circle(23.0, 24.0, 2.4)],
+            Self::Pivot => vec![Ring(23.0, 24.0, 2.8, 1.1), Circle(23.0, 24.0, 0.9)],
+            Self::No => vec![
+                Ring(23.0, 24.0, 3.2, 1.2),
+                Stroke("M20.8 26.2L25.2 21.8", 1.2),
+            ],
+            Self::Swap => vec![
+                Stroke("M19.5 22H25.8", 1.1),
+                Stroke("M26.5 26H20.2", 1.1),
+                Fill("M27.5 22L25.3 20.3V23.7Z"),
+                Fill("M18.5 26L20.7 24.3V27.7Z"),
+            ],
+            Self::Scale => vec![
+                StrokeRect(19.6, 20.6, 6.8, 6.8, 1.1),
+                Stroke("M21.6 25.4L24.4 22.6", 1.1),
+                Fill("M25.2 21.8H22.6L25.2 24.4Z"),
+            ],
+            Self::Anchor => vec![StrokeRect(20.4, 21.4, 5.2, 5.2, 1.2)],
+            Self::Segment => vec![Rect(20.6, 21.6, 4.8, 4.8, 0.0)],
+            Self::Convert => vec![Stroke("M19.6 27.2L23 21.6L26.4 27.2", 1.4)],
+            Self::Bend => vec![Stroke("M19.4 27C20.4 22.4 25.6 22.4 26.6 27", 1.4)],
+            Self::Close => vec![Ring(23.0, 24.0, 2.6, 1.3)],
+            Self::Continue => vec![
+                Stroke("M19.6 27.6L23.6 23.6", 1.3),
+                StrokeRect(23.4, 19.6, 4.4, 4.4, 1.2),
+            ],
+            Self::Join => vec![
+                StrokeRect(19.2, 24.0, 4.0, 4.0, 1.1),
+                StrokeRect(24.0, 19.2, 4.0, 4.0, 1.1),
+                Stroke("M22.8 24.4L24.4 22.8", 1.1),
+            ],
+            Self::Star => vec![
+                Stroke("M23 20.3V27.7", 1.2),
+                Stroke("M19.8 22.2L26.2 25.8", 1.2),
+                Stroke("M19.8 25.8L26.2 22.2", 1.2),
+            ],
+        }
+    }
+
+    /// The drawing, flattened once and kept.
+    fn shapes(self) -> &'static [Shape] {
+        static ALL: std::sync::OnceLock<Vec<Vec<Shape>>> = std::sync::OnceLock::new();
+        let all = ALL.get_or_init(|| {
+            Self::ALL
+                .iter()
+                .map(|g| g.parts().into_iter().map(Part::flatten).collect())
+                .collect()
+        });
+        let i = Self::ALL.iter().position(|g| *g == self).unwrap_or(0);
+        &all[i]
+    }
+}
+
+/// One piece of a drawing, as the drawing is written.
+enum Part {
+    /// A filled path, nonzero.
+    Fill(&'static str),
+    /// A filled path with holes, even-odd.
+    EvenOdd(&'static str),
+    /// A filled rectangle: x, y, width, height, corner radius.
+    Rect(f32, f32, f32, f32, f32),
+    /// A filled circle: centre and radius.
+    Circle(f32, f32, f32),
+    /// A stroked path and its width; butt caps in the core, square in the rim.
+    Stroke(&'static str, f32),
+    /// A stroked rectangle's outline and its width.
+    StrokeRect(f32, f32, f32, f32, f32),
+    /// A stroked circle: centre, radius, width.
+    Ring(f32, f32, f32, f32),
+}
+
+impl Part {
+    fn flatten(self) -> Shape {
+        let rect = |x: f32, y: f32, w: f32, h: f32, r: f32| {
+            let r = r.min(w / 2.0).min(h / 2.0);
+            if r <= 0.0 {
+                return vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+            }
+            // Corners clockwise from the top-right, each a quarter arc.
+            let corners = [
+                ([x + w - r, y + r], -90.0f32),
+                ([x + w - r, y + h - r], 0.0),
+                ([x + r, y + h - r], 90.0),
+                ([x + r, y + r], 180.0),
+            ];
+            corners
+                .iter()
+                .flat_map(|&(c, from)| {
+                    (0..=ARC_STEPS / 4).map(move |i| {
+                        let a = (from + 90.0 * i as f32 / (ARC_STEPS / 4) as f32).to_radians();
+                        [c[0] + r * a.cos(), c[1] + r * a.sin()]
+                    })
+                })
+                .collect()
+        };
+        let circle = |cx: f32, cy: f32, r: f32| -> Vec<[f32; 2]> {
+            (0..ARC_STEPS)
+                .map(|i| {
+                    let a = std::f32::consts::TAU * i as f32 / ARC_STEPS as f32;
+                    [cx + r * a.cos(), cy + r * a.sin()]
+                })
+                .collect()
+        };
+        let closed = |pts| Contour { pts, closed: true };
+        match self {
+            Self::Fill(d) => Shape::fill(parse(d), false),
+            Self::EvenOdd(d) => Shape::fill(parse(d), true),
+            Self::Rect(x, y, w, h, r) => Shape::fill(vec![closed(rect(x, y, w, h, r))], false),
+            Self::Circle(cx, cy, r) => Shape::fill(vec![closed(circle(cx, cy, r))], false),
+            Self::Stroke(d, w) => Shape::stroke(parse(d), w),
+            Self::StrokeRect(x, y, w, h, sw) => {
+                Shape::stroke(vec![closed(rect(x, y, w, h, 0.0))], sw)
+            }
+            Self::Ring(cx, cy, r, sw) => Shape::stroke(vec![closed(circle(cx, cy, r))], sw),
+        }
+    }
+}
+
+/// Segments in a full circle, when flattening arcs and curves.
+const ARC_STEPS: usize = 48;
+/// Segments per cubic or quadratic curve.
+const CURVE_STEPS: usize = 12;
+
+/// A flattened polyline.
+#[derive(Clone, Debug)]
+struct Contour {
+    pts: Vec<[f32; 2]>,
+    closed: bool,
+}
+
+/// A flattened drawing piece and how it is painted.
+struct Shape {
+    contours: Vec<Contour>,
+    /// `None` for a fill, else the stroke's width.
+    stroke: Option<f32>,
+    even_odd: bool,
+    /// The contours' bounds, before any widening.
+    min: [f32; 2],
+    max: [f32; 2],
+    /// How many half-widths the outline reaches past the bounds ([`mitre_reach`]).
+    reach: f32,
+}
+
+impl Shape {
+    fn fill(contours: Vec<Contour>, even_odd: bool) -> Self {
+        Self::new(contours, None, even_odd)
+    }
+
+    fn stroke(contours: Vec<Contour>, width: f32) -> Self {
+        Self::new(contours, Some(width), false)
+    }
+
+    fn new(contours: Vec<Contour>, stroke: Option<f32>, even_odd: bool) -> Self {
+        let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in contours.iter().flat_map(|c| &c.pts) {
+            min = [min[0].min(p[0]), min[1].min(p[1])];
+            max = [max[0].max(p[0]), max[1].max(p[1])];
+        }
+        Self {
+            reach: mitre_reach(&contours),
+            contours,
+            stroke,
+            even_odd,
+            min,
+            max,
+        }
+    }
+
+    /// Whether `p` is painted, the shape widened by `grow` on every side: zero for
+    /// the core, [`RIM_PT`] for the rim.
+    fn covers(&self, p: [f32; 2], grow: f32) -> bool {
+        let half = self.stroke.map_or(0.0, |w| w / 2.0) + grow;
+        // A square cap reaches `√2` half-widths past a stroke's end.
+        let reach = half * self.reach.max(std::f32::consts::SQRT_2);
+        if p[0] < self.min[0] - reach
+            || p[1] < self.min[1] - reach
+            || p[0] > self.max[0] + reach
+            || p[1] > self.max[1] + reach
+        {
+            return false;
+        }
+        match self.stroke {
+            Some(_) => self.near(p, half, grow > 0.0),
+            None => self.inside(p) || (grow > 0.0 && self.near(p, grow, false)),
+        }
+    }
+
+    /// Inside the filled contours, by the shape's fill rule.
+    fn inside(&self, p: [f32; 2]) -> bool {
+        let mut winding = 0i32;
+        for c in &self.contours {
+            let n = c.pts.len();
+            for i in 0..n {
+                let (a, b) = (c.pts[i], c.pts[(i + 1) % n]);
+                if a[1] <= p[1] {
+                    if b[1] > p[1] && side(a, b, p) > 0.0 {
+                        winding += 1;
+                    }
+                } else if b[1] <= p[1] && side(a, b, p) < 0.0 {
+                    winding -= 1;
+                }
+            }
+        }
+        match self.even_odd {
+            true => winding % 2 != 0,
+            false => winding != 0,
+        }
+    }
+
+    /// Within `half` of the outline, with mitred joins and, for `square`, ends
+    /// extended by `half`; butt ends otherwise.
+    fn near(&self, p: [f32; 2], half: f32, square: bool) -> bool {
+        for c in &self.contours {
+            let n = c.pts.len();
+            let segs = if c.closed { n } else { n.saturating_sub(1) };
+            for i in 0..segs {
+                let (a, b) = (c.pts[i], c.pts[(i + 1) % n]);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-6 {
+                    continue;
+                }
+                let (ux, uy) = (dx / len, dy / len);
+                let (px, py) = (p[0] - a[0], p[1] - a[1]);
+                let along = px * ux + py * uy;
+                let across = (px * uy - py * ux).abs();
+                let open_start = !c.closed && i == 0;
+                let open_end = !c.closed && i + 1 == segs;
+                let lo = if open_start && square { -half } else { 0.0 };
+                let hi = if open_end && square { len + half } else { len };
+                if across <= half && along >= lo && along <= hi {
+                    return true;
+                }
+            }
+            // The joins: a wedge on each corner's outer side, mitred.
+            let joins = if c.closed {
+                0..n
+            } else {
+                1..n.saturating_sub(1)
+            };
+            for i in joins {
+                let v = c.pts[i];
+                let prev = c.pts[(i + n - 1) % n];
+                let next = c.pts[(i + 1) % n];
+                if join_covers(prev, v, next, half, p) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Which side of the line `a → b` the point is on.
+fn side(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
+    (b[0] - a[0]) * (p[1] - a[1]) - (p[0] - a[0]) * (b[1] - a[1])
+}
+
+/// Whether `p` lies in the mitre (or, past the limit, the bevel) that fills the
+/// outer side of the corner at `v` for an outline `half` wide each way.
+fn join_covers(prev: [f32; 2], v: [f32; 2], next: [f32; 2], half: f32, p: [f32; 2]) -> bool {
+    let unit = |a: [f32; 2], b: [f32; 2]| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = (dx * dx + dy * dy).sqrt();
+        (l > 1e-6).then(|| [dx / l, dy / l])
+    };
+    let (Some(d1), Some(d2)) = (unit(prev, v), unit(v, next)) else {
+        return false;
+    };
+    let turn = d1[0] * d2[1] - d1[1] * d2[0];
+    if turn.abs() < 1e-6 {
+        return false;
+    }
+    // The outer side is away from the turn.
+    let s = -turn.signum();
+    let n1 = [-d1[1] * s, d1[0] * s];
+    let n2 = [-d2[1] * s, d2[0] * s];
+    let a = [v[0] + n1[0] * half, v[1] + n1[1] * half];
+    let b = [v[0] + n2[0] * half, v[1] + n2[1] * half];
+    let sum = [n1[0] + n2[0], n1[1] + n2[1]];
+    let sq = sum[0] * sum[0] + sum[1] * sum[1];
+    // `1 / cos(θ/2)` is the mitre's length over the half-width.
+    let ratio = 2.0 / sq.sqrt();
+    let (poly, n) = if sq > 1e-9 && ratio <= MITRE_LIMIT {
+        let k = 2.0 * half / sq;
+        ([v, a, [v[0] + sum[0] * k, v[1] + sum[1] * k], b], 4)
+    } else {
+        ([v, a, b, b], 3)
+    };
+    // Convex either way round: inside if on one side of every edge.
+    let (mut pos, mut neg) = (true, true);
+    for i in 0..n {
+        let s = side(poly[i], poly[(i + 1) % n], p);
+        pos &= s >= 0.0;
+        neg &= s <= 0.0;
+    }
+    pos || neg
+}
+
+/// How far past its corner the sharpest mitre of `contours` reaches, in
+/// half-widths: the bound [`Shape::covers`] culls with.
+fn mitre_reach(contours: &[Contour]) -> f32 {
+    let mut reach = 1.0f32;
+    for c in contours {
+        let n = c.pts.len();
+        let joins = if c.closed {
+            0..n
+        } else {
+            1..n.saturating_sub(1)
+        };
+        for i in joins {
+            let (prev, v, next) = (c.pts[(i + n - 1) % n], c.pts[i], c.pts[(i + 1) % n]);
+            let d1 = [v[0] - prev[0], v[1] - prev[1]];
+            let d2 = [next[0] - v[0], next[1] - v[1]];
+            let (l1, l2) = (d1[0].hypot(d1[1]), d2[0].hypot(d2[1]));
+            if l1 < 1e-6 || l2 < 1e-6 {
+                continue;
+            }
+            // `cos θ` between the sides; the mitre is `1 / cos(θ/2)` half-widths.
+            let cos = (d1[0] * d2[0] + d1[1] * d2[1]) / (l1 * l2);
+            let half_cos = ((1.0 + cos) / 2.0).max(0.0).sqrt();
+            let ratio = if half_cos > 1e-6 {
+                1.0 / half_cos
+            } else {
+                f32::MAX
+            };
+            reach = reach.max(if ratio <= MITRE_LIMIT { ratio } else { 1.0 });
+        }
+    }
+    reach
+}
+
+/// SVG path data into polylines. Absolute commands only, which is all the drawings
+/// use; a relative command is a mistake in [`Glyph::parts`] and panics in the tests.
+fn parse(d: &str) -> Vec<Contour> {
+    let mut out: Vec<Contour> = Vec::new();
+    let mut cur: Vec<[f32; 2]> = Vec::new();
+    let mut at = [0.0f32; 2];
+    let mut start = at;
+    let mut nums: Vec<f32> = Vec::new();
+    let mut cmd = ' ';
+    let flush = |cmd: char,
+                 nums: &mut Vec<f32>,
+                 cur: &mut Vec<[f32; 2]>,
+                 at: &mut [f32; 2],
+                 start: &mut [f32; 2],
+                 out: &mut Vec<Contour>| {
+        let n = nums.as_slice();
+        match cmd {
+            'M' => {
+                if cur.len() > 1 {
+                    out.push(Contour {
+                        pts: std::mem::take(cur),
+                        closed: false,
+                    });
+                }
+                cur.clear();
+                for (i, p) in n.as_chunks::<2>().0.iter().enumerate() {
+                    *at = [p[0], p[1]];
+                    if i == 0 {
+                        *start = *at;
+                    }
+                    cur.push(*at);
+                }
+            }
+            'L' => {
+                for p in n.as_chunks::<2>().0 {
+                    *at = [p[0], p[1]];
+                    cur.push(*at);
+                }
+            }
+            'H' => {
+                for &x in n {
+                    *at = [x, at[1]];
+                    cur.push(*at);
+                }
+            }
+            'V' => {
+                for &y in n {
+                    *at = [at[0], y];
+                    cur.push(*at);
+                }
+            }
+            'C' => {
+                for c in n.as_chunks::<6>().0 {
+                    let p0 = *at;
+                    for i in 1..=CURVE_STEPS {
+                        let t = i as f32 / CURVE_STEPS as f32;
+                        let u = 1.0 - t;
+                        let f = |k: usize| {
+                            u * u * u * [p0[0], p0[1]][k]
+                                + 3.0 * u * u * t * c[k]
+                                + 3.0 * u * t * t * c[2 + k]
+                                + t * t * t * c[4 + k]
+                        };
+                        cur.push([f(0), f(1)]);
+                    }
+                    *at = [c[4], c[5]];
+                }
+            }
+            'Q' => {
+                for c in n.as_chunks::<4>().0 {
+                    let p0 = *at;
+                    for i in 1..=CURVE_STEPS {
+                        let t = i as f32 / CURVE_STEPS as f32;
+                        let u = 1.0 - t;
+                        let f = |k: usize| {
+                            u * u * [p0[0], p0[1]][k] + 2.0 * u * t * c[k] + t * t * c[2 + k]
+                        };
+                        cur.push([f(0), f(1)]);
+                    }
+                    *at = [c[2], c[3]];
+                }
+            }
+            'A' => {
+                for c in n.as_chunks::<7>().0 {
+                    arc(*at, c, cur);
+                    *at = [c[5], c[6]];
+                }
+            }
+            'Z' => {
+                // A contour that ends on its start would repeat the vertex, and a
+                // zero-length side has no direction to mitre the corner with.
+                if cur.len() > 2
+                    && let (Some(a), Some(b)) = (cur.first(), cur.last())
+                    && (a[0] - b[0]).abs() + (a[1] - b[1]).abs() < 1e-3
+                {
+                    cur.pop();
+                }
+                if cur.len() > 1 {
+                    out.push(Contour {
+                        pts: std::mem::take(cur),
+                        closed: true,
+                    });
+                }
+                *at = *start;
+            }
+            ' ' => {}
+            other => panic!("cursor drawing: unsupported path command {other:?}"),
+        }
+        nums.clear();
+    };
+    let mut token = String::new();
+    let push_num = |token: &mut String, nums: &mut Vec<f32>| {
+        if !token.is_empty() {
+            nums.push(token.parse().expect("cursor drawing: a number"));
+            token.clear();
+        }
+    };
+    for ch in d.chars() {
+        match ch {
+            c if c.is_ascii_alphabetic() => {
+                push_num(&mut token, &mut nums);
+                flush(cmd, &mut nums, &mut cur, &mut at, &mut start, &mut out);
+                cmd = c;
+            }
+            '-' => {
+                push_num(&mut token, &mut nums);
+                token.push(ch);
+            }
+            ' ' | ',' => push_num(&mut token, &mut nums),
+            '.' if token.contains('.') => {
+                push_num(&mut token, &mut nums);
+                token.push(ch);
+            }
+            _ => token.push(ch),
+        }
+    }
+    push_num(&mut token, &mut nums);
+    flush(cmd, &mut nums, &mut cur, &mut at, &mut start, &mut out);
+    if cur.len() > 1 {
+        out.push(Contour {
+            pts: cur,
+            closed: false,
+        });
+    }
+    out
+}
+
+/// An SVG elliptical arc from `from`, its seven numbers `c`, flattened into `out`
+/// (the endpoint-to-centre conversion of the SVG spec, appendix B.2.4).
+fn arc(from: [f32; 2], c: &[f32], out: &mut Vec<[f32; 2]>) {
+    let (mut rx, mut ry) = (c[0].abs(), c[1].abs());
+    let phi = c[2].to_radians();
+    let (large, sweep) = (c[3] != 0.0, c[4] != 0.0);
+    let to = [c[5], c[6]];
+    if rx < 1e-6 || ry < 1e-6 {
+        out.push(to);
+        return;
+    }
+    let (sp, cp) = phi.sin_cos();
+    let (dx, dy) = ((from[0] - to[0]) / 2.0, (from[1] - to[1]) / 2.0);
+    let (x1, y1) = (cp * dx + sp * dy, -sp * dx + cp * dy);
+    let lambda = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
+    if lambda > 1.0 {
+        rx *= lambda.sqrt();
+        ry *= lambda.sqrt();
+    }
+    let num = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1;
+    let den = rx * rx * y1 * y1 + ry * ry * x1 * x1;
+    let mut k = (num / den).max(0.0).sqrt();
+    if large == sweep {
+        k = -k;
+    }
+    let (cx1, cy1) = (k * rx * y1 / ry, -k * ry * x1 / rx);
+    let (cx, cy) = (
+        cp * cx1 - sp * cy1 + (from[0] + to[0]) / 2.0,
+        sp * cx1 + cp * cy1 + (from[1] + to[1]) / 2.0,
+    );
+    let angle = |ux: f32, uy: f32| uy.atan2(ux);
+    let t1 = angle((x1 - cx1) / rx, (y1 - cy1) / ry);
+    let t2 = angle((-x1 - cx1) / rx, (-y1 - cy1) / ry);
+    let mut dt = t2 - t1;
+    let tau = std::f32::consts::TAU;
+    if sweep && dt < 0.0 {
+        dt += tau;
+    } else if !sweep && dt > 0.0 {
+        dt -= tau;
+    }
+    let steps = ((dt.abs() / tau * ARC_STEPS as f32).ceil() as usize).max(2);
+    for i in 1..=steps {
+        let t = t1 + dt * i as f32 / steps as f32;
+        let (x, y) = (rx * t.cos(), ry * t.sin());
+        out.push([cp * x - sp * y + cx, sp * x + cp * y + cy]);
+    }
+}
+
+/// One cached bitmap; `None` once built means it failed, kept so it is not
+/// retried every frame.
+type Slot = Option<egui::CustomCursorImage>;
+
+/// The drawn cursors, built on first use and kept while the scale stays put.
 ///
 /// Caching is required, not just an optimization: egui dedupes by `Arc` pointer
 /// identity, so a fresh buffer each frame would upload a new cursor every frame.
 #[derive(Default)]
 pub struct Cursors {
-    /// Scale the cached bitmaps were rasterized for.
+    /// Texels per point the cached bitmaps were drawn at.
     scale: f32,
-    hand_open: Slot,
-    hand_closed: Slot,
-    pen: Slot,
-    pencil: Slot,
-    /// The Scale tool's; `scale` above is the display scale.
-    scale_tool: Slot,
-    crosshair: Slot,
-    /// One per [`Turn`], built on demand.
-    rotate: [Slot; Turn::STEPS as usize],
-    discard: Slot,
-    text_on_path: Slot,
-    eyedropper: Slot,
-    /// One per count the cursor has been loaded with; a map because a session
-    /// touches a handful of [`Remaining`]'s hundred values.
-    loaded: std::collections::HashMap<Remaining, Slot>,
+    built: std::collections::HashMap<Bitmap, Slot>,
+    /// The OS pointer size over its default, and when it was last read.
+    pointer: Option<(f32, std::time::Instant)>,
 }
+
+/// How often the OS pointer size is read again, so a change in the system settings
+/// shows without a restart.
+const POINTER_REREAD: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Cursors {
-    /// The bitmap for `which`, or `None` if it could not be rasterized — in which
-    /// case the caller's `CursorIcon` stands on its own.
+    /// The bitmap for `which`, or `None` if it could not be drawn, in which case
+    /// the caller's `CursorIcon` stands on its own.
     pub fn image(&mut self, ctx: &egui::Context, which: Bitmap) -> Option<egui::CustomCursorImage> {
-        let scale = ctx.pixels_per_point();
+        let scale = texels_per_point(ctx.pixels_per_point()) * self.pointer_scale();
         if self.scale != scale {
-            *self = Self {
-                scale,
-                ..Default::default()
-            };
+            self.scale = scale;
+            self.built.clear();
         }
-        let slot = match which {
-            Bitmap::HandOpen => &mut self.hand_open,
-            Bitmap::HandClosed => &mut self.hand_closed,
-            Bitmap::Pen => &mut self.pen,
-            Bitmap::Pencil => &mut self.pencil,
-            Bitmap::Scale => &mut self.scale_tool,
-            Bitmap::Crosshair => &mut self.crosshair,
-            Bitmap::Rotate(t) => &mut self.rotate[t.index()],
-            Bitmap::Discard => &mut self.discard,
-            Bitmap::TextOnPath => &mut self.text_on_path,
-            Bitmap::Eyedropper => &mut self.eyedropper,
-            Bitmap::Loaded(n) => self.loaded.entry(n).or_default(),
-        };
-        slot.get_or_insert_with(|| match which {
-            Bitmap::TextOnPath => text_on_path(scale),
-            Bitmap::Crosshair => crosshair(scale),
-            Bitmap::Rotate(t) => rotate_arc(scale, t.radians()),
-            Bitmap::Loaded(n) => loaded_crosshair(ctx, scale, n),
-            other => {
-                let (glyph, hotspot) = other.glyph_and_hotspot()?;
-                rasterize(ctx, glyph, hotspot)
+        if let Some(slot) = self.built.get(&which) {
+            return slot.clone();
+        }
+        let slot = draw(ctx, which, scale, cfg!(windows));
+        self.built.insert(which, slot.clone());
+        slot
+    }
+
+    fn pointer_scale(&mut self) -> f32 {
+        let now = std::time::Instant::now();
+        match self.pointer {
+            Some((s, at)) if now.duration_since(at) < POINTER_REREAD => s,
+            _ => {
+                let s = os_pointer_scale().clamp(1.0, 8.0);
+                self.pointer = Some((s, now));
+                s
             }
-        })
-        .clone()
+        }
     }
 }
 
-/// Rasterize one icon glyph into a cursor bitmap.
-fn rasterize(
-    ctx: &egui::Context,
-    glyph: &str,
-    hotspot: Hotspot,
-) -> Option<egui::CustomCursorImage> {
-    // Laying the glyph out rasterizes it into the font atlas; the galley says where.
-    let galley = ctx.fonts_mut(|f| {
-        f.layout_no_wrap(
-            glyph.to_owned(),
-            theme::icon_font(GLYPH_PT),
-            egui::Color32::WHITE,
+/// Texels per point in the bitmap handed to the OS.
+///
+/// On macOS winit 0.30 sizes the cursor's `NSImage` in points equal to the bitmap's
+/// pixel count, so a 2× bitmap shows at twice the size on a Retina display. macOS
+/// gets one texel per point, which it shows at the right size.
+fn texels_per_point(pixels_per_point: f32) -> f32 {
+    match cfg!(target_os = "macos") {
+        true => 1.0,
+        false => pixels_per_point,
+    }
+}
+
+/// The OS pointer size over its default: `CursorBaseSize ÷ 32` on Windows, and
+/// `XCURSOR_SIZE ÷ 24` on Linux. macOS scales app cursors itself when its pointer
+/// size is raised, so there it is 1 and the image is not scaled twice.
+fn os_pointer_scale() -> f32 {
+    #[cfg(windows)]
+    {
+        windows_cursor_base_size().map_or(1.0, |px| px as f32 / 32.0)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("XCURSOR_SIZE")
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .map_or(1.0, |px| px / 24.0)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        1.0
+    }
+}
+
+/// `HKCU\Control Panel\Cursors\CursorBaseSize`, the pixel size Windows' pointer
+/// size slider writes (32 to 256), or `None` where it was never set.
+#[cfg(windows)]
+fn windows_cursor_base_size() -> Option<u32> {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (key, name) = (wide("Control Panel\\Cursors"), wide("CursorBaseSize"));
+    let mut value: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: both strings are NUL-terminated and outlive the call, and the out
+    // buffer is a `u32` whose size is passed alongside it.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &raw mut size,
         )
-    });
-    let uv = galley.rows.first()?.row.glyphs.first()?.uv_rect;
-    if uv.is_nothing() {
-        return None;
-    }
-    let atlas = ctx.fonts(|f| f.image());
-    let (gw, gh) = (
-        i32::from(uv.max[0]) - i32::from(uv.min[0]),
-        i32::from(uv.max[1]) - i32::from(uv.min[1]),
-    );
-    if gw <= 0 || gh <= 0 {
-        return None;
-    }
-
-    // Glyph coverage lives in the atlas alpha channel — glyphs are written as
-    // premultiplied white, so alpha *is* the coverage.
-    let source = |x: i32, y: i32| {
-        if x < 0 || y < 0 || x >= gw || y >= gh {
-            return 0;
-        }
-        let (ax, ay) = (
-            usize::from(uv.min[0]) + x as usize,
-            usize::from(uv.min[1]) + y as usize,
-        );
-        atlas
-            .pixels
-            .get(ay * atlas.size[0] + ax)
-            .map_or(0, |p| u32::from(p.a()))
     };
-    let (w, h) = (gw, gh);
-    compose(ctx.pixels_per_point(), (w, h), hotspot, |x, y| {
-        // Mirrored, not turned, for a nib: the icon draws the tip bottom-left, and
-        // every other cursor points up-left. A reflection puts the tip top-left; a
-        // 180° turn would put it top-right.
-        let y = if hotspot == Hotspot::Nib {
-            h - 1 - y
-        } else {
-            y
-        };
-        source(x, y)
-    })
+    (status == 0 && value > 0).then_some(value)
 }
 
-/// A thin crosshair of four rectangles. `IDC_CROSS` is too large and the
-/// `CROSSHAIR` glyphs carry a target ring. The geometry is [`Cross`], which the
-/// loaded Image cursor draws too.
-fn crosshair(scale: f32) -> Option<egui::CustomCursorImage> {
-    let cross = Cross::new(scale);
-    let aim = cross.aim();
-    compose(
-        scale,
-        (cross.size, cross.size),
-        Hotspot::At(aim, aim),
-        move |x, y| cross.ink(x, y),
-    )
-}
-
-/// The Text tool's *type along this path* pointer: an I-beam over a curve
-/// (§15 D408).
-///
-/// The I-beam makes it read as the type tool; the curve separates it from
-/// `CursorIcon::Text`, which means "edit the text under the pointer". The curve is
-/// one circular arc, since a wave's bends smudge at sixteen texels. Sizes are in
-/// points and scaled, as for every drawn cursor here.
-fn text_on_path(scale: f32) -> Option<egui::CustomCursorImage> {
-    /// Half the arc's width, and so half the whole figure's. Wider than the I-beam
-    /// on purpose: an arc the beam's width reads as a bowl the type sits in.
-    const HALF_W_PT: f32 = 5.0;
-    /// Half the I-beam's serif.
-    const SERIF_PT: f32 = 2.0;
-    /// The stem's height, serifs included.
-    const BEAM_H_PT: f32 = 9.0;
-    /// Clear space between the beam's foot and the arc's apex.
-    const GAP_PT: f32 = 1.5;
-    /// How far the arc's ends hang below its middle. Shallow: this is a hint of a
-    /// curve at cursor size, and a deep one reads as a bracket.
-    const SAG_PT: f32 = 2.0;
-
-    let pt = |v: f32| ((v * scale).round() as i32).max(1);
-    let (half_w, serif, beam_h) = (pt(HALF_W_PT), pt(SERIF_PT), pt(BEAM_H_PT));
-    let (gap, sag, thick) = (pt(GAP_PT), pt(SAG_PT), pt(1.0));
-    let w = half_w * 2 + thick;
-    let cx = w / 2;
-    // The apex is under the stem and the ends hang away from it: type standing on
-    // a curve, the baseline being the path.
-    let apex = beam_h + gap;
-    let h = apex + sag + thick;
-
-    // The circle through the apex and the two low ends (chord-and-sagitta,
-    // `R = (c²/4 + s²) / 2s`), centred below the apex so it is a hill, not a bowl.
-    // The centre is `w / 2` as a length, not `cx` as an index, and the chord is
-    // `w − 1` (first to last texel middle); an index centre puts one end a row
-    // lower.
-    let (c, s) = (f64::from(w) - 1.0, f64::from(sag).max(1.0));
-    let r = (c * c / 4.0 + s * s) / (2.0 * s);
-    let (ccx, ccy) = (f64::from(w) / 2.0, f64::from(apex) + r);
-
-    let half = f64::from(thick) / 2.0;
-    compose(scale, (w, h), Hotspot::At(cx, beam_h / 2), move |x, y| {
-        if x < 0 || y < 0 || x >= w || y >= h {
-            return 0;
-        }
-        // The I-beam: a stem, and a serif at each end. Measured from `ccx`, the
-        // length the arc uses, not from `cx`: the buffer's mirror axis is
-        // `(w − 1) / 2`, which `cx` matches only when `thick` is odd, and `pt(1.0)`
-        // is even at 1.5x, 1.75x, 2.0x and 2.5x. An even-width figure gets one
-        // extra serif column, since it has no centre column.
-        let from_middle = (f64::from(x) + 0.5 - ccx).abs();
-        let stem = from_middle < half && y < beam_h;
-        let serif = (y < thick || (beam_h - thick..beam_h).contains(&y))
-            && from_middle <= f64::from(serif) + 0.5;
-        // The arc: texels whose distance from the centre is the radius, sampled at
-        // the texel's middle.
-        let (dx, dy) = (f64::from(x) + 0.5 - ccx, f64::from(y) + 0.5 - ccy);
-        let arc = y >= apex && ((dx * dx + dy * dy).sqrt() - r).abs() <= half;
-        u32::from(stem || serif || arc) * 255
-    })
-}
-
-/// The crosshair's geometry in physical texels, shared with [`loaded_crosshair`],
-/// which draws the same four rectangles into a larger buffer and needs to know where
-/// they end and which texel it still aims through. The centre gap lets you see the
-/// pixel you are aiming at.
-#[derive(Clone, Copy)]
-struct Cross {
-    /// Arm length from the centre gap outward; the whole cursor is about half of
-    /// `IDC_CROSS`'s 32 texels.
-    arm: i32,
-    /// Clear space each side of centre.
-    gap: i32,
-    /// Width of an arm.
-    thick: i32,
-    /// Where the centre band starts: the far arms begin `thick + gap` past it.
-    near: i32,
-    /// The whole figure, on both axes.
-    size: i32,
-    /// What [`compose`] will add all round, which the badge has to clear.
-    rim: i32,
-}
-
-impl Cross {
-    fn new(scale: f32) -> Self {
-        const ARM_PT: f32 = 5.0;
-        const GAP_PT: f32 = 1.5;
-
-        let pt = |v: f32| ((v * scale).round() as i32).max(1);
-        let (arm, gap, thick) = (pt(ARM_PT), pt(GAP_PT), pt(1.0));
-        // Arms occupy `[arm+gap, arm+gap+thick)` on the cross axis.
-        let near = arm + gap;
-        Self {
-            arm,
-            gap,
-            thick,
-            near,
-            size: near + thick + gap + arm,
-            rim: rim_px(scale),
-        }
-    }
-
-    /// Coverage of the four rectangles.
-    ///
-    /// Bounded, because it is called over a buffer the badge has grown, where an
-    /// unbounded `on_arm` would run the horizontal arm out past the end.
-    fn ink(&self, x: i32, y: i32) -> u32 {
-        if x < 0 || y < 0 || x >= self.size || y >= self.size {
-            return 0;
-        }
-        let on_axis = |v: i32| v >= self.near && v < self.near + self.thick;
-        let on_arm = |v: i32| v < self.arm || v >= self.near + self.thick + self.gap;
-        u32::from((on_axis(x) && on_arm(y)) || (on_axis(y) && on_arm(x))) * 255
-    }
-
-    /// The texel the cursor aims through, on both axes — the middle of the gap.
-    ///
-    /// The same point `Hotspot::Middle` gives the plain crosshair; the loaded
-    /// buffer is not symmetric, and `the_badge_does_not_move_the_aiming_point`
-    /// holds the two together.
-    fn aim(&self) -> i32 {
-        self.near + self.thick / 2
-    }
-
-    /// Where a badge's top-left corner goes: diagonally out past the gap, in the
-    /// quadrant the arms leave empty, plus the rim so the chip's outline is not
-    /// welded to the arm's.
-    fn badge_at(&self) -> i32 {
-        self.near + self.thick + self.gap + self.rim
-    }
-}
-
-/// Size of the badge's digits: the smallest that reads at 1x, where at eight the
-/// `2` of a `12` closes up.
-const BADGE_PT: f32 = 9.0; // text-size: drawn into the cursor's bitmap, not the chrome
-/// Clear space between the digits and the chip's edge, each side.
-const BADGE_PAD_PT: f32 = 1.0;
-/// Corner radius of the chip, clamped against the chip's own size in [`badge`].
-const BADGE_ROUND_PT: f32 = 2.0;
-
-/// The Image tool's loaded cursor: [`crosshair`] with a count badge hung off the
-/// bottom-right.
-///
-/// The digits are knocked out of a solid chip, not drawn as ink: a nine-point digit
-/// at 1x is a one-texel stroke, so drawn ink becomes a white hairline in a black
-/// outline. Knocked out, [`compose`] paints the chip white and the rim's dilation
-/// turns the holes dark at every scale.
-///
-/// The hotspot stays on the crosshair's aiming point ([`Hotspot::At`]), because the
-/// buffer grows down and right and its middle is no longer the cross's.
-fn loaded_crosshair(
+/// Draw one cursor at `scale` texels per point, in the light set when `light`.
+fn draw(
     ctx: &egui::Context,
+    which: Bitmap,
     scale: f32,
-    count: Remaining,
+    light: bool,
 ) -> Option<egui::CustomCursorImage> {
-    let cross = Cross::new(scale);
-    let (bw, bh, chip) = badge(ctx, scale, &count.label())?;
-    let at = cross.badge_at();
-    let aim = cross.aim();
-    // The badge only ever grows the buffer.
-    let size = ((at + bw).max(cross.size), (at + bh).max(cross.size));
+    let recipe = which.recipe();
+    let (mut fill, mut ink) = match light {
+        true => (LIGHT, DARK),
+        false => (DARK, LIGHT),
+    };
+    if recipe.inverted {
+        std::mem::swap(&mut fill, &mut ink);
+    }
+    let n = (BOX_PT * scale).ceil() as usize;
+    // Samples per texel per axis: large bitmaps have texels small next to the
+    // drawing's features, so fewer suffice.
+    let ss = if scale <= 2.0 { 4 } else { 2 };
 
-    compose(scale, size, Hotspot::At(aim, aim), move |x, y| {
-        let (bx, by) = (x - at, y - at);
-        let on_chip = if bx < 0 || by < 0 || bx >= bw || by >= bh {
-            0
-        } else {
-            u32::from(chip[(by * bw + bx) as usize])
-        };
-        cross.ink(x, y).max(on_chip)
+    // A drawing aimed from its middle has its one-point lines centred there. Where
+    // a point holds an odd number of whole texels, that centre is moved onto a
+    // texel's middle, or a line a texel wide smears into two grey ones; an even
+    // number keeps it on a texel edge. In texels.
+    let nudge = match recipe.hot == Hot::MIDDLE {
+        true => {
+            let centre = 16.0 * scale;
+            let odd = (scale.floor() as i32) % 2 == 1;
+            centre.floor() + if odd { 0.5 } else { 0.0 } - centre
+        }
+        false => 0.0,
+    };
+
+    // The loaded badge: a chip in the set's core, the count in its ink.
+    let chip = match which {
+        Bitmap::Loaded(count) => Some(Chip::new(ctx, scale, nudge, &count.label())?),
+        _ => None,
+    };
+
+    // Premultiplied colour and alpha.
+    let mut px = vec![[0.0f32; 4]; n * n];
+    let over = |dst: &mut [f32; 4], rgb: [f32; 3], a: f32| {
+        if a <= 0.0 {
+            return;
+        }
+        for k in 0..3 {
+            dst[k] = rgb[k] * a + dst[k] * (1.0 - a);
+        }
+        dst[3] = a + dst[3] * (1.0 - a);
+    };
+    let total = (ss * ss) as f32;
+    for y in 0..n {
+        for x in 0..n {
+            let texel = &mut px[y * n + x];
+            for layer in &recipe.layers {
+                let (mut rim, mut core) = (0u32, 0u32);
+                for j in 0..ss {
+                    for i in 0..ss {
+                        let p = [
+                            (x as f32 + (i as f32 + 0.5) / ss as f32 - nudge) / scale,
+                            (y as f32 + (j as f32 + 0.5) / ss as f32 - nudge) / scale,
+                        ];
+                        let (mut r, mut c) = (false, false);
+                        for item in layer {
+                            let q = item.glyph_point(p);
+                            for shape in item.glyph.shapes() {
+                                c = c || shape.covers(q, 0.0);
+                                r = r || c || shape.covers(q, RIM_PT);
+                            }
+                            if let Some(chip) = &chip {
+                                c = c || chip.covers(p, 0.0);
+                                r = r || c || chip.covers(p, RIM_PT);
+                            }
+                        }
+                        rim += u32::from(r);
+                        core += u32::from(c);
+                    }
+                }
+                over(texel, ink, rim as f32 / total);
+                over(texel, fill, core as f32 / total);
+            }
+            if let Some(chip) = &chip {
+                over(texel, ink, chip.digit(x, y));
+            }
+        }
+    }
+
+    // A glyph that drew nothing would look like the pointer had vanished.
+    if px.iter().all(|p| p[3] <= 0.0) {
+        return None;
+    }
+    let px = with_shadow(px, n, scale);
+
+    let rgba: Vec<u8> = px
+        .iter()
+        .flat_map(|p| {
+            let a = p[3].clamp(0.0, 1.0);
+            let c = |v: f32| match a > 0.0 {
+                true => ((v / a).clamp(0.0, 1.0) * 255.0).round() as u8,
+                false => 0,
+            };
+            [c(p[0]), c(p[1]), c(p[2]), (a * 255.0).round() as u8]
+        })
+        .collect();
+    let hot = |v: f32| ((v * scale + nudge).floor() as usize).min(n - 1) as u16;
+    Some(egui::CustomCursorImage {
+        rgba: rgba.into(),
+        size: [n as u16, n as u16],
+        hotspot: [hot(recipe.hot.0), hot(recipe.hot.1)],
     })
 }
 
-/// The badge's coverage: a rounded chip with `label` knocked out of it.
-///
-/// Returns its size and the field, both in physical texels.
-fn badge(ctx: &egui::Context, scale: f32, label: &str) -> Option<(i32, i32, Vec<u8>)> {
-    let (tw, th, text) = digits(ctx, scale, label)?;
-    let pad = ((BADGE_PAD_PT * scale).round() as i32).max(1);
-    // Never narrower than tall: Inter's `1` is three texels wide at 1x, so padding
-    // alone would make a white bar.
-    let h = th + pad * 2;
-    let w = (tw + pad * 2).max(h);
-    let inset = (w - tw) / 2;
-    // A radius is a fraction of the smaller side or it swallows a narrow chip.
-    let r = (BADGE_ROUND_PT * scale)
-        .round()
-        .min((w.min(h) / 3) as f32)
-        .max(0.0);
-
-    let mut cov = vec![0u8; (w * h) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            // Outside the corner arcs is off the chip: the texel's centre against
-            // the nearest point of the rounded rect's inner box.
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (cx, cy) = (px.clamp(r, w as f32 - r), py.clamp(r, h as f32 - r));
-            if (px - cx).powi(2) + (py - cy).powi(2) > r * r {
-                continue;
-            }
-            let (gx, gy) = (x - inset, y - pad);
-            let ink = if gx < 0 || gy < 0 || gx >= tw || gy >= th {
-                0
-            } else {
-                text[(gy * tw + gx) as usize]
-            };
-            cov[(y * w + x) as usize] = 255 - ink;
-        }
-    }
-    Some((w, h, cov))
+/// The image composited over its own shadow: its alpha blurred, dropped and
+/// darkened.
+fn with_shadow(px: Vec<[f32; 4]>, n: usize, scale: f32) -> Vec<[f32; 4]> {
+    let sigma = SHADOW_BLUR_PT * scale;
+    let radius = (sigma * 3.0).ceil() as i32;
+    let kernel: Vec<f32> = (-radius..=radius)
+        .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+        .collect();
+    let sum: f32 = kernel.iter().sum();
+    let at = |v: &[f32], x: i32, y: i32| match (0..n as i32).contains(&x)
+        && (0..n as i32).contains(&y)
+    {
+        true => v[y as usize * n + x as usize],
+        false => 0.0,
+    };
+    let alpha: Vec<f32> = px.iter().map(|p| p[3]).collect();
+    let blur = |src: &[f32], dx: i32, dy: i32| -> Vec<f32> {
+        (0..n * n)
+            .map(|i| {
+                let (x, y) = ((i % n) as i32, (i / n) as i32);
+                kernel
+                    .iter()
+                    .zip(-radius..=radius)
+                    .map(|(w, k)| w * at(src, x + k * dx, y + k * dy))
+                    .sum::<f32>()
+                    / sum
+            })
+            .collect()
+    };
+    let soft = blur(&blur(&alpha, 1, 0), 0, 1);
+    let drop = (SHADOW_DROP_PT * scale).round() as i32;
+    px.iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let (x, y) = ((i % n) as i32, (i / n) as i32);
+            let shadow = at(&soft, x, y - drop) * SHADOW_ALPHA;
+            // The image over a black shadow: the colour is already premultiplied.
+            [p[0], p[1], p[2], p[3] + shadow * (1.0 - p[3])]
+        })
+        .collect()
 }
 
-/// One short string's coverage, lifted out of the font atlas as [`rasterize`] lifts
-/// a glyph. A glyph's `pos` and `uv_rect.offset` are logical, so they are scaled
-/// here; a miss is invisible at 1x and shears the digits apart at 1.5x.
+/// The loaded Image cursor's badge: a rounded chip with the count on it.
+struct Chip {
+    /// The chip, in points.
+    shape: Shape,
+    /// The count's coverage, in texels, and where its top-left texel sits.
+    digits: Vec<u8>,
+    size: (usize, usize),
+    origin: (i32, i32),
+}
+
+impl Chip {
+    /// The chip's left and top edge, its height, and the clear space either side of
+    /// the count, in points.
+    const AT: f32 = 18.6;
+    const H: f32 = 8.0;
+    const PAD: f32 = 1.8;
+    /// The narrowest chip, for one digit.
+    const MIN_W: f32 = 9.6;
+    /// How far right the chip may reach, so its rim stays clear of the box's last
+    /// texel.
+    const RIGHT: f32 = BOX_PT - RIM_PT - 0.75;
+
+    /// The chip for `label` at `scale` texels per point, its count shifted by the
+    /// drawing's `nudge` in texels, as the chip itself is.
+    fn new(ctx: &egui::Context, scale: f32, nudge: f32, label: &str) -> Option<Self> {
+        let (tw, th, digits) = digits(ctx, scale, label)?;
+        let w = (tw as f32 / scale + Self::PAD * 2.0).max(Self::MIN_W);
+        let x = Self::AT.min(Self::RIGHT - w);
+        let shape = Part::Rect(x, Self::AT, w, Self::H, 2.0).flatten();
+        let origin = (
+            ((x + w / 2.0) * scale + nudge - tw as f32 / 2.0).round() as i32,
+            ((Self::AT + Self::H / 2.0) * scale + nudge - th as f32 / 2.0).round() as i32,
+        );
+        Some(Self {
+            shape,
+            digits,
+            size: (tw as usize, th as usize),
+            origin,
+        })
+    }
+
+    fn covers(&self, p: [f32; 2], grow: f32) -> bool {
+        self.shape.covers(p, grow)
+    }
+
+    /// The count's coverage at a texel of the bitmap.
+    fn digit(&self, x: usize, y: usize) -> f32 {
+        let (dx, dy) = (x as i32 - self.origin.0, y as i32 - self.origin.1);
+        if dx < 0 || dy < 0 || dx as usize >= self.size.0 || dy as usize >= self.size.1 {
+            return 0.0;
+        }
+        f32::from(self.digits[dy as usize * self.size.0 + dx as usize]) / 255.0
+    }
+}
+
+/// One short string's coverage at `scale` texels per point, lifted out of the font
+/// atlas. The font is asked for at the size that makes the atlas's texels the
+/// bitmap's; a glyph's `pos` and `uv_rect.offset` are in points, so scaled here.
 fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<u8>)> {
+    let ppp = ctx.pixels_per_point();
     let galley = ctx.fonts_mut(|f| {
         f.layout_no_wrap(
             text.to_owned(),
-            egui::FontId::new(BADGE_PT, egui::FontFamily::Proportional),
+            egui::FontId::new(DIGIT_PT * scale / ppp, egui::FontFamily::Proportional),
             egui::Color32::WHITE,
         )
     });
@@ -572,8 +1423,8 @@ fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<
         .map(|(origin, g)| {
             let uv = g.uv_rect;
             (
-                ((origin.x + g.pos.x + uv.offset.x) * scale).round() as i32,
-                ((origin.y + g.pos.y + uv.offset.y) * scale).round() as i32,
+                ((origin.x + g.pos.x + uv.offset.x) * ppp).round() as i32,
+                ((origin.y + g.pos.y + uv.offset.y) * ppp).round() as i32,
                 i32::from(uv.max[0]) - i32::from(uv.min[0]),
                 i32::from(uv.max[1]) - i32::from(uv.min[1]),
                 uv.min,
@@ -581,9 +1432,8 @@ fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<
         })
         .filter(|&(_, _, w, h, _)| w > 0 && h > 0)
         .collect();
-    // Before the fold, not after: with nothing placed the fold returns its seeds
-    // and `hi_x - lo_x` overflows (a debug panic, a release wrap), which the
-    // `w <= 0` guard below is too late to catch. Not reachable from the app today.
+    // Before the fold: with nothing placed it returns its seeds and the width
+    // overflows.
     if placed.is_empty() {
         return None;
     }
@@ -617,204 +1467,9 @@ fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<
     Some((w, h, cov))
 }
 
-/// The rotate cursor: a stroked arc with an arrowhead at each end, facing
-/// `angle` — a **screen** angle in radians, y down, pointing from the pivot out
-/// towards the handle under the pointer.
-///
-/// Drawn rather than taken from the icon font: its rings stay rings at any turn, so
-/// the orientation (which handle you have) would be invisible, and it has no
-/// two-headed arc. An arc of about 120° with a head at each end (a rotate drag goes
-/// either way) reads at a glance.
-///
-/// Sized from the circumscribed circle, which makes the angle free: the outermost
-/// ink is `RADIUS_PT + HEAD_W_PT` from the hotspot at any angle, so nothing clips,
-/// and the angle goes into the geometry, so nothing is resampled.
-fn rotate_arc(scale: f32, angle: f32) -> Option<egui::CustomCursorImage> {
-    /// Radius of the arc's centreline.
-    const RADIUS_PT: f32 = 5.6;
-    /// Width of the band.
-    const THICK_PT: f32 = 1.9;
-    /// Half an arrowhead's base, measured radially; wider than the band it caps.
-    const HEAD_W_PT: f32 = 2.3;
-    /// An arrowhead's length along the tangent; longer than its base is wide, or the
-    /// head reads as the band flaring.
-    const HEAD_L_PT: f32 = 4.0;
-    /// Half the *band's* sweep, in radians. Each head adds `HEAD_L / RADIUS`, so the
-    /// figure spans about 128°, far from a ring.
-    const BAND: f32 = 0.40;
-    /// Samples per texel per axis: antialiasing by counting plain insideness hits.
-    const SS: i32 = 4;
-
-    let (r, t, hw, hl) = (
-        RADIUS_PT * scale,
-        THICK_PT * scale,
-        HEAD_W_PT * scale,
-        HEAD_L_PT * scale,
-    );
-    // The outermost ink is an arrowhead's base corner, at `r + hw`; the apex is
-    // nearer, at `hypot(r, hl)`. One texel of slack for the antialiased fringe.
-    let half = (r + hw).ceil() as i32 + 1;
-    let n = half * 2 + 1;
-
-    // In the arc's own frame, with its midpoint on +x.
-    let cross = |u: egui::Vec2, v: egui::Vec2| u.x * v.y - u.y * v.x;
-    let in_triangle = |p: egui::Vec2, a: egui::Vec2, b: egui::Vec2, c: egui::Vec2| {
-        let (d1, d2, d3) = (
-            cross(b - a, p - a),
-            cross(c - b, p - b),
-            cross(a - c, p - c),
-        );
-        (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
-    };
-    let inside = |p: egui::Vec2| {
-        if (p.length() - r).abs() <= t * 0.5 && p.y.atan2(p.x).abs() <= BAND {
-            return true;
-        }
-        // A head at each end of the band, sitting on the tangent and pointing
-        // away from it — `s` is which end, and which way "away" is.
-        [1.0f32, -1.0].into_iter().any(|s| {
-            let (sn, cs) = (s * BAND).sin_cos();
-            let (base, radial) = (egui::vec2(cs, sn) * r, egui::vec2(cs, sn));
-            let apex = base + egui::vec2(-sn, cs) * s * hl;
-            in_triangle(p, apex, base + radial * hw, base - radial * hw)
-        })
-    };
-
-    // Precomputed: `compose` calls its coverage closure once per texel and once per
-    // texel of the rim's dilation window, so inline supersampling would repeat the
-    // geometry.
-    let (sa, ca) = angle.sin_cos();
-    let centre = half as f32 + 0.5;
-    let mut grid = vec![0u32; (n * n) as usize];
-    for y in 0..n {
-        for x in 0..n {
-            let mut hits = 0;
-            for j in 0..SS {
-                for i in 0..SS {
-                    let d = egui::vec2(
-                        x as f32 + (i as f32 + 0.5) / SS as f32 - centre,
-                        y as f32 + (j as f32 + 0.5) / SS as f32 - centre,
-                    );
-                    // Into the arc's own frame: turn the sample by −angle rather
-                    // than the drawing by +angle.
-                    if inside(egui::vec2(d.x * ca + d.y * sa, d.y * ca - d.x * sa)) {
-                        hits += 1;
-                    }
-                }
-            }
-            grid[(y * n + x) as usize] = hits * 255 / (SS * SS) as u32;
-        }
-    }
-
-    // `n` is odd and `compose` pads both sides equally, so `Middle` lands on the
-    // texel `centre` puts the centre of rotation in.
-    compose(scale, (n, n), Hotspot::Middle, |x, y| {
-        if x < 0 || y < 0 || x >= n || y >= n {
-            return 0;
-        }
-        grid[(y * n + x) as usize]
-    })
-}
-
-/// Turn a coverage field into a cursor bitmap: white core, dark rim, straight
-/// alpha. Shared by the glyph-sourced and the drawn cursors.
-fn compose(
-    scale: f32,
-    (gw, gh): (i32, i32),
-    hotspot: Hotspot,
-    coverage: impl Fn(i32, i32) -> u32,
-) -> Option<egui::CustomCursorImage> {
-    let rim_px = rim_px(scale);
-
-    let (w, h) = (gw + rim_px * 2, gh + rim_px * 2);
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    let mut ink = 0usize;
-    for y in 0..h {
-        for x in 0..w {
-            let (gx, gy) = (x - rim_px, y - rim_px);
-            let fill = coverage(gx, gy);
-            // The rim is the shape dilated by `rim_px`; its alpha is the occupancy.
-            let mut rim = 0;
-            for dy in -rim_px..=rim_px {
-                for dx in -rim_px..=rim_px {
-                    rim = rim.max(coverage(gx + dx, gy + dy));
-                }
-            }
-            if rim == 0 {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
-                continue;
-            }
-            ink += 1;
-            // White at the core, black in the dilated ring, the ratio between.
-            let lum = (fill * 255 / rim) as u8;
-            rgba.extend_from_slice(&[lum, lum, lum, rim as u8]);
-        }
-    }
-
-    // A glyph the font lacks lays out blank, and a transparent cursor would look
-    // like the pointer had vanished.
-    if (ink as f32) < MIN_INK * (w * h) as f32 {
-        return None;
-    }
-    let point = match hotspot {
-        Hotspot::Middle => [w / 2, h / 2],
-        Hotspot::At(x, y) => [x + rim_px, y + rim_px],
-        Hotspot::Nib => nib(&rgba, w, h).unwrap_or([w / 2, h / 2]),
-    };
-    Some(egui::CustomCursorImage {
-        rgba: rgba.into(),
-        size: [w as u16, h as u16],
-        hotspot: [point[0] as u16, point[1] as u16],
-    })
-}
-
-/// The drawing tip of a nib glyph: the solid pixel closest to the **top-left**
-/// corner, which is where the tip sits once [`rasterize`] has mirrored the glyph.
-///
-/// Measured, since the tip is not at the bitmap's corner. The search direction and
-/// the mirror in [`rasterize`] must move together;
-/// `the_pen_points_from_its_nib_not_its_middle` holds them.
-fn nib(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 2]> {
-    /// Ignore the faint antialiased fringe, which reaches past the visible tip.
-    const SOLID: u8 = 128;
-    let mut best: Option<([i32; 2], i32)> = None;
-    for y in 0..h {
-        for x in 0..w {
-            if rgba[((y * w + x) * 4 + 3) as usize] < SOLID {
-                continue;
-            }
-            let distance = x + y;
-            if best.is_none_or(|(_, d)| distance < d) {
-                best = Some(([x, y], distance));
-            }
-        }
-    }
-    best.map(|(p, _)| p)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Where a cursor's ink sits, as an offset from its hotspot in texels, weighted
-    /// by alpha so the answer does not jump with the rasterizer's phase.
-    fn centroid(img: &egui::CustomCursorImage) -> egui::Vec2 {
-        let (w, h) = (usize::from(img.size[0]), usize::from(img.size[1]));
-        let (hx, hy) = (f32::from(img.hotspot[0]), f32::from(img.hotspot[1]));
-        let (mut sum, mut mass) = (egui::Vec2::ZERO, 0.0);
-        for y in 0..h {
-            for x in 0..w {
-                let a = f32::from(img.rgba[(y * w + x) * 4 + 3]);
-                sum += egui::vec2(x as f32 - hx, y as f32 - hy) * a;
-                mass += a;
-            }
-        }
-        if mass == 0.0 {
-            egui::Vec2::ZERO
-        } else {
-            sum / mass
-        }
-    }
 
     /// A context with the theme's fonts installed. `fonts_mut` panics until a
     /// pass has run, so one is run here.
@@ -825,531 +1480,285 @@ mod tests {
         ctx
     }
 
-    /// Each cursor has ink, a light core and a dark rim: a wrong icon codepoint
-    /// lays out blank, and white-on-white is invisible over an artboard.
-    #[test]
-    fn every_bitmap_cursor_rasterizes_legibly() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        for (name, which) in [
-            ("hand-open", Bitmap::HandOpen),
-            ("hand-closed", Bitmap::HandClosed),
-            ("pen", Bitmap::Pen),
-            ("pencil", Bitmap::Pencil),
-            ("scale", Bitmap::Scale),
-            ("crosshair", Bitmap::Crosshair),
-            ("rotate-0", Bitmap::Rotate(Turn(0))),
-            ("rotate-1", Bitmap::Rotate(Turn(1))),
-            ("rotate-6", Bitmap::Rotate(Turn(6))),
-            ("rotate-23", Bitmap::Rotate(Turn(23))),
-            ("discard", Bitmap::Discard),
-            ("text-on-path", Bitmap::TextOnPath),
-            ("loaded", Bitmap::Loaded(Remaining(3))),
-            ("eyedropper", Bitmap::Eyedropper),
-        ] {
-            let img = cursors.image(&ctx, which).expect(name);
-            let expected = usize::from(img.size[0]) * usize::from(img.size[1]) * 4;
-            assert_eq!(img.rgba.len(), expected, "{name}: buffer vs {:?}", img.size);
-            let opaque = || img.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0);
-            assert!(opaque().count() > 0, "{name}: blank cursor");
-            assert!(opaque().any(|p| p[0] > 200), "{name}: no light core");
-            assert!(opaque().any(|p| p[0] < 60), "{name}: no dark rim");
-            assert!(
-                img.hotspot[0] < img.size[0] && img.hotspot[1] < img.size[1],
-                "{name}: hotspot outside the bitmap"
-            );
+    /// Every cursor the canvas can ask for, once each.
+    fn every_cursor() -> Vec<Bitmap> {
+        let badges = [
+            None,
+            Some(Badge::Plus),
+            Some(Badge::Minus),
+            Some(Badge::Duplicate),
+            Some(Badge::Deep),
+            Some(Badge::Dot),
+            Some(Badge::Pivot),
+            Some(Badge::Swap),
+            Some(Badge::No),
+            Some(Badge::Scale),
+            Some(Badge::Anchor),
+            Some(Badge::Segment),
+            Some(Badge::Convert),
+            Some(Badge::Bend),
+            Some(Badge::Close),
+            Some(Badge::Continue),
+            Some(Badge::Join),
+            Some(Badge::Star),
+        ];
+        let mut all: Vec<Bitmap> = badges.iter().map(|b| Bitmap::Arrow(*b)).collect();
+        all.extend(badges.iter().map(|b| Bitmap::Node(*b)));
+        all.extend(badges.iter().map(|b| Bitmap::Pen(*b)));
+        all.extend([Bitmap::Pencil(None), Bitmap::Pencil(Some(Badge::Continue))]);
+        for t in [0, 2, 3, 6, 9] {
+            all.extend([
+                Bitmap::Resize(Turn(t)),
+                Bitmap::Skew(Turn(t)),
+                Bitmap::Rotate(Turn(t)),
+            ]);
         }
+        all.extend([
+            Bitmap::Crosshair,
+            Bitmap::FromCentre,
+            Bitmap::Loaded(Remaining(3)),
+            Bitmap::Loaded(Remaining(42)),
+            Bitmap::Loaded(Remaining(Remaining::MANY as u8)),
+            Bitmap::IBeam,
+            Bitmap::TextOnPath,
+            Bitmap::Eyedropper,
+            Bitmap::Guide(Axis::Vertical),
+            Bitmap::Guide(Axis::Horizontal),
+            Bitmap::CopyGuide(Axis::Vertical),
+            Bitmap::Discard,
+            Bitmap::Gap(Axis::Vertical),
+            Bitmap::Gap(Axis::Horizontal),
+            Bitmap::Pan,
+            Bitmap::Panning,
+        ]);
+        all
     }
 
-    /// The Scale cursor is a bitmap of its own, not one of the others.
-    #[test]
-    fn the_scale_cursor_is_its_own_drawing() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let scale = cursors.image(&ctx, Bitmap::Scale).expect("scale");
-        for (name, other) in [
-            ("hand-open", Bitmap::HandOpen),
-            ("pen", Bitmap::Pen),
-            ("crosshair", Bitmap::Crosshair),
-            ("rotate", Bitmap::Rotate(Turn::default())),
-            ("discard", Bitmap::Discard),
-        ] {
-            let other = cursors.image(&ctx, other).expect(name);
-            assert_ne!(
-                scale.rgba, other.rgba,
-                "the scale cursor came out the same bitmap as {name}"
-            );
-        }
+    /// The texel at `(x, y)`: its value (0 dark, 255 light) and alpha.
+    fn texel(img: &egui::CustomCursorImage, x: usize, y: usize) -> (u8, u8) {
+        let k = (y * usize::from(img.size[0]) + x) * 4;
+        (img.rgba[k], img.rgba[k + 3])
     }
 
-    /// The discard cursor is a bitmap of its own: a transposed codepoint
-    /// (`trash-simple` U+E4A8 vs `trash` U+E4A6) yields some other glyph, which only
-    /// differing bitmaps reveal.
-    #[test]
-    fn the_discard_cursor_is_its_own_drawing() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let discard = cursors.image(&ctx, Bitmap::Discard).expect("discard");
-        for (name, other) in [
-            ("hand-open", Bitmap::HandOpen),
-            ("hand-closed", Bitmap::HandClosed),
-            ("pen", Bitmap::Pen),
-            ("scale", Bitmap::Scale),
-            ("crosshair", Bitmap::Crosshair),
-            ("rotate", Bitmap::Rotate(Turn::default())),
-        ] {
-            let other = cursors.image(&ctx, other).expect(name);
-            assert_ne!(
-                discard.rgba, other.rgba,
-                "the discard cursor came out the same bitmap as {name}"
-            );
-        }
-    }
-
-    /// The whole reason the hands are not `CursorIcon::Grab`: on Windows that
-    /// collapses both states onto one move arrow.
-    #[test]
-    fn the_two_hands_are_different_drawings() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let open = cursors.image(&ctx, Bitmap::HandOpen).expect("open hand");
-        let closed = cursors
-            .image(&ctx, Bitmap::HandClosed)
-            .expect("closed hand");
-        assert_ne!(open.rgba, closed.rgba);
-    }
-
-    /// A pen points with its nib, not the bitmap's middle.
-    #[test]
-    fn the_pen_points_from_its_nib_not_its_middle() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let pen = cursors.image(&ctx, Bitmap::Pen).expect("pen");
-        let (w, h) = (i32::from(pen.size[0]), i32::from(pen.size[1]));
-        let (hx, hy) = (i32::from(pen.hotspot[0]), i32::from(pen.hotspot[1]));
-        // The glyph is mirrored so the tip is up-left, so the hotspot belongs in the
-        // top-left; dropping the reflection in `rasterize` would put it at the bottom.
-        assert!(hx < w / 3, "hotspot x {hx} is not near the left of {w}");
-        assert!(hy < h / 3, "hotspot y {hy} is not near the top of {h}");
-    }
-
-    /// Every rotate step is its own drawing; a `Turn` that never reached the pixels
-    /// would leave every handle looking identical.
-    #[test]
-    fn every_rotate_step_is_its_own_drawing() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let all: Vec<_> = (0..Turn::STEPS)
-            .map(|k| {
-                cursors
-                    .image(&ctx, Bitmap::Rotate(Turn(k)))
-                    .expect("rotate")
-            })
-            .collect();
-        for (i, a) in all.iter().enumerate() {
-            for (j, b) in all.iter().enumerate().skip(i + 1) {
-                assert_ne!(a.rgba, b.rgba, "steps {i} and {j} came out the same bitmap");
+    /// Where a cursor's ink sits, as an offset from its hotspot in texels, weighted
+    /// by alpha so the answer does not jump with the rasterizer's phase.
+    fn centroid(img: &egui::CustomCursorImage) -> egui::Vec2 {
+        let (w, h) = (usize::from(img.size[0]), usize::from(img.size[1]));
+        let (hx, hy) = (f32::from(img.hotspot[0]), f32::from(img.hotspot[1]));
+        let (mut sum, mut mass) = (egui::Vec2::ZERO, 0.0);
+        for y in 0..h {
+            for x in 0..w {
+                let a = f32::from(texel(img, x, y).1);
+                sum += egui::vec2(x as f32 - hx, y as f32 - hy) * a;
+                mass += a;
             }
         }
+        sum / mass
     }
 
-    /// The arc points where it was asked to: its ink centroid, measured from the
-    /// hotspot, lies on the ray it faces. Measuring from the hotspot also pins the
-    /// centre of rotation to it.
+    /// Every cursor draws at the common display scales, in both sets, with a core
+    /// and a rim in the set's two inks and its hotspot inside the bitmap. A drawing
+    /// that parses to nothing, or a rim pass that paints the core, fails here.
     #[test]
-    fn the_arc_faces_the_direction_it_was_given() {
+    fn every_cursor_draws_its_core_and_rim_in_both_sets() {
         let ctx = context();
-        let mut cursors = Cursors::default();
-        for k in 0..Turn::STEPS {
-            let turn = Turn(k);
-            let img = cursors.image(&ctx, Bitmap::Rotate(turn)).expect("rotate");
-            let got = centroid(&img);
-            assert!(
-                got.length() > 1.0,
-                "step {k}: the ink is centred on the hotspot, so it has no heading"
-            );
-            // Wrapped into (−π, π], not via `sin().asin()`, which folds 180° onto 0.
-            use std::f32::consts::{PI, TAU};
-            let mut off = (got.y.atan2(got.x) - turn.radians()).rem_euclid(TAU);
-            if off > PI {
-                off -= TAU;
-            }
-            assert!(
-                off.abs() < 0.13,
-                "step {k} faces {:.0}° but was asked for {:.0}°",
-                got.y.atan2(got.x).to_degrees(),
-                turn.radians().to_degrees(),
-            );
-        }
-    }
-
-    /// Nothing clips at any angle: no ink on the buffer's border, and the alpha mass
-    /// is within 4% across steps (alpha-weighted, since a texel count swings on
-    /// rasterizer phase). The border arm only catches the padding being trimmed,
-    /// since the arc is nearly round; the mass arm catches a shortened head.
-    #[test]
-    fn no_angle_clips_the_arc() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let mut mass = Vec::new();
-        for k in 0..Turn::STEPS {
-            let img = cursors
-                .image(&ctx, Bitmap::Rotate(Turn(k)))
-                .expect("rotate");
-            let (w, h) = (usize::from(img.size[0]), usize::from(img.size[1]));
-            let at = |x: usize, y: usize| img.rgba[(y * w + x) * 4 + 3];
-            let edge = (0..w)
-                .map(|x| (x, 0))
-                .chain((0..w).map(|x| (x, h - 1)))
-                .chain((0..h).map(|y| (0, y)))
-                .chain((0..h).map(|y| (w - 1, y)))
-                .find(|&(x, y)| at(x, y) > 0);
-            assert_eq!(edge, None, "step {k}: ink on the buffer's own border");
-            mass.push(
-                img.rgba
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|p| u32::from(p[3]))
-                    .sum::<u32>(),
-            );
-        }
-        let (lo, hi) = (*mass.iter().min().unwrap(), *mass.iter().max().unwrap());
-        assert!(
-            (hi - lo) * 100 < hi * 4,
-            "the drawing weighs {lo}..={hi} across the {} steps — some angle is \
-             losing part of it",
-            Turn::STEPS,
-        );
-    }
-
-    /// It is an arc, not a ring: the half-plane behind the facing direction is
-    /// empty, which a closed glyph with an off-centre centroid would not satisfy.
-    #[test]
-    fn the_arc_has_an_open_side() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        for k in 0..Turn::STEPS {
-            let turn = Turn(k);
-            let img = cursors.image(&ctx, Bitmap::Rotate(turn)).expect("rotate");
-            let (facing, behind) = (
-                egui::Vec2::angled(turn.radians()),
-                egui::Vec2::angled(turn.radians() + std::f32::consts::PI),
-            );
-            let (w, h) = (usize::from(img.size[0]), usize::from(img.size[1]));
-            let (hx, hy) = (f32::from(img.hotspot[0]), f32::from(img.hotspot[1]));
-            let mut ahead = 0;
-            let mut back = 0;
-            for y in 0..h {
-                for x in 0..w {
-                    if img.rgba[(y * w + x) * 4 + 3] == 0 {
-                        continue;
-                    }
-                    let d = egui::vec2(x as f32 - hx, y as f32 - hy);
-                    ahead += usize::from(d.dot(facing) > 1.0);
-                    back += usize::from(d.dot(behind) > 1.0);
-                }
-            }
-            assert!(ahead > 0, "step {k}: no ink in front of the hotspot at all");
-            assert_eq!(
-                back, 0,
-                "step {k}: {back} texels of ink behind the hotspot — this is a \
-                 ring, and a ring turned by any amount is still a ring"
-            );
-        }
-    }
-
-    /// A screen direction (y down, the sign a maths-axes `toward` would get wrong on
-    /// every corner) picks the step facing it.
-    #[test]
-    fn a_screen_direction_picks_the_step_facing_it() {
-        let steps = f32::from(Turn::STEPS);
-        for (out, degrees, name) in [
-            (egui::vec2(1.0, 0.0), 0.0, "right"),
-            (egui::vec2(1.0, 1.0), 45.0, "down-right"),
-            (egui::vec2(0.0, 1.0), 90.0, "down"),
-            (egui::vec2(-1.0, 1.0), 135.0, "down-left"),
-            (egui::vec2(-1.0, -1.0), 225.0, "up-left"),
-            (egui::vec2(1.0, -1.0), 315.0, "up-right"),
-        ] {
-            let want = Turn((degrees / 360.0 * steps) as u8);
-            assert_eq!(Turn::toward(out), want, "{name}");
-            // 45° is a whole number of 15° steps, so each diagonal lands on one.
-            assert!(
-                (degrees / 360.0 * steps).fract() == 0.0,
-                "{name} does not land on a step, so this asserts the wrong one"
-            );
-        }
-        // Between two steps, the nearer wins rather than the earlier.
-        assert_eq!(Turn::toward(egui::Vec2::angled(0.24)), Turn(1));
-        assert_eq!(Turn::toward(egui::Vec2::angled(0.02)), Turn(0));
-        // A degenerate direction answers rather than panics.
-        assert_eq!(Turn::toward(egui::Vec2::ZERO), Turn(0));
-    }
-
-    /// The crosshair is well under the stock `IDC_CROSS`'s size, the reason it is
-    /// drawn.
-    #[test]
-    fn the_crosshair_is_far_smaller_than_the_stock_one() {
-        /// `IDC_CROSS`, for scale.
-        const STOCK: u16 = 32;
-        let ctx = context();
-        assert_eq!(ctx.pixels_per_point(), 1.0, "sized against a 1x display");
-        let cross = Cursors::default()
-            .image(&ctx, Bitmap::Crosshair)
-            .expect("crosshair");
-        assert!(
-            cross.size[0] <= STOCK * 2 / 3 && cross.size[1] <= STOCK * 2 / 3,
-            "{:?} is not meaningfully smaller than {STOCK}px",
-            cross.size
-        );
-    }
-
-    /// The aiming point is see-through: the arms never meet over it.
-    #[test]
-    fn the_crosshair_can_be_seen_through_at_its_aiming_point() {
-        let ctx = context();
-        let cross = Cursors::default()
-            .image(&ctx, Bitmap::Crosshair)
-            .expect("crosshair");
-        let (w, hx, hy) = (
-            usize::from(cross.size[0]),
-            usize::from(cross.hotspot[0]),
-            usize::from(cross.hotspot[1]),
-        );
-        let alpha = cross.rgba[(hy * w + hx) * 4 + 3];
-        assert_eq!(alpha, 0, "the aiming point is painted over");
-    }
-
-    /// The same buffer comes back by `Arc` identity, which egui dedupes uploads on.
-    #[test]
-    fn the_bitmaps_are_reused_rather_than_rebuilt() {
-        let ctx = context();
-        let mut cursors = Cursors::default();
-        let first = cursors.image(&ctx, Bitmap::HandOpen).expect("open hand");
-        let again = cursors.image(&ctx, Bitmap::HandOpen).expect("open hand");
-        assert!(std::sync::Arc::ptr_eq(&first.rgba, &again.rgba));
-        // Every rotate step has a slot of its own.
-        let one = cursors.image(&ctx, Bitmap::Rotate(Turn(1))).unwrap();
-        let one_again = cursors.image(&ctx, Bitmap::Rotate(Turn(1))).unwrap();
-        assert!(std::sync::Arc::ptr_eq(&one.rgba, &one_again.rgba));
-    }
-
-    /// Every display scale a badge has to survive: 1.25 and 1.5 are Windows norms
-    /// where rounding can undo a change; at 3.0 the digits thicken faster than the
-    /// rim, which the knockout depends on reaching into a stroke.
-    const SCALES: [f32; 5] = [1.0, 1.25, 1.5, 2.0, 3.0];
-
-    /// A context at `scale`, with a pass run so the atlas is rasterized for it.
-    fn scaled(scale: f32) -> egui::Context {
-        let ctx = context();
-        ctx.set_pixels_per_point(scale);
-        let _ = ctx.run_ui(Default::default(), |_| {});
-        ctx
-    }
-
-    /// The badge does not move the aiming point: the loaded cursor's hotspot equals
-    /// the plain crosshair's (the buffer grows, so `Hotspot::Middle` would be off),
-    /// and the point stays see-through.
-    #[test]
-    fn the_badge_does_not_move_the_aiming_point() {
-        for scale in SCALES {
-            let ctx = scaled(scale);
-            let mut cursors = Cursors::default();
-            let plain = cursors.image(&ctx, Bitmap::Crosshair).expect("crosshair");
-            for n in [1usize, 2, 9, 10, 47, 100] {
-                let which = Bitmap::Loaded(Remaining::of(n).expect("loaded"));
-                let img = cursors.image(&ctx, which).expect("loaded cursor");
-                assert_eq!(
-                    img.hotspot, plain.hotspot,
-                    "{scale}x n={n}: the badge moved the aiming point off the \
-                     crosshair's own"
-                );
-                let (w, hx, hy) = (
-                    usize::from(img.size[0]),
-                    usize::from(img.hotspot[0]),
-                    usize::from(img.hotspot[1]),
-                );
-                assert_eq!(
-                    img.rgba[(hy * w + hx) * 4 + 3],
-                    0,
-                    "{scale}x n={n}: the aiming point is painted over"
-                );
-            }
-        }
-    }
-
-    /// Every count is its own drawing, and the clamp holds from both sides: 99
-    /// differs from 100, and counts past the clamp share a bitmap, which bounds the
-    /// cache.
-    #[test]
-    fn the_badge_draws_the_count_it_was_given() {
-        let ctx = scaled(1.0);
-        let mut cursors = Cursors::default();
-        let of = |n: usize| Bitmap::Loaded(Remaining::of(n).expect("loaded"));
-        let mut seen: Vec<(usize, std::sync::Arc<[u8]>)> = Vec::new();
-        for n in [1usize, 2, 3, 9, 10, 42, 99] {
-            let img = cursors.image(&ctx, of(n)).expect("loaded cursor");
-            // `assert!` rather than `assert_ne!`, which would print both buffers.
-            for (m, other) in &seen {
-                assert!(
-                    img.rgba != *other,
-                    "{n} images and {m} came out the same bitmap"
-                );
-            }
-            seen.push((n, img.rgba.clone()));
-        }
-        let (many, more) = (
-            cursors.image(&ctx, of(100)).expect("100"),
-            cursors.image(&ctx, of(4000)).expect("4000"),
-        );
-        assert!(
-            cursors.image(&ctx, of(99)).unwrap().rgba != many.rgba,
-            "99 and 100 draw the same badge, so the count stops being exact a step \
-             early"
-        );
-        assert!(
-            many.rgba == more.rgba,
-            "past the clamp every count is its own bitmap, so one big drop would \
-             build one per file"
-        );
-    }
-
-    /// The digits are knocked out of the chip and survive the rim: each digit texel
-    /// is opaque and dark. A hole the rim's dilation cannot reach (strokes outrunning
-    /// the rim at a high scale) goes transparent; flip: `BADGE_PT` 9 → 40 → fails at
-    /// the transparency assertion. The darkness arm restates the coverage.
-    ///
-    /// Digit texels come from the badge's own coverage, as the gaps not reachable by
-    /// filling in from the chip's border.
-    #[test]
-    fn the_count_reads_dark_on_a_light_chip() {
-        for scale in SCALES {
-            let ctx = scaled(scale);
-            let mut cursors = Cursors::default();
-            for n in [1usize, 8, 88] {
-                let img = cursors
-                    .image(&ctx, Bitmap::Loaded(Remaining::of(n).expect("loaded")))
-                    .expect("loaded cursor");
-                let w = usize::from(img.size[0]);
-                let label = Remaining::of(n).expect("loaded").label();
-                let (bw, bh, chip) = badge(&ctx, scale, &label).expect("badge");
-                // Gaps reached from the border are the rounded corners, not digits;
-                // a one-texel stroke is never enclosed on four sides. A knocked-out
-                // texel is below `KNOCKED`, not zero: an antialiased one-texel stem
-                // never reaches a clean hole.
-                const KNOCKED: u8 = 128;
-                let gap = |i: usize| chip[i] < KNOCKED;
-                let mut outside = vec![false; (bw * bh) as usize];
-                let mut edge: Vec<(i32, i32)> = (0..bw)
-                    .flat_map(|x| [(x, 0), (x, bh - 1)])
-                    .chain((0..bh).flat_map(|y| [(0, y), (bw - 1, y)]))
-                    .collect();
-                while let Some((x, y)) = edge.pop() {
-                    if x < 0 || y < 0 || x >= bw || y >= bh {
-                        continue;
-                    }
-                    let i = (y * bw + x) as usize;
-                    if outside[i] || !gap(i) {
-                        continue;
-                    }
-                    outside[i] = true;
-                    edge.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]);
-                }
-                let origin = Cross::new(scale).badge_at() + rim_px(scale);
-                let (mut digits, mut face) = (0, 0);
-                for y in 0..bh {
-                    for x in 0..bw {
-                        let p = &img.rgba
-                            [((y + origin) as usize * w + (x + origin) as usize) * 4..][..4];
-                        let i = (y * bw + x) as usize;
-                        if !gap(i) {
-                            face += usize::from(p[3] > 0 && p[0] > 200);
-                            continue;
-                        }
-                        if outside[i] {
-                            continue;
-                        }
-                        digits += 1;
-                        assert!(
-                            p[3] > 0,
-                            "{scale}x n={n}: the digit texel at {x},{y} is \
-                             transparent — a stroke the rim could not reach is a \
-                             see-through number, not a dark one"
-                        );
-                        assert!(
-                            p[0] < KNOCKED,
-                            "{scale}x n={n}: the digit texel at {x},{y} paints \
-                             {} rather than dark",
-                            p[0]
-                        );
-                    }
-                }
-                assert!(
-                    digits > 0,
-                    "{scale}x n={n}: nothing is knocked out of the chip, so the \
-                     badge is a blank lozenge"
-                );
-                assert!(face > 0, "{scale}x n={n}: the chip has no light face");
-            }
-        }
-    }
-
-    /// An empty cursor is not a badge reading zero.
-    #[test]
-    fn an_unloaded_cursor_has_no_badge() {
-        assert_eq!(Remaining::of(0), None);
-        assert!(Remaining::of(1).is_some());
-    }
-
-    /// The type-on-a-path pointer is mirror-symmetric and its curve is its widest
-    /// mark (§15 D408). Asserted on alpha, since the dark rim is part of the drawing.
-    /// flip: build the beam from `cx` in `text_on_path` → fails at the lopsided
-    /// assertion at 1.5x.
-    #[test]
-    fn the_type_on_a_path_pointer_is_symmetric_and_its_curve_is_the_wider_mark() {
-        // `pt(1.0)` is even at 1.5, 1.75, 2.0 and 2.5, where an index-centred beam
-        // is off; 1.0 is symmetric regardless. 2.5 is a control that stays clean.
-        for scale in SCALES.iter().copied().chain([1.75, 2.5]) {
-            let img = text_on_path(scale).expect("drawn");
-            let (w, h) = (usize::from(img.size[0]), usize::from(img.size[1]));
-            let alpha = |x: usize, y: usize| img.rgba[(y * w + x) * 4 + 3];
-
-            for y in 0..h {
-                for x in 0..w {
-                    assert_eq!(
-                        alpha(x, y),
-                        alpha(w - 1 - x, y),
-                        "at {scale}x, row {y} is lopsided at column {x} — a mark is \
-                         centred on an index rather than on the figure's own middle"
+        for scale in [1.0, 1.5, 2.0] {
+            for light in [false, true] {
+                for which in every_cursor() {
+                    let img = draw(&ctx, which, scale, light)
+                        .unwrap_or_else(|| panic!("{which:?} at {scale}: nothing drawn"));
+                    let n = (BOX_PT * scale).ceil() as u16;
+                    assert_eq!(img.size, [n, n], "{which:?} at {scale}");
+                    // Over half covered: at 1x the rim is under a texel wide.
+                    let inked: Vec<u8> = img
+                        .rgba
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .filter(|p| p[3] > 128)
+                        .map(|p| p[0])
+                        .collect();
+                    assert!(
+                        inked.iter().any(|&v| v > 200),
+                        "{which:?} at {scale}: no light ink"
+                    );
+                    assert!(
+                        inked.iter().any(|&v| v < 40),
+                        "{which:?} at {scale}: no dark ink"
+                    );
+                    assert!(
+                        img.hotspot[0] < n && img.hotspot[1] < n,
+                        "{which:?}: hotspot"
                     );
                 }
             }
+        }
+    }
 
-            // The widest inked row belongs to the curve, which is below the beam.
-            let width_of = |y: usize| (0..w).filter(|x| alpha(*x, y) > 0).count();
-            let widest = (0..h).max_by_key(|y| width_of(*y)).expect("rows");
-            let beam_rows = (0..h).filter(|y| width_of(*y) > 0).count();
+    /// The arrow aims from its tip's first texel, which is ink, and the light set
+    /// swaps the inks without moving it; the node arrow is the select arrow with
+    /// the inks swapped.
+    /// flip: `draw`'s `light` arm returning the dark inks → fails at "the light set's core".
+    #[test]
+    fn the_sets_swap_inks_around_the_same_aim() {
+        let ctx = context();
+        for scale in [1.0, 2.0] {
+            let dark = draw(&ctx, Bitmap::Arrow(None), scale, false).expect("dark");
+            let light = draw(&ctx, Bitmap::Arrow(None), scale, true).expect("light");
+            assert_eq!(dark.hotspot, light.hotspot);
+            assert_eq!(
+                dark.hotspot,
+                [(6.0 * scale) as u16, (4.0 * scale) as u16],
+                "the tip's first texel"
+            );
+            let (hx, hy) = (usize::from(dark.hotspot[0]), usize::from(dark.hotspot[1]));
+            assert!(texel(&dark, hx, hy).1 > 128, "the hotspot is on the ink");
+            // Well inside the arrow's body.
+            let (bx, by) = ((8.0 * scale) as usize, (14.0 * scale) as usize);
+            assert!(texel(&dark, bx, by).0 < 40, "the dark set's core");
+            assert!(texel(&light, bx, by).0 > 230, "the light set's core");
+            let node = draw(&ctx, Bitmap::Node(None), scale, false).expect("node");
             assert!(
-                widest > beam_rows / 2,
-                "at {scale}x the widest mark must be the curve in the lower half, \
-                 not the serif: widest row {widest} of {beam_rows} inked"
+                texel(&node, bx, by).0 > 230,
+                "the node arrow swaps the inks"
             );
         }
     }
 
-    /// A label with no ink answers `None` instead of overflowing the bounding-box
-    /// fold in `digits`. flip: move `if placed.is_empty()` below the
-    /// `let (w, h) = …` → panics "attempt to subtract with overflow" in debug.
+    /// The rim is a mitred outline: it reaches past the arrow's square-cut tail
+    /// corner by about the mitre, not just the rim's width.
+    /// flip: `join_covers` returning false → fails at "the mitre".
     #[test]
-    fn a_badge_with_nothing_to_draw_refuses_rather_than_overflowing() {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        // Fonts are only available once a frame has run.
-        let _ = ctx.run_ui(Default::default(), |_| {});
-        assert!(digits(&ctx, 1.0, "").is_none());
-        // The control: a real label still measures, so the guard has not eaten the
-        // ordinary case.
-        assert!(digits(&ctx, 1.0, "99+").is_some());
+    fn the_rim_is_mitred() {
+        let ctx = context();
+        let scale = 4.0;
+        let img = draw(&ctx, Bitmap::Arrow(None), scale, false).expect("drawn");
+        // The tail's right corner is at (19.7, 17.8): a right angle whose mitre
+        // reaches `√2 · RIM_PT` along the diagonal, past the rim's own reach.
+        let along = RIM_PT * 1.2;
+        let (x, y) = ((19.7 + along) * scale, (17.8 + along * 0.2) * scale);
+        assert!(texel(&img, x as usize, y as usize).1 > 128, "the mitre");
+    }
+
+    /// The duplicate cursor's second arrow sits behind the first, down and right:
+    /// its ink reaches further right than the plain arrow's, and the front arrow's
+    /// rim still cuts through it, so the front tip's rim is unchanged.
+    #[test]
+    fn the_duplicate_is_a_second_arrow_behind() {
+        let ctx = context();
+        let plain = draw(&ctx, Bitmap::Arrow(None), 2.0, false).expect("plain");
+        let dup = draw(&ctx, Bitmap::Arrow(Some(Badge::Duplicate)), 2.0, false).expect("dup");
+        let reach = |img: &egui::CustomCursorImage| {
+            let w = usize::from(img.size[0]);
+            (0..w)
+                .rev()
+                .find(|&x| (0..w).any(|y| texel(img, x, y).1 > 200))
+                .unwrap_or(0)
+        };
+        assert!(reach(&dup) >= reach(&plain) + (DUPLICATE_OFFSET.0 * 2.0) as usize - 1);
+        // Just inside the front arrow's right edge, where the copy lies under it:
+        // the front arrow's core, not the copy's rim.
+        let (x, y) = ((13.0f32 * 2.0) as usize, (15.0f32 * 2.0) as usize);
+        assert_eq!(
+            texel(&dup, x, y),
+            texel(&plain, x, y),
+            "the front arrow on top"
+        );
+    }
+
+    /// A turned cursor faces the way it was given: the rotate arc's ink lies
+    /// toward its heading, and resize and skew share a bitmap with their
+    /// opposite heading.
+    #[test]
+    fn turned_cursors_face_their_heading() {
+        let ctx = context();
+        for (step, dir) in [
+            (0, egui::vec2(1.0, 0.0)),
+            (6, egui::vec2(0.0, 1.0)),
+            (18, egui::vec2(0.0, -1.0)),
+        ] {
+            let img = draw(&ctx, Bitmap::Rotate(Turn(step)), 2.0, false).expect("drawn");
+            let c = centroid(&img);
+            assert!(c.normalized().dot(dir) > 0.9, "step {step}: centroid {c:?}");
+        }
+        let mut cursors = Cursors::default();
+        for make in [Bitmap::Resize, Bitmap::Skew] {
+            let a = cursors.image(&ctx, make(Turn(3))).expect("drawn");
+            let b = cursors.image(&ctx, make(Turn(15))).expect("drawn");
+            assert_eq!(a.rgba, b.rgba, "{:?}: opposite headings", make(Turn(3)));
+        }
+    }
+
+    /// A screen direction picks the 15° step facing it, y down.
+    #[test]
+    fn a_screen_direction_picks_the_step_facing_it() {
+        assert_eq!(Turn::toward(egui::vec2(1.0, 0.0)), Turn(0));
+        assert_eq!(Turn::toward(egui::vec2(0.0, 1.0)), Turn(6));
+        assert_eq!(Turn::toward(egui::vec2(-1.0, 0.0)), Turn(12));
+        assert_eq!(Turn::toward(egui::vec2(0.0, -1.0)), Turn(18));
+        assert_eq!(Turn::toward(egui::vec2(1.0, -1.0)), Turn(21));
+        assert_eq!(Turn::toward(egui::Vec2::ZERO), Turn(0));
+        assert_eq!(Turn(15).axis(), Turn(3));
+    }
+
+    /// A cursor is built once and handed back as the same buffer, which egui
+    /// dedupes uploads by; a change of scale rebuilds.
+    #[test]
+    fn the_bitmaps_are_reused_until_the_scale_changes() {
+        let ctx = context();
+        let mut cursors = Cursors::default();
+        let a = cursors.image(&ctx, Bitmap::Pan).expect("drawn");
+        let b = cursors.image(&ctx, Bitmap::Pan).expect("drawn");
+        assert!(std::sync::Arc::ptr_eq(&a.rgba, &b.rgba));
+        cursors.scale = 0.0;
+        cursors.built.insert(Bitmap::Pan, None);
+        let c = cursors.image(&ctx, Bitmap::Pan).expect("rebuilt");
+        assert!(!std::sync::Arc::ptr_eq(&a.rgba, &c.rgba));
+    }
+
+    /// The bitmap is drawn at the display's texels per point, except on macOS,
+    /// where winit sizes the image in points equal to its pixel count.
+    #[test]
+    fn the_bitmap_is_sized_for_the_display() {
+        let want = if cfg!(target_os = "macos") { 1.0 } else { 2.0 };
+        assert_eq!(texels_per_point(2.0), want);
+    }
+
+    /// The loaded badge says the count it was given: different counts draw
+    /// differently, and the wide `99+` chip keeps its rim inside the box.
+    #[test]
+    fn the_badge_draws_the_count_it_was_given() {
+        let ctx = context();
+        let three = draw(&ctx, Bitmap::Loaded(Remaining(3)), 2.0, false).expect("3");
+        let four = draw(&ctx, Bitmap::Loaded(Remaining(4)), 2.0, false).expect("4");
+        assert_ne!(three.rgba, four.rgba);
+        let many = draw(
+            &ctx,
+            Bitmap::Loaded(Remaining(Remaining::MANY as u8)),
+            2.0,
+            false,
+        )
+        .expect("99+");
+        let n = usize::from(many.size[0]);
+        let edge = (0..n).map(|y| texel(&many, n - 1, y).1).max().unwrap_or(0);
+        assert!(edge < 128, "the chip is clipped at the box's edge");
+        assert_eq!(Remaining::of(0), None);
+        assert_eq!(Remaining(100).label(), "99+");
+    }
+
+    /// Every drawing parses into ink; a relative command, which the parser does
+    /// not take, is refused rather than drawn wrong.
+    #[test]
+    fn every_drawing_parses() {
+        for g in Glyph::ALL {
+            assert!(
+                g.shapes()
+                    .iter()
+                    .all(|s| s.contours.iter().all(|c| c.pts.len() > 1)),
+                "{g:?}"
+            );
+        }
+        let relative = std::panic::catch_unwind(|| parse("M0 0l1 1"));
+        assert!(relative.is_err());
     }
 }

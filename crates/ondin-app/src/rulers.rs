@@ -11,7 +11,7 @@
 //! labels clear [`MIN_LABEL_PX`].
 
 use crate::app::OndinApp;
-use crate::cursor::Bitmap;
+use crate::cursor::{Axis, Bitmap, Pointer};
 use crate::preview::{Drag, GuideDrag};
 use crate::theme::{self, color};
 use eframe::egui;
@@ -1032,12 +1032,18 @@ impl OndinApp {
 }
 
 /// The cursor for dragging a guide of this axis: a horizontal line moves up and
-/// down, a vertical one side to side.
-fn axis_cursor(axis: GuideAxis) -> egui::CursorIcon {
-    match axis {
-        GuideAxis::Horizontal => egui::CursorIcon::ResizeVertical,
-        GuideAxis::Vertical => egui::CursorIcon::ResizeHorizontal,
-    }
+/// down, a vertical one side to side. `copying` badges it with the copy the
+/// drop leaves behind.
+fn axis_cursor(axis: GuideAxis, copying: bool) -> Pointer {
+    let (icon, line) = match axis {
+        GuideAxis::Horizontal => (egui::CursorIcon::ResizeVertical, Axis::Horizontal),
+        GuideAxis::Vertical => (egui::CursorIcon::ResizeHorizontal, Axis::Vertical),
+    };
+    let drawn = match copying {
+        true => Bitmap::CopyGuide(line),
+        false => Bitmap::Guide(line),
+    };
+    (icon, Some(drawn))
 }
 
 /// Type on a guide chip: the badge's near-black ink, since the chrome's
@@ -1583,22 +1589,18 @@ impl OndinApp {
     /// A drag about to throw the guide away shows the bin cursor; `discarding` is
     /// computed once ([`Self::update_guide_drag`]), so the cursor cannot disagree
     /// with the fade.
-    pub(crate) fn ruler_cursor(
-        &self,
-        p: egui::Pos2,
-        rect: egui::Rect,
-    ) -> Option<(egui::CursorIcon, Option<Bitmap>)> {
+    pub(crate) fn ruler_cursor(&self, p: egui::Pos2, rect: egui::Rect) -> Option<Pointer> {
         if self.discarding_guide() {
             // `NoDrop` is the stock fallback; it says the wrong thing alone (the
             // drop is accepted, but destructive), hence the bin.
             return Some((egui::CursorIcon::NoDrop, Some(Bitmap::Discard)));
         }
-        let axis = match &self.drag {
-            Drag::Guide(d) => d.axis,
-            _ if self.rulers_on() => ruler_at(rect, p)?,
+        let (axis, copying) = match &self.drag {
+            Drag::Guide(d) => (d.axis, d.copying),
+            _ if self.rulers_on() => (ruler_at(rect, p)?, false),
             _ => return None,
         };
-        Some((axis_cursor(axis), None))
+        Some(axis_cursor(axis, copying))
     }
 
     /// Whether the guide in flight should *say* that letting go throws it away.
@@ -1616,10 +1618,10 @@ impl OndinApp {
         p: egui::Pos2,
         rect: egui::Rect,
         ppp: f32,
-    ) -> Option<egui::CursorIcon> {
+    ) -> Option<Pointer> {
         let id = self.guide_at(p, rect, ppp)?;
         let guide = self.session.doc.guide(id)?;
-        Some(axis_cursor(guide.axis))
+        Some(axis_cursor(guide.axis, false))
     }
 }
 

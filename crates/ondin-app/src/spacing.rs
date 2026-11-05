@@ -888,17 +888,17 @@ impl OndinApp {
 
     /// The arrows a band's drag shows: along the band's axis as the container's
     /// world transform turns it, so a rotated container's arrows point the way
-    /// the drag moves (`resize_icon`'s octants).
-    pub(crate) fn spacing_cursor(&self, id: NodeId, band: BandKind) -> egui::CursorIcon {
+    /// the drag moves.
+    pub(crate) fn spacing_cursor(&self, id: NodeId, band: BandKind) -> crate::cursor::Pointer {
         let Some(w) = self.session.preview_world_transform(id) else {
-            return egui::CursorIcon::Default;
+            return crate::canvas::arrow(None);
         };
         let c = w.as_coeffs();
         let (x, y) = match band.horizontal() {
             true => (c[0], c[1]),
             false => (c[2], c[3]),
         };
-        crate::canvas::resize_icon(egui::vec2(x as f32, y as f32))
+        crate::canvas::resize_cursor(egui::vec2(x as f32, y as f32))
     }
 
     /// The derived-space hatch: where a gap lays out wider than it stores, the stored part
@@ -2329,7 +2329,7 @@ mod canvas_tests {
         let (s, i) = app.spacing_at(at, RECT, 1.0).expect("the gap, turned");
         assert_eq!(s.bands[i].kind, super::BandKind::ColumnGap);
         assert_eq!(
-            app.spacing_cursor(row, s.bands[i].kind),
+            app.spacing_cursor(row, s.bands[i].kind).0,
             egui::CursorIcon::ResizeVertical
         );
         let none = Default::default();

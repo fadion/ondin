@@ -171,6 +171,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D747** The panels are keyboard-traversable: Tab is meant to reach every control and field, not only a dialog's.
 - **The chrome has a dark and a light palette; the canvas marks are theme-independent.** Chrome colours are read through functions of the current theme; selection, key, component, measure and point marks stay constants, since they sit on artwork.
 - **The app ships its own icon set** (`OndinIcons.ttf`, built from `assets/icons/glyphs.json`) rather than a third-party one: each icon is drawn for the size it is shown at, so no picture is a compromise forced by what another set happens to contain.
+- **Over the canvas the app draws every cursor, the arrow included**: a base drawing with at most one badge saying what a press there would do, one badge meaning one thing on every base, in the OS's own ink set and pointer size. Panels, menus and window edges keep the system cursor.
 - **D345** Dropping in the layers panel chooses the parent level by horizontal travel.
 - **Only a frame on its page is a page container**, as in Figma: it wears a name tag and is picked by it or its edge. A frame inside another frame or a group wears no tag and picks as a group does, so a design of nested frames is not a wall of names.
 - **D750** Focus mode hides the panels but keeps the rulers, guides and layout grids: they are editing aids, not app chrome.

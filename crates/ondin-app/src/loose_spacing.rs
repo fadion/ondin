@@ -267,16 +267,25 @@ impl OndinApp {
     }
 
     /// The cursor over a run's handle, or while dragging one.
-    pub(crate) fn loose_cursor(&self, grab: Option<Grab>) -> Option<egui::CursorIcon> {
-        let axis_icon = |axis: Axis| match axis {
-            Axis::X => egui::CursorIcon::ResizeHorizontal,
-            Axis::Y => egui::CursorIcon::ResizeVertical,
+    pub(crate) fn loose_cursor(&self, grab: Option<Grab>) -> Option<crate::cursor::Pointer> {
+        use crate::cursor::{Axis as Line, Badge, Bitmap};
+        // An X gap is dragged across, between two vertical bars.
+        let gap = |axis: Axis| match axis {
+            Axis::X => (
+                egui::CursorIcon::ResizeHorizontal,
+                Some(Bitmap::Gap(Line::Vertical)),
+            ),
+            Axis::Y => (
+                egui::CursorIcon::ResizeVertical,
+                Some(Bitmap::Gap(Line::Horizontal)),
+            ),
         };
+        let reorder = |icon| (icon, Some(Bitmap::Arrow(Some(Badge::Swap))));
         match (&self.drag, grab) {
-            (Drag::LooseGap { axis, .. }, _) => Some(axis_icon(*axis)),
-            (Drag::LooseReorder { .. }, _) => Some(egui::CursorIcon::Grabbing),
-            (_, Some(Grab::Gap(axis))) => Some(axis_icon(axis)),
-            (_, Some(Grab::Dot(_))) => Some(egui::CursorIcon::Grab),
+            (Drag::LooseGap { axis, .. }, _) => Some(gap(*axis)),
+            (Drag::LooseReorder { .. }, _) => Some(reorder(egui::CursorIcon::Grabbing)),
+            (_, Some(Grab::Gap(axis))) => Some(gap(axis)),
+            (_, Some(Grab::Dot(_))) => Some(reorder(egui::CursorIcon::Grab)),
             _ => None,
         }
     }

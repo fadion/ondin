@@ -435,10 +435,10 @@ impl OndinApp {
     }
 
     /// The cursor over a dot, or while dragging one.
-    pub(crate) fn shape_handle_cursor(&self, grab: Option<Grab>) -> Option<egui::CursorIcon> {
+    pub(crate) fn shape_handle_cursor(&self, grab: Option<Grab>) -> Option<crate::cursor::Pointer> {
         match (&self.drag, grab) {
-            (Drag::ShapeHandle { .. }, _) => Some(egui::CursorIcon::Grabbing),
-            (_, Some(_)) => Some(egui::CursorIcon::Grab),
+            (Drag::ShapeHandle { .. }, _) => Some(crate::canvas::handle_cursor(true)),
+            (_, Some(_)) => Some(crate::canvas::handle_cursor(false)),
             _ => None,
         }
     }

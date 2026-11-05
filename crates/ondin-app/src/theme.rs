@@ -552,8 +552,6 @@ pub mod icon {
     pub const LOCK_SIMPLE_OPEN: &str = "\u{e30a}"; // an unlocked layer
     pub const CURSOR: &str = "\u{e1dc}";
     pub const HAND: &str = "\u{e298}";
-    /// The open-hand cursor: [`HAND`] filled, so it reads over artwork.
-    pub const HAND_FILL: &str = "\u{f002}";
     /// The Line tool and layer, and a line's own *Length* field: the line, measured.
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
     /// A stroke's paint, wherever a *Stroke* step is named: a box drawn only as
@@ -746,9 +744,6 @@ pub mod icon {
     pub const TIDY_UP: &str = "\u{f02c}";
     pub const COLUMNS: &str = "\u{e546}";
     pub const ROWS: &str = "\u{e5a2}";
-    /// The closed-hand cursor, filled like [`HAND_FILL`]; nothing draws an outline
-    /// fist.
-    pub const HAND_GRABBING: &str = "\u{e57c}";
     pub const RULER: &str = "\u{e6b8}"; // a guide, named for where it comes from
     /// Dragging a guide back onto its ruler throws it away; rasterized by
     /// `cursor.rs` as the cursor that says so. The plain bin rather than `trash`,
@@ -1133,7 +1128,6 @@ pub mod icon {
         ("lock-simple-open", LOCK_SIMPLE_OPEN),
         ("cursor", CURSOR),
         ("hand", HAND),
-        ("hand-fill", HAND_FILL),
         ("line-segment", LINE_SEGMENT),
         ("stroke", STROKE),
         ("pen-nib", PEN_NIB),
@@ -1212,7 +1206,6 @@ pub mod icon {
         ("no-layout", NO_LAYOUT),
         ("columns", COLUMNS),
         ("rows", ROWS),
-        ("hand-grabbing", HAND_GRABBING),
         ("ruler", RULER),
         ("trash-simple", TRASH_SIMPLE),
         ("check", CHECK),

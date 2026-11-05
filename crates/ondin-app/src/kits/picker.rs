@@ -578,6 +578,14 @@ impl OndinApp {
                     ghost.pass(ctx);
                     ghost.follow_zoom(item, &self.session.doc, zoom);
                     draw_ghost(ctx, item, ghost, panel, canvas, zoom, ppp);
+                    // Over the canvas the drop places a new layer, so it says Add;
+                    // the tile's own `Grabbing` stays the stock fallback.
+                    if let Some(at) = ctx.pointer_latest_pos()
+                        && dropped_on_canvas(at, canvas, panel, ctx.layer_id_at(at))
+                    {
+                        let add = crate::cursor::Bitmap::Arrow(Some(crate::cursor::Badge::Plus));
+                        ctx.set_cursor_image(self.cursors.image(ctx, add));
+                    }
                 }
                 None => p.ghost = None,
             }

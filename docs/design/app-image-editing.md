@@ -109,8 +109,8 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 - `chrome_hidden` removes the selection box; `canvas::draw_crop_box` (called from `draw_canvas`, shapes
   from the free `canvas::crop_chrome`) draws the window **dashed** — 3pt at 6/6 (`CROP_DASH_PX`,
   `CROP_GAP_PX`, `CROP_STROKE_PX`) — with hollow corner handles, plus the picture's solid outline when
-  the ghost is live, both via `shown_crop`. Cursor: a hand for the pan, the stock resize cursor on
-  handles.
+  the ghost is live, both via `shown_crop`. Cursor: the open hand (`Bitmap::Pan`) over the
+  picture, the closed one while panning it, `Bitmap::Resize` at the handle's angle on handles.
 - **Done pill** (`canvas::crop_exit_pill`) in the size badge's slot, same ground, ink, radius, gap and
   `badge_placement`. A `Foreground` `Area`; `wheel_input`'s exemption names its layer.
 

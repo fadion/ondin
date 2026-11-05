@@ -15,7 +15,7 @@
 //! so they never go near the renderer or the model.
 
 use crate::app::{LoadedImage, OndinApp};
-use crate::cursor::{Bitmap, Remaining, Turn};
+use crate::cursor::{Badge, Bitmap, Pointer, Remaining, Turn};
 use crate::input::Mode;
 use crate::measure::{self, Axis};
 use crate::preview::{
@@ -1766,10 +1766,12 @@ impl OndinApp {
 
         // `icon` is the stock fallback when `bitmap` is absent or cannot rasterize.
         let pointer = resp.hover_pos().or(resp.interact_pointer_pos());
+        let world = pointer.map(|p| self.to_world(p, rect, ppp));
+        let mods = ui.input(|i| i.modifiers);
         let (icon, bitmap) = if panning || middle {
-            (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed))
+            (egui::CursorIcon::Grabbing, Some(Bitmap::Panning))
         } else if armed {
-            (egui::CursorIcon::Grab, Some(Bitmap::HandOpen))
+            (egui::CursorIcon::Grab, Some(Bitmap::Pan))
         } else if self.dropper_armed().is_some() {
             // The loupe is the cursor; its ringed middle pixel is the hotspot.
             (egui::CursorIcon::None, None)
@@ -1778,75 +1780,66 @@ impl OndinApp {
         {
             // A live text session owns the cursor over its layer; `dragged()`
             // keeps it through a selection that overshoots the box.
-            (egui::CursorIcon::Text, None)
+            (egui::CursorIcon::Text, Some(Bitmap::IBeam))
         } else if let Some(cursor) = pointer.and_then(|p| self.ruler_cursor(p, rect)) {
             // The ruler bar takes the press from every tool, so the cursor too.
             cursor
         } else {
             match self.tool {
-                // A drawn crosshair: the stock `IDC_CROSS` is 32 texels across.
                 Tool::Frame
                 | Tool::Slice
                 | Tool::Rect
                 | Tool::Ellipse
                 | Tool::Polygon
                 | Tool::Star
-                | Tool::Line => (egui::CursorIcon::Crosshair, Some(Bitmap::Crosshair)),
+                | Tool::Line => create_cursor(mods.alt),
                 // The same crosshair, badged with how many images are left to place.
-                Tool::Image => (
+                Tool::Image => match Remaining::of(self.pending_images.len()) {
+                    Some(n) => (egui::CursorIcon::Crosshair, Some(Bitmap::Loaded(n))),
+                    None => create_cursor(mods.alt),
+                },
+                Tool::Pen => (
                     egui::CursorIcon::Crosshair,
-                    Some(match Remaining::of(self.pending_images.len()) {
-                        Some(n) => Bitmap::Loaded(n),
-                        None => Bitmap::Crosshair,
-                    }),
+                    Some(Bitmap::Pen(self.pen_badge(world, mods.alt))),
                 ),
-                Tool::Pen => (egui::CursorIcon::Crosshair, Some(Bitmap::Pen)),
-                Tool::Pencil => (egui::CursorIcon::Crosshair, Some(Bitmap::Pencil)),
-                // The plain arrow over points, whose markers are the affordance;
-                // the point box gets resize arrows ([`Self::point_box_cursor`]),
-                // and the nib shows where `pen_verb`, the press's query, arms.
+                // Over the selected open path's end, a stroke carries it on.
+                Tool::Pencil => {
+                    let extends = self.drag.is_none()
+                        && world.is_some_and(|w| self.pencil_extend_target(w).is_some());
+                    (
+                        egui::CursorIcon::Crosshair,
+                        Some(Bitmap::Pencil(extends.then_some(Badge::Continue))),
+                    )
+                }
                 Tool::Node => match self.point_box_cursor(resp, rect, ppp) {
                     Some(c) => c,
-                    None => {
-                        // A path in flight is always the pen; else only where a
-                        // verb is armed, never mid-drag.
-                        let armed = self.pen.is_some()
-                            || (self.drag.is_none()
-                                && pointer
-                                    .map(|p| self.to_world(p, rect, ppp))
-                                    .is_some_and(|w| self.pen_verb(w).is_some()));
-                        match armed {
-                            true => (egui::CursorIcon::Crosshair, Some(Bitmap::Pen)),
-                            false => (egui::CursorIcon::Default, None),
-                        }
-                    }
+                    None => self.node_cursor(world, mods),
                 },
                 // An I-beam over a text layer, else the crosshair; not re-read
-                // mid-drag.
+                // mid-drag. A drag on empty canvas makes a text box, so the plain
+                // crosshair, Alt or not.
                 Tool::Text => {
-                    let world = (self.drag.is_none())
-                        .then(|| pointer.map(|p| self.to_world(p, rect, ppp)))
-                        .flatten();
+                    let world = world.filter(|_| self.drag.is_none());
                     // The press's order: existing text beats an outline.
                     match world {
                         Some(w) if self.text_layer_at(w).is_some() => {
-                            (egui::CursorIcon::Text, None)
+                            (egui::CursorIcon::Text, Some(Bitmap::IBeam))
                         }
                         // An outline under the pointer: a click writes along it.
                         Some(w) if self.rail_at(w).is_some() => {
                             (egui::CursorIcon::Text, Some(Bitmap::TextOnPath))
                         }
-                        _ => (egui::CursorIcon::Crosshair, Some(Bitmap::Crosshair)),
+                        _ => create_cursor(false),
                     }
                 }
                 // The loupe arm above answers first; this is the fallback.
                 Tool::Eyedropper => (egui::CursorIcon::None, None),
                 // Handles get resize cursors from `crop_hover`.
                 Tool::ImageEdit => match self.drag {
-                    Drag::CropPan { .. } => (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed)),
+                    Drag::CropPan { .. } => (egui::CursorIcon::Grabbing, Some(Bitmap::Panning)),
                     _ => match self.crop_hover(resp, rect, ppp) {
                         Some(c) => c,
-                        None => (egui::CursorIcon::Default, None),
+                        None => arrow(None),
                     },
                 },
                 // Select and Scale differ only in the rest state.
@@ -1855,23 +1848,36 @@ impl OndinApp {
                     if matches!(self.drag, Drag::Pivot { .. })
                         || pointer.is_some_and(|p| self.on_pivot(p, rect, ppp).is_some())
                     {
-                        (egui::CursorIcon::Move, None)
-                    } else if matches!(self.drag, Drag::Move { .. } | Drag::Marquee { .. }) {
-                        // A move or marquee passes over handles and guides it will
-                        // never grab; zoomed out, the dragged layer's own handles
-                        // sit under the pointer the whole way.
-                        self.rest_cursor()
+                        (
+                            egui::CursorIcon::Move,
+                            Some(Bitmap::Arrow(Some(Badge::Pivot))),
+                        )
                     } else {
-                        let handle = self.select_cursor(resp, rect, ppp);
-                        match (handle, pointer) {
-                            ((egui::CursorIcon::Default, None), Some(p)) => {
-                                match self.guide_cursor(p, rect, ppp) {
-                                    Some(icon) => (icon, None),
-                                    None => self.rest_cursor(),
-                                }
-                            }
-                            ((egui::CursorIcon::Default, None), None) => self.rest_cursor(),
-                            _ => handle,
+                        match &self.drag {
+                            // A move or marquee passes over handles and guides it
+                            // will never grab; zoomed out, the dragged layer's own
+                            // handles sit under the pointer the whole way. Alt makes
+                            // the move a copy at any point in it.
+                            Drag::Move { .. } => match self.alt_clone.is_some() {
+                                true => arrow(Some(Badge::Duplicate)),
+                                false => self.rest_cursor(None),
+                            },
+                            // The mode the press fixed, not the keys held now.
+                            Drag::Marquee { mode, .. } => match mode {
+                                MarqueeMode::Toggle => arrow(Some(Badge::Plus)),
+                                MarqueeMode::Subtract => arrow(Some(Badge::Minus)),
+                                MarqueeMode::Replace => self.rest_cursor(None),
+                            },
+                            _ => match self.select_cursor(resp, rect, ppp) {
+                                Some(c) => c,
+                                None => match pointer {
+                                    Some(p) => match self.guide_cursor(p, rect, ppp) {
+                                        Some(c) => c,
+                                        None => self.select_rest_cursor(ui, p, rect, ppp),
+                                    },
+                                    None => self.rest_cursor(None),
+                                },
+                            },
                         }
                     }
                 }
@@ -1882,112 +1888,207 @@ impl OndinApp {
         ctx.set_cursor_image(bitmap.and_then(|b| self.cursors.image(ctx, b)));
     }
 
-    fn rest_cursor(&self) -> (egui::CursorIcon, Option<Bitmap>) {
-        rest_cursor(self.tool)
+    /// The tool's arrow at rest, or `badge` in place of the tool's own: on the
+    /// Scale tool a modifier's badge replaces the scale badge.
+    fn rest_cursor(&self, badge: Option<Badge>) -> Pointer {
+        match badge {
+            Some(b) => arrow(Some(b)),
+            None => rest_cursor(self.tool),
+        }
     }
 
-    /// What the Select tool's cursor should be: what the handle under (or just
-    /// outside) the pointer will do, else an arrow. Directions are measured in
-    /// screen space, so they are right on a rotated layer.
-    fn select_cursor(
+    /// The Select tool's arrow over a layer or empty canvas, badged with what the
+    /// held modifiers make a press there do, in the press's own order.
+    fn select_rest_cursor(
         &self,
-        resp: &egui::Response,
+        ui: &egui::Ui,
+        p: egui::Pos2,
         rect: egui::Rect,
         ppp: f32,
-    ) -> (egui::CursorIcon, Option<Bitmap>) {
-        const NONE: (egui::CursorIcon, Option<Bitmap>) = (egui::CursorIcon::Default, None);
+    ) -> Pointer {
+        let mods = ui.input(|i| i.modifiers);
+        let over = self.layer_under(ui, p, rect, ppp);
+        let badge = if mods.shift {
+            Some(Badge::Plus)
+        } else if mods.alt {
+            // Over a layer a drag duplicates; over empty canvas the marquee removes.
+            Some(match over {
+                Some(_) => Badge::Duplicate,
+                None => Badge::Minus,
+            })
+        } else if mods.ctrl || mods.command {
+            over.map(|_| Badge::Deep)
+        } else {
+            // A locked selection: a press selects, never moves.
+            over.filter(|id| self.session.selection.contains(*id) && self.selection_locked())
+                .map(|_| Badge::No)
+        };
+        self.rest_cursor(badge)
+    }
+
+    /// The layer a Select press at `p` would take: `begin_select_drag`'s chain,
+    /// without its side effects.
+    fn layer_under(
+        &self,
+        ui: &egui::Ui,
+        p: egui::Pos2,
+        rect: egui::Rect,
+        ppp: f32,
+    ) -> Option<NodeId> {
+        let world = self.to_world(p, rect, ppp);
+        if let Some(slice) = self.selected_slice_at(world) {
+            return Some(slice);
+        }
+        self.frame_label_at(ui, p, rect, ppp)
+            .or_else(|| self.pick_leaf(world))
+            .or_else(|| self.selected_frame_at(world))
+            .or_else(|| self.frame_edge_at(world))
+            .map(|leaf| self.pick_preview(leaf, ui))
+    }
+
+    /// What the pen's press at `world` would do, as its badge: close on the run's
+    /// first anchor, join another open end, continue an open end when no path is
+    /// in flight, and convert while Alt breaks the handle being pulled.
+    fn pen_badge(&self, world: Option<Point>, alt: bool) -> Option<Badge> {
+        let Some(pen) = &self.pen else {
+            return world
+                .and_then(|w| self.pen_resume_target(w))
+                .map(|_| Badge::Continue);
+        };
+        if pen.shaping {
+            return alt.then_some(Badge::Convert);
+        }
+        let w = world?;
+        // The press snaps before its close test, so the badge does too.
+        let at = self.pen_point(w, false).0;
+        let closes = tools::pen_close_snap(
+            &pen.anchors,
+            at,
+            self.points_per_world(),
+            f64::from(PEN_PICK_PX),
+        );
+        if closes.is_some() {
+            return Some(Badge::Close);
+        }
+        self.pen_join_target(w).map(|_| Badge::Join)
+    }
+
+    /// The node tool away from the point box: the pen where its bias arms a verb,
+    /// else the node arrow badged with what is under the pointer.
+    fn node_cursor(&self, world: Option<Point>, mods: egui::Modifiers) -> Pointer {
+        // A path in flight is always the pen.
+        if self.pen.is_some() {
+            return (
+                egui::CursorIcon::Crosshair,
+                Some(Bitmap::Pen(self.pen_badge(world, mods.alt))),
+            );
+        }
+        let resting = self.drag.is_none();
+        if resting && let Some(verb) = world.and_then(|w| self.pen_verb(w)) {
+            let badge = match verb {
+                PenVerb::Continue(_) => Badge::Continue,
+                PenVerb::Insert(..) => Badge::Plus,
+                PenVerb::NewSubpath => Badge::Star,
+            };
+            return (egui::CursorIcon::Crosshair, Some(Bitmap::Pen(Some(badge))));
+        }
+        if let Drag::Marquee { mode, .. } = &self.drag {
+            return node_arrow(match mode {
+                MarqueeMode::Toggle => Some(Badge::Plus),
+                MarqueeMode::Subtract => Some(Badge::Minus),
+                MarqueeMode::Replace => None,
+            });
+        }
+        // Mid-drag the dragged point stays under the pointer, and the keys held
+        // no longer change the press.
+        let mods = if resting { mods } else { egui::Modifiers::NONE };
+        let ctrl = mods.ctrl || mods.command;
+        let grab = world.and_then(|w| self.node_grab(w));
+        let badge = match grab {
+            _ if mods.shift => Some(Badge::Plus),
+            Some(NodeGrab::Anchor(_)) => Some(if ctrl { Badge::Convert } else { Badge::Anchor }),
+            Some(NodeGrab::Handle(..)) => Some(if mods.alt { Badge::Convert } else { Badge::Dot }),
+            Some(NodeGrab::Segment(..)) => Some(if ctrl { Badge::Bend } else { Badge::Segment }),
+            Some(NodeGrab::Box(_) | NodeGrab::BoxRotate) => None,
+            None => mods.alt.then_some(Badge::Minus),
+        };
+        node_arrow(badge)
+    }
+
+    /// What the Select tool's cursor should be over a handle under (or just
+    /// outside) the pointer, or through a handle's drag; `None` elsewhere.
+    /// Directions are measured in screen space, so they are right on a rotated
+    /// layer.
+    fn select_cursor(&self, resp: &egui::Response, rect: egui::Rect, ppp: f32) -> Option<Pointer> {
         // The edited gradient's handles, in the press's order.
         if let Some(c) = self.gradient_cursor(resp.hover_pos(), rect, ppp) {
-            return (c, None);
+            return Some(c);
         }
         // Mid-gesture the cursor reports the gesture, so a resize dragged past the
         // opposite corner does not flicker.
         let handles = self.selection_handles(rect, ppp);
         match &self.drag {
-            // The arrow faces from the pivot to the pointer, not the grabbed corner.
+            // The arc faces from the pivot to the pointer, not the grabbed corner.
             Drag::Rotate { pivot, .. } => {
                 let facing = resp
                     .hover_pos()
                     .or_else(|| resp.interact_pointer_pos())
                     .map(|p| Turn::toward(p - self.to_screen(*pivot, rect, ppp)))
                     .unwrap_or_default();
-                return (egui::CursorIcon::Grabbing, Some(Bitmap::Rotate(facing)));
+                return Some((egui::CursorIcon::Grabbing, Some(Bitmap::Rotate(facing))));
             }
             Drag::Resize { handle, .. } => {
-                return match &handles {
-                    Some(h) => (resize_icon(h.screen_direction(*handle)), None),
-                    None => NONE,
-                };
+                return handles.map(|h| resize_cursor(h.screen_direction(*handle)));
             }
             // Along the side, held even if Ctrl is let go part way.
             Drag::Skew { handle, .. } => {
-                return match &handles {
-                    Some(h) => (resize_icon(h.screen_tangent(*handle)), None),
-                    None => NONE,
-                };
+                return handles.map(|h| skew_cursor(h.screen_tangent(*handle)));
             }
-            Drag::LineEnd { .. } => return (egui::CursorIcon::Grabbing, None),
-            Drag::RailOffset { .. } => return (egui::CursorIcon::Grabbing, None),
-            Drag::Spacing { id, band, .. } => return (self.spacing_cursor(*id, *band), None),
-            Drag::LooseGap { .. } | Drag::LooseReorder { .. } => {
-                return (self.loose_cursor(None).unwrap_or_default(), None);
+            Drag::LineEnd { .. } | Drag::RailOffset { .. } | Drag::ShapeHandle { .. } => {
+                return Some(handle_cursor(true));
             }
-            Drag::ShapeHandle { .. } => return (egui::CursorIcon::Grabbing, None),
+            Drag::Spacing { id, band, .. } => return Some(self.spacing_cursor(*id, *band)),
+            Drag::LooseGap { .. } | Drag::LooseReorder { .. } => return self.loose_cursor(None),
             _ => {}
         }
+        let p = resp.hover_pos()?;
 
         // A shape's corner or arc dot, in the press's order: ahead of the box
         // handles, whose sides and corners it may sit on.
-        if let Some(p) = resp.hover_pos()
-            && let Some(icon) = self.shape_handle_cursor(self.shape_handle_at(p, rect, ppp))
-        {
-            return (icon, None);
+        if let Some(c) = self.shape_handle_cursor(self.shape_handle_at(p, rect, ppp)) {
+            return Some(c);
         }
 
         // A selected set's `+` resolves ahead of the box handles, as the press
-        // does: the plain arrow (no control shows a pointing hand, §9.2).
-        if let Some(p) = resp.hover_pos()
-            && self.set_plus_at(p, rect, ppp).is_some()
-        {
-            return (egui::CursorIcon::Default, None);
+        // does: the plain arrow, since no control shows a pointing hand.
+        if self.set_plus_at(p, rect, ppp).is_some() {
+            return Some(arrow(None));
         }
 
         // A line's ends, then the rail handle, in the press's order.
-        if let Some(p) = resp.hover_pos()
-            && self.grab_line_end(p, rect, ppp).is_some()
+        if self.grab_line_end(p, rect, ppp).is_some()
+            || self.grab_rail_handle(p, rect, ppp).is_some()
         {
-            return (egui::CursorIcon::Grab, None);
-        }
-        if let Some(p) = resp.hover_pos()
-            && self.grab_rail_handle(p, rect, ppp).is_some()
-        {
-            return (egui::CursorIcon::Grab, None);
+            return Some(handle_cursor(false));
         }
 
         // A spacing band, in the press's order.
-        if let Some(p) = resp.hover_pos()
-            && let Some((s, i)) = self.spacing_at(p, rect, ppp)
-        {
-            return (self.spacing_cursor(s.id, s.bands[i].kind), None);
+        if let Some((s, i)) = self.spacing_at(p, rect, ppp) {
+            return Some(self.spacing_cursor(s.id, s.bands[i].kind));
         }
-        if let Some(p) = resp.hover_pos()
-            && let Some(icon) = self.loose_cursor(self.loose_at(p, rect, ppp))
-        {
-            return (icon, None);
+        if let Some(c) = self.loose_cursor(self.loose_at(p, rect, ppp)) {
+            return Some(c);
         }
 
-        let (Some(p), Some(h)) = (resp.hover_pos(), handles) else {
-            return NONE;
-        };
+        let h = handles?;
         let skewing = resp.ctx.input(|i| i.modifiers.ctrl || i.modifiers.command);
-        match h.armed(p, skewing) {
-            Some(Armed::Resize(handle)) => (resize_icon(h.screen_direction(handle)), None),
-            Some(Armed::Skew(handle)) => (resize_icon(h.screen_tangent(handle)), None),
-            Some(Armed::Rotate(handle)) => (
+        match h.armed(p, skewing)? {
+            Armed::Resize(handle) => Some(resize_cursor(h.screen_direction(handle))),
+            Armed::Skew(handle) => Some(skew_cursor(h.screen_tangent(handle))),
+            Armed::Rotate(handle) => Some((
                 egui::CursorIcon::Grab,
                 Some(Bitmap::Rotate(Turn::toward(h.screen_direction(handle)))),
-            ),
-            None => NONE,
+            )),
         }
     }
 
@@ -1998,7 +2099,7 @@ impl OndinApp {
         resp: &egui::Response,
         rect: egui::Rect,
         ppp: f32,
-    ) -> Option<(egui::CursorIcon, Option<Bitmap>)> {
+    ) -> Option<Pointer> {
         let id = self.edited_path()?;
         let turning = |pivot: Point, at: Option<egui::Pos2>| {
             let facing = at
@@ -2029,7 +2130,7 @@ impl OndinApp {
         };
         let out = self.to_screen(box_handle_at(box_, handle), rect, ppp)
             - self.to_screen(box_.center(), rect, ppp);
-        Some((resize_icon(out), None))
+        Some(resize_cursor(out))
     }
 
     // --- normal mode ------------------------------------------------------
@@ -4728,12 +4829,7 @@ impl OndinApp {
 
     /// What the pointer would take in image editing, as a cursor: a resize arrow
     /// over a handle, an open hand over the picture, `None` off the frame.
-    fn crop_hover(
-        &self,
-        resp: &egui::Response,
-        rect: egui::Rect,
-        ppp: f32,
-    ) -> Option<(egui::CursorIcon, Option<Bitmap>)> {
+    fn crop_hover(&self, resp: &egui::Response, rect: egui::Rect, ppp: f32) -> Option<Pointer> {
         let (id, fill) = self.edited_image()?;
         let (world, frame) = self.crop_frame(id)?;
         let at = world.inverse() * self.to_world(resp.hover_pos()?, rect, ppp);
@@ -4741,10 +4837,10 @@ impl OndinApp {
             (Some(h), _) => {
                 let (ox, oy) = h.outward();
                 let d = (world * Point::new(ox, oy)) - (world * Point::ZERO);
-                Some((resize_icon(egui::vec2(d.x as f32, d.y as f32)), None))
+                Some(resize_cursor(egui::vec2(d.x as f32, d.y as f32)))
             }
             (None, true) => (self.crop_state(id, fill).is_some())
-                .then_some((egui::CursorIcon::Grab, Some(Bitmap::HandOpen))),
+                .then_some((egui::CursorIcon::Grab, Some(Bitmap::Pan))),
             (None, false) => None,
         }
     }
@@ -10075,13 +10171,53 @@ fn drag_create_again(drag: &Drag, id: NodeId, start: Point) -> Drag {
     }
 }
 
-/// The cursor over nothing: an arrow, or the Scale tool's own glyph, which shares
+/// The cursor over nothing: the arrow, badged on the Scale tool, which shares
 /// every gesture with Select and so needs the cursor as its only warning.
-fn rest_cursor(tool: Tool) -> (egui::CursorIcon, Option<Bitmap>) {
+fn rest_cursor(tool: Tool) -> Pointer {
     match tool {
-        Tool::Scale => (egui::CursorIcon::Default, Some(Bitmap::Scale)),
-        _ => (egui::CursorIcon::Default, None),
+        Tool::Scale => arrow(Some(Badge::Scale)),
+        _ => arrow(None),
     }
+}
+
+/// The Select arrow, with the stock arrow as its fallback.
+pub(crate) fn arrow(badge: Option<Badge>) -> Pointer {
+    (egui::CursorIcon::Default, Some(Bitmap::Arrow(badge)))
+}
+
+/// The node tool's arrow.
+fn node_arrow(badge: Option<Badge>) -> Pointer {
+    (egui::CursorIcon::Default, Some(Bitmap::Node(badge)))
+}
+
+/// The create tools' crosshair; with Alt held the drag grows from its centre.
+fn create_cursor(alt: bool) -> Pointer {
+    let drawn = match alt {
+        true => Bitmap::FromCentre,
+        false => Bitmap::Crosshair,
+    };
+    (egui::CursorIcon::Crosshair, Some(drawn))
+}
+
+/// A handle's dot under the pointer, or being dragged: the arrow with a dot,
+/// never a hand, since hands mean panning.
+pub(crate) fn handle_cursor(dragging: bool) -> Pointer {
+    let icon = match dragging {
+        true => egui::CursorIcon::Grabbing,
+        false => egui::CursorIcon::Grab,
+    };
+    (icon, Some(Bitmap::Arrow(Some(Badge::Dot))))
+}
+
+/// The resize cursor for a handle facing `out` **on screen**, drawn at that
+/// angle in 15° steps.
+pub(crate) fn resize_cursor(out: egui::Vec2) -> Pointer {
+    (resize_icon(out), Some(Bitmap::Resize(Turn::toward(out))))
+}
+
+/// The skew cursor along a side running `along` on screen.
+fn skew_cursor(along: egui::Vec2) -> Pointer {
+    (resize_icon(along), Some(Bitmap::Skew(Turn::toward(along))))
 }
 
 /// The stock resize cursor for a handle facing `out` **on screen**.
@@ -10777,9 +10913,12 @@ mod tests {
     /// Only the Scale tool takes a cursor of its own at rest, since it shares every gesture with Select.
     #[test]
     fn only_the_scale_tool_takes_a_cursor_of_its_own_at_rest() {
-        assert_eq!(rest_cursor(Tool::Scale).1, Some(Bitmap::Scale));
+        assert_eq!(
+            rest_cursor(Tool::Scale).1,
+            Some(Bitmap::Arrow(Some(Badge::Scale)))
+        );
         for tool in [Tool::Select, Tool::Hand] {
-            assert_eq!(rest_cursor(tool).1, None, "{tool:?}");
+            assert_eq!(rest_cursor(tool).1, Some(Bitmap::Arrow(None)), "{tool:?}");
         }
         assert_ne!(rest_cursor(Tool::Scale).1, rest_cursor(Tool::Select).1);
     }
@@ -14475,6 +14614,114 @@ mod headless_app_tests {
         assert_eq!(icon(&mut app), egui::CursorIcon::Default);
     }
 
+    /// The Select arrow's badge says what a press would do with the keys held:
+    /// Shift adds anywhere, Alt duplicates over a layer and subtracts over empty
+    /// canvas, Ctrl selects inside a layer and does nothing over empty canvas, and
+    /// the Scale tool's own badge gives way to a modifier's.
+    /// flip: `select_rest_cursor`'s Alt arm ignoring what is under the pointer →
+    /// fails at "Alt over empty canvas".
+    #[test]
+    fn the_select_badge_follows_the_held_keys_and_what_is_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let layer = app.to_screen(Point::new(50.0, 50.0), area, 1.0);
+        let empty = app.to_screen(Point::new(150.0, 50.0), area, 1.0);
+
+        let badge = |app: &OndinApp, at: egui::Pos2, modifiers: egui::Modifiers| {
+            let mut got = None;
+            let input = egui::RawInput {
+                screen_rect: Some(area),
+                modifiers,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                got = app.select_rest_cursor(ui, at, area, 1.0).1;
+            });
+            got
+        };
+        let over = |app: &OndinApp, at: egui::Pos2| {
+            let mut got = None;
+            let input = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| got = app.layer_under(ui, at, area, 1.0));
+            got
+        };
+        let arrow = |b: Option<Badge>| Some(Bitmap::Arrow(b));
+        let none = egui::Modifiers::NONE;
+        assert!(over(&app, layer).is_some(), "the fixture's layer");
+        assert!(over(&app, empty).is_none(), "and its gap");
+
+        assert_eq!(badge(&app, layer, none), arrow(None));
+        assert_eq!(
+            badge(&app, empty, egui::Modifiers::SHIFT),
+            arrow(Some(Badge::Plus))
+        );
+        assert_eq!(
+            badge(&app, layer, egui::Modifiers::SHIFT),
+            arrow(Some(Badge::Plus))
+        );
+        assert_eq!(
+            badge(&app, layer, egui::Modifiers::ALT),
+            arrow(Some(Badge::Duplicate))
+        );
+        assert_eq!(
+            badge(&app, empty, egui::Modifiers::ALT),
+            arrow(Some(Badge::Minus)),
+            "Alt over empty canvas"
+        );
+        assert_eq!(
+            badge(&app, layer, egui::Modifiers::COMMAND),
+            arrow(Some(Badge::Deep))
+        );
+        assert_eq!(badge(&app, empty, egui::Modifiers::COMMAND), arrow(None));
+
+        app.tool = Tool::Scale;
+        assert_eq!(badge(&app, empty, none), arrow(Some(Badge::Scale)));
+        assert_eq!(
+            badge(&app, layer, egui::Modifiers::ALT),
+            arrow(Some(Badge::Duplicate))
+        );
+    }
+
+    /// The pen's badge: continue on an open path's end with no path in flight,
+    /// close on the run's first anchor, and convert while Alt pulls a handle.
+    #[test]
+    fn the_pen_badge_says_what_its_press_does() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.tool = Tool::Pen;
+        assert_eq!(
+            app.pen_badge(Some(Point::new(500.0, 500.0)), false),
+            None,
+            "bare canvas"
+        );
+        app.pen = Some(PenState {
+            parent: app.session.doc.first_page(),
+            parent_world: Affine::IDENTITY,
+            anchors: vec![
+                PenAnchor::corner(Point::ZERO),
+                PenAnchor::corner(Point::new(100.0, 0.0)),
+                PenAnchor::corner(Point::new(100.0, 100.0)),
+            ],
+            shaping: false,
+            editing: None,
+        });
+        assert_eq!(
+            app.pen_badge(Some(Point::new(1.0, 1.0)), false),
+            Some(Badge::Close)
+        );
+        assert_eq!(app.pen_badge(Some(Point::new(300.0, 300.0)), false), None);
+        if let Some(pen) = app.pen.as_mut() {
+            pen.shaping = true;
+        }
+        assert_eq!(app.pen_badge(None, true), Some(Badge::Convert));
+        assert_eq!(app.pen_badge(None, false), None);
+    }
+
     /// `cancel_gesture` is armed by each of our own witnesses without egui's
     /// `dragged_id` (which blinks on a short right-click) and is a no-op when idle.
     #[test]
@@ -16664,7 +16911,9 @@ mod frame_menu_door_tests {
                     egui::Sense::click_and_drag(),
                 );
                 app.normal_mode_input(ui, &resp, AREA, 1.0);
-                cursor = app.select_cursor(&resp, AREA, 1.0).0;
+                cursor = app
+                    .select_cursor(&resp, AREA, 1.0)
+                    .map_or(egui::CursorIcon::Default, |c| c.0);
             });
             cursor
         };

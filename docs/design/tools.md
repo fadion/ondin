@@ -1,6 +1,6 @@
 # Tools and canvas interaction
 
-The v1 tool set, the tool rail and how canvas gestures behave: the wheel, cancelling, context menus and their
+The v1 tool set, the tool rail and how canvas gestures behave: the wheel, the canvas cursors, cancelling, context menus and their
 chrome, selection chrome, multi-selection transforms, the Scale tool, skew, snapping during
 resize, drop outlines and the transform origin (pivot).
 
@@ -66,6 +66,62 @@ events, not egui's smoothed deltas (§15 D26).
 | scroll | pan vertically |
 | `Shift`+scroll | pan horizontally |
 | `Ctrl`/`Cmd`+scroll, `Alt`+scroll | zoom at the cursor (`Alt` is Adobe's spelling) |
+
+### Canvas cursors (`cursor.rs`)
+
+Over the canvas the app draws every cursor itself, the arrow included, so each says what a press
+there would do. Panels, menus and window edges keep the system cursor. A caller answers a
+`cursor::Pointer`, `(CursorIcon, Option<Bitmap>)`: the bitmap is handed to egui as an OS cursor
+image, and the `CursorIcon` set beside it is the stock fallback when the bitmap cannot be drawn.
+
+- **A base and at most one badge.** `cursor::Bitmap` names the base (`Arrow`, `Node`, `Pen`,
+  `Pencil`, turned `Resize`/`Skew`/`Rotate`, `Crosshair`, `FromCentre`, `Loaded`, `IBeam`,
+  `TextOnPath`, `Eyedropper`, `Guide`/`CopyGuide`/`Gap` by axis, `Discard`, `Pan`, `Panning`);
+  `cursor::Badge` the badge. One badge means one thing on every base. `Duplicate` is a second
+  arrow of the same size 5.5 pt right and 3 pt down, behind the first. The node arrow is the
+  select arrow with its inks swapped, so the two tools read apart.
+- **Drawn, not taken from the icon font.** Each drawing is SVG path data on a 32-point box
+  (`Glyph::parts`), flattened once and rasterized by supersampling: a rim pass in the set's ink
+  (the shape widened by a 1.5 pt mitred outline, mitre limit 8, square caps on strokes), then the
+  core in its fill. Layers paint in order, so the duplicate's front arrow's rim cuts the copy. A
+  soft shadow (blur 0.7 pt, drop 0.6 pt, 32%) is drawn into the bitmap. A drawing aimed from its
+  middle is nudged onto the texel grid so its 1-point lines stay crisp.
+- **Two ink sets**, matching each OS's own pointer: the light set (white core, dark rim) on
+  Windows, the dark set on macOS and Linux. The inks are `#121316` and white, the cursor's own and
+  the same under either theme, so not theme colours.
+- **Size**: 32 pt × pointer scale × texels per point. The pointer scale is the OS pointer size
+  over its default: `CursorBaseSize ÷ 32` from `HKCU\Control Panel\Cursors` on Windows,
+  `XCURSOR_SIZE ÷ 24` on Linux, 1 on macOS, which scales app cursors itself. It is re-read every
+  2 s, so a settings change shows without a restart. macOS gets one texel per point
+  (`texels_per_point`): winit sizes the cursor's `NSImage` in points equal to its pixel count, so
+  a 2× bitmap would show at twice the size; on a Retina display the OS upscales a 1× bitmap.
+- **Turned cursors** face the handle's screen direction in 15° steps (`cursor::Turn`). Resize
+  and skew keep twelve steps, since a double-headed drawing turned 180° is the same drawing.
+
+| Where | Cursor |
+| --- | --- |
+| Select at rest | arrow; `Shift` → Plus; `Alt` over a layer → Duplicate, over empty canvas → Minus; `Ctrl`/`Cmd` over a layer → Deep; over a locked selected layer → No |
+| Scale tool at rest | arrow with Scale, replaced by a modifier's badge |
+| A move | the rest arrow; Duplicate once the Alt copy exists |
+| A marquee | the mode fixed at its press: Toggle → Plus, Subtract → Minus |
+| Pivot, and its drag | arrow with Pivot |
+| Line ends, rail handle, shape dots, gradient handles, and their drags | arrow with Dot |
+| A loose run's centre dot, and a reorder | arrow with Swap |
+| A loose run's gap band | `Gap` along its axis |
+| Box, point-box, crop and spacing handles | `Resize` at the handle's angle |
+| `Ctrl` on a side | `Skew` along the side |
+| Rotate band (box and point box), and the turn | `Rotate`, facing out from the corner; while turning, from the pivot towards the pointer |
+| Rulers, guide lines, guide drags | `Guide`; `Alt` while dragging an existing guide → `CopyGuide`; back over its ruler → `Discard` |
+| Create tools | `Crosshair`; `Alt` → `FromCentre` (the Text tool keeps the plain crosshair) |
+| Image tool, loaded | `Loaded`, the crosshair with the count left |
+| Pen | Close on the first anchor, Join on another open end, Continue on an open end with no path in flight, Convert while `Alt` pulls the handle |
+| Node tool | node arrow; Anchor, Segment or Dot over those; `Ctrl` on an anchor or `Alt` on a handle → Convert; `Ctrl` on a segment → Bend; `Shift` → Plus; `Alt` over empty canvas → Minus |
+| Node tool, pen armed | pen with Plus (insert) on a segment, Continue, Star (new subpath) |
+| Pencil over the selected open path's end | pencil with Continue |
+| Text tool over text, and in a text edit | `IBeam`; over an outline → `TextOnPath` |
+| Eyedropper armed | the loupe (`CursorIcon::None`); `Eyedropper` off the canvas until the frozen frame lands |
+| Space, Hand tool, inside a crop | `Pan`; while dragging, or the middle button → `Panning` |
+| A kit tile dragged over the canvas | arrow with Plus |
 
 ### The right button cancels a gesture
 
@@ -251,8 +307,8 @@ chrome hides, and the box handles, a lone line's ends and the rail handle do not
   `radial_axes`/`with_radial_axes`, `sweep_geom`/`with_sweep_geom`/`sweep_dir`, `guide_point` and
   `offset_at`, all in the shape's space.
 - A readout pill (the spacing handles' `paint_label`) shows angle and length, the radii (and turn), or
-  the start angle. Cursor: `Grab` over a handle or dot, `Grabbing` while dragging, the plain arrow over
-  the bare guide, where the ghost dot is the affordance. A locked layer draws the handles and arms none
+  the start angle. Cursor: the arrow with a Dot badge over a handle or dot and through its drag, the
+  plain arrow over the bare guide, where the ghost dot is the affordance. A locked layer draws the handles and arms none
   of them.
 
 ### Shape handles (`shape_handles.rs`)
@@ -283,7 +339,7 @@ different verb on the handles.
 - **Shared gates.** Click, marquee, move, rotate ring and pivot behave as under Select. `Tool::selects()` is the shared gate (click, drag start, hover outline, pivot marker, `rulers.rs` guide lines); the cursor shares one match arm.
 - Only `Tool::scaling()` differs; `canvas::resize_opts` passes it into `tools::Resize`.
 - **Proportional by default.** `canvas::keep_ratio` treats the tool as locked, so Shift releases it. Released, scalar properties take the geometric mean of the two factors.
-- **Cursor.** `Bitmap::Scale`, from the rail button's glyph (`icon::RESIZE`); over a handle, the resize arrows win.
+- **Cursor.** At rest the arrow wears the Scale badge (`canvas::rest_cursor`), the tool's only warning that the gestures differ; a modifier's badge replaces it, and over a handle the resize arrows win.
 - **Numeric door.** The Transform card's Scale % row appears only while the tool is held (`inspector.md`).
 
 **Adding a `Tool` variant is found by the compiler; adding a `NodeKind` is not.** Every predicate
@@ -374,7 +430,7 @@ the rail tool, as the narrower ask.
 - **Input.** In `normal_mode_input` the dropper takes every press an armed pan does not (Space, Hand and middle-drag still pan), ahead of guides, handles and tools: they are chrome its sample never sees. It also routes in `TextInsert`, so a picker opened over a text session can pick. While a dropper is armed the canvas does not answer as Select (`OndinApp::selecting`): a picker's pick button leaves the tool on Select, and without this the hover outline, spacing bands and guide grabs kept answering.
 - **The rest of the window is inert while armed** (`OndinApp::gate_dropper_input`, from `raw_input_hook`), which is what keeps the frozen frame true. egui gets the pointer only over the canvas; the picking picker too is pickable, not clickable. Elsewhere egui is told the pointer is gone and gets no press or wheel, so no panel hovers, takes a click or scrolls; `dropper_pointer` keeps the position for the loupe. A press there is the dropper's (`OndinApp::dropper_press`) and its release acts: primary records a `PickAt::Window` pick at the press position (`Alt` stroke, `Shift` stay), secondary disarms. A press egui already has finishes untouched, so a pan dragged off the canvas still ends; disarming hands the pointer back where it is. The canvas is told apart from the panels by `canvas_rect`, since all of them share egui's background layer; any area above that layer is chrome.
 - **Ways out.** `Escape` is one rung (`disarm_dropper`, `shortcuts.md` §11): it disarms a picker's button and leaves the picker open, or hands the rail tool back. A right-click anywhere disarms and spends the click (above). A second `I` is `choose_tool`'s toggle arm. Leaving the editor for the library disarms (`go_to_dashboard`), since the gate runs on every screen and the library has neither a canvas nor the escape ladder. The picker's own pick button is not one: a picking picker takes no click.
-- **The loupe is the cursor** everywhere (`CursorIcon::None`): it draws the region at 8pt a pixel, centred on the hotspot, the centre pixel ringed, with a chip below (above near the window's bottom) showing what a click would apply: the hex, or after a snap the document colour with the magnet glyph, named by its variable when bound; with `Ctrl` held, the raw pixel's hex. Its edge is two rims, dark outside light, under a soft shadow, so one of the pair contrasts with any ground. Off the canvas, until the frozen frame lands, the eyedropper bitmap (`cursor::Bitmap::Eyedropper`, the rail glyph mirrored to aim from its tip like the pen's) stands in, with no chip.
+- **The loupe is the cursor** everywhere (`CursorIcon::None`): it draws the region at 8pt a pixel, centred on the hotspot, the centre pixel ringed, with a chip below (above near the window's bottom) showing what a click would apply: the hex, or after a snap the document colour with the magnet glyph, named by its variable when bound; with `Ctrl` held, the raw pixel's hex. Its edge is two rims, dark outside light, under a soft shadow, so one of the pair contrasts with any ground. Off the canvas, until the frozen frame lands, the eyedropper cursor (`cursor::Bitmap::Eyedropper`, aimed from its tip like the pen's) stands in, with no chip.
 - **On the canvas the picker's preview is the latest sample**, not the one for the pixel under the pointer: each pixel of movement starts a readback that lands a frame later, and waiting for the matching one put the slot's own colour back for that frame.
 
 ### Skew
@@ -467,5 +523,7 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 - **Predicate negatives.** `drags_a_box` decides whether arming a tool deletes the selection. When a predicate gains a second consumer, re-check its negative members.
 - **Middle-button pan over the origin fields.** It is still swallowed by their `Area` (unverified).
 - **Menu placement order.** `menu_place` must clamp after rounding; reversing the order cuts off a menu's last column.
+- **Cursor bitmaps are cached and their angles quantized on purpose.** egui dedupes cursor uploads by `Arc` pointer identity, so a buffer drawn afresh each frame, or a raw angle in place of `cursor::Turn`, uploads a new cursor every frame of a drag. The cache is keyed by cursor and cleared when the scale changes (`the_bitmaps_are_reused_until_the_scale_changes`).
+- **macOS cursors are one texel per point.** Raising `texels_per_point` to the display's pixels per point on macOS doubles the cursor on Retina; `the_bitmap_is_sized_for_the_display` pins it, on a macOS build only.
 - **The eyedropper's repaint guard is unpinned.** `request_sample`'s GPU arm skipping a key that matches the last sample is all that stops a still, armed pointer repainting every frame; headless the CPU arm answers `false` whatever the key, so `the_hover_sample_is_keyed_to_the_pointer` does not catch its removal.
 - **The frozen frame's three guards.** The capture frame draws no loupe (`the_captured_frame_has_no_loupe`), a capture is taken only on its own `FrozenShot` tag (`off_the_canvas_a_pick_reads_the_frozen_window`), and `dropper_frame` stops asking for frames 30 passes after an unanswered ask, or a surface egui cannot capture repaints forever (unpinned).

@@ -243,9 +243,9 @@ impl OndinApp {
         screen: Option<egui::Pos2>,
         rect: egui::Rect,
         ppp: f32,
-    ) -> Option<egui::CursorIcon> {
+    ) -> Option<crate::cursor::Pointer> {
         if matches!(self.drag, Drag::Gradient { .. }) {
-            return Some(egui::CursorIcon::Grabbing);
+            return Some(crate::canvas::handle_cursor(true));
         }
         let m = self.gradient_marks(rect, ppp)?;
         let at = screen?;
@@ -253,9 +253,9 @@ impl OndinApp {
             return None;
         }
         if m.grab_at(at).is_some() {
-            return Some(egui::CursorIcon::Grab);
+            return Some(crate::canvas::handle_cursor(false));
         }
-        m.on_guide(at).then_some(egui::CursorIcon::Default)
+        m.on_guide(at).then(|| crate::canvas::arrow(None))
     }
 
     /// Start a drag on the gradient's handle or stop under `grab`, selecting the

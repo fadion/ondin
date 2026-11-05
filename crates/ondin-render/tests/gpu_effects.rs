@@ -240,6 +240,15 @@ fn render_gpu_on(
     }
     drop(data);
     buf.unmap();
+    // Colour under a zero alpha is not a colour. vello's last store divides by
+    // `max(a, 1e-6)`, so a coverage under half an 8-bit step keeps its colour while
+    // its alpha rounds to 0; Metal's fast math leaves such slivers beside a
+    // pixel-aligned edge, and the CPU backend writes zero there.
+    for p in out.as_chunks_mut::<4>().0 {
+        if p[3] == 0 {
+            p.fill(0);
+        }
+    }
     out
 }
 

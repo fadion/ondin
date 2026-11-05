@@ -11,8 +11,9 @@
 //! `dispatch` admits only the verbs that look ([`admits`]), and the canvas only
 //! pans and picks a mark.
 //!
-//! **The topmost changed layer is marked**: a layer under another listed one is
-//! folded into that row, its changes named under it and counted in the mark's tag.
+//! **The topmost changed layer is marked**: a layer under another listed, changed
+//! one is folded into that row, its changes named under it and counted in the
+//! mark's tag.
 
 use crate::app::OndinApp;
 use crate::canvas::CanvasRenderer;
@@ -321,10 +322,6 @@ pub(crate) fn rows(
             let name = layer.trail.last().cloned().unwrap_or_default();
             if top != i {
                 let row = &mut rows[row_of[&top]];
-                // An added or removed row already counts what came or went inside it.
-                if row.status != Status::Changed {
-                    continue;
-                }
                 row.layers += 1;
                 row.folded.push(Folded {
                     id,
@@ -364,8 +361,9 @@ pub(crate) fn rows(
 }
 
 /// For each of a page's listed `layers`, the index of the listed layer whose row it
-/// folds into: its nearest listed ancestor's, or its own when none is listed. `None`
-/// for an id that does not parse.
+/// folds into: its nearest listed ancestor's, or its own when none is listed or
+/// that row is an added or removed one, whose `inside` counts only the layers that
+/// came or went with it. `None` for an id that does not parse.
 pub(crate) fn topmost(
     layers: &[diff::LayerDiff],
     then: &Document,
@@ -379,6 +377,7 @@ pub(crate) fn topmost(
             let id = NodeId::from_wire(&layer.id)?;
             let top = ancestors(id, then, now)
                 .find_map(|a| top_of.get(&a).copied())
+                .filter(|t| layers[*t].status == Status::Changed)
                 .unwrap_or(i);
             top_of.insert(id, top);
             Some(top)
@@ -785,7 +784,7 @@ impl OndinApp {
                     })
                     .show(ui, |ui| {
                         ui.set_width(column.width() - 12.0);
-                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.spacing_mut().item_spacing.y = ITEM_GAP;
                         card_head(ui, c);
                         egui::ScrollArea::vertical()
                             .max_height(column.height() - 60.0)
@@ -793,7 +792,9 @@ impl OndinApp {
                             .scroll_bar_visibility(
                                 egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
                             )
-                            .show(ui, |ui| card_list(ui, c, doc, &mut act));
+                            .show_viewport(ui, |ui, viewport| {
+                                card_list(ui, viewport, c, doc, &mut act)
+                            });
                     });
             });
         match act {
@@ -1181,76 +1182,165 @@ fn card_head(ui: &mut egui::Ui, c: &Compare) {
     );
 }
 
-/// The rows, grouped by page in the document's order, then what is not on the
-/// canvas.
-fn card_list(ui: &mut egui::Ui, c: &Compare, doc: &Document, act: &mut Option<Act>) {
-    let private = crate::private::on();
-    for (g, group) in c.groups.iter().enumerate() {
-        let rows: Vec<usize> = (0..c.rows.len())
-            .filter(|i| c.rows[*i].group == g)
-            .collect();
-        let name = match (private, group.page) {
-            (true, Some(page)) if doc.is_page(page) => crate::private::page(doc, page).into_owned(),
-            (true, Some(page)) => crate::private::page(c.page_doc(page), page).into_owned(),
-            (true, None) => "Page".into(),
-            (false, _) => group.name.clone(),
-        };
-        heading(ui, icon::FILE, &name, rows.len(), group.removed);
-        for i in rows {
-            let row = &c.rows[i];
-            let name = match private {
-                false => row.name.clone(),
-                true if row.is_page => name.clone(),
-                true => match row.status {
-                    Status::Removed => crate::private::layer(&c.then, row.id).into_owned(),
-                    _ => crate::private::layer(doc, row.id).into_owned(),
-                },
-            };
-            let folded: Vec<String> = row
-                .folded
-                .iter()
-                .map(|f| match (private, f.status) {
-                    (false, _) => f.name.clone(),
-                    (true, Status::Removed) => crate::private::layer(&c.then, f.id).into_owned(),
-                    (true, _) => crate::private::layer(doc, f.id).into_owned(),
-                })
-                .collect();
-            let expanded = c.expanded.contains(&i);
-            let (resp, toggled) = row_ui(
-                ui,
-                row,
-                &name,
-                &folded,
-                private,
-                c.current == Some(i),
-                expanded,
-            );
-            if toggled {
-                *act = Some(Act::Expand(i));
-            } else if resp.clicked() {
-                *act = Some(Act::Show(i));
-            }
+/// One entry of the card's list, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+enum Item {
+    /// A page's heading, by its index in [`Compare::groups`], and its row count.
+    Heading(usize, usize),
+    Row(usize),
+    /// The gap above *Not on the canvas*.
+    Gap,
+    OffHeading,
+    Off(usize),
+}
+
+/// A page heading's height, and *Not on the canvas*'s.
+const HEADING_H: f32 = 24.0;
+/// An off-canvas row's height: its title and one line of values.
+const OFF_ROW_H: f32 = 5.0 + 16.0 + 3.0 + 14.0 + 5.0;
+/// The gap above *Not on the canvas*.
+const OFF_GAP: f32 = 6.0;
+/// The card list's gap between entries.
+const ITEM_GAP: f32 = 2.0;
+
+/// The card's entries with each one's top and height, from the list's top: the
+/// rows grouped by page in the document's order, then what is not on the canvas.
+fn card_items(c: &Compare, private: bool) -> Vec<(Item, f32, f32)> {
+    let mut by_group: Vec<Vec<usize>> = vec![Vec::new(); c.groups.len()];
+    for (i, row) in c.rows.iter().enumerate() {
+        if let Some(g) = by_group.get_mut(row.group) {
+            g.push(i);
+        }
+    }
+    let mut out = Vec::new();
+    let mut y = 0.0;
+    let mut push = |item: Item, h: f32| {
+        if item == Item::Gap {
+            y += h;
+            return;
+        }
+        out.push((item, y, h));
+        y += h + ITEM_GAP;
+    };
+    for (g, rows) in by_group.iter().enumerate() {
+        push(Item::Heading(g, rows.len()), HEADING_H);
+        for &i in rows {
+            let lines = row_line_count(&c.rows[i], private, c.expanded.contains(&i));
+            push(Item::Row(i), row_h(lines));
         }
     }
     if !c.off_canvas.is_empty() {
-        ui.add_space(6.0);
-        heading(
-            ui,
-            icon::SLIDERS,
-            "Not on the canvas",
-            c.off_canvas.len(),
-            false,
-        );
-        for change in &c.off_canvas {
-            off_canvas_row(ui, change, private);
+        push(Item::Gap, OFF_GAP);
+        push(Item::OffHeading, HEADING_H);
+        for k in 0..c.off_canvas.len() {
+            push(Item::Off(k), OFF_ROW_H);
         }
+    }
+    out
+}
+
+/// The card's list, only the entries in view (and one past each end, so `Tab`
+/// finds the next row) drawn; it follows a row the keyboard focuses.
+fn card_list(
+    ui: &mut egui::Ui,
+    viewport: egui::Rect,
+    c: &Compare,
+    doc: &Document,
+    act: &mut Option<Act>,
+) {
+    let private = crate::private::on();
+    let items = card_items(c, private);
+    let (top, left, width) = (
+        ui.max_rect().top(),
+        ui.max_rect().left(),
+        ui.available_width(),
+    );
+    let total = items.last().map_or(0.0, |(_, y, h)| y + h);
+    ui.set_height(total);
+    let first = items
+        .partition_point(|(_, y, h)| y + h < viewport.min.y)
+        .saturating_sub(1);
+    let last = (items.partition_point(|(_, y, _)| *y <= viewport.max.y) + 1).min(items.len());
+    for &(item, y, h) in &items[first..last] {
+        let rect = egui::Rect::from_min_size(egui::pos2(left, top + y), egui::vec2(width, h));
+        // By the entry, so a row keeps its focus as the list scrolls past others.
+        let id = egui::Id::new("compare-card-item").with(item);
+        let mut ui = ui.new_child(egui::UiBuilder::new().id(id).max_rect(rect));
+        let ui = &mut ui;
+        match item {
+            Item::Heading(g, count) => {
+                let group = &c.groups[g];
+                let name = group_name(c, doc, g, private);
+                heading(ui, icon::FILE, &name, count, group.removed);
+            }
+            Item::Row(i) => {
+                let row = &c.rows[i];
+                let name = match private {
+                    false => row.name.clone(),
+                    true if row.is_page => group_name(c, doc, row.group, private),
+                    true => match row.status {
+                        Status::Removed => crate::private::layer(&c.then, row.id).into_owned(),
+                        _ => crate::private::layer(doc, row.id).into_owned(),
+                    },
+                };
+                let folded: Vec<String> = row
+                    .folded
+                    .iter()
+                    .map(|f| match (private, f.status) {
+                        (false, _) => f.name.clone(),
+                        (true, Status::Removed) => {
+                            crate::private::layer(&c.then, f.id).into_owned()
+                        }
+                        (true, _) => crate::private::layer(doc, f.id).into_owned(),
+                    })
+                    .collect();
+                let expanded = c.expanded.contains(&i);
+                let (resp, toggled) = row_ui(
+                    ui,
+                    row,
+                    &name,
+                    &folded,
+                    private,
+                    c.current == Some(i),
+                    expanded,
+                );
+                if toggled {
+                    *act = Some(Act::Expand(i));
+                } else if resp.clicked() {
+                    *act = Some(Act::Show(i));
+                }
+            }
+            Item::Gap => {}
+            Item::OffHeading => heading(
+                ui,
+                icon::SLIDERS,
+                "Not on the canvas",
+                c.off_canvas.len(),
+                false,
+            ),
+            Item::Off(k) => off_canvas_row(ui, &c.off_canvas[k], private),
+        }
+    }
+    crate::ui::keep_focus_in_view(ui);
+}
+
+/// Group `g`'s page name as the card heads it: masked in private mode.
+fn group_name(c: &Compare, doc: &Document, g: usize, private: bool) -> String {
+    let group = &c.groups[g];
+    match (private, group.page) {
+        (true, Some(page)) if doc.is_page(page) => crate::private::page(doc, page).into_owned(),
+        (true, Some(page)) => crate::private::page(c.page_doc(page), page).into_owned(),
+        (true, None) => "Page".into(),
+        (false, _) => group.name.clone(),
     }
 }
 
 /// A page's heading in the list: its glyph, its name, how many rows it has.
 fn heading(ui: &mut egui::Ui, glyph: &str, name: &str, count: usize, dim: bool) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), HEADING_H),
+        egui::Sense::hover(),
+    );
     let p = ui.painter();
     let ink = match dim {
         true => theme::text::faint(),
@@ -1392,6 +1482,41 @@ fn row_lines(row: &Row, folded_names: &[String], private: bool, expanded: bool) 
     out
 }
 
+/// A value line's height under a row's title.
+const ROW_LINE_H: f32 = 14.0;
+
+/// A row's height with `lines` value lines under its title.
+fn row_h(lines: usize) -> f32 {
+    5.0 + 16.0 + lines as f32 * (3.0 + ROW_LINE_H) + 5.0
+}
+
+/// How many lines [`value_lines`] gives for `n` changes.
+fn value_line_count(n: usize, private: bool, cut: bool) -> usize {
+    match (private, cut) {
+        (true, _) => usize::from(n > 0),
+        (false, true) => n.min(LINES_SHOWN) + usize::from(n > LINES_SHOWN),
+        (false, false) => n,
+    }
+}
+
+/// How many lines [`row_lines`] gives, without making them: the card measures
+/// every row each frame and draws only those in view.
+fn row_line_count(row: &Row, private: bool, expanded: bool) -> usize {
+    if !expanded || row.folded.is_empty() {
+        let folded: usize = (row.folded.iter())
+            .map(|f| match f.status {
+                Status::Changed => f.lines.len(),
+                _ => 1,
+            })
+            .sum();
+        return value_line_count(row.lines.len() + folded, private, true);
+    }
+    let folded: usize = (row.folded.iter())
+        .map(|f| 1 + value_line_count(f.lines.len(), private, false))
+        .sum();
+    value_line_count(row.lines.len(), private, false) + folded
+}
+
 /// One row of the list: the status tag, the trail dim and the name, then the
 /// changed values a line each. A row with folded layers has a caret: expanded, it
 /// lists each of them apart (`folded_names`, in order) with all their values.
@@ -1406,8 +1531,8 @@ fn row_ui(
     expanded: bool,
 ) -> (egui::Response, bool) {
     let lines = row_lines(row, folded_names, private, expanded);
-    let line_h = 14.0;
-    let h = 5.0 + 16.0 + lines.len() as f32 * (3.0 + line_h) + 5.0;
+    let line_h = ROW_LINE_H;
+    let h = row_h(lines.len());
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
     let p = ui.painter();
@@ -1511,9 +1636,10 @@ fn row_ui(
 
 /// A change no page holds: its status tag and what, the values under it.
 fn off_canvas_row(ui: &mut egui::Ui, c: &Change, private: bool) {
-    let h = 5.0 + 16.0 + 3.0 + 14.0 + 5.0;
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), OFF_ROW_H),
+        egui::Sense::hover(),
+    );
     let p = ui.painter();
     let (hue, ink, sign) = look(status_of(c));
     let tag =
@@ -1794,7 +1920,11 @@ mod tests {
     }
 
     /// One frame of the whole app, with `events` delivered to it.
-    fn whole_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+    fn whole_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1811,9 +1941,9 @@ mod tests {
             events,
             ..Default::default()
         };
-        let _ = ctx.run_ui(input, |ui| {
+        ctx.run_ui(input, |ui| {
             eframe::App::ui(app, ui, &mut frame);
-        });
+        })
     }
 
     fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -1889,6 +2019,148 @@ mod tests {
         assert_eq!(pay.page, Some(second));
         assert_eq!(c.changed_on(first), 4, "card, price, note and box");
         assert_eq!(c.changed_on(second), 1);
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A layer that was there before and moved into a new frame keeps its own row
+    /// with its changes, beside the frame's added row, and the page counts both.
+    ///
+    /// flip: `topmost` folding into an added row → fails at "the price's own row".
+    #[test]
+    fn a_layer_moved_into_a_new_frame_keeps_its_row() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "moved-in");
+        let tray = f.app.session.ids.mint();
+        let price = f.app.session.doc.get(f.card).unwrap().children()[0];
+        assert!(f.app.session.commit(Transaction(vec![
+            boxed(tray, f.first, "Tray", (0.0, 300.0), true),
+            Operation::Reparent {
+                id: price,
+                new_parent: tray,
+                index: 0,
+            },
+        ])));
+        let first = f.first;
+        let c = open(&mut f);
+        let row = c
+            .rows
+            .iter()
+            .find(|r| r.id == price)
+            .expect("the price's own row");
+        assert_eq!(row.status, Status::Changed);
+        let whats: Vec<&str> = row.lines.iter().map(|l| l.what.as_str()).collect();
+        assert!(
+            whats.contains(&"parent") && whats.contains(&"opacity"),
+            "{whats:?}"
+        );
+        let tray = c
+            .rows
+            .iter()
+            .find(|r| r.id == tray)
+            .expect("the tray's row");
+        assert_eq!((tray.status, tray.inside), (Status::Added, 0));
+        let rows = c.rows.iter().filter(|r| r.group == 0 && !r.is_page);
+        assert_eq!(
+            c.changed_on(first),
+            rows.map(|r| r.layers).sum::<usize>(),
+            "the badge counts what the rows show"
+        );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A row's height counts the lines it draws, folded or expanded, in private
+    /// mode or not.
+    #[test]
+    fn a_rows_line_count_is_the_lines_it_draws() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "line-count");
+        let c = open(&mut f);
+        for row in &c.rows {
+            let names = vec![String::new(); row.folded.len()];
+            for (private, expanded) in [(false, false), (false, true), (true, false), (true, true)]
+            {
+                assert_eq!(
+                    row_line_count(row, private, expanded),
+                    row_lines(row, &names, private, expanded).len(),
+                    "{} private {private} expanded {expanded}",
+                    row.name
+                );
+            }
+        }
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// The changes card draws only the rows in view, and `Tab` down it keeps the
+    /// focused row in view.
+    ///
+    /// flip: `card_list` without `keep_focus_in_view` → fails at "the focus stays
+    /// on the card's rows", Tab running off the rows drawn; drawing every row →
+    /// fails at "only the rows in view".
+    #[test]
+    fn the_card_draws_the_rows_in_view_and_follows_the_focus() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "long");
+        let dots: Vec<Operation> = (0..60)
+            .map(|k| {
+                let id = f.app.session.ids.mint();
+                boxed(
+                    id,
+                    f.first,
+                    &format!("Dot {k}"),
+                    (k as f64 * 50.0, 600.0),
+                    false,
+                )
+            })
+            .collect();
+        assert!(f.app.session.commit(Transaction(dots)));
+        open(&mut f);
+        // `whole_frame`'s screen.
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1320.0, 820.0));
+        let column = OndinApp::inspector_column(screen);
+        // The card's titles, not the marks' tags on the canvas.
+        let drawn = |out: &egui::FullOutput| {
+            (out.shapes.iter())
+                .filter(|s| match &s.shape {
+                    egui::Shape::Text(t) => {
+                        // Below the screen too: the ink a long list would lay out.
+                        t.galley.text().starts_with("Dot ") && column.x_range().contains(t.pos.x)
+                    }
+                    _ => false,
+                })
+                .count()
+        };
+        let mut out = whole_frame(&ctx, &mut f.app, Vec::new());
+        for _ in 0..3 {
+            out = whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        let shown = drawn(&out);
+        assert!(shown > 5 && shown < 40, "only the rows in view: {shown}");
+
+        let card = egui::LayerId::new(egui::Order::Middle, egui::Id::new("compare-card"));
+        let focused_row = |ctx: &egui::Context| {
+            let id = ctx.memory(|m| m.focused())?;
+            ctx.viewport(|v| v.prev_pass.widgets.get(id).copied())
+                .filter(|w| w.layer_id == card)
+        };
+        let first = ctx.viewport(|v| {
+            (v.prev_pass.widgets.get_layer(card))
+                .find(|w| w.sense.is_focusable())
+                .map(|w| w.id)
+        });
+        ctx.memory_mut(|m| m.request_focus(first.expect("a row on the card")));
+        let tab = key(egui::Key::Tab, egui::Modifiers::NONE);
+        for step in 0..40 {
+            whole_frame(&ctx, &mut f.app, vec![tab.clone()]);
+            whole_frame(&ctx, &mut f.app, Vec::new());
+            whole_frame(&ctx, &mut f.app, Vec::new());
+            let w = focused_row(&ctx).expect("the focus stays on the card's rows");
+            assert!(
+                screen.contains_rect(w.rect),
+                "in view after {} tabs: {:?}",
+                step + 1,
+                w.rect
+            );
+        }
         let _ = std::fs::remove_file(&f.version);
     }
 

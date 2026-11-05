@@ -51,8 +51,9 @@ matched by id, so a renamed or moved layer is one change.
   layer), `None` only in the kit vault.
   **The topmost listed layer is marked**: a listed layer under one that already has a row folds
   into it. Under a changed row it is kept in the row's `folded`, with its own changes, and counted
-  in the row's `layers`; under an added or removed row nothing is added, since its `inside` count
-  already says. Each row keeps its world box in both documents
+  in the row's `layers`. An added or removed row folds nothing: its `inside` counts the layers that
+  came or went with it, which the diff does not list, and a layer listed under it was there before
+  (moved into a new frame, say), so it keeps a row of its own. Each row keeps its world box in both documents
   (`Resolved::world_bounds`); *moved or resized* is both boxes present and differing by
   `diff::EPSILON`. Variables, modes, styles, guides and publish state go under *Not on the canvas*,
   their status read from which side has a value.
@@ -122,7 +123,10 @@ matched by id, so a renamed or moved layer is one change.
   A row with folded layers has a caret at its right end (`Compare::expanded`): expanded, the row
   shows all its own values, then each folded layer apart — a 12pt status tag and its name, and all
   its values indented 17pt under it. A click on the caret expands or folds; a click elsewhere on a
-  row makes it current and steps to it.
+  row makes it current and steps to it. The list measures every entry each frame by arithmetic
+  (`card_items`, `row_line_count`) and draws only those in view and one past each end, so `Tab`
+  finds the next row; each entry's id is its own, not the layout's next, and the list ends with
+  `ui::keep_focus_in_view`.
 - **Private mode** masks the names in the card and in the marks' tags through `private::layer` and
   `private::page` and the bar's (*a version*, *with another*), drops the trail, and replaces the value lines with
   *n changes*.

@@ -796,12 +796,7 @@ impl Item {
                 Some("Ctrl+Alt+B"),
                 Group::Structure,
             ),
-            Item::MoveToPage => s(
-                "Move to page",
-                icon::ARROW_SQUARE_OUT,
-                None,
-                Group::Structure,
-            ),
+            Item::MoveToPage => s("Move to page", icon::FILE, None, Group::Structure),
             // Labelled with the page's name by the list and the palette.
             Item::MoveTo(_) => s("Move to page", icon::FILE, None, Group::Pages),
             Item::Arrange => s("Arrange", icon::STACK, None, Group::Structure),
@@ -1261,7 +1256,7 @@ impl Item {
             Item::SaveNamedVersion => {
                 s("Save named version…", icon::FLOPPY_DISK, None, Group::File)
             }
-            Item::ColourReview => s("Colour review", icon::SWATCHES, None, Group::View),
+            Item::ColourReview => s("Colour review", icon::PALETTE, None, Group::View),
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
                 icon::ROTATE_LEFT,

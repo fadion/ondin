@@ -1831,7 +1831,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
     });
     match &card.field {
         Field::Empty => {}
-        Field::Reading { .. } => message(ui, icon::FILE, "Reading…", theme::text::faint()),
+        Field::Reading { .. } => message(ui, icon::DOCUMENT, "Reading…", theme::text::faint()),
         Field::One { source, .. } if source.kind == Kind::Figma => message(
             ui,
             icon::CHECK_CIRCLE,

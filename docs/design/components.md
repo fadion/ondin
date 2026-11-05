@@ -496,12 +496,14 @@ Inspector:
   override. A row of the swap picker hovers its main's description (`SwapTarget::description`).
 - **Link**: under the description on the same three cards, `component::link_field` — the host while
   unfocused, the whole address while focused, committed through `web_link` on `Enter` or defocus as
-  one undo step (*Link*). A refused address stays in the field, ringed in the error colour with the
+  one undo step (*Link*). The field and the step wear `icon::GLOBE`, as does the host in the insert
+  picker's hover card. A refused address stays in the field, ringed in the error colour with the
   reason under it, and is not stored; `Escape` drops it. A variant without its own link hints its
-  set's host. An open button (arrow-square-out) opens the link shown, the main's own else its set's
-  (`component::doc_link_of`). A single instance's card puts a book button (`icon::BOOK_OPEN`, tooltip
-  *Open documentation: ‹host›*) at the end of the name line when its main or set has a link, and no
-  book otherwise. **`component::open_doc_link` is the only door to the browser** (egui's `OpenUrl`)
+  set's host. An open button (`icon::ARROW_SQUARE_OUT`) opens the link shown, the main's own else its
+  set's (`component::doc_link_of`). A single instance's card puts the same button (tooltip *Open
+  documentation: ‹host›*) at the end of the name line when its main or set has a link, and none
+  otherwise. The host shown (`ondin_core::link_host`) ends at a `\` as well as at `/`, `?` and `#`,
+  as a browser reads the address, so it is the host the link opens. **`component::open_doc_link` is the only door to the browser** (egui's `OpenUrl`)
   and re-checks `web_link`, so only an `http`/`https` address leaves the app; nothing is fetched.
 - A face's instance count is on its name's line and is the *Select all*
   (`component::name_line(ui, glyph, name, instances)`; at zero plain `text::dim()` and dead).

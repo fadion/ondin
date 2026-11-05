@@ -555,6 +555,7 @@ pub mod icon {
     /// The open-hand cursor: [`HAND`] filled, so it reads over artwork.
     pub const HAND_FILL: &str = "\u{f002}";
     /// The Line tool and layer, and a line's own *Length* field: the line, measured.
+    /// Also every *Stroke* step, which has no glyph of its own.
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
@@ -791,8 +792,9 @@ pub mod icon {
     // the circular ones (`ARROW_COUNTER_CLOCKWISE`), which read as "rotate".
     pub const ARROW_U_UP_LEFT: &str = "\u{e08a}";
     pub const ARROW_U_UP_RIGHT: &str = "\u{e08c}";
-    /// `flex-wrap: wrap`: a line running into a wall and turning back under
-    /// itself. [`WRAP_REVERSE`] is the same drawing flipped.
+    /// Wrapping: `flex-wrap: wrap`, and a text's *Wrap* step. A line running into a
+    /// wall and turning back under itself. [`WRAP_REVERSE`] is the same drawing
+    /// flipped.
     pub const WRAP: &str = "\u{f01a}";
     /// `flex-wrap: wrap-reverse`: [`WRAP`] flipped, the line turning back over.
     pub const WRAP_REVERSE: &str = "\u{f019}";
@@ -810,7 +812,8 @@ pub mod icon {
     /// A blend-mode step's History glyph.
     pub const INTERSECT_THREE: &str = "\u{ecc4}";
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
-    /// Colour review's merge target: the row the others fold into.
+    /// Colour review's merge: the target row the others fold into, and the *Merge
+    /// colours* step.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
     /// Compare's grip between the two states. A gap is [`ARROWS_OUT_LINE_HORIZONTAL`].
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
@@ -828,8 +831,8 @@ pub mod icon {
     /// A stroke's cap: a stroke's end, rounded, against a dotted line where the
     /// path stops.
     pub const STROKE_CAP: &str = "\u{f03c}";
-    // The two horizontal sides, completing the set with `ARROW_UP`/`ARROW_DOWN`
-    // above: each arrow points at the side whose width it sets.
+    // A step one way along a row: *Move left* / *Move right*, *Move earlier* /
+    // *Move later*, a flex direction, batch rename's order.
     pub const ARROW_LEFT: &str = "\u{e058}";
     pub const ARROW_RIGHT: &str = "\u{e06c}";
     // --- typography ------------------------------------------------------
@@ -872,6 +875,10 @@ pub mod icon {
     /// arrow pointing **at** it: the bar is the margin the number is measured
     /// from (`ARROW_LINE_LEFT` for the start inset), and swapping the pair would
     /// put each number on the opposite margin.
+    ///
+    /// They also carry [`ARROW_LINE_UP`]'s *all the way* reading: a mode's *Make
+    /// default* (moved to the first column) and flex *No wrap* (a line run into
+    /// the wall, against [`WRAP`]'s turning back).
     pub const ARROW_LINE_LEFT: &str = "\u{e062}";
     pub const ARROW_LINE_RIGHT: &str = "\u{e064}";
     /// Paragraph spacing — the pilcrow, which is the thing being spaced.
@@ -934,7 +941,8 @@ pub mod icon {
     /// A style card's *Create style…* (§15 D1063).
     pub const PLUS_SQUARE: &str = "\u{ed4a}";
     /// Colours as a set: the browser's `+` menu's *Colour variable* and *Number
-    /// variable*, Group colors, the picker's row of this document's colours.
+    /// variable*, Group colors, the picker's row of this document's colours, and
+    /// View's *Colour review*.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
     /// A boolean variable: a switch, its knob on.
@@ -957,10 +965,12 @@ pub mod icon {
     /// Component card's main link and its *Go to main* button, *Go to main in*
     /// a kit (§15 D981).
     pub const ARROW_UP_RIGHT: &str = "\u{e092}";
-    /// Open elsewhere: a main's documentation link in the browser, *Open kit*;
-    /// also *Move to page ▸*.
+    /// Open elsewhere: a main's documentation link in the browser, from the main's
+    /// field and from an instance's card alike, and *Open kit*.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
-    /// A main's documentation link, opened in the browser.
+    /// Unused: a documentation link is [`GLOBE`] and opening it
+    /// [`ARROW_SQUARE_OUT`]. Kept because dropping it means rebuilding the font.
+    #[allow(dead_code)]
     pub const BOOK_OPEN: &str = "\u{e0e6}";
     /// Comparing with a version: two states, each arrow carrying one into the other.
     pub const GIT_DIFF: &str = "\u{f00c}";
@@ -1935,25 +1945,6 @@ mod tests {
             "OndinIcons.ttf was not built from the current glyphs.json (want \
              `{stamp}`); rebuild it with assets/icons/build_font.py"
         );
-    }
-
-    /// The four side arrows have to be four *different* pictures, each pointing at
-    /// the side whose width it labels. Four copies of one arrow would read as a
-    /// decoration and leave the fields unidentifiable — and is exactly what a
-    /// copy-paste slip in the table above produces.
-    #[test]
-    fn the_four_side_arrows_are_four_different_glyphs() {
-        let all = [
-            icon::ARROW_UP,
-            icon::ARROW_RIGHT,
-            icon::ARROW_DOWN,
-            icon::ARROW_LEFT,
-        ];
-        for (i, a) in all.iter().enumerate() {
-            for b in &all[i + 1..] {
-                assert_ne!(a, b, "two of the side arrows are the same codepoint");
-            }
-        }
     }
 
     /// Every chrome ink stays legible on every chrome ground in both palettes:

@@ -133,16 +133,13 @@ fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleVa
         .then_some(first)
 }
 
-/// A layout's glyph: *columns* for a row, the same picture
-/// turned, *rows*, for a column — the display glyph turned with the direction —
-/// and [`icon::GRID_LAYOUT`] for a grid.
+/// A layout's glyph, the one its *Flex layout* / *Grid layout* step wears:
+/// [`icon::FLEX_LAYOUT`] in either direction, which the summary names, and
+/// [`icon::GRID_LAYOUT`] for a grid.
 pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static str {
-    use ondin_core::container::{Display, FlexDirection};
+    use ondin_core::container::Display;
     match display {
-        Display::Flex(f) => match f.direction {
-            FlexDirection::Row | FlexDirection::RowReverse => icon::COLUMNS,
-            FlexDirection::Column | FlexDirection::ColumnReverse => icon::ROWS,
-        },
+        Display::Flex(_) => icon::FLEX_LAYOUT,
         Display::Grid(_) => icon::GRID_LAYOUT,
     }
 }

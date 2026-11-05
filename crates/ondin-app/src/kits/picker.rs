@@ -1842,7 +1842,7 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             ui.label(
-                                egui::RichText::new(icon::BOOK_OPEN)
+                                egui::RichText::new(icon::GLOBE)
                                     .font(theme::icon_font(13.0))
                                     .color(theme::text::faint()),
                             );

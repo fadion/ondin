@@ -3592,7 +3592,7 @@ impl OndinApp {
                 segment_label(painter, rect, WrapMode::ALL[i].label(), on)
             }) && WrapMode::ALL[i] != p.wrap
             {
-                self.session.name_step("Wrap", icon::ARROW_LINE_RIGHT);
+                self.session.name_step("Wrap", icon::WRAP);
                 self.commit_paragraph(
                     subject.id,
                     ParagraphStyle {

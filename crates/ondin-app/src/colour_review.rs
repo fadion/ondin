@@ -459,7 +459,7 @@ impl OndinApp {
         }
         let (label, glyph) = match new {
             Some(_) => ("Merge into a new variable", icon::BRACKETS_CURLY),
-            None => ("Merge colours", icon::SWATCHES),
+            None => ("Merge colours", icon::ARROWS_MERGE),
         };
         self.session.name_step(label, glyph);
         if !self.commit_edit(merged.tx) {

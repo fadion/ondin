@@ -1024,8 +1024,8 @@ impl OndinApp {
                                     (ExportBackground::Transparent, false) => {
                                         "JPEG has no alpha — this exports on white"
                                     }
-                                    // Plural where the answer is plural (§15 D657):
-                                    // the chip is muted over a multi-selection.
+                                    // Plural where the answer is plural: over a
+                                    // multi-selection each layer has its own frame.
                                     (ExportBackground::Frame, _) if sizing.is_none() => {
                                         "Each layer's own nearest frame — no single colour to show"
                                     }

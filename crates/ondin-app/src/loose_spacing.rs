@@ -373,12 +373,12 @@ impl OndinApp {
     }
 }
 
-/// A layer's centre dot: white, ringed in the selection blue.
+/// A layer's centre dot: the canvas's handle white, ringed in the selection blue.
 fn paint_dot(painter: &egui::Painter, at: egui::Pos2) {
     painter.circle(
         at,
         DOT_R,
-        egui::Color32::WHITE,
+        color::POINT,
         egui::Stroke::new(1.5, color::SELECT),
     );
 }

@@ -1673,14 +1673,14 @@ fn heading(
         paint_hexagon(ui, main, slot, block.response.rect);
         if !summary.is_empty() || !docs.is_empty() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // The book at the line's end, its tooltip the link's host.
+                // The open button at the line's end, its tooltip the link's host.
                 if !docs.is_empty() {
                     let tip = if crate::private::on() {
                         "Open documentation".to_string()
                     } else {
                         format!("Open documentation: {}", ondin_core::link_host(docs))
                     };
-                    if ui::icon_button(ui, icon::BOOK_OPEN, LINK_H, 14.0, false, true)
+                    if ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
                         .on_hover_text(tip)
                         .clicked()
                     {
@@ -2568,7 +2568,7 @@ mod tests {
 
         f.app.session.selection.set_one(f.i);
         let out = settle(&mut f.app, &ctx);
-        field(&out, icon::BOOK_OPEN);
+        field(&out, icon::ARROW_SQUARE_OUT);
 
         // Private mode masks the link and the description as it does names.
         assert!(

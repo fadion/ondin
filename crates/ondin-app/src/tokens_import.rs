@@ -1092,7 +1092,9 @@ fn note_row(ui: &mut egui::Ui, note: &str) {
         });
 }
 
-/// *Keep this file linked*, then *Cancel* (or *Later*) and *Apply N changes*.
+/// *Keep this file linked* on the left, then the dialogs' footer row
+/// (`settings::footer_row_noted`): *Cancel* (or *Later*) and *Apply N changes*,
+/// a refusal written to the row's left and worn as Apply's tooltip.
 fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 50.0), egui::Sense::hover());
     if t.linkable {
@@ -1111,47 +1113,38 @@ fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
         0 => "Done".to_string(),
         n => format!("Apply {}", changes_label(n)),
     };
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(PAD, 11.0)))
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
-    );
-    child.spacing_mut().item_spacing.x = 8.0;
     let state = match &t.why_not {
         None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
-    let primary = crate::settings::text_button(&mut child, &go, state);
-    let primary = match &t.why_not {
-        Some(why) => primary.on_hover_text(why.as_str()),
-        None => primary,
-    };
     let back = if t.from_link { "Later" } else { "Cancel" };
-    let cancel = crate::settings::text_button(&mut child, back, FieldButton::Off);
+    let buttons = [(back, FieldButton::Off), (go.as_str(), state)];
+    let row = rect.shrink2(egui::vec2(PAD, 11.0));
     if let Some(why) = &t.why_not {
+        let right = row.right() - crate::settings::footer_row_w(ui, &buttons) - 8.0;
         let mut job = egui::text::LayoutJob::simple_singleline(
             why.clone(),
             egui::FontId::proportional(ui::CAPTION_PT),
             color::warn(),
         );
-        job.wrap =
-            egui::text::TextWrapping::truncate_at_width(cancel.rect.left() - rect.center().x - 8.0);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(right - rect.center().x);
         let g = ui.fonts_mut(|f| f.layout_job(job));
         ui.painter().galley(
-            egui::pos2(
-                cancel.rect.left() - 8.0 - g.size().x,
-                rect.center().y - g.size().y / 2.0,
-            ),
+            egui::pos2(right - g.size().x, rect.center().y - g.size().y / 2.0),
             g,
             color::warn(),
         );
     }
-    if primary.clicked() && t.why_not.is_none() {
-        Some(Act::Apply)
-    } else if cancel.clicked() {
-        Some(if t.from_link { Act::Later } else { Act::Cancel })
-    } else {
-        None
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let why_not = t.why_not.as_deref();
+    match crate::settings::footer_row_noted(&mut child, &buttons, why_not) {
+        Some(0) => Some(if t.from_link { Act::Later } else { Act::Cancel }),
+        Some(_) => Some(Act::Apply),
+        None => None,
     }
 }
 
@@ -1381,6 +1374,52 @@ mod tests {
         assert!(ctx.memory(|m| m.focused()).is_none());
         frame(&mut app, vec![key(egui::Key::Enter)]);
         assert!(!app.session.doc.variables().is_empty(), "Enter applies");
+    }
+
+    /// `Tab` walks the footer the way it reads: the link box, Cancel, then Apply.
+    /// flip: the buttons laid right to left (`foot`'s old row, or
+    /// `settings::footer_row_noted`'s layout) → fails at "left to right".
+    #[test]
+    fn tab_walks_the_footer_left_to_right() {
+        let (ctx, mut app) = app();
+        app.open_tokens_import(temp_file("tab", FILE), false);
+        let mut t = app.tokens_import.take().expect("opened");
+        assert!(t.linkable, "the box is drawn");
+        let frame = |t: &mut TokensImport, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let _ = foot(ui, t);
+            });
+            ctx.memory(|m| m.focused())
+                .and_then(|id| ctx.read_response(id))
+                .map(|r| r.rect)
+        };
+        let tab = || {
+            vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(&mut t, vec![]);
+        let mut stops = Vec::new();
+        for _ in 0..3 {
+            frame(&mut t, tab());
+            stops.push(frame(&mut t, vec![]).expect("a footer control holds the focus"));
+        }
+        assert!(
+            stops.windows(2).all(|w| w[0].center().x < w[1].center().x),
+            "left to right: {stops:?}"
+        );
     }
 
     /// A click on a group's header closes that group and a second opens it;

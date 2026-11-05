@@ -576,17 +576,12 @@ pub(crate) fn footer_row_noted(
     buttons: &[(&str, FieldButton)],
     why_not: Option<&str>,
 ) -> Option<usize> {
-    const GAP: f32 = 8.0;
     let mut pressed = None;
-    let widths: f32 = buttons
-        .iter()
-        .map(|(label, _)| text_button_w(ui, label))
-        .sum();
-    let row = widths + GAP * buttons.len().saturating_sub(1) as f32;
+    let row = footer_row_w(ui, buttons);
     // Laid left to right after the slack, not right to left: `Tab` follows the
     // order controls are added in, and it must read the way out first.
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = GAP;
+        ui.spacing_mut().item_spacing.x = FOOTER_ROW_GAP;
         ui.add_space((ui.available_width() - row).max(0.0));
         for (i, (label, state)) in buttons.iter().enumerate() {
             let mut resp = text_button(ui, label, *state);
@@ -601,6 +596,19 @@ pub(crate) fn footer_row_noted(
         }
     });
     pressed
+}
+
+/// The gap between a footer row's buttons.
+const FOOTER_ROW_GAP: f32 = 8.0;
+
+/// The width [`footer_row_noted`] lays `buttons` in, gaps included: what a caller
+/// painting a note to the row's left keeps clear.
+pub(crate) fn footer_row_w(ui: &egui::Ui, buttons: &[(&str, FieldButton)]) -> f32 {
+    let widths: f32 = buttons
+        .iter()
+        .map(|(label, _)| text_button_w(ui, label))
+        .sum();
+    widths + FOOTER_ROW_GAP * buttons.len().saturating_sub(1) as f32
 }
 
 /// Which way the modal was closed. `None` for "still open" is the third state and

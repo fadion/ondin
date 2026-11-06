@@ -116,6 +116,7 @@ mod measure;
 mod menu;
 mod meter;
 mod minimap;
+mod mirror;
 #[cfg(target_os = "macos")]
 mod open_event;
 mod pages;

@@ -544,6 +544,8 @@ pub struct EditorSession {
     /// *Repeat around origin…* makes linked copies in this document rather than
     /// plain ones.
     pub repeat_linked: bool,
+    /// The pen's and the pencil's mirror in this document (`crate::mirror`).
+    pub mirror: crate::mirror::Mirror,
     status: Status,
     /// Which frame a status write belongs to ([`Self::next_status_pass`]): writes in
     /// one frame are one handler's, and join after an error.
@@ -755,6 +757,7 @@ impl EditorSession {
             last_detached: Default::default(),
             last_transform: None,
             repeat_linked: false,
+            mirror: Default::default(),
             status: Status::default(),
             status_pass: 0,
             compare: None,

@@ -2953,6 +2953,7 @@ pub fn solid_stroke(color: Color, width: f64) -> Stroke {
 ///
 /// The node origin sits at the first anchor. `close` joins the last anchor back to
 /// the first, through their handles. Fewer than two anchors yields an empty transaction.
+#[cfg(test)]
 pub fn create_path(
     id: NodeId,
     parent: NodeId,
@@ -2962,11 +2963,36 @@ pub fn create_path(
     close: bool,
     stroke: Stroke,
 ) -> Transaction {
-    if anchors.len() < 2 {
+    let one = [PenSubpath {
+        anchors: anchors.to_vec(),
+        closed: close,
+    }];
+    create_paths(id, parent, index, parent_world, &one, stroke)
+}
+
+/// Create a `Path` node from world-space pen `subpaths` under `parent`, carrying
+/// the one `stroke` and no fill — several when a mirrored run does not join.
+///
+/// The node origin sits at the first subpath's first anchor. A subpath of fewer
+/// than two anchors is left out; none left yields an empty transaction.
+pub fn create_paths(
+    id: NodeId,
+    parent: NodeId,
+    index: usize,
+    parent_world: Affine,
+    subpaths: &[PenSubpath],
+    stroke: Stroke,
+) -> Transaction {
+    let subpaths: Vec<PenSubpath> = subpaths
+        .iter()
+        .filter(|s| s.anchors.len() >= 2)
+        .cloned()
+        .collect();
+    let Some(first) = subpaths.first() else {
         return Transaction(vec![]);
-    }
-    let origin = parent_world.inverse() * anchors[0].at;
-    let mut path = pen_outline(anchors, close);
+    };
+    let origin = parent_world.inverse() * first.anchors[0].at;
+    let mut path = pen_path(&subpaths);
     path.apply_affine(Affine::translate(-origin.to_vec2()) * parent_world.inverse());
     Transaction(vec![
         Operation::CreateNode {
@@ -2975,10 +3001,7 @@ pub fn create_path(
             index,
             kind: NodeKind::Path {
                 path,
-                corner_radii: pen_radii(&[PenSubpath {
-                    anchors: anchors.to_vec(),
-                    closed: close,
-                }]),
+                corner_radii: pen_radii(&subpaths),
                 corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(origin.to_vec2())),
@@ -2994,7 +3017,7 @@ pub fn create_path(
 /// Write world-space `subpaths` back into the existing `Path` node `id`, whose
 /// own world transform is `node_world`.
 ///
-/// The partner of [`create_path`] for the resume case, except that the transform is
+/// The partner of [`create_paths`] for the resume case, except that the transform is
 /// not touched: extending the start of a path must not move its origin.
 ///
 /// Fewer than two anchors in every subpath yields an empty transaction, and so does

@@ -1,6 +1,7 @@
 //! The path bar: a short rail beside the tool rail while a path's points are being
 //! edited, holding the node tool's verbs — select or add points, corner and smooth,
-//! join, reverse, simplify, offset — and the way out.
+//! join, reverse, simplify, offset — and the way out. While the pen or the pencil
+//! draws new paths it holds the mirror switch instead (`crate::mirror`).
 //!
 //! It floats over the canvas, the ruler included, centred on the rail's Pen button,
 //! so it reads as that button's drawer. *Offset* opens a card with one scrubbable
@@ -177,14 +178,131 @@ enum Verb {
     Reverse,
     Simplify,
     Offset,
+    /// The pen's and the pencil's mirror switch, which opens its flyout.
+    Mirror,
     Done,
 }
 
+/// What one frame of the bar answered: the verb clicked, the bar's rect, and the
+/// rects of the two buttons that hang a card or a flyout.
+struct Shown {
+    clicked: Option<Verb>,
+    bar: egui::Rect,
+    offset: egui::Rect,
+    mirror: egui::Rect,
+}
+
 impl OndinApp {
+    /// Draw `bar` beside the rail, centred on its Pen button (with the rail hidden,
+    /// on the canvas's edge), so it reads as that button's drawer.
+    fn show_bar(&self, ctx: &egui::Context, bar: &[E]) -> Shown {
+        let centre_y = if self.show_toolbar && self.pen_button.is_finite() {
+            self.pen_button.center().y
+        } else {
+            self.canvas_rect.center().y
+        };
+        let at = egui::pos2(self.canvas_rect.left() + GAP, centre_y);
+        let mut clicked: Option<Verb> = None;
+        let (mut offset, mut mirror) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
+        let shown = egui::Area::new(egui::Id::new("path-bar"))
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::LEFT_CENTER)
+            .fixed_pos(at)
+            .show(ctx, |ui| {
+                bar_frame().show(ui, |ui| {
+                    // Less the hairline, which the frame draws outside its content.
+                    ui.set_width(BAR_W - 2.0);
+                    ui.vertical_centered(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        for e in bar {
+                            match e {
+                                E::Sep => separator(ui),
+                                E::Btn {
+                                    glyph,
+                                    tip,
+                                    dimmed,
+                                    active,
+                                    enabled,
+                                    verb,
+                                } => {
+                                    let resp =
+                                        icon_button(ui, glyph, 30.0, 20.0, *active, *enabled)
+                                            .on_hover_text(crate::input::keys(if *enabled {
+                                                tip
+                                            } else {
+                                                dimmed
+                                            }));
+                                    match verb {
+                                        Verb::Offset => offset = resp.rect,
+                                        Verb::Mirror => mirror = resp.rect,
+                                        _ => {}
+                                    }
+                                    if *enabled && resp.clicked() {
+                                        clicked = Some(*verb);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            });
+        Shown {
+            clicked,
+            bar: shown.response.rect,
+            offset,
+            mirror,
+        }
+    }
+
+    /// The bar while the pen or the pencil is drawing new paths: the mirror switch
+    /// with its flyout, and the way out.
+    fn drawing_bar(&mut self, ctx: &egui::Context) {
+        let on = self.session.mirror.axes != crate::mirror::Axes::Off;
+        let bar = [
+            E::Btn {
+                glyph: icon::FLIP_HORIZONTAL,
+                tip: "Mirror while drawing",
+                dimmed: "",
+                active: on || self.mirror_open,
+                enabled: true,
+                verb: Verb::Mirror,
+            },
+            E::Sep,
+            E::Btn {
+                glyph: icon::CHECK,
+                tip: "Done",
+                dimmed: "",
+                active: false,
+                enabled: true,
+                verb: Verb::Done,
+            },
+        ];
+        let shown = self.show_bar(ctx, &bar);
+        match shown.clicked {
+            Some(Verb::Mirror) => self.mirror_open = !self.mirror_open,
+            Some(Verb::Done) => {
+                self.finish_pen(false);
+                self.choose_tool(Tool::Select);
+                return;
+            }
+            _ => {}
+        }
+        if self.mirror_open {
+            self.mirror_flyout(ctx, shown.mirror);
+        }
+    }
+
     /// Draw the path bar and its Offset card while a path's points are being edited.
     pub(crate) fn path_bar(&mut self, ctx: &egui::Context) {
+        // The mirror's flyout hangs only from the drawing bar.
+        if !matches!(self.tool, Tool::Pen | Tool::Pencil) {
+            self.mirror_open = false;
+        }
         let Some(id) = self.edited_path() else {
             self.close_offset_card();
+            if matches!(self.tool, Tool::Pen | Tool::Pencil) {
+                self.drawing_bar(ctx);
+            }
             return;
         };
         if self.offset_card.as_ref().is_some_and(|c| c.id != id) {
@@ -277,58 +395,10 @@ impl OndinApp {
             },
         ];
 
-        // Centred on the rail's Pen button; with the rail hidden, on the canvas's edge.
-        let centre_y = if self.show_toolbar && self.pen_button.is_finite() {
-            self.pen_button.center().y
-        } else {
-            self.canvas_rect.center().y
-        };
-        let at = egui::pos2(self.canvas_rect.left() + GAP, centre_y);
-        let mut clicked: Option<Verb> = None;
-        let mut offset_button = egui::Rect::NOTHING;
-        let shown = egui::Area::new(egui::Id::new("path-bar"))
-            .order(egui::Order::Foreground)
-            .pivot(egui::Align2::LEFT_CENTER)
-            .fixed_pos(at)
-            .show(ctx, |ui| {
-                bar_frame().show(ui, |ui| {
-                    // Less the hairline, which the frame draws outside its content.
-                    ui.set_width(BAR_W - 2.0);
-                    ui.vertical_centered(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        for e in &bar {
-                            match e {
-                                E::Sep => separator(ui),
-                                E::Btn {
-                                    glyph,
-                                    tip,
-                                    dimmed,
-                                    active,
-                                    enabled,
-                                    verb,
-                                } => {
-                                    let resp =
-                                        icon_button(ui, glyph, 30.0, 20.0, *active, *enabled)
-                                            .on_hover_text(crate::input::keys(if *enabled {
-                                                tip
-                                            } else {
-                                                dimmed
-                                            }));
-                                    if matches!(verb, Verb::Offset) {
-                                        offset_button = resp.rect;
-                                    }
-                                    if *enabled && resp.clicked() {
-                                        clicked = Some(*verb);
-                                    }
-                                }
-                            }
-                        }
-                    });
-                });
-            });
-        let bar_rect = shown.response.rect;
+        let shown = self.show_bar(ctx, &bar);
+        let (bar_rect, offset_button) = (shown.bar, shown.offset);
 
-        match clicked {
+        match shown.clicked {
             Some(Verb::Points) => self.choose_tool(Tool::Node),
             Some(Verb::Pen) => self.choose_tool(Tool::Pen),
             Some(Verb::Smooth(smooth)) => self.set_point_smoothness(smooth),
@@ -340,7 +410,7 @@ impl OndinApp {
                 self.choose_tool(Tool::Select);
                 return;
             }
-            None => {}
+            Some(Verb::Mirror) | None => {}
         }
         if self.offset_card.is_some() {
             self.offset_card_ui(ctx, bar_rect, offset_button);

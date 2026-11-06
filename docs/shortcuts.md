@@ -527,7 +527,8 @@ or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's 
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
 variables browser (inner rungs first) → a text session → the find box → colour review (its own
-inner rungs first) → the Repeat around origin card → the Blend shapes card → a compare → the pen →
+inner rungs first) → the Repeat around origin card → the Blend shapes card → the path bar's mirror flyout → a compare →
+the pen →
 **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
 Offset card (`offset_card`) → pen bias armed over an edit → the point selection → the pivot handle → the entered group (selects it) → a tool that is

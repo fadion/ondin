@@ -1,7 +1,7 @@
 # Pen and node tools
 
-Drawing paths with the pen and the pencil, resuming them, editing their points with the node tool
-(`A`), joining two path layers, and per-anchor corner radii. Part of §9.4.
+Drawing paths with the pen and the pencil, mirrored or not, resuming them, editing their points with
+the node tool (`A`), joining two path layers, and per-anchor corner radii. Part of §9.4.
 
 ## 9.4 The pen
 
@@ -60,7 +60,7 @@ ordinary stroked `Path` the node tool edits like a pen path.
 - **What lands.** One stroke, no fill, round caps and joins, in the frame under the press
   (`draw_target`). Colour and width are the last pencil path's as it stands now
   (`OndinApp::pencil_last`), so a width changed on it in the Stroke card carries to the next stroke;
-  before any, the pen's (`PEN_STROKE_COLOR`, `PEN_STROKE_WIDTH`). `tools::create_path` takes the whole
+  before any, the pen's (`PEN_STROKE_COLOR`, `PEN_STROKE_WIDTH`). `tools::create_paths` takes the whole
   `Stroke`. The new path is selected; one stroke is one undo step, *Draw path*.
 - **The tool stays on** after a stroke, unlike the pen: freehand comes in runs. Arming it keeps the
   selection, since a stroke can carry on the selected path.
@@ -78,6 +78,48 @@ ordinary stroked `Path` the node tool edits like a pen path.
   (`cancel_gesture`); Escape with nothing in flight falls through the ladder to Select. A tool
   switch, an undo or redo that moves the document (`document_rewound`) and a page switch drop a
   stroke in flight; a document switch also forgets `pencil_last`.
+
+## Mirror while drawing
+
+The pen and the pencil draw the other half of a new path as they go, reflected across a vertical
+axis, a horizontal one or both (`crate::mirror`).
+
+- **State.** `EditorSession::mirror` (`mirror::Mirror { axes, at }`), per document, in memory only.
+  `at` is where the axes cross once one has been dragged. `None` is the default: the middle of the
+  frame the run lands in (`draw_target` under the run's first point; under the pointer while nothing
+  is drawn), on open canvas the view's centre (`Camera::center`). `OndinApp::mirror_axes` resolves it.
+  A new run on open canvas fixes `at` at the view's centre as it starts (`pin_mirror_axes`), so a
+  pan or zoom mid-run does not move the axes under anchors already placed; *Reset axis* lets them
+  follow the view again.
+- **The joining rule** (`mirror::mirrored`). An end of the run within `ON_AXIS_PT` (8 screen pt) of
+  an axis is pulled onto it, and the halves join there:
+
+  | Ends on the axis | What lands |
+  | --- | --- |
+  | both | one closed symmetric path: the run, then its image backwards, the shared anchors once |
+  | one | one open path, joined there |
+  | neither | two subpaths in the one layer |
+
+  An already-closed run gets its image as a second subpath. At a join the anchor keeps the drawn
+  handle on one side and takes its mirror on the other, so the path is as smooth across the axis as
+  it was drawn. *Both axes* applies the vertical rule, then the horizontal one over what that made,
+  so a quarter drawn from axis to axis closes into a whole.
+- **Only new paths mirror.** The pen's and the pencil's new-path finishes go through
+  `OndinApp::mirror_run` and `tools::create_paths` (several subpaths in one `Path` node), one undo
+  step under its usual name, *Add path* or *Draw path*. Extending a path (pen resume, a pencil stroke
+  carried on) does not mirror.
+- **Pen snapping.** A new run's anchor within `ON_AXIS_PT` of an axis lands on it, over the other
+  snaps (`snap_to_axis`, in `canvas::pen_point`), so a run can start and end exactly on it.
+- **On the canvas** (`mirror_chrome`). While the pen or the pencil is armed and mirroring, and the
+  run in flight is not extending a path, each axis
+  is a dashed `accent_400` line through the frame being drawn in, or across the canvas on open
+  canvas, with a 16×10 accent pill at its top end (left end for the horizontal axis) as its grab
+  handle: a drag moves that axis, a double-click puts the axes back to the default. While the pen
+  draws, the mirrored run shows at 45% of the pen stroke. The pen's opening status reads
+  *Mirroring across the vertical axis · start and end on the axis to close the shape* (the
+  horizontal axis likewise; under both axes, *draw from one axis to the other to close the shape*)
+  instead of its usual hint.
+- **The switch** is the path bar's Mirror button (*The path bar*, below).
 
 ## The node tool (`A`)
 
@@ -123,11 +165,21 @@ ordinary stroked `Path` the node tool edits like a pen path.
 
 ## The path bar
 
-While a path's points are edited (`canvas::edited_path`), a short rail floats beside the tool rail,
-centred on its Pen slot (`OndinApp::pen_button`, whichever of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`). It holds the tool's verbs:
-select points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the
-point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`). It shows
-nothing the canvas does not already offer except *Simplify* and *Offset*.
+A short rail floats beside the tool rail, centred on its Pen slot (`OndinApp::pen_button`, whichever
+of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; both bars are drawn by
+`show_bar`). It shows nothing the canvas does not already offer except *Simplify*, *Offset* and the
+mirror.
+
+- **While a path's points are edited** (`canvas::edited_path`) it holds the node tool's verbs: select
+  points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the point
+  selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`).
+- **While the pen or the pencil is armed** (`path_bar::drawing_bar`) it holds Mirror, a rule, and
+  *Done*, which finishes a pen run and drops to Select. Mirror
+  (`icon::FLIP_HORIZONTAL`, lit while mirroring or while its flyout is open) opens a `ui::flyout` in
+  the `Foreground` order (`OndinApp::mirror_open`): *Off*, *Vertical axis*, *Horizontal axis* and
+  *Both axes* as `ui::menu_check` rows, a rule, and *Reset axis*, dimmed until an axis has been
+  dragged (*The axis is where it starts*). A pick or a press elsewhere closes it, and so does
+  `Escape`, a rung of the ladder; leaving the pen and the pencil drops it.
 
 - **Simplify** (`build::simplify_path`, `simplify_outline`) flattens the drawn outline and refits it
   with `fit`'s cubics, within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units), as *Offset path*'s

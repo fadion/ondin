@@ -771,7 +771,7 @@ pub struct PenState {
 pub struct PenEdit {
     pub id: NodeId,
     /// The node's **own** world transform, not its parent's, so writing the edited
-    /// path back leaves the node's transform alone; `create_path`'s
+    /// path back leaves the node's transform alone; `create_paths`'s
     /// origin-at-the-first-anchor rule would move it.
     pub world: Affine,
     /// Every subpath the node holds, in world space, with the one being edited

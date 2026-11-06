@@ -47,6 +47,18 @@ pub(crate) struct PencilStroke {
     extend: Option<PenEdit>,
 }
 
+impl PencilStroke {
+    /// Where the trail began.
+    pub(crate) fn origin(&self) -> Option<Point> {
+        self.samples.first().copied()
+    }
+
+    /// Whether the stroke carries an existing path on rather than starting one.
+    pub(crate) fn extends(&self) -> bool {
+        self.extend.is_some()
+    }
+}
+
 impl OndinApp {
     /// The pencil's gesture: press starts a trail, dragging extends it, release fits
     /// it. Escape mid-drag drops it (`OndinApp::escape`).
@@ -99,6 +111,9 @@ impl OndinApp {
         let extend = self.pencil_extend_target(world);
         let start = extend.as_ref().and_then(PenEdit::endpoint).unwrap_or(world);
         let (parent, parent_world) = self.draw_target(start);
+        if extend.is_none() {
+            self.pin_mirror_axes(start);
+        }
         self.pencil = Some(PencilStroke {
             parent,
             parent_world,
@@ -193,13 +208,13 @@ impl OndinApp {
                 };
                 let id = self.session.ids.mint();
                 let style = self.pencil_style();
-                let tx = tools::create_path(
+                let run = self.mirror_run(sub);
+                let tx = tools::create_paths(
                     id,
                     stroke.parent,
                     self.child_count(stroke.parent),
                     stroke.parent_world,
-                    &sub.anchors,
-                    sub.closed,
+                    &run,
                     style.clone(),
                 );
                 self.pencil_last = Some((id, style));

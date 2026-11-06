@@ -140,7 +140,8 @@ ondin-app/src/
 ├─ measure.rs       Axis + Measure: Alt-hover measure and spacing-snap gaps; pure Rect geometry
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
 ├─ minimap.rs       the minimap card at the canvas's bottom left (app-canvas-chrome.md)
-├─ path_bar.rs      the path bar beside the rail while points are edited (app-pen-and-nodes.md)
+├─ path_bar.rs      the path bar beside the rail while points are edited or the pen or pencil is armed (app-pen-and-nodes.md)
+├─ mirror.rs        mirror while drawing: the axes, the joining rule, the canvas axes and the flyout (app-pen-and-nodes.md)
 ├─ rail.rs          the tool rail's grouped slots and their members' row (tools.md)
 ├─ pencil.rs        the pencil: the freehand trail, its fit on release, extending and closing (app-pen-and-nodes.md)
 ├─ slice.rs         slices on the canvas: the Slice tool's pick and the dashed outlines (tools.md)

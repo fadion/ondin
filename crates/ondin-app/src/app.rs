@@ -959,6 +959,8 @@ pub struct OndinApp {
     pub(crate) repeat: crate::repeat::RepeatCard,
     /// *Blend shapes…*'s card (`crate::blend`).
     pub(crate) blend: crate::blend::BlendCard,
+    /// The path bar's mirror flyout is open (`crate::mirror`).
+    pub(crate) mirror_open: bool,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1592,6 +1594,7 @@ impl OndinApp {
             colour_review: Default::default(),
             repeat: Default::default(),
             blend: Default::default(),
+            mirror_open: false,
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -2757,6 +2760,9 @@ impl OndinApp {
             self.close_repeat();
         } else if self.blend.open {
             self.close_blend();
+        } else if self.mirror_open {
+            // The path bar's mirror flyout, above the pen it was opened over.
+            self.mirror_open = false;
         } else if self.session.compare.is_some() {
             self.leave_compare();
         } else if self.pen.is_some() {

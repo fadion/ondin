@@ -1398,14 +1398,14 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
 }
 
 /// A flattened subpath in screen space (see [`OndinApp::flatten_to_screen`]).
-struct Polyline {
+pub(crate) struct Polyline {
     pts: Vec<egui::Pos2>,
     closed: bool,
 }
 
 impl Polyline {
     /// The subpath as a stroked shape, closed or open as the path was.
-    fn stroked(self, stroke: egui::Stroke) -> egui::Shape {
+    pub(crate) fn stroked(self, stroke: egui::Stroke) -> egui::Shape {
         match (self.pts.len(), self.closed) {
             (0..=1, _) => egui::Shape::Noop,
             (_, true) => egui::Shape::closed_line(self.pts, stroke),
@@ -4298,6 +4298,13 @@ impl OndinApp {
             .map(|e| vec![e.id])
             .unwrap_or_default();
         let snapped = snap::snap_point(world, (true, true), &self.snapping(&moving));
+        // A new run's anchor near a mirror axis lands on it, where the halves join.
+        if moving.is_empty() {
+            let (on, hit) = self.snap_to_axis(snapped.at);
+            if hit {
+                return (on, Vec::new());
+            }
+        }
         (snapped.at, snapped.guides)
     }
 
@@ -4306,6 +4313,7 @@ impl OndinApp {
             if self.pen_resume(world) {
                 return;
             }
+            self.pin_mirror_axes(world);
             let at = self.pen_point(world, shift).0;
             let (parent, parent_world) = self.draw_target(at);
             self.pen = Some(PenState {
@@ -4315,8 +4323,12 @@ impl OndinApp {
                 shaping: true,
                 editing: None,
             });
-            self.session
-                .info("Pen: click for a corner, drag for a curve; Enter or double-click to finish");
+            match self.mirror_status() {
+                Some(said) => self.session.info(said),
+                None => self.session.info(
+                    "Pen: click for a corner, drag for a curve; Enter or double-click to finish",
+                ),
+            }
             return;
         }
         // Snapped before the close test, so a press closes only where the preview showed.
@@ -6076,13 +6088,17 @@ impl OndinApp {
             None => {
                 let id = self.session.ids.mint();
                 let index = self.child_count(pen.parent);
-                let tx = tools::create_path(
+                // The mirror draws the other half, joined where the run meets the axis.
+                let run = self.mirror_run(crate::preview::PenSubpath {
+                    anchors: pen.anchors,
+                    closed: close,
+                });
+                let tx = tools::create_paths(
                     id,
                     pen.parent,
                     index,
                     pen.parent_world,
-                    &pen.anchors,
-                    close,
+                    &run,
                     tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
                 );
                 (id, tx, "Created path")
@@ -9347,6 +9363,7 @@ impl OndinApp {
         }
 
         self.draw_pencil(painter, rect, ppp, resp);
+        self.mirror_chrome(ui, painter, rect, ppp);
         if self.tool == Tool::ShapeBuilder {
             self.draw_builder(painter, rect, ppp, resp);
         }
@@ -9840,7 +9857,7 @@ impl OndinApp {
     /// Flatten a world-space path to screen points at a screen-pixel tolerance.
     /// Each [`Polyline`] records whether its subpath closes: `Shape::line` leaves
     /// the closing edge undrawn.
-    fn flatten_to_screen(
+    pub(crate) fn flatten_to_screen(
         &self,
         path: &ondin_core::kurbo::BezPath,
         rect: egui::Rect,
@@ -9871,7 +9888,7 @@ impl OndinApp {
     }
 
     /// A world-space rect as an axis-aligned screen rect.
-    fn world_rect_to_screen(&self, b: KRect, rect: egui::Rect, ppp: f32) -> egui::Rect {
+    pub(crate) fn world_rect_to_screen(&self, b: KRect, rect: egui::Rect, ppp: f32) -> egui::Rect {
         egui::Rect::from_min_max(
             self.to_screen(Point::new(b.min_x(), b.min_y()), rect, ppp),
             self.to_screen(Point::new(b.max_x(), b.max_y()), rect, ppp),

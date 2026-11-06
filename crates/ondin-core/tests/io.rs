@@ -104,6 +104,7 @@ fn rich_document() -> (Document, NodeId) {
                     path: p,
                     corner_radii: Vec::new(),
                     corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
                 },
                 transform: None,
                 name: None,
@@ -183,6 +184,69 @@ fn rich_document() -> (Document, NodeId) {
     .unwrap();
 
     (doc, root)
+}
+
+/// A mirrored path's axes survive a save and a load; a plain path writes no
+/// `mirror` key, so its bytes are what they were.
+/// flip: `NodeKind::Path::mirror` without its `skip_serializing_if` → fails at the count.
+#[test]
+fn a_mirrored_paths_axes_round_trip_and_a_plain_path_writes_none() {
+    let mut ids = IdSource::new(1);
+    let mut doc = Document::new(ids.mint());
+    let page = doc.first_page();
+    let (mirrored, plain) = (ids.mint(), ids.mint());
+    let mut diamond = BezPath::new();
+    diamond.move_to((0.0, -10.0));
+    diamond.line_to((10.0, 0.0));
+    diamond.line_to((0.0, 10.0));
+    diamond.line_to((-10.0, 0.0));
+    diamond.close_path();
+    let path = |mirror| NodeKind::Path {
+        path: diamond.clone(),
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
+        mirror,
+    };
+    let vertical = ondin_core::symmetry::PathMirror {
+        vertical: true,
+        horizontal: false,
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: mirrored,
+            parent: page,
+            index: 0,
+            kind: path(vertical),
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: plain,
+            parent: page,
+            index: 1,
+            kind: path(ondin_core::symmetry::PathMirror::NONE),
+            transform: None,
+            name: None,
+        },
+    ]))
+    .unwrap();
+    let bytes = io::save(&doc).unwrap();
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    assert_eq!(
+        text.matches("\"mirror\"").count(),
+        1,
+        "only the mirrored path writes it"
+    );
+    assert!(
+        !text.contains("\"horizontal\""),
+        "a false axis is not written"
+    );
+    let loaded = io::load(&bytes).unwrap();
+    assert_eq!(doc, loaded);
+    assert!(matches!(
+        loaded.get(mirrored).map(|n| n.kind()),
+        Some(NodeKind::Path { mirror, .. }) if mirror.vertical
+    ));
 }
 
 #[test]
@@ -1614,6 +1678,7 @@ fn path_corner_radii_survive_a_save_and_an_old_file_still_loads() {
             path: p,
             corner_radii: vec![0.0, 6.0],
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         transform: None,
         name: None,
@@ -3028,6 +3093,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                         p
                     },
                     corner_radii: Vec::new(),
+                    mirror: None,
                 },
             },
         ),

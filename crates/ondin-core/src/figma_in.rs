@@ -293,6 +293,7 @@ impl Builder<'_> {
                         path,
                         corner_radii: Vec::new(),
                         corner_smoothing: 0.0,
+                        mirror: crate::symmetry::PathMirror::NONE,
                     },
                     // Nothing to fill: drawn from its network when the file
                     // carries one, so its stroke stays a stroke.
@@ -301,6 +302,7 @@ impl Builder<'_> {
                             path,
                             corner_radii: Vec::new(),
                             corner_smoothing: 0.0,
+                            mirror: crate::symmetry::PathMirror::NONE,
                         },
                         // Else its stroke outlined, drawn as a shape.
                         (None, Some(path)) => {
@@ -399,6 +401,7 @@ impl Builder<'_> {
                 path,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             transform: Some(parent_world.inverse() * world),
             name: Some(str_of(n, "name").to_owned()),
@@ -448,6 +451,7 @@ impl Builder<'_> {
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         };
         let (id, f, s) = (self.ids.mint(), self.ids.mint(), self.ids.mint());
         self.push(Operation::CreateNode {

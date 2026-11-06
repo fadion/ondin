@@ -211,6 +211,7 @@ fn golden_document() -> (Document, Resolved) {
                 path: outline,
                 corner_radii: vec![6.0, 0.0, 3.0],
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: Some(Affine::translate((160.0, 100.0))),
             name: Some("Triangle".into()),

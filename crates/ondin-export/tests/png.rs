@@ -362,6 +362,7 @@ fn overlapping_path_doc(rule: ondin_core::FillRule) -> (Document, Resolved) {
                 path: squares,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,

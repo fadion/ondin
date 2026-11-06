@@ -3115,6 +3115,7 @@ mod tests {
             path: Default::default(),
             corner_radii: Default::default(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         };
         assert_eq!(size_modes(&frame, false, false), vec![Px], "no menu at all");
         assert_eq!(size_modes(&frame, true, false), vec![Px, FitContent]);

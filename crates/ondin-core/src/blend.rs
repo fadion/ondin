@@ -441,6 +441,7 @@ pub fn blend(
                 path,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: Some(format!("Step {k}")),

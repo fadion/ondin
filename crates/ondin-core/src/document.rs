@@ -2108,11 +2108,22 @@ impl Document {
             None => numbering.name(self, parent, kind),
         };
 
+        // A mirror axis lands only where it holds, as `GeometryPatch::Path` keeps it.
+        let mut stored = kind.clone();
+        if let NodeKind::Path {
+            path,
+            corner_radii,
+            mirror,
+            ..
+        } = &mut stored
+        {
+            *mirror = crate::symmetry::kept(path, corner_radii, *mirror);
+        }
         let node = Node {
             id,
             parent: Some(parent),
             children: Vec::new(),
-            kind: kind.clone(),
+            kind: stored,
             transform: transform.unwrap_or(Affine::IDENTITY),
             name,
             visible: true,
@@ -3829,16 +3840,24 @@ pub(crate) fn apply_geometry_patch(
             NodeKind::Path {
                 path,
                 corner_radii: radii,
+                mirror,
                 ..
             },
             G::Path {
                 path: new,
                 corner_radii: new_radii,
+                mirror: new_mirror,
             },
-        ) => Ok(G::Path {
-            path: std::mem::replace(path, new.clone()),
-            corner_radii: std::mem::replace(radii, new_radii.clone()),
-        }),
+        ) => {
+            let was = *mirror;
+            let old = G::Path {
+                path: std::mem::replace(path, new.clone()),
+                corner_radii: std::mem::replace(radii, new_radii.clone()),
+                mirror: Some(was),
+            };
+            *mirror = crate::symmetry::kept(path, radii, new_mirror.unwrap_or(was));
+            Ok(old)
+        }
         (NodeKind::Text { sizing, .. }, G::TextSizing(new)) => {
             Ok(G::TextSizing(std::mem::replace(sizing, *new)))
         }

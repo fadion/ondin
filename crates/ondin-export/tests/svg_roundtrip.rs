@@ -137,6 +137,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
                 path: p,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: Some(Affine::translate((180.0, 140.0))),
             name: None,

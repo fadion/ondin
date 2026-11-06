@@ -1887,6 +1887,8 @@ pub struct LayerState {
     pub divisible: bool,
     /// Why *Blend shapes…* cannot take the selection (`blend::pair`), if not.
     pub blend_refusal: Option<&'static str>,
+    /// The layer is a path mirrored across its own axes, which *Flatten* makes plain.
+    pub mirrored: bool,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
     pub all_slices: bool,
 }
@@ -2283,7 +2285,7 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .sub(vec![ops, vec![divide]]),
         );
     }
-    if !promoted_flatten && (cx.selection.len() >= 2 || on_boolean) {
+    if !promoted_flatten && (cx.selection.len() >= 2 || on_boolean || (one && st.mirrored)) {
         rows.push(Row::new(Item::Flatten).dim_if(locked, why));
     }
     // After Flatten for any two layers, refusing a picture or text by name.
@@ -3339,6 +3341,7 @@ impl OndinApp {
             blend_refusal: ondin_core::blend::pair(&self.session.doc, self.session.selection.ids())
                 .err()
                 .map(|r| r.says()),
+            mirrored: build::is_mirrored_path(&self.session.doc, id),
             all_slices: self.session.selection.ids().iter().all(|s| {
                 matches!(
                     self.session.doc.get(*s).map(|n| n.kind()),

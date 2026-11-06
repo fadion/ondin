@@ -213,8 +213,9 @@ impl OndinApp {
                 };
                 let id = self.session.ids.mint();
                 let style = self.pencil_style();
+                let near = sub.anchors.first().map(|a| a.at);
                 let run = self.mirror_run(sub);
-                let tx = tools::create_paths(
+                let mut tx = tools::create_paths(
                     id,
                     stroke.parent,
                     self.child_count(stroke.parent),
@@ -222,6 +223,13 @@ impl OndinApp {
                     &run,
                     style.clone(),
                 );
+                // Saved mirrored, so point editing keeps it so.
+                if let Some(frame) = self.mirror_frame(near) {
+                    crate::mirror::mark_mirrored(
+                        &mut tx,
+                        crate::mirror::path_mirror_of(frame.axes),
+                    );
+                }
                 self.pencil_last = Some((id, style));
                 (id, tx)
             }
@@ -771,6 +779,7 @@ mod tests {
                 path: drawn,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,

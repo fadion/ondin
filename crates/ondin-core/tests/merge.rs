@@ -599,6 +599,7 @@ fn a_paths_outline_and_radii_are_one_value() {
                 path: square(false),
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: Some("P".into()),
@@ -606,7 +607,11 @@ fn a_paths_outline_and_radii_are_one_value() {
     );
     let geometry = |path, corner_radii| Operation::SetGeometry {
         id: p,
-        geometry: GeometryPatch::Path { path, corner_radii },
+        geometry: GeometryPatch::Path {
+            path,
+            corner_radii,
+            mirror: None,
+        },
     };
     let ours = edited(&start, vec![geometry(square(true), Vec::new())]);
     let theirs = edited(

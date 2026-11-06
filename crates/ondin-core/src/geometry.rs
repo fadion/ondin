@@ -601,6 +601,7 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
             path,
             corner_radii,
             corner_smoothing,
+            ..
         } => Some(round_corners_smoothed(
             path,
             corner_radii,
@@ -1210,6 +1211,7 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
             path,
             corner_radii,
             corner_smoothing,
+            ..
         } => Some(round_corners_smoothed(path, corner_radii, *corner_smoothing).bounding_box()),
         // The layout's box, not `0,0..w,h`: a trimmed text node's box starts
         // below its local origin ([`TextLayout::origin`]), so this is the one kind
@@ -2387,6 +2389,7 @@ mod tests {
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         });
 
         assert!(
@@ -2655,11 +2658,13 @@ mod tests {
             path: path.clone(),
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         };
         let rounded = NodeKind::Path {
             path,
             corner_radii: vec![30.0],
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         };
         let plain = local_bounds(&square, None).unwrap();
         let cut = local_bounds(&rounded, None).unwrap();

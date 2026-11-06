@@ -2822,6 +2822,7 @@ mod tests {
             path: line,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         };
         let (slot, size) = placed(insets, Affine::IDENTITY, &path);
         assert_eq!(
@@ -3044,6 +3045,7 @@ mod tests {
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         };
         let bx = geometry::local_bounds(&kind, None).unwrap();
         let at = Affine::translate((20.0, 10.0));

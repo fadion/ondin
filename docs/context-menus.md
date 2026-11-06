@@ -145,7 +145,7 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Use as mask ✓ | `Ctrl+Alt+M` | absent on a frames-only selection and on a boolean's operand. Ticked when the layer is a mask or holds one. Dims with the inspector's refusal (`mask_refusal`), and on lock |
 | Even-odd fill ✓ | — | a lone `Path` only; dims on lock |
 | Boolean ▸ | — | `Item::BooleanMenu`, `UNITE_SQUARE` glyph; two or more layers, or a lone boolean; a submenu of the four operations and *Divide* (below); dims on lock |
-| Flatten | `Ctrl+E` | two or more layers (on a lone boolean it is in the head); dims on lock |
+| Flatten | `Ctrl+E` | two or more layers, or one path mirrored across its own axes (`LayerState::mirrored`), which it makes plain (on a lone boolean it is in the head); dims on lock |
 | Blend shapes… | — | exactly two layers; dims with `blend::pair`'s refusal (*"Blend shapes needs exactly two shapes"*, *"… can't take a picture"*, *"… can't take text"*, or the parts sentence); dims on lock. Opens the Blend shapes card (`app-booleans.md`) |
 | Convert to path | — | one text layer; dims *"This text has no glyphs to convert"*; dims on lock |
 | Flip to other side ✓ | — | one text layer on a rail; ticked when flipped; dims on lock |
@@ -157,7 +157,9 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Arrange ▸ | — | always; `Item::Arrange`, `STACK` glyph; a submenu of the four restacks (below); dims on lock |
 | Move to page ▸ | — | always, last of the group: it takes the layers off this page. A submenu of the other pages, each an `Item::MoveTo(page)` row under the page's shown name with the `FILE` glyph (`Context::other_pages`). A page there moves the selection to the top of that page, same place on the canvas, and clears it (`move_selection_to_page`). Dims *"This document has one page"*; dims on lock |
 
-*Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*.
+*Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*, except
+on a lone rounded mirrored path, where the two do different things: *Flatten* drops the mirror,
+*Outline shape* bakes the corners.
 
 **Boolean ▸**, two groups: *Union* (`Ctrl+Alt+U`) · *Subtract* (`S`) · *Intersect* (`I`) · *Exclude*
 (`X`), on a lone boolean checkable with its current operation ticked; then, after a rule, *Divide*

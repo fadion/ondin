@@ -10107,6 +10107,7 @@ mod image_edit_lock_tests {
             path: p,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         }
     }
 
@@ -16718,6 +16719,7 @@ mod undo_rewind_tests {
                 path: p,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,

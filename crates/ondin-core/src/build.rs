@@ -1401,7 +1401,9 @@ pub fn set_boolean_op(
 /// - Two or more layers: their union in the parent's space; groups and booleans
 ///   contribute through [`Resolved::operand_path`].
 ///
-/// A single non-boolean layer is refused (that is [`outline`]). Text is refused for
+/// - One mirrored path: the same outline with its mirror axes dropped.
+///
+/// Any other single layer is refused (that is [`outline`]). Text is refused for
 /// [`boolean`]'s reason.
 pub fn flatten(
     doc: &Document,
@@ -1411,9 +1413,36 @@ pub fn flatten(
 ) -> Result<(Transaction, NodeId), OpError> {
     match outermost(doc, members).as_slice() {
         [] => Err(OpError::WrongKindForOp),
+        [one] if is_mirrored_path(doc, *one) => Ok((flatten_mirror(doc, *one)?, *one)),
         [one] => flatten_boolean(doc, res, ids, *one),
         many => flatten_union(doc, res, ids, many),
     }
+}
+
+/// Whether `id` is a path mirrored across its own axes (`crate::symmetry`): what
+/// [`flatten`] takes alone, besides a boolean.
+pub fn is_mirrored_path(doc: &Document, id: NodeId) -> bool {
+    doc.get(id)
+        .is_some_and(|n| matches!(n.kind(), NodeKind::Path { mirror, .. } if !mirror.is_none()))
+}
+
+/// A mirrored path made plain: the same outline, its axes dropped, so point
+/// editing no longer keeps it symmetric.
+fn flatten_mirror(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
+    let Some(NodeKind::Path {
+        path, corner_radii, ..
+    }) = doc.get(id).map(Node::kind)
+    else {
+        return Err(OpError::WrongKindForOp);
+    };
+    Ok(Transaction(vec![Operation::SetGeometry {
+        id,
+        geometry: GeometryPatch::Path {
+            path: path.clone(),
+            corner_radii: corner_radii.clone(),
+            mirror: Some(crate::symmetry::PathMirror::NONE),
+        },
+    }]))
 }
 
 /// One boolean, replaced in place by its own result.
@@ -1538,6 +1567,7 @@ fn reshaped(id: NodeId, path: kurbo::BezPath) -> Transaction {
         geometry: GeometryPatch::Path {
             path,
             corner_radii: Vec::new(),
+            mirror: None,
         },
     }])
 }
@@ -2204,6 +2234,7 @@ pub fn outline_stroke(
                 path: ink,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             transform: Some(local),
             name: Some(format!("{} stroke", node.name())),
@@ -2682,6 +2713,7 @@ pub fn detach_text_path(
                 path: rail,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             transform: Some(node.transform()),
             name: None,
@@ -2727,6 +2759,7 @@ pub(crate) fn replace_with_path(
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
         },
         transform: Some(node.transform()),
         name: Some(node.name().to_string()),
@@ -2840,6 +2873,7 @@ fn flatten_union(
         path,
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: crate::symmetry::PathMirror::NONE,
     };
     // Named here: the create precedes the deletes, so the operands would still count.
     let name = crate::naming::free_name(&doc.child_names(parent, &ordered), kind.default_name(), 1);

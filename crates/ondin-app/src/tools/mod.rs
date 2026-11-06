@@ -1089,6 +1089,7 @@ fn scale_geometry(
                         path: scaled,
                         // Carried: only the Scale tool multiplies it (`scale_scalars`).
                         corner_radii: corner_radii.clone(),
+                        mirror: None,
                     },
                 });
                 carry_gradients(doc, id, csx, csy, ops);
@@ -1271,6 +1272,7 @@ fn scale_scalars(
                 geometry: GeometryPatch::Path {
                     path: path.clone(),
                     corner_radii: corner_radii.iter().map(|r| r * s).collect(),
+                    mirror: None,
                 },
             });
         }
@@ -3003,6 +3005,7 @@ pub fn create_paths(
                 path,
                 corner_radii: pen_radii(&subpaths),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: Some(Affine::translate(origin.to_vec2())),
             name: None,
@@ -3049,7 +3052,11 @@ pub fn rewrite_path(
     }
     Transaction(vec![Operation::SetGeometry {
         id,
-        geometry: GeometryPatch::Path { path, corner_radii },
+        geometry: GeometryPatch::Path {
+            path,
+            corner_radii,
+            mirror: None,
+        },
     }])
 }
 
@@ -3601,6 +3608,7 @@ mod tests {
                 path: pen,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             }
         };
 
@@ -3761,6 +3769,7 @@ mod tests {
                 path: pen,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,
@@ -3959,6 +3968,7 @@ mod tests {
                     path: pen,
                     corner_radii: Vec::new(),
                     corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
                 },
                 transform: None,
                 name: None,
@@ -4348,6 +4358,7 @@ mod tests {
                 path: pen,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,

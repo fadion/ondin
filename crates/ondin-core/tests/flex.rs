@@ -1888,6 +1888,7 @@ fn a_resize_clears_the_basis_and_a_point_edit_keeps_growth() {
             path: path.clone(),
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         (0.0, 0.0),
     );
@@ -1905,6 +1906,7 @@ fn a_resize_clears_the_basis_and_a_point_edit_keeps_growth() {
         geometry: GeometryPatch::Path {
             path: wider,
             corner_radii: Vec::new(),
+            mirror: None,
         },
     }]);
     assert_eq!(s.doc.get(p).unwrap().item().grow, 1.0, "its growth kept");

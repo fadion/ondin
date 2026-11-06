@@ -18,6 +18,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **A page is a parentless root listed in a page table**, not a node under one root: the structural operations, the loader's tree rules and the clipboard's rules hold unchanged (Delete, Reparent and Reorder refuse a page as a node), and `Document::new` stays a one-page document. Name and modes are the root's; ground and draft flag are the table's.
 - **D119** A path's corner radius lives in the model, not in the geometry.
 - **D114** A pen anchor carries two independent handles, not one mirrored vector.
+- **A mirrored path stores which axes, not where they are**: each runs through the centre of the path's control box, so it cannot drift from the points, and a flag is kept only while the path is symmetric about it, so a writer that knows nothing of mirrors can drop an axis but never leave a false one.
 - **D68** A rectangle's stroke can sit on one side; a side is an open path. **D69** Dash mode is classified from the stored pattern, never stored beside it.
 - **D144** Frames stroke over their contents and outside their own clip. Type can be stroked, which is how outlined type is expressed.
 - **D282** A mask is a layer that paints nothing and clips the run of siblings above it, by its outline, its alpha or its luminance (`MaskMode`). A mask is never hit, and what it masks is hit only inside it.

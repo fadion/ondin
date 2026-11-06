@@ -492,6 +492,7 @@ impl Builder<'_> {
                         path,
                         corner_radii: Vec::new(),
                         corner_smoothing: 0.0,
+                        mirror: crate::symmetry::PathMirror::NONE,
                     },
                     world,
                 )

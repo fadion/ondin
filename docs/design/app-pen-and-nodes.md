@@ -104,14 +104,21 @@ axis, a horizontal one or both (`crate::mirror`).
   handle on one side and takes its mirror on the other, so the path is as smooth across the axis as
   it was drawn. *Both axes* applies the vertical rule, then the horizontal one over what that made,
   so a quarter drawn from axis to axis closes into a whole.
-- **Only new paths mirror.** The pen's and the pencil's new-path finishes go through
-  `OndinApp::mirror_run` and `tools::create_paths` (several subpaths in one `Path` node), one undo
-  step under its usual name, *Add path* or *Draw path*. Extending a path (pen resume, a pencil stroke
-  carried on) does not mirror.
+- **New runs mirror; extending an end does not.** The pen's and the pencil's new-path finishes go
+  through `OndinApp::mirror_run` and `tools::create_paths` (several subpaths in one `Path` node), one
+  undo step under its usual name, *Add path* or *Draw path*, and mark the path with the axes they
+  mirrored across (`mirror::mark_mirrored`, `path_mirror_of`), so it is saved mirrored (*Mirrored
+  paths*, below). The model keeps only the axes that hold, so a path drawn in a turned frame lands
+  plain. A new run inside the edited path (the node tool's pen on bare canvas, `PenEdit::minted`)
+  mirrors too: across that path's own axes when it is mirrored, otherwise across the switch's when it
+  is on, which leaves a plain path plain. `OndinApp::mirror_frame` makes that choice for the commit,
+  the snapping and the chrome. Extending an open end (pen resume, a pencil stroke carried on) does
+  not mirror.
 - **Pen snapping.** A new run's anchor within `ON_AXIS_PT` of an axis lands on it, over the other
-  snaps (`snap_to_axis`, in `canvas::pen_point`), so a run can start and end exactly on it.
-- **On the canvas** (`mirror_chrome`). While the pen or the pencil is armed and mirroring, and the
-  run in flight is not extending a path, each axis
+  snaps (`snap_to_axis`, in `canvas::pen_point`), so a run can start and end exactly on it. It is
+  measured in the space the axes are straight in: a mirrored path's own, the world for the switch.
+- **On the canvas** (`mirror_chrome`). While the pen or the pencil is armed and mirroring, or the
+  node tool's pen is, and the run in flight is not extending a path, each axis
   is a dashed `accent_400` line through the frame being drawn in, or across the canvas on open
   canvas, with a 16×10 accent pill at its top end (left end for the horizontal axis) as its grab
   handle: a drag moves that axis, a double-click puts the axes back to the default. While the pen
@@ -124,6 +131,35 @@ axis, a horizontal one or both (`crate::mirror`).
   horizontal axis likewise; under both axes, *draw from one axis to the other to close the shape*)
   instead of its usual hint.
 - **The switch** is the path bar's Mirror button (*The path bar*, below).
+
+### Mirrored paths
+
+A path drawn mirrored is saved mirrored (`NodeKind::Path::mirror`, `core-model.md`): its axes run
+through the centre of its control box and are kept only while the path is symmetric about them.
+Point editing keeps it symmetric.
+
+- **Every point edit that keeps the anchor count is made symmetric before it is written**
+  (`OndinApp::rewrite_points`, `mirror::symmetric_edit`, reached through `canvas::rewrite_edit` and
+  `rewrite_scrub`): drag, nudge, handle drag and fields, corner radius, align, distribute and
+  spacing, point-box scale and rotate, segment move and bend. In the path's own space, where an
+  anchor changed its image takes its reflection; where both changed, the first in path order wins.
+  An anchor on an axis is held to it and slides along it: where the run crosses the axis its two
+  handles are each other's image, where the run lies along the axis both handles stay on it.
+- **The base is what the edit started from**: the committed path for a drag
+  (`edited_subpaths`), last frame's preview for a scrub's increment (`preview_subpaths`).
+- **Images pair by position** (`mirror::partners`), and which way round the run passes an image is
+  read from the anchors' neighbours, not their handles: a corner has none to tell by.
+- **Delete** takes each point's images too (`with_mirrored_points`). **Add point** inserts the
+  images too (`mirrored_inserts`); on a segment that is its own image, one crossing an axis, a point
+  within 0.02 of the middle goes in once, at the middle. The point asked for is selected.
+- **Other path writes are not adjusted**: cutting a segment, *Join*, *Reverse* and the rest go
+  straight through `tools::rewrite_path`, and the model drops an axis they break.
+- **The axes on the canvas** (`own_axes_chrome`). While the node tool edits a mirrored path, its
+  own axes are dashed `accent_400` lines through its control box, `OWN_AXIS_OVERHANG` (16 screen pt)
+  past each end, turned with the layer, with no grab pill: the points put them there. A new run
+  inside it shows its mirrored half and the *On axis* mark as a new path's does.
+- **Flatten** makes a lone mirrored path plain: the same outline, its axes cleared, one step
+  (`app-booleans.md`).
 
 ## The node tool (`A`)
 
@@ -221,7 +257,8 @@ mirror.
   circle at every distance hold the distance and the mitres exactly. A shape that misbehaves
   belongs in that catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
-  stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.
+  stored path back, radii included. Every distance asks for the mirror the card opened with
+  (`OffsetCard::mirror`), so going back to zero restores an axis a lopsided offset dropped. A press outside the card, `Escape`, or the edit ending closes it.
 - Both write a new path with no corner radii, the radii baked into the curves, and clear the point
   selection, whose anchors are gone.
 - Both run on a worker thread (`crate::job::Job`), so the frame loop never waits on the arithmetic.
@@ -247,3 +284,9 @@ selected without the node tool. Every corner rounds; a radius on a smooth anchor
   outline by a zero-length segment.
 - `PointSet` index truncation is no guard against an undo: the stale indices stay valid.
 - A verb with a second door (`reverse_subpaths`' fallback) owes the lock check on that door too.
+- A mirrored path's image is told which way round by its neighbours, never its handles: a handle
+  pulled out of a corner would land on the wrong side
+  (`a_handle_pulled_from_a_corner_mirrors_onto_the_right_side`).
+- `GeometryPatch::Path`'s inverse must carry `Some(old)` for the mirror, not `None`: `None` would
+  keep only what holds after the edit, and undo would leave a dropped axis dropped
+  (`a_lopsided_edit_drops_the_axis_and_undo_restores_it`).

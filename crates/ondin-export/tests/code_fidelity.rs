@@ -983,6 +983,7 @@ fn pictures_match_the_canvas() {
             path: p,
             corner_radii: vec![],
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         Affine::translate((100.0, 30.0)),
         "Blob",

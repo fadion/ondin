@@ -35,6 +35,10 @@ pub(crate) struct OffsetCard {
     id: NodeId,
     /// Written back at distance zero, so the corner radii come back too.
     stored: (BezPath, Vec<f64>),
+    /// The path's mirror axes when the card opened, asked for at every distance:
+    /// an offset whose outline came out a hair off its image drops them, and
+    /// going back to zero brings them back.
+    mirror: ondin_core::symmetry::PathMirror,
     /// What every distance offsets: the stored path with its radii applied.
     drawn: Arc<BezPath>,
     /// The fill rule `drawn` is read with.
@@ -73,7 +77,10 @@ impl OffsetCard {
     fn writes(&self) -> Option<(BezPath, Vec<f64>)> {
         match self.tx().0.first() {
             Some(Operation::SetGeometry {
-                geometry: GeometryPatch::Path { path, corner_radii },
+                geometry:
+                    GeometryPatch::Path {
+                        path, corner_radii, ..
+                    },
                 ..
             }) => Some((path.clone(), corner_radii.clone())),
             _ => None,
@@ -142,7 +149,11 @@ impl OffsetCard {
         };
         Transaction(vec![Operation::SetGeometry {
             id: self.id,
-            geometry: GeometryPatch::Path { path, corner_radii },
+            geometry: GeometryPatch::Path {
+                path,
+                corner_radii,
+                mirror: Some(self.mirror),
+            },
         }])
     }
 }
@@ -486,6 +497,7 @@ impl OndinApp {
             geometry: GeometryPatch::Path {
                 path: fitted,
                 corner_radii: Vec::new(),
+                mirror: None,
             },
         }]);
         self.session.name_step("Simplify", icon::MAGIC_WAND);
@@ -513,6 +525,7 @@ impl OndinApp {
             path,
             corner_radii,
             corner_smoothing,
+            mirror,
         }) = self.session.doc.get(id).map(|n| n.kind().clone())
         else {
             return;
@@ -528,6 +541,7 @@ impl OndinApp {
         self.offset_card = Some(OffsetCard {
             id,
             stored: (path, corner_radii),
+            mirror,
             drawn: Arc::new(drawn),
             rule,
             distance: 0.0,
@@ -706,6 +720,7 @@ mod tests {
                 path: p,
                 corner_radii: radii,
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,
@@ -839,6 +854,7 @@ mod tests {
             geometry: GeometryPatch::Path {
                 path: moved.clone(),
                 corner_radii: Vec::new(),
+                mirror: None,
             },
         }]));
         app.settle_simplify();
@@ -879,6 +895,7 @@ mod tests {
             geometry: GeometryPatch::Path {
                 path: moved,
                 corner_radii: Vec::new(),
+                mirror: None,
             },
         }]));
         run(&mut app);

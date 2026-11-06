@@ -3140,6 +3140,7 @@ fn outlining_a_path_keeps_the_fill_rule_the_user_set_on_it() {
             path: compound,
             corner_radii: vec![10.0; 8],
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         (0.0, 0.0),
     );
@@ -3280,6 +3281,7 @@ fn stroke_ink_covers_what_a_non_zero_expansion_fills() {
             path: path.clone(),
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         };
         let ours = ondin_core::build::stroke_ink(&kind, &path, &stroke).unwrap();
         let style = kurbo::Stroke {
@@ -3568,6 +3570,7 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
             path: path.clone(),
             corner_radii: vec![0.0, 0.0, 0.0],
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         }),
         "a path with nothing to bake is already an outline"
     );
@@ -3576,6 +3579,7 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
             path,
             corner_radii: vec![0.0, 3.0, 0.0],
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         }),
         "and one radius in the model is enough to make baking mean something"
     );
@@ -5233,6 +5237,7 @@ fn path_kind(path: ondin_core::kurbo::BezPath) -> NodeKind {
         path,
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     }
 }
 

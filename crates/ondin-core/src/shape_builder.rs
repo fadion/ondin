@@ -277,6 +277,7 @@ fn reshaped(
             geometry: crate::GeometryPatch::Path {
                 path: local,
                 corner_radii: Vec::new(),
+                mirror: None,
             },
         }]);
         return Ok((tx, id));
@@ -320,6 +321,7 @@ fn placed_path(
         path,
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: crate::symmetry::PathMirror::NONE,
     };
     let name = crate::naming::free_name(&doc.child_names(parent, &[]), kind.default_name(), 1);
     let new = ids.mint();
@@ -409,6 +411,7 @@ pub fn divide(
                 path: to_parent * arr.regions[i].path.clone(),
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             transform: None,
             name,

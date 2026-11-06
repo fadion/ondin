@@ -1345,9 +1345,16 @@ pub enum GeometryPatch {
     /// **One patch, not two**: the radii are indexed by anchor
     /// (`NodeKind::Path::corner_radii`), so replacing the outline alone would put
     /// every radius after an inserted or deleted anchor on the wrong corner.
+    ///
+    /// `mirror` `None` keeps the path's mirror axes that still hold
+    /// (`crate::symmetry::kept`), so a writer that knows nothing of them cannot
+    /// leave a false one; `Some` sets them, also only where they hold. The inverse
+    /// always carries `Some`, so undo puts back an axis an edit dropped.
     Path {
         path: BezPath,
         corner_radii: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mirror: Option<crate::symmetry::PathMirror>,
     },
     TextSizing(crate::node::TextSizing),
     /// The rail a `Text` node is set along, or `None` to take it off
@@ -1436,9 +1443,9 @@ impl GeometryPatch {
                 .all(|v| v.is_finite()),
             Self::Arc(a) => a.is_finite(),
             Self::LineEnd(p) => p.x.is_finite() && p.y.is_finite(),
-            Self::Path { path, corner_radii } => {
-                crate::node::path_is_finite(path) && corner_radii.iter().all(|v| v.is_finite())
-            }
+            Self::Path {
+                path, corner_radii, ..
+            } => crate::node::path_is_finite(path) && corner_radii.iter().all(|v| v.is_finite()),
             Self::TextSizing(s) => match s {
                 crate::node::TextSizing::Auto => true,
                 crate::node::TextSizing::AutoHeight(w) => w.is_finite(),

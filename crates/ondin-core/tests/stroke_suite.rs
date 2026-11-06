@@ -105,6 +105,7 @@ fn path_kind(path: &BezPath) -> NodeKind {
         path: path.clone(),
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     }
 }
 

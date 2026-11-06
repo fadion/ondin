@@ -281,10 +281,12 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
             path,
             corner_radii,
             corner_smoothing,
+            mirror,
         } => vec![
             geo(G::Path {
                 path: path.clone(),
                 corner_radii: corner_radii.clone(),
+                mirror: Some(*mirror),
             }),
             geo(G::CornerSmoothing(*corner_smoothing)),
         ],

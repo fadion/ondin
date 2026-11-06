@@ -4871,6 +4871,23 @@ impl OndinApp {
         Some((world, subpaths))
     }
 
+    /// Write a point edit of `id` made from [`Self::edited_subpaths`], kept
+    /// symmetric on a mirrored path (`OndinApp::rewrite_points`).
+    fn rewrite_edit(&self, id: NodeId, world: Affine, subpaths: Vec<PenSubpath>) -> Transaction {
+        let base = self.edited_subpaths(id).map(|(_, b)| b).unwrap_or_default();
+        self.rewrite_points(id, world, &base, subpaths)
+    }
+
+    /// [`Self::rewrite_edit`] for an edit made from [`Self::preview_subpaths`]: a
+    /// scrub's increment, whose base is last frame's preview.
+    fn rewrite_scrub(&self, id: NodeId, world: Affine, subpaths: Vec<PenSubpath>) -> Transaction {
+        let base = self
+            .preview_subpaths(id)
+            .map(|(_, b)| b)
+            .unwrap_or_default();
+        self.rewrite_points(id, world, &base, subpaths)
+    }
+
     /// What the pointer would take in image editing, as a cursor: a resize arrow
     /// over a handle, an open hand over the picture, `None` off the frame.
     fn crop_hover(&self, resp: &egui::Response, rect: egui::Rect, ppp: f32) -> Option<Pointer> {
@@ -5455,7 +5472,7 @@ impl OndinApp {
         if let Some(an) = subpaths.get_mut(at.0).and_then(|s| s.anchors.get_mut(at.1)) {
             an.pull_side(side, to, break_pair);
         }
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_scrub(id, world, subpaths)
     }
 
     /// Align the selected points: the align row's verb, redirected from layers to
@@ -5542,7 +5559,7 @@ impl OndinApp {
         };
         let points: Vec<PointRef> = self.subject_points(id);
         edit(&mut subpaths, &points);
-        let tx = tools::rewrite_path(id, world, &subpaths, self.stored_path(id));
+        let tx = self.rewrite_edit(id, world, subpaths);
         if tx.0.is_empty() {
             return;
         }
@@ -5566,7 +5583,7 @@ impl OndinApp {
         };
         let points: Vec<_> = self.subject_points(id);
         tools::space_points(&mut subpaths, &points, axis, gap);
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, world, subpaths)
     }
 
     /// The gaps the spacing field shows, from [`Self::preview_subpaths`], or a
@@ -5590,7 +5607,7 @@ impl OndinApp {
         };
         let points: Vec<_> = self.subject_points(id);
         tools::move_points(&mut subpaths, &points, delta);
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, world, subpaths)
     }
 
     /// The corner radius the radius field should show for `id`, and whether any
@@ -5632,7 +5649,7 @@ impl OndinApp {
                 an.radius = radius.max(0.0);
             }
         }
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_scrub(id, world, subpaths)
     }
 
     /// Move the selected points by `delta` from where the preview has them. The
@@ -5645,7 +5662,7 @@ impl OndinApp {
         };
         let points: Vec<_> = self.subject_points(id);
         tools::move_points(&mut subpaths, &points, delta);
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_scrub(id, world, subpaths)
     }
 
     /// The delta a node-tool drag should apply, and the lines explaining it. The
@@ -5722,7 +5739,7 @@ impl OndinApp {
         } else {
             tools::move_points(&mut subpaths, &self.subject_points(id), delta);
         }
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, world, subpaths)
     }
 
     /// Scale the selected points about the box the press captured: Shift holds the
@@ -5748,7 +5765,7 @@ impl OndinApp {
             world,
             tools::Resize::geometry(shift, alt),
         );
-        tools::rewrite_path(id, wt, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, wt, subpaths)
     }
 
     /// Turn the selected points about the box's centre. Shift snaps to
@@ -5770,7 +5787,7 @@ impl OndinApp {
             angle = (angle / ROTATE_SNAP).round() * ROTATE_SNAP;
         }
         tools::rotate_points(&mut subpaths, &self.subject_points(id), pivot, angle);
-        tools::rewrite_path(id, wt, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, wt, subpaths)
     }
 
     /// Insert an anchor into the segment leaving `at`, at parameter `t`, and select
@@ -5779,10 +5796,32 @@ impl OndinApp {
         let Some((world, mut subpaths)) = self.edited_subpaths(id) else {
             return;
         };
-        let Some(new) = tools::insert_point(&mut subpaths, at, t) else {
+        // A mirrored path takes the point's images too (`mirrored_inserts`); the
+        // one asked for is found again by where it landed.
+        let inserts = self.mirrored_inserts(id, at, t);
+        let wanted = tools::segment_point(&subpaths, at, t);
+        let many = inserts.len() > 1;
+        let mut new = None;
+        for (seg, u) in inserts {
+            new = tools::insert_point(&mut subpaths, seg, u).or(new);
+        }
+        let Some(mut new) = new else {
             return;
         };
-        let tx = tools::rewrite_path(id, world, &subpaths, self.stored_path(id));
+        if let Some(p) = wanted.filter(|_| many) {
+            let refs = subpaths.iter().enumerate().flat_map(|(s, sub)| {
+                sub.anchors
+                    .iter()
+                    .enumerate()
+                    .map(move |(i, a)| ((s, i), a.at))
+            });
+            if let Some((r, _)) =
+                refs.min_by(|x, y| (x.1 - p).hypot().total_cmp(&(y.1 - p).hypot()))
+            {
+                new = r;
+            }
+        }
+        let tx = self.rewrite_edit(id, world, subpaths);
         if !self.session.has_step_name() {
             self.session.name_step("Add point", icon::PLUS);
         }
@@ -5961,7 +6000,7 @@ impl OndinApp {
             snap,
             f64::from(TANGENT_SNAP_PX) / zoom,
         );
-        tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        self.rewrite_edit(id, world, subpaths)
     }
 
     /// The **committed** outline and radii of `id`, for `rewrite_path`'s no-op
@@ -5992,6 +6031,8 @@ impl OndinApp {
         if points.is_empty() {
             return;
         }
+        // A mirrored path loses each point's image with it, and stays mirrored.
+        let points = self.with_mirrored_points(id, &points);
         let left = tools::remove_points(&subpaths, &points);
         // Nothing left to draw: delete the node rather than keep an empty layer.
         if left.is_empty() {
@@ -6078,6 +6119,11 @@ impl OndinApp {
                 // A minted run left too short goes, not a lone `MoveTo` (`PenEdit::minted`).
                 if edit.minted && sub.anchors.len() < 2 {
                     edit.subpaths.remove(edit.active);
+                } else if edit.minted {
+                    // A new run inside the path mirrors as a new path does: across
+                    // the path's own axes when it is mirrored (`mirror_frame`).
+                    let run = self.mirror_run(sub);
+                    edit.subpaths.splice(edit.active..=edit.active, run);
                 } else {
                     edit.subpaths[edit.active] = sub;
                 }
@@ -6093,7 +6139,7 @@ impl OndinApp {
                     anchors: pen.anchors,
                     closed: close,
                 });
-                let tx = tools::create_paths(
+                let mut tx = tools::create_paths(
                     id,
                     pen.parent,
                     index,
@@ -6101,6 +6147,15 @@ impl OndinApp {
                     &run,
                     tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
                 );
+                // Saved mirrored, so point editing keeps it so.
+                if let Some(frame) =
+                    self.mirror_frame(run.first().and_then(|s| s.anchors.first()).map(|a| a.at))
+                {
+                    crate::mirror::mark_mirrored(
+                        &mut tx,
+                        crate::mirror::path_mirror_of(frame.axes),
+                    );
+                }
                 (id, tx, "Created path")
             }
         };
@@ -14420,6 +14475,7 @@ mod headless_app_tests {
                     path: p,
                     corner_radii: Vec::new(),
                     corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
                 },
                 transform: Some(Affine::translate((1000.0, 1000.0))),
                 name: None,
@@ -15045,6 +15101,7 @@ mod headless_app_tests {
                 path: p,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,
@@ -17969,6 +18026,7 @@ mod locked_path_verb_tests {
                 path: p,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,
@@ -19250,6 +19308,7 @@ mod select_drag_tests {
                 path: p,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,
@@ -22769,6 +22828,7 @@ mod join_and_grid_snap_tests {
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         }
     }
 

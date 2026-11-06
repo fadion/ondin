@@ -151,6 +151,7 @@ fn synthetic(paths: usize) -> (Document, Rect) {
                 path: blob(&mut rng, Point::ZERO, r, segs),
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: Some(Affine::translate(centre.to_vec2())),
             name: None,

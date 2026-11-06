@@ -2385,7 +2385,9 @@ impl OndinApp {
     /// The result is selected. The refusal is the dropdown's, since `Ctrl+E`
     /// bypasses its disabled state; only the count refusal is worded for this verb.
     pub(crate) fn flatten_selection(&mut self) {
+        let mirrored = matches!(self.session.selection.ids(), [one] if build::is_mirrored_path(&self.session.doc, *one));
         if self.selected_boolean().is_none()
+            && !mirrored
             && let Err(why) = self.booleanable_selection()
         {
             let few = build::outermost(&self.session.doc, self.session.selection.ids()).len() < 2;
@@ -12892,6 +12894,7 @@ mod polish_tests {
             path: BezPath::new(),
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         }));
         assert!(
             stroke_join_applies(&NodeKind::Artboard {
@@ -20446,6 +20449,7 @@ mod subject_tests {
                 path: bez,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
             transform: None,
             name: None,

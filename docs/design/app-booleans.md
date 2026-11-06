@@ -127,13 +127,14 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
 
 | Verb | Admits | Result |
 | --- | --- | --- |
-| `build::flatten` (`Ctrl+E`) | one boolean, or two or more layers | one boolean → `Path` of its outline in place; a set → union in the parent's space at the topmost member's slot with the bottom member's paint (`build::flatten_union`, carries paint only) |
+| `build::flatten` (`Ctrl+E`) | one boolean, one mirrored path, or two or more layers | one boolean → `Path` of its outline in place; one mirrored path (`build::is_mirrored_path`) → the same path with its mirror cleared, one `SetGeometry` (`flatten_mirror`), so point editing stops keeping it symmetric; a set → union in the parent's space at the topmost member's slot with the bottom member's paint (`build::flatten_union`, carries paint only) |
 | `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Path | `Path` of its own outline (`local_path`), radii, smoothing and an ellipse's arc baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
 | `build::outline_stroke` (*Outline stroke*) | one Shape/Path/Boolean with a visible stroke | each visible stroke a `Path` filled with that stroke's brush (a bound brush stays bound), below |
 | `build::outline_text` (*Convert to path*) | one Text | `Path` from `ondin_core::text::outline` (glyph coords already node-local) |
 
-- Flatten refuses a single non-boolean (that is *Outline shape*'s verb — the two rows never appear
-  together), text, `Artboard`, `Root`. Groups contribute their union, nested booleans their result,
+- Flatten refuses a single non-boolean other than a mirrored path (that is *Outline shape*'s verb — the two rows
+  appear together only on a rounded mirrored path, where Flatten drops the mirror and *Outline shape*
+  bakes the corners), text, `Artboard`, `Root`. Groups contribute their union, nested booleans their result,
   via `Resolved::operand_path`; `build::carried_paint` shared by all arms.
 - Flatten's two refusals of an admissible selection: `OpError::EmptyGeometry` (operands cancel out —
   move a shape) and `OpError::BooleanAbandoned` (flo_curves unwound — moving won't help).
@@ -333,8 +334,8 @@ Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16
 - **Dropdown**: four ops, then under a hairline two actions, not states: *Divide* (dimmed with
   `DIVIDE_NEEDS` where `can_arrange` refuses) and *Flatten* (`stack-simple` glyph, as in the
   context menu). `ComboBox::height(BOOL_MENU_H)` = 250 so the six rows never get a scroll bar.
-  `inspector::flatten_selection` gates on the dropdown's own predicate so the keyboard path reports a
-  useful sentence. `inspector::popup_rule` draws the hairline via `ui::hairline_in_column`, sized from
+  `inspector::flatten_selection` gates on the dropdown's own predicate, plus a lone mirrored path,
+  so the keyboard path reports a useful sentence. `inspector::popup_rule` draws the hairline via `ui::hairline_in_column`, sized from
   `available_width`, with gaps `ABOVE` 5pt / `BELOW` 4pt and the layout's `item_spacing.y` subtracted
   back out with `add_space`.
 - **Mask** (`icon::MASK`) is a state: lit while the target is a mask, click again releases.

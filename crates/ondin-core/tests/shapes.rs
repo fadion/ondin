@@ -218,6 +218,7 @@ fn a_paths_smoothing_applies_to_its_rounded_anchors() {
         path: path.clone(),
         corner_radii: radii,
         corner_smoothing: s,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     };
     assert_ne!(
         local_path(&kind(vec![10.0; 3], 0.0)),

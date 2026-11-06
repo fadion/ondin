@@ -41,6 +41,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             10 => migrate_10_to_11(&mut value),
             11 => migrate_11_to_12(&mut value),
             12 => migrate_12_to_13(&mut value),
+            13 => migrate_13_to_14(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -382,5 +383,20 @@ fn migrate_12_to_13(value: &mut Value) {
         .filter(|d| d.is_object())
     {
         inner["schema_version"] = Value::from(13u32);
+    }
+}
+
+/// v13 → v14: a mirrored path's axes (`NodeKind::Path::mirror`). A number and
+/// nothing else: a v13 file holds none. The bump is for the older build, which
+/// would drop the axes and edit the path as a plain one. The published
+/// document's number moves too.
+fn migrate_13_to_14(value: &mut Value) {
+    value["schema_version"] = Value::from(14u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(14u32);
     }
 }

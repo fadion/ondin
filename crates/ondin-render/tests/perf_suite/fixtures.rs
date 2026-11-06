@@ -529,6 +529,7 @@ impl Gen {
                 path,
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
             },
         );
         self.stroke(id, MUTED, 2.0);

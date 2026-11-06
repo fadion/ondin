@@ -1348,6 +1348,7 @@ fn stroke_alignment_only_applies_to_closed_shapes() {
         path: open.clone(),
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     }));
 
     let mut closed = open;
@@ -1356,6 +1357,7 @@ fn stroke_alignment_only_applies_to_closed_shapes() {
         path: closed,
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     }));
 }
 
@@ -1690,6 +1692,7 @@ fn only_a_box_takes_a_per_side_stroke() {
             path: BezPath::new(),
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         NodeKind::Group,
         // Text is the one worth naming: its outline is its glyphs', which have no
@@ -3272,6 +3275,7 @@ fn a_group_masks_with_the_union_of_its_contents() {
             .reverse_subpaths(),
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
     };
     create(
         &mut doc,
@@ -3825,6 +3829,7 @@ fn a_many_segment_outline_answers_the_same_with_the_segment_reject() {
             path,
             corner_radii: Vec::new(),
             corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
         },
         Affine::IDENTITY,
     );

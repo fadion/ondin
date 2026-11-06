@@ -924,6 +924,10 @@ pub enum NodeKind {
         corner_radii: Vec<f64>,
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_smoothing: f64,
+        /// The path's own axes it is mirrored across (`crate::symmetry`), which
+        /// point editing keeps; only ever set where it holds.
+        #[serde(default, skip_serializing_if = "crate::symmetry::PathMirror::is_none")]
+        mirror: crate::symmetry::PathMirror,
     },
     /// A container whose children are combined into one outline (`boolean.rs`).
     ///
@@ -1288,6 +1292,7 @@ impl NodeKind {
                 path,
                 corner_radii,
                 corner_smoothing,
+                ..
             } => {
                 path_is_finite(path)
                     && corner_radii.iter().all(|r| r.is_finite())
@@ -1882,6 +1887,7 @@ pub(crate) mod kind_fixture {
                 path: BezPath::new(),
                 corner_radii: Vec::new(),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             },
             NodeKind::Boolean { op: BoolOp::Union },
             NodeKind::Text {

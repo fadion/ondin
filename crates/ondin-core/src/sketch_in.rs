@@ -1553,6 +1553,7 @@ fn shape_kind(class: &str, layer: &Value, size: Size) -> NodeKind {
                 path,
                 corner_radii: trimmed(corner_radii),
                 corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
             }
         }
     }

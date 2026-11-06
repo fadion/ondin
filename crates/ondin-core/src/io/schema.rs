@@ -976,6 +976,22 @@ fn normalize_kind(kind: NodeKind) -> NodeKind {
                 on_path_offset,
             }
         }
+        // A hand-edited axis the points do not bear out is dropped, as a write
+        // would drop it, so point editing never mirrors an unmirrored path.
+        NodeKind::Path {
+            path,
+            corner_radii,
+            corner_smoothing,
+            mirror,
+        } => {
+            let mirror = crate::symmetry::kept(&path, &corner_radii, mirror);
+            NodeKind::Path {
+                path,
+                corner_radii,
+                corner_smoothing,
+                mirror,
+            }
+        }
         other => other,
     }
 }

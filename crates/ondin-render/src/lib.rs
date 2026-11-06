@@ -22,6 +22,7 @@ pub mod images;
 mod outline_only;
 pub mod renderer;
 pub mod scene;
+mod tight_stroke;
 pub mod vision;
 
 pub use cpu::{MAX_RASTER_SIDE, VelloCpuRenderer, rasterize_glyph_run};

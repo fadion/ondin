@@ -3515,6 +3515,12 @@ fn lay_dashed<P: ScenePainter>(
 /// `ui::MAX_STROKE_WIDTH` is 10 000, so such widths must work. Closed paths only
 /// (read off the path: per-side strokes lie along open edges of a closed kind) and
 /// solid strokes only (the plug would fill a dashed shape solid).
+///
+/// A solid stroke along an **open** curve tighter than half its width is filled as
+/// the union of its pieces instead (`tight_stroke`): the backend folds the inner
+/// edge there, and next to a cap a notch of ground shows through. Open only: a
+/// closed outline's band covers its own folds, and glyphs and small rounded
+/// corners under thick strokes would leave the backend's stroker for nothing.
 fn lay_stroke<P: ScenePainter>(
     painter: &mut P,
     world: Affine,
@@ -3524,6 +3530,15 @@ fn lay_stroke<P: ScenePainter>(
     let box_ = path.bounding_box();
     let closed = matches!(path.elements().last(), Some(kurbo::PathEl::ClosePath));
     if !closed || paint.width < box_.width().min(box_.height()) || !paint.dashes.is_empty() {
+        if !closed
+            && paint.dashes.is_empty()
+            && crate::tight_stroke::bends_too_tight(path, paint.width)
+        {
+            let tolerance = crate::tight_stroke::tolerance_through(world, TOLERANCE);
+            let ink = crate::tight_stroke::union_outline(path, paint, tolerance);
+            painter.fill_path(world, &ink, paint.brush, paint.framing, ClipRule::NonZero);
+            return;
+        }
         painter.stroke_path(world, path, paint);
         return;
     }

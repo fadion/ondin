@@ -1109,7 +1109,7 @@ fn sweep_on(theme: Theme) {
     });
     assert_eq!(app.colour_review.groups_shown(), 1, "a group unfolded");
     check("colour review", app, found);
-    // *Repeat around origin…* on the box: its segments, fields, switch and foot.
+    // *Repeat around origin…* on the box: its segments, fields, switches and foot.
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| {
         let first = a.session.doc.first_page();

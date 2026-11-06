@@ -306,14 +306,17 @@ layer menu it follows *Flatten* whenever exactly two layers are selected, dimmed
 refusal (`LayerState::blend_refusal`) or the lock sentence; otherwise the palette's *Not available
 here* row says *Blend shapes needs exactly two shapes* (`KIND_VERBS`).
 
-- **The card** hangs from `ui::canvas_popup_area` at `POPOVER_W` and is no modal, as the Repeat
-  card (`tools.md`). Rows: title *Blend shapes* with ✕; *Steps between* (`icon::DOTS_THREE`, 1 to
-  200, default 5); the switch *Blend paint and opacity* (on); *Match points from*, a dropdown of
+- **The card** is an inspector-lane popover placed as the Repeat card is
+  (`OndinApp::transform_popover_area`, level with the Transform card, `tools.md`): no modal, no
+  click-away. Rows: head `ui::popover_head` *Blend shapes*; *Steps between* (`icon::DOTS_THREE`, 1
+  to 200, default 5); the switch *Blend paint and opacity* (on); *Match points from*, a dropdown of
   the nine places (`canvas::NINE_POINTS`, the names the pivot's pill uses), default *Top left*; the
-  switch *Reverse the second shape*; foot *Cancel*, primary *Blend*. Its settings live on the app
-  and outlive a close. One card at the palette's place at a time: opening it closes the Repeat
-  card and Colour review, and opening either of those two closes it. It also closes Find, as they
-  do.
+  switch *Reverse the second shape*; foot `settings::footer_row`, *Cancel*, primary *Blend*. Its
+  settings live on the app and outlive a close. It holds the lane alone: opening it closes the
+  inspector's popovers and the Repeat card, opening the Repeat card closes it, and so does an
+  inspector popover opened after it. Find and Colour review are left open.
+- **A right-click cancels a scrub** of *Steps between* wherever the pointer is
+  (`InFlight::blend_scrub`, as the Repeat card's `repeat_scrub`).
 - **The preview** is the commit's own edit, minted from a copy of the id counter so it spends no
   ids; rebuilt when the revision, selection or settings change, and put back after another
   gesture's preview cleared it. A canvas drag owns the preview while it lasts.

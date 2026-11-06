@@ -10593,6 +10593,9 @@ impl OndinApp {
                 })
             })
             .inner;
+        if title == "Transform" {
+            self.transform_card = Some(card_rect);
+        }
         if reveal {
             ui.scroll_to_rect(card_rect, Some(egui::Align::TOP));
             if let Some(field) = first_field(ui, card_rect) {

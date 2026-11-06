@@ -899,14 +899,9 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.y = SECTION_GAP;
 
                     // --- header ------------------------------------------------
-                    ui.horizontal(|ui| {
-                        ui.label(ui::eyebrow("Export settings"));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui::close_button(ui).clicked() {
-                                close = true;
-                            }
-                        });
-                    });
+                    if ui::popover_head(ui, "Export settings") {
+                        close = true;
+                    }
 
                     // --- prefix, then suffix (filename order) ------------------
                     if let Some(text) = self.name_part_field(

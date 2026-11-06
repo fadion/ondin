@@ -1,5 +1,5 @@
 //! *Repeat around origin…* (`docs/design/tools.md`, *Repeat around origin*): a
-//! card over the canvas that turns copies of the selection about the transform
+//! popover beside the Transform card that turns copies of the selection about the transform
 //! origin, previewed live, and commits them grouped with the original as one
 //! *Repeat* step (`ondin_core::repeat`).
 //!
@@ -29,6 +29,9 @@ pub(crate) struct RepeatCard {
     /// The step under *Fixed angle*, in degrees.
     step_deg: f64,
     turn: bool,
+    /// Whether opening the card brought the pivot's handle up, so leaving puts it
+    /// away again.
+    raised_pivot: bool,
     /// The preview built for the key it was built from.
     built: Option<(Key, Transaction)>,
 }
@@ -41,6 +44,7 @@ impl Default for RepeatCard {
             count: 12.0,
             step_deg: 30.0,
             turn: true,
+            raised_pivot: false,
             built: None,
         }
     }
@@ -51,6 +55,12 @@ impl Default for RepeatCard {
 type Key = (u64, Vec<NodeId>, [u64; 2], usize, u64, bool);
 
 impl RepeatCard {
+    /// Put back the count and step a right-click cancelled the scrub of.
+    pub(crate) fn restore_scrub(&mut self, count: f64, step_deg: f64) {
+        self.count = count;
+        self.step_deg = step_deg;
+    }
+
     fn count(&self) -> usize {
         (self.count.round() as usize).clamp(2, repeat::MAX_COUNT)
     }
@@ -88,13 +98,19 @@ impl OndinApp {
         if let Some(why) = self.repeat_refusal() {
             return self.session.info(why);
         }
-        self.close_find();
-        self.colour_review.open = false;
+        // One card in the popover lane at a time.
+        self.close_inspector_popovers();
         self.close_blend();
+        if self.repeat.open {
+            return;
+        }
         self.repeat.open = true;
         self.repeat.built = None;
-        // The pivot decides the ring, so its handle comes up with the card.
-        self.show_pivot = self.session.selection.ids().len() == 1;
+        // The pivot decides the ring, so its handle comes up with the card, and
+        // goes with it if the card raised it.
+        let raise = !self.show_pivot && self.session.selection.ids().len() == 1;
+        self.repeat.raised_pivot = raise;
+        self.show_pivot |= raise;
     }
 
     /// Whether the gesture preview is the card's ring rather than a gesture.
@@ -105,9 +121,18 @@ impl OndinApp {
     /// Close the card and take its copies off the canvas.
     pub(crate) fn close_repeat(&mut self) {
         if self.repeat.open {
-            self.repeat.open = false;
-            self.repeat.built = None;
+            self.leave_repeat();
             self.session.clear_gesture_preview();
+        }
+    }
+
+    /// The card's way out, closed or committed: the pivot's handle goes back
+    /// down if the card brought it up.
+    fn leave_repeat(&mut self) {
+        self.repeat.open = false;
+        self.repeat.built = None;
+        if std::mem::take(&mut self.repeat.raised_pivot) {
+            self.show_pivot = false;
         }
     }
 
@@ -274,13 +299,15 @@ impl OndinApp {
             ),
         };
         self.session.info(said);
-        self.repeat.open = false;
-        self.repeat.built = None;
+        self.leave_repeat();
     }
 
     /// The edit that makes `id` a component where it stands, or wraps it in a
-    /// frame made the component, then repeats that main: its copies land as
-    /// instances. Worked on a scratch copy so both halves are one step.
+    /// group made the component, then repeats that main: its copies land as
+    /// instances. A group rather than *Create component*'s frame: the wrapper only
+    /// carries the link, and a frame would add a clip and a fill nobody asked for.
+    /// It takes the layer's name, so the main, its instances and the ring read as
+    /// the layer. Worked on a scratch copy so both halves are one step.
     fn linked_ring(
         &mut self,
         id: NodeId,
@@ -291,7 +318,15 @@ impl OndinApp {
         let (mut tx, main) = match crate::app::create_in_place(doc, id) {
             true => (Transaction(Vec::new()), id),
             false => {
-                build::frame(doc, res, &mut self.session.ids, &[id]).map_err(|e| e.to_string())?
+                let (mut tx, group) = build::group(doc, res, &mut self.session.ids, &[id])
+                    .map_err(|e| e.to_string())?;
+                if let Some(node) = doc.get(id) {
+                    tx.0.push(Operation::SetName {
+                        id: group,
+                        name: node.name().to_string(),
+                    });
+                }
+                (tx, group)
             }
         };
         tx.0.push(Operation::SetComponent {
@@ -326,8 +361,12 @@ impl OndinApp {
         if self.repeat_refusal().is_some() {
             return self.close_repeat();
         }
+        // A popover opened in the lane after the card takes its place.
+        if self.inspector_popover_open() {
+            return self.close_repeat();
+        }
         self.refresh_repeat_preview();
-        let canvas = self.canvas_rect;
+        let area = self.transform_popover_area(ctx, egui::Id::new("repeat-around"));
         let linked_refusal = self.linked_refusal();
         let linked = match &linked_refusal {
             Some(r) => r.on,
@@ -339,16 +378,20 @@ impl OndinApp {
             .map(|id| crate::private::layer(&self.session.doc, *id).into_owned())
             .unwrap_or_default();
         let card = &mut self.repeat;
+        // Before the fields: `value_field` applies this frame's drag delta inside
+        // the call that reports the drag.
+        let before = (card.count, card.step_deg);
+        let mut scrubbing = false;
         let mut act = None;
-        ui::canvas_popup_area(ctx, egui::Id::new("repeat-around"), canvas).show(ctx, |ui| {
+        area.show(ctx, |ui| {
             ui::hold_tab(ui);
-            crate::settings::card_frame().show(ui, |ui| {
-                ui.set_width(W - 2.0 * ui::POPOVER_PAD);
-                ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-                if crate::settings::modal_title(ui, "Repeat around origin") {
+            ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
+                let w = ui::menu_inner_w(W, ui::POPOVER_PAD);
+                ui.set_width(w);
+                ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;
+                if ui::popover_head(ui, "Repeat around origin") {
                     act = Some(Act::Close);
                 }
-                let w = ui.available_width();
                 let lit = usize::from(card.fixed);
                 if let Some(i) = ui::segmented(ui, w, ui::SEGMENT_CELL_H, 2, lit, |p, i, r, on| {
                     ui::segment_label(p, r, ["Full turn", "Fixed angle"][i], on);
@@ -361,15 +404,16 @@ impl OndinApp {
                     ui.vertical(|ui| {
                         ui.set_width(fw);
                         ui::labelled(ui, "Count", |ui| {
-                            ui::value_field(
+                            let resp = ui::value_field(
                                 ui,
                                 egui::vec2(fw, ui::CONTROL_H),
                                 Prefix::Icon(icon::COPY_SIMPLE),
                                 &mut card.count,
                                 Scrub::whole(0.1).range(2.0..=repeat::MAX_COUNT as f64),
                                 |d| d.custom_formatter(ui::number(0)),
-                            )
-                            .on_hover_text("How many in the ring, the original counted")
+                            );
+                            scrubbing |= resp.dragged();
+                            resp.on_hover_text("How many in the ring, the original counted")
                         });
                     });
                     ui.vertical(|ui| {
@@ -391,6 +435,7 @@ impl OndinApp {
                                 )
                             })
                             .inner;
+                            scrubbing |= resp.dragged();
                             if card.fixed {
                                 card.step_deg = shown;
                             }
@@ -411,23 +456,22 @@ impl OndinApp {
                 {
                     act = Some(Act::Turn);
                 }
-                ui::labelled(ui, "Copies", |ui| {
-                    let enabled = linked_refusal.is_none();
-                    let tip: &'static str = linked_refusal.as_ref().map_or("", |r| r.why);
-                    if let Some(i) = ui::segmented_tipped(
-                        ui,
-                        w,
-                        ui::SEGMENT_CELL_H,
-                        2,
-                        usize::from(linked),
-                        |_| enabled,
-                        |_| tip,
-                        |p, i, r, on| match enabled {
-                            true => ui::segment_label(p, r, ["Plain", "Linked"][i], on),
-                            false => ui::segment_label_disabled(p, r, ["Plain", "Linked"][i]),
-                        },
-                    ) {
-                        act = Some(Act::Linked(i == 1));
+                // The caption sits under its switch at the label gap, as an
+                // eyebrow sits over its control.
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.y = ui::SECTION_LABEL_GAP;
+                    let link = ui::disable_unless(ui, linked_refusal.is_none(), |ui| {
+                        ui::switch_row(ui, "Link the copies", linked, crate::settings::SWITCH_H)
+                    })
+                    .inner;
+                    let link = match &linked_refusal {
+                        Some(r) => link.on_disabled_hover_text(r.why),
+                        None => link.on_hover_text(
+                            "Make the original a component and the copies its instances",
+                        ),
+                    };
+                    if link.clicked() && linked_refusal.is_none() {
+                        act = Some(Act::Linked(!linked));
                     }
                     let caption = match (&linked_refusal, linked) {
                         (Some(r), _) => r.why.to_string(),
@@ -448,17 +492,24 @@ impl OndinApp {
                         .wrap(),
                     );
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                    if crate::settings::text_button(ui, "Repeat", FieldButton::Primary).clicked() {
-                        act = Some(Act::Commit);
-                    }
-                    if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                        act = Some(Act::Close);
-                    }
-                });
+                match crate::settings::footer_row(
+                    ui,
+                    &[
+                        ("Cancel", FieldButton::Off),
+                        ("Repeat", FieldButton::Primary),
+                    ],
+                ) {
+                    Some(0) => act = Some(Act::Close),
+                    Some(_) => act = Some(Act::Commit),
+                    None => {}
+                }
             });
         });
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if scrubbing && !self.gesture_cancelled && self.in_flight.repeat_scrub.is_none() {
+            self.in_flight.repeat_scrub = Some(before);
+        }
         let Some(act) = act else {
             return;
         };
@@ -619,9 +670,11 @@ pub(crate) mod tests {
         ));
     }
 
-    /// Linked makes the tick a component where it stands, wrapped in a frame
-    /// since a rectangle cannot be one, and every copy an instance of it — in one
-    /// step.
+    /// Linked wraps the tick in a group named for it and makes that the main,
+    /// since a rectangle cannot be one, and every copy an instance of it, in one
+    /// step; the ring wears the tick's name, and the pivot the card raised goes
+    /// back down.
+    /// flip: `linked_ring` wrapping with `build::frame` → fails at the group-kind assertion.
     #[test]
     fn linked_wraps_the_tick_in_a_main_and_lands_the_copies_as_its_instances() {
         let ctx = egui::Context::default();
@@ -640,6 +693,13 @@ pub(crate) mod tests {
             "the original became the main"
         );
         assert_eq!(doc.get(main).unwrap().children(), &[tick]);
+        assert!(
+            matches!(doc.get(main).unwrap().kind(), NodeKind::Group),
+            "the main is a group, not a frame"
+        );
+        assert_eq!(doc.get(main).unwrap().name(), "Tick");
+        assert_eq!(doc.get(group).unwrap().name(), "Tick × 6");
+        assert!(!app.show_pivot, "the pivot the card raised went down");
         for copy in &kids[..kids.len() - 1] {
             assert_eq!(
                 ondin_core::component::main_of(doc, *copy),
@@ -705,5 +765,151 @@ pub(crate) mod tests {
         let r = app.linked_refusal().expect("a main is linked already");
         assert!(r.on);
         assert_eq!(r.why, "Copies of a component are linked already");
+    }
+
+    /// The card puts down only the pivot handle it raised: one already up when
+    /// it opened stays up when it closes.
+    /// flip: `leave_repeat` clearing `show_pivot` unconditionally → fails at "stays up".
+    #[test]
+    fn the_card_leaves_a_pivot_it_did_not_raise() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = tick_app(&ctx);
+        app.open_repeat();
+        assert!(app.show_pivot, "the card raised it");
+        app.close_repeat();
+        assert!(!app.show_pivot, "and put it down");
+        app.show_pivot = true;
+        app.open_repeat();
+        app.close_repeat();
+        assert!(app.show_pivot, "a pivot already up stays up");
+    }
+
+    /// One whole frame of the app, at a window the inspector fits in.
+    pub(crate) fn pass(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame))
+    }
+
+    /// Drag the field under the eyebrow `label` in the card `card` to the right,
+    /// on to `away`, and right-click there. Answers the field's centre.
+    pub(crate) fn scrub_then_right_click(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        card: egui::Id,
+        label: &str,
+        away: impl Fn(egui::Pos2) -> egui::Pos2,
+        mid: impl Fn(&OndinApp),
+    ) -> egui::Pos2 {
+        let mut out = pass(ctx, app, Vec::new());
+        for _ in 0..10 {
+            out = pass(ctx, app, Vec::new());
+        }
+        let area = ctx.memory(|m| m.area_rect(card)).expect("the card is up");
+        let eyebrow = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t)
+                    if t.galley.text() == label.to_uppercase() && area.contains(t.pos) =>
+                {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the {label} eyebrow"));
+        let field = egui::pos2(
+            eyebrow.left() + 40.0,
+            eyebrow.bottom() + ui::SECTION_LABEL_GAP + ui::CONTROL_H / 2.0,
+        );
+        let button = |pressed, pos, button| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(ctx, app, vec![egui::Event::PointerMoved(field)]);
+        pass(
+            ctx,
+            app,
+            vec![button(true, field, egui::PointerButton::Primary)],
+        );
+        for dx in [10.0, 30.0, 60.0, 90.0] {
+            let at = field + egui::vec2(dx, 0.0);
+            pass(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        }
+        let to = away(field + egui::vec2(90.0, 0.0));
+        pass(ctx, app, vec![egui::Event::PointerMoved(to)]);
+        mid(app);
+        pass(
+            ctx,
+            app,
+            vec![button(true, to, egui::PointerButton::Secondary)],
+        );
+        pass(
+            ctx,
+            app,
+            vec![button(false, to, egui::PointerButton::Secondary)],
+        );
+        pass(
+            ctx,
+            app,
+            vec![button(false, to, egui::PointerButton::Primary)],
+        );
+        for _ in 0..3 {
+            pass(ctx, app, Vec::new());
+        }
+        field
+    }
+
+    /// The card opens in the popover lane beside the Transform card, level with
+    /// its top; a right-click mid-scrub of Count puts the count back, with the
+    /// pointer still on the card or out over the canvas.
+    /// flip: `cancel_gesture` not restoring `repeat_scrub` → fails at "the count is back".
+    #[test]
+    fn the_card_hangs_beside_the_transform_card_and_a_right_click_winds_a_scrub_back() {
+        let id = egui::Id::new("repeat-around");
+        for outside in [false, true] {
+            let ctx = egui::Context::default();
+            let (mut app, _, _) = tick_app(&ctx);
+            pass(&ctx, &mut app, Vec::new());
+            app.open_repeat();
+            let before = app.repeat.count;
+            scrub_then_right_click(
+                &ctx,
+                &mut app,
+                id,
+                "Count",
+                |at| match outside {
+                    true => egui::pos2(200.0, 400.0),
+                    false => at,
+                },
+                |app| {
+                    assert_ne!(app.repeat.count, before, "the drag scrubbed the count");
+                    assert!(app.in_flight.repeat_scrub.is_some(), "the scrub is armed");
+                },
+            );
+            assert_eq!(app.repeat.count, before, "the count is back ({outside})");
+            assert!(app.repeat.open, "the right-click closed nothing");
+            let card = ctx.memory(|m| m.area_rect(id)).expect("the card");
+            let transform = app.transform_card.expect("the Transform card drawn");
+            assert_eq!(card.top(), transform.top(), "level with the Transform card");
+            assert_eq!(
+                card.right() + crate::app::POPOVER_GAP,
+                transform.left(),
+                "a popover's gap left of the cards"
+            );
+        }
     }
 }

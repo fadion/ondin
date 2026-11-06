@@ -192,9 +192,9 @@ lists exist:
 
 | List | Members |
 | --- | --- |
-| `a_popover_is_open` (the lane test) | six popovers, including the image card |
-| R4's clear | five of those six, plus the dropdown slot and the picker |
-| `a_popover_owns_escape` | the lane's six minus the image card, because `Escape` is how image editing is left |
+| `a_popover_is_open` (the lane test) | the inspector's popovers (`inspector_popover_open`), the Repeat and Blend cards, the image card |
+| R4's clear | the inspector's popovers, plus the dropdown slot and the picker |
+| `a_popover_owns_escape` | the inspector's popovers and the contrast and simulation bars; not the image card, because `Escape` is how image editing is left, nor the Repeat and Blend cards, which are rungs of the ladder |
 
 - `ContextMenu::just_opened` makes the opening frame skip the dismissal test, or the opening release would dismiss it.
 - A click that dismisses a menu is spent on the dismissal: the canvas skips its mode input and a layers row its click. The library screen's ⋮ popup and project-filter dropdown follow the rule (§9.5).
@@ -558,30 +558,43 @@ Copies of the selection turned step by step about one point, committed grouped w
   the Transform card's fifth button (`inspector.md`), On while the card is up. A layer menu carries
   no Transform rows, so the card is the door.
 
-**The card** hangs from `ui::canvas_popup_area` at `POPOVER_W` and is no modal: the canvas stays
-live, because the pivot decides the ring and must stay draggable. Opening it closes Find, Colour
-review and the Blend shapes card (`app-booleans.md`) and, over one layer, raises the pivot handle
-(`show_pivot`).
+**The card** is an inspector-lane popover: an `Order::Foreground` `Area` from
+`OndinApp::transform_popover_area`, placed by `popover_anchor` level with the top of the inspector's
+Transform card (`OndinApp::transform_card`, recorded by `panel_full` each frame; the inspector
+column's top when no Transform card is drawn), on `ui::menu_frame(ui::POPOVER_PAD)` at `POPOVER_W`,
+rows at `ui::POPOVER_SECTION_GAP`. It is no modal and has no click-away: the canvas stays live,
+because the pivot decides the ring and must stay draggable. It holds the lane alone: opening it
+closes the inspector's popovers (`close_inspector_popovers`) and the Blend shapes card
+(`app-booleans.md`), and an inspector popover opened after it closes it (`inspector_popover_open`).
+Find and Colour review are left open. If the pivot handle is down and one layer is selected, opening
+raises it (`show_pivot`); closing or committing puts it back down only if the card raised it
+(`RepeatCard::raised_pivot`).
 
-- **Rows.** Title *Repeat around origin* with ✕; *Full turn · Fixed angle*; *Count*
+- **Rows.** Head `ui::popover_head` *Repeat around origin*; *Full turn · Fixed angle*; *Count*
   (`icon::COPY_SIMPLE`) beside *Step* (`icon::ROTATION`), the step disabled showing 360/count under
   *Full turn* and editable under *Fixed angle*, which starts from the full turn's step; the switch
-  *Turn the copies with the step*; *Copies* *Plain · Linked* with a caption; foot *Cancel* then
-  primary *Repeat*. Its settings outlive a close, so it reopens on the ring last made.
+  *Turn the copies with the step*; the switch *Link the copies* with a caption under it at
+  `ui::SECTION_LABEL_GAP`; foot `settings::footer_row`, *Cancel* then primary *Repeat*. Its settings
+  outlive a close, so it reopens on the ring last made.
 - **Keys.** `Enter` repeats (`dispatch` hands `Action::Enter` to the card while it is open); `Escape`
   cancels, the rung after Colour review. The card closes when another document comes to the front.
+- **A right-click cancels a scrub** of *Count* or *Step* wherever the pointer is: `InFlight::repeat_scrub`
+  holds both as they were, armed while a field is dragged, put back by `cancel_gesture` and cleared at
+  the frame's end once no button is down, as `settings_scrub` is.
 - **The preview** is `Place::Beside`: the copies in each original's own parent at 45% of its opacity,
   since a preview must not reparent what is on the canvas. It is minted from a copy of the id
   counter, so it spends no ids; rebuilt when the revision, selection, pivot or ring changes; and put
   back after another gesture's preview cleared it. A canvas drag owns the preview while it lasts.
 - **Linked** makes the original a component first — in place for a frame or group, else wrapped in a
-  frame made the main, as *Create component* does — then repeats that main, so the copies are its
-  instances. Both halves are built on a scratch copy of the document and commit as one *Repeat*
-  step; the status says *Made Tick a component and 11 linked copies around the origin*. *Plain* is
-  the default, and the choice is kept per document in memory (`Session::repeat_linked`). Refused:
-  several layers, off, with *Linked copies repeat one layer at a time*; a main or an instance root,
-  on and dimmed, with *Copies of a component are linked already*; otherwise the reason
-  `create_component_refusal` gives.
+  group named after the layer and made the main (not *Create component*'s frame: the wrapper only
+  carries the link, and a frame would add a clip and a fill), so the ring group reads *‹layer› ×
+  ‹count›* — then repeats that main, so the copies are its instances. Both halves are built on a
+  scratch copy of the document and commit as one *Repeat* step; the status says *Made Tick a
+  component and 11 linked copies around the origin*. Off is the default, and the choice is kept per
+  document in memory (`Session::repeat_linked`). Where it cannot apply the switch is disabled, its
+  reason both tooltip and caption: several layers, off, *Linked copies repeat one layer at a time*;
+  a main or an instance root, on, *Copies of a component are linked already*; otherwise off, with
+  the reason `create_component_refusal` gives.
 
 ### `Ctrl`+arrow size step
 
@@ -601,7 +614,7 @@ review and the Blend shapes card (`app-booleans.md`) and, over one layer, raises
 - **Same press, two consumers.** The cancel and the context menu share one press: `gesture_cancelled` must be read at the top of `canvas_context_menu`, before any branch selects.
 - **Dropdown keyboard focus.** A dropdown opened by clicking its head leaves `focused() == None`, so `egui_wants_keyboard_input` does not cover it.
 - **Popover flags outlive popovers.** Gate on `popover_heard`, not on the flags, or Escape is swallowed behind a popover nobody is drawing.
-- **Three popover lists.** They differ deliberately, by the image card. A shared list would have to carry that exception.
+- **Three popover lists.** They differ by the image card and by the Repeat and Blend cards. A shared list would have to carry those exceptions.
 - **Inert `TopMenu` row.** `TopMenu` needs its own Escape arm; without one, Escape closes the menu *and* drops the tool.
 - **Two copies of one resize rule.** `resized_box` and `resize_factors` have diverged twice. Change both, and test both: the box can be identical while the path differs.
 - **Unguarded `draw_drop_indicator`.** It does not check `shown_visible`, so a picture inside a hidden group is still ringed during a file drag.

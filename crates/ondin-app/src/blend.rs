@@ -1,5 +1,5 @@
-//! *Blend shapes…* (`docs/design/app-booleans.md`, *Blend shapes*): a card over
-//! the canvas that makes the steps between two shapes (`ondin_core::blend`),
+//! *Blend shapes…* (`docs/design/app-booleans.md`, *Blend shapes*): a popover in
+//! the inspector's lane that makes the steps between two shapes (`ondin_core::blend`),
 //! previewed live and committed as one *Blend shapes* step.
 
 use crate::app::OndinApp;
@@ -42,6 +42,11 @@ impl Default for BlendCard {
 type Key = (u64, Vec<NodeId>, usize, bool, usize, bool);
 
 impl BlendCard {
+    /// Put back the step count a right-click cancelled the scrub of.
+    pub(crate) fn restore_scrub(&mut self, steps: f64) {
+        self.steps = steps;
+    }
+
     fn blend(&self) -> Blend {
         let (col, row) = (self.start % 3, self.start / 3);
         Blend {
@@ -74,9 +79,9 @@ impl OndinApp {
         if let Some(why) = self.blend_refusal() {
             return self.session.info(why);
         }
-        self.close_find();
+        // One card in the popover lane at a time.
+        self.close_inspector_popovers();
         self.close_repeat();
-        self.colour_review.open = false;
         self.blend.open = true;
         self.blend.built = None;
     }
@@ -168,29 +173,38 @@ impl OndinApp {
         if self.blend_refusal().is_some() {
             return self.close_blend();
         }
+        // A popover opened in the lane after the card takes its place.
+        if self.inspector_popover_open() {
+            return self.close_blend();
+        }
         self.refresh_blend_preview();
-        let canvas = self.canvas_rect;
+        let area = self.transform_popover_area(ctx, egui::Id::new("blend-shapes"));
         let card = &mut self.blend;
+        // Before the field: `value_field` applies this frame's drag delta inside
+        // the call that reports the drag.
+        let before = card.steps;
+        let mut scrubbing = false;
         let mut act = None;
-        ui::canvas_popup_area(ctx, egui::Id::new("blend-shapes"), canvas).show(ctx, |ui| {
+        area.show(ctx, |ui| {
             ui::hold_tab(ui);
-            crate::settings::card_frame().show(ui, |ui| {
-                ui.set_width(W - 2.0 * ui::POPOVER_PAD);
-                ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-                if crate::settings::modal_title(ui, "Blend shapes") {
+            ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
+                let w = ui::menu_inner_w(W, ui::POPOVER_PAD);
+                ui.set_width(w);
+                ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;
+                if ui::popover_head(ui, "Blend shapes") {
                     act = Some(Act::Close);
                 }
-                let w = ui.available_width();
                 ui::labelled(ui, "Steps between", |ui| {
-                    ui::value_field(
+                    let resp = ui::value_field(
                         ui,
                         egui::vec2(w, ui::CONTROL_H),
                         Prefix::Icon(icon::DOTS_THREE),
                         &mut card.steps,
                         Scrub::whole(0.1).range(1.0..=blend::MAX_STEPS as f64),
                         |d| d.custom_formatter(ui::number(0)),
-                    )
-                    .on_hover_text("How many shapes go between the two")
+                    );
+                    scrubbing = resp.dragged();
+                    resp.on_hover_text("How many shapes go between the two")
                 });
                 if ui::switch_row(
                     ui,
@@ -235,17 +249,24 @@ impl OndinApp {
                 {
                     act = Some(Act::Reverse);
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                    if crate::settings::text_button(ui, "Blend", FieldButton::Primary).clicked() {
-                        act = Some(Act::Commit);
-                    }
-                    if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                        act = Some(Act::Close);
-                    }
-                });
+                match crate::settings::footer_row(
+                    ui,
+                    &[
+                        ("Cancel", FieldButton::Off),
+                        ("Blend", FieldButton::Primary),
+                    ],
+                ) {
+                    Some(0) => act = Some(Act::Close),
+                    Some(_) => act = Some(Act::Commit),
+                    None => {}
+                }
             });
         });
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if scrubbing && !self.gesture_cancelled && self.in_flight.blend_scrub.is_none() {
+            self.in_flight.blend_scrub = Some(before);
+        }
         let Some(act) = act else {
             return;
         };
@@ -333,6 +354,41 @@ mod tests {
             app.session.doc.get(page).unwrap().children(),
             &[circle, square]
         );
+    }
+
+    /// The card opens in the popover lane, and a right-click mid-scrub of the
+    /// steps puts them back, with the pointer on the card or out over the canvas.
+    /// flip: `cancel_gesture` not restoring `blend_scrub` → fails at "the steps are back".
+    #[test]
+    fn a_right_click_winds_a_steps_scrub_back() {
+        use crate::repeat::tests::scrub_then_right_click;
+        let id = egui::Id::new("blend-shapes");
+        for outside in [false, true] {
+            let ctx = egui::Context::default();
+            let (mut app, _, _) = two_shapes(&ctx);
+            crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+            app.open_blend();
+            let before = app.blend.steps;
+            scrub_then_right_click(
+                &ctx,
+                &mut app,
+                id,
+                "Steps between",
+                |at| match outside {
+                    true => egui::pos2(200.0, 400.0),
+                    false => at,
+                },
+                |app| {
+                    assert_ne!(app.blend.steps, before, "the drag scrubbed the steps");
+                    assert!(app.in_flight.blend_scrub.is_some(), "the scrub is armed");
+                },
+            );
+            assert_eq!(app.blend.steps, before, "the steps are back ({outside})");
+            assert!(app.blend.open, "the right-click closed nothing");
+            let card = ctx.memory(|m| m.area_rect(id)).expect("the card");
+            let transform = app.transform_card.expect("the Transform card drawn");
+            assert_eq!(card.top(), transform.top(), "level with the Transform card");
+        }
     }
 
     /// One shape is refused with the row's own sentence, and no card opens.

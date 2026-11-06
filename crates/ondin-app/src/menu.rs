@@ -2832,7 +2832,8 @@ impl OndinApp {
             .unwrap_or_default();
         // R4: one slot across every floating thing drawn over the canvas. Spelled
         // out rather than routed through `OndinApp::a_popover_is_open`, since the
-        // two sets differ by image editing's card.
+        // two sets differ by image editing's card and the Repeat and Blend cards,
+        // which stay up beside a menu as they do beside the canvas.
         self.open_menu = TopMenu::None;
         self.picker = None;
         self.stroke_menu = None;

@@ -159,6 +159,20 @@ pub fn close_button(ui: &mut egui::Ui) -> egui::Response {
     icon_button(ui, icon::X, CLOSE_BUTTON_W, 13.0, false, true).on_hover_text("Close")
 }
 
+/// The head of a popover with no control to lead it (*Export settings*, *Repeat
+/// around origin*): its name as an [`eyebrow`], the [`close_button`] against the
+/// right margin. Answers whether the × was pressed.
+pub fn popover_head(ui: &mut egui::Ui, title: &str) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(eyebrow(title));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            close_button(ui).clicked()
+        })
+        .inner
+    })
+    .inner
+}
+
 /// What a list says when it has nothing to show (a search that matched
 /// nothing, an empty list): one line of [`SMALL_PT`] `text::dim()`, at the
 /// rows' own inset, without a closing period.

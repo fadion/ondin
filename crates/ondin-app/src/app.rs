@@ -175,6 +175,11 @@ pub(crate) struct InFlight {
     /// The batch rename box's numbering as it was when a From, Step or Pad scrub
     /// began, for the same reasons as [`Self::settings_scrub`].
     pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
+    /// *Repeat around origin…*'s count and step as they were when a scrub of either
+    /// began, for the same reasons as [`Self::settings_scrub`].
+    pub(crate) repeat_scrub: Option<(f64, f64)>,
+    /// *Blend shapes…*'s step count as it was when its scrub began, likewise.
+    pub(crate) blend_scrub: Option<f64>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
@@ -239,6 +244,20 @@ mod in_flight_tests {
                 "rename_scrub",
                 InFlight {
                     rename_scrub: Some(ondin_core::rename::Numbering::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "repeat_scrub",
+                InFlight {
+                    repeat_scrub: Some((12.0, 30.0)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "blend_scrub",
+                InFlight {
+                    blend_scrub: Some(5.0),
                     ..Default::default()
                 },
             ),
@@ -910,6 +929,9 @@ pub struct OndinApp {
     /// frame, which the palette offers to show.
     pub(crate) cards_drawn: Vec<&'static str>,
     pub(crate) cards_shown: Vec<&'static str>,
+    /// Where the inspector drew its Transform card this frame, if it did: what the
+    /// Repeat and Blend cards open beside, in the popover lane.
+    pub(crate) transform_card: Option<egui::Rect>,
     /// Every card title drawn this session, so a card the selection does not show
     /// can still be offered, dim.
     pub(crate) cards_seen: std::collections::BTreeSet<&'static str>,
@@ -1575,6 +1597,7 @@ impl OndinApp {
             cheatsheet: None,
             reveal_card: None,
             cards_drawn: Vec::new(),
+            transform_card: None,
             cards_shown: Vec::new(),
             cards_seen: std::collections::BTreeSet::new(),
             secondary_press: None,
@@ -2103,6 +2126,8 @@ impl OndinApp {
             self.in_flight.session_scrub = None;
             self.in_flight.settings_scrub = None;
             self.in_flight.rename_scrub = None;
+            self.in_flight.repeat_scrub = None;
+            self.in_flight.blend_scrub = None;
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2706,6 +2731,13 @@ impl OndinApp {
             && let Some(b) = &mut self.batch_rename
         {
             b.s.numbering = n;
+        }
+        // And the Repeat and Blend cards' numbers; their previews rebuild from them.
+        if let Some((count, step)) = self.in_flight.repeat_scrub.take() {
+            self.repeat.restore_scrub(count, step);
+        }
+        if let Some(steps) = self.in_flight.blend_scrub.take() {
+            self.blend.restore_scrub(steps);
         }
         // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;
@@ -6123,8 +6155,8 @@ impl OndinApp {
         self.builder = None;
         self.builder_cache = None;
         // Their previews are of the document leaving.
-        self.repeat.open = false;
-        self.blend.open = false;
+        self.close_repeat();
+        self.close_blend();
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;
@@ -8524,6 +8556,40 @@ impl OndinApp {
         egui::pos2(Self::popover_left(ctx, width), head.top())
     }
 
+    /// The `Area` a card that works on the Transform card's origin opens in
+    /// (*Repeat around origin…*, *Blend shapes…*): the popover lane, level with the
+    /// Transform card, or with the inspector's top while no Transform card is drawn.
+    pub(crate) fn transform_popover_area(&self, ctx: &egui::Context, id: egui::Id) -> egui::Area {
+        let screen = ctx.input(|i| i.content_rect());
+        let head = self
+            .transform_card
+            .unwrap_or_else(|| Self::inspector_column(screen));
+        egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(Self::popover_anchor(ctx, head, POPOVER_W))
+            .constrain_to(screen.shrink(crate::ui::SCREEN_MARGIN))
+    }
+
+    /// Whether one of the inspector's own popovers holds the lane: a card opened
+    /// in it after the Repeat or Blend card puts that card away.
+    pub(crate) fn inspector_popover_open(&self) -> bool {
+        self.type_menu.is_some()
+            || self.stroke_menu.is_some()
+            || self.effect_menu.is_some()
+            || self.export_menu
+            || self.export_row_open.is_some()
+    }
+
+    /// Put the inspector's own popovers away, for a card opening in their lane.
+    pub(crate) fn close_inspector_popovers(&mut self) {
+        self.type_menu = None;
+        self.stroke_menu = None;
+        self.stroke_dash_text = None;
+        self.effect_menu = None;
+        self.export_menu = false;
+        self.export_row_open = None;
+    }
+
     /// What a new detached picker opens [`POPOVER_GAP`] left of: the inspector's cards,
     /// or any open popover, which would cover it (`Foreground` over `Middle`).
     pub(crate) fn picker_lane_right(&self, ctx: &egui::Context) -> f32 {
@@ -8536,11 +8602,9 @@ impl OndinApp {
     /// Whether anything is occupying the popover lane; a new popover must join this list.
     /// The image-editing card is asked for by its mode being on.
     fn a_popover_is_open(&self) -> bool {
-        self.type_menu.is_some()
-            || self.stroke_menu.is_some()
-            || self.effect_menu.is_some()
-            || self.export_menu
-            || self.export_row_open.is_some()
+        self.inspector_popover_open()
+            || self.repeat.open
+            || self.blend.open
             || self.edited_image().is_some()
     }
 
@@ -8565,6 +8629,7 @@ impl OndinApp {
     pub(crate) fn inspector_panel(&mut self, ctx: &egui::Context) {
         // Last frame's cards are what the palette offers to show.
         self.cards_shown = std::mem::take(&mut self.cards_drawn);
+        self.transform_card = None;
         let screen = ctx.input(|i| i.content_rect());
         let column = Self::inspector_column(screen);
 

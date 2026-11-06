@@ -59,8 +59,10 @@ and `2x` buttons filling the row.
 - `0.5x`/`2x` are `ui::label_button` at `FieldButton::Off`, straight to `commit_edit`; never shown as selected.
 - **Named rows.** Because the row comes and goes, every row from it downwards is drawn through `inspector::transform_row` and identified by name; positional ids would renumber and lose half-typed `DragValue` state.
 
-**Rotation and skew** share a row at X/Y widths. Below, four equal buttons (`ui::field_button_sized`):
-turn 90° counter-clockwise, turn 90° clockwise, flip H, flip V.
+**Rotation and skew** share a row at X/Y widths. Below, five equal buttons (`ui::field_button_sized`):
+turn 90° counter-clockwise, turn 90° clockwise, flip H, flip V, *Repeat around origin…*. The last
+opens and closes the Repeat card (`tools.md`), On while it is up and Disabled with
+`repeat_refusal`'s reason as its tooltip.
 
 - **Skew** is clamped at `tools::MAX_SKEW` (±89°), with the `SKEW` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
 - **Rotation** shows `Basis::of`'s angle at rest, a latched number during a gesture (§15 D206). It writes by composition (`inspector::turned_about`, `rotate_about · old_world`), never by rebuilding, which would spin a mirrored layer past ±90°. A `Line`'s rotation is the world-space start→end angle, written as the delta (typed minus shown) about the pivot.

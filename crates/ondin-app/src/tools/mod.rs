@@ -1466,6 +1466,12 @@ pub fn rotate_node(
     pivot: Point,
     angle: f64,
 ) -> Transaction {
+    transform_node(doc, res, id, turn_about(pivot, angle))
+}
+
+/// `id` carried by the world-space affine `by`, any scale in it written into the
+/// layer's geometry as [`rotate_node`]'s is.
+pub fn transform_node(doc: &Document, res: &Resolved, id: NodeId, by: Affine) -> Transaction {
     let Some(node) = doc.get(id) else {
         return Transaction(vec![]);
     };
@@ -1476,7 +1482,7 @@ pub fn rotate_node(
         .parent()
         .and_then(|p| res.world_transform(p))
         .unwrap_or(Affine::IDENTITY);
-    let new_world = turn_about(pivot, angle) * old_world;
+    let new_world = by * old_world;
     let new_local = parent_world.inverse() * new_world;
     let Some((transform, gx, gy)) = split_geometry_scale(new_local) else {
         return Transaction(vec![]);

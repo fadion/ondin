@@ -212,6 +212,11 @@ pub enum Action {
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),
+    /// *Transform again* (`crate::again`). Unbound: Ctrl+Alt+D is AltGr+D, which
+    /// types a letter on several European layouts.
+    TransformAgain,
+    /// Open *Repeat around origin…* (`crate::repeat`). Unbound.
+    RepeatAround,
     /// Move the selection by a world-space delta (arrow keys).
     Nudge(Vec2),
     /// Grow or shrink the selection's box by this many points on each axis —

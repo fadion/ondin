@@ -538,6 +538,12 @@ pub struct EditorSession {
     /// what [`said_detached`] worded onto the status — so a door whose own report
     /// overwrites that status can carry them ([`Self::last_detached`]).
     last_detached: (Vec<String>, Vec<String>),
+    /// The last move, rotation, scale or skew a commit made, which *Transform
+    /// again* applies once more (`crate::again`). Kept across selection changes.
+    pub last_transform: Option<crate::again::Again>,
+    /// *Repeat around origin…* makes linked copies in this document rather than
+    /// plain ones.
+    pub repeat_linked: bool,
     status: Status,
     /// Which frame a status write belongs to ([`Self::next_status_pass`]): writes in
     /// one frame are one handler's, and join after an error.
@@ -747,6 +753,8 @@ impl EditorSession {
             commits: 0,
             flex_receipt: None,
             last_detached: Default::default(),
+            last_transform: None,
+            repeat_linked: false,
             status: Status::default(),
             status_pass: 0,
             compare: None,
@@ -1462,6 +1470,7 @@ impl EditorSession {
         if tx.0.is_empty() {
             return Ok(());
         }
+        let watch = crate::again::Watch::of(&note, &self.resolved);
         if self.compare.is_some() {
             self.fail(crate::compare::READ_ONLY);
             return Err(CommitError::ReadOnly);
@@ -1603,6 +1612,9 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
+        if let Some(again) = watch.and_then(|w| w.finish(&self.resolved)) {
+            self.last_transform = Some(again);
+        }
         if ondin_core::boolean::failures() != failures {
             self.fail("A boolean could not be computed and draws nothing — undo to bring its operands back");
         }

@@ -527,7 +527,7 @@ or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's 
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
 variables browser (inner rungs first) → a text session → the find box → colour review (its own
-inner rungs first) → a compare → the pen →
+inner rungs first) → the Repeat around origin card → a compare → the pen →
 **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
 Offset card (`offset_card`) → pen bias armed over an edit → the point selection → the pivot handle → the entered group (selects it) → a tool that is
@@ -602,6 +602,9 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   stroke / font / effects*), since the palette can enumerate *which* "same".
 - **Select matching layers** — a palette verb. Figma's `Ctrl+Alt+A` is free but not spent while
   §12's `AltGr` question is open: on Polish and similar layouts it is `ą`.
+- **Transform again** and **Repeat around origin…** — palette verbs (the second also the Transform
+  card's fifth button), no chord. Every free `Ctrl+Alt` chord is `AltGr` on some layout:
+  `Ctrl+Alt+D` is `AltGr+D`, a letter on Croatian, Slovenian, Czech and Hungarian layouts.
 - **Paste to replace** — a layer-menu row (and so a palette row), no chord. `Ctrl+Shift+R` is not spent on it: it is
   batch rename, beside `Ctrl+R`'s rename.
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural

@@ -955,6 +955,8 @@ pub struct OndinApp {
     pub(crate) find: crate::find::FindBox,
     /// The Colour review card, at the palette's place (`colour_review.rs`).
     pub(crate) colour_review: crate::colour_review::ColourReview,
+    /// *Repeat around origin…*'s card (`crate::repeat`).
+    pub(crate) repeat: crate::repeat::RepeatCard,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1586,6 +1588,7 @@ impl OndinApp {
             tokens_import: None,
             find: Default::default(),
             colour_review: Default::default(),
+            repeat: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -2071,6 +2074,7 @@ impl OndinApp {
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
         self.colour_review_ui(&ctx);
+        self.repeat_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
         self.compare_bar(&ctx);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
@@ -2290,6 +2294,8 @@ impl OndinApp {
                 let turn = std::f64::consts::FRAC_PI_2;
                 self.rotate_selection_quarter(if clockwise { turn } else { -turn });
             }
+            Action::TransformAgain => self.transform_again(),
+            Action::RepeatAround => self.open_repeat(),
             Action::Copy => {
                 self.copy_selection(ctx);
             }
@@ -2320,6 +2326,7 @@ impl OndinApp {
             Action::SelectMatching => self.select_matching(),
             Action::SelectInverse => self.select_inverse(),
             // The pen reads Enter itself in `pen_input`.
+            Action::Enter if self.repeat.open => self.commit_repeat(),
             Action::Enter if self.pen.is_some() => {}
             Action::Enter => self.enter_action(),
             // The Escape that closes a top-bar dropdown closes only it (an open dropdown
@@ -2621,8 +2628,10 @@ impl OndinApp {
         // `dragged_id` blinks (egui clears it on any button's release), so the gesture
         // preview and `InFlight` are read too; both are absent when nothing is in
         // flight, which keeps this a no-op for the right-click that removes a gradient stop.
+        // The Repeat card's ring stands on the gesture preview while no drag is
+        // live; it is no gesture, and a right-click must still open its menu.
         let field = ctx.dragged_id().is_some()
-            || self.session.has_gesture_preview()
+            || (self.session.has_gesture_preview() && !self.repeat_preview_standing())
             || self.in_flight.any()
             // A component carried out of the insert picker: its drag is egui's too.
             || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
@@ -2737,6 +2746,8 @@ impl OndinApp {
         } else if self.colour_review.open {
             // Its open menu or the name being typed goes first, the card next press.
             self.colour_review.escape();
+        } else if self.repeat.open {
+            self.close_repeat();
         } else if self.session.compare.is_some() {
             self.leave_compare();
         } else if self.pen.is_some() {
@@ -4041,7 +4052,7 @@ impl OndinApp {
 
 /// Whether *Create component* on the one layer `id` makes it the main where it
 /// stands — a frame or a group — rather than wrapping it in a new frame first.
-fn create_in_place(doc: &ondin_core::Document, id: NodeId) -> bool {
+pub(crate) fn create_in_place(doc: &ondin_core::Document, id: NodeId) -> bool {
     doc.get(id)
         .is_some_and(|n| matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group))
 }
@@ -6096,6 +6107,8 @@ impl OndinApp {
         self.pencil_last = None;
         self.builder = None;
         self.builder_cache = None;
+        // Its preview is of the document leaving.
+        self.repeat.open = false;
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;

@@ -455,6 +455,12 @@ pub enum Item {
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
     RotateQuarter(bool),
+    /// *Transform again*: the last move, rotation, scale or skew once more
+    /// (`crate::again`). The palette's row names the step.
+    TransformAgain,
+    /// *Repeat around origin…*: the card that turns copies about the transform
+    /// origin (`crate::repeat`).
+    RepeatAround,
     /// *Select same fill* and its siblings (`OndinApp::select_same`).
     SelectSame(crate::input::Same),
     /// *Select matching layers* (`OndinApp::select_matching`).
@@ -1285,6 +1291,19 @@ impl Item {
                 None,
                 Group::Transform,
             ),
+            // Unbound: every free Ctrl+Alt chord is AltGr on some layout.
+            Item::TransformAgain => s(
+                "Transform again",
+                icon::TRANSFORM_AGAIN,
+                None,
+                Group::Transform,
+            ),
+            Item::RepeatAround => s(
+                "Repeat around origin…",
+                icon::REPEAT_AROUND,
+                None,
+                Group::Transform,
+            ),
             Item::SelectSame(same) => {
                 use crate::input::Same;
                 let label = match same {
@@ -1403,6 +1422,8 @@ impl Item {
             Item::UnlinkTokens => &["tokens", "dtcg", "json", "link"],
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Divide => &["boolean", "split", "cut", "pieces"],
+            Item::TransformAgain => &["repeat", "again", "redo", "step"],
+            Item::RepeatAround => &["radial", "rotate", "copies", "ring", "circular", "array"],
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
@@ -1515,6 +1536,8 @@ impl Item {
             Item::SaveNamedVersion => Action::SaveNamedVersion,
             Item::ColourReview => Action::ColourReview,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
+            Item::TransformAgain => Action::TransformAgain,
+            Item::RepeatAround => Action::RepeatAround,
             Item::SelectSame(same) => Action::SelectSame(same),
             Item::SelectMatching => Action::SelectMatching,
             Item::SelectInverse => Action::SelectInverse,
@@ -1564,6 +1587,7 @@ impl Item {
             Action::Distribute(axis) => Item::Distribute(axis),
             Action::TidyUp => Item::TidyUp,
             Action::RotateQuarter(clockwise) => Item::RotateQuarter(clockwise),
+            Action::TransformAgain => Item::TransformAgain,
             Action::TextStyle(chord) => Item::TextChord(chord),
             Action::Nudge(_) => return Some(("Nudge", icon::ARROWS_OUT_CARDINAL)),
             Action::SizeStep(_) => return Some(("Resize", icon::ARROWS_OUT)),
@@ -3636,6 +3660,8 @@ impl OndinApp {
             | Item::SaveNamedVersion
             | Item::ColourReview
             | Item::RotateQuarter(_)
+            | Item::TransformAgain
+            | Item::RepeatAround
             | Item::SelectSame(_)
             | Item::SelectMatching
             | Item::SelectInverse

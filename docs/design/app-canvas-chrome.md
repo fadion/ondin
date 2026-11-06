@@ -337,7 +337,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   *Kits used…*, *Stop sharing as kit…*, *Show in library*) are registry items the menu draws its
   labels from, offered always and dimmed with a reason where the menu would leave them out (their
   `Action`s re-ask the menu's guards); the Transform card's quarter turns are
-  `Item::RotateQuarter`, dimmed without a selection. *Select same …* (`Item::SelectSame`) dims with
+  `Item::RotateQuarter`, dimmed without a selection. *Transform again* and *Repeat around origin…*
+  (`Item::TransformAgain`, `Item::RepeatAround`) are rows of their own in the Transform group
+  (`tools.md`). *Select same …* (`Item::SelectSame`) dims with
   `select_same_source`'s reason, *Select matching layers* with `select_matching_sources`'s, and
   *Select inverse* without a selection (`app-selection.md`).
 - **The target** (`palette_target`, re-read every frame): a text session → `Target::TextSession`; a

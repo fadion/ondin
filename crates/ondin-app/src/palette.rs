@@ -673,6 +673,23 @@ impl OndinApp {
                 Cmd::verb(Item::RotateQuarter(clockwise), need_sel),
             );
         }
+        // Names what it will repeat, so the verb is never a guess.
+        let again = self.session.last_transform;
+        let mut transform_again = Cmd::verb(
+            Item::TransformAgain,
+            match again {
+                None => Some(crate::again::NOTHING_YET),
+                Some(_) => need_sel,
+            },
+        );
+        if let Some(a) = again {
+            transform_again.label = format!("Transform again: {}", a.label());
+        }
+        push(&mut out, transform_again);
+        push(
+            &mut out,
+            Cmd::verb(Item::RepeatAround, self.repeat_refusal()),
+        );
         for same in crate::input::Same::ALL {
             push(
                 &mut out,

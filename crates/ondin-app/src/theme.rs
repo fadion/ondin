@@ -1001,6 +1001,11 @@ pub mod icon {
     /// The shape builder tool: a small circle and a large one overlapping on the
     /// rail's rising diagonal, the face they share filled.
     pub const SHAPE_BUILDER: &str = "\u{f047}";
+    /// *Transform again*: a bent arrow with a second head behind its first, the
+    /// step taken once more.
+    pub const TRANSFORM_AGAIN: &str = "\u{f049}";
+    /// *Repeat around origin…*: eight ticks turned about a pivot dot.
+    pub const REPEAT_AROUND: &str = "\u{f04a}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1318,6 +1323,8 @@ pub mod icon {
         ("stack-simple", STACK_SIMPLE),
         ("divide", DIVIDE),
         ("shape-builder", SHAPE_BUILDER),
+        ("transform-again", TRANSFORM_AGAIN),
+        ("repeat-around", REPEAT_AROUND),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

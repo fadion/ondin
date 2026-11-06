@@ -40,8 +40,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
   steps by 45°).
 - **Cutting paths.** Split a path at an anchor into two subpaths, delete a segment to open a closed
   path, and a knife that cuts along a drawn line. *Delete* on points always heals.
-- **Repeat with a transform.** *Repeat around origin…*: N copies turned about the transform origin
-  (rays, teeth, ticks); and *Transform again*, the last move, rotation or scale applied once more.
 - **Icon-ready SVG export.** Options for `currentColor`, a viewBox from the frame, number precision,
   and outlined versus stroked output; and one action that writes every main of a component set as a
   folder of SVGs.

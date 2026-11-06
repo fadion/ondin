@@ -2824,7 +2824,12 @@ impl OndinApp {
             Drag::Resize { target, handle } => {
                 let (at, _) = self.snapped_resize(target, handle, world);
                 let tx = self.resize_tx(target, handle, at, self.resize_opts(target, shift, alt));
-                self.session.name_step("Resize", icon::ARROWS_OUT);
+                // The Scale tool's drag is a scale, as its row's is, which
+                // *Transform again* learns by the name.
+                match self.tool {
+                    Tool::Scale => self.session.name_step("Scale", icon::RESIZE),
+                    _ => self.session.name_step("Resize", icon::ARROWS_OUT),
+                }
                 self.session.commit(tx);
             }
             Drag::LineEnd { id, which } => {

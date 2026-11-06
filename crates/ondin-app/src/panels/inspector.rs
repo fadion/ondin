@@ -3443,7 +3443,8 @@ impl OndinApp {
         }
         self.commit_edit(Transaction(ops));
     }
-    /// The Transform card's four buttons — two quarter turns, then the two mirrors.
+    /// The Transform card's five buttons — two quarter turns, the two mirrors, then
+    /// *Repeat around origin…*, lit while its card is up.
     ///
     /// One row for both cards, scoped by [`TurnScope`].
     ///
@@ -3453,7 +3454,7 @@ impl OndinApp {
     fn quarters_row(app: &mut Self, ui: &mut egui::Ui, scope: TurnScope) {
         Self::transform_row(ui, "quarters", |ui| {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-            let quarter = (ui.available_width() - 3.0 * ui::CARD_COL_GAP) / 4.0;
+            let quarter = (ui.available_width() - 4.0 * ui::CARD_COL_GAP) / 5.0;
             let bw = egui::vec2(quarter, 28.0);
             let (turn_tips, flip_tips) = match scope {
                 TurnScope::Node(_) => (
@@ -3502,6 +3503,28 @@ impl OndinApp {
                 {
                     app.name_action(crate::input::Action::Flip(axis));
                     app.flip(axis);
+                }
+            }
+            let state = match (app.repeat_refusal(), app.repeat.open) {
+                (Some(_), _) => ui::FieldButton::Disabled,
+                (None, true) => ui::FieldButton::On,
+                (None, false) => ui::FieldButton::Off,
+            };
+            let tip = match (app.repeat_refusal(), scope) {
+                (Some(why), _) => why,
+                (None, TurnScope::Node(_)) => "Repeat around origin…",
+                (None, TurnScope::Selection) => {
+                    "Repeat around origin… — the selection turns as one arrangement about its centre"
+                }
+            };
+            if ui::field_button_sized(ui, icon::REPEAT_AROUND, bw, state)
+                .on_hover_text(tip)
+                .clicked()
+                && state != ui::FieldButton::Disabled
+            {
+                match app.repeat.open {
+                    true => app.close_repeat(),
+                    false => app.open_repeat(),
                 }
             }
         });
@@ -22273,14 +22296,14 @@ mod template_cell_tests {
 
 #[cfg(test)]
 mod quarters_row_tests {
-    //! The Transform card's four-button row, driven on the real `quarters_row`.
+    //! The Transform card's five-button row, driven on the real `quarters_row`.
     use super::*;
     use crate::app::OndinApp;
 
     /// The card width the real panel lays a Transform row out in.
     const CARD: f32 = 222.0;
 
-    /// The four button faces of one `quarters_row`, left to right, after two passes.
+    /// The five button faces of one `quarters_row`, left to right, after two passes.
     fn buttons(scope: TurnScope) -> Vec<egui::Rect> {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -22306,35 +22329,36 @@ mod quarters_row_tests {
         rects
     }
 
-    /// The four buttons split the card evenly and fill it.
+    /// The five buttons split the card evenly and fill it.
     ///
-    /// flip: divisor `4.0` → `3.0` → fails at the fill assertion only; the evenness loop catches a button of a different width.
+    /// flip: divisor `5.0` → `4.0` → fails at the fill assertion only; the evenness loop catches a button of a different width.
     #[test]
-    fn the_four_buttons_split_the_card_evenly_and_fill_it() {
+    fn the_five_buttons_split_the_card_evenly_and_fill_it() {
         let bs = buttons(TurnScope::Selection);
-        assert_eq!(bs.len(), 4, "four buttons: {bs:?}");
+        assert_eq!(bs.len(), 5, "five buttons: {bs:?}");
         for b in &bs {
             assert_eq!(b.width(), bs[0].width(), "uneven: {bs:?}");
             assert_eq!(b.height(), 28.0, "{b:?} is not 28 tall");
         }
         assert!(
-            (bs[3].max.x - bs[0].min.x - CARD).abs() < 0.01,
+            // egui rounds each face to a sixteenth of a point; five of them overshoot by one.
+            (bs[4].max.x - bs[0].min.x - CARD).abs() < 0.1,
             "the row does not fill the card: {:?}..{:?} of {CARD}",
             bs[0].min.x,
-            bs[3].max.x
+            bs[4].max.x
         );
     }
 
     /// Both scopes lay the row out identically.
     ///
-    /// flip: giving `TurnScope::Node` its own `/ 5.0` split inside `quarters_row` → fails here, not above.
+    /// flip: giving `TurnScope::Node` its own `/ 6.0` split inside `quarters_row` → fails here, not above.
     #[test]
     fn both_scopes_lay_the_row_out_identically() {
         // Any id: the scope's id reaches `rotate_quarter` on a click, not the layout.
         let one = buttons(TurnScope::Node(ondin_core::IdSource::new(1).mint()));
         let many = buttons(TurnScope::Selection);
-        assert_eq!(one.len(), 4, "one layer: {one:?}");
-        assert_eq!(many.len(), 4, "a selection: {many:?}");
+        assert_eq!(one.len(), 5, "one layer: {one:?}");
+        assert_eq!(many.len(), 5, "a selection: {many:?}");
         for (a, b) in one.iter().zip(&many) {
             assert!(
                 (a.width() - b.width()).abs() < 0.01 && (a.min.x - b.min.x).abs() < 0.01,

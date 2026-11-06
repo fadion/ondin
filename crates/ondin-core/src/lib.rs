@@ -58,6 +58,7 @@ pub mod penpot_v1;
 pub mod propagate;
 pub mod query;
 pub mod rename;
+pub mod repeat;
 pub mod reset;
 pub mod resolve;
 pub mod shape_builder;

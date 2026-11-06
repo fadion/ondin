@@ -75,6 +75,7 @@
 // tests back-date an `Instant` by subtraction on purpose.
 #![cfg_attr(not(test), deny(clippy::unchecked_time_subtraction))]
 
+mod again;
 mod app;
 mod atomic;
 mod batch_rename;
@@ -130,6 +131,7 @@ mod quit;
 mod rail;
 mod reader;
 mod render_cli;
+mod repeat;
 mod rulers;
 mod session;
 mod settings;

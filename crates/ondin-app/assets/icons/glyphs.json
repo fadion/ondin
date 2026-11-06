@@ -247,5 +247,7 @@
  { "name": "stroke", "codepoint": "U+F045", "fill": "M4 2H12a2 2 0 0 1 2 2V12a2 2 0 0 1 -2 2H4a2 2 0 0 1 -2 -2V4a2 2 0 0 1 2 -2ZM4 4V12H12V4Z" },
  { "name": "mode-default", "codepoint": "U+F046", "stroke": "M2.5 5.5H10.5V13.5H2.5ZM5.5 5.5V2.5H13.5V10.5H10.5", "fill": "M2.5 5.5H10.5V13.5H2.5Z" },
  { "name": "shape-builder", "codepoint": "U+F047", "stroke": "M2.5 10.5a3 3 0 1 0 6 0a3 3 0 1 0 -6 0ZM5.5 6.5a4 4 0 1 0 8 0a4 4 0 1 0 -8 0Z", "fill": "M5.63 7.5A3 3 0 0 1 8.5 10.37A4 4 0 0 1 5.63 7.5Z" },
- { "name": "divide", "codepoint": "U+F048", "stroke": "M2.5 2.5H9.5V4.5H4.5V9.5H2.5ZM6.5 6.5H9.5V9.5H6.5ZM11.5 6.5H13.5V13.5H6.5V11.5H11.5Z" }
+ { "name": "divide", "codepoint": "U+F048", "stroke": "M2.5 2.5H9.5V4.5H4.5V9.5H2.5ZM6.5 6.5H9.5V9.5H6.5ZM11.5 6.5H13.5V13.5H6.5V11.5H11.5Z" },
+ { "name": "transform-again", "codepoint": "U+F049", "stroke": "M2.5 13.5V10.5A5 5 0 0 1 7.5 5.5H13.5M10.5 2.5L13.5 5.5L10.5 8.5M7.5 2.5L10.5 5.5L7.5 8.5" },
+ { "name": "repeat-around", "codepoint": "U+F04A", "stroke": "M7.5 1.5V4M7.5 11V13.5M1.5 7.5H4M11 7.5H13.5M3.26 3.26L5.03 5.03M9.97 9.97L11.74 11.74M11.74 3.26L9.97 5.03M5.03 9.97L3.26 11.74", "fill": "M6.25 7.5a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0 -2.5 0Z" }
 ]

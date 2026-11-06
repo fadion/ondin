@@ -1109,6 +1109,17 @@ fn sweep_on(theme: Theme) {
     });
     assert_eq!(app.colour_review.groups_shown(), 1, "a group unfolded");
     check("colour review", app, found);
+    // *Repeat around origin…* on the box: its segments, fields, switch and foot.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let first = a.session.doc.first_page();
+        let id = a.session.doc.get(first).unwrap().children()[0];
+        a.session.selection.set_one(id);
+        a.open_repeat();
+        // The card raises the pivot handle, whose origin chips are not the card's.
+        a.show_pivot = false;
+    });
+    check("repeat around origin", app, found);
     let mut app = with_a_set(&ctx);
     let found = inspector(&ctx, &mut app);
     check("variants card", app, found);

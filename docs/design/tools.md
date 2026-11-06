@@ -2,7 +2,7 @@
 
 The v1 tool set, the tool rail and how canvas gestures behave: the wheel, the canvas cursors, cancelling, context menus and their
 chrome, selection chrome, multi-selection transforms, the Scale tool, skew, snapping during
-resize, drop outlines and the transform origin (pivot).
+resize, drop outlines, the transform origin (pivot), *Transform again* and *Repeat around origin*.
 
 ## 9.4 v1 tools
 
@@ -24,6 +24,7 @@ resize, drop outlines and the transform origin (pivot).
   - **Stability**: the union's top-left holds still, and tidying twice moves nothing. `tidy_suite.rs` checks these properties over hand cases and seeded random layouts.
   - Once the gaps are even, the selection shows **spacing handles** on the canvas: drag a gap band to set every gap of its axis, or a layer's centre dot to reorder it (`layout.md`, *Spacing handles on a loose selection*).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
+- **Transform again** (the last move, rotation, scale or skew once more) and **Repeat around origin…** (copies turned about the pivot), below.
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
 - **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
@@ -504,8 +505,82 @@ is armed over one layer, sharing `badge_placement`; a shape being drawn takes th
 
 **What reads the pivot.** `Handles::pivot` is the node's origin for one selection, the union centre
 for several. Readers: `Drag::Rotate`; the inspector's skew field (rebuilds about it); the rotation
-field (composes about it); quarter turns; `build::flip`, only when a pivot has been placed (D55).
-Canvas skew and Alt-resize deliberately do not, each having its own fixed point (D55, D60).
+field (composes about it); quarter turns; *Transform again*; *Repeat around origin* over one layer;
+`build::flip`, only when a pivot has been placed (D55). Canvas skew and Alt-resize deliberately do
+not, each having its own fixed point (D55, D60).
+
+### Transform again (`again.rs`)
+
+A palette verb (`Item::TransformAgain`, group Transform, `icon::TRANSFORM_AGAIN`, no chord:
+`shortcuts.md`, *Deliberately unbound*). It applies the last move, rotation, scale or skew once more
+to every outermost selected layer, each about its own pivot (`pivot_world`); a move is the same world
+delta. Each application is one undo step, *Transform again*; the status says *Rotated 15° again*
+(*Moved*, *Scaled*, *Skewed*).
+
+- **Learnt at the commit, not at the doors.** `Session::commit_inner` starts an `again::Watch` when
+  the step's name is a transform's (`Move`, `Nudge`, `Rotate`, `Rotate 90° …`, `Scale`, `Skew`):
+  the first subject's world transform, and for a scale its world bounds, before the commit, compared
+  after. So the canvas drags, the arrow keys, the Transform card's fields and quarter turns, the
+  Scale row and the Scale tool's handle drags (named *Scale*, not *Resize*) teach it without each
+  door saying so. A step named otherwise teaches nothing: `Resize` (a handle drag under any other
+  tool, W/H, `Ctrl`+arrows) and *Transform again* itself, so repeating leaves the step what it was.
+- **What is kept** is `Session::last_transform`, per document, in memory, across selection changes:
+  a move's world delta; a rotation's angle; a scale as the ratio of the world bounds, only when both
+  sides grew alike (a stretch has no one factor and keeps the old step); a skew as the world-space
+  lean, named by how far the layer's own lean moved. A commit that changed nothing measurable keeps
+  the old step.
+- **Applied** through `tools::rotate_node` (rotation), `tools::transform_node` (the skew's lean about
+  the pivot) and `tools::resize_selection` with `Scaling::Photographic` about the pivot (strokes,
+  radii and type scale too).
+- **The palette row names the step**: *Transform again: Rotate 15°* (*Move 24, 0*, *Scale 120%*,
+  *Skew 10°*). With nothing learnt it is dim with *Move, rotate or scale something first*; with
+  nothing selected, *Select a layer first*.
+
+### Repeat around origin (`repeat.rs`, `ondin_core::repeat`)
+
+Copies of the selection turned step by step about one point, committed grouped with the originals.
+
+- **The ring** (`repeat::Ring { count, step, turn }`). The count includes the original (12 is a clock
+  face), from 2 to `repeat::MAX_COUNT`. `Ring::full` divides a full turn by the count. With *turn*
+  off the copies keep their orientation and travel round: the selection box's centre is what the
+  rotation carries.
+- **The point.** One layer turns about its pivot (`pivot_world`). Several layers have no shared
+  origin, so they turn as one arrangement about their box's centre (`repeat::centre`).
+- **The result** (`Place::Group`, through `build::group`, so the layers must share a parent): a group
+  named *‹top layer› × ‹count›*, the originals first in the layers list and the copies below them in
+  order round the ring. Copies are captured subtrees settled with `component::settle_copy`, so a
+  main's copies land as its instances. The group is selected; the status says *Made 11 copies around
+  the origin*. One undo step, *Repeat*.
+- **Refusals** (`repeat_refusal`): nothing selected (*Select a layer first*), *This layer is
+  locked*, *A group containing this layer is locked*, *Repeat takes layers that share one parent*.
+  The card closes when the selection comes to be refused.
+- **Doors.** The palette (`Item::RepeatAround`, group Transform, `icon::REPEAT_AROUND`, unbound) and
+  the Transform card's fifth button (`inspector.md`), On while the card is up. A layer menu carries
+  no Transform rows, so the card is the door.
+
+**The card** hangs from `ui::canvas_popup_area` at `POPOVER_W` and is no modal: the canvas stays
+live, because the pivot decides the ring and must stay draggable. Opening it closes Find and Colour
+review and, over one layer, raises the pivot handle (`show_pivot`).
+
+- **Rows.** Title *Repeat around origin* with ✕; *Full turn · Fixed angle*; *Count*
+  (`icon::COPY_SIMPLE`) beside *Step* (`icon::ROTATION`), the step disabled showing 360/count under
+  *Full turn* and editable under *Fixed angle*, which starts from the full turn's step; the switch
+  *Turn the copies with the step*; *Copies* *Plain · Linked* with a caption; foot *Cancel* then
+  primary *Repeat*. Its settings outlive a close, so it reopens on the ring last made.
+- **Keys.** `Enter` repeats (`dispatch` hands `Action::Enter` to the card while it is open); `Escape`
+  cancels, the rung after Colour review. The card closes when another document comes to the front.
+- **The preview** is `Place::Beside`: the copies in each original's own parent at 45% of its opacity,
+  since a preview must not reparent what is on the canvas. It is minted from a copy of the id
+  counter, so it spends no ids; rebuilt when the revision, selection, pivot or ring changes; and put
+  back after another gesture's preview cleared it. A canvas drag owns the preview while it lasts.
+- **Linked** makes the original a component first — in place for a frame or group, else wrapped in a
+  frame made the main, as *Create component* does — then repeats that main, so the copies are its
+  instances. Both halves are built on a scratch copy of the document and commit as one *Repeat*
+  step; the status says *Made Tick a component and 11 linked copies around the origin*. *Plain* is
+  the default, and the choice is kept per document in memory (`Session::repeat_linked`). Refused:
+  several layers, off, with *Linked copies repeat one layer at a time*; a main or an instance root,
+  on and dimmed, with *Copies of a component are linked already*; otherwise the reason
+  `create_component_refusal` gives.
 
 ### `Ctrl`+arrow size step
 
@@ -519,6 +594,7 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 
 ## Traps
 
+- **A step's name is what teaches *Transform again*.** `again::kind_of` matches the undo-step names the doors pass to `name_step`; renaming one (`Move`, `Rotate`, `Scale`, …) silently stops that door teaching it. `transform_steps_are_recognised_by_name` pins the matcher, not the doors' names.
 - **Hidden is not disarmed.** `editing_in_place` hides the selection chrome but arms nothing off; `selection_handles`, `line_ends`, `grab_rail_handle` and `on_pivot` each refuse under `edited_gradient`, or a hidden handle takes the press from the gradient's (the pivot sits on a new radial's centre). `the_box_handles_step_aside` and `a_hidden_pivot_does_not_take_a_centre_s_press` pin the box handles and the pivot.
 - **The hold's release is not a pick.** egui reports the release that ends a hold as the slot's click; `rail_group`'s `ends_hold` guard keeps it from arming the shown member and closing the row. The row finds the member under a held drag from its own geometry, since the press belongs to the slot and no button in the row reads as hovered. `a_held_press_opens_the_row_and_a_release_over_a_member_picks_it` pins the guard, and its release over the lasso exercises the geometry.
 - **Same press, two consumers.** The cancel and the context menu share one press: `gesture_cancelled` must be read at the top of `canvas_context_menu`, before any branch selects.

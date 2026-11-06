@@ -14,7 +14,7 @@ matched by id, so a renamed or moved layer is one change.
   drawing. `OndinApp::then_canvas` and `now_canvas` are the versions' canvases, each made on first
   use and dropped on the first frame with no compare.
 - **Doors.** Each Version history row has one compare button, *Compare with now*
-  (`versions::NOW_GLYPH`, the Swipe grip's arrows), before the pencil and shown with the row's
+  (`versions::NOW_GLYPH`, the git-diff glyph), before the pencil and shown with the row's
   other buttons (`library.md`): it closes the card and opens the compare. An opened row's *Show
   on canvas* (the git-diff glyph) opens the version against the one before it, as two versions —
   the pair its summary line describes; Now's opens the newest version against now. With
@@ -118,7 +118,7 @@ matched by id, so a renamed or moved layer is one change.
   With two versions Now draws the newer through a third (`now_canvas`) over the open document's
   drawing, and the frame labels, which are the open document's, are not drawn.
   Swipe clips the version left of a draggable handle (`ui::split_handle`: a 2pt accent line, a
-  24×36 accent grip with a left-right arrow), with *THEN* and *NOW* pills in the bottom corners.
+  12×36 accent grip with three vertical dots), with *THEN* and *NOW* pills in the bottom corners.
   A press within `ui::SPLIT_REACH` of the line takes it; anywhere else pans. Over the line and
   through its drag the cursor is the drawn horizontal resize cursor (`canvas::resize_cursor`), not a
   stock icon, which would sit under the drawn arrow `canvas_cursor` has already set. A right-click during

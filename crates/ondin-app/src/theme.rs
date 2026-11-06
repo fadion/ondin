@@ -599,7 +599,9 @@ pub mod icon {
     pub const NUMBER_SQUARE_ONE: &str = "\u{e36c}"; // actual size (1:1 / 100%)
     pub const PLUS: &str = "\u{e3d4}";
     pub const DOTS_THREE: &str = "\u{e1fe}";
-    /// A row's own overflow menu: a Library file's, a kit's in *Kits used…*.
+    /// A row's own overflow menu: a Library file's, a kit's in *Kits used…*; and
+    /// the grip on a before-and-after split (`ui::split_handle`), too narrow for
+    /// [`DOTS_SIX_VERTICAL`].
     ///
     /// Vertical where a head's overflow ([`DOTS_THREE`]) is horizontal: a row's
     /// own menu reads as belonging to the row.
@@ -813,7 +815,10 @@ pub mod icon {
     /// Colour review's merge: the target row the others fold into, and the *Merge
     /// colours* step.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
-    /// Compare's grip between the two states. A gap is [`ARROWS_OUT_LINE_HORIZONTAL`].
+    /// Unused: a split's grip wears [`DOTS_THREE_VERTICAL`], and a gap is
+    /// [`ARROWS_OUT_LINE_HORIZONTAL`]. Kept because dropping it means rebuilding
+    /// the font.
+    #[allow(dead_code)]
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
     /// A box around several things: a multi-selection's identity, Compare's
     /// Overlay, a text's *Fixed size*, and fitting the dash pattern to the

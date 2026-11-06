@@ -10954,6 +10954,8 @@ struct BadgeEdge {
 /// (`the_badge_label_lies_along_its_edge_at_every_angle`). `None` for a degenerate
 /// outline.
 fn badge_edge(quad: &[egui::Pos2; 4]) -> Option<BadgeEdge> {
+    /// How much steeper a later edge must face to win: about a twentieth of a degree.
+    const TIE: f32 = 1e-3;
     let centroid = quad.iter().fold(egui::Vec2::ZERO, |a, p| a + p.to_vec2()) / 4.0;
     let mut best: Option<BadgeEdge> = None;
     for i in 0..4 {
@@ -10968,8 +10970,10 @@ fn badge_edge(quad: &[egui::Pos2; 4]) -> Option<BadgeEdge> {
         if out.dot(mid.to_vec2() - centroid) < 0.0 {
             out = -out;
         }
-        // Screen y points down, so the largest `out.y` faces most downward; a tie keeps the first.
-        if best.is_none_or(|w| out.y > w.out.y) {
+        // Screen y points down, so the largest `out.y` faces most downward. A tie
+        // keeps the first, within a margin: at 45° a resize nudges the two normals
+        // by float noise, and an exact compare flips the pill every frame.
+        if best.is_none_or(|w| out.y > w.out.y + TIE) {
             best = Some(BadgeEdge {
                 mid,
                 dir: along.normalized(),
@@ -11773,6 +11777,34 @@ mod tests {
             edges.windows(2).filter(|w| w[0] != w[1]).count(),
             4,
             "{edges:?}"
+        );
+    }
+
+    /// At exactly 45° the pill keeps one edge while the box is resized, though each
+    /// size leaves the two lower normals a float hair apart.
+    /// flip: `badge_edge` comparing `out.y` with no margin → fails at "stayed on one edge".
+    #[test]
+    fn the_size_badge_holds_its_edge_through_a_resize_at_45_degrees() {
+        let (sin, cos) = std::f32::consts::FRAC_PI_4.sin_cos();
+        let turn =
+            |x: f32, y: f32| egui::pos2(400.0 + x * cos - y * sin, 300.0 + x * sin + y * cos);
+        let mut outs = Vec::new();
+        for step in 0..200 {
+            let (w, h) = (200.0 + step as f32 * 0.37, 150.0 + step as f32 * 0.21);
+            let quad = [turn(0.0, 0.0), turn(w, 0.0), turn(w, h), turn(0.0, h)];
+            let edge = badge_edge(&quad).expect("edges");
+            outs.push((edge.out.x > 0.0, edge.out.y));
+        }
+        // The fixture is the tie: both lower edges face down by the same amount.
+        assert!(
+            outs.iter()
+                .all(|(_, y)| (y - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4)
+        );
+        let first = outs[0].0;
+        assert!(
+            outs.iter().all(|(right, _)| *right == first),
+            "stayed on one edge: {:?}",
+            outs.iter().map(|o| o.0).collect::<Vec<_>>()
         );
     }
 

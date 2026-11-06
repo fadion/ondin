@@ -268,7 +268,7 @@ impl OndinApp {
     /// The bar while the pen or the pencil is drawing new paths: the mirror switch
     /// with its flyout, and the way out.
     fn drawing_bar(&mut self, ctx: &egui::Context) {
-        let on = self.session.mirror.axes != crate::mirror::Axes::Off;
+        let on = self.mirror().axes != crate::mirror::Axes::Off;
         let bar = [
             E::Btn {
                 glyph: icon::FLIP_HORIZONTAL,
@@ -305,11 +305,14 @@ impl OndinApp {
 
     /// Draw the path bar and its Offset card while a path's points are being edited.
     pub(crate) fn path_bar(&mut self, ctx: &egui::Context) {
-        // The mirror's flyout hangs only from the drawing bar.
-        if !matches!(self.tool, Tool::Pen | Tool::Pencil) {
+        // The mirror's flyout hangs from the drawing bar, or the edit bar's
+        // button while the edit's pen is armed.
+        if !matches!(self.tool, Tool::Pen | Tool::Pencil) && !self.pen_bias {
             self.mirror_open = false;
         }
         let Some(id) = self.edited_path() else {
+            // The edit's own mirror switch ends with it.
+            self.edit_mirror = None;
             self.close_offset_card();
             if matches!(self.tool, Tool::Pen | Tool::Pencil) {
                 self.drawing_bar(ctx);
@@ -328,6 +331,10 @@ impl OndinApp {
             self.drop_offset_card();
         }
         let has_points = !self.subject_points(id).is_empty();
+        // The edit's own switch, for the runs its pen draws; a mirrored path's
+        // runs follow its own axes instead.
+        let own_axes = self.path_mirror(id).is_some();
+        let mirroring = self.mirror().axes != crate::mirror::Axes::Off;
         let bar = [
             E::Btn {
                 glyph: icon::CURSOR,
@@ -344,6 +351,17 @@ impl OndinApp {
                 active: self.pen_bias,
                 enabled: true,
                 verb: Verb::Pen,
+            },
+            E::Btn {
+                glyph: icon::FLIP_HORIZONTAL,
+                tip: "Mirror while drawing",
+                dimmed: match own_axes {
+                    true => "A new run follows this path's own mirror axes",
+                    false => "Pick the pen to mirror what it draws",
+                },
+                active: self.pen_bias && !own_axes && (mirroring || self.mirror_open),
+                enabled: self.pen_bias && !own_axes,
+                verb: Verb::Mirror,
             },
             E::Sep,
             E::Btn {
@@ -421,7 +439,14 @@ impl OndinApp {
                 self.choose_tool(Tool::Select);
                 return;
             }
-            Some(Verb::Mirror) | None => {}
+            Some(Verb::Mirror) => self.mirror_open = !self.mirror_open,
+            None => {}
+        }
+        if own_axes {
+            self.mirror_open = false;
+        }
+        if self.mirror_open {
+            self.mirror_flyout(ctx, shown.mirror);
         }
         if self.offset_card.is_some() {
             self.offset_card_ui(ctx, bar_rect, offset_button);

@@ -400,11 +400,36 @@ const OWN_AXIS_OVERHANG: f64 = 16.0;
 const PILL: egui::Vec2 = egui::vec2(16.0, 10.0);
 
 impl OndinApp {
+    /// The switch the next new run follows: inside a path edit that edit's own,
+    /// which starts off whatever the drawing switch says; otherwise the drawing
+    /// switch, the document's.
+    pub(crate) fn mirror(&self) -> Mirror {
+        match self.edited_path() {
+            Some(id) => match self.edit_mirror {
+                Some((of, m)) if of == id => m,
+                _ => Mirror::default(),
+            },
+            None => self.session.mirror,
+        }
+    }
+
+    /// [`Self::mirror`] to write to; inside an edit it is that edit's, made off
+    /// on the first write.
+    pub(crate) fn mirror_mut(&mut self) -> &mut Mirror {
+        let Some(id) = self.edited_path() else {
+            return &mut self.session.mirror;
+        };
+        if self.edit_mirror.is_none_or(|(of, _)| of != id) {
+            self.edit_mirror = Some((id, Mirror::default()));
+        }
+        &mut self.edit_mirror.as_mut().expect("just set").1
+    }
+
     /// The axes and where they cross, while mirroring is on: the dragged point, or
     /// the middle of the frame under `near` (the run's first point while one is
     /// drawn), or of the view.
     pub(crate) fn mirror_axes(&self, near: Option<Point>) -> Option<(Axes, Point)> {
-        let m = self.session.mirror;
+        let m = self.mirror();
         if m.axes == Axes::Off {
             return None;
         }
@@ -727,7 +752,7 @@ impl OndinApp {
 
     /// The words the status line keeps while the pen or the pencil mirrors.
     pub(crate) fn mirror_status(&self) -> Option<String> {
-        let axes = self.session.mirror.axes;
+        let axes = self.mirror().axes;
         let across = match axes {
             Axes::Off => return None,
             Axes::Vertical => "the vertical axis",
@@ -745,9 +770,9 @@ impl OndinApp {
     /// is under it, so the view's middle they default to stays put while the run
     /// is drawn, however the view then moves. *Reset axis* lets them follow again.
     pub(crate) fn pin_mirror_axes(&mut self, p: Point) {
-        let m = self.session.mirror;
+        let m = self.mirror();
         if m.axes != Axes::Off && m.at.is_none() && self.draw_target(p).0 == self.session.page {
-            self.session.mirror.at = Some(self.view_middle());
+            self.mirror_mut().at = Some(self.view_middle());
         }
     }
 
@@ -844,20 +869,20 @@ impl OndinApp {
                 .on_hover_text("Drag to move the axis · double-click to put it back");
             if resp.dragged() || resp.is_pointer_button_down_on() {
                 self.mirror_grips.held = Some(vertical);
-                self.mirror_grips.from = Some(from.unwrap_or(self.session.mirror.at));
+                self.mirror_grips.from = Some(from.unwrap_or(self.mirror().at));
             }
             if ui::double_clicked(ui, &resp) {
-                self.session.mirror.at = None;
+                self.mirror_mut().at = None;
             } else if resp.dragged()
                 && let Some(p) = resp.interact_pointer_pos()
             {
                 let w = self.to_world(p, rect, ppp);
-                let mut moved = self.session.mirror.at.unwrap_or(at);
+                let mut moved = self.mirror().at.unwrap_or(at);
                 match vertical {
                     true => moved.x = w.x,
                     false => moved.y = w.y,
                 }
-                self.session.mirror.at = Some(moved);
+                self.mirror_mut().at = Some(moved);
             }
         }
         self.mirrored_run_chrome(ui, painter, rect, ppp, hover);
@@ -1002,11 +1027,12 @@ impl OndinApp {
         hit.then_some(on)
     }
 
-    /// The path bar's mirror button and its flyout: the axes, ticked like the View
-    /// menu's rows, and *Reset axis*.
+    /// The path bar's mirror button's flyout, the drawing bar's or the edit
+    /// bar's, over the switch it shows ([`Self::mirror`]): the axes, ticked like
+    /// the View menu's rows, and *Reset axis*.
     pub(crate) fn mirror_flyout(&mut self, ctx: &egui::Context, button: egui::Rect) {
         let id = egui::Id::new("mirror-flyout");
-        let current = self.session.mirror.axes;
+        let current = self.mirror().axes;
         let mut pick = None;
         let mut reset = false;
         let card = ui::flyout(id, button, 200.0)
@@ -1018,7 +1044,7 @@ impl OndinApp {
                     }
                 }
                 ui::menu_sep(ui);
-                let placed = self.session.mirror.at.is_some();
+                let placed = self.mirror().at.is_some();
                 let row = ui::MenuRow {
                     enabled: placed,
                     ..ui::MenuRow::new("", "Reset axis")
@@ -1031,11 +1057,11 @@ impl OndinApp {
                 reset = placed && resp.clicked();
             });
         if let Some(axes) = pick {
-            self.session.mirror.axes = axes;
+            self.mirror_mut().axes = axes;
             self.mirror_open = false;
         }
         if reset {
-            self.session.mirror.at = None;
+            self.mirror_mut().at = None;
             self.mirror_open = false;
         }
         let pressed_elsewhere = ctx.input(|i| i.pointer.any_pressed())
@@ -1809,6 +1835,56 @@ mod tests {
             "and stays"
         );
         assert!(app.pen.is_none(), "the pen plants nothing");
+    }
+
+    /// A path edit's pen mirrors through the edit's own switch: off when the edit
+    /// opens whatever the drawing switch says, and off again in the next edit,
+    /// the drawing switch untouched.
+    ///
+    /// flip: `OndinApp::mirror` reading the drawing switch inside an edit → fails
+    /// at "the edit starts off"; `path_bar` keeping the switch past the edit →
+    /// fails at "the next edit starts off too".
+    #[test]
+    fn a_path_edits_pen_mirrors_through_its_own_switch() {
+        let ctx = egui::Context::default();
+        let mut app = mirroring_pen(&ctx);
+        let page = app.session.page;
+        app.pen = Some(crate::preview::PenState {
+            parent: page,
+            parent_world: Affine::IDENTITY,
+            anchors: [(20.0, 10.0), (60.0, 50.0)]
+                .map(|(x, y)| PenAnchor::corner(Point::new(x, y)))
+                .to_vec(),
+            shaping: false,
+            editing: None,
+        });
+        // Drawn off the axis, so the path lands plain.
+        app.session.mirror.axes = Axes::Off;
+        app.finish_pen(false);
+        let id = app.session.selection.single().expect("the path");
+        assert!(app.path_mirror(id).is_none(), "fixture: a plain path");
+        app.session.mirror.axes = Axes::Vertical;
+        let edit = |app: &mut OndinApp| {
+            app.choose_tool(crate::tools::Tool::Node);
+            app.session.selection.set_one(id);
+            app.choose_tool(crate::tools::Tool::Pen);
+            assert!(app.pen_bias, "fixture: the edit's pen is armed");
+        };
+        edit(&mut app);
+        assert_eq!(app.mirror().axes, Axes::Off, "the edit starts off");
+        assert!(app.mirror_frame(None).is_none());
+        app.mirror_mut().axes = Axes::Both;
+        assert_eq!(app.mirror_frame(None).map(|f| f.axes), Some(Axes::Both));
+        // Done, and the bar's frame that sees no edit.
+        app.choose_tool(crate::tools::Tool::Select);
+        let _ = ctx.run_ui(Default::default(), |ui| app.path_bar(ui.ctx()));
+        edit(&mut app);
+        assert_eq!(app.mirror().axes, Axes::Off, "the next edit starts off too");
+        assert_eq!(
+            app.session.mirror.axes,
+            Axes::Vertical,
+            "the drawing switch"
+        );
     }
 
     /// Leaving the pen puts a dragged axis back; the pencil and the eyedropper's

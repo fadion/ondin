@@ -90,8 +90,8 @@ axis, a horizontal one or both (`crate::mirror`).
   is drawn), on open canvas the middle of the canvas past the rulers (`view_middle`).
   `OndinApp::mirror_axes` resolves it. A new run on open canvas fixes `at` there as it starts
   (`pin_mirror_axes`), so a pan or zoom mid-run does not move the axes under anchors already placed;
-  *Reset axis* lets them follow the view again. Leaving the pen and the pencil (or the node tool's
-  pen) for another tool puts `at` back to `None`, so a placed axis does not carry into the next
+  *Reset axis* lets them follow the view again. Leaving the pen and the pencil for another tool
+  puts `at` back to `None`, so a placed axis does not carry into the next
   spell of drawing; the eyedropper's round trip keeps it, and the axes choice itself stays.
 - **The joining rule** (`mirror::mirrored`). An end of the run within `ON_AXIS_PT` (8 screen pt) of
   an axis is pulled onto it, and the halves join there:
@@ -112,8 +112,10 @@ axis, a horizontal one or both (`crate::mirror`).
   mirrored across (`mirror::mark_mirrored`, `path_mirror_of`), so it is saved mirrored (*Mirrored
   paths*, below). The model keeps only the axes that hold, so a path drawn in a turned frame lands
   plain. A new run inside the edited path (the node tool's pen on bare canvas, `PenEdit::minted`)
-  mirrors too: across that path's own axes when it is mirrored, otherwise across the switch's when it
-  is on, which leaves a plain path plain. `OndinApp::mirror_frame` makes that choice for the commit,
+  mirrors too: across that path's own axes when it is mirrored, otherwise across the edit's own
+  switch when it is on, which leaves a plain path plain. The edit's switch (`OndinApp::edit_mirror`,
+  read and written through `OndinApp::mirror` / `mirror_mut`, as the drawing switch is outside an
+  edit) starts off in every edit, whatever the drawing switch says, and ends with the edit. `OndinApp::mirror_frame` makes that choice for the commit,
   the snapping and the chrome. Extending an open end (pen resume, a pencil stroke carried on) does
   not mirror.
 - **Pen snapping.** A new run's anchor within `ON_AXIS_PT` of an axis lands on it, over the other
@@ -219,8 +221,10 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; bo
 mirror.
 
 - **While a path's points are edited** (`canvas::edited_path`) it holds the node tool's verbs: select
-  points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the point
-  selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`).
+  points (`A`), the pen bias (`P`) and Mirror, the edit's own switch with the drawing bar's flyout,
+  dimmed until the pen bias is picked (*Pick the pen to mirror what it draws*) and on a mirrored
+  path, whose runs follow its own axes; *Make corner*, *Make smooth* and *Join*, dimmed until the
+  point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`).
 - **While the pen or the pencil is armed** (`path_bar::drawing_bar`) it holds Mirror, a rule, and
   *Done*, which finishes a pen run and drops to Select. Mirror
   (`icon::FLIP_HORIZONTAL`, lit while mirroring or while its flyout is open) opens a `ui::flyout` in

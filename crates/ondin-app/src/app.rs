@@ -997,6 +997,9 @@ pub struct OndinApp {
     pub(crate) mirror_open: bool,
     /// The mirror axes' grab pills as last painted (`crate::mirror::Grips`).
     pub(crate) mirror_grips: crate::mirror::Grips,
+    /// The path edit's own mirror switch and the path it belongs to; another
+    /// path's edit starts with it off (`OndinApp::mirror`).
+    pub(crate) edit_mirror: Option<(NodeId, crate::mirror::Mirror)>,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1633,6 +1636,7 @@ impl OndinApp {
             blend: Default::default(),
             mirror_open: false,
             mirror_grips: Default::default(),
+            edit_mirror: None,
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -2704,7 +2708,7 @@ impl OndinApp {
         }
         // So does a mirror axis its pill is dragging.
         if let Some(from) = self.mirror_grips.from.take() {
-            self.session.mirror.at = from;
+            self.mirror_mut().at = from;
             self.gesture_cancelled = true;
             ctx.stop_dragging();
             return true;
@@ -2990,7 +2994,8 @@ impl OndinApp {
             Tool::Eyedropper => self.dropper_return,
             t => t,
         };
-        if (matches!(from, Tool::Pen | Tool::Pencil) || self.pen_bias)
+        // A path edit's own switch ends with the edit (`path_bar`).
+        if matches!(from, Tool::Pen | Tool::Pencil)
             && !matches!(tool, Tool::Pen | Tool::Pencil | Tool::Eyedropper)
         {
             self.session.mirror.at = None;

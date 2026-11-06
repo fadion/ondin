@@ -4954,6 +4954,11 @@ impl OndinApp {
             Some(NodeKind::Ellipse { arc, .. }) => Some(*arc),
             _ => None,
         };
+        // A spiral's turns or an arc's sweep shares opacity's row.
+        let open = matches!(
+            self.session.display_node(id).map(|n| n.kind()),
+            Some(NodeKind::Spiral { .. } | NodeKind::Arc { .. })
+        );
         self.appearance_panel(ui, &[id], |app, ui| {
             let per_corner = app.per_corner_radius.contains(&id);
             let smoothing = app.corner_smoothing_open.contains(&id);
@@ -4969,7 +4974,7 @@ impl OndinApp {
                 let button_space = buttons * (28.0 + ui::CARD_COL_GAP);
                 // Two columns where opacity has company, so an ellipse's lines up with
                 // the arc row under it; alone (a group, text, a line), the full width.
-                let alone = corners0.is_none() && vertices0.is_none() && arc0.is_none();
+                let alone = corners0.is_none() && vertices0.is_none() && arc0.is_none() && !open;
                 let fw = match alone {
                     true => ui.available_width(),
                     false => (ui.available_width() - button_space - ui::CARD_COL_GAP) / 2.0,
@@ -4983,6 +4988,9 @@ impl OndinApp {
                 app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
                 if let Some(arc) = arc0 {
                     app.arc_field(ui, id, arc, 1, fw, &marks.arc[1]);
+                }
+                if open {
+                    app.open_shape_field(ui, id, fw, &marks);
                 }
                 let Some(corners) = corners0 else { return };
                 // Bound, the field is a chip.
@@ -5039,7 +5047,6 @@ impl OndinApp {
             if let Some(arc) = arc0 {
                 app.arc_fields(ui, id, arc, &marks.arc);
             }
-            app.open_shape_field(ui, id, &marks);
             // The radius row's disclosures open under it, above the clip switch.
             if corners0.is_some() && smoothing {
                 app.corner_smoothing_field(ui, id, &marks.smoothing);
@@ -5300,10 +5307,16 @@ impl OndinApp {
             }]),
         );
     }
-    /// A spiral's turns or an arc's sweep, across the row under opacity: what
-    /// `↑`/`↓` set while it was drawn, settable after. The sweep is signed, as the
-    /// warp card's bend is: negative bulges the other way.
-    fn open_shape_field(&mut self, ui: &mut egui::Ui, id: NodeId, marks: &AppearanceMarks) {
+    /// A spiral's turns or an arc's sweep, `fw` wide beside opacity: what `↑`/`↓`
+    /// set while it was drawn, settable after. The sweep is signed, as the warp
+    /// card's bend is: negative bulges the other way.
+    fn open_shape_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        fw: f32,
+        marks: &AppearanceMarks,
+    ) {
         use ondin_core::geometry::{MAX_SWEEP, MAX_TURNS, MIN_TURNS};
         let (glyph, name, tip, v0, scrub, mark, unit, decimals) =
             match self.session.display_node(id).map(|n| n.kind()) {
@@ -5330,30 +5343,27 @@ impl OndinApp {
                 _ => return,
             };
         let mut v = v0;
-        let fw = ui.available_width();
-        ui.horizontal(|ui| {
-            let (resp, hit) = ui::value_field_marked(
-                ui,
-                egui::vec2(fw, 28.0),
-                Prefix::Icon(glyph),
-                mark.as_ref().map(Mark::field),
-                &mut v,
-                scrub,
-                |d| d.suffix(unit).max_decimals(decimals),
-            );
-            let resp = tip_unless_marked(resp, mark, tip);
-            self.reset_marked(hit, mark);
-            let geometry = match name {
-                "Turns" => GeometryPatch::Turns(v.clamp(MIN_TURNS, MAX_TURNS)),
-                _ => GeometryPatch::Sweep(v.clamp(-MAX_SWEEP, MAX_SWEEP)),
-            };
-            self.named_valve(
-                name,
-                glyph,
-                &resp,
-                Transaction(vec![Operation::SetGeometry { id, geometry }]),
-            );
-        });
+        let (resp, hit) = ui::value_field_marked(
+            ui,
+            egui::vec2(fw, 28.0),
+            Prefix::Icon(glyph),
+            mark.as_ref().map(Mark::field),
+            &mut v,
+            scrub,
+            |d| d.suffix(unit).max_decimals(decimals),
+        );
+        let resp = tip_unless_marked(resp, mark, tip);
+        self.reset_marked(hit, mark);
+        let geometry = match name {
+            "Turns" => GeometryPatch::Turns(v.clamp(MIN_TURNS, MAX_TURNS)),
+            _ => GeometryPatch::Sweep(v.clamp(-MAX_SWEEP, MAX_SWEEP)),
+        };
+        self.named_valve(
+            name,
+            glyph,
+            &resp,
+            Transaction(vec![Operation::SetGeometry { id, geometry }]),
+        );
     }
     /// The vertex-count row inside Appearance: a polygon's sides, or a star's
     /// points and inner ratio.

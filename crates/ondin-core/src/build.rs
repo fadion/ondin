@@ -2698,10 +2698,10 @@ pub fn detach_text_path(
     Ok((tx, new))
 }
 
-/// The body [`flatten`]'s single-boolean arm, [`outline`] and [`outline_text`]
-/// share: `id` becomes a `Path` holding `path`, in `id`'s own slot, carrying
-/// everything about the layer that is not its geometry (one list, not three).
-fn replace_with_path(
+/// The body [`flatten`]'s single-boolean arm, [`outline`], [`outline_text`] and the
+/// shape builder share: `id` becomes a `Path` holding `path`, in `id`'s own slot,
+/// carrying everything about the layer that is not its geometry (one list, not four).
+pub(crate) fn replace_with_path(
     doc: &Document,
     ids: &mut IdSource,
     id: NodeId,
@@ -2731,19 +2731,7 @@ fn replace_with_path(
         transform: Some(node.transform()),
         name: Some(node.name().to_string()),
     }];
-    ops.extend(carried_paint(node, new));
-    // Opacity and visibility are written resolved: the path is unbound.
-    let opacity = doc.drawn_opacity(id);
-    if opacity != 1.0 {
-        ops.push(Operation::SetOpacity { id: new, opacity });
-    }
-    let blend = node.blend();
-    if !matches!(
-        blend,
-        crate::BlendMode::Normal | crate::BlendMode::PassThrough
-    ) {
-        ops.push(Operation::SetBlend { id: new, blend });
-    }
+    ops.extend(carried_look(doc, id, new));
     if !doc.shown(id) {
         ops.push(Operation::SetVisible {
             id: new,
@@ -2761,12 +2749,6 @@ fn replace_with_path(
         ops.push(Operation::SetMask {
             id: new,
             mask: true,
-        });
-    }
-    if !node.effects().is_empty() {
-        ops.push(Operation::SetEffects {
-            id: new,
-            effects: node.effects().to_vec(),
         });
     }
     // `Node::fill_rule` derives even-odd for an `Exclude` from the operation, which
@@ -2879,6 +2861,34 @@ fn flatten_union(
         index: final_index,
     });
     Ok((Transaction(ops), new))
+}
+
+/// How layer `from` looks, for a new layer `to` that draws in its place: its paint,
+/// opacity, blend and effects. Opacity is written resolved, since the new layer is
+/// unbound.
+pub(crate) fn carried_look(doc: &Document, from: NodeId, to: NodeId) -> Vec<Operation> {
+    let Some(node) = doc.get(from) else {
+        return Vec::new();
+    };
+    let mut ops = carried_paint(node, to);
+    let opacity = doc.drawn_opacity(from);
+    if opacity != 1.0 {
+        ops.push(Operation::SetOpacity { id: to, opacity });
+    }
+    let blend = node.blend();
+    if !matches!(
+        blend,
+        crate::BlendMode::Normal | crate::BlendMode::PassThrough
+    ) {
+        ops.push(Operation::SetBlend { id: to, blend });
+    }
+    if !node.effects().is_empty() {
+        ops.push(Operation::SetEffects {
+            id: to,
+            effects: node.effects().to_vec(),
+        });
+    }
+    ops
 }
 
 /// The paint a node built out of others inherits from the one it stands in for; a

@@ -161,6 +161,12 @@ fn guarded(
     operands: &[BezPath],
     fold: impl FnOnce(BoolOp, &[BezPath]) -> Option<BezPath>,
 ) -> Option<BezPath> {
+    unwind_guard(|| fold(op, operands))
+}
+
+/// [`guarded`]'s body for any answer: [`regions`] goes through the same guard,
+/// counter and poison as a boolean.
+fn unwind_guard<T>(work: impl FnOnce() -> Option<T>) -> Option<T> {
     // Taken before the closure: the `Err` arm also needs to know whether the panic
     // was synthetic.
     let poisoned = POISON.with(|p| {
@@ -172,7 +178,7 @@ fn guarded(
         if poisoned {
             panic!("ondin: synthetic boolean failure, armed by boolean::poison_next");
         }
-        fold(op, operands)
+        work()
     })) {
         Ok(path) => path,
         Err(_) => {
@@ -578,6 +584,151 @@ fn combine(
         // Unreachable: `fold_operands` answers `Exclude` through `exclude_of`.
         BoolOp::Exclude => unreachable!("fold_operands answers Exclude through exclude_of"),
     }
+}
+
+/// One face of the arrangement [`regions`] cuts a set of outlines into.
+#[derive(Clone, Debug)]
+pub struct Region {
+    /// The face, holes wound against it as [`evaluate`]'s results are, so it
+    /// fills the same under either rule.
+    pub path: BezPath,
+    /// The outlines covering the face, as ascending indices into the slice
+    /// [`regions`] was given: the last is the topmost when that slice is z-order.
+    pub covers: Vec<usize>,
+}
+
+/// The least area, in square units, a face of [`regions`] keeps. Two outlines
+/// that share an edge leave slivers along it a few flo_curves tolerances wide;
+/// a face anyone could hover or drag across is far larger.
+const REGION_MIN_AREA: f64 = 1e-3;
+
+/// The planar arrangement of `outlines`: every connected face their edges cut the
+/// covered plane into, with which outlines cover it. Each outline is read as
+/// [`evaluate`] reads an operand, so an open subpath is closed first.
+///
+/// Built by refinement, and curves stay curves: each outline in turn cuts every face
+/// so far into the part inside it and the part outside, and adds the part of itself
+/// nothing covered yet. A face whose box misses the outline's is not cut. Each answer
+/// is then split into its connected pieces, one outline with the holes directly
+/// inside it.
+///
+/// `None` when an outline is out of range or the arithmetic unwound, which bumps
+/// [`failures`] as a boolean does; an empty list when nothing is covered.
+pub fn regions(outlines: &[BezPath]) -> Option<Vec<Region>> {
+    if outlines.iter().any(|p| !within_bool_range(p)) {
+        return None;
+    }
+    unwind_guard(|| Some(arrange(outlines)))
+}
+
+/// [`regions`] without its guard.
+fn arrange(outlines: &[BezPath]) -> Vec<Region> {
+    use flo_curves::bezier::path::{PathCut, path_cut};
+    struct Face {
+        flo: Vec<SimpleBezierPath>,
+        bounds: kurbo::Rect,
+        covers: Vec<usize>,
+    }
+    let face = |flo: Vec<SimpleBezierPath>, covers: Vec<usize>| Face {
+        bounds: flo_bounds(&flo),
+        flo,
+        covers,
+    };
+    let mut faces: Vec<Face> = Vec::new();
+    let mut covered: Vec<SimpleBezierPath> = Vec::new();
+    for (i, outline) in outlines.iter().enumerate() {
+        let shape = to_flo(outline);
+        if shape.is_empty() {
+            continue;
+        }
+        let bounds = flo_bounds(&shape);
+        let mut next = Vec::with_capacity(faces.len() * 2 + 1);
+        for f in faces {
+            if f.bounds.intersect(bounds).area() <= 0.0 {
+                next.push(f);
+                continue;
+            }
+            let cut: PathCut<SimpleBezierPath> = path_cut(&f.flo, &shape, FLO_ACCURACY);
+            if !cut.interior_path.is_empty() {
+                let mut covers = f.covers.clone();
+                covers.push(i);
+                next.push(face(cut.interior_path, covers));
+            }
+            if !cut.exterior_path.is_empty() {
+                next.push(face(cut.exterior_path, f.covers));
+            }
+        }
+        let fresh = match covered.is_empty() {
+            true => shape.clone(),
+            false => path_sub(&shape, &covered, FLO_ACCURACY),
+        };
+        if !fresh.is_empty() {
+            next.push(face(fresh, vec![i]));
+        }
+        covered = match covered.is_empty() {
+            true => shape,
+            false => path_add(&covered, &shape, FLO_ACCURACY),
+        };
+        faces = next;
+    }
+    faces
+        .into_iter()
+        .filter_map(|f| Some((from_flo(&f.flo)?, f.covers)))
+        .flat_map(|(path, covers)| {
+            pieces(&path).into_iter().map(move |path| Region {
+                path,
+                covers: covers.clone(),
+            })
+        })
+        .filter(|r| <BezPath as kurbo::Shape>::area(&r.path).abs() >= REGION_MIN_AREA)
+        .collect()
+}
+
+/// The box round every point of `flo`, handles included, in flo_curves' space.
+fn flo_bounds(flo: &[SimpleBezierPath]) -> kurbo::Rect {
+    let mut points = flo
+        .iter()
+        .flat_map(|(start, sections)| {
+            std::iter::once(*start).chain(sections.iter().flat_map(|(a, b, p)| [*a, *b, *p]))
+        })
+        .map(|p| Point::new(p.0, p.1));
+    let Some(first) = points.next() else {
+        return kurbo::Rect::ZERO;
+    };
+    points.fold(kurbo::Rect::from_points(first, first), |r, p| r.union_pt(p))
+}
+
+/// `path`, a result [`from_flo`] wound, split into its connected pieces: each solid
+/// subpath with the holes directly inside it. An island inside a hole is a piece of
+/// its own.
+fn pieces(path: &BezPath) -> Vec<BezPath> {
+    use kurbo::Shape;
+    let subs = crate::geometry::subpaths(path);
+    let areas: Vec<f64> = subs.iter().map(|s| s.area()).collect();
+    let mut out: Vec<BezPath> = Vec::new();
+    let mut slot = vec![None; subs.len()];
+    for (i, s) in subs.iter().enumerate() {
+        if areas[i] > 0.0 {
+            slot[i] = Some(out.len());
+            out.push(s.clone());
+        }
+    }
+    for (i, hole) in subs.iter().enumerate() {
+        if areas[i] > 0.0 {
+            continue;
+        }
+        let Some(inside) = representative_point(hole) else {
+            continue;
+        };
+        // The smallest solid round it is the one it is directly inside.
+        let owner = (0..subs.len())
+            .filter(|&j| areas[j] > -areas[i] && crate::geometry::winding(&subs[j], inside) != 0)
+            .min_by(|&a, &b| areas[a].total_cmp(&areas[b]));
+        if let Some(o) = owner.and_then(|j| slot[j]) {
+            out[o].extend(hole.iter());
+        }
+    }
+    out
 }
 
 /// How a caller reads the state a boolean is evaluated against.
@@ -1734,5 +1885,87 @@ mod tests {
             "nothing here panics, so this class of loss is silent and `failures` \
              cannot be what reports it"
         );
+    }
+
+    fn circle(x: f64, y: f64) -> BezPath {
+        kurbo::Circle::new((x, y), 78.0).to_path(0.01)
+    }
+
+    /// Three circles overlapping as a Venn diagram are seven faces, one per
+    /// covering set, which tile the union with no gap or overlap.
+    #[test]
+    fn three_overlapping_circles_are_seven_faces_tiling_their_union() {
+        let shapes = [
+            circle(211.0, 140.0),
+            circle(311.0, 140.0),
+            circle(261.0, 222.0),
+        ];
+        let faces = regions(&shapes).expect("nothing here unwinds");
+        let mut sets: Vec<Vec<usize>> = faces.iter().map(|f| f.covers.clone()).collect();
+        sets.sort();
+        assert_eq!(
+            sets,
+            vec![
+                vec![0],
+                vec![0, 1],
+                vec![0, 1, 2],
+                vec![0, 2],
+                vec![1],
+                vec![1, 2],
+                vec![2]
+            ]
+        );
+        let union = evaluate(BoolOp::Union, &shapes)
+            .expect("a union")
+            .area()
+            .abs();
+        let sum: f64 = faces.iter().map(|f| f.path.area()).sum();
+        assert!(
+            (sum - union).abs() < union * 1e-4,
+            "faces {sum}, union {union}"
+        );
+        assert!(
+            faces.iter().all(|f| f.path.area() > 0.0),
+            "every face is wound solid"
+        );
+    }
+
+    /// A face its covering set makes twice — the two ends of a bar a disc crosses —
+    /// is two regions, and a ring's hole stays with the ring rather than becoming a
+    /// region.
+    #[test]
+    fn a_face_split_in_two_is_two_regions_and_a_ring_keeps_its_hole() {
+        let bar = kurbo::Rect::new(0.0, 40.0, 300.0, 60.0).to_path(0.01);
+        let disc = kurbo::Circle::new((150.0, 50.0), 40.0).to_path(0.01);
+        let faces = regions(&[bar, disc]).expect("nothing here unwinds");
+        let ends = faces.iter().filter(|f| f.covers == [0]).count();
+        assert_eq!(ends, 2, "the bar's two ends either side of the disc");
+        // Bar ∩ disc, and the disc above and below the bar.
+        assert_eq!(faces.iter().filter(|f| f.covers == [1]).count(), 2);
+        assert_eq!(faces.len(), 5);
+
+        let mut ring = kurbo::Circle::new((0.0, 0.0), 50.0).to_path(0.01);
+        ring.extend(
+            kurbo::Circle::new((0.0, 0.0), 20.0)
+                .to_path(0.01)
+                .reverse_subpaths(),
+        );
+        let faces = regions(&[ring]).expect("nothing here unwinds");
+        assert_eq!(
+            faces.len(),
+            1,
+            "one face with a hole, not a disc and a hole"
+        );
+        assert_eq!(crate::geometry::subpaths(&faces[0].path).len(), 2);
+        assert_eq!(crate::geometry::winding(&faces[0].path, Point::ZERO), 0);
+    }
+
+    /// An unwind inside the arrangement is caught and counted like a boolean's.
+    #[test]
+    fn an_unwound_arrangement_is_none_and_counted() {
+        let before = failures();
+        poison_next(1);
+        assert!(regions(&[circle(0.0, 0.0)]).is_none());
+        assert_eq!(failures(), before + 1);
     }
 }

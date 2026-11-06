@@ -27,6 +27,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **A cached local box on `Resolved`** — the chrome's six walks a frame are an accepted cost, and a gesture would bypass the cache (§15 D778).
 - **Retained per-frame scenes or effect results kept across frames** — a pan, a preview and an edit already redraw only what they changed (`render.md` §6.3); the caches would serve only a full redraw at an unchanged scale, never the zoom gesture.
 - **A rotation handle or mid-edge squares** — sides still resize (§15 D14).
+- **A pixel grid drawn coarser than one unit** — the drawn grid matches the 1px lattice snapping uses; a coarser one has no workflow that needs it.
 - **A user-draggable ruler origin** — the rulers would disagree with the world-space inspector; rulers re-origin only on a lone selected frame (§15 D137, D36).
 - **Middle-button pan over the origin fields** (§15 D254).
 - **`Tab` held inside a menu or a dropdown's list** — a desktop menu's keys are its arrows, `Enter` and `Escape`, and `Tab` does not cycle it; popovers, dialogs and cards hold `Tab`, menus do not (`app-chrome.md`, *Two kinds of focus*).

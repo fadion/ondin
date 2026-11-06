@@ -1,5 +1,6 @@
 //! *Blend shapes*: the steps between two shapes, as plain paths with their outline,
-//! paint and opacity interpolated, in a group named *Blend* placed between the two.
+//! paint and opacity interpolated, in a group named *Blend* that takes the two
+//! shapes as well, one at each end.
 //!
 //! Computed once; nothing stays live. Both outlines are taken in world space and
 //! cut into the same number of cubic segments, so step `k` of `n` is every control
@@ -385,8 +386,9 @@ fn look_between(
 }
 
 /// The blend of `selection`'s two shapes: the [`Operation::InsertSubtree`] that
-/// adds the *Blend* group, its steps from the first shape to the second, under
-/// the upper of the two in its parent. Answers the edit and the group.
+/// adds the *Blend* group where the upper of the two stands in its parent, then
+/// the two moved into it around the steps, first shape lowest. Answers the edit
+/// and the group.
 pub fn blend(
     doc: &Document,
     res: &Resolved,
@@ -468,12 +470,25 @@ pub fn blend(
         .apply(&Transaction(ops))
         .map_err(|_| Refusal::Parts)?;
     let nodes = scratch.capture_subtree(group).ok_or(Refusal::Parts)?;
-    Ok((
-        Transaction(vec![Operation::InsertSubtree {
-            nodes,
-            parent,
-            index: at,
-        }]),
-        group,
-    ))
+    let mut ops = vec![Operation::InsertSubtree {
+        nodes,
+        parent,
+        index: at,
+    }];
+    // The two shapes join their steps, the first under them and the second over,
+    // each where it stood: the group sits in the upper shape's parent with no
+    // transform of its own.
+    for (id, index) in [(a, 0), (b, blend.steps + 1)] {
+        let world = res.world_transform(id).ok_or(Refusal::Count)?;
+        ops.push(Operation::Reparent {
+            id,
+            new_parent: group,
+            index,
+        });
+        ops.push(Operation::SetTransform {
+            id,
+            transform: to_parent * world,
+        });
+    }
+    Ok((Transaction(ops), group))
 }

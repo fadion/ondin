@@ -292,11 +292,13 @@ stays live.
   opacity. Stroke widths are first scaled into the steps' own units, so a stroke draws as wide as
   it did under a scaled shape or parent; each step takes the nearer shape's fill rule, so holes
   stay holes. Effects and blend mode are not carried.
-- **The result** (`blend::blend`): one `Operation::InsertSubtree` of a group named *Blend*
-  (`GROUP_NAME`) holding `steps` (up to `MAX_STEPS`) `Path` children *Step 1…n*, step 1 nearest the
-  lower shape, in the upper shape's parent just below it — between the two when they share a
-  parent. It is built on a scratch `Document`, so each node takes every default a created node
-  has, then captured whole.
+- **The result** (`blend::blend`): an `Operation::InsertSubtree` of a group named *Blend*
+  (`GROUP_NAME`) holding `steps` (up to `MAX_STEPS`) `Path` children *Step 1…n*, in the upper
+  shape's parent where the upper shape stood, then the two shapes moved into it (`Reparent` and a
+  `SetTransform` that keeps each where it was drawn): the lower shape at the bottom, the steps from
+  it upwards, the upper shape on top. A blend is almost always used with its ends, so the group is
+  the whole thing; *Ungroup* gives the parts back. The steps are built on a scratch `Document`, so
+  each node takes every default a created node has, then captured whole.
 
 ### The card (`blend.rs`)
 
@@ -318,8 +320,9 @@ here* row says *Blend shapes needs exactly two shapes* (`KIND_VERBS`).
   inspector popover opened after it. Find and Colour review are left open.
 - **A right-click cancels a scrub** of *Steps between* wherever the pointer is
   (`InFlight::blend_scrub`, as the Repeat card's `repeat_scrub`).
-- **The preview** is the commit's own edit, minted from a copy of the id counter so it spends no
-  ids; rebuilt when the revision, selection or settings change, and put back after another
+- **The preview** is the commit's own edit less the two shapes' move into the group (a preview
+  cannot reparent, and they draw where they stand either way), minted from a copy of the id
+  counter so it spends no ids; rebuilt when the revision, selection or settings change, and put back after another
   gesture's preview cleared it. A canvas drag owns the preview while it lasts.
 - **Keys.** `Enter` blends (`dispatch` hands `Action::Enter` to the card while it is open);
   `Escape` cancels, the rung after the Repeat card. The card closes when another document comes to

@@ -121,9 +121,12 @@ impl OndinApp {
             let mut minter = IdSource::new(self.session.ids.actor());
             minter.skip_to(self.session.ids.next_seq());
             let (doc, res) = (&self.session.doc, &self.session.resolved);
-            let tx = blend::blend(doc, res, &mut minter, &ids, b)
+            let mut tx = blend::blend(doc, res, &mut minter, &ids, b)
                 .map(|(tx, _)| tx)
                 .unwrap_or_default();
+            // The steps alone: a preview cannot reparent, and the two shapes are
+            // drawn where they stand either way.
+            tx.0.retain(|op| matches!(op, ondin_core::Operation::InsertSubtree { .. }));
             self.session.set_preview(&tx);
             self.blend.built = Some((key, tx));
         } else if !self.session.has_gesture_preview()
@@ -134,8 +137,8 @@ impl OndinApp {
         }
     }
 
-    /// Blend the two shapes as the card says, one *Blend shapes* step; the group
-    /// of steps is selected.
+    /// Blend the two shapes as the card says, one *Blend shapes* step; the group,
+    /// which takes the two shapes and the steps between, is selected.
     pub(crate) fn commit_blend(&mut self) {
         let b = self.blend.blend();
         let ids = self.session.selection.ids().to_vec();
@@ -327,8 +330,8 @@ mod tests {
         (app, circle, square)
     }
 
-    /// The card's commit lands the group between the two, selects it, says how
-    /// many steps, and is one undo step.
+    /// The card's commit lands the group with both shapes in it at its ends,
+    /// selects it, says how many steps, and is one undo step.
     #[test]
     fn blending_lands_one_step_and_selects_the_group() {
         let ctx = egui::Context::default();
@@ -344,10 +347,9 @@ mod tests {
             .single()
             .expect("the group is selected");
         let page = app.session.doc.first_page();
-        assert_eq!(
-            app.session.doc.get(page).unwrap().children(),
-            &[circle, group, square]
-        );
+        assert_eq!(app.session.doc.get(page).unwrap().children(), &[group]);
+        let kids = app.session.doc.get(group).unwrap().children();
+        assert_eq!((kids[0], kids[kids.len() - 1]), (circle, square));
         assert_eq!(app.session.status().text, "Blended in 5 steps");
         app.undo();
         assert_eq!(

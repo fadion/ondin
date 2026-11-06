@@ -118,26 +118,91 @@ const FIVE: Blend = Blend {
     reverse: false,
 };
 
-/// Five plain paths in a group named *Blend*, which sits between the two shapes,
-/// the steps running from the circle up to the square.
+/// The steps between the two shapes, `steps` of them, inside the group.
+fn steps_of(f: &Fixture, group: NodeId) -> Vec<NodeId> {
+    let kids = f.doc.get(group).unwrap().children();
+    kids[1..kids.len() - 1].to_vec()
+}
+
+/// A group named *Blend* takes the two shapes and five plain paths between them,
+/// the circle lowest, the steps running up to the square on top, each shape
+/// still drawn where it was.
+/// flip: `blend` without its `Reparent`s → fails at "the group is the whole blend".
 #[test]
-fn the_steps_are_paths_in_a_group_between_the_two() {
+fn the_group_holds_both_shapes_and_the_steps_between() {
     let mut f = Fixture::new();
+    let before = Resolved::rebuild(&f.doc);
+    let was = [f.circle, f.square].map(|id| before.world_transform(id).unwrap());
     let group = f.blend(FIVE);
-    let kids = f.doc.get(f.frame).unwrap().children().to_vec();
     assert_eq!(
-        kids,
-        [f.circle, group, f.square],
-        "between them in the stack"
+        f.doc.get(f.frame).unwrap().children(),
+        &[group],
+        "the group is the whole blend"
     );
     let g = f.doc.get(group).unwrap();
     assert_eq!(g.name(), "Blend");
-    assert_eq!(g.children().len(), 5);
-    for (k, step) in g.children().iter().enumerate() {
+    let kids = g.children();
+    assert_eq!(kids.len(), 7);
+    assert_eq!((kids[0], kids[6]), (f.circle, f.square));
+    for (k, step) in steps_of(&f, group).iter().enumerate() {
         let n = f.doc.get(*step).unwrap();
         assert!(matches!(n.kind(), NodeKind::Path { .. }));
         assert_eq!(n.name(), format!("Step {}", k + 1));
     }
+    let after = Resolved::rebuild(&f.doc);
+    for (id, w) in [f.circle, f.square].into_iter().zip(was) {
+        let now = after.world_transform(id).unwrap();
+        assert!(
+            now.as_coeffs()
+                .iter()
+                .zip(w.as_coeffs())
+                .all(|(a, b)| (a - b).abs() < 1e-9),
+            "drawn where it was"
+        );
+    }
+}
+
+/// A shape from another parent, a moved group, comes into the blend's group and
+/// is still drawn where it was.
+/// flip: `blend` without its `SetTransform`s → fails at "drawn where it was".
+#[test]
+fn a_shape_from_another_parent_keeps_its_place() {
+    let mut f = Fixture::new();
+    let holder = f.ids.mint();
+    let res = Resolved::rebuild(&f.doc);
+    let circle_world = res.world_transform(f.circle).unwrap();
+    let frame_world = res.world_transform(f.frame).unwrap();
+    let holder_local = Affine::translate((20.0, 10.0));
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: holder,
+                parent: f.frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(holder_local),
+                name: None,
+            },
+            Operation::Reparent {
+                id: f.circle,
+                new_parent: holder,
+                index: 0,
+            },
+            Operation::SetTransform {
+                id: f.circle,
+                transform: (frame_world * holder_local).inverse() * circle_world,
+            },
+        ]))
+        .unwrap();
+    f.blend(FIVE);
+    let now = Resolved::rebuild(&f.doc).world_transform(f.circle).unwrap();
+    assert!(
+        now.as_coeffs()
+            .iter()
+            .zip(circle_world.as_coeffs())
+            .all(|(a, b)| (a - b).abs() < 1e-9),
+        "drawn where it was"
+    );
 }
 
 /// Step k of n sits k / (n + 1) of the way between the two centres, and grows
@@ -147,7 +212,7 @@ fn the_middle_step_is_half_way_in_place_size_and_paint() {
     let mut f = Fixture::new();
     let group = f.blend(FIVE);
     let res = Resolved::rebuild(&f.doc);
-    let middle = f.doc.get(group).unwrap().children()[2];
+    let middle = steps_of(&f, group)[2];
     let world = res.world_transform(middle).unwrap() * res.local_path(&f.doc, middle).unwrap();
     let b = world.bounding_box();
     // Centres (160, 290) and (663, 289) in world space; sizes 60 and 166.
@@ -179,8 +244,8 @@ fn without_paint_every_step_wears_the_first_shapes() {
         paint: false,
         ..FIVE
     });
-    for step in f.doc.get(group).unwrap().children() {
-        let n = f.doc.get(*step).unwrap();
+    for step in steps_of(&f, group) {
+        let n = f.doc.get(step).unwrap();
         assert_eq!(
             n.paint().fills[0].brush.literal(),
             Some(&Brush::Solid(BLUE))
@@ -196,7 +261,7 @@ fn match_points_from_moves_where_the_outlines_pair_up() {
     let first_anchor = |start: Vec2| {
         let mut f = Fixture::new();
         let group = f.blend(Blend { start, ..FIVE });
-        let step = f.doc.get(group).unwrap().children()[0];
+        let step = steps_of(&f, group)[0];
         let NodeKind::Path { path, .. } = f.doc.get(step).unwrap().kind() else {
             panic!("a path");
         };

@@ -163,6 +163,9 @@ pub(super) struct AppearanceMarks {
     pub(super) corners: [Option<Mark>; 4],
     pub(super) count: Option<Mark>,
     pub(super) ratio: Option<Mark>,
+    /// A spiral's turns, and an arc's sweep.
+    pub(super) turns: Option<Mark>,
+    pub(super) sweep: Option<Mark>,
     /// An ellipse's Start, Sweep and Ratio.
     pub(super) arc: [Option<Mark>; 3],
     /// Corner smoothing of a frame, rect, polygon, star or path.
@@ -1411,6 +1414,7 @@ impl OndinApp {
             | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
+            | NodeKind::Spiral { size, .. }
             | NodeKind::Artboard { size, .. }
             | NodeKind::Slice { size } => Some(*size),
             // Read from `local_box` so the row agrees with the handles.
@@ -3921,6 +3925,7 @@ impl OndinApp {
             | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
+            | NodeKind::Spiral { size, .. }
             | NodeKind::Artboard { size, .. } => Some(*size),
             _ => None,
         };
@@ -4002,8 +4007,10 @@ impl OndinApp {
         }
         // A line's end is its length (`L`) and its angle (R); each reset writes one
         // of them, so the two together write the main's end.
-        if let (NodeKind::Line { end: mine_e }, NodeKind::Line { end: main_e }) =
-            (copy.kind(), content.kind())
+        if let (
+            NodeKind::Line { end: mine_e } | NodeKind::Arc { end: mine_e, .. },
+            NodeKind::Line { end: main_e } | NodeKind::Arc { end: main_e, .. },
+        ) = (copy.kind(), content.kind())
             && mine_e != main_e
         {
             let (len, main_len) = (mine_e.to_vec2().hypot(), main_e.to_vec2().hypot());
@@ -4088,8 +4095,9 @@ impl OndinApp {
                 .preview_local_box(id)
                 .map(|b| Point::new(b.x0, b.y0))
                 .unwrap_or(Point::ZERO);
+        // An arc's chord is measured as a line's length is.
         let line_ends = match self.session.display_node(id).map(|n| n.kind()) {
-            Some(NodeKind::Line { end }) => {
+            Some(NodeKind::Line { end } | NodeKind::Arc { end, .. }) => {
                 let (a, b) = (Affine::new(world) * Point::ZERO, Affine::new(world) * *end);
                 ((b - a).hypot() > 1e-9).then_some((a, b))
             }
@@ -4688,6 +4696,42 @@ impl OndinApp {
                 },
                 |v| format!("{}%", mark_num(*v * 100.0)),
             ),
+            turns: self.sub_mark(
+                s,
+                patch(|g| match g {
+                    GeometryPatch::Turns(t) => Some(*t),
+                    _ => None,
+                }),
+                |n| match n.kind() {
+                    NodeKind::Spiral { turns, .. } => Some(*turns),
+                    _ => None,
+                },
+                |v| *v,
+                |c, v| *c = v,
+                |id, t| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::Turns(t),
+                },
+                |v| mark_num(*v),
+            ),
+            sweep: self.sub_mark(
+                s,
+                patch(|g| match g {
+                    GeometryPatch::Sweep(t) => Some(*t),
+                    _ => None,
+                }),
+                |n| match n.kind() {
+                    NodeKind::Arc { sweep, .. } => Some(*sweep),
+                    _ => None,
+                },
+                |v| *v,
+                |c, v| *c = v,
+                |id, t| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::Sweep(t),
+                },
+                |v| format!("{}°", mark_num(*v)),
+            ),
             arc: [
                 self.sub_mark(
                     s,
@@ -4995,6 +5039,7 @@ impl OndinApp {
             if let Some(arc) = arc0 {
                 app.arc_fields(ui, id, arc, &marks.arc);
             }
+            app.open_shape_field(ui, id, &marks);
             // The radius row's disclosures open under it, above the clip switch.
             if corners0.is_some() && smoothing {
                 app.corner_smoothing_field(ui, id, &marks.smoothing);
@@ -5254,6 +5299,61 @@ impl OndinApp {
                 geometry: GeometryPatch::Arc(next.normalized()),
             }]),
         );
+    }
+    /// A spiral's turns or an arc's sweep, across the row under opacity: what
+    /// `↑`/`↓` set while it was drawn, settable after. The sweep is signed, as the
+    /// warp card's bend is: negative bulges the other way.
+    fn open_shape_field(&mut self, ui: &mut egui::Ui, id: NodeId, marks: &AppearanceMarks) {
+        use ondin_core::geometry::{MAX_SWEEP, MAX_TURNS, MIN_TURNS};
+        let (glyph, name, tip, v0, scrub, mark, unit, decimals) =
+            match self.session.display_node(id).map(|n| n.kind()) {
+                Some(NodeKind::Spiral { turns, .. }) => (
+                    icon::SPIRAL,
+                    "Turns",
+                    "How many times it winds round",
+                    *turns,
+                    Scrub::fine(0.05, 2).range(MIN_TURNS..=MAX_TURNS),
+                    &marks.turns,
+                    "",
+                    2,
+                ),
+                Some(NodeKind::Arc { sweep, .. }) => (
+                    icon::ARC,
+                    "Sweep",
+                    "How far the arc runs — negative bends it the other way",
+                    *sweep,
+                    Scrub::whole(0.5).range(-MAX_SWEEP..=MAX_SWEEP),
+                    &marks.sweep,
+                    "°",
+                    1,
+                ),
+                _ => return,
+            };
+        let mut v = v0;
+        let fw = ui.available_width();
+        ui.horizontal(|ui| {
+            let (resp, hit) = ui::value_field_marked(
+                ui,
+                egui::vec2(fw, 28.0),
+                Prefix::Icon(glyph),
+                mark.as_ref().map(Mark::field),
+                &mut v,
+                scrub,
+                |d| d.suffix(unit).max_decimals(decimals),
+            );
+            let resp = tip_unless_marked(resp, mark, tip);
+            self.reset_marked(hit, mark);
+            let geometry = match name {
+                "Turns" => GeometryPatch::Turns(v.clamp(MIN_TURNS, MAX_TURNS)),
+                _ => GeometryPatch::Sweep(v.clamp(-MAX_SWEEP, MAX_SWEEP)),
+            };
+            self.named_valve(
+                name,
+                glyph,
+                &resp,
+                Transaction(vec![Operation::SetGeometry { id, geometry }]),
+            );
+        });
     }
     /// The vertex-count row inside Appearance: a polygon's sides, or a star's
     /// points and inner ratio.

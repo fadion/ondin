@@ -412,9 +412,11 @@ a corner dot sets that corner alone · `Shift` on an ellipse's arc dot snaps to 
 - **`↑` / `↓` while dragging a polygon or star adds / removes sides** (Illustrator). The count
   lives on `Drag::Create`, starts at `POLYGON_DEFAULT_SIDES` / `STAR_DEFAULT_POINTS`, and
   `tools::step_sides` clamps it to `MIN_SIDES..=MAX_SIDES`, the inspector field's range.
-  The same keys add or take half a turn from a spiral (3.5 turns to start, ½ to 20) and move an
-  arc's sweep in 15° steps (90° to start, 15° to 345°), and the pill under the pointer says
-  which (`tools::step_drawn_count`). Nothing on screen names the keys.
+  The same keys add or take half a turn from a spiral (3.5 turns to start, ½ to 20) and walk an
+  arc's signed sweep (90° to start): 15° steps up to 345° either way, and below 15° to 5°, then
+  across to −5° and on down the other side, so one drag reaches both bulges (`tools::arc_sweep`).
+  The pill beside the pointer says which (`tools::step_drawn_count`, `drawn_count_label`). Nothing
+  on screen names the keys.
 - **`Alt` while drawing grows from the press point** (§15 D289); `canvas::create_box` constrains
   first and mirrors second, so `Alt`+`Shift` draws a circle around the click.
 - **A plain click with the Image tool places the picture at its own size** (§15 D295): aspect kept,

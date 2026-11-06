@@ -203,14 +203,21 @@ pub const STAR_DEFAULT_RATIO: f64 = 0.382;
 /// reaches.
 pub const SPIRAL_DEFAULT_HALF_TURNS: u32 = 7;
 const SPIRAL_MAX_HALF_TURNS: u32 = 40;
-/// A drawn arc's sweep moves in steps of this many degrees, from one step to one short
-/// of a whole turn; a fresh arc is a quarter turn.
-pub const ARC_STEP_DEG: u32 = 15;
-pub const ARC_DEFAULT_STEPS: u32 = 6;
-const ARC_MAX_STEPS: u32 = 360 / ARC_STEP_DEG - 1;
+/// A drawn arc's sweep moves in steps of this many degrees up to one short of a
+/// whole turn, either way round; below the first step it takes [`ARC_LEAST_DEG`]
+/// and then crosses to the other side, so one drag reaches both bulges.
+const ARC_STEP_DEG: u32 = 15;
+/// The shallowest a drawn arc bulges, either way.
+const ARC_LEAST_DEG: f64 = 5.0;
+/// Rungs of the arc's sweep ladder ([`arc_sweep`]) on each side.
+const ARC_SIDE_RUNGS: u32 = 360 / ARC_STEP_DEG;
+/// The highest rung: one step short of a whole turn clockwise.
+const ARC_MAX_STEPS: u32 = 2 * ARC_SIDE_RUNGS - 1;
+/// A fresh arc is a quarter turn clockwise.
+pub const ARC_DEFAULT_STEPS: u32 = ARC_SIDE_RUNGS + 90 / ARC_STEP_DEG;
 
 /// The authored local box of a node, or `None` for the kinds with no such field
-/// (lines, paths, groups, booleans), which scale through [`resize_geometry`] and
+/// (lines, arcs, paths, groups, booleans), which scale through [`resize_geometry`] and
 /// `scale_geometry` instead of a `GeometryPatch::Size`.
 pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
     match kind {
@@ -218,6 +225,7 @@ pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
         | NodeKind::Ellipse { size, .. }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
+        | NodeKind::Spiral { size, .. }
         | NodeKind::Artboard { size, .. }
         | NodeKind::Slice { size } => Some(*size),
         // Auto text reports a zero box and auto-height a zero height, so handles
@@ -654,7 +662,8 @@ pub fn move_line_end(
     let Some(node) = doc.get(id) else {
         return Transaction::default();
     };
-    let NodeKind::Line { end } = *res.used_kind_of(node) else {
+    // An arc's ends are a line's: the start the origin, the end its one point.
+    let (NodeKind::Line { end } | NodeKind::Arc { end, .. }) = *res.used_kind_of(node) else {
         return Transaction::default();
     };
     let Some(world) = res.world_transform(id) else {
@@ -687,17 +696,17 @@ pub fn move_line_end(
     }
 }
 
-/// Where the two ends of the line `id` are in world space, near end first.
+/// Where the two ends of the line or arc `id` are in world space, near end first.
 pub fn line_ends_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<(Point, Point)> {
     let node = doc.get(id)?;
-    let NodeKind::Line { end } = *res.used_kind_of(node) else {
+    let (NodeKind::Line { end } | NodeKind::Arc { end, .. }) = *res.used_kind_of(node) else {
         return None;
     };
     let world = res.world_transform(id)?;
     Some((world * Point::ZERO, world * end))
 }
 
-/// Resize a leaf whose geometry is its own shape — a `Line` or a `Path` — by
+/// Resize a leaf whose geometry is its own shape — a `Line`, an `Arc` or a `Path` — by
 /// dragging `handle`.
 ///
 /// `scale_geometry` scales about the node's origin, and a path's bounding box is
@@ -1089,6 +1098,15 @@ fn scale_geometry(
         // `paint_box::keep_gradients` cannot tell a path resize from a point edit.
         None => match res.used_kind_of(node) {
             NodeKind::Line { end } => {
+                ops.push(Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::LineEnd(Point::new(end.x * csx, end.y * csy)),
+                });
+                carry_gradients(doc, id, csx, csy, ops);
+            }
+            // A circle cannot stretch: the ends scale and the sweep stays, so an
+            // uneven resize bends a different circle through the new ends.
+            NodeKind::Arc { end, .. } => {
                 ops.push(Operation::SetGeometry {
                     id,
                     geometry: GeometryPatch::LineEnd(Point::new(end.x * csx, end.y * csy)),
@@ -2020,11 +2038,27 @@ pub fn drawn_count(shape: Tool) -> u32 {
     }
 }
 
+/// The sweep in degrees on rung `rung` of the arc's ladder: positive bulges to the
+/// left of the drag, negative to its right. From the middle out either way:
+/// [`ARC_LEAST_DEG`], then whole [`ARC_STEP_DEG`] steps.
+pub fn arc_sweep(rung: u32) -> f64 {
+    let r = rung.min(ARC_MAX_STEPS);
+    let (side, k) = match r >= ARC_SIDE_RUNGS {
+        true => (1.0, r - ARC_SIDE_RUNGS),
+        false => (-1.0, ARC_SIDE_RUNGS - 1 - r),
+    };
+    let deg = match k {
+        0 => ARC_LEAST_DEG,
+        k => f64::from(k * ARC_STEP_DEG),
+    };
+    side * deg
+}
+
 /// One press of `↑` or `↓` on the [`drawn_count`] of `shape`, held to its range.
 pub fn step_drawn_count(shape: Tool, count: u32, up: bool, down: bool) -> u32 {
     let range = match shape {
         Tool::Spiral => 1..=SPIRAL_MAX_HALF_TURNS,
-        Tool::Arc => 1..=ARC_MAX_STEPS,
+        Tool::Arc => 0..=ARC_MAX_STEPS,
         _ => return step_sides(count, up, down),
     };
     let delta = i64::from(up) - i64::from(down);
@@ -2039,99 +2073,82 @@ pub fn drawn_count_label(shape: Tool, count: u32) -> Option<String> {
             let unit = if count == 2 { "turn" } else { "turns" };
             Some(format!("{}{half} {unit}", count / 2))
         }
-        Tool::Arc => Some(format!("{}°", count * ARC_STEP_DEG)),
+        Tool::Arc => Some(format!("{}°", arc_sweep(count))),
         _ => None,
     }
 }
 
-/// An Archimedean spiral in world space, `half_turns` half turns out from `centre`
-/// and ending at `end`, winding clockwise on screen. Its radius grows evenly with
-/// the angle, so the gap between neighbouring turns is the same all the way out.
-pub fn spiral_path(centre: Point, end: Point, half_turns: u32) -> BezPath {
-    /// Cubics per half turn; four keep the fit within a hair of the true spiral.
-    const PER_HALF_TURN: u32 = 4;
-    let d = end - centre;
-    let radius = d.hypot();
-    let total = f64::from(half_turns.max(1)) * std::f64::consts::PI;
-    let end_angle = d.y.atan2(d.x);
-    let grow = radius / total;
-    // The point and its derivative by the angle swept from the centre.
-    let at = |theta: f64| {
-        let (r, a) = (grow * theta, end_angle - total + theta);
-        let (sin, cos) = a.sin_cos();
-        (
-            centre + Vec2::new(r * cos, r * sin),
-            Vec2::new(grow * cos - r * sin, grow * sin + r * cos),
-        )
-    };
-    let segments = half_turns.max(1) * PER_HALF_TURN;
-    let step = total / f64::from(segments);
-    let mut path = BezPath::new();
-    let (mut p0, mut d0) = at(0.0);
-    path.move_to(p0);
-    for i in 1..=segments {
-        let (p1, d1) = at(step * f64::from(i));
-        path.curve_to(p0 + d0 * (step / 3.0), p1 - d1 * (step / 3.0), p1);
-        (p0, d0) = (p1, d1);
-    }
-    path
-}
-
-/// A circular arc in world space from `a` to `b`, sweeping `sweep_deg` clockwise on
-/// screen, so it bulges to the left of the way from `a` to `b`.
-pub fn arc_path(a: Point, b: Point, sweep_deg: f64) -> BezPath {
-    let d = b - a;
-    let chord = d.hypot();
-    let mut path = BezPath::new();
-    path.move_to(a);
-    if chord < 1e-9 {
-        return path;
-    }
-    let half = sweep_deg.to_radians() / 2.0;
-    let radius = chord / (2.0 * half.sin());
-    // Right of the way from `a` to `b`, where the centre is while the sweep is under
-    // a half turn; past it the cosine turns negative and the centre crosses over.
-    let right = Vec2::new(-d.y, d.x) / chord;
-    let centre = a.midpoint(b) + right * (radius * half.cos());
-    let start = (a - centre).atan2();
-    // The core outlines' flattening tolerance.
-    ondin_core::kurbo::Arc::new(centre, Vec2::new(radius, radius), start, 2.0 * half, 0.0)
-        .append_iter(0.1)
-        .for_each(|el| match el {
-            PathEl::MoveTo(_) => {}
-            el => path.push(el),
-        });
-    path
-}
-
-/// Create an open `Path` node from the world-space `path` under `parent`, carrying
-/// the one `stroke` and no fill. The node origin sits at the path's first point.
-pub fn create_open_path(
+/// Create a spiral dragged from `centre` to `end` in the world: `half_turns` half
+/// turns clockwise out to `end`, which sets its outer radius and where it ends.
+/// Its box is the true spiral's at that radius, so the stretch that fills it
+/// (`geometry::local_path`) is uniform; the node turns to put the end on the drag.
+#[allow(clippy::too_many_arguments)]
+pub fn create_spiral(
     id: NodeId,
     parent: NodeId,
     index: usize,
     parent_world: Affine,
-    mut path: BezPath,
+    centre: Point,
+    end: Point,
+    half_turns: u32,
     stroke: Stroke,
 ) -> Transaction {
-    let first = match path.elements().first() {
-        Some(PathEl::MoveTo(p)) => *p,
-        _ => return Transaction(vec![]),
-    };
-    let origin = parent_world.inverse() * first;
-    path.apply_affine(Affine::translate(-origin.to_vec2()) * parent_world.inverse());
+    let turns = f64::from(half_turns) / 2.0;
+    let d = end - centre;
+    let radius = d.hypot();
+    let unit = ondin_core::kurbo::Shape::bounding_box(&geometry::unit_spiral(turns));
+    let size = Size::new(unit.width() * radius, unit.height() * radius);
+    let transform = parent_world.inverse()
+        * Affine::translate(centre.to_vec2())
+        * Affine::rotate(d.y.atan2(d.x))
+        * Affine::translate(unit.origin().to_vec2() * radius);
     Transaction(vec![
         Operation::CreateNode {
             id,
             parent,
             index,
-            kind: NodeKind::Path {
-                path,
-                corner_radii: Vec::new(),
-                corner_smoothing: 0.0,
-                mirror: ondin_core::symmetry::PathMirror::NONE,
+            kind: NodeKind::Spiral { size, turns },
+            transform: Some(transform),
+            name: None,
+        },
+        Operation::SetStrokes {
+            id,
+            strokes: keyed_by_position([stroke]),
+        },
+    ])
+}
+
+/// Create an arc dragged from `a` to `b` in the world, bulging `sweep` degrees
+/// (positive to the left of the drag), as [`create_line`] places a line: the node
+/// at `a`, its end at `b`. A mirroring parent would turn the bulge over on screen,
+/// so the sweep is turned with it.
+#[allow(clippy::too_many_arguments)]
+pub fn create_arc(
+    id: NodeId,
+    parent: NodeId,
+    index: usize,
+    parent_world: Affine,
+    a: Point,
+    b: Point,
+    sweep: f64,
+    stroke: Stroke,
+) -> Transaction {
+    let inv = parent_world.inverse();
+    let (la, lb) = (inv * a, inv * b);
+    let sweep = match inv.determinant() < 0.0 {
+        true => -sweep,
+        false => sweep,
+    };
+    Transaction(vec![
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Arc {
+                end: (lb - la).to_point(),
+                sweep,
             },
-            transform: Some(Affine::translate(origin.to_vec2())),
+            transform: Some(Affine::translate(la.to_vec2())),
             name: None,
         },
         Operation::SetStrokes {
@@ -9511,83 +9528,102 @@ mod side_shear_tests {
 #[cfg(test)]
 mod spiral_arc_tests {
     use super::*;
-    use ondin_core::kurbo::{ParamCurveArclen, Shape};
 
-    fn cubics(path: &BezPath) -> Vec<CubicBez> {
-        path.segments()
-            .map(|s| match s {
-                ondin_core::kurbo::PathSeg::Cubic(c) => c,
-                other => panic!("a spiral is all cubics: {other:?}"),
-            })
-            .collect()
+    /// `tx`'s new layer's kind, and its outline carried into the world; the layer
+    /// is stroked and has no fill operation.
+    fn made(tx: &Transaction, parent_world: Affine) -> (NodeKind, BezPath) {
+        let Operation::CreateNode {
+            kind,
+            transform: Some(t),
+            ..
+        } = &tx.0[0]
+        else {
+            panic!("a node first");
+        };
+        let mut world = geometry::local_path(kind).expect("an outline");
+        world.apply_affine(parent_world * *t);
+        assert!(
+            matches!(&tx.0[1], Operation::SetStrokes { .. }) && tx.0.len() == 2,
+            "stroked, and no fill op"
+        );
+        (kind.clone(), world)
     }
 
-    /// A spiral starts on its centre, ends on the dragged point, and each cubic's
-    /// middle sits on the true Archimedean spiral, whose radius grows evenly with
-    /// the angle swept.
+    /// A drawn spiral is a spiral layer that starts on the press and ends on the
+    /// release; its box is the true spiral's at the drag's radius, so filling it
+    /// stretches nothing and the turns stay evenly spaced.
     #[test]
-    fn a_spiral_runs_from_the_centre_to_the_drag_on_the_true_curve() {
-        let centre = Point::new(10.0, 20.0);
-        let end = Point::new(40.0, 60.0);
-        let radius = 50.0;
+    fn a_spiral_runs_from_the_press_to_the_release() {
+        let (centre, end) = (Point::new(10.0, 20.0), Point::new(40.0, 60.0));
+        let parent_world = Affine::translate((5.0, -3.0));
+        let mut ids = ondin_core::IdSource::new(1);
         for half_turns in [1, 2, 7, 12] {
-            let path = spiral_path(centre, end, half_turns);
-            let segs = cubics(&path);
-            assert_eq!(segs.len(), half_turns as usize * 4);
-            assert!((segs[0].p0 - centre).hypot() < 1e-9);
+            let tx = create_spiral(
+                ids.mint(),
+                ids.mint(),
+                0,
+                parent_world,
+                centre,
+                end,
+                half_turns,
+                solid_stroke(Color::BLACK, 2.0),
+            );
+            let (kind, world) = made(&tx, parent_world);
+            let NodeKind::Spiral { size, turns } = kind else {
+                panic!("a spiral layer");
+            };
+            assert_eq!(turns, f64::from(half_turns) / 2.0);
+            let segs: Vec<_> = world.segments().collect();
+            assert!(segs[0].start().distance(centre) < 1e-6, "{half_turns}");
             assert!(
-                (segs.last().unwrap().p3 - end).hypot() < 1e-9,
+                segs.last().unwrap().end().distance(end) < 1e-6,
                 "{half_turns}"
             );
-            let total = f64::from(half_turns) * std::f64::consts::PI;
-            let end_angle = (end - centre).atan2();
-            let step = total / segs.len() as f64;
-            for (i, seg) in segs.iter().enumerate() {
-                let theta = step * (i as f64 + 0.5);
-                let a = end_angle - total + theta;
-                let r = radius * theta / total;
-                let truth = centre + Vec2::new(r * a.cos(), r * a.sin());
-                let off = (seg.eval(0.5) - truth).hypot();
-                assert!(
-                    off < 0.01 * radius,
-                    "{half_turns}: segment {i} off by {off}"
-                );
-            }
+            let unit = ondin_core::kurbo::Shape::bounding_box(&geometry::unit_spiral(turns));
+            let r = (end - centre).hypot();
+            assert!((size.width / unit.width() - r).abs() < 1e-9, "uniform");
+            assert!((size.height / unit.height() - r).abs() < 1e-9, "uniform");
         }
     }
 
-    /// Every sweep the keys reach makes an arc from the press to the release whose
-    /// length is the circle's `r·θ` for the radius the chord and sweep give, so it is
-    /// a true circular arc of that sweep; a quarter arc bulges to the left of the way
-    /// it was dragged.
+    /// A drawn arc is an arc layer from the press to the release at every sweep
+    /// the keys reach, either way round.
     #[test]
     fn an_arc_joins_the_drag_s_ends_at_every_sweep() {
-        let a = Point::new(440.0, 320.0);
-        let b = Point::new(580.0, 180.0);
-        let chord = (b - a).hypot();
-        for steps in 1..=ARC_MAX_STEPS {
-            let sweep = f64::from(steps * ARC_STEP_DEG).to_radians();
-            let path = arc_path(a, b, sweep.to_degrees());
-            let first = path.segments().next().unwrap().start();
-            let last = path.segments().last().unwrap().end();
-            assert!((first - a).hypot() < 1e-6, "{steps}");
-            assert!((last - b).hypot() < 1e-6, "{steps}");
-            let r = chord / (2.0 * (sweep / 2.0).sin());
-            let len: f64 = path.segments().map(|s| s.arclen(1e-6)).sum();
-            assert!(
-                (len - r * sweep).abs() < 1e-3 * r * sweep,
-                "{steps}: {len} against {}",
-                r * sweep
+        let (a, b) = (Point::new(440.0, 320.0), Point::new(580.0, 180.0));
+        let parent_world = Affine::translate((30.0, 10.0));
+        let mut ids = ondin_core::IdSource::new(1);
+        for rung in 0..=ARC_MAX_STEPS {
+            let tx = create_arc(
+                ids.mint(),
+                ids.mint(),
+                0,
+                parent_world,
+                a,
+                b,
+                arc_sweep(rung),
+                solid_stroke(Color::BLACK, 2.0),
             );
+            let (kind, world) = made(&tx, parent_world);
+            assert!(matches!(kind, NodeKind::Arc { sweep, .. } if sweep == arc_sweep(rung)));
+            let segs: Vec<_> = world.segments().collect();
+            assert!(segs[0].start().distance(a) < 1e-6, "{rung}");
+            assert!(segs.last().unwrap().end().distance(b) < 1e-6, "{rung}");
         }
-        // The quarter arc's centre is the drag box's far corner, and it bulges up-left.
-        let quarter = arc_path(a, b, 90.0);
-        let corner = Point::new(580.0, 320.0);
-        for seg in quarter.segments() {
-            assert!(((seg.eval(0.5) - corner).hypot() - 140.0).abs() < 0.05);
-        }
-        let bounds = quarter.bounding_box();
-        assert!((bounds.min_x() - 440.0).abs() < 1e-6 && (bounds.min_y() - 180.0).abs() < 1e-6);
+    }
+
+    /// The sweep ladder runs one step short of a whole turn either way, through 5°
+    /// on each side of the straight line and never onto it.
+    #[test]
+    fn the_arc_ladder_crosses_over_through_five_degrees() {
+        let sweeps: Vec<f64> = (0..=ARC_MAX_STEPS).map(arc_sweep).collect();
+        assert_eq!(sweeps[0], -345.0);
+        assert_eq!(*sweeps.last().unwrap(), 345.0);
+        assert!(sweeps.windows(2).all(|w| w[0] < w[1]), "rising");
+        assert!(!sweeps.contains(&0.0), "never straight");
+        let mid = sweeps.iter().position(|s| *s > 0.0).unwrap();
+        assert_eq!(&sweeps[mid - 2..mid + 2], &[-15.0, -5.0, 5.0, 15.0]);
+        assert_eq!(arc_sweep(ARC_DEFAULT_STEPS), 90.0, "a quarter to begin");
     }
 
     /// The keys walk each count through its range and stop at the ends.
@@ -9599,15 +9635,17 @@ mod spiral_arc_tests {
             step_drawn_count(Tool::Spiral, SPIRAL_MAX_HALF_TURNS, true, false),
             SPIRAL_MAX_HALF_TURNS
         );
-        assert_eq!(step_drawn_count(Tool::Arc, 1, false, true), 1);
-        assert_eq!(step_drawn_count(Tool::Arc, ARC_MAX_STEPS, true, false), 23);
-        assert_eq!(23 * ARC_STEP_DEG, 345, "one step short of a whole turn");
+        assert_eq!(step_drawn_count(Tool::Arc, 0, false, true), 0);
+        assert_eq!(
+            step_drawn_count(Tool::Arc, ARC_MAX_STEPS, true, false),
+            ARC_MAX_STEPS
+        );
         assert_eq!(
             step_drawn_count(Tool::Polygon, 3, false, true),
             step_sides(3, false, true)
         );
         assert_eq!(drawn_count(Tool::Spiral), 7);
-        assert_eq!(drawn_count(Tool::Arc), 6);
+        assert_eq!(drawn_count(Tool::Arc), ARC_DEFAULT_STEPS);
     }
 
     /// The pill says turns in halves and the sweep in degrees; other tools say nothing.
@@ -9625,43 +9663,14 @@ mod spiral_arc_tests {
             drawn_count_label(Tool::Spiral, 1).as_deref(),
             Some("0.5 turns")
         );
-        assert_eq!(drawn_count_label(Tool::Arc, 6).as_deref(), Some("90°"));
+        assert_eq!(
+            drawn_count_label(Tool::Arc, ARC_DEFAULT_STEPS).as_deref(),
+            Some("90°")
+        );
+        assert_eq!(
+            drawn_count_label(Tool::Arc, ARC_SIDE_RUNGS - 1).as_deref(),
+            Some("-5°")
+        );
         assert_eq!(drawn_count_label(Tool::Polygon, 5), None);
-    }
-
-    /// An open path's node sits at its first point in the parent's space, and its
-    /// outline, carried into the world, is the path it was given.
-    #[test]
-    fn an_open_path_lands_at_its_first_point() {
-        let world = arc_path(Point::new(50.0, 60.0), Point::new(90.0, 20.0), 120.0);
-        let parent_world = Affine::translate((30.0, 10.0));
-        let mut ids = ondin_core::IdSource::new(1);
-        let tx = create_open_path(
-            ids.mint(),
-            ids.mint(),
-            0,
-            parent_world,
-            world.clone(),
-            solid_stroke(Color::BLACK, 2.0),
-        );
-        let Operation::CreateNode {
-            kind: NodeKind::Path { path, .. },
-            transform: Some(t),
-            ..
-        } = &tx.0[0]
-        else {
-            panic!("a path node first");
-        };
-        assert_eq!(*t, Affine::translate((20.0, 50.0)));
-        let mut back = path.clone();
-        back.apply_affine(parent_world * *t);
-        for (x, y) in back.segments().zip(world.segments()) {
-            assert!((x.end() - y.end()).hypot() < 1e-9);
-        }
-        assert!(
-            matches!(&tx.0[1], Operation::SetStrokes { .. }),
-            "stroked, and no fill op"
-        );
-        assert_eq!(tx.0.len(), 2);
     }
 }

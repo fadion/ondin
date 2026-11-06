@@ -128,7 +128,7 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
 | Verb | Admits | Result |
 | --- | --- | --- |
 | `build::flatten` (`Ctrl+E`) | one boolean, one mirrored path, or two or more layers | one boolean → `Path` of its outline in place; one mirrored path (`build::is_mirrored_path`) → the same path with its mirror cleared, one `SetGeometry` (`flatten_mirror`), so point editing stops keeping it symmetric; a set → union in the parent's space at the topmost member's slot with the bottom member's paint (`build::flatten_union`, carries paint only) |
-| `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Path | `Path` of its own outline (`local_path`), radii, smoothing and an ellipse's arc baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
+| `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Spiral/Arc/Path | `Path` of its own outline (`local_path`), radii, smoothing and an ellipse's arc baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
 | `build::outline_stroke` (*Outline stroke*) | one Shape/Path/Boolean with a visible stroke | each visible stroke a `Path` filled with that stroke's brush (a bound brush stays bound), below |
 | `build::outline_text` (*Convert to path*) | one Text | `Path` from `ondin_core::text::outline` (glyph coords already node-local) |
 
@@ -200,7 +200,7 @@ plain `Path` layers.
 - **Sources** (`shape_builder::arrange`): visible, not effectively locked, not picture-filled,
   outside any boolean and any instance; a rect, ellipse, polygon, star, boolean, or a path whose
   every subpath is closed. Selected groups are opened into their contents. Any other shown layer
-  (text, pictures, frames, open paths, lines, locked shapes) is left out, and
+  (text, pictures, frames, open paths, lines, spirals, arcs, locked shapes) is left out, and
   `Arrangement::left_out` says so. The work is in world
   space, so sources under different parents cut each other as drawn. Refusals: `TooFew`,
   `NoOverlap` (no face covered twice), `Abandoned`. `can_arrange` is the dim test: it counts
@@ -266,8 +266,8 @@ paths*.
 `core::blend` makes the steps between two shapes as plain paths. It is computed once; nothing
 stays live.
 
-- **The pair** (`blend::pair`): exactly two layers, each a rect, ellipse, polygon, star, line, path
-  or boolean, answered bottom of the stack first. A `blend::Refusal`'s `says()` is the sentence
+- **The pair** (`blend::pair`): exactly two layers, each a rect, ellipse, polygon, star, line, spiral,
+  arc, path or boolean, answered bottom of the stack first. A `blend::Refusal`'s `says()` is the sentence
   both the dimmed row and a refused commit give: `Count` *Blend shapes needs exactly two shapes*
   (also any other kind, a group or a frame), `Picture` *Blend shapes can't take a picture*, `Text`
   *Blend shapes can't take text*, `Parts` *Blend shapes needs two shapes made of the same number of

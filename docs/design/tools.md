@@ -11,10 +11,10 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 - **Move and rotate** (`SetTransform`): Shift locks a move to one axis and a rotation to 15° steps.
 - **Resize** by corners or sides (`SetGeometry`, §5.6): Shift locks the ratio, or releases it on a proportion-locked layer; Alt scales about the box centre. Group resize is recursive; a multi-selection gets one box for resize, rotate and skew.
 - **Skew**: `Ctrl`-drag a side; Shift holds 15° steps. **Transform origin**: a draggable pivot marker with two numeric fields. **Scale** (`K`): the same gestures, but stroke widths, radii and type scale too.
-- **Shapes**: frame, rect, ellipse, polygon, star, line. **Text**: edit on the canvas with a real caret.
+- **Shapes**: frame, rect, ellipse, polygon, star, line, spiral, arc. **Text**: edit on the canvas with a real caret.
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
-- **Spiral** (`Shift+L`) and **Arc** (no key) draw open `Path`s with the line's stroke and no fill (`tools::create_open_path`). A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends; it is Archimedean, so its turns are evenly spaced (`tools::spiral_path`, four cubics a half turn), and it starts at 3.5 turns. An arc is dragged from end to end and is a circular arc bulging to the left of the drag, clockwise on screen (`tools::arc_path`), starting at 90°. `↑`/`↓` step the turns by halves (½ to 20) or the sweep by 15° (15° to 345°), and the pill under the pointer gives the value (`tools::drawn_count_label`). Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is a path rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
+- **Spiral** (`Shift+L`) and **Arc** (no key) draw a `Spiral` and an `Arc` node (`core-model.md`) with the line's stroke and no fill. A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends, and it starts at 3.5 turns. `tools::create_spiral` gives the node the true spiral's box at that radius, so the stretch that fills the box is uniform, and turns the node so the end lands on the drag. An arc is dragged from end to end, bulging to the left of the drag, and starts at 90°; `tools::create_arc` places it as `create_line` places a line, the sweep negated under a mirroring parent so the bulge stays where it was drawn. `↑`/`↓` step the turns by halves (½ to 20) or walk the arc's signed ladder (`tools::arc_sweep`): 15° steps up to 345° either way, and below 15° to 5°, then across to −5° and on down the other side, so one drag reaches both bulges. The pill beside the pointer gives the value (`tools::drawn_count_label`: `3.5 turns`, `90°`, `-5°`), placed by `spacing::paint_label` as every pointer readout is. Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is its own kind rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
 - **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
 - **Shape builder** (`Shift+M`): drag across the faces overlapping shapes cut each other into to merge them, Alt-drag to remove them (`app-booleans.md`).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
@@ -30,7 +30,7 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 - **Warp…**: an envelope round the selection, dragged by its corners or bent by an *Arc*, *Flag* or *Bulge* preset, baked into plain paths (below).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
-- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
+- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, a spiral's turns, an arc's sweep, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
 ### The tool rail (`rail.rs`)
@@ -252,7 +252,7 @@ selection is exactly one `Line`; `canvas::line_ends` places the ends.
 
 - Dragging an end (`Drag::LineEnd { id, which }`, `tools::move_line_end`) moves that point. Shift constrains to eighths of a turn about the other end (`axial_corner`); snapping applies to the unshifted case, on both axes. The two ends behave asymmetrically, because of the model (§15 D99).
 - `canvas::selection_handles` returns `None` on `lone_line` (not on `line_ends`, so an unresolvable transform cannot fall through to the box), suppressing corners, side bands, skew, the rotate ring and their cursors. `draw_size_badge` returns early.
-- The panel shows X/Y as the start point, rotation as the start→end angle, and `L` (length) in W's slot.
+- The panel shows X/Y as the start point, rotation as the start→end angle, and `L` (length) across the full row where W/H would be. An `Arc` shows the same fields, `L` being its chord, but keeps the selection box: `lone_line` answers only for a `Line`.
 
 **A selected text node gets two boxes.** New text uses `BoxTrim::CapToBaseline` (§5.4); every gesture
 and number reads the trimmed box. `canvas::draw_text_line_boxes` also outlines the untrimmed box
@@ -363,7 +363,7 @@ over `Tool` is an exhaustive `match` (the cursor, `create_tx`), a `matches!` all
 `NodeKind`'s `matches!` lists answer a missing kind with a confident "no" (§15 D87–D88).
 
 **Arming a create tool clears the selection** (`OndinApp::choose_tool`). The set is `drags_a_box`:
-Frame, Slice, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select, Scale and Shape builder (operate on the
+Frame, Slice, Rect, Ellipse, Polygon, Star, Line, Spiral, Arc, Text, Image. Left out: Select, Scale and Shape builder (operate on the
 selection), Hand (a pan keeps it), Node and ImageEdit (entered *from* a selected layer), Pen (places
 anchors, never drags a box), Pencil (a stroke can carry on the selected path), Eyedropper (picks onto the selection). `place_image_action` clears it too.
 

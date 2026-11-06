@@ -272,6 +272,7 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
             | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
+            | NodeKind::Spiral { size, .. }
             | NodeKind::Artboard { size, .. }
             | NodeKind::Slice { size } => Some(crate::GeometryPatch::Size(*size)),
             NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(
@@ -1467,7 +1468,7 @@ fn flatten_boolean(
 
 /// Whether [`outline`] would produce a layer *different* from the one it replaces.
 ///
-/// A rect, ellipse, polygon, star or line has an outline that is not already a
+/// A rect, ellipse, polygon, star, line, spiral or arc has an outline that is not already a
 /// `Path`; a `Path` has one only while its corner radii are still in the model.
 /// Refused: a `Boolean` ([`flatten`]'s), a `Group`, an `Artboard`, and `Text`
 /// ([`outline_text`], which needs the resolved layout).
@@ -1477,7 +1478,9 @@ pub fn can_outline(kind: &NodeKind) -> bool {
         | NodeKind::Ellipse { .. }
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
-        | NodeKind::Line { .. } => true,
+        | NodeKind::Line { .. }
+        | NodeKind::Spiral { .. }
+        | NodeKind::Arc { .. } => true,
         // Keep `any(> 0)`: `all(<= 0)` is not its negation because `NaN` fails both.
         NodeKind::Path { corner_radii, .. } => corner_radii.iter().any(|r| *r > 0.0),
         NodeKind::Root

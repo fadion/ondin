@@ -249,7 +249,7 @@ The four operations stay in Structure's *Boolean ▸*, checkable (§4).
 
 *Outline shape*, *Outline stroke*, *Even-odd fill* and *Join paths* reach a path from Structure (§4).
 
-### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
+### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line · Spiral · Arc)
 
 No head. The baseline menu, 20 rows.
 

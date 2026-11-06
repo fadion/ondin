@@ -36,7 +36,7 @@ pub enum Operation {
     Reparent    { id, new_parent, index },
     Reorder     { id, index },
     SetTransform{ id, transform },
-    SetGeometry { id, geometry: GeometryPatch }, // size, corner radii and smoothing, arc, path, line end, text sizing
+    SetGeometry { id, geometry: GeometryPatch }, // size, corner radii and smoothing, arc, path, line end, turns, sweep, text sizing
     SetText     { id, content, spans: CharSpans, para_spans: ParaSpans },
     SetTextStyle{ id, style: TextStyle, spans: Option<CharSpans> },         // character defaults
     SetTextSpans{ id, spans },                  // character overrides, content untouched

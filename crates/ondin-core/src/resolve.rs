@@ -562,6 +562,8 @@ pub(crate) fn is_indexed(kind: &NodeKind) -> bool {
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
             | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
             | NodeKind::Path { .. }
             | NodeKind::Text { .. }
             | NodeKind::Artboard { .. }

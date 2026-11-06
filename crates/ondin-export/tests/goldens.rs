@@ -86,6 +86,8 @@ fn kind_name(k: &NodeKind) -> &'static str {
         NodeKind::Polygon { .. } => "polygon",
         NodeKind::Star { .. } => "star",
         NodeKind::Line { .. } => "line",
+        NodeKind::Spiral { .. } => "spiral",
+        NodeKind::Arc { .. } => "arc",
         NodeKind::Path { .. } => "path",
         NodeKind::Boolean { .. } => "boolean",
         NodeKind::Text { .. } => "text",
@@ -525,6 +527,15 @@ fn golden_document() -> (Document, Resolved) {
     // explicit Normal (not the group's Pass-through default), a ring sector and a
     // wedge, and a clipping frame with corners whose child runs past them.
     let (ring, wedge, card, inside) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    let (spiral, open_arc) = (ids.mint(), ids.mint());
+    let ink = |id| Operation::SetStrokes {
+        id,
+        strokes: keyed_by_position([Stroke {
+            brush: Brush::Solid(Color::from_rgba8(60, 60, 70, 255)).into(),
+            width: 2.0,
+            ..Default::default()
+        }]),
+    };
     let solid = |id, rgb: [u8; 3]| Operation::SetFills {
         id,
         fills: keyed_by_position([Fill {
@@ -593,8 +604,33 @@ fn golden_document() -> (Document, Resolved) {
             name: None,
         },
         solid(inside, [230, 90, 40]),
+        // The open kinds, stroked as their tools draw them.
+        Operation::CreateNode {
+            id: spiral,
+            parent: artboard,
+            index: 12,
+            kind: NodeKind::Spiral {
+                size: Size::new(60.0, 56.0),
+                turns: 2.5,
+            },
+            transform: Some(Affine::translate((20.0, 240.0))),
+            name: None,
+        },
+        ink(spiral),
+        Operation::CreateNode {
+            id: open_arc,
+            parent: artboard,
+            index: 13,
+            kind: NodeKind::Arc {
+                end: Point::new(70.0, 0.0),
+                sweep: -120.0,
+            },
+            transform: Some(Affine::translate((100.0, 280.0))),
+            name: None,
+        },
+        ink(open_arc),
     ]))
-    .expect("blends, arcs and a rounded clip");
+    .expect("blends, arcs, a rounded clip and the open kinds");
 
     let res = Resolved::rebuild(&doc);
     (doc, res)

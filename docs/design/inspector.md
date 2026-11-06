@@ -25,7 +25,7 @@ An empty group shows no row.
 
 - **The write.** An authored `size` is replaced. Anything else goes through `tools::resize_box_to`, which puts a pointer at the corner the new box wants and calls `tools::resize_layer`, the bottom-right drag's path, so a typed number and a dragged handle mean the same thing. It asks for geometry only, with no modifiers; the proportion lock is applied to the target size first, and passing `keep_ratio` too would apply it twice.
 - **Committed values.** Box and transform come from the committed tree, not the preview, so a scrub does not compound.
-- **`Line`** has no W/H. Its W slot shows **`L`** (length), written through `tools::move_line_end`, anchoring the start point.
+- **`Line` and `Arc`** have no W/H. They show one full-width **`L`** row (a line's length, an arc's chord), written through `tools::move_line_end`, anchoring the start point; a `Spiral` has an authored size and shows W/H.
 
 **The proportion lock** is a 28×28 `link-simple` button after W and H (broken chain unlocked, whole
 chain locked); W is exactly X's width.
@@ -65,7 +65,7 @@ opens and closes the Repeat card (`tools.md`), On while it is up and Disabled wi
 `repeat_refusal`'s reason as its tooltip.
 
 - **Skew** is clamped at `tools::MAX_SKEW` (±89°), with the `SKEW` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
-- **Rotation** shows `Basis::of`'s angle at rest, a latched number during a gesture (§15 D206). It writes by composition (`inspector::turned_about`, `rotate_about · old_world`), never by rebuilding, which would spin a mirrored layer past ±90°. A `Line`'s rotation is the world-space start→end angle, written as the delta (typed minus shown) about the pivot.
+- **Rotation** shows `Basis::of`'s angle at rest, a latched number during a gesture (§15 D206). It writes by composition (`inspector::turned_about`, `rotate_about · old_world`), never by rebuilding, which would spin a mirrored layer past ±90°. A `Line`'s or `Arc`'s rotation is the world-space start→end angle, written as the delta (typed minus shown) about the pivot.
 - **No `-0°`.** `inspector::shown_degrees` snaps magnitudes under 1e-9° to +0. Tests assert `is_sign_positive`, because `-0.0 == 0.0`.
 - **Quarter turns** go through `tools::rotate_node` about the pivot read from the committed tree (adding 90 to the field is wrong for mirrored and sheared layers). Mirrors use `build::flip`. Both cards draw the row through `inspector::quarters_row(TurnScope)`.
 
@@ -196,12 +196,13 @@ comes from the committed document.
 | Kind | Rows |
 | --- | --- |
 | Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them, above a frame's Clip content |
-| Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row |
+| Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row. A polygon's Sides takes the whole count row; a star's Points lines up under opacity and Inner ratio takes the rest |
 | Ellipse | a 2 × 2 grid of equal fields: opacity and Sweep, then Start and Ratio; icons only (pie slice, arc start, dashed circle), no labels, the polygon's pattern |
+| Spiral, arc | opacity the full width, then one full-width field under it: a spiral's *Turns* (`SPIRAL` glyph, two decimals) or an arc's *Sweep* (`ARC` glyph, signed degrees, negative bulging the other way) |
 | Group, text, line, boolean | opacity alone, the full width |
 | Path | the per-corner button (inert: a path's radius is per anchor), then the smoothing button; the smoothing field opens under them |
 
-Override marks on an instance cover the arc and smoothing on every kind.
+Override marks on an instance cover the arc, turns, sweep and smoothing on every kind.
 
 ### Appearance (multi-selection)
 

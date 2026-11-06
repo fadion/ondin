@@ -909,6 +909,23 @@ pub enum NodeKind {
     Line {
         end: Point,
     },
+    /// An Archimedean spiral stretched to fill `size`, as a polygon is: `turns`
+    /// turns winding clockwise on screen out from its middle to its end at three
+    /// o'clock, the gap between turns even. Open, so it is drawn by its stroke.
+    /// Turns outside `geometry::MIN_TURNS..=MAX_TURNS` are clamped by the outline
+    /// builder, not the model, as a polygon's sides are.
+    Spiral {
+        size: Size,
+        turns: f64,
+    },
+    /// A circular arc from the local origin to `end`, as a line runs: `sweep`
+    /// degrees of a circle, positive clockwise on screen (bulging to the left of
+    /// the way to `end`), negative the other way, and 0 the straight line. Past
+    /// ±`geometry::MAX_SWEEP` is clamped by the outline builder.
+    Arc {
+        end: Point,
+        sweep: f64,
+    },
     /// An authored outline, plus a rounding radius per **anchor** of it.
     ///
     /// The radii are a parallel list indexed by [`crate::geometry::anchor_runs`]'
@@ -1144,8 +1161,8 @@ impl<'a> TextRef<'a> {
 }
 
 impl NodeKind {
-    /// The stored `size` of a frame, rectangle, ellipse, polygon or star — the
-    /// five kinds whose width and height bind — and `None` for every other kind,
+    /// The stored `size` of a frame, rectangle, ellipse, polygon, star or spiral
+    /// — the kinds whose width and height bind — and `None` for every other kind,
     /// a text box included: its size is its sizing mode's.
     pub fn box_size(&self) -> Option<Size> {
         match self {
@@ -1153,7 +1170,8 @@ impl NodeKind {
             | NodeKind::Rect { size, .. }
             | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
-            | NodeKind::Star { size, .. } => Some(*size),
+            | NodeKind::Star { size, .. }
+            | NodeKind::Spiral { size, .. } => Some(*size),
             _ => None,
         }
     }
@@ -1165,7 +1183,8 @@ impl NodeKind {
             | NodeKind::Rect { size, .. }
             | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
-            | NodeKind::Star { size, .. } => Some(size),
+            | NodeKind::Star { size, .. }
+            | NodeKind::Spiral { size, .. } => Some(size),
             _ => None,
         }
     }
@@ -1288,6 +1307,10 @@ impl NodeKind {
                     && corner_smoothing.is_finite()
             }
             NodeKind::Line { end } => end.x.is_finite() && end.y.is_finite(),
+            NodeKind::Spiral { size: s, turns } => size(s) && turns.is_finite(),
+            NodeKind::Arc { end, sweep } => {
+                end.x.is_finite() && end.y.is_finite() && sweep.is_finite()
+            }
             NodeKind::Path {
                 path,
                 corner_radii,
@@ -1368,6 +1391,8 @@ impl NodeKind {
                 | NodeKind::Polygon { .. }
                 | NodeKind::Star { .. }
                 | NodeKind::Line { .. }
+                | NodeKind::Spiral { .. }
+                | NodeKind::Arc { .. }
                 | NodeKind::Path { .. }
                 | NodeKind::Text { .. }
                 // The one container that paints: `build::boolean` inherits the
@@ -1388,6 +1413,8 @@ impl NodeKind {
             NodeKind::Polygon { .. } => "Polygon",
             NodeKind::Star { .. } => "Star",
             NodeKind::Line { .. } => "Line",
+            NodeKind::Spiral { .. } => "Spiral",
+            NodeKind::Arc { .. } => "Arc",
             NodeKind::Path { .. } => "Path",
             NodeKind::Text { .. } => "Text",
             NodeKind::Slice { .. } => "Slice",
@@ -1839,6 +1866,8 @@ pub(crate) mod kind_fixture {
             NodeKind::Polygon { .. } => "Polygon",
             NodeKind::Star { .. } => "Star",
             NodeKind::Line { .. } => "Line",
+            NodeKind::Spiral { .. } => "Spiral",
+            NodeKind::Arc { .. } => "Arc",
             NodeKind::Path { .. } => "Path",
             NodeKind::Boolean { .. } => "Boolean",
             NodeKind::Text { .. } => "Text",
@@ -1882,6 +1911,14 @@ pub(crate) mod kind_fixture {
             },
             NodeKind::Line {
                 end: Point::new(1.0, 0.0),
+            },
+            NodeKind::Spiral {
+                size: one,
+                turns: 2.0,
+            },
+            NodeKind::Arc {
+                end: Point::new(1.0, 0.0),
+                sweep: 90.0,
             },
             NodeKind::Path {
                 path: BezPath::new(),
@@ -1961,8 +1998,8 @@ mod kind_predicate_tests {
             (
                 vec!["Artboard"],
                 vec![
-                    "Root", "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path",
-                    "Boolean", "Text", "Slice",
+                    "Root", "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Spiral", "Arc",
+                    "Path", "Boolean", "Text", "Slice",
                 ]
             ),
             "clips_children"
@@ -1971,8 +2008,8 @@ mod kind_predicate_tests {
             split(|k| k.can_mask()),
             (
                 vec![
-                    "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text"
+                    "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Spiral", "Arc", "Path",
+                    "Boolean", "Text"
                 ],
                 vec!["Root", "Artboard", "Slice"]
             ),
@@ -1982,8 +2019,8 @@ mod kind_predicate_tests {
             split(|k| k.takes_paint()),
             (
                 vec![
-                    "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text"
+                    "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Spiral", "Arc",
+                    "Path", "Boolean", "Text"
                 ],
                 vec!["Root", "Group", "Slice"]
             ),
@@ -1993,8 +2030,8 @@ mod kind_predicate_tests {
             split(crate::resolve::is_indexed),
             (
                 vec![
-                    "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text", "Slice"
+                    "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Spiral", "Arc",
+                    "Path", "Boolean", "Text", "Slice"
                 ],
                 vec!["Root", "Group"]
             ),
@@ -2005,8 +2042,8 @@ mod kind_predicate_tests {
             (
                 vec!["Artboard", "Rect"],
                 vec![
-                    "Root", "Group", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text", "Slice"
+                    "Root", "Group", "Ellipse", "Polygon", "Star", "Line", "Spiral", "Arc", "Path",
+                    "Boolean", "Text", "Slice"
                 ]
             ),
             "stroke_sides_apply"
@@ -2016,8 +2053,8 @@ mod kind_predicate_tests {
             (
                 vec!["Group", "Boolean"],
                 vec![
-                    "Root", "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path",
-                    "Text", "Slice"
+                    "Root", "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Spiral",
+                    "Arc", "Path", "Text", "Slice"
                 ]
             ),
             "steps_into (group_chain's arm)"

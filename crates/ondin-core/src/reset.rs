@@ -277,6 +277,8 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
             geo(G::CornerSmoothing(*corner_smoothing)),
         ],
         NodeKind::Line { end } => vec![geo(G::LineEnd(*end))],
+        NodeKind::Spiral { size, turns } => vec![geo(G::Size(*size)), geo(G::Turns(*turns))],
+        NodeKind::Arc { end, sweep } => vec![geo(G::LineEnd(*end)), geo(G::Sweep(*sweep))],
         NodeKind::Path {
             path,
             corner_radii,

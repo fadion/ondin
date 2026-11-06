@@ -1280,6 +1280,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
             | G::CornerSmoothing(_)
             | G::Sides(_)
             | G::InnerRatio(_)
+            | G::Turns(_)
+            | G::Sweep(_)
             | G::Arc(_) => Some("Appearance"),
             G::TextSizing(_) => Some("Type"),
             G::Path { .. }

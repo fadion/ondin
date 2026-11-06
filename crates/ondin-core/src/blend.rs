@@ -103,6 +103,8 @@ pub fn pair(doc: &Document, selection: &[NodeId]) -> Result<(NodeId, NodeId), Re
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
             | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
             | NodeKind::Path { .. }
             | NodeKind::Boolean { .. } => {}
             _ => return Err(Refusal::Count),

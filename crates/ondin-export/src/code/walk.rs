@@ -1309,6 +1309,8 @@ impl Walk<'_> {
             NodeKind::Polygon { .. } => return Some("a polygon".into()),
             NodeKind::Star { .. } => return Some("a star".into()),
             NodeKind::Line { .. } => return Some("a line".into()),
+            NodeKind::Spiral { .. } => return Some("a spiral".into()),
+            NodeKind::Arc { .. } => return Some("an arc, which CSS cannot draw".into()),
             NodeKind::Path { .. } => return Some("a vector path".into()),
             NodeKind::Boolean { .. } => return Some("a boolean".into()),
             NodeKind::Root => return Some("the document".into()),

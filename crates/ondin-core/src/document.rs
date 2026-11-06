@@ -3782,6 +3782,7 @@ pub(crate) fn apply_geometry_patch(
         | (NodeKind::Ellipse { size, .. }, G::Size(new))
         | (NodeKind::Polygon { size, .. }, G::Size(new))
         | (NodeKind::Star { size, .. }, G::Size(new))
+        | (NodeKind::Spiral { size, .. }, G::Size(new))
         | (NodeKind::Artboard { size, .. }, G::Size(new))
         | (NodeKind::Slice { size }, G::Size(new)) => Ok(G::Size(std::mem::replace(size, *new))),
         (NodeKind::Polygon { sides, .. }, G::Sides(new))
@@ -3835,7 +3836,16 @@ pub(crate) fn apply_geometry_patch(
         (NodeKind::Ellipse { arc, .. }, G::Arc(new)) => {
             Ok(G::Arc(std::mem::replace(arc, new.normalized())))
         }
-        (NodeKind::Line { end }, G::LineEnd(new)) => Ok(G::LineEnd(std::mem::replace(end, *new))),
+        (NodeKind::Line { end }, G::LineEnd(new))
+        | (NodeKind::Arc { end, .. }, G::LineEnd(new)) => {
+            Ok(G::LineEnd(std::mem::replace(end, *new)))
+        }
+        (NodeKind::Spiral { turns, .. }, G::Turns(new)) => {
+            Ok(G::Turns(std::mem::replace(turns, *new)))
+        }
+        (NodeKind::Arc { sweep, .. }, G::Sweep(new)) => {
+            Ok(G::Sweep(std::mem::replace(sweep, *new)))
+        }
         (
             NodeKind::Path {
                 path,

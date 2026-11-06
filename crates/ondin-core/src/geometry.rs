@@ -595,6 +595,8 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
             PathEl::MoveTo(Point::ZERO),
             PathEl::LineTo(*end),
         ])),
+        NodeKind::Spiral { size, turns } => Some(spiral_path(*size, *turns)),
+        NodeKind::Arc { end, sweep } => Some(arc_path(*end, *sweep)),
         // The one place a path's corner radii become geometry; every consumer
         // reaches it through here or `Resolved::local_path`.
         NodeKind::Path {
@@ -612,6 +614,94 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
         // Nothing to fill or stroke: a slice draws nothing.
         NodeKind::Slice { .. } => None,
     }
+}
+
+/// Fewest and most turns a spiral is drawn with: half a turn is the least that
+/// still winds, and past fifty the turns are a solid disc at any stroke.
+pub const MIN_TURNS: f64 = 0.5;
+pub const MAX_TURNS: f64 = 50.0;
+/// The most an arc sweeps either way: a hair short of the whole circle, whose
+/// ends would meet and leave no chord to hang it on.
+pub const MAX_SWEEP: f64 = 359.0;
+
+/// The unit spiral of `turns` turns about the origin, radius 1, ending at
+/// `(1, 0)`: Archimedean, its radius growing evenly with the angle, clockwise on
+/// screen. Four cubics a half turn, each matching the true curve's tangent at
+/// both ends, keep it within a hair of the curve.
+pub fn unit_spiral(turns: f64) -> BezPath {
+    const PER_HALF_TURN: f64 = 4.0;
+    let turns = turns.clamp(MIN_TURNS, MAX_TURNS);
+    let total = turns * std::f64::consts::TAU;
+    let grow = 1.0 / total;
+    // The point and its derivative by the angle swept from the middle.
+    let at = |theta: f64| {
+        let (r, a) = (grow * theta, theta - total);
+        let (sin, cos) = a.sin_cos();
+        (
+            Point::new(r * cos, r * sin),
+            Vec2::new(grow * cos - r * sin, grow * sin + r * cos),
+        )
+    };
+    let segments = (turns * 2.0 * PER_HALF_TURN).ceil().max(1.0) as u32;
+    let step = total / f64::from(segments);
+    let mut path = BezPath::new();
+    let (mut p0, mut d0) = at(0.0);
+    path.move_to(p0);
+    for i in 1..=segments {
+        let (p1, d1) = at(step * f64::from(i));
+        path.curve_to(p0 + d0 * (step / 3.0), p1 - d1 * (step / 3.0), p1);
+        (p0, d0) = (p1, d1);
+    }
+    path
+}
+
+/// A spiral's outline: [`unit_spiral`] stretched to fill `size` exactly, as
+/// [`star_path`] fills its box, so `local_bounds` is the box and the handles sit
+/// on the ink.
+fn spiral_path(size: Size, turns: f64) -> BezPath {
+    let mut path = unit_spiral(turns);
+    let b = path.bounding_box();
+    let sx = if b.width() > 0.0 {
+        size.width / b.width()
+    } else {
+        0.0
+    };
+    let sy = if b.height() > 0.0 {
+        size.height / b.height()
+    } else {
+        0.0
+    };
+    path.apply_affine(Affine::scale_non_uniform(sx, sy) * Affine::translate(-b.origin().to_vec2()));
+    path
+}
+
+/// An arc's outline: from the origin to `end`, `sweep` degrees of a circle,
+/// positive clockwise on screen, so bulging to the left of the way to `end`. A
+/// sweep of 0, or ends that meet, is the straight line.
+pub fn arc_path(end: Point, sweep: f64) -> BezPath {
+    let d = end.to_vec2();
+    let chord = d.hypot();
+    let half = sweep.clamp(-MAX_SWEEP, MAX_SWEEP).to_radians() / 2.0;
+    let mut path = BezPath::new();
+    path.move_to(Point::ZERO);
+    if chord < 1e-9 || half.abs() < 1e-9 {
+        path.line_to(end);
+        return path;
+    }
+    let radius = chord / (2.0 * half.sin().abs());
+    // Right of the way to `end` for a clockwise sweep under a half turn; past it
+    // the cosine turns negative and the centre crosses over. A sweep the other
+    // way mirrors it across the chord.
+    let right = Vec2::new(-d.y, d.x) / chord;
+    let centre = Point::ZERO.midpoint(end) + right * (radius * half.cos() * half.signum());
+    let start = (Point::ZERO - centre).atan2();
+    kurbo::Arc::new(centre, Vec2::new(radius, radius), start, 2.0 * half, 0.0)
+        .append_iter(TOLERANCE)
+        .for_each(|el| match el {
+            PathEl::MoveTo(_) => {}
+            el => path.push(el),
+        });
+    path
 }
 
 /// Fewest sides that still enclose an area.
@@ -886,7 +976,7 @@ pub fn is_closed(path: &BezPath) -> bool {
 pub fn stroke_align_applies(kind: &NodeKind) -> bool {
     match kind {
         NodeKind::Boolean { .. } | NodeKind::Text { .. } => true,
-        NodeKind::Line { .. } => false,
+        NodeKind::Line { .. } | NodeKind::Spiral { .. } | NodeKind::Arc { .. } => false,
         kind => local_path(kind).is_some_and(|p| is_closed(&p)),
     }
 }
@@ -913,8 +1003,8 @@ pub fn stroke_join_applies(kind: &NodeKind) -> bool {
         // Glyph outlines are full of corners.
         | NodeKind::Text { .. } => true,
         NodeKind::Ellipse { arc, .. } => arc.sweep < 360.0,
-        // No interior vertex.
-        NodeKind::Line { .. } => false,
+        // No interior vertex; a spiral's and an arc's cubics meet tangent.
+        NodeKind::Line { .. } | NodeKind::Spiral { .. } | NodeKind::Arc { .. } => false,
         // Nothing here strokes at all (§6.3), so there is no join to shape.
         NodeKind::Root | NodeKind::Group | NodeKind::Slice { .. } => false,
     }
@@ -1196,8 +1286,11 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
         | NodeKind::Ellipse { size, .. }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
+        | NodeKind::Spiral { size, .. }
         | NodeKind::Artboard { size, .. }
         | NodeKind::Slice { size } => Some(Rect::new(0.0, 0.0, size.width, size.height)),
+        // The arc's own box, as a line's is the line's.
+        NodeKind::Arc { .. } => local_path(kind).map(|p| p.bounding_box()),
         NodeKind::Line { end } => Some(Rect::new(
             0.0_f64.min(end.x),
             0.0_f64.min(end.y),
@@ -1260,12 +1353,14 @@ pub fn pivot_for(kind: &NodeKind, local: Rect, at: Point) -> Pivot {
         | NodeKind::Ellipse { .. }
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
+        | NodeKind::Spiral { .. }
         | NodeKind::Artboard { .. }
         | NodeKind::Slice { .. } => true,
         NodeKind::Text { sizing, .. } => matches!(sizing, crate::node::TextSizing::Fixed(_)),
         NodeKind::Root
         | NodeKind::Group
         | NodeKind::Line { .. }
+        | NodeKind::Arc { .. }
         | NodeKind::Path { .. }
         // Emergent, like a group's: editing an operand would move a fraction of
         // its box.
@@ -1705,6 +1800,11 @@ pub fn contains_local(
             // plus `slop`, which the canvas derives from a screen distance and the
             // zoom. Added to the reach rather than maxed with it.
             distance_point_segment(p, Point::ZERO, *end) <= tol
+        }
+        // Open, and a line's kin: grabbed by the stroke alone, never by the
+        // space a closing chord would enclose.
+        NodeKind::Spiral { .. } | NodeKind::Arc { .. } => {
+            local_path(kind).is_some_and(|path| near_outline(&path, p, tol))
         }
         // Star spokes and a polygon's corners leave a lot of the box empty, so
         // these test the outline rather than the box — clicking the gap between
@@ -2891,5 +2991,78 @@ mod tests {
         }
         let took = start.elapsed();
         assert!(took.as_secs_f64() < 1.0, "at once: {took:?}");
+    }
+
+    /// The unit spiral starts at the middle, ends at (1, 0), and each cubic's
+    /// middle sits on the true Archimedean spiral, whose radius grows evenly with
+    /// the angle; a half-turn count too.
+    #[test]
+    fn the_unit_spiral_is_archimedean() {
+        for turns in [0.5, 1.0, 3.5, 12.0] {
+            let path = unit_spiral(turns);
+            let segs: Vec<_> = path.segments().collect();
+            assert!(segs[0].start().distance(Point::ZERO) < 1e-12);
+            assert!(segs.last().unwrap().end().distance(Point::new(1.0, 0.0)) < 1e-12);
+            let total = turns * std::f64::consts::TAU;
+            let step = total / segs.len() as f64;
+            for (i, seg) in segs.iter().enumerate() {
+                let theta = step * (i as f64 + 0.5);
+                let (r, a) = (theta / total, theta - total);
+                let truth = Point::new(r * a.cos(), r * a.sin());
+                let off = seg.eval(0.5).distance(truth);
+                assert!(off < 0.01, "{turns}: segment {i} off by {off}");
+            }
+        }
+    }
+
+    /// A spiral fills its box exactly, as a polygon does, so its handles sit on
+    /// its ink; the turns are clamped, not refused.
+    #[test]
+    fn a_spiral_fills_its_box() {
+        for turns in [0.1, 3.5, 99.0] {
+            let b = local_path(&NodeKind::Spiral {
+                size: Size::new(120.0, 80.0),
+                turns,
+            })
+            .unwrap()
+            .bounding_box();
+            for (got, want) in [(b.x0, 0.0), (b.y0, 0.0), (b.x1, 120.0), (b.y1, 80.0)] {
+                assert!((got - want).abs() < 1e-6, "{turns}: {b:?}");
+            }
+        }
+    }
+
+    /// An arc runs from the origin to its end at every sweep either way, its
+    /// length the circle's `r·θ`; a positive quarter bulges left of the way to
+    /// its end, a negative one right, and zero is the line.
+    #[test]
+    fn an_arc_joins_its_ends_bulging_by_its_sweep() {
+        let end = Point::new(140.0, -140.0);
+        let chord = end.to_vec2().hypot();
+        for deg in [-345.0, -90.0, -5.0, 5.0, 15.0, 90.0, 180.0, 345.0] {
+            let path = arc_path(end, deg);
+            let segs: Vec<_> = path.segments().collect();
+            assert!(segs[0].start().distance(Point::ZERO) < 1e-6, "{deg}");
+            assert!(segs.last().unwrap().end().distance(end) < 1e-6, "{deg}");
+            let theta = f64::to_radians(deg).abs();
+            let r = chord / (2.0 * (theta / 2.0).sin());
+            let len: f64 = segs.iter().map(|s| s.arclen(1e-6)).sum();
+            assert!((len - r * theta).abs() < 1e-3 * r * theta, "{deg}: {len}");
+        }
+        // Dragged up and right, a clockwise quarter's centre is the box's
+        // lower-right corner, and it bulges up-left; the other way, the reverse.
+        for (deg, centre) in [
+            (90.0, Point::new(140.0, 0.0)),
+            (-90.0, Point::new(0.0, -140.0)),
+        ] {
+            for seg in arc_path(end, deg).segments() {
+                assert!(
+                    (seg.eval(0.5).distance(centre) - 140.0).abs() < 0.05,
+                    "{deg}"
+                );
+            }
+        }
+        let flat = arc_path(end, 0.0);
+        assert_eq!(flat.elements().len(), 2, "the straight line");
     }
 }

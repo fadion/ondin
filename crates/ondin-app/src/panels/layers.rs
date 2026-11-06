@@ -583,6 +583,9 @@ pub(crate) fn node_glyph(kind: &NodeKind) -> (&'static str, GlyphInk) {
         NodeKind::Polygon { .. } => (icon::TRIANGLE, Muted),
         NodeKind::Star { .. } => (icon::STAR, Muted),
         NodeKind::Line { .. } => (icon::LINE_SEGMENT, Muted),
+        // The tools' own glyphs, as a polygon's and a star's are theirs.
+        NodeKind::Spiral { .. } => (icon::SPIRAL, Muted),
+        NodeKind::Arc { .. } => (icon::ARC, Muted),
         NodeKind::Path { .. } => (icon::POLYGON, Accent),
         NodeKind::Text { .. } => (icon::TEXT_T, Muted),
         NodeKind::Slice { .. } => (icon::KNIFE, Muted),

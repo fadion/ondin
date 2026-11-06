@@ -448,6 +448,8 @@ fn collect(doc: &Document, id: NodeId, leaves: &mut Vec<NodeId>) -> Result<(), R
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
         | NodeKind::Line { .. }
+        | NodeKind::Spiral { .. }
+        | NodeKind::Arc { .. }
         | NodeKind::Path { .. }
         | NodeKind::Text { .. } => leaves.push(id),
     }

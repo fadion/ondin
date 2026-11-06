@@ -1,5 +1,5 @@
 {
-  "snapshot_version": 14,
+  "snapshot_version": 15,
   "pages": [
     {
       "id": "601d:1",
@@ -538,6 +538,8 @@
         "601d:19",
         "601d:20",
         "601d:21",
+        "601d:23",
+        "601d:24",
         "601d:14"
       ],
       "artboard": null,
@@ -755,6 +757,116 @@
         }
       ],
       "strokes": []
+    },
+    {
+      "id": "601d:23",
+      "kind": "spiral",
+      "name": "Spiral 1",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        20.0,
+        240.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        30.0,
+        250.0
+      ],
+      "world_bounds": [
+        29.0,
+        249.0,
+        91.0,
+        307.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Spiral",
+        "width": 60.0,
+        "height": 56.0,
+        "turns": 2.5
+      },
+      "fills": [],
+      "strokes": [
+        {
+          "paint": {
+            "type": "Solid",
+            "color": "#3c3c46",
+            "alpha": 1.0
+          },
+          "width": 2.0
+        }
+      ]
+    },
+    {
+      "id": "601d:24",
+      "kind": "arc",
+      "name": "Arc 1",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        100.0,
+        280.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        110.0,
+        290.0
+      ],
+      "world_bounds": [
+        109.0,
+        289.0,
+        181.0,
+        311.2073
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Arc",
+        "end_x": 70.0,
+        "end_y": 0.0,
+        "sweep": -120.0
+      },
+      "fills": [],
+      "strokes": [
+        {
+          "paint": {
+            "type": "Solid",
+            "color": "#3c3c46",
+            "alpha": 1.0
+          },
+          "width": 2.0
+        }
+      ]
     },
     {
       "id": "601d:3",

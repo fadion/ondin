@@ -37,7 +37,7 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 | Rect, Ellipse, Polygon, Star | `DefaultBox` | `tools::CLICK_CREATE_SIZE` square at the pointer, tool defaults |
 | Image | `FittedImage` | the picture's own size, aspect kept, shrunk to fit frame/viewport (`tools::fitted_image_size`), **centred** on the pointer |
 | Text | `TextNode` | what gets typed |
-| Frame, Line | `None` | deliberately (a default frame guesses a layout; a line has no box) |
+| Frame, Line, Spiral, Arc | `None` | deliberately (a default frame guesses a layout; a default line, spiral or arc would invent a direction) |
 | Slice | `None` | its click picks the slice under it instead (`tools.md`, *The Slice tool*) |
 
 - A click synthesizes the gesture: `click_create` runs `begin_create` (parent frame, id, side count),
@@ -51,8 +51,9 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 ### Keys during a create drag (`canvas::reshape_create`)
 
 - `Space` held repositions the uncommitted shape: moves `start` by the pointer **delta**.
-- `↑`/`↓` add/remove polygon or star sides; the count lives on `Drag::Create`, clamped by
-  `tools::step_sides` to `geometry::MIN_SIDES..=MAX_SIDES`.
+- `↑`/`↓` add/remove polygon or star sides, a spiral's half turns, or a rung of the arc's signed
+  sweep ladder (`tools::arc_sweep`); the count lives on `Drag::Create`, held to its range by
+  `tools::step_drawn_count` (sides through `tools::step_sides`, `geometry::MIN_SIDES..=MAX_SIDES`).
 - Read in the gesture's own loop, not as `Action`s. `dispatch` drops `Action::Nudge` and
   `Action::SizeStep` while a create drag is up. The armed-pan cursor excludes a live create drag.
 

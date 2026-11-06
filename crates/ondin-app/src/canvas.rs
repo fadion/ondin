@@ -4249,15 +4249,24 @@ impl OndinApp {
                 PEN_STROKE_COLOR,
                 PEN_STROKE_WIDTH,
             ),
-            Tool::Spiral | Tool::Arc => tools::create_open_path(
+            Tool::Spiral => tools::create_spiral(
                 id,
                 parent,
                 index,
                 parent_world,
-                match shape {
-                    Tool::Spiral => tools::spiral_path(start, corner, sides),
-                    _ => tools::arc_path(start, corner, f64::from(sides * tools::ARC_STEP_DEG)),
-                },
+                start,
+                corner,
+                sides,
+                tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
+            ),
+            Tool::Arc => tools::create_arc(
+                id,
+                parent,
+                index,
+                parent_world,
+                start,
+                corner,
+                tools::arc_sweep(sides),
                 tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
             ),
             Tool::Text => tools::create_text(
@@ -10119,15 +10128,12 @@ impl OndinApp {
         ppp: f32,
         resp: &egui::Response,
     ) -> Option<()> {
+        // Beside the pointer, as every pointer readout sits (`spacing::paint_label`).
         if let Drag::Create { shape, sides, .. } = &self.drag
             && let Some(label) = tools::drawn_count_label(*shape, *sides)
         {
-            let edge = BadgeEdge {
-                mid: resp.interact_pointer_pos()?,
-                dir: egui::vec2(1.0, 0.0),
-                out: egui::vec2(0.0, 1.0),
-            };
-            paint_size_pill(painter, edge, label, &[], color::BADGE);
+            let at = resp.interact_pointer_pos()?;
+            crate::spacing::paint_label(painter, at, &label, None, color::BADGE);
             return Some(());
         }
         let box_ = self.create_outline_box(ui, rect, ppp, resp)?;

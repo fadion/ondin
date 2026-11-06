@@ -277,6 +277,7 @@ pub fn can_stretch(kind: &NodeKind) -> bool {
             | NodeKind::Ellipse { .. }
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
+            | NodeKind::Spiral { .. }
             | NodeKind::Artboard { .. }
             | NodeKind::Text { .. }
     )
@@ -307,6 +308,7 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
         | NodeKind::Ellipse { size: s, .. }
         | NodeKind::Polygon { size: s, .. }
         | NodeKind::Star { size: s, .. }
+        | NodeKind::Spiral { size: s, .. }
         | NodeKind::Artboard { size: s, .. }
         | NodeKind::Slice { size: s } => *s = size,
         NodeKind::Text { sizing, .. } => {

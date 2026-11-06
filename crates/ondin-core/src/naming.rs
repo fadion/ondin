@@ -34,6 +34,8 @@ pub const GENERATED_NAMES: &[&str] = &[
     "Polygon",
     "Star",
     "Line",
+    "Spiral",
+    "Arc",
     "Path",
     "Text",
     "Slice",
@@ -227,6 +229,8 @@ mod tests {
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
             | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
             | NodeKind::Path { .. }
             | NodeKind::Boolean { .. }
             | NodeKind::Text { .. }
@@ -269,6 +273,14 @@ mod tests {
             },
             NodeKind::Line {
                 end: crate::kurbo::Point::new(1.0, 0.0),
+            },
+            NodeKind::Spiral {
+                size: one,
+                turns: 2.0,
+            },
+            NodeKind::Arc {
+                end: crate::kurbo::Point::new(1.0, 0.0),
+                sweep: 90.0,
             },
             NodeKind::Path {
                 path: Default::default(),

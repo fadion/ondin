@@ -34,7 +34,9 @@ use std::collections::BTreeMap;
 /// - **13** the `"slice"` kind and `Geometry::Slice`.
 /// - **14** `NodeSnapshot::blend`, absent at the kind's default, and
 ///   `EffectSummary::blend`, absent at Normal.
-pub const SNAPSHOT_VERSION: u32 = 14;
+/// - **15** the `"spiral"` and `"arc"` kinds, `Geometry::Spiral` and
+///   `Geometry::Arc`.
+pub const SNAPSHOT_VERSION: u32 = 15;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -208,6 +210,20 @@ pub enum Geometry {
     Line {
         end_x: f64,
         end_y: f64,
+    },
+    /// An open spiral filling its box: `turns` turns clockwise out from the middle
+    /// to three o'clock.
+    Spiral {
+        width: f64,
+        height: f64,
+        turns: f64,
+    },
+    /// An open circular arc from the local origin to the end, `sweep` degrees,
+    /// positive clockwise on screen.
+    Arc {
+        end_x: f64,
+        end_y: f64,
+        sweep: f64,
     },
     Path {
         svg: String,
@@ -526,6 +542,8 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::Polygon { .. } => "polygon",
         NodeKind::Star { .. } => "star",
         NodeKind::Line { .. } => "line",
+        NodeKind::Spiral { .. } => "spiral",
+        NodeKind::Arc { .. } => "arc",
         NodeKind::Path { .. } => "path",
         NodeKind::Text { .. } => "text",
         NodeKind::Slice { .. } => "slice",
@@ -603,6 +621,16 @@ fn geometry(kind: &NodeKind) -> Geometry {
         NodeKind::Line { end } => Geometry::Line {
             end_x: end.x,
             end_y: end.y,
+        },
+        NodeKind::Spiral { size, turns } => Geometry::Spiral {
+            width: size.width,
+            height: size.height,
+            turns: *turns,
+        },
+        NodeKind::Arc { end, sweep } => Geometry::Arc {
+            end_x: end.x,
+            end_y: end.y,
+            sweep: *sweep,
         },
         // The resolved outline spelled by the SVG writer (`svg::path_d`, four
         // places), not `BezPath::to_svg`: full `f64` digits differ across platforms.

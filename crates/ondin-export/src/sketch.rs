@@ -450,6 +450,8 @@ impl Writer<'_> {
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
             | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
             | NodeKind::Path { .. } => {
                 let mut path = res.local_path(doc, id)?;
                 path.apply_affine(world);

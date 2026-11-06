@@ -1339,7 +1339,12 @@ pub enum GeometryPatch {
     Sides(u32),
     /// A star's inner radius as a fraction of its outer one, 0..=1.
     InnerRatio(f64),
+    /// A line's or an arc's end, its start being the local origin.
     LineEnd(Point),
+    /// A spiral's turns.
+    Turns(f64),
+    /// An arc's signed sweep in degrees.
+    Sweep(f64),
     /// A path's outline **and** its per-anchor radii, together.
     ///
     /// **One patch, not two**: the radii are indexed by anchor
@@ -1396,6 +1401,8 @@ impl GeometryPatch {
         match self {
             GeometryPatch::Size(_)
             | GeometryPatch::LineEnd(_)
+            // An arc's box is the arc's, which its bulge moves.
+            | GeometryPatch::Sweep(_)
             | GeometryPatch::Path { .. }
             | GeometryPatch::TextSizing(_)
             // A rail changes the box a text node is measured in, and so do the
@@ -1410,6 +1417,7 @@ impl GeometryPatch {
             | GeometryPatch::CornerSmoothing(_)
             | GeometryPatch::Arc(_)
             | GeometryPatch::Sides(_)
+            | GeometryPatch::Turns(_)
             | GeometryPatch::InnerRatio(_) => false,
         }
     }
@@ -1437,6 +1445,8 @@ impl GeometryPatch {
             Self::CornerRadius(v)
             | Self::CornerSmoothing(v)
             | Self::InnerRatio(v)
+            | Self::Turns(v)
+            | Self::Sweep(v)
             | Self::TextPathOffset(v) => v.is_finite(),
             Self::CornerRadii(r) => [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
                 .iter()

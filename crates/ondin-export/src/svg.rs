@@ -1976,8 +1976,15 @@ fn write_element(
                 r#"{pad}<polygon{t} points="{points}"{fill}{stroke}{op}/>"#
             );
         }
-        // An arc has no element of its own; its outline goes out as a path.
+        // An arc has no element of its own, nor has a spiral or an open arc; the
+        // outline goes out as a path.
         NodeKind::Ellipse { arc, .. } if !arc.is_whole() => {
+            let d = geometry::local_path(kind)
+                .map(|p| path_d(&p))
+                .unwrap_or_default();
+            let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
+        }
+        NodeKind::Spiral { .. } | NodeKind::Arc { .. } => {
             let d = geometry::local_path(kind)
                 .map(|p| path_d(&p))
                 .unwrap_or_default();

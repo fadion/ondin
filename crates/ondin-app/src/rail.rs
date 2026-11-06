@@ -588,10 +588,11 @@ mod tests {
         );
     }
 
-    /// A spiral and an arc drawn with their tools are open paths with the line's
-    /// stroke and no fill, each its own undo step, and the drawn one is selected.
+    /// A spiral and an arc drawn with their tools are spiral and arc layers, open,
+    /// with the line's stroke and no fill, each its own undo step, and the drawn
+    /// one is selected.
     #[test]
-    fn a_drawn_spiral_and_arc_are_stroked_open_paths() {
+    fn a_drawn_spiral_and_arc_are_stroked_open_shapes() {
         let mut rig = Rig::new(Group::Line);
         for (tool, step) in [(Tool::Spiral, "Add spiral"), (Tool::Arc, "Add arc")] {
             let app = &mut rig.app;
@@ -606,9 +607,16 @@ mod tests {
             assert_eq!(sides, crate::tools::drawn_count(tool));
             app.commit_create(id, tool, start, Point::new(160.0, 20.0));
             let node = app.session.doc.get(id).expect("drawn");
-            let ondin_core::NodeKind::Path { path, .. } = node.kind() else {
-                panic!("{tool:?} draws a path: {:?}", node.kind());
+            let kind_matches = match tool {
+                Tool::Spiral => matches!(node.kind(), ondin_core::NodeKind::Spiral { .. }),
+                _ => matches!(node.kind(), ondin_core::NodeKind::Arc { .. }),
             };
+            assert!(
+                kind_matches,
+                "{tool:?} draws its own kind: {:?}",
+                node.kind()
+            );
+            let path = ondin_core::geometry::local_path(node.kind()).expect("an outline");
             assert!(
                 !path
                     .elements()

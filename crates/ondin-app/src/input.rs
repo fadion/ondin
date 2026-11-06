@@ -1674,6 +1674,9 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         if plain && m.shift && i.key_pressed(egui::Key::P) {
             out.push(Action::ChooseTool(Tool::Pencil));
         }
+        if plain && m.shift && i.key_pressed(egui::Key::M) {
+            out.push(Action::ChooseTool(Tool::ShapeBuilder));
+        }
         if plain && m.shift && i.key_pressed(egui::Key::F) {
             out.push(Action::ChooseTool(Tool::Slice));
         }
@@ -2545,6 +2548,16 @@ mod tests {
         assert_eq!(
             actions(Mode::Normal, vec![key(egui::Key::F, none)], none),
             vec![Action::ChooseTool(Tool::Frame)]
+        );
+    }
+
+    /// `Shift+M` arms the shape builder.
+    #[test]
+    fn shift_m_is_the_shape_builder() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::M, shift)], shift),
+            vec![Action::ChooseTool(Tool::ShapeBuilder)]
         );
     }
 

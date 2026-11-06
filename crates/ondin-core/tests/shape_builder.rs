@@ -245,7 +245,8 @@ fn divide_makes_one_path_per_face_painted_as_it_showed() {
     .area()
     .abs();
     let res = f.resolved();
-    let (tx, group) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[a, b, c]).unwrap();
+    let arr = f.arrange(&[a, b, c]);
+    let (tx, group) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[a, b, c], &arr).unwrap();
     f.commit(tx);
     assert_eq!(f.name(group), shape_builder::DIVIDED);
     assert_eq!(f.doc.get(f.frame).unwrap().children(), &[group]);

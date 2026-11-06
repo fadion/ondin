@@ -276,6 +276,9 @@ pub enum Item {
     /// `apply_boolean` decides which, so one item covers both.
     Boolean(BoolOp),
     Flatten,
+    /// Every face the selection's outlines cut each other into becomes a path of
+    /// its own (`shape_builder::divide`). One-way, so it is never checked.
+    Divide,
     /// §4 / §5.4 / §5.5 — one shape becomes the `Path` its outline traces
     /// (`build::outline`).
     ///
@@ -613,6 +616,7 @@ impl Item {
         Item::Boolean(BoolOp::Intersect),
         Item::Boolean(BoolOp::Exclude),
         Item::Flatten,
+        Item::Divide,
         Item::OutlineShape,
         Item::OutlineStroke,
         Item::JoinPaths,
@@ -879,6 +883,7 @@ impl Item {
                 Group::Structure,
             ),
             // Deliberately unbound: a one-way conversion is not one keystroke away.
+            Item::Divide => s("Divide", icon::DIVIDE, None, Group::Structure),
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
             Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
             Item::JoinPaths => s("Join paths", icon::PLUGS_CONNECTED, None, Group::Structure),
@@ -1151,6 +1156,7 @@ impl Item {
                     Tool::Select => ("Tool: Select", icon::CURSOR, "V"),
                     Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
                     Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
+                    Tool::ShapeBuilder => ("Tool: Shape builder", icon::SHAPE_BUILDER, "Shift+M"),
                     Tool::Frame => ("Tool: Frame", icon::FRAME, "F"),
                     Tool::Slice => ("Tool: Slice", icon::KNIFE, "Shift+F"),
                     Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),
@@ -1396,6 +1402,7 @@ impl Item {
             }
             Item::UnlinkTokens => &["tokens", "dtcg", "json", "link"],
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
+            Item::Divide => &["boolean", "split", "cut", "pieces"],
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
@@ -1844,6 +1851,9 @@ pub struct LayerState {
     pub outlineable: bool,
     /// `build::can_outline_stroke` said yes — the layer has a visible stroke.
     pub stroke_outlineable: bool,
+    /// `shape_builder::can_arrange` said yes of the selection: two or more closed
+    /// shapes for *Divide* to cut.
+    pub divisible: bool,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
     pub all_slices: bool,
 }
@@ -2229,10 +2239,15 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             }
         })
         .collect();
+        // *Divide* after a rule, beside the one-way verbs: it leaves no live
+        // operation behind, so it is never checked.
+        let divide = Row::new(Item::Divide)
+            .dim_if(!st.divisible, DIVIDE_NEEDS)
+            .dim_if(locked, why);
         rows.push(
             Row::new(Item::BooleanMenu)
                 .dim_if(locked, why)
-                .sub(vec![ops]),
+                .sub(vec![ops, vec![divide]]),
         );
     }
     if !promoted_flatten && (cx.selection.len() >= 2 || on_boolean) {
@@ -2467,6 +2482,10 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     .collect()
 }
 
+/// Why *Divide* is dimmed or refused: the selection has fewer than two closed
+/// shapes, or none of them overlap.
+pub const DIVIDE_NEEDS: &str = "Divide needs two or more overlapping shapes";
+
 /// The layer verbs a menu leaves out for some selections, each with what it
 /// needs — the command palette's *Not available here* rows, shown only when typed
 /// for. With nothing selected every one reads [`NEEDS_SELECTION`] instead.
@@ -2509,6 +2528,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
         "Needs two layers or a boolean",
     ),
     (Item::Flatten, "Needs two layers or a boolean"),
+    (Item::Divide, DIVIDE_NEEDS),
     (Item::OutlineShape, "Needs one shape"),
     (Item::OutlineStroke, "Needs one stroked shape"),
     (Item::JoinPaths, "Needs two path layers"),
@@ -3266,6 +3286,10 @@ impl OndinApp {
             // Core's own predicate, so the row never offers what `build::outline` refuses.
             outlineable: build::can_outline(node.kind()),
             stroke_outlineable: build::can_outline_stroke(&self.session.doc, id),
+            divisible: ondin_core::shape_builder::can_arrange(
+                &self.session.doc,
+                self.session.selection.ids(),
+            ),
             all_slices: self.session.selection.ids().iter().all(|s| {
                 matches!(
                     self.session.doc.get(*s).map(|n| n.kind()),
@@ -3407,6 +3431,7 @@ impl OndinApp {
             Item::Ungroup => self.dispatch(ctx, Action::Ungroup),
             Item::Boolean(op) => self.dispatch(ctx, Action::Boolean(op)),
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
+            Item::Divide => self.divide_selection(),
             // No chord, so no `Action`. `hit` rather than the selection (C3); the
             // verb re-checks its own kind, so a stale row refuses.
             Item::OutlineText => {
@@ -4121,7 +4146,10 @@ mod tests {
         let groups = build(&open(target, &two, &kinds));
         assert_eq!(
             sub_labels(&groups, Item::BooleanMenu),
-            [vec!["Union", "Subtract", "Intersect", "Exclude"]]
+            [
+                vec!["Union", "Subtract", "Intersect", "Exclude"],
+                vec!["Divide"]
+            ]
         );
         assert!(
             !flat(&groups).contains(&Item::Boolean(BoolOp::Union)),
@@ -4211,10 +4239,13 @@ mod tests {
         assert!(head.iter().any(|r| r.item == Item::Ungroup));
 
         // The four operations, in *Boolean ▸*, are checkable here, and exactly one
-        // is ticked.
+        // is ticked; *Divide* follows after a rule.
         assert_eq!(
             sub_labels(&groups, Item::BooleanMenu),
-            [vec!["Union", "Subtract", "Intersect", "Exclude"]]
+            [
+                vec!["Union", "Subtract", "Intersect", "Exclude"],
+                vec!["Divide"]
+            ]
         );
         let ticked: Vec<&str> = deep(&groups)
             .into_iter()

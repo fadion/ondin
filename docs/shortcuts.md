@@ -95,14 +95,16 @@ or the release, not the press.**
 
 ## 1. Tools
 
-Single key, `plain && !shift`, Normal mode only. The two Shift chords, the pencil's `Shift+P`
-and the slice's `Shift+F`, are read after the letters under `plain && m.shift`.
+Single key, `plain && !shift`, Normal mode only. The Shift chords, the pencil's `Shift+P`, the
+shape builder's `Shift+M` and the slice's `Shift+F`, are read after the letters under
+`plain && m.shift`.
 
 | Key | Tool | |
 |---|---|---|
 | `V` | Select with a box marquee — turns the lasso off, being the pointer member of the rail's Select slot | ✅ Figma, Sketch, Illustrator |
 | `H` | Hand | ✅ Figma |
 | `K` | Scale | ✅ Figma |
+| `Shift+M` | Shape builder | ✅ |
 | `F` | Frame | ✅ Figma (also `A`; taken here) |
 | `Shift+F` | Slice | ✅ on the frame's letter, as it shares the frame's slot on the rail |
 | `R` | Rect | ✅ Figma, Sketch |

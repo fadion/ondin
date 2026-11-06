@@ -1,8 +1,9 @@
 # Booleans, flatten, outline and masks in the identity row
 
 Non-destructive boolean containers (`core::boolean`, `NodeKind::Boolean`), the destructive verbs
-beside them (flatten, outline shape, outline stroke, convert text to path), the identity card's boolean row with its
-Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part of §9.4.
+beside them (flatten, outline shape, outline stroke, convert text to path), the shape builder and
+*Divide*, the identity card's boolean row with its Mask/Group/Ungroup buttons, the Mask card, and how
+a failed boolean draws. Part of §9.4.
 
 ## 9.4 Booleans
 
@@ -180,12 +181,85 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
   layer-menu row dims without a visible stroke (`LayerState::stroke_outlineable`);
   `inspector::outline_stroke` commits and selects the result.
 
+## The shape builder and Divide
+
+`core::shape_builder` cuts the selection's closed shapes into the faces of their planar arrangement.
+The shape builder tool merges or removes faces; *Divide* makes each face a path. What lands is
+plain `Path` layers.
+
+- **The arrangement** (`boolean::regions`) is built by refinement with flo_curves' `path_cut`, so
+  curves stay curves (i_overlay would flatten them, as for booleans): each outline in turn cuts
+  every face so far into the part inside it and the part outside, and adds the part of itself
+  nothing covered yet. Each face is split into its connected pieces (`pieces`: one outline with the
+  holes directly inside it) and lists the outlines covering it in ascending order
+  (`Region::covers`), the last topmost. Faces under `REGION_MIN_AREA` (10⁻³ unit²) are dropped:
+  two outlines sharing an edge leave slivers along it. It runs under the booleans' unwind guard and
+  failure counter (`unwind_guard`, which `guarded` wraps) and refuses coordinates past
+  `MAX_BOOL_COORD`.
+- **Sources** (`shape_builder::arrange`): visible, not effectively locked, not picture-filled,
+  outside any boolean and any instance; a rect, ellipse, polygon, star, boolean, or a path whose
+  every subpath is closed. Selected groups are opened into their contents. Any other shown layer
+  (text, pictures, frames, open paths, lines, locked shapes) is left out, and
+  `Arrangement::left_out` says so. The work is in world
+  space, so sources under different parents cut each other as drawn. Refusals: `TooFew`,
+  `NoOverlap` (no face covered twice), `Abandoned`. `can_arrange` is the dim test: it counts
+  sources and does no arithmetic.
+- **Merge and remove** (`Arrangement::merge`, `remove`): every source covering a picked face
+  becomes itself minus the picked faces. A path is rewritten in place; any other kind, a live
+  boolean included, is replaced by a path in its slot through `build::replace_with_path`, keeping
+  its name and look (undo brings the boolean back live). A source left with nothing is deleted;
+  a subtraction the guard caught refuses the whole edit with `BooleanAbandoned`, deleting nothing.
+  Merge also adds a path, the faces' union, looking like the topmost source over the first face
+  picked (`build::carried_look`: paint, opacity, blend, effects), named *Path N*, just above the
+  topmost source it took from, in that source's parent.
+- **Divide** (`shape_builder::divide`): one path per face, looking like and named after the topmost
+  source over it, so nothing moves on screen, stacked by that source. They go into a new group
+  named *Divided* just above the outermost selected layer holding the topmost source. The sources
+  are deleted; a selected group left with nothing goes whole.
+
+### The tool (`shape_builder.rs`)
+
+`Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) sits on the rail after Scale: it reshapes
+what is drawn rather than drawing, and stays armed after each edit.
+
+- Faces are found once per selection and document revision (`OndinApp::builder_faces`), on the
+  frame the tool arms; hovering only looks up the face under the pointer.
+- **Hover**: a light white wash and a 2pt `color::POINT` edge on the face under the pointer.
+- **Drag**: a 3pt trail in `color::POINT` with a dot at the press. Faces join as the trail enters
+  them and never leave; the trail is sampled every 2 screen pt so a fast drag cannot jump a thin
+  face. The gathered faces draw as one outline, their union, with a pill beside the pointer,
+  *N regions*. Alt, read live so it can flip mid-drag, turns trail and edge `color::danger()`,
+  hatches the faces at 45° and makes the pill *Remove N*; the cursor's badge goes from Plus to Minus.
+- **Release** commits one undo step, *Shape builder*: a merge, or with Alt held a removal. A click
+  is a drag over one face: it lifts that face out as its own path, and an Alt-click removes it.
+  The merged path and every source still there are selected afterwards.
+- Escape or a right-click drops the drag (`cancel_gesture`) and records nothing; a second Escape
+  returns to Select.
+- **Status line**: on arming *Drag across regions to merge them · Alt-drag to remove*, or the
+  refusal *Select two or more overlapping shapes, then drag across them* (`shape_builder::NEEDS`,
+  also said by a press with nothing to build), or *The shapes could not be cut into regions*;
+  during a drag *Release to merge N regions · Esc to cancel*, *remove* while Alt is held; after it
+  *Merged N regions* or *Removed N regions*. The arming hint, these reports and *Divide*'s end in
+  *— only unlocked closed shapes take part; the rest were left out* when the arrangement left part
+  of the selection out (`left_out_note`).
+
+### Divide's doors
+
+`menu::Item::Divide`, glyph `divide`, no chord (a one-way conversion is not one keystroke away):
+the context menu's *Boolean ▸* as a second group, the inspector's boolean dropdown under the rule
+above *Flatten*, and the palette (aliases
+boolean, split, cut, pieces). It dims with *Divide needs two or more overlapping shapes*
+(`menu::DIVIDE_NEEDS`) where `can_arrange` refuses, and is never checked: it leaves no live
+operation. The *Divided* group is selected afterwards and the status line says *Divided into N
+paths*.
+
 ## The identity card's boolean row
 
 Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16.
 
-- **Dropdown**: four ops, then under a hairline a fifth row, *Flatten* (`stack-simple` glyph, as in
-  the context menu — an action, not a state). `ComboBox::height(BOOL_MENU_H)` = 220 so the five rows never get a scroll bar.
+- **Dropdown**: four ops, then under a hairline two actions, not states: *Divide* (dimmed with
+  `DIVIDE_NEEDS` where `can_arrange` refuses) and *Flatten* (`stack-simple` glyph, as in the
+  context menu). `ComboBox::height(BOOL_MENU_H)` = 250 so the six rows never get a scroll bar.
   `inspector::flatten_selection` gates on the dropdown's own predicate so the keyboard path reports a
   useful sentence. `inspector::popup_rule` draws the hairline via `ui::hairline_in_column`, sized from
   `available_width`, with gaps `ABOVE` 5pt / `BELOW` 4pt and the layout's `item_spacing.y` subtracted

@@ -144,7 +144,7 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Ungroup | `Ctrl+Shift+G` | any member is a Group or Boolean, unless promoted to the head; dims on lock |
 | Use as mask ✓ | `Ctrl+Alt+M` | absent on a frames-only selection and on a boolean's operand. Ticked when the layer is a mask or holds one. Dims with the inspector's refusal (`mask_refusal`), and on lock |
 | Even-odd fill ✓ | — | a lone `Path` only; dims on lock |
-| Boolean ▸ | — | `Item::BooleanMenu`, `UNITE_SQUARE` glyph; two or more layers, or a lone boolean; a submenu of the four operations (below); dims on lock |
+| Boolean ▸ | — | `Item::BooleanMenu`, `UNITE_SQUARE` glyph; two or more layers, or a lone boolean; a submenu of the four operations and *Divide* (below); dims on lock |
 | Flatten | `Ctrl+E` | two or more layers (on a lone boolean it is in the head); dims on lock |
 | Convert to path | — | one text layer; dims *"This text has no glyphs to convert"*; dims on lock |
 | Flip to other side ✓ | — | one text layer on a rail; ticked when flipped; dims on lock |
@@ -158,8 +158,11 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 
 *Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*.
 
-**Boolean ▸**, one group: *Union* (`Ctrl+Alt+U`) · *Subtract* (`S`) · *Intersect* (`I`) · *Exclude*
-(`X`). On a lone boolean they are checkable, its current operation ticked.
+**Boolean ▸**, two groups: *Union* (`Ctrl+Alt+U`) · *Subtract* (`S`) · *Intersect* (`I`) · *Exclude*
+(`X`), on a lone boolean checkable with its current operation ticked; then, after a rule, *Divide*
+(`Item::Divide`, no chord), which dims *"Divide needs two or more overlapping shapes"* where
+`shape_builder::can_arrange` refuses and is never checked, leaving no live operation
+(`app-booleans.md`).
 
 **Align ▸**, one group, horizontal then vertical as the inspector's row reads: *Left* (`Alt+A`) ·
 *Horizontal centres* (`Alt+H`) · *Right* (`Alt+D`) · *Top* (`Alt+W`) · *Vertical centres* (`Alt+V`) ·
@@ -176,7 +179,7 @@ full *Align …* labels.
 | Send backward | `Ctrl+[` | as above |
 | Send to back | `Ctrl+Shift+[` | as above |
 
-The submenus' own rows carry no lock dim: on a lock *Boolean ▸*, *Align ▸* and *Arrange ▸* dim and
+The submenus' own rows need no lock dim: on a lock *Boolean ▸*, *Align ▸* and *Arrange ▸* dim and
 stay shut (`align_dims_with_nothing_to_align_to_and_boolean_holds_the_four`).
 
 **Component rows**, directly after *Slice selection* (`Combine as variants` leads them):

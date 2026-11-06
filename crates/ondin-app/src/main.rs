@@ -133,6 +133,7 @@ mod render_cli;
 mod rulers;
 mod session;
 mod settings;
+mod shape_builder;
 mod slice;
 mod snap;
 mod spacing;

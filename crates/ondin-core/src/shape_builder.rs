@@ -45,7 +45,10 @@ fn takes_part(doc: &Document, id: NodeId) -> bool {
     let Some(node) = doc.get(id) else {
         return false;
     };
-    if node.locked() || !doc.shown(id) || node.paint().image_fill().is_some() {
+    if crate::is_effectively_locked(doc, id)
+        || !doc.shown(id)
+        || node.paint().image_fill().is_some()
+    {
         return false;
     }
     if crate::component::instance_root(doc, id).is_some() {
@@ -225,18 +228,18 @@ impl Arrangement {
                 built.kept.push(source);
                 continue;
             }
-            let left =
-                match boolean::evaluate(BoolOp::Subtract, &[self.outlines[j].clone(), set.clone()])
-                {
-                    Some(left) => left,
-                    None => {
-                        step(
-                            Transaction(vec![Operation::DeleteNode { id: source }]),
-                            &mut advanced,
-                        )?;
-                        continue;
-                    }
-                };
+            // Nothing left deletes the source; an unwind refuses the whole edit.
+            let left = match evaluated(BoolOp::Subtract, &[self.outlines[j].clone(), set.clone()]) {
+                Ok(left) => left,
+                Err(OpError::EmptyGeometry) => {
+                    step(
+                        Transaction(vec![Operation::DeleteNode { id: source }]),
+                        &mut advanced,
+                    )?;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             let world = res
                 .world_transform(source)
                 .ok_or(OpError::NoSuchNode(source))?;
@@ -344,17 +347,9 @@ pub const DIVIDED: &str = "Divided";
 /// screen. The paths go into a group named [`DIVIDED`] in the slot of the
 /// outermost selected layer holding the topmost source; the sources go, and so does
 /// a selected group nothing is left in.
+///
+/// `arr` is [`arrange`]'s answer for the same `selection`; one path per region.
 pub fn divide(
-    doc: &Document,
-    res: &Resolved,
-    ids: &mut IdSource,
-    selection: &[NodeId],
-) -> Result<(Transaction, NodeId), Refusal> {
-    let arr = arrange(doc, res, selection)?;
-    divide_arranged(doc, res, ids, selection, &arr).map_err(|_| Refusal::Abandoned)
-}
-
-fn divide_arranged(
     doc: &Document,
     res: &Resolved,
     ids: &mut IdSource,

@@ -32,6 +32,11 @@ pub enum Tool {
     /// Select's gestures, with the handle drag scaling the layer *photographically*
     /// instead of editing its geometry — see [`Scaling`].
     Scale,
+    /// Drag across the faces the selection's closed shapes cut each other into to
+    /// merge them, Alt-drag to remove them (`crate::shape_builder`). It reshapes what
+    /// is drawn rather than drawing, so it sits with Select, Hand and Scale, and
+    /// stays armed after each edit.
+    ShapeBuilder,
     Frame,
     /// Cuts a slice: a box dragged out as a rect's is, on whole pixels always, that
     /// exports whatever lies under it. Stays armed after a cut, so several slices
@@ -110,6 +115,7 @@ impl Tool {
             Tool::Frame | Tool::Line | Tool::Slice => None,
             Tool::Select
             | Tool::Scale
+            | Tool::ShapeBuilder
             | Tool::Pen
             | Tool::Pencil
             | Tool::Node
@@ -5123,6 +5129,7 @@ mod tests {
             Tool::ImageEdit,
             Tool::Select,
             Tool::Scale,
+            Tool::ShapeBuilder,
             Tool::Hand,
         ] {
             assert!(!tool.drags_a_box(), "{tool:?}");
@@ -5147,6 +5154,7 @@ mod tests {
             (Tool::Line, None),
             (Tool::Select, None),
             (Tool::Scale, None),
+            (Tool::ShapeBuilder, None),
             (Tool::Pen, None),
             (Tool::Node, None),
             (Tool::ImageEdit, None),

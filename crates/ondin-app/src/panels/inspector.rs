@@ -735,7 +735,7 @@ const HEAD_NAME_EDGE: egui::Vec2 = egui::vec2(5.0, 3.0);
 
 /// Outer height of the boolean dropdown's menu: its rows with headroom, so a
 /// retuned row height does not add a scroll area.
-const BOOL_MENU_H: f32 = 220.0;
+const BOOL_MENU_H: f32 = 250.0;
 
 /// A full-width hairline parting one group of rows in a dropdown from the next.
 ///
@@ -1995,6 +1995,11 @@ impl OndinApp {
             ui.spacing_mut().button_padding.y = 0.0;
             let mut pick = None;
             let mut flatten = false;
+            let mut divide = false;
+            let divisible = ondin_core::shape_builder::can_arrange(
+                &self.session.doc,
+                self.session.selection.ids(),
+            );
             ui::disable_unless(ui, enabled, |ui| {
                 egui::ComboBox::from_id_salt("boolean-op")
                     .icon(ui::combo_chevron)
@@ -2014,6 +2019,17 @@ impl OndinApp {
                             }
                         }
                         popup_rule(ui);
+                        ui::disable_unless(ui, divisible, |ui| {
+                            let row = ui::glyph_and_text(icon::DIVIDE, "Divide");
+                            divide = ui
+                                .selectable_label(false, row)
+                                .on_hover_text(
+                                    "Cut the selection where it overlaps. \
+                                     Each piece becomes its own path.",
+                                )
+                                .on_disabled_hover_text(crate::menu::DIVIDE_NEEDS)
+                                .clicked();
+                        });
                         let row = ui::glyph_and_text(icon::STACK_SIMPLE, "Flatten");
                         flatten = ui
                             .selectable_label(false, row)
@@ -2036,6 +2052,10 @@ impl OndinApp {
             if flatten {
                 self.name_action(crate::input::Action::Flatten);
                 self.flatten_selection();
+            }
+            if divide {
+                self.name_step_as(crate::menu::Item::Divide);
+                self.divide_selection();
             }
 
             // Mask, Group, Ungroup. Mask is a state, lit while the selection is
@@ -2390,6 +2410,44 @@ impl OndinApp {
                 }
             }
             Err(e) => self.session.fail(format!("Cannot flatten: {e}")),
+        }
+    }
+
+    /// *Divide*: every face the selection's closed shapes cut each other into
+    /// becomes a path of its own, in a group that takes the selection
+    /// (`shape_builder::divide`).
+    pub(crate) fn divide_selection(&mut self) {
+        use ondin_core::shape_builder::{self, Refusal};
+        let ids = self.session.selection.ids().to_vec();
+        let arr = match shape_builder::arrange(&self.session.doc, &self.session.resolved, &ids) {
+            Ok(arr) => arr,
+            Err(Refusal::Abandoned) => {
+                return self
+                    .session
+                    .fail("Cannot divide: the shapes could not be cut");
+            }
+            Err(Refusal::TooFew | Refusal::NoOverlap) => {
+                return self.session.info(crate::menu::DIVIDE_NEEDS);
+            }
+        };
+        match shape_builder::divide(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            &ids,
+            &arr,
+        ) {
+            Ok((tx, group)) => {
+                if self.commit_edit(tx) {
+                    self.session.selection.set_one(group);
+                    let n = arr.regions.len();
+                    self.session.info(format!(
+                        "Divided into {n} paths{}",
+                        crate::shape_builder::left_out_note(&arr)
+                    ));
+                }
+            }
+            Err(e) => self.session.fail(format!("Cannot divide: {e}")),
         }
     }
 

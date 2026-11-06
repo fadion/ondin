@@ -130,6 +130,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         Tool::Select,
         Tool::Hand,
         Tool::Scale,
+        Tool::ShapeBuilder,
         Tool::Frame,
         Tool::Slice,
         Tool::Rect,

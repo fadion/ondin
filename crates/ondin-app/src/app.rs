@@ -517,6 +517,10 @@ pub struct OndinApp {
     /// The last pencil path drawn this session and the stroke it was drawn with,
     /// which the next one takes (`crate::pencil`).
     pub(crate) pencil_last: Option<(NodeId, ondin_core::Stroke)>,
+    /// The shape builder's drag in flight, or `None` (`crate::shape_builder`).
+    pub(crate) builder: Option<crate::shape_builder::BuilderDrag>,
+    /// The faces the shape builder last found, and for which selection and revision.
+    pub(crate) builder_cache: Option<crate::shape_builder::Faces>,
     /// Images picked but not yet placed: what a loaded cursor holds (`Tool::Image`).
     /// Placed front-first; the tool hands back to Select when it empties. Already
     /// decoded, so nothing here can fail to place.
@@ -1456,6 +1460,8 @@ impl OndinApp {
             pen_bias: false,
             pencil: None,
             pencil_last: None,
+            builder: None,
+            builder_cache: None,
             pending_images: Vec::new(),
             dropper_return: Tool::Select,
             dropper_pick: None,
@@ -2158,6 +2164,7 @@ impl OndinApp {
         self.points.clear();
         self.pen = None;
         self.pencil = None;
+        self.builder = None;
         self.close_fix();
         // A picker on a slot a style has just landed on closes, or its next write would
         // cut the style again (unless the style itself is being edited).
@@ -2619,6 +2626,10 @@ impl OndinApp {
         if self.pencil.take().is_some() {
             return true;
         }
+        // So is a shape builder drag.
+        if self.builder.take().is_some() {
+            return true;
+        }
         // The compare's Swipe handle goes back to where its drag began.
         if let Some(c) = self.session.compare.as_mut()
             && let Some(from) = c.split_from.take()
@@ -2906,7 +2917,12 @@ impl OndinApp {
         if tool.drags_a_box() {
             self.session.selection.clear();
         }
+        self.builder = None;
+        let arming = tool == Tool::ShapeBuilder && self.tool != tool;
         self.tool = tool;
+        if arming {
+            self.builder_armed();
+        }
     }
 
     pub(crate) fn select_all(&mut self) {
@@ -6074,6 +6090,8 @@ impl OndinApp {
         self.pen = None;
         self.pencil = None;
         self.pencil_last = None;
+        self.builder = None;
+        self.builder_cache = None;
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;
@@ -8068,6 +8086,12 @@ impl OndinApp {
                 icon::RESIZE,
                 Tool::Scale,
                 "Scale — drag a handle to scale strokes, radii and type with the box (K)",
+            ),
+            // With them too: it reshapes what is drawn.
+            E::Btn(
+                icon::SHAPE_BUILDER,
+                Tool::ShapeBuilder,
+                "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)",
             ),
             E::Sep,
             E::Group(Group::Frame),

@@ -995,6 +995,12 @@ pub mod icon {
     /// *Flatten*, in the context menu and at the foot of the boolean dropdown —
     /// the same stack pressed into one sheet.
     pub const STACK_SIMPLE: &str = "\u{e468}";
+    /// *Divide*, beside *Flatten*: the two overlapping squares of the boolean
+    /// family cut into their three faces, each outlined apart.
+    pub const DIVIDE: &str = "\u{f048}";
+    /// The shape builder tool: two overlapping circles with a drag's trail across
+    /// them, the dot where it started.
+    pub const SHAPE_BUILDER: &str = "\u{f047}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1310,6 +1316,8 @@ pub mod icon {
         ("code", CODE),
         ("stack", STACK),
         ("stack-simple", STACK_SIMPLE),
+        ("divide", DIVIDE),
+        ("shape-builder", SHAPE_BUILDER),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

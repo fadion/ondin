@@ -1834,6 +1834,11 @@ impl OndinApp {
                 }
                 // The loupe arm above answers first; this is the fallback.
                 Tool::Eyedropper => (egui::CursorIcon::None, None),
+                // What a press would do: merge, or with Alt held, remove.
+                Tool::ShapeBuilder => arrow(Some(match mods.alt {
+                    true => Badge::Minus,
+                    false => Badge::Plus,
+                })),
                 // Handles get resize cursors from `crop_hover`.
                 Tool::ImageEdit => match self.drag {
                     Drag::CropPan { .. } => (egui::CursorIcon::Grabbing, Some(Bitmap::Panning)),
@@ -2197,6 +2202,13 @@ impl OndinApp {
             && (self.pencil.is_some() || !panning_armed && !matches!(self.drag, Drag::Pan))
         {
             self.pencil_input(ui, resp, rect, ppp);
+            return;
+        }
+        // The shape builder's drag, routed the same way.
+        if self.tool == Tool::ShapeBuilder
+            && (self.builder.is_some() || !panning_armed && !matches!(self.drag, Drag::Pan))
+        {
+            self.builder_input(ui, resp, rect, ppp);
             return;
         }
 
@@ -4166,6 +4178,7 @@ impl OndinApp {
             | Tool::ImageEdit
             | Tool::Select
             | Tool::Scale
+            | Tool::ShapeBuilder
             | Tool::Hand
             | Tool::Eyedropper => {
                 return None;
@@ -9320,6 +9333,9 @@ impl OndinApp {
         }
 
         self.draw_pencil(painter, rect, ppp, resp);
+        if self.tool == Tool::ShapeBuilder {
+            self.draw_builder(painter, rect, ppp, resp);
+        }
 
         self.draw_points(painter, rect, ppp, resp);
 

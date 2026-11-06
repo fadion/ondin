@@ -17,11 +17,9 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ### Highest value
 
-- **A shape builder.** Drag across overlapping shapes to merge the regions crossed; `Alt`-drag removes
-  them. With it, **Divide**, which cuts overlaps into separate paths. The faces come from the planar
-  arrangement of the selection's outlines (`i_overlay` is already a dependency) and land as plain
-  paths. With the next two items, it covers for a designer most of what a vector network would
-  offer (`non-goals.md`).
+- **Open paths and lines in the shape builder.** An open path or line in the selection should cut
+  the faces it crosses without filling one of its own. Today `shape_builder::sources_of` leaves them
+  out of the arrangement, and the status line says so (`left_out_note`).
 - **Snapping for points.** Pen anchors and dragged points snap to the pixel grid only
   (`app-snapping.md`, `snap_point`). Add anchors and segments of other paths, intersections, and,
   for node-tool handles, `Shift` angle steps (`canvas::handle_tx` reads `Alt` only; the pen already

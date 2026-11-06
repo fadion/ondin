@@ -14,6 +14,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
 - **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
+- **Shape builder** (`Shift+M`): drag across the faces overlapping shapes cut each other into to merge them, Alt-drag to remove them (`app-booleans.md`).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
   - **Rows and columns** are clusters of box centres. A box joins a band while its centre is within half the band's largest box, or half its own when it is larger, of the band's mean centre.
@@ -30,7 +31,7 @@ resize, drop outlines and the transform origin (pivot).
 
 ### The tool rail (`rail.rs`)
 
-`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot and the
+`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale, Shape builder · the Frame slot and the
 five shapes · the Pen slot, Text, Place image · the eyedropper; at its foot the styles-and-variables
 and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
 subject. The five shape tools keep a slot each while the rail has room for them.
@@ -109,6 +110,7 @@ image, and the `CursorIcon` set beside it is the stock fallback when the bitmap 
 | --- | --- |
 | Select at rest | arrow; `Shift` → Plus; `Alt` over a layer → Duplicate, over empty canvas → Minus; `Ctrl`/`Cmd` over a layer → Deep; over a locked selected layer → No |
 | Scale tool at rest | arrow with Scale, replaced by a modifier's badge |
+| Shape builder | arrow with Plus; `Alt` → Minus |
 | A move | the rest arrow; Duplicate once the Alt copy exists |
 | A marquee | the mode fixed at its press: Toggle → Plus, Subtract → Minus |
 | Pivot, and its drag | arrow with Pivot |
@@ -355,7 +357,7 @@ over `Tool` is an exhaustive `match` (the cursor, `create_tx`), a `matches!` all
 `NodeKind`'s `matches!` lists answer a missing kind with a confident "no" (§15 D87–D88).
 
 **Arming a create tool clears the selection** (`OndinApp::choose_tool`). The set is `drags_a_box`:
-Frame, Slice, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select and Scale (operate on the
+Frame, Slice, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select, Scale and Shape builder (operate on the
 selection), Hand (a pan keeps it), Node and ImageEdit (entered *from* a selected layer), Pen (places
 anchors, never drags a box), Pencil (a stroke can carry on the selected path), Eyedropper (picks onto the selection). `place_image_action` clears it too.
 

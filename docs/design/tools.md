@@ -80,16 +80,21 @@ image, and the `CursorIcon` set beside it is the stock fallback when the bitmap 
   `cursor::Badge` the badge. One badge means one thing on every base. `Duplicate` is a second
   arrow of the same size 5.5 pt right and 3 pt down, behind the first. The node arrow is the
   select arrow with its inks swapped, so the two tools read apart.
-- **Drawn, not taken from the icon font.** Each drawing is SVG path data on a 32-point box
+- **Drawn, not taken from the icon font.** Each drawing is SVG path data on a box 32 units square
   (`Glyph::parts`), flattened once and rasterized by supersampling: a rim pass in the set's ink
   (the shape widened by a 1.5 pt mitred outline, mitre limit 8, square caps on strokes), then the
   core in its fill. Layers paint in order, so the duplicate's front arrow's rim cuts the copy. A
   soft shadow (blur 0.7 pt, drop 0.6 pt, 32%) is drawn into the bitmap. A drawing aimed from its
-  middle is nudged onto the texel grid so its 1-point lines stay crisp.
+  middle is nudged onto the texel grid so its one-unit lines stay crisp; one aimed from a tip has
+  the tip on a texel corner.
+- **A unit is a point, or 0.75 pt for the pointing drawings** (the arrows, pen, pencil and
+  dropper, `POINTING_UNIT_PT`): at 0.75 the arrow, outline included, is the OS's own size
+  (Windows' is 12 × 19 texels at 100%), and the resize arrows at a point per unit already match
+  the OS's. The rim and shadow are in points, so they keep their weight at either unit.
 - **Two ink sets**, matching each OS's own pointer: the light set (white core, dark rim) on
   Windows, the dark set on macOS and Linux. The inks are `#121316` and white, the cursor's own and
   the same under either theme, so not theme colours.
-- **Size**: 32 pt × pointer scale × texels per point. The pointer scale is the OS pointer size
+- **Size**: 32 units × the unit's points × pointer scale × texels per point. The pointer scale is the OS pointer size
   over its default: `CursorBaseSize ÷ 32` from `HKCU\Control Panel\Cursors` on Windows,
   `XCURSOR_SIZE ÷ 24` on Linux, 1 on macOS, which scales app cursors itself. It is re-read every
   2 s, so a settings change shows without a restart. macOS gets one texel per point

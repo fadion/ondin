@@ -2,7 +2,9 @@
 //! drawn by the app so each one can say what a press there would do.
 //!
 //! Each cursor is a base drawing with at most one badge, both vector drawings on a
-//! 32-point box ([`Glyph`]). [`Cursors::image`] rasterizes one per (cursor, pointer
+//! box 32 units square ([`Glyph`]), a unit being a point at pointer size 1, or
+//! [`POINTING_UNIT_PT`] for the drawings that point from a tip.
+//! [`Cursors::image`] rasterizes one per (cursor, pointer
 //! size, display scale) and hands it to egui as a real OS cursor, so it neither lags
 //! the pointer nor clips at the window edge. A `CursorIcon` is still set alongside
 //! every bitmap as the fallback when rasterizing fails.
@@ -179,7 +181,7 @@ pub enum Bitmap {
 
 impl Bitmap {
     /// The bitmap's drawings, in paint order, with where the pointer aims in the
-    /// 32-point box. A resize and skew of opposite headings share one drawing.
+    /// 32-unit box. A resize and skew of opposite headings share one drawing.
     fn recipe(self) -> Recipe {
         use Glyph as G;
         let at = |g: G| Item::at(g);
@@ -244,7 +246,7 @@ impl Bitmap {
             ),
             Self::IBeam => one(vec![at(G::IBeam)], Hot::MIDDLE),
             Self::TextOnPath => one(vec![at(G::TextOnPath)], Hot(16.0, 11.5)),
-            Self::Eyedropper => one(vec![at(G::Dropper)], Hot(5.0, 5.0)),
+            Self::Eyedropper => one(vec![at(G::Dropper)], Hot::DROPPER),
             Self::Guide(a) => one(vec![at(G::Guide).turned(a.turn())], Hot::MIDDLE),
             Self::CopyGuide(a) => one(
                 vec![at(G::Guide).turned(a.turn()), at(G::Plus).shifted(1.0, 3.0)],
@@ -268,13 +270,20 @@ impl Axis {
     }
 }
 
-/// How far the duplicate cursor's second arrow sits right and down, in points.
+/// How far the duplicate cursor's second arrow sits right and down, in units.
 const DUPLICATE_OFFSET: (f32, f32) = (5.5, 3.0);
 
-/// The side of the box every drawing is laid out on, in points at pointer size 1.
-const BOX_PT: f32 = 32.0;
-/// Half the rim's width: the shape widened by a 1.5 pt outline. Under 1.0 on
-/// purpose, so at 125% and 150% the rim stays one texel rather than rounding to two.
+/// The side of the box every drawing is laid out on, in drawing units.
+const BOX: f32 = 32.0;
+/// Points per drawing unit for the pointing drawings (the arrows, pen, pencil and
+/// dropper) at pointer size 1: at 0.75 the arrow, outline included, is the OS's
+/// own size (Windows' is 12 × 19 texels at 100%). The other drawings take a point
+/// per unit, where their arrows already match the OS's resize cursors, and their
+/// one-unit lines stay a whole texel at 1x.
+const POINTING_UNIT_PT: f32 = 0.75;
+/// Half the rim's width, in points: the shape widened by a 1.5 pt outline. Under
+/// 1.0 on purpose, so at 125% and 150% the rim stays one texel rather than two.
+/// In points, not units, so the outline keeps its weight at either unit size.
 const RIM_PT: f32 = 0.75;
 /// The rim's mitre limit, as SVG counts it: past this a join is bevelled.
 const MITRE_LIMIT: f32 = 8.0;
@@ -290,11 +299,11 @@ const DARK: [f32; 3] = [
     0x16 as f32 / 255.0,
 ];
 const LIGHT: [f32; 3] = [1.0, 1.0, 1.0];
-/// The loaded badge's digits, in points: the size whose figures fill the chip's
+/// The loaded badge's digits, in units: the size whose figures fill the chip's
 /// height with a point of clear space above and below.
 const DIGIT_PT: f32 = 6.6; // text-size: drawn into the cursor's bitmap, not the chrome
 
-/// Where in the 32-point box a cursor aims.
+/// Where in the 32-unit box a cursor aims.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Hot(f32, f32);
 
@@ -305,6 +314,8 @@ impl Hot {
     const MIDDLE: Self = Self(16.0, 16.0);
     /// The pen's and pencil's point.
     const TIP: Self = Self(5.5, 5.0);
+    /// The dropper's point.
+    const DROPPER: Self = Self(5.0, 5.0);
 }
 
 /// What one bitmap is made of.
@@ -315,6 +326,16 @@ struct Recipe {
     hot: Hot,
     /// The inks swapped: the node tool's arrow.
     inverted: bool,
+}
+
+impl Recipe {
+    /// Points per drawing unit: smaller for the drawings that point from a tip.
+    fn unit_pt(&self) -> f32 {
+        match [Hot::ARROW, Hot::TIP, Hot::DROPPER].contains(&self.hot) {
+            true => POINTING_UNIT_PT,
+            false => 1.0,
+        }
+    }
 }
 
 /// One drawing placed in the box: turned about the box's middle, then shifted.
@@ -358,7 +379,7 @@ impl Item {
     }
 }
 
-/// The drawings, on the 32-point box. Paths are SVG path data, absolute commands
+/// The drawings, on the 32-unit box. Paths are SVG path data, absolute commands
 /// only (`M L H V C Q A Z`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Glyph {
@@ -725,7 +746,7 @@ impl Shape {
     }
 
     /// Whether `p` is painted, the shape widened by `grow` on every side: zero for
-    /// the core, [`RIM_PT`] for the rim.
+    /// the core, [`RIM_PT`] in units for the rim.
     fn covers(&self, p: [f32; 2], grow: f32) -> bool {
         let half = self.stroke.map_or(0.0, |w| w / 2.0) + grow;
         // A square cap reaches `√2` half-widths past a stroke's end.
@@ -1207,27 +1228,36 @@ fn draw(
     if recipe.inverted {
         std::mem::swap(&mut fill, &mut ink);
     }
-    let n = (BOX_PT * scale).ceil() as usize;
+    // Texels per drawing unit, and the rim in units.
+    let unit = scale * recipe.unit_pt();
+    let rim_u = RIM_PT / recipe.unit_pt();
+    let n = (BOX * unit).ceil() as usize;
     // Samples per texel per axis: large bitmaps have texels small next to the
     // drawing's features, so fewer suffice.
-    let ss = if scale <= 2.0 { 4 } else { 2 };
+    let ss = if unit <= 2.0 { 4 } else { 2 };
 
-    // A drawing aimed from its middle has its one-point lines centred there. Where
-    // a point holds an odd number of whole texels, that centre is moved onto a
-    // texel's middle, or a line a texel wide smears into two grey ones; an even
-    // number keeps it on a texel edge. In texels.
+    // The drawing moved onto the texel grid, in texels. One aimed from its middle
+    // has its one-unit lines centred there: where a unit holds an odd number of
+    // whole texels, that centre goes on a texel's middle, or a line a texel wide
+    // smears into two grey ones, and an even number keeps it on a texel edge. One
+    // aimed from a tip has the tip on a texel corner, so the arrow's upright edge
+    // is one crisp column.
     let nudge = match recipe.hot == Hot::MIDDLE {
         true => {
-            let centre = 16.0 * scale;
-            let odd = (scale.floor() as i32) % 2 == 1;
-            centre.floor() + if odd { 0.5 } else { 0.0 } - centre
+            let centre = 16.0 * unit;
+            let odd = (unit.floor() as i32) % 2 == 1;
+            let d = centre.floor() + if odd { 0.5 } else { 0.0 } - centre;
+            (d, d)
         }
-        false => 0.0,
+        false => {
+            let (x, y) = (recipe.hot.0 * unit, recipe.hot.1 * unit);
+            (x.round() - x, y.round() - y)
+        }
     };
 
     // The loaded badge: a chip in the set's core, the count in its ink.
     let chip = match which {
-        Bitmap::Loaded(count) => Some(Chip::new(ctx, scale, nudge, &count.label())?),
+        Bitmap::Loaded(count) => Some(Chip::new(ctx, unit, nudge.0, &count.label())?),
         _ => None,
     };
 
@@ -1251,19 +1281,19 @@ fn draw(
                 for j in 0..ss {
                     for i in 0..ss {
                         let p = [
-                            (x as f32 + (i as f32 + 0.5) / ss as f32 - nudge) / scale,
-                            (y as f32 + (j as f32 + 0.5) / ss as f32 - nudge) / scale,
+                            (x as f32 + (i as f32 + 0.5) / ss as f32 - nudge.0) / unit,
+                            (y as f32 + (j as f32 + 0.5) / ss as f32 - nudge.1) / unit,
                         ];
                         let (mut r, mut c) = (false, false);
                         for item in layer {
                             let q = item.glyph_point(p);
                             for shape in item.glyph.shapes() {
                                 c = c || shape.covers(q, 0.0);
-                                r = r || c || shape.covers(q, RIM_PT);
+                                r = r || c || shape.covers(q, rim_u);
                             }
                             if let Some(chip) = &chip {
                                 c = c || chip.covers(p, 0.0);
-                                r = r || c || chip.covers(p, RIM_PT);
+                                r = r || c || chip.covers(p, rim_u);
                             }
                         }
                         rim += u32::from(r);
@@ -1296,11 +1326,11 @@ fn draw(
             [c(p[0]), c(p[1]), c(p[2]), (a * 255.0).round() as u8]
         })
         .collect();
-    let hot = |v: f32| ((v * scale + nudge).floor() as usize).min(n - 1) as u16;
+    let hot = |v: f32, d: f32| ((v * unit + d).floor() as usize).min(n - 1) as u16;
     Some(egui::CustomCursorImage {
         rgba: rgba.into(),
         size: [n as u16, n as u16],
-        hotspot: [hot(recipe.hot.0), hot(recipe.hot.1)],
+        hotspot: [hot(recipe.hot.0, nudge.0), hot(recipe.hot.1, nudge.1)],
     })
 }
 
@@ -1348,7 +1378,7 @@ fn with_shadow(px: Vec<[f32; 4]>, n: usize, scale: f32) -> Vec<[f32; 4]> {
 
 /// The loaded Image cursor's badge: a rounded chip with the count on it.
 struct Chip {
-    /// The chip, in points.
+    /// The chip, in units.
     shape: Shape,
     /// The count's coverage, in texels, and where its top-left texel sits.
     digits: Vec<u8>,
@@ -1358,17 +1388,17 @@ struct Chip {
 
 impl Chip {
     /// The chip's left and top edge, its height, and the clear space either side of
-    /// the count, in points.
+    /// the count, in units.
     const AT: f32 = 18.6;
     const H: f32 = 8.0;
     const PAD: f32 = 1.8;
     /// The narrowest chip, for one digit.
     const MIN_W: f32 = 9.6;
     /// How far right the chip may reach, so its rim stays clear of the box's last
-    /// texel.
-    const RIGHT: f32 = BOX_PT - RIM_PT - 0.75;
+    /// texel. The crosshair it hangs on takes a point per unit.
+    const RIGHT: f32 = BOX - RIM_PT - 0.75;
 
-    /// The chip for `label` at `scale` texels per point, its count shifted by the
+    /// The chip for `label` at `scale` texels per unit, its count shifted by the
     /// drawing's `nudge` in texels, as the chip itself is.
     fn new(ctx: &egui::Context, scale: f32, nudge: f32, label: &str) -> Option<Self> {
         let (tw, th, digits) = digits(ctx, scale, label)?;
@@ -1401,9 +1431,10 @@ impl Chip {
     }
 }
 
-/// One short string's coverage at `scale` texels per point, lifted out of the font
+/// One short string's coverage at `scale` texels per unit, lifted out of the font
 /// atlas. The font is asked for at the size that makes the atlas's texels the
-/// bitmap's; a glyph's `pos` and `uv_rect.offset` are in points, so scaled here.
+/// bitmap's; a glyph's `pos` and `uv_rect.offset` are in egui points, so scaled
+/// here by the context's pixels per point.
 fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<u8>)> {
     let ppp = ctx.pixels_per_point();
     let galley = ctx.fonts_mut(|f| {
@@ -1567,7 +1598,7 @@ mod tests {
                 for which in every_cursor() {
                     let img = draw(&ctx, which, scale, light)
                         .unwrap_or_else(|| panic!("{which:?} at {scale}: nothing drawn"));
-                    let n = (BOX_PT * scale).ceil() as u16;
+                    let n = (BOX * which.recipe().unit_pt() * scale).ceil() as u16;
                     assert_eq!(img.size, [n, n], "{which:?} at {scale}");
                     // Over half covered: at 1x the rim is under a texel wide.
                     let inked: Vec<u8> = img
@@ -1603,18 +1634,21 @@ mod tests {
     fn the_sets_swap_inks_around_the_same_aim() {
         let ctx = context();
         for scale in [1.0, 2.0] {
+            let u = scale * POINTING_UNIT_PT;
             let dark = draw(&ctx, Bitmap::Arrow(None), scale, false).expect("dark");
             let light = draw(&ctx, Bitmap::Arrow(None), scale, true).expect("light");
             assert_eq!(dark.hotspot, light.hotspot);
+            // The tip snapped to the nearest texel corner; the texel below and
+            // right of it.
             assert_eq!(
                 dark.hotspot,
-                [(6.0 * scale) as u16, (4.0 * scale) as u16],
+                [(6.0 * u).round() as u16, (4.0 * u).round() as u16],
                 "the tip's first texel"
             );
             let (hx, hy) = (usize::from(dark.hotspot[0]), usize::from(dark.hotspot[1]));
             assert!(texel(&dark, hx, hy).1 > 128, "the hotspot is on the ink");
             // Well inside the arrow's body.
-            let (bx, by) = ((8.0 * scale) as usize, (14.0 * scale) as usize);
+            let (bx, by) = ((8.0 * u) as usize, (14.0 * u) as usize);
             assert!(texel(&dark, bx, by).0 < 40, "the dark set's core");
             assert!(texel(&light, bx, by).0 > 230, "the light set's core");
             let node = draw(&ctx, Bitmap::Node(None), scale, false).expect("node");
@@ -1625,18 +1659,40 @@ mod tests {
         }
     }
 
+    /// At 1x the arrow, outline included, is the size of Windows' own arrow
+    /// (12 × 19 texels at 100%), within a texel: the shadow aside, nothing makes
+    /// the canvas pointer read larger than the system one beside it.
+    /// flip: `POINTING_UNIT_PT` at 1.0 → fails at "the arrow's width" (16).
+    #[test]
+    fn the_arrow_is_the_size_of_the_systems() {
+        let ctx = context();
+        let img = draw(&ctx, Bitmap::Arrow(None), 1.0, true).expect("drawn");
+        let n = usize::from(img.size[0]);
+        let inked: Vec<(usize, usize)> = (0..n)
+            .flat_map(|y| (0..n).map(move |x| (x, y)))
+            .filter(|&(x, y)| texel(&img, x, y).1 > 128)
+            .collect();
+        let span = |f: fn(&(usize, usize)) -> usize| {
+            let v: Vec<usize> = inked.iter().map(f).collect();
+            v.iter().max().unwrap_or(&0) - v.iter().min().unwrap_or(&0) + 1
+        };
+        let (w, h) = (span(|p| p.0), span(|p| p.1));
+        assert!((11..=14).contains(&w), "the arrow's width: {w}");
+        assert!((18..=21).contains(&h), "the arrow's height: {h}");
+    }
+
     /// The rim is a mitred outline: it reaches past the arrow's square-cut tail
     /// corner by about the mitre, not just the rim's width.
     /// flip: `join_covers` returning false → fails at "the mitre".
     #[test]
     fn the_rim_is_mitred() {
         let ctx = context();
-        let scale = 4.0;
-        let img = draw(&ctx, Bitmap::Arrow(None), scale, false).expect("drawn");
+        let u = 4.0 * POINTING_UNIT_PT;
+        let img = draw(&ctx, Bitmap::Arrow(None), 4.0, false).expect("drawn");
         // The tail's right corner is at (19.7, 17.8): a right angle whose mitre
-        // reaches `√2 · RIM_PT` along the diagonal, past the rim's own reach.
-        let along = RIM_PT * 1.2;
-        let (x, y) = ((19.7 + along) * scale, (17.8 + along * 0.2) * scale);
+        // reaches `√2` rims along the diagonal, past the rim's own reach.
+        let along = RIM_PT / POINTING_UNIT_PT * 1.2;
+        let (x, y) = ((19.7 + along) * u, (17.8 + along * 0.2) * u);
         assert!(texel(&img, x as usize, y as usize).1 > 128, "the mitre");
     }
 
@@ -1655,10 +1711,11 @@ mod tests {
                 .find(|&x| (0..w).any(|y| texel(img, x, y).1 > 200))
                 .unwrap_or(0)
         };
-        assert!(reach(&dup) >= reach(&plain) + (DUPLICATE_OFFSET.0 * 2.0) as usize - 1);
+        let u = 2.0 * POINTING_UNIT_PT;
+        assert!(reach(&dup) >= reach(&plain) + (DUPLICATE_OFFSET.0 * u) as usize - 1);
         // Just inside the front arrow's right edge, where the copy lies under it:
         // the front arrow's core, not the copy's rim.
-        let (x, y) = ((13.0f32 * 2.0) as usize, (15.0f32 * 2.0) as usize);
+        let (x, y) = ((13.0f32 * u) as usize, (15.0f32 * u) as usize);
         assert_eq!(
             texel(&dup, x, y),
             texel(&plain, x, y),

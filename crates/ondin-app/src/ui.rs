@@ -2364,6 +2364,17 @@ const SUFFIX_BLEED: f32 = 4.0;
 /// four digits at the field's type size.
 const UNIT_DIGITS_MIN: f32 = 28.0;
 
+/// The width a field reserves for its prefix's run `lead` and the gap after it;
+/// none for a bare field (`Prefix::Text("")`), whose number then sits as far in
+/// as it does from the right. Rounded so the reserved space and the paint point
+/// are one number.
+fn prefix_inset(lead: &egui::Galley) -> f32 {
+    match lead.size().x > 0.0 {
+        true => (lead.size().x + PREFIX_GAP).round(),
+        false => 0.0,
+    }
+}
+
 /// [`value_field`]'s prefix strip for a field drawn in another face (a bound
 /// field's chip, its retype buffer, the *Mixed* capsule), reserved as
 /// [`value_field`] reserves it, with the row's item spacing zeroed after it.
@@ -2374,7 +2385,7 @@ pub fn prefix_strip(
     prefix: Prefix,
 ) -> (egui::Rect, std::sync::Arc<egui::Galley>) {
     let lead = prefix.galley(ui);
-    let inset = (lead.size().x + PREFIX_GAP).round();
+    let inset = prefix_inset(&lead);
     let (strip, _) = ui.allocate_exact_size(
         egui::vec2(inset, CONTROL_H - FIELD_BORDER_H),
         egui::Sense::hover(),
@@ -2979,8 +2990,7 @@ fn value_field_f64_marked(
                 )
             });
             let lead = prefix.galley(ui);
-            // Rounded so the reserved space and the paint point are one number.
-            let inset = (lead.size().x + PREFIX_GAP).round();
+            let inset = prefix_inset(&lead);
 
             strip_drag_value_chrome(ui);
             // The height is the content box: the hairline is already counted.
@@ -6791,6 +6801,31 @@ mod tests {
                 value.0 - label.0
             );
         }
+    }
+
+    /// A bare field's number starts where a prefix would, with no gap reserved.
+    /// flip: `prefix_inset` reserving the gap for an empty run → fails at "where `W` stands".
+    #[test]
+    fn a_bare_field_reserves_no_prefix_gap() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let x_of = |prefix: Prefix, starts: &str| {
+            paint_value_field(&ctx, prefix, None);
+            let (shapes, _) = paint_value_field(&ctx, prefix, None);
+            shapes
+                .iter()
+                .find_map(|s| match s {
+                    egui::Shape::Text(t) if t.galley.text().starts_with(starts) => Some(t.pos.x),
+                    _ => None,
+                })
+                .expect("painted")
+        };
+        let prefix_at = x_of(Prefix::Text("W"), "W");
+        let bare_at = x_of(Prefix::Text(""), "101");
+        assert!(
+            (bare_at - prefix_at).abs() < 0.51,
+            "the bare number is at {bare_at}, not where `W` stands at {prefix_at}"
+        );
     }
 
     /// **A text field takes a press anywhere on its height**, not only on its

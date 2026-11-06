@@ -497,12 +497,12 @@ pub mod icon {
     #[allow(dead_code)]
     pub const CARET_UP: &str = "\u{e13c}";
     pub const CARET_LEFT: &str = "\u{e138}";
-    /// The layers header's *Expand all*: two carets, one under the other, so it
-    /// reads as an act on every row rather than one row's open state. Not the
-    /// vertical gap arrows, which mean the row gap.
-    pub const CARET_DOUBLE_DOWN: &str = "\u{f041}";
-    /// *Collapse all*: [`CARET_DOUBLE_DOWN`] turned.
-    pub const CARET_DOUBLE_UP: &str = "\u{f042}";
+    /// The layers header's *Expand all*: two carets pointing apart, the tree
+    /// opening out, so it reads as an act on every row rather than one row's
+    /// open state. Not the vertical gap arrows, which mean the row gap.
+    pub const CARETS_OUT: &str = "\u{f041}";
+    /// *Collapse all*: [`CARETS_OUT`]'s carets each flipped, pointing together.
+    pub const CARETS_IN: &str = "\u{f042}";
     // The contrast check's glyphs: a passing count, a layer it could not measure,
     // a badge waiting on a remeasure, and a non-text finding.
     pub const CHECK_CIRCLE: &str = "\u{e184}";
@@ -1106,8 +1106,8 @@ pub mod icon {
         ("caret-right", CARET_RIGHT),
         ("caret-up", CARET_UP),
         ("caret-left", CARET_LEFT),
-        ("caret-double-down", CARET_DOUBLE_DOWN),
-        ("caret-double-up", CARET_DOUBLE_UP),
+        ("carets-out", CARETS_OUT),
+        ("carets-in", CARETS_IN),
         ("check-circle", CHECK_CIRCLE),
         ("prohibit", PROHIBIT),
         ("circle-notch", CIRCLE_NOTCH),

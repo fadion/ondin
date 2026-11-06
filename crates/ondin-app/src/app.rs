@@ -8405,9 +8405,9 @@ impl OndinApp {
                                         if icon_button(
                                             ui,
                                             if folded {
-                                                icon::CARET_DOUBLE_DOWN
+                                                icon::CARETS_OUT
                                             } else {
-                                                icon::CARET_DOUBLE_UP
+                                                icon::CARETS_IN
                                             },
                                             20.0,
                                             15.0,

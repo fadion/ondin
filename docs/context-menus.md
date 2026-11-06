@@ -146,6 +146,7 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Even-odd fill ✓ | — | a lone `Path` only; dims on lock |
 | Boolean ▸ | — | `Item::BooleanMenu`, `UNITE_SQUARE` glyph; two or more layers, or a lone boolean; a submenu of the four operations and *Divide* (below); dims on lock |
 | Flatten | `Ctrl+E` | two or more layers (on a lone boolean it is in the head); dims on lock |
+| Blend shapes… | — | exactly two layers; dims with `blend::pair`'s refusal (*"Blend shapes needs exactly two shapes"*, *"… can't take a picture"*, *"… can't take text"*, or the parts sentence); dims on lock. Opens the Blend shapes card (`app-booleans.md`) |
 | Convert to path | — | one text layer; dims *"This text has no glyphs to convert"*; dims on lock |
 | Flip to other side ✓ | — | one text layer on a rail; ticked when flipped; dims on lock |
 | Detach from path | — | one text layer on a rail; dims on lock |

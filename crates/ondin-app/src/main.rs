@@ -79,6 +79,7 @@ mod again;
 mod app;
 mod atomic;
 mod batch_rename;
+mod blend;
 mod canvas;
 mod cheatsheet;
 mod chrome;

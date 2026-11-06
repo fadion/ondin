@@ -1120,6 +1120,31 @@ fn sweep_on(theme: Theme) {
         a.show_pivot = false;
     });
     check("repeat around origin", app, found);
+    // *Blend shapes…* between the box and a second one: its field, switches,
+    // dropdown and foot.
+    // Selected before the card opens, so the layers rows' lit ground is not the card's.
+    let mut app = with_a_rect(&ctx);
+    {
+        let a = &mut app;
+        let page = a.session.doc.first_page();
+        let first = a.session.doc.get(page).unwrap().children()[0];
+        let second = a.session.ids.mint();
+        assert!(a.session.commit(Transaction(vec![Operation::CreateNode {
+            id: second,
+            parent: page,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((300.0, 0.0))),
+            name: None,
+        }])));
+        a.session.selection.set(vec![first, second]);
+    }
+    let found = opened(&ctx, &mut app, |_, a| a.open_blend());
+    check("blend shapes", app, found);
     let mut app = with_a_set(&ctx);
     let found = inspector(&ctx, &mut app);
     check("variants card", app, found);

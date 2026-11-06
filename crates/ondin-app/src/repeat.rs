@@ -90,6 +90,7 @@ impl OndinApp {
         }
         self.close_find();
         self.colour_review.open = false;
+        self.close_blend();
         self.repeat.open = true;
         self.repeat.built = None;
         // The pivot decides the ring, so its handle comes up with the card.

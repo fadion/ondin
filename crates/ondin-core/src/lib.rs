@@ -20,6 +20,7 @@
 #![deny(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 #![allow(rustdoc::private_intra_doc_links)]
 
+pub mod blend;
 pub mod boolean;
 pub mod build;
 pub mod color_review;

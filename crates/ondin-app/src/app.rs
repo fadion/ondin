@@ -957,6 +957,8 @@ pub struct OndinApp {
     pub(crate) colour_review: crate::colour_review::ColourReview,
     /// *Repeat around origin…*'s card (`crate::repeat`).
     pub(crate) repeat: crate::repeat::RepeatCard,
+    /// *Blend shapes…*'s card (`crate::blend`).
+    pub(crate) blend: crate::blend::BlendCard,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1589,6 +1591,7 @@ impl OndinApp {
             find: Default::default(),
             colour_review: Default::default(),
             repeat: Default::default(),
+            blend: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -2075,6 +2078,7 @@ impl OndinApp {
         self.find_ui(&ctx);
         self.colour_review_ui(&ctx);
         self.repeat_ui(&ctx);
+        self.blend_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
         self.compare_bar(&ctx);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
@@ -2327,6 +2331,7 @@ impl OndinApp {
             Action::SelectInverse => self.select_inverse(),
             // The pen reads Enter itself in `pen_input`.
             Action::Enter if self.repeat.open => self.commit_repeat(),
+            Action::Enter if self.blend.open => self.commit_blend(),
             Action::Enter if self.pen.is_some() => {}
             Action::Enter => self.enter_action(),
             // The Escape that closes a top-bar dropdown closes only it (an open dropdown
@@ -2628,10 +2633,12 @@ impl OndinApp {
         // `dragged_id` blinks (egui clears it on any button's release), so the gesture
         // preview and `InFlight` are read too; both are absent when nothing is in
         // flight, which keeps this a no-op for the right-click that removes a gradient stop.
-        // The Repeat card's ring stands on the gesture preview while no drag is
-        // live; it is no gesture, and a right-click must still open its menu.
+        // The Repeat and Blend cards' previews stand on the gesture preview while
+        // no drag is live; they are no gesture, and a right-click must still open
+        // its menu.
+        let standing = self.repeat_preview_standing() || self.blend_preview_standing();
         let field = ctx.dragged_id().is_some()
-            || (self.session.has_gesture_preview() && !self.repeat_preview_standing())
+            || (self.session.has_gesture_preview() && !standing)
             || self.in_flight.any()
             // A component carried out of the insert picker: its drag is egui's too.
             || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
@@ -2748,6 +2755,8 @@ impl OndinApp {
             self.colour_review.escape();
         } else if self.repeat.open {
             self.close_repeat();
+        } else if self.blend.open {
+            self.close_blend();
         } else if self.session.compare.is_some() {
             self.leave_compare();
         } else if self.pen.is_some() {
@@ -6107,8 +6116,9 @@ impl OndinApp {
         self.pencil_last = None;
         self.builder = None;
         self.builder_cache = None;
-        // Its preview is of the document leaving.
+        // Their previews are of the document leaving.
         self.repeat.open = false;
+        self.blend.open = false;
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;

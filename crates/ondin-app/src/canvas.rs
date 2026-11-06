@@ -1177,6 +1177,20 @@ fn set_outline(ground: Color) -> egui::Color32 {
 pub(crate) const PEN_STROKE_COLOR: Color = Color::BLACK;
 pub(crate) const PEN_STROKE_WIDTH: f64 = 2.0;
 
+/// The nine places on a box, row by row from the top left: what the pivot's pill
+/// names and *Blend shapes* matches points from.
+pub(crate) const NINE_POINTS: [&str; 9] = [
+    "Top left",
+    "Top",
+    "Top right",
+    "Left",
+    "Centre",
+    "Right",
+    "Bottom left",
+    "Bottom",
+    "Bottom right",
+];
+
 /// The transform box and its four corners, in screen space.
 ///
 /// For a single node this is its own local box through its world transform; for a
@@ -8913,17 +8927,7 @@ impl OndinApp {
             third(at.x, b.x0, b.width())?,
             third(at.y, b.y0, b.height())?,
         );
-        Some(match (row, col) {
-            (0, 0) => "Top left",
-            (0, 1) => "Top",
-            (0, 2) => "Top right",
-            (1, 0) => "Left",
-            (1, 1) => "Centre",
-            (1, 2) => "Right",
-            (2, 0) => "Bottom left",
-            (2, 1) => "Bottom",
-            _ => "Bottom right",
-        })
+        Some(NINE_POINTS[row * 3 + col])
     }
 
     fn draw_canvas(

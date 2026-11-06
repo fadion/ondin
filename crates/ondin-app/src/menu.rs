@@ -279,6 +279,9 @@ pub enum Item {
     /// Every face the selection's outlines cut each other into becomes a path of
     /// its own (`shape_builder::divide`). One-way, so it is never checked.
     Divide,
+    /// *Blend shapes…*: the card that makes the steps between two shapes
+    /// (`crate::blend`).
+    BlendShapes,
     /// §4 / §5.4 / §5.5 — one shape becomes the `Path` its outline traces
     /// (`build::outline`).
     ///
@@ -623,6 +626,7 @@ impl Item {
         Item::Boolean(BoolOp::Exclude),
         Item::Flatten,
         Item::Divide,
+        Item::BlendShapes,
         Item::OutlineShape,
         Item::OutlineStroke,
         Item::JoinPaths,
@@ -890,6 +894,8 @@ impl Item {
             ),
             // Deliberately unbound: a one-way conversion is not one keystroke away.
             Item::Divide => s("Divide", icon::DIVIDE, None, Group::Structure),
+            // *Blend shapes*, since *Blend* already names the blend mode.
+            Item::BlendShapes => s("Blend shapes…", icon::BLEND_SHAPES, None, Group::Structure),
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
             Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
             Item::JoinPaths => s("Join paths", icon::PLUGS_CONNECTED, None, Group::Structure),
@@ -1422,6 +1428,7 @@ impl Item {
             Item::UnlinkTokens => &["tokens", "dtcg", "json", "link"],
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Divide => &["boolean", "split", "cut", "pieces"],
+            Item::BlendShapes => &["morph", "tween", "steps", "interpolate"],
             Item::TransformAgain => &["repeat", "again", "redo", "step"],
             Item::RepeatAround => &["radial", "rotate", "copies", "ring", "circular", "array"],
             Item::Restack(_) => &["order", "arrange", "z"],
@@ -1878,6 +1885,8 @@ pub struct LayerState {
     /// `shape_builder::can_arrange` said yes of the selection: two or more closed
     /// shapes for *Divide* to cut.
     pub divisible: bool,
+    /// Why *Blend shapes…* cannot take the selection (`blend::pair`), if not.
+    pub blend_refusal: Option<&'static str>,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
     pub all_slices: bool,
 }
@@ -2277,6 +2286,17 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     if !promoted_flatten && (cx.selection.len() >= 2 || on_boolean) {
         rows.push(Row::new(Item::Flatten).dim_if(locked, why));
     }
+    // After Flatten for any two layers, refusing a picture or text by name.
+    if cx.selection.len() == 2 {
+        rows.push(
+            Row::new(Item::BlendShapes)
+                .dim_if(
+                    st.blend_refusal.is_some(),
+                    st.blend_refusal.unwrap_or_default(),
+                )
+                .dim_if(locked, why),
+        );
+    }
     // Outline rows sit in Structure, not the text head: §3 groups by what a verb
     // does. *Convert to path* and *Outline shape* are mutually exclusive by kind,
     // and neither is Flatten's (a boolean or set) since `one` excludes a set.
@@ -2553,6 +2573,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     ),
     (Item::Flatten, "Needs two layers or a boolean"),
     (Item::Divide, DIVIDE_NEEDS),
+    (Item::BlendShapes, "Blend shapes needs exactly two shapes"),
     (Item::OutlineShape, "Needs one shape"),
     (Item::OutlineStroke, "Needs one stroked shape"),
     (Item::JoinPaths, "Needs two path layers"),
@@ -3314,6 +3335,9 @@ impl OndinApp {
                 &self.session.doc,
                 self.session.selection.ids(),
             ),
+            blend_refusal: ondin_core::blend::pair(&self.session.doc, self.session.selection.ids())
+                .err()
+                .map(|r| r.says()),
             all_slices: self.session.selection.ids().iter().all(|s| {
                 matches!(
                     self.session.doc.get(*s).map(|n| n.kind()),
@@ -3456,6 +3480,7 @@ impl OndinApp {
             Item::Boolean(op) => self.dispatch(ctx, Action::Boolean(op)),
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
             Item::Divide => self.divide_selection(),
+            Item::BlendShapes => self.open_blend(),
             // No chord, so no `Action`. `hit` rather than the selection (C3); the
             // verb re-checks its own kind, so a stale row refuses.
             Item::OutlineText => {

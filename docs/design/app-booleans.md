@@ -2,8 +2,8 @@
 
 Non-destructive boolean containers (`core::boolean`, `NodeKind::Boolean`), the destructive verbs
 beside them (flatten, outline shape, outline stroke, convert text to path), the shape builder and
-*Divide*, the identity card's boolean row with its Mask/Group/Ungroup buttons, the Mask card, and how
-a failed boolean draws. Part of §9.4.
+*Divide*, *Blend shapes*, the identity card's boolean row with its Mask/Group/Ungroup buttons, the
+Mask card, and how a failed boolean draws. Part of §9.4.
 
 ## 9.4 Booleans
 
@@ -260,6 +260,69 @@ boolean, split, cut, pieces). It dims with *Divide needs two or more overlapping
 operation. The *Divided* group is selected afterwards and the status line says *Divided into N
 paths*.
 
+## Blend shapes
+
+`core::blend` makes the steps between two shapes as plain paths. It is computed once; nothing
+stays live.
+
+- **The pair** (`blend::pair`): exactly two layers, each a rect, ellipse, polygon, star, line, path
+  or boolean, answered bottom of the stack first. A `blend::Refusal`'s `says()` is the sentence
+  both the dimmed row and a refused commit give: `Count` *Blend shapes needs exactly two shapes*
+  (also any other kind, a group or a frame), `Picture` *Blend shapes can't take a picture*, `Text`
+  *Blend shapes can't take text*, `Parts` *Blend shapes needs two shapes made of the same number of
+  parts, both closed or both open*, `Locked` *A layer to blend is locked*, `Inside` *Blend shapes
+  can't work inside a boolean, a component or an instance* — the group lands beside the upper
+  shape, and there it would be one more operand, or a layer the main does not have.
+- **Outlines** are taken in world space (`world_transform` × `Resolved::local_path`, so a boolean
+  gives its result) and split into subpaths, which pair one to one and must agree on closed or
+  open; each becomes cubics. A closed second subpath is turned to run the way the first does (by
+  the sign of the area it encloses, curves included, so a lens of two segments reads right), then *reverse* turns it back by hand; each closed one
+  starts at the point of its outline nearest the chosen place on its own world box (`Blend::start`,
+  a fraction of the box), that segment cut in two. An open one keeps its ends; *reverse* flips the
+  second.
+- **Pairing is by arc length** (`paired`): each run is cut at the other's anchors' fractions of
+  length, so both have the same segments and keep their exact shape, and step k of n puts every
+  control point k/(n+1) of the way. Pairing anchor by anchor twists a circle against a rounded
+  square and shrinks the middle step.
+- **Paint** (`Blend::paint`, on): each step takes the nearer shape's fills and strokes, resolved
+  and literal, bindings cut. Where both shapes have as many fills (or strokes) and the one at a
+  position is a solid colour in both, the colour is mixed channel by channel, alpha included;
+  stroke widths and drawn opacity are mixed. Off, every step wears the first shape's paint and
+  opacity. Stroke widths are first scaled into the steps' own units, so a stroke draws as wide as
+  it did under a scaled shape or parent; each step takes the nearer shape's fill rule, so holes
+  stay holes. Effects and blend mode are not carried.
+- **The result** (`blend::blend`): one `Operation::InsertSubtree` of a group named *Blend*
+  (`GROUP_NAME`) holding `steps` (up to `MAX_STEPS`) `Path` children *Step 1…n*, step 1 nearest the
+  lower shape, in the upper shape's parent just below it — between the two when they share a
+  parent. It is built on a scratch `Document`, so each node takes every default a created node
+  has, then captured whole.
+
+### The card (`blend.rs`)
+
+`menu::Item::BlendShapes`, *Blend shapes…*, glyph `blend-shapes` (a small circle growing into a
+square through a rounded step), group Structure, no chord; palette aliases morph, tween, steps,
+interpolate. *Blend* alone already names the blend mode in the inspector and its undo steps. In the
+layer menu it follows *Flatten* whenever exactly two layers are selected, dimmed with `pair`'s
+refusal (`LayerState::blend_refusal`) or the lock sentence; otherwise the palette's *Not available
+here* row says *Blend shapes needs exactly two shapes* (`KIND_VERBS`).
+
+- **The card** hangs from `ui::canvas_popup_area` at `POPOVER_W` and is no modal, as the Repeat
+  card (`tools.md`). Rows: title *Blend shapes* with ✕; *Steps between* (`icon::DOTS_THREE`, 1 to
+  200, default 5); the switch *Blend paint and opacity* (on); *Match points from*, a dropdown of
+  the nine places (`canvas::NINE_POINTS`, the names the pivot's pill uses), default *Top left*; the
+  switch *Reverse the second shape*; foot *Cancel*, primary *Blend*. Its settings live on the app
+  and outlive a close. One card at the palette's place at a time: opening it closes the Repeat
+  card and Colour review, and opening either of those two closes it. It also closes Find, as they
+  do.
+- **The preview** is the commit's own edit, minted from a copy of the id counter so it spends no
+  ids; rebuilt when the revision, selection or settings change, and put back after another
+  gesture's preview cleared it. A canvas drag owns the preview while it lasts.
+- **Keys.** `Enter` blends (`dispatch` hands `Action::Enter` to the card while it is open);
+  `Escape` cancels, the rung after the Repeat card. The card closes when another document comes to
+  the front and when the selection stops being blendable.
+- **Commit**: one undo step, *Blend shapes*; the *Blend* group is selected and the status line
+  says *Blended in 5 steps*.
+
 ## The identity card's boolean row
 
 Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16.
@@ -333,3 +396,9 @@ the balanced fold; per-operand caching is not to be built. Pixel tests live in
   thing in one call: read even-odd it double-counts the inner corners (a 100 square with a 10 stroke
   comes out 4100 instead of 4000). `outline_stroke_traces_the_ink_each_alignment_draws` and
   `stroke_ink_covers_what_a_non_zero_expansion_fills` (`ondin-core/tests/build.rs`) pin it.
+- *Blend shapes* must pair by arc length, not by matching anchor counts, though the latter looks
+  simpler. `the_middle_step_is_half_way_in_place_size_and_paint` (`ondin-core/tests/blend_shapes.rs`,
+  a circle against a rounded square) checks the middle step's width.
+- `cancel_gesture` must not take the Blend card's standing preview for a gesture
+  (`blend_preview_standing`, beside `repeat_preview_standing`), or a right-click on the canvas
+  cancels it instead of opening the menu.

@@ -559,8 +559,9 @@ Copies of the selection turned step by step about one point, committed grouped w
   no Transform rows, so the card is the door.
 
 **The card** hangs from `ui::canvas_popup_area` at `POPOVER_W` and is no modal: the canvas stays
-live, because the pivot decides the ring and must stay draggable. Opening it closes Find and Colour
-review and, over one layer, raises the pivot handle (`show_pivot`).
+live, because the pivot decides the ring and must stay draggable. Opening it closes Find, Colour
+review and the Blend shapes card (`app-booleans.md`) and, over one layer, raises the pivot handle
+(`show_pivot`).
 
 - **Rows.** Title *Repeat around origin* with ✕; *Full turn · Fixed angle*; *Count*
   (`icon::COPY_SIMPLE`) beside *Step* (`icon::ROTATION`), the step disabled showing 360/count under

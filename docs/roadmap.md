@@ -54,7 +54,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
   *Simplify*).
 - **Mirror symmetry while drawing** about an axis. A flipped linked copy already works as a
   workaround.
-- **Blend between two shapes** in N steps.
 - **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors
   (*Simplify* works on the whole path).
 

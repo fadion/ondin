@@ -237,6 +237,9 @@ impl OndinApp {
     /// card would run under Find's corner on any canvas short of a wide one.
     pub(crate) fn open_colour_review(&mut self) {
         self.close_find();
+        // One card at the palette's place at a time.
+        self.close_repeat();
+        self.close_blend();
         let r = &mut self.colour_review;
         if !r.open {
             r.selection = !self.session.selection.ids().is_empty();

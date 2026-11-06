@@ -1006,6 +1006,9 @@ pub mod icon {
     pub const TRANSFORM_AGAIN: &str = "\u{f049}";
     /// *Repeat around origin…*: eight ticks turned about a pivot dot.
     pub const REPEAT_AROUND: &str = "\u{f04a}";
+    /// *Blend shapes…*: a small circle growing into a square through a rounded
+    /// step between them. Not a gradient: *Blend* already means blend mode.
+    pub const BLEND_SHAPES: &str = "\u{f04b}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1325,6 +1328,7 @@ pub mod icon {
         ("shape-builder", SHAPE_BUILDER),
         ("transform-again", TRANSFORM_AGAIN),
         ("repeat-around", REPEAT_AROUND),
+        ("blend-shapes", BLEND_SHAPES),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

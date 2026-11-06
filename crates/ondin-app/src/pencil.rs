@@ -53,6 +53,11 @@ impl PencilStroke {
         self.samples.first().copied()
     }
 
+    /// The trail so far, in world space.
+    pub(crate) fn samples(&self) -> &[Point] {
+        &self.samples
+    }
+
     /// Whether the stroke carries an existing path on rather than starting one.
     pub(crate) fn extends(&self) -> bool {
         self.extend.is_some()
@@ -430,6 +435,45 @@ mod tests {
         app.pencil = None;
         app.poll_imports();
         assert!(app.imports.is_empty(), "and lands after");
+    }
+
+    /// While mirroring, the trail's image draws as the stroke goes, not on release.
+    /// flip: `mirror_chrome` without its pencil branch → fails at "the image draws".
+    #[test]
+    fn a_mirrored_stroke_previews_its_image_as_it_goes() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _) = app_with_a_frame(&ctx);
+        app.session.camera.center = Point::new(200.0, 150.0);
+        app.session.camera.zoom = 1.0;
+        app.session.mirror = crate::mirror::Mirror {
+            axes: crate::mirror::Axes::Vertical,
+            at: Some(Point::new(300.0, 150.0)),
+        };
+        let trail = wave();
+        app.pencil_press(trail[0]);
+        for p in &trail[1..60] {
+            app.pencil_sample(*p, false);
+        }
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                let painter = ui.painter().clone();
+                app.mirror_chrome(ui, &painter, rect, 1.0);
+            },
+        );
+        // The trail runs left of the axis; its image, right of it, past the pill.
+        let image_x = app.to_screen(Point::new(360.0, 150.0), rect, 1.0).x;
+        let drawn = out.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Path(p) => p.points.len() > 2 && p.points.iter().any(|q| q.x > image_x),
+            _ => false,
+        });
+        assert!(app.pencil.is_some(), "the stroke is still in flight");
+        assert!(drawn, "the image draws");
     }
 
     /// Press at the first point, drag through the rest, release.

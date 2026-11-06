@@ -366,6 +366,34 @@ impl OndinApp {
                 }
             }
         }
+        // And the pencil's: its trail as the mirror makes it, joined where it will
+        // join, in the trail's own line at 45%. The fit happens on release.
+        if let Some(stroke) = self.pencil.as_ref().filter(|s| !s.extends())
+            && stroke.samples().len() >= 2
+        {
+            let drawn = PenSubpath {
+                anchors: stroke
+                    .samples()
+                    .iter()
+                    .map(|p| crate::preview::PenAnchor::corner(*p))
+                    .collect(),
+                closed: false,
+            };
+            let ghost = egui::Stroke::new(1.0, color::SELECT.gamma_multiply(0.45));
+            for sub in &self.mirror_run(drawn) {
+                let mut pts: Vec<egui::Pos2> = sub
+                    .anchors
+                    .iter()
+                    .map(|a| self.to_screen(a.at, rect, ppp))
+                    .collect();
+                if sub.closed
+                    && let Some(first) = pts.first().copied()
+                {
+                    pts.push(first);
+                }
+                painter.add(egui::Shape::line(pts, ghost));
+            }
+        }
         // Where the next point would land on an axis: a ring there and *On axis*,
         // in the snaps' red.
         let shift = ui.input(|i| i.modifiers.shift);

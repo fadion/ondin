@@ -2983,7 +2983,8 @@ impl OndinApp {
                 self.pen_bias = true;
                 self.session.info(
                     "Pen armed inside the edit: click an open end to carry on, \
-                     a segment to add a point, empty canvas for a new subpath",
+                     a segment to add a point, empty canvas for a new subpath; \
+                     hold Ctrl to move points",
                 );
             }
             return;

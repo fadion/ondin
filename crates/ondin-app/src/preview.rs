@@ -243,6 +243,14 @@ pub enum Drag {
         at: PointRef,
         side: Side,
     },
+    /// Moving a point of the pen's run in flight, `Ctrl` held at the press: the
+    /// anchor at `index`, `grab` from the pointer, or with `side` one of its
+    /// handles, which follows the pointer as [`Drag::Handle`]'s does.
+    PenPoint {
+        index: usize,
+        side: Option<Side>,
+        grab: Vec2,
+    },
     /// Dragging a **segment** of a path, with the node tool.
     ///
     /// Plain **moves** the segment, `Ctrl` **bends** it — the split `Ctrl` has on

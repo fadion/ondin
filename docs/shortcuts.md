@@ -114,6 +114,7 @@ shape builder's `Shift+M` and the slice's `Shift+F`, are read after the letters 
 | `S` | Star | ✅ |
 | `L` | Line | ✅ Figma, Sketch |
 | `P` | Pen — **or arms the pen bias** inside an active point edit | ✅ (§15 D125) |
+| `Ctrl` held, in the pen | move the run's points and handles instead of placing one; with the pen bias and no run, the node tool's point editing | ✅ Illustrator's direct-select hold (`canvas::pen_holds_points`) |
 | `Shift+P` | Pencil | ✅ the common pencil chord, `P` being the pen |
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |

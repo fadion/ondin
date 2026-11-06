@@ -17,6 +17,16 @@ the node tool (`A`), joining two path layers, and per-anchor corner radii. Part 
   the angle as a Line's Rotation field shows it, world start to end): the pending segment to where a
   press would land, or, while a handle is dragged out, the segment that placed that anchor
   (`canvas::pen_segment`). It is the gradient handles' label (`spacing::paint_label`).
+- **`Ctrl` held moves points instead of placing them** (`canvas::pen_holds_points`). With a run in
+  flight a press takes one of its anchors or drawn handles within `PEN_PICK_PX`, handles first
+  (`pen_run_grab`), as `Drag::PenPoint`: an anchor lands where a pen press would snap and carries its
+  handles, a handle pulls as the node tool's does, mirrored unless `Alt` (`pen_point_drag`). While
+  held every anchor shows its handles, and the pending segment, its readout and the close and join
+  rings go; the cursor is the node tool's arrow. A press on nothing does nothing, and the drag runs
+  to its release whatever `Ctrl` does meanwhile; nothing is committed, as with the rest of the run.
+  Inside a path edit with the pen bias armed and no run in flight, `Ctrl` is the node tool's point
+  editing on the edited path instead (`node_input`), with the pen's verbs and `Ctrl`'s own node
+  meanings (pull handles out, bend a segment) off while it is held.
 - **Backspace removes the last anchor mid-draw** (`canvas::pen_backspace`), cancelling the path when
   the first goes; intercepted in `app::dispatch` as `Action::Delete if self.pen.is_some()` (keyboard
   actions dispatch before `pen_input`). Undo cannot help — nothing is committed yet.

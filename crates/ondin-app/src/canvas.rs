@@ -1825,6 +1825,9 @@ impl OndinApp {
                     Some(n) => (egui::CursorIcon::Crosshair, Some(Bitmap::Loaded(n))),
                     None => create_cursor(mods.alt),
                 },
+                Tool::Pen if self.pen_holds_points(mods.ctrl || mods.command) => {
+                    self.pen_points_cursor(world)
+                }
                 Tool::Pen => (
                     egui::CursorIcon::Crosshair,
                     Some(Bitmap::Pen(self.pen_badge(world, mods.alt))),
@@ -2008,15 +2011,32 @@ impl OndinApp {
     /// The node tool away from the point box: the pen where its bias arms a verb,
     /// else the node arrow badged with what is under the pointer.
     fn node_cursor(&self, world: Option<Point>, mods: egui::Modifiers) -> Pointer {
-        // A path in flight is always the pen.
+        let ctrl = mods.ctrl || mods.command;
+        // A path in flight is the pen, or with Ctrl the hand on its points.
         if self.pen.is_some() {
+            if self.pen_holds_points(ctrl) {
+                return self.pen_points_cursor(world);
+            }
             return (
                 egui::CursorIcon::Crosshair,
                 Some(Bitmap::Pen(self.pen_badge(world, mods.alt))),
             );
         }
+        // The armed pen's Ctrl is point editing, without Ctrl's own meanings here.
+        let pen = !(self.pen_bias && ctrl);
+        let mods = match self.pen_bias {
+            true => egui::Modifiers {
+                ctrl: false,
+                command: false,
+                ..mods
+            },
+            false => mods,
+        };
         let resting = self.drag.is_none();
-        if resting && let Some(verb) = world.and_then(|w| self.pen_verb(w)) {
+        if resting
+            && pen
+            && let Some(verb) = world.and_then(|w| self.pen_verb(w))
+        {
             let badge = match verb {
                 PenVerb::Continue(_) => Badge::Continue,
                 PenVerb::Insert(..) => Badge::Plus,
@@ -2743,12 +2763,13 @@ impl OndinApp {
                 }
             }
             Drag::ShapeHandle { .. } => self.preview_shape_drag(world, shift),
-            // `node_input` runs first and owns the node tool's drags end to end.
+            // `node_input` and `pen_input` run first and own their drags end to end.
             Drag::Points { .. }
             | Drag::Handle { .. }
             | Drag::Segment { .. }
             | Drag::PointBox { .. }
-            | Drag::PointRotate { .. } => {}
+            | Drag::PointRotate { .. }
+            | Drag::PenPoint { .. } => {}
             // Unsnapped to guides, since the pointer stands for an angle.
             Drag::Skew {
                 target,
@@ -2931,12 +2952,13 @@ impl OndinApp {
                 self.drag = drag;
                 self.finish_shape_drag(world, shift);
             }
-            // `node_input` commits its own release.
+            // `node_input` commits its own release; `pen_input` ends its own.
             Drag::Points { .. }
             | Drag::Handle { .. }
             | Drag::Segment { .. }
             | Drag::PointBox { .. }
-            | Drag::PointRotate { .. } => {}
+            | Drag::PointRotate { .. }
+            | Drag::PenPoint { .. } => {}
             Drag::Skew {
                 target,
                 handle,
@@ -4273,18 +4295,35 @@ impl OndinApp {
     /// handles out symmetrically; release settles it. On press, not click, since
     /// a click resolves only after the shaping drag.
     fn pen_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
-        let (enter, pressed, released, alt, shift) = ui.input(|i| {
+        let (enter, pressed, released, alt, shift, ctrl) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Enter),
                 i.pointer.primary_pressed(),
                 i.pointer.primary_released(),
                 i.modifiers.alt,
                 i.modifiers.shift,
+                i.modifiers.ctrl || i.modifiers.command,
             )
         });
         // Escape also finishes, but `OndinApp::escape` owns it.
         if enter {
             self.finish_pen(false);
+            return;
+        }
+        // Ctrl holds the run's points: a press takes an anchor or a handle of it,
+        // and no press places one.
+        if self.pen_holds_points(ctrl) {
+            let pointer = resp.hover_pos().or_else(|| resp.interact_pointer_pos());
+            if let Some(p) = pointer.filter(|_| pressed && resp.contains_pointer()) {
+                if let Some(grab) = self.pen_run_grab(self.to_world(p, rect, ppp)) {
+                    self.drag = grab;
+                }
+            } else if let Some(p) = pointer {
+                self.pen_point_drag(self.to_world(p, rect, ppp), alt);
+            }
+            if released && matches!(self.drag, Drag::PenPoint { .. }) {
+                self.drag = Drag::None;
+            }
             return;
         }
         // A double-click finishes, dropping the duplicate anchor its second press planted.
@@ -4321,6 +4360,109 @@ impl OndinApp {
         }
         if released && let Some(pen) = self.pen.as_mut() {
             pen.shaping = false;
+        }
+    }
+
+    /// The node tool's arrow while the pen holds its run's points: badged as a
+    /// point or a handle over one, or through its drag.
+    fn pen_points_cursor(&self, world: Option<Point>) -> Pointer {
+        let grab = match self.drag {
+            Drag::PenPoint { .. } => Some(&self.drag),
+            _ => None,
+        };
+        let hovered = world.and_then(|w| self.pen_run_grab(w));
+        let side = match grab.or(hovered.as_ref()) {
+            Some(Drag::PenPoint { side, .. }) => Some(*side),
+            _ => None,
+        };
+        node_arrow(match side {
+            Some(None) => Some(Badge::Anchor),
+            Some(Some(_)) => Some(Badge::Dot),
+            None => None,
+        })
+    }
+
+    /// Whether the pen holds its run's points rather than placing one: `Ctrl`
+    /// held, or one of them being dragged, which a let-go `Ctrl` does not end.
+    /// Never while the anchor just placed is being shaped.
+    pub(crate) fn pen_holds_points(&self, ctrl: bool) -> bool {
+        matches!(self.drag, Drag::PenPoint { .. })
+            || ctrl && !self.pen.as_ref().is_some_and(|p| p.shaping)
+    }
+
+    /// The point of the pen's run in flight under `world`, as the drag that moves
+    /// it: a drawn handle first, then an anchor, within `PEN_PICK_PX`.
+    fn pen_run_grab(&self, world: Point) -> Option<Drag> {
+        let pen = self.pen.as_ref()?;
+        let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
+        let near = |p: Point| (p - world).hypot();
+        let handle = pen
+            .anchors
+            .iter()
+            .enumerate()
+            .flat_map(|(i, a)| Side::BOTH.map(|side| (i, side, a.handle(side), a.at)))
+            .filter(|(.., p, at)| (*p - *at).hypot() > HANDLE_DRAWN)
+            .filter(|(.., p, _)| near(*p) <= slop)
+            .min_by(|a, b| near(a.2).total_cmp(&near(b.2)));
+        if let Some((index, side, ..)) = handle {
+            return Some(Drag::PenPoint {
+                index,
+                side: Some(side),
+                grab: Vec2::ZERO,
+            });
+        }
+        let (index, a) = pen
+            .anchors
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| near(a.at) <= slop)
+            .min_by(|a, b| near(a.1.at).total_cmp(&near(b.1.at)))?;
+        Some(Drag::PenPoint {
+            index,
+            side: None,
+            grab: a.at - world,
+        })
+    }
+
+    /// Follow a [`Drag::PenPoint`] to `world`: the anchor lands where a pen press
+    /// there would, its handles with it; a handle is pulled as the node tool pulls
+    /// one, mirrored unless `alt`.
+    fn pen_point_drag(&mut self, world: Point, alt: bool) {
+        let Drag::PenPoint { index, side, grab } = self.drag else {
+            return;
+        };
+        let zoom = self.points_per_world();
+        let to = match side {
+            None => Some(self.pen_point(world + grab, false).0),
+            Some(_) => None,
+        };
+        let Some(pen) = self.pen.as_mut() else {
+            return;
+        };
+        match (side, to) {
+            (None, Some(to)) => {
+                if let Some(a) = pen.anchors.get_mut(index) {
+                    a.at = to;
+                }
+            }
+            (Some(side), _) => {
+                let mut run = [crate::preview::PenSubpath {
+                    anchors: std::mem::take(&mut pen.anchors),
+                    closed: false,
+                }];
+                tools::pull_handle(
+                    &mut run,
+                    (0, index),
+                    side,
+                    world,
+                    alt,
+                    f64::from(PEN_PICK_PX) / zoom,
+                    f64::from(TANGENT_SNAP_PX) / zoom,
+                );
+                let [run] = run;
+                pen.anchors = run.anchors;
+            }
+            _ => {}
         }
     }
 
@@ -4368,7 +4510,8 @@ impl OndinApp {
             match self.mirror_status() {
                 Some(said) => self.session.info(said),
                 None => self.session.info(
-                    "Pen: click for a corner, drag for a curve; Enter or double-click to finish",
+                    "Pen: click for a corner, drag for a curve, hold Ctrl to move points; \
+                     Enter or double-click to finish",
                 ),
             }
             return;
@@ -5083,11 +5226,16 @@ impl OndinApp {
                 i.modifiers.ctrl || i.modifiers.command,
             )
         });
+        // With the edit's pen armed, Ctrl held is point editing instead, as the
+        // standalone pen's Ctrl moves its run's points; Ctrl's own meanings here
+        // (pull handles, bend) are then not on.
+        let pen_points = self.pen_bias && ctrl;
+        let ctrl = ctrl && !self.pen_bias;
         if pressed
             && resp.contains_pointer()
             && let Some(p) = ui.ctx().pointer_interact_pos()
         {
-            self.node_press(self.to_world(p, rect, ppp), shift, alt, ctrl);
+            self.node_press(self.to_world(p, rect, ppp), shift, alt, ctrl, !pen_points);
         }
         let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) else {
             return;
@@ -5291,7 +5439,8 @@ impl OndinApp {
         tools::points_box(&subpaths, &points)
     }
 
-    fn node_press(&mut self, world: Point, shift: bool, alt: bool, ctrl: bool) {
+    /// `pen` lets an armed pen claim the press first ([`PenVerb`]).
+    fn node_press(&mut self, world: Point, shift: bool, alt: bool, ctrl: bool, pen: bool) {
         let id = match self.edited_path() {
             Some(id) => id,
             None => {
@@ -5305,7 +5454,7 @@ impl OndinApp {
             }
         };
         // The pen's verbs first, when armed; [`PenVerb`] declines targets it does not claim.
-        if let Some(verb) = self.pen_verb(world) {
+        if let Some(verb) = self.pen_verb(world).filter(|_| pen) {
             self.pen_verb_press(id, world, shift, verb);
             return;
         }
@@ -9358,10 +9507,14 @@ impl OndinApp {
             }
 
             // The segment the next click would add, at half opacity, to where the
-            // anchor would land, or to the first anchor when closing.
-            let held = ui.input(|i| i.modifiers.shift);
+            // anchor would land, or to the first anchor when closing. None while
+            // Ctrl holds the run's points: no press places one.
+            let (held, ctrl) =
+                ui.input(|i| (i.modifiers.shift, i.modifiers.ctrl || i.modifiers.command));
+            let holding = self.pen_holds_points(ctrl);
             let pointer = resp
                 .hover_pos()
+                .filter(|_| !holding)
                 .map(|h| self.pen_point(self.to_world(h, rect, ppp), held).0);
             let closing = pointer.and_then(|w| {
                 tools::pen_close_snap(
@@ -9379,18 +9532,23 @@ impl OndinApp {
                 }
             }
 
-            // The handles of the anchor being shaped.
-            if let Some(last) = pen.anchors.last()
-                && !last.is_corner()
-            {
-                let a = self.to_screen(last.arriving(), rect, ppp);
-                let b = self.to_screen(last.leaving(), rect, ppp);
-                let at = self.to_screen(last.at, rect, ppp);
+            // The handles of the anchor being shaped, or of every anchor while Ctrl
+            // holds the points, so each can be taken.
+            let shown = match holding {
+                true => &pen.anchors[..],
+                false => &pen.anchors[pen.anchors.len().saturating_sub(1)..],
+            };
+            for a in shown.iter().filter(|a| !a.is_corner()) {
+                let at = self.to_screen(a.at, rect, ppp);
                 let handle = egui::Stroke::new(1.0, color::SELECT_DIM);
-                painter.line_segment([a, at], handle);
-                painter.line_segment([at, b], handle);
-                painter.circle_filled(a, HANDLE_DOT_PX, color::SELECT);
-                painter.circle_filled(b, HANDLE_DOT_PX, color::SELECT);
+                for side in Side::BOTH {
+                    if (a.handle(side) - a.at).hypot() <= HANDLE_DRAWN {
+                        continue;
+                    }
+                    let h = self.to_screen(a.handle(side), rect, ppp);
+                    painter.line_segment([h, at], handle);
+                    painter.circle_filled(h, HANDLE_DOT_PX, color::SELECT);
+                }
             }
             // The anchors placed so far, always circles since nothing is settled.
             for (i, a) in pen.anchors.iter().enumerate() {
@@ -9408,6 +9566,7 @@ impl OndinApp {
 
             // Another path's open end, which a press would join, ringed likewise.
             if closing.is_none()
+                && !holding
                 && let Some(p) = resp.hover_pos()
                 && let Some(edit) = self.pen_join_target(self.to_world(p, rect, ppp))
                 && let Some(end) = edit.endpoint()
@@ -9437,6 +9596,8 @@ impl OndinApp {
             ui.ctx().request_repaint();
         } else if self.drag.is_none()
             && !self.gesture_cancelled
+            // Not while Ctrl makes the pen point editing.
+            && !ui.input(|i| i.modifiers.ctrl || i.modifiers.command)
             && let Some(p) = resp.hover_pos()
             // The standalone pen reaches any open end; the others via `pen_verb`.
             // Only with nothing in hand, as `draw_points` gates hover.
@@ -21582,13 +21743,24 @@ mod flex_canvas_tests {
             alt: true,
             ..Default::default()
         };
+        held_drag(ctx, app, from, to, alt);
+    }
+
+    /// A drag from `from` to `to` (world) with `mods` held throughout.
+    fn held_drag(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        from: Point,
+        to: Point,
+        mods: egui::Modifiers,
+    ) {
         let held = |ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>| {
             let time = ctx.input(|i| i.time) + 0.1;
             let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(RECT),
                     time: Some(time),
-                    modifiers: alt,
+                    modifiers: mods,
                     events,
                     ..Default::default()
                 },
@@ -21599,7 +21771,7 @@ mod flex_canvas_tests {
             pos: at,
             button: egui::PointerButton::Primary,
             pressed,
-            modifiers: alt,
+            modifiers: mods,
         };
         let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
         let start = at(app, from);
@@ -21613,6 +21785,114 @@ mod flex_canvas_tests {
         let end = at(app, to);
         held(ctx, app, vec![press(end, false)]);
         frame(ctx, app, Vec::new());
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: true,
+        shift: false,
+        mac_cmd: false,
+        command: true,
+    };
+
+    /// The pen armed with a run in flight on open canvas: a corner at (450, 50)
+    /// and a smooth anchor at (520, 50) whose handles reach 30 either way.
+    fn pen_with_a_run(ctx: &egui::Context) -> OndinApp {
+        let (mut app, ..) = app_with_a_row(ctx);
+        app.choose_tool(Tool::Pen);
+        let page = app.session.page;
+        app.pen = Some(crate::preview::PenState {
+            parent: page,
+            parent_world: Affine::IDENTITY,
+            anchors: vec![
+                PenAnchor::corner(Point::new(450.0, 50.0)),
+                PenAnchor::smooth(Point::new(520.0, 50.0), Vec2::new(30.0, 0.0)),
+            ],
+            shaping: false,
+            editing: None,
+        });
+        app
+    }
+
+    /// With Ctrl held the pen moves its run's anchor and places none.
+    /// flip: `pen_input` without the `pen_holds_points` branch → fails at "the run is
+    /// still in flight": the press on the first anchor closes the run instead.
+    #[test]
+    fn ctrl_in_the_pen_moves_an_anchor_of_the_run() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = pen_with_a_run(&ctx);
+        held_drag(
+            &ctx,
+            &mut app,
+            Point::new(450.0, 50.0),
+            Point::new(450.0, 120.0),
+            CTRL,
+        );
+        let pen = app.pen.as_ref().expect("the run is still in flight");
+        assert_eq!(pen.anchors.len(), 2, "no anchor placed");
+        let at = pen.anchors[0].at;
+        assert!(
+            (at - Point::new(450.0, 120.0)).hypot() < 0.5,
+            "moved: {at:?}"
+        );
+        assert!(app.drag.is_none(), "the drag ended with the release");
+    }
+
+    /// With Ctrl held the pen pulls a handle of its run, its pair mirrored.
+    #[test]
+    fn ctrl_in_the_pen_pulls_a_handle_of_the_run() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = pen_with_a_run(&ctx);
+        held_drag(
+            &ctx,
+            &mut app,
+            Point::new(550.0, 50.0),
+            Point::new(550.0, 100.0),
+            CTRL,
+        );
+        let pen = app.pen.as_ref().expect("in flight");
+        let a = pen.anchors[1];
+        assert_eq!(pen.anchors.len(), 2, "no anchor placed");
+        assert!(
+            (a.out - Vec2::new(30.0, 50.0)).hypot() < 0.5,
+            "pulled: {a:?}"
+        );
+        assert!((a.back + a.out).hypot() < 1e-6, "the pair mirrored: {a:?}");
+        assert_eq!(a.at, Point::new(520.0, 50.0), "the anchor stays");
+    }
+
+    /// Inside a path edit, Ctrl turns the armed pen into point editing: a drag moves
+    /// the path's anchor and starts no run.
+    /// flip: `node_press` letting the pen claim the press under Ctrl → fails at "no run".
+    #[test]
+    fn ctrl_in_the_edits_pen_moves_the_paths_point() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = pen_with_a_run(&ctx);
+        if let Some(pen) = app.pen.as_mut() {
+            pen.anchors[1] = PenAnchor::corner(Point::new(520.0, 50.0));
+            pen.anchors
+                .push(PenAnchor::corner(Point::new(520.0, 150.0)));
+        }
+        app.finish_pen(false);
+        let id = app.session.selection.single().expect("the path");
+        app.choose_tool(Tool::Node);
+        app.session.selection.set_one(id);
+        app.choose_tool(Tool::Pen);
+        assert!(app.pen_bias, "fixture: the edit's pen is armed");
+        held_drag(
+            &ctx,
+            &mut app,
+            Point::new(520.0, 150.0),
+            Point::new(570.0, 150.0),
+            CTRL,
+        );
+        assert!(app.pen.is_none(), "no run");
+        // Bounds with the stroke's half width; the drag may land on a snap nearby.
+        let b = app.session.resolved.world_bounds(id).expect("placed");
+        assert!(b.x1 > 560.0, "the point moved: {b:?}");
     }
 
     /// An Alt-drag of a main drops an instance of it under the main's own name, as

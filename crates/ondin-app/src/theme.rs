@@ -1009,6 +1009,11 @@ pub mod icon {
     /// *Blend shapes…*: a small circle growing into a square through a rounded
     /// step between them. Not a gradient: *Blend* already means blend mode.
     pub const BLEND_SHAPES: &str = "\u{f04b}";
+    /// The Spiral tool: two turns of a spiral wound out from the middle.
+    pub const SPIRAL: &str = "\u{f04c}";
+    /// The Arc tool: a quarter circle between two end dots, the line segment's
+    /// drawing bent. Not `CIRCLE_NOTCH`, which is the loading spinner.
+    pub const ARC: &str = "\u{f04d}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1329,6 +1334,8 @@ pub mod icon {
         ("transform-again", TRANSFORM_AGAIN),
         ("repeat-around", REPEAT_AROUND),
         ("blend-shapes", BLEND_SHAPES),
+        ("spiral", SPIRAL),
+        ("arc", ARC),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

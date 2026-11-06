@@ -1819,7 +1819,9 @@ impl OndinApp {
                 | Tool::Ellipse
                 | Tool::Polygon
                 | Tool::Star
-                | Tool::Line => create_cursor(mods.alt),
+                | Tool::Line
+                | Tool::Spiral
+                | Tool::Arc => create_cursor(mods.alt),
                 // The same crosshair, badged with how many images are left to place.
                 Tool::Image => match Remaining::of(self.pending_images.len()) {
                     Some(n) => (egui::CursorIcon::Crosshair, Some(Bitmap::Loaded(n))),
@@ -3981,14 +3983,14 @@ impl OndinApp {
 
     /// Where the far corner of what is being drawn sits: on the pixel grid, and
     /// with Shift, equal extents for boxes (text included) or a direction for a
-    /// line ([`Self::axial_corner`]). The pen arm is unreachable
+    /// line, spiral or arc ([`Self::axial_corner`]). The pen arm is unreachable
     /// (`Tool::drags_a_box`) and kept so the fallthrough never squares a pen point.
     fn create_corner(&self, shape: Tool, start: Point, world: Point, shift: bool) -> Point {
         if !shift {
             return self.pixel_point(world);
         }
         match shape {
-            Tool::Line => self.axial_corner(start, world),
+            Tool::Line | Tool::Spiral | Tool::Arc => self.axial_corner(start, world),
             Tool::Pen => self.pixel_point(world),
             // Rounded before squaring, or the "square" can be a pixel off.
             _ => squared_corner(start, self.pixel_point(world)),
@@ -3997,8 +3999,9 @@ impl OndinApp {
 
     /// **Both** ends of what is being drawn — the pair every `tools::create_*`
     /// takes. With Alt the press point is the centre and the corner is mirrored
-    /// through it, lines included. Constrain first, mirror second, so Alt+Shift
-    /// stays square (or on its octant) and on the pixel grid (§15 D289).
+    /// through it, lines and arcs included; a spiral is drawn from its centre
+    /// already. Constrain first, mirror second, so Alt+Shift stays square (or on
+    /// its octant) and on the pixel grid.
     fn create_box(
         &self,
         shape: Tool,
@@ -4008,7 +4011,7 @@ impl OndinApp {
         alt: bool,
     ) -> (Point, Point) {
         let corner = self.create_corner(shape, start, world, shift);
-        match alt {
+        match alt && shape != Tool::Spiral {
             true => centred_ends(start, corner),
             false => (start, corner),
         }
@@ -4055,7 +4058,8 @@ impl OndinApp {
     }
 
     /// The two keys a create drag reads in flight (`docs/shortcuts.md` §9):
-    /// `Space` repositions the uncommitted shape, `↑`/`↓` add and remove sides.
+    /// `Space` repositions the uncommitted shape, `↑`/`↓` step its count: sides,
+    /// points, a spiral's half turns or an arc's sweep (`tools::drawn_count`).
     /// `dispatch` drops a `Nudge` while a create drag is up, so the arrows do not
     /// also move the selection.
     fn reshape_create(&mut self, ui: &egui::Ui, world: Point) {
@@ -4067,7 +4071,11 @@ impl OndinApp {
             )
         });
         let Drag::Create {
-            start, sides, last, ..
+            start,
+            sides,
+            last,
+            shape,
+            ..
         } = &mut self.drag
         else {
             return;
@@ -4078,7 +4086,7 @@ impl OndinApp {
         }
         *last = world;
 
-        *sides = tools::step_sides(*sides, up, down);
+        *sides = tools::step_drawn_count(*shape, *sides, up, down);
     }
 
     pub(crate) fn begin_create(&mut self, world: Point) {
@@ -4092,10 +4100,7 @@ impl OndinApp {
             parent_world,
             start: world,
             shape,
-            sides: match shape {
-                Tool::Star => tools::STAR_DEFAULT_POINTS,
-                _ => tools::POLYGON_DEFAULT_SIDES,
-            },
+            sides: tools::drawn_count(shape),
             last: world,
         };
     }
@@ -4114,6 +4119,8 @@ impl OndinApp {
             Tool::Polygon => "Add polygon",
             Tool::Star => "Add star",
             Tool::Line => "Add line",
+            Tool::Spiral => "Add spiral",
+            Tool::Arc => "Add arc",
             Tool::Text => "Add text",
             Tool::Image => "Place image",
             _ => "Add shape",
@@ -4224,6 +4231,17 @@ impl OndinApp {
                 corner,
                 PEN_STROKE_COLOR,
                 PEN_STROKE_WIDTH,
+            ),
+            Tool::Spiral | Tool::Arc => tools::create_open_path(
+                id,
+                parent,
+                index,
+                parent_world,
+                match shape {
+                    Tool::Spiral => tools::spiral_path(start, corner, sides),
+                    _ => tools::arc_path(start, corner, f64::from(sides * tools::ARC_STEP_DEG)),
+                },
+                tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
             ),
             Tool::Text => tools::create_text(
                 id,
@@ -9996,7 +10014,7 @@ impl OndinApp {
         let Drag::Create { start, shape, .. } = &self.drag else {
             return None;
         };
-        if *shape == Tool::Line {
+        if matches!(shape, Tool::Line | Tool::Spiral | Tool::Arc) {
             return None;
         }
         let p = resp.interact_pointer_pos()?;
@@ -10012,6 +10030,7 @@ impl OndinApp {
 
     /// The size pill under a shape being *drawn*: `draw_size_badge` reads
     /// `selection.ids()`, and a shape being drawn is not selected until it commits.
+    /// A spiral's or arc's says its turns or sweep instead, under the pointer.
     fn draw_create_badge(
         &self,
         ui: &egui::Ui,
@@ -10020,6 +10039,17 @@ impl OndinApp {
         ppp: f32,
         resp: &egui::Response,
     ) -> Option<()> {
+        if let Drag::Create { shape, sides, .. } = &self.drag
+            && let Some(label) = tools::drawn_count_label(*shape, *sides)
+        {
+            let edge = BadgeEdge {
+                mid: resp.interact_pointer_pos()?,
+                dir: egui::vec2(1.0, 0.0),
+                out: egui::vec2(0.0, 1.0),
+            };
+            paint_size_pill(painter, edge, label, &[], color::BADGE);
+            return Some(());
+        }
         let box_ = self.create_outline_box(ui, rect, ppp, resp)?;
         let label = size_label(box_);
         // Upright, so the edge is stated rather than searched for.

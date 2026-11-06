@@ -113,6 +113,7 @@ shape builder's `Shift+M` and the slice's `Shift+F`, are read after the letters 
 | `G` | Polygon | ✅ no convention |
 | `S` | Star | ✅ |
 | `L` | Line | ✅ Figma, Sketch |
+| `Shift+L` | Spiral | ✅ on the line's letter, as it shares the line's slot on the rail; Arc, the slot's third member, has no key |
 | `P` | Pen — **or arms the pen bias** inside an active point edit | ✅ (§15 D125) |
 | `Ctrl` held, in the pen | move the run's points and handles instead of placing one; with the pen bias and no run, the node tool's point editing | ✅ Illustrator's direct-select hold (`canvas::pen_holds_points`) |
 | `Shift+P` | Pencil | ✅ the common pencil chord, `P` being the pen |
@@ -411,6 +412,9 @@ a corner dot sets that corner alone · `Shift` on an ellipse's arc dot snaps to 
 - **`↑` / `↓` while dragging a polygon or star adds / removes sides** (Illustrator). The count
   lives on `Drag::Create`, starts at `POLYGON_DEFAULT_SIDES` / `STAR_DEFAULT_POINTS`, and
   `tools::step_sides` clamps it to `MIN_SIDES..=MAX_SIDES`, the inspector field's range.
+  The same keys add or take half a turn from a spiral (3.5 turns to start, ½ to 20) and move an
+  arc's sweep in 15° steps (90° to start, 15° to 345°), and the pill under the pointer says
+  which (`tools::step_drawn_count`). Nothing on screen names the keys.
 - **`Alt` while drawing grows from the press point** (§15 D289); `canvas::create_box` constrains
   first and mirrors second, so `Alt`+`Shift` draws a circle around the click.
 - **A plain click with the Image tool places the picture at its own size** (§15 D295): aspect kept,

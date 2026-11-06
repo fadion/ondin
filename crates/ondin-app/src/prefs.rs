@@ -67,6 +67,9 @@ pub struct ViewPrefs {
     pub lasso: bool,
     /// The tool rail's frame slot shows the slice tool, last picked there.
     pub rail_slice: bool,
+    /// The tool rail's line slot shows this of Line, Spiral and Arc, last picked
+    /// there.
+    pub(crate) rail_line: crate::rail::Member,
     /// The tool rail's pen slot shows the pencil, last picked there.
     pub rail_pencil: bool,
 }
@@ -92,6 +95,7 @@ impl Default for ViewPrefs {
             snap_baselines: true,
             lasso: false,
             rail_slice: false,
+            rail_line: crate::rail::Member::Line,
             rail_pencil: false,
         }
     }

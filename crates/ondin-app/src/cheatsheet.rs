@@ -138,6 +138,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         Tool::Polygon,
         Tool::Star,
         Tool::Line,
+        Tool::Spiral,
         Tool::Pen,
         Tool::Pencil,
         Tool::Node,

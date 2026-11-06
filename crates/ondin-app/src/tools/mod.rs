@@ -47,6 +47,12 @@ pub enum Tool {
     Polygon,
     Star,
     Line,
+    /// Draws an open spiral path out from the press: the drag is the outer radius
+    /// and the angle it ends at, `↑`/`↓` add or take half a turn.
+    Spiral,
+    /// Draws an open circular arc from the press to the release: `↑`/`↓` change
+    /// its sweep in [`ARC_STEP_DEG`] steps.
+    Arc,
     Pen,
     /// Draws a path freehand: the drag's trail is fitted to curves on release
     /// (`crate::pencil`). Stays armed after a stroke, since freehand comes in runs.
@@ -92,6 +98,8 @@ impl Tool {
                 | Tool::Polygon
                 | Tool::Star
                 | Tool::Line
+                | Tool::Spiral
+                | Tool::Arc
                 | Tool::Text
                 // A drag draws the box the image fills; a click places it fitted.
                 | Tool::Image
@@ -101,9 +109,9 @@ impl Tool {
     /// What a plain click with this tool makes, or `None` for a tool whose click
     /// means something else — or nothing.
     ///
-    /// Exhaustive with no wildcard, so a new tool is a build error here. Frame and Line
-    /// answer `None` deliberately: a default frame guesses at a layout, and a default
-    /// line would invent a direction.
+    /// Exhaustive with no wildcard, so a new tool is a build error here. Frame and the
+    /// line tools answer `None` deliberately: a default frame guesses at a layout, and
+    /// a default line, spiral or arc would invent a direction.
     pub fn click_makes(self) -> Option<ClickCreate> {
         match self {
             Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => {
@@ -112,7 +120,7 @@ impl Tool {
             Tool::Image => Some(ClickCreate::FittedImage),
             Tool::Text => Some(ClickCreate::TextNode),
             // A slice's click picks the slice under it (`OndinApp::slice_at`).
-            Tool::Frame | Tool::Line | Tool::Slice => None,
+            Tool::Frame | Tool::Line | Tool::Spiral | Tool::Arc | Tool::Slice => None,
             Tool::Select
             | Tool::Scale
             | Tool::ShapeBuilder
@@ -191,6 +199,15 @@ pub const POLYGON_DEFAULT_SIDES: u32 = 3;
 /// the golden-section radius where the spokes' edges line up straight through the middle.
 pub const STAR_DEFAULT_POINTS: u32 = 5;
 pub const STAR_DEFAULT_RATIO: f64 = 0.382;
+/// Half turns a fresh spiral is drawn with (three and a half turns), and the most `↑`
+/// reaches.
+pub const SPIRAL_DEFAULT_HALF_TURNS: u32 = 7;
+const SPIRAL_MAX_HALF_TURNS: u32 = 40;
+/// A drawn arc's sweep moves in steps of this many degrees, from one step to one short
+/// of a whole turn; a fresh arc is a quarter turn.
+pub const ARC_STEP_DEG: u32 = 15;
+pub const ARC_DEFAULT_STEPS: u32 = 6;
+const ARC_MAX_STEPS: u32 = 360 / ARC_STEP_DEG - 1;
 
 /// The authored local box of a node, or `None` for the kinds with no such field
 /// (lines, paths, groups, booleans), which scale through [`resize_geometry`] and
@@ -1990,6 +2007,138 @@ pub fn step_sides(sides: u32, up: bool, down: bool) -> u32 {
         i64::from(geometry::MIN_SIDES),
         i64::from(geometry::MAX_SIDES),
     ) as u32
+}
+
+/// The count `↑`/`↓` step while `shape` is drawn: sides or points, a spiral's half
+/// turns, an arc's [`ARC_STEP_DEG`] steps.
+pub fn drawn_count(shape: Tool) -> u32 {
+    match shape {
+        Tool::Star => STAR_DEFAULT_POINTS,
+        Tool::Spiral => SPIRAL_DEFAULT_HALF_TURNS,
+        Tool::Arc => ARC_DEFAULT_STEPS,
+        _ => POLYGON_DEFAULT_SIDES,
+    }
+}
+
+/// One press of `↑` or `↓` on the [`drawn_count`] of `shape`, held to its range.
+pub fn step_drawn_count(shape: Tool, count: u32, up: bool, down: bool) -> u32 {
+    let range = match shape {
+        Tool::Spiral => 1..=SPIRAL_MAX_HALF_TURNS,
+        Tool::Arc => 1..=ARC_MAX_STEPS,
+        _ => return step_sides(count, up, down),
+    };
+    let delta = i64::from(up) - i64::from(down);
+    (i64::from(count) + delta).clamp(i64::from(*range.start()), i64::from(*range.end())) as u32
+}
+
+/// What the pill says of a spiral's or arc's [`drawn_count`]: `3.5 turns`, `90°`.
+pub fn drawn_count_label(shape: Tool, count: u32) -> Option<String> {
+    match shape {
+        Tool::Spiral => {
+            let half = if count % 2 == 1 { ".5" } else { "" };
+            let unit = if count == 2 { "turn" } else { "turns" };
+            Some(format!("{}{half} {unit}", count / 2))
+        }
+        Tool::Arc => Some(format!("{}°", count * ARC_STEP_DEG)),
+        _ => None,
+    }
+}
+
+/// An Archimedean spiral in world space, `half_turns` half turns out from `centre`
+/// and ending at `end`, winding clockwise on screen. Its radius grows evenly with
+/// the angle, so the gap between neighbouring turns is the same all the way out.
+pub fn spiral_path(centre: Point, end: Point, half_turns: u32) -> BezPath {
+    /// Cubics per half turn; four keep the fit within a hair of the true spiral.
+    const PER_HALF_TURN: u32 = 4;
+    let d = end - centre;
+    let radius = d.hypot();
+    let total = f64::from(half_turns.max(1)) * std::f64::consts::PI;
+    let end_angle = d.y.atan2(d.x);
+    let grow = radius / total;
+    // The point and its derivative by the angle swept from the centre.
+    let at = |theta: f64| {
+        let (r, a) = (grow * theta, end_angle - total + theta);
+        let (sin, cos) = a.sin_cos();
+        (
+            centre + Vec2::new(r * cos, r * sin),
+            Vec2::new(grow * cos - r * sin, grow * sin + r * cos),
+        )
+    };
+    let segments = half_turns.max(1) * PER_HALF_TURN;
+    let step = total / f64::from(segments);
+    let mut path = BezPath::new();
+    let (mut p0, mut d0) = at(0.0);
+    path.move_to(p0);
+    for i in 1..=segments {
+        let (p1, d1) = at(step * f64::from(i));
+        path.curve_to(p0 + d0 * (step / 3.0), p1 - d1 * (step / 3.0), p1);
+        (p0, d0) = (p1, d1);
+    }
+    path
+}
+
+/// A circular arc in world space from `a` to `b`, sweeping `sweep_deg` clockwise on
+/// screen, so it bulges to the left of the way from `a` to `b`.
+pub fn arc_path(a: Point, b: Point, sweep_deg: f64) -> BezPath {
+    let d = b - a;
+    let chord = d.hypot();
+    let mut path = BezPath::new();
+    path.move_to(a);
+    if chord < 1e-9 {
+        return path;
+    }
+    let half = sweep_deg.to_radians() / 2.0;
+    let radius = chord / (2.0 * half.sin());
+    // Right of the way from `a` to `b`, where the centre is while the sweep is under
+    // a half turn; past it the cosine turns negative and the centre crosses over.
+    let right = Vec2::new(-d.y, d.x) / chord;
+    let centre = a.midpoint(b) + right * (radius * half.cos());
+    let start = (a - centre).atan2();
+    // The core outlines' flattening tolerance.
+    ondin_core::kurbo::Arc::new(centre, Vec2::new(radius, radius), start, 2.0 * half, 0.0)
+        .append_iter(0.1)
+        .for_each(|el| match el {
+            PathEl::MoveTo(_) => {}
+            el => path.push(el),
+        });
+    path
+}
+
+/// Create an open `Path` node from the world-space `path` under `parent`, carrying
+/// the one `stroke` and no fill. The node origin sits at the path's first point.
+pub fn create_open_path(
+    id: NodeId,
+    parent: NodeId,
+    index: usize,
+    parent_world: Affine,
+    mut path: BezPath,
+    stroke: Stroke,
+) -> Transaction {
+    let first = match path.elements().first() {
+        Some(PathEl::MoveTo(p)) => *p,
+        _ => return Transaction(vec![]),
+    };
+    let origin = parent_world.inverse() * first;
+    path.apply_affine(Affine::translate(-origin.to_vec2()) * parent_world.inverse());
+    Transaction(vec![
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Path {
+                path,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: ondin_core::symmetry::PathMirror::NONE,
+            },
+            transform: Some(Affine::translate(origin.to_vec2())),
+            name: None,
+        },
+        Operation::SetStrokes {
+            id,
+            strokes: keyed_by_position([stroke]),
+        },
+    ])
 }
 
 /// Create a regular polygon inscribed in the world box `a`..`b`.
@@ -5157,6 +5306,8 @@ mod tests {
             Tool::Polygon,
             Tool::Star,
             Tool::Line,
+            Tool::Spiral,
+            Tool::Arc,
         ] {
             assert!(tool.drags_a_box(), "{tool:?}");
         }
@@ -5192,6 +5343,8 @@ mod tests {
             // Box tools deliberately without a click answer, then non-creation tools.
             (Tool::Frame, None),
             (Tool::Line, None),
+            (Tool::Spiral, None),
+            (Tool::Arc, None),
             (Tool::Select, None),
             (Tool::Scale, None),
             (Tool::ShapeBuilder, None),
@@ -9352,5 +9505,163 @@ mod side_shear_tests {
         assert!(side_shear(box_, Handle::TopLeft, drag, false).is_none());
         let slit = Rect::new(0.0, 0.0, 200.0, MIN_EXTENT * 0.5);
         assert!(side_shear(slit, Handle::Top, drag, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod spiral_arc_tests {
+    use super::*;
+    use ondin_core::kurbo::{ParamCurveArclen, Shape};
+
+    fn cubics(path: &BezPath) -> Vec<CubicBez> {
+        path.segments()
+            .map(|s| match s {
+                ondin_core::kurbo::PathSeg::Cubic(c) => c,
+                other => panic!("a spiral is all cubics: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// A spiral starts on its centre, ends on the dragged point, and each cubic's
+    /// middle sits on the true Archimedean spiral, whose radius grows evenly with
+    /// the angle swept.
+    #[test]
+    fn a_spiral_runs_from_the_centre_to_the_drag_on_the_true_curve() {
+        let centre = Point::new(10.0, 20.0);
+        let end = Point::new(40.0, 60.0);
+        let radius = 50.0;
+        for half_turns in [1, 2, 7, 12] {
+            let path = spiral_path(centre, end, half_turns);
+            let segs = cubics(&path);
+            assert_eq!(segs.len(), half_turns as usize * 4);
+            assert!((segs[0].p0 - centre).hypot() < 1e-9);
+            assert!(
+                (segs.last().unwrap().p3 - end).hypot() < 1e-9,
+                "{half_turns}"
+            );
+            let total = f64::from(half_turns) * std::f64::consts::PI;
+            let end_angle = (end - centre).atan2();
+            let step = total / segs.len() as f64;
+            for (i, seg) in segs.iter().enumerate() {
+                let theta = step * (i as f64 + 0.5);
+                let a = end_angle - total + theta;
+                let r = radius * theta / total;
+                let truth = centre + Vec2::new(r * a.cos(), r * a.sin());
+                let off = (seg.eval(0.5) - truth).hypot();
+                assert!(
+                    off < 0.01 * radius,
+                    "{half_turns}: segment {i} off by {off}"
+                );
+            }
+        }
+    }
+
+    /// Every sweep the keys reach makes an arc from the press to the release whose
+    /// length is the circle's `r·θ` for the radius the chord and sweep give, so it is
+    /// a true circular arc of that sweep; a quarter arc bulges to the left of the way
+    /// it was dragged.
+    #[test]
+    fn an_arc_joins_the_drag_s_ends_at_every_sweep() {
+        let a = Point::new(440.0, 320.0);
+        let b = Point::new(580.0, 180.0);
+        let chord = (b - a).hypot();
+        for steps in 1..=ARC_MAX_STEPS {
+            let sweep = f64::from(steps * ARC_STEP_DEG).to_radians();
+            let path = arc_path(a, b, sweep.to_degrees());
+            let first = path.segments().next().unwrap().start();
+            let last = path.segments().last().unwrap().end();
+            assert!((first - a).hypot() < 1e-6, "{steps}");
+            assert!((last - b).hypot() < 1e-6, "{steps}");
+            let r = chord / (2.0 * (sweep / 2.0).sin());
+            let len: f64 = path.segments().map(|s| s.arclen(1e-6)).sum();
+            assert!(
+                (len - r * sweep).abs() < 1e-3 * r * sweep,
+                "{steps}: {len} against {}",
+                r * sweep
+            );
+        }
+        // The quarter arc's centre is the drag box's far corner, and it bulges up-left.
+        let quarter = arc_path(a, b, 90.0);
+        let corner = Point::new(580.0, 320.0);
+        for seg in quarter.segments() {
+            assert!(((seg.eval(0.5) - corner).hypot() - 140.0).abs() < 0.05);
+        }
+        let bounds = quarter.bounding_box();
+        assert!((bounds.min_x() - 440.0).abs() < 1e-6 && (bounds.min_y() - 180.0).abs() < 1e-6);
+    }
+
+    /// The keys walk each count through its range and stop at the ends.
+    #[test]
+    fn the_drawn_counts_stop_at_their_ends() {
+        assert_eq!(step_drawn_count(Tool::Spiral, 1, false, true), 1);
+        assert_eq!(step_drawn_count(Tool::Spiral, 7, true, false), 8);
+        assert_eq!(
+            step_drawn_count(Tool::Spiral, SPIRAL_MAX_HALF_TURNS, true, false),
+            SPIRAL_MAX_HALF_TURNS
+        );
+        assert_eq!(step_drawn_count(Tool::Arc, 1, false, true), 1);
+        assert_eq!(step_drawn_count(Tool::Arc, ARC_MAX_STEPS, true, false), 23);
+        assert_eq!(23 * ARC_STEP_DEG, 345, "one step short of a whole turn");
+        assert_eq!(
+            step_drawn_count(Tool::Polygon, 3, false, true),
+            step_sides(3, false, true)
+        );
+        assert_eq!(drawn_count(Tool::Spiral), 7);
+        assert_eq!(drawn_count(Tool::Arc), 6);
+    }
+
+    /// The pill says turns in halves and the sweep in degrees; other tools say nothing.
+    #[test]
+    fn the_pill_names_turns_and_sweep() {
+        assert_eq!(
+            drawn_count_label(Tool::Spiral, 7).as_deref(),
+            Some("3.5 turns")
+        );
+        assert_eq!(
+            drawn_count_label(Tool::Spiral, 2).as_deref(),
+            Some("1 turn")
+        );
+        assert_eq!(
+            drawn_count_label(Tool::Spiral, 1).as_deref(),
+            Some("0.5 turns")
+        );
+        assert_eq!(drawn_count_label(Tool::Arc, 6).as_deref(), Some("90°"));
+        assert_eq!(drawn_count_label(Tool::Polygon, 5), None);
+    }
+
+    /// An open path's node sits at its first point in the parent's space, and its
+    /// outline, carried into the world, is the path it was given.
+    #[test]
+    fn an_open_path_lands_at_its_first_point() {
+        let world = arc_path(Point::new(50.0, 60.0), Point::new(90.0, 20.0), 120.0);
+        let parent_world = Affine::translate((30.0, 10.0));
+        let mut ids = ondin_core::IdSource::new(1);
+        let tx = create_open_path(
+            ids.mint(),
+            ids.mint(),
+            0,
+            parent_world,
+            world.clone(),
+            solid_stroke(Color::BLACK, 2.0),
+        );
+        let Operation::CreateNode {
+            kind: NodeKind::Path { path, .. },
+            transform: Some(t),
+            ..
+        } = &tx.0[0]
+        else {
+            panic!("a path node first");
+        };
+        assert_eq!(*t, Affine::translate((20.0, 50.0)));
+        let mut back = path.clone();
+        back.apply_affine(parent_world * *t);
+        for (x, y) in back.segments().zip(world.segments()) {
+            assert!((x.end() - y.end()).hypot() < 1e-9);
+        }
+        assert!(
+            matches!(&tx.0[1], Operation::SetStrokes { .. }),
+            "stroked, and no fill op"
+        );
+        assert_eq!(tx.0.len(), 2);
     }
 }

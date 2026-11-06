@@ -26,16 +26,22 @@ const PAD: f32 = 4.0;
 pub(crate) enum Group {
     Select,
     Frame,
+    Line,
     Pen,
 }
 
-/// One tool a grouped slot can stand for.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// One tool a grouped slot can stand for. Stored lowercase in the view prefs, for
+/// the line slot's last pick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Member {
     Pointer,
     Lasso,
     Frame,
     Slice,
+    Line,
+    Spiral,
+    Arc,
     Pen,
     Pencil,
 }
@@ -43,11 +49,12 @@ pub(crate) enum Member {
 impl Group {
     /// The members in the row's order; the first is what the slot shows until
     /// another is picked.
-    pub(crate) fn members(self) -> [Member; 2] {
+    pub(crate) fn members(self) -> &'static [Member] {
         match self {
-            Self::Select => [Member::Pointer, Member::Lasso],
-            Self::Frame => [Member::Frame, Member::Slice],
-            Self::Pen => [Member::Pen, Member::Pencil],
+            Self::Select => &[Member::Pointer, Member::Lasso],
+            Self::Frame => &[Member::Frame, Member::Slice],
+            Self::Line => &[Member::Line, Member::Spiral, Member::Arc],
+            Self::Pen => &[Member::Pen, Member::Pencil],
         }
     }
 }
@@ -59,6 +66,9 @@ impl Member {
             Self::Lasso => icon::LASSO,
             Self::Frame => icon::FRAME,
             Self::Slice => icon::KNIFE,
+            Self::Line => icon::LINE_SEGMENT,
+            Self::Spiral => icon::SPIRAL,
+            Self::Arc => icon::ARC,
             Self::Pen => icon::PEN_NIB,
             Self::Pencil => icon::PENCIL_SIMPLE,
         }
@@ -70,9 +80,27 @@ impl Member {
             Self::Lasso => "Lasso select (Q)",
             Self::Frame => "Frame (F)",
             Self::Slice => "Slice — drag out a region to export (Shift+F)",
+            Self::Line => "Line (L)",
+            Self::Spiral => "Spiral (Shift+L)",
+            Self::Arc => "Arc",
             Self::Pen => "Pen (P)",
             Self::Pencil => "Pencil (Shift+P)",
         }
+    }
+
+    /// The tool this member arms, for all but the pointer's two, which differ only
+    /// in the marquee's shape.
+    fn tool(self) -> Option<Tool> {
+        Some(match self {
+            Self::Pointer | Self::Lasso => return None,
+            Self::Frame => Tool::Frame,
+            Self::Slice => Tool::Slice,
+            Self::Line => Tool::Line,
+            Self::Spiral => Tool::Spiral,
+            Self::Arc => Tool::Arc,
+            Self::Pen => Tool::Pen,
+            Self::Pencil => Tool::Pencil,
+        })
     }
 }
 
@@ -87,10 +115,12 @@ pub(crate) struct Flyout {
 }
 
 /// The grouped slots' state. The pointer slot remembers through the lasso switch.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Rail {
     /// The frame slot shows the slice when neither is armed.
     pub(crate) slice: bool,
+    /// The line slot's member when none of its three is armed.
+    pub(crate) line: Member,
     /// The pen slot shows the pencil when neither is armed.
     pub(crate) pencil: bool,
     pub(crate) flyout: Option<Flyout>,
@@ -108,6 +138,12 @@ impl OndinApp {
                 _ if self.rail.slice => Member::Slice,
                 _ => Member::Frame,
             },
+            Group::Line => match self.tool {
+                Tool::Line => Member::Line,
+                Tool::Spiral => Member::Spiral,
+                Tool::Arc => Member::Arc,
+                _ => self.rail.line,
+            },
             // The pen armed inside a node edit is the pen, whatever was last picked.
             Group::Pen if self.pen_bias || self.tool == Tool::Pen => Member::Pen,
             Group::Pen if self.tool == Tool::Pencil || self.rail.pencil => Member::Pencil,
@@ -120,28 +156,20 @@ impl OndinApp {
         match member {
             Member::Pointer => self.tool == Tool::Select && !self.lasso,
             Member::Lasso => self.tool == Tool::Select && self.lasso,
-            Member::Frame => self.tool == Tool::Frame,
-            Member::Slice => self.tool == Tool::Slice,
             Member::Pen => self.tool == Tool::Pen || self.pen_bias,
-            Member::Pencil => self.tool == Tool::Pencil,
+            m => m.tool() == Some(self.tool),
         }
     }
 
     /// Arm `member`: its tool, and for the pointer's two the marquee's shape.
     pub(crate) fn rail_pick(&mut self, member: Member) {
-        let tool = match member {
-            Member::Pointer | Member::Lasso => {
-                self.choose_tool(Tool::Select);
-                let lasso = member == Member::Lasso;
-                if self.lasso != lasso {
-                    self.set_view_switch(ViewSwitch::Lasso, lasso);
-                }
-                return;
+        let Some(tool) = member.tool() else {
+            self.choose_tool(Tool::Select);
+            let lasso = member == Member::Lasso;
+            if self.lasso != lasso {
+                self.set_view_switch(ViewSwitch::Lasso, lasso);
             }
-            Member::Frame => Tool::Frame,
-            Member::Slice => Tool::Slice,
-            Member::Pen => Tool::Pen,
-            Member::Pencil => Tool::Pencil,
+            return;
         };
         self.choose_tool(tool);
     }
@@ -152,6 +180,9 @@ impl OndinApp {
         match tool {
             Tool::Frame => self.rail.slice = false,
             Tool::Slice => self.rail.slice = true,
+            Tool::Line => self.rail.line = Member::Line,
+            Tool::Spiral => self.rail.line = Member::Spiral,
+            Tool::Arc => self.rail.line = Member::Arc,
             Tool::Pen => self.rail.pencil = false,
             Tool::Pencil => self.rail.pencil = true,
             _ => {}
@@ -227,7 +258,7 @@ impl OndinApp {
         // The member under a held drag, from the row's geometry: the press belongs
         // to the slot, so no button in the row reads as hovered.
         let first = pos + egui::Vec2::splat(PAD + ui::MENU_BORDER);
-        let dragged_over = members.into_iter().enumerate().find_map(|(i, m)| {
+        let dragged_over = members.iter().copied().enumerate().find_map(|(i, m)| {
             let at = egui::Rect::from_min_size(
                 first + egui::vec2(i as f32 * (BUTTON + GAP), 0.0),
                 egui::Vec2::splat(BUTTON),
@@ -242,7 +273,7 @@ impl OndinApp {
                 ui::menu_frame(PAD).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = GAP;
-                        for m in members {
+                        for &m in members {
                             let lit = dragged_over.map_or(m == shown, |d| d == m);
                             let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, true)
                                 .on_hover_text(crate::input::keys(m.tip()));
@@ -296,6 +327,8 @@ fn paint_more_mark(ui: &egui::Ui, slot: egui::Rect) {
 mod tests {
     use super::*;
     use crate::input::Action;
+    use crate::preview::Drag;
+    use ondin_core::kurbo::{PathEl, Point};
 
     /// A headless app with one grouped slot drawn per frame, on a clock the test sets.
     struct Rig {
@@ -516,6 +549,79 @@ mod tests {
             .dispatch(&ctx, Action::ToggleView(ViewSwitch::Lasso));
         assert_eq!(rig.app.tool, Tool::Node, "the node tool keeps its marquee");
         assert!(rig.app.lasso);
+    }
+
+    /// The line slot holds three: its row opens with all three, `Shift+L` arms the
+    /// spiral and the slot keeps showing it after another tool, and `L` takes it back.
+    /// flip: `remember_rail_pick` without its `Tool::Spiral` arm → fails at
+    /// "remembered".
+    #[test]
+    fn the_line_slot_remembers_the_spiral_and_l_takes_it_back() {
+        let mut rig = Rig::new(Group::Line);
+        assert_eq!(rig.app.rail_shown(Group::Line), Member::Line);
+        let at = rig.slot.center();
+        let right = egui::PointerButton::Secondary;
+        rig.frame(
+            1.0,
+            vec![egui::Event::PointerMoved(at), button(at, right, true)],
+        );
+        rig.frame(1.1, vec![button(at, right, false)]);
+        let arc = rig.member(2);
+        rig.frame(1.2, vec![egui::Event::PointerMoved(arc)]);
+        rig.frame(1.3, vec![press(arc, true)]);
+        rig.frame(1.4, vec![press(arc, false)]);
+        assert_eq!(rig.app.tool, Tool::Arc, "the third member is the arc");
+
+        let ctx = rig.ctx.clone();
+        rig.app.dispatch(&ctx, Action::ChooseTool(Tool::Spiral));
+        rig.app.choose_tool(Tool::Rect);
+        assert_eq!(
+            rig.app.rail_shown(Group::Line),
+            Member::Spiral,
+            "remembered"
+        );
+        rig.app.dispatch(&ctx, Action::ChooseTool(Tool::Line));
+        assert_eq!(
+            rig.app.rail_shown(Group::Line),
+            Member::Line,
+            "`L` takes it back"
+        );
+    }
+
+    /// A spiral and an arc drawn with their tools are open paths with the line's
+    /// stroke and no fill, each its own undo step, and the drawn one is selected.
+    #[test]
+    fn a_drawn_spiral_and_arc_are_stroked_open_paths() {
+        let mut rig = Rig::new(Group::Line);
+        for (tool, step) in [(Tool::Spiral, "Add spiral"), (Tool::Arc, "Add arc")] {
+            let app = &mut rig.app;
+            app.choose_tool(tool);
+            app.begin_create(Point::new(100.0, 100.0));
+            let Drag::Create {
+                id, start, sides, ..
+            } = app.drag
+            else {
+                panic!("the drag began");
+            };
+            assert_eq!(sides, crate::tools::drawn_count(tool));
+            app.commit_create(id, tool, start, Point::new(160.0, 20.0));
+            let node = app.session.doc.get(id).expect("drawn");
+            let ondin_core::NodeKind::Path { path, .. } = node.kind() else {
+                panic!("{tool:?} draws a path: {:?}", node.kind());
+            };
+            assert!(
+                !path
+                    .elements()
+                    .iter()
+                    .any(|e| matches!(e, PathEl::ClosePath)),
+                "{tool:?} is open"
+            );
+            assert!(node.paint().fills.is_empty(), "{tool:?} has no fill");
+            assert_eq!(node.paint().strokes.len(), 1);
+            assert_eq!(app.session.selection.single(), Some(id));
+            let done = app.session.history.done().last().expect("a step");
+            assert_eq!(done.note.label, step);
+        }
     }
 
     /// Escape closes the open row without arming anything.

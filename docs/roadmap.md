@@ -55,10 +55,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors
   (*Simplify* works on the whole path).
 
-### Small
-
-- **Spiral and arc tools.**
-
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

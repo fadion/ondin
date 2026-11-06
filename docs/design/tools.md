@@ -13,6 +13,7 @@ resize, drop outlines, the transform origin (pivot), *Transform again* and *Repe
 - **Shapes**: frame, rect, ellipse, polygon, star, line. **Text**: edit on the canvas with a real caret.
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
+- **Spiral** (`Shift+L`) and **Arc** (no key) draw open `Path`s with the line's stroke and no fill (`tools::create_open_path`). A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends; it is Archimedean, so its turns are evenly spaced (`tools::spiral_path`, four cubics a half turn), and it starts at 3.5 turns. An arc is dragged from end to end and is a circular arc bulging to the left of the drag, clockwise on screen (`tools::arc_path`), starting at 90°. `↑`/`↓` step the turns by halves (½ to 20) or the sweep by 15° (15° to 345°), and the pill under the pointer gives the value (`tools::drawn_count_label`). Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is a path rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
 - **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
 - **Shape builder** (`Shift+M`): drag across the faces overlapping shapes cut each other into to merge them, Alt-drag to remove them (`app-booleans.md`).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
@@ -32,21 +33,22 @@ resize, drop outlines, the transform origin (pivot), *Transform again* and *Repe
 
 ### The tool rail (`rail.rs`)
 
-`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot and the
-five shapes · the Pen slot, Text, Place image · Shape builder and the eyedropper, which act on the
-selection and are used less; at its foot the styles-and-variables
+`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot, four
+shapes and the Line slot · the Pen slot, Text, Place image · Shape builder and the eyedropper,
+which act on the selection and are used less; at its foot the styles-and-variables
 and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
-subject. The five shape tools keep a slot each while the rail has room for them.
+subject. The four filled shape tools keep a slot each while the rail has room for them.
 
-- **Grouped slots.** Three slots each stand for two tools (`rail::Group::members`): Select is
-  Pointer and Lasso, Frame is Frame and Slice, Pen is Pen and Pencil. A slot shows the armed tool
-  when it is a member, else the member last picked (`rail_shown`), and carries a small `text::dim()`
-  triangle in its bottom-right corner (`paint_more_mark`).
+- **Grouped slots.** Four slots stand for several tools each (`rail::Group::members`): Select is
+  Pointer and Lasso, Frame is Frame and Slice, Line is Line, Spiral and Arc, Pen is Pen and
+  Pencil. A slot shows the armed tool when it is a member, else the member last picked
+  (`rail_shown`), and carries a small `text::dim()` triangle in its bottom-right corner
+  (`paint_more_mark`).
 - **Memory.** The Select slot's memory is the lasso switch itself (`app-selection.md`); Pointer
-  and Lasso arm Select with the switch off and on. The other two remember through `Rail::slice`
-  and `Rail::pencil`, set in `choose_tool` (`remember_rail_pick`) however the tool was armed —
-  slot, letter or palette — and kept in `prefs.view` (`rail_slice`, `rail_pencil`). The pen bias
-  inside a node edit shows Pen.
+  and Lasso arm Select with the switch off and on. The others remember through `Rail::slice`,
+  `Rail::line` and `Rail::pencil`, set in `choose_tool` (`remember_rail_pick`) however the tool
+  was armed — slot, letter or palette — and kept in `prefs.view` (`rail_slice`, `rail_line`,
+  `rail_pencil`). The pen bias inside a node edit shows Pen.
 - **Gestures** (`rail_group`, `rail_flyout`). A click arms what the slot shows. A press held
   `HOLD_S` (0.45 s) or a right-click opens the members as a row of icon buttons beside the slot
   (`ui::flyout_place`, a `ui::menu_frame` card, area `"rail-flyout"`), the shown member lit, each

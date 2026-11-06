@@ -1176,6 +1176,8 @@ impl Item {
                     Tool::Polygon => ("Tool: Polygon", icon::TRIANGLE, "G"),
                     Tool::Star => ("Tool: Star", icon::STAR, "S"),
                     Tool::Line => ("Tool: Line", icon::LINE_SEGMENT, "L"),
+                    Tool::Spiral => ("Tool: Spiral", icon::SPIRAL, "Shift+L"),
+                    Tool::Arc => ("Tool: Arc", icon::ARC, ""),
                     Tool::Pen => ("Tool: Pen", icon::PEN_NIB, "P"),
                     Tool::Pencil => ("Tool: Pencil", icon::PENCIL_SIMPLE, "Shift+P"),
                     Tool::Node => ("Tool: Edit points", icon::BEZIER_CURVE, "A"),

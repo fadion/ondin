@@ -1649,6 +1649,7 @@ impl OndinApp {
             lasso: view.lasso,
             rail: crate::rail::Rail {
                 slice: view.rail_slice,
+                line: view.rail_line,
                 pencil: view.rail_pencil,
                 flyout: None,
             },
@@ -7793,6 +7794,7 @@ impl OndinApp {
             snap_baselines: self.snap_baselines,
             lasso: self.lasso,
             rail_slice: self.rail.slice,
+            rail_line: self.rail.line,
             rail_pencil: self.rail.pencil,
         };
         if now != self.prefs.view {
@@ -8197,7 +8199,7 @@ impl OndinApp {
             E::Btn(icon::CIRCLE, Tool::Ellipse, "Ellipse (O)"),
             E::Btn(icon::TRIANGLE, Tool::Polygon, "Polygon (G)"),
             E::Btn(icon::STAR, Tool::Star, "Star (S)"),
-            E::Btn(icon::LINE_SEGMENT, Tool::Line, "Line (L)"),
+            E::Group(Group::Line),
             E::Sep,
             E::Group(Group::Pen),
             // No points button: like `Tool::ImageEdit`, `Tool::Node` is entered on a

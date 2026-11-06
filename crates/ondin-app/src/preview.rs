@@ -202,12 +202,13 @@ pub enum Drag {
         parent_world: Affine,
         start: Point,
         shape: Tool,
-        /// How many sides the polygon or star being drawn has, live —
-        /// `↑`/`↓` change it mid-drag (`docs/shortcuts.md` §9).
+        /// The count `↑`/`↓` step mid-drag (`docs/shortcuts.md` §9): a polygon's
+        /// sides, a star's points, a spiral's half turns, an arc's sweep in
+        /// `tools::ARC_STEP_DEG` steps (`tools::drawn_count`).
         ///
         /// On the gesture because there is no node yet: `create_tx` rebuilds the
         /// shape from these fields every frame. Never read for shapes without a
-        /// side count.
+        /// count.
         sides: u32,
         /// Where the pointer was on the previous frame of this drag.
         ///

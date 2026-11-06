@@ -1679,6 +1679,10 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         if plain && m.shift && i.key_pressed(egui::Key::P) {
             out.push(Action::ChooseTool(Tool::Pencil));
         }
+        // The spiral shares the line's slot as the pencil shares the pen's.
+        if plain && m.shift && i.key_pressed(egui::Key::L) {
+            out.push(Action::ChooseTool(Tool::Spiral));
+        }
         if plain && m.shift && i.key_pressed(egui::Key::M) {
             out.push(Action::ChooseTool(Tool::ShapeBuilder));
         }
@@ -2578,6 +2582,21 @@ mod tests {
         assert_eq!(
             actions(Mode::Normal, vec![key(egui::Key::P, none)], none),
             vec![Action::ChooseTool(Tool::Pen)]
+        );
+    }
+
+    /// `Shift+L` is the spiral and plain `L` stays the line.
+    #[test]
+    fn shift_l_is_the_spiral_and_l_the_line() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::L, shift)], shift),
+            vec![Action::ChooseTool(Tool::Spiral)]
+        );
+        let none = egui::Modifiers::NONE;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::L, none)], none),
+            vec![Action::ChooseTool(Tool::Line)]
         );
     }
 

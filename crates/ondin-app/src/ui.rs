@@ -1745,7 +1745,8 @@ pub fn text_field(
 
 /// Typing focus: the `accent_700` hairline on a text entry's own edge while it
 /// holds focus, however it got it. Every field a person types in wears it —
-/// value, text, search, rename — painted after the field, over its own hairline.
+/// value, text, search, rename — painted after the field, over its own hairline;
+/// a [`label_edit`], which has no edge, shows its caret instead.
 pub fn typing_edge(ui: &egui::Ui, rect: egui::Rect) {
     ui.painter().rect_stroke(
         rect,
@@ -1862,7 +1863,7 @@ fn search_clear(ui: &mut egui::Ui, side: f32, glyph: f32) -> bool {
 /// places the rect this far left of where the label it replaces was drawn.
 pub const INLINE_EDIT_PAD_X: f32 = 6.0;
 
-/// A rename field laid over a list row (a layer, a page, a document card): the
+/// A rename field laid over a list row or card (a document card, a version): the
 /// field ground filling `rect`, the row's own height rather than [`CONTROL_H`],
 /// text at [`CONTROL_PT`], and [`typing_edge`] while it holds focus.
 pub fn inline_edit(
@@ -1871,22 +1872,35 @@ pub fn inline_edit(
     text: &mut String,
     id: egui::Id,
 ) -> egui::Response {
-    let font = egui::FontId::proportional(CONTROL_PT);
     ui.painter()
         .rect_filled(rect, egui::CornerRadius::same(BUTTON_R), color::field());
+    let resp = label_edit(ui, rect, text, id);
+    if resp.has_focus() {
+        typing_edge(ui, rect);
+    }
+    resp
+}
+
+/// [`inline_edit`] with no ground and no edge: the label itself turns editable
+/// where it was drawn, caret and selection only. For a name typed over in place
+/// in a tree (the layers' and pages' rows), where a field would cover the row.
+/// The label must be drawn at [`CONTROL_PT`] for the text not to move.
+pub fn label_edit(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    text: &mut String,
+    id: egui::Id,
+) -> egui::Response {
+    let font = egui::FontId::proportional(CONTROL_PT);
     let frame = edit_frame(ui, &font, rect.height(), INLINE_EDIT_PAD_X);
-    let resp = ui.put(
+    ui.put(
         rect,
         frame
             .on(egui::TextEdit::singleline(text))
             .id(id)
             .desired_width(rect.width() - INLINE_EDIT_PAD_X * 2.0)
             .font(font),
-    );
-    if resp.has_focus() {
-        typing_edge(ui, rect);
-    }
-    resp
+    )
 }
 
 /// The side of a [`paint_tick_box`].

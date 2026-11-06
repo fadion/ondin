@@ -629,7 +629,7 @@ fn row_id(id: NodeId) -> egui::Id {
     egui::Id::new(("layer-row", id))
 }
 
-/// Where the [`crate::ui::inline_edit`] rename field goes on a row whose name is
+/// Where the [`crate::ui::label_edit`] rename field goes on a row whose name is
 /// painted from `left`: the full row height, starting
 /// [`crate::ui::INLINE_EDIT_PAD_X`] left of the name, so the text does not shift
 /// when the rename opens.
@@ -1595,7 +1595,7 @@ impl OndinApp {
         }
         // Sits where the painted name sat — see `rename_field_rect`.
         let field = rename_field_rect(row, left);
-        let resp = crate::ui::inline_edit(ui, field, &mut buf, fid);
+        let resp = crate::ui::label_edit(ui, field, &mut buf, fid);
         if let Some((_, stored)) = &mut self.renaming_layer {
             *stored = buf.clone();
         }
@@ -3067,6 +3067,31 @@ mod rename_layout_tests {
             Some(rename_field_id(id)),
             "a field that re-takes focus can never be committed or cancelled"
         );
+    }
+
+    /// A rename types over the name in place: the row shows no field ground and no
+    /// typing edge while the field holds the caret.
+    /// flip: `layer_rename_field` through `ui::inline_edit` → fails at "no field ground".
+    #[test]
+    fn a_rename_shows_no_field_over_the_row() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, id) = app_with_a_layer(&ctx);
+        app.renaming_layer = Some((id, "Ellipse".to_owned()));
+        let _ = frame(&mut app, &ctx);
+        let out = frame(&mut app, &ctx);
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(rename_field_id(id)),
+            "typing"
+        );
+        let field = color::field();
+        let edge = color::accent_700();
+        let grounds = out.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(r) => r.fill == field || r.stroke.color == edge,
+            _ => false,
+        });
+        assert!(!grounds, "no field ground or edge");
     }
 
     /// No frame ends with focus on a widget that frame did not draw (AccessKit

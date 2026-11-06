@@ -983,6 +983,8 @@ pub struct OndinApp {
     pub(crate) blend: crate::blend::BlendCard,
     /// The path bar's mirror flyout is open (`crate::mirror`).
     pub(crate) mirror_open: bool,
+    /// The mirror axes' grab pills as last painted (`crate::mirror::Grips`).
+    pub(crate) mirror_grips: crate::mirror::Grips,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1618,6 +1620,7 @@ impl OndinApp {
             repeat: Default::default(),
             blend: Default::default(),
             mirror_open: false,
+            mirror_grips: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -2687,6 +2690,13 @@ impl OndinApp {
             ctx.stop_dragging();
             return true;
         }
+        // So does a mirror axis its pill is dragging.
+        if let Some(from) = self.mirror_grips.from.take() {
+            self.session.mirror.at = from;
+            self.gesture_cancelled = true;
+            ctx.stop_dragging();
+            return true;
+        }
         if self.drag.is_none() && self.layer_drag.is_none() && !self.pages.dragging() && !field {
             return false;
         }
@@ -2961,6 +2971,17 @@ impl OndinApp {
                 );
             }
             return;
+        }
+        // A dragged mirror axis lasts while the pen or the pencil does; the
+        // eyedropper hands back to the tool it was armed from, so it keeps it.
+        let from = match self.tool {
+            Tool::Eyedropper => self.dropper_return,
+            t => t,
+        };
+        if (matches!(from, Tool::Pen | Tool::Pencil) || self.pen_bias)
+            && !matches!(tool, Tool::Pen | Tool::Pencil | Tool::Eyedropper)
+        {
+            self.session.mirror.at = None;
         }
         if tool != Tool::Pen {
             self.pen = None;

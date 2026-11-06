@@ -87,10 +87,12 @@ axis, a horizontal one or both (`crate::mirror`).
 - **State.** `EditorSession::mirror` (`mirror::Mirror { axes, at }`), per document, in memory only.
   `at` is where the axes cross once one has been dragged. `None` is the default: the middle of the
   frame the run lands in (`draw_target` under the run's first point; under the pointer while nothing
-  is drawn), on open canvas the view's centre (`Camera::center`). `OndinApp::mirror_axes` resolves it.
-  A new run on open canvas fixes `at` at the view's centre as it starts (`pin_mirror_axes`), so a
-  pan or zoom mid-run does not move the axes under anchors already placed; *Reset axis* lets them
-  follow the view again.
+  is drawn), on open canvas the middle of the canvas past the rulers (`view_middle`).
+  `OndinApp::mirror_axes` resolves it. A new run on open canvas fixes `at` there as it starts
+  (`pin_mirror_axes`), so a pan or zoom mid-run does not move the axes under anchors already placed;
+  *Reset axis* lets them follow the view again. Leaving the pen and the pencil (or the node tool's
+  pen) for another tool puts `at` back to `None`, so a placed axis does not carry into the next
+  spell of drawing; the eyedropper's round trip keeps it, and the axes choice itself stays.
 - **The joining rule** (`mirror::mirrored`). An end of the run within `ON_AXIS_PT` (8 screen pt) of
   an axis is pulled onto it, and the halves join there:
 
@@ -119,9 +121,13 @@ axis, a horizontal one or both (`crate::mirror`).
   measured in the space the axes are straight in: a mirrored path's own, the world for the switch.
 - **On the canvas** (`mirror_chrome`). While the pen or the pencil is armed and mirroring, or the
   node tool's pen is, and the run in flight is not extending a path, each axis
-  is a dashed `accent_400` line through the frame being drawn in, or across the canvas on open
-  canvas, with a 16×10 accent pill at its top end (left end for the horizontal axis) as its grab
-  handle: a drag moves that axis, a double-click puts the axes back to the default. While the pen
+  is a dashed `accent_400` line through the frame the run began in or the pointer is over, when the
+  axes cross inside it; otherwise down the whole canvas past the rulers (`axis_frame`). A 16×10
+  accent pill at its top end (left end for the horizontal axis) is its grab handle: a drag moves
+  that axis, a right-click mid-drag puts it back where the drag began (`Grips::from`, in
+  `cancel_gesture`), a double-click puts the axes back to the default. The pill claims its pointer
+  (`mirror::Grips`, `OndinApp::mirror_grip`): a press or drag on it places no point, shows no
+  *On axis* mark and wears the resize cursor, under the pen, the pencil and the node tool. While the pen
   draws, the mirrored run shows at 45% of the pen stroke; while the pencil draws, its trail's image
   shows as it goes, the trail's own line at 45%, joined where the commit will join it. Where the next point would land on an
   axis (`lands_on_axis`: the pen's next anchor as its press would snap it, or the pencil's pointer,

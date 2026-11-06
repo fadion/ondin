@@ -75,6 +75,19 @@ pub(crate) struct Frame {
     pub(crate) own: bool,
 }
 
+/// The axes' grab pills as last painted, which a press on leaves to them: the pen,
+/// the pencil and the *On axis* chip stay out of a pill and its drag.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Grips {
+    /// Each pill's hit rect in screen pt, and whether it moves the vertical axis.
+    pub(crate) pills: Vec<(bool, egui::Rect)>,
+    /// The axis a pill drag is moving, while one is: `true` for the vertical.
+    pub(crate) held: Option<bool>,
+    /// Where the axes were when the held pill was pressed, which a right-click
+    /// puts back (`OndinApp::cancel_gesture`). Kept across frames while held.
+    pub(crate) from: Option<Option<Point>>,
+}
+
 /// The path axes a run drawn across `axes` lands mirrored across.
 pub(crate) fn path_mirror_of(axes: Axes) -> PathMirror {
     PathMirror {
@@ -404,8 +417,46 @@ impl OndinApp {
                     .flatten()
                     .map(|b| b.center())
             })
-            .unwrap_or(self.session.camera.center);
+            .unwrap_or_else(|| self.view_middle());
         Some((m.axes, at))
+    }
+
+    /// The middle of the canvas past the rulers, in world space; the camera's
+    /// centre before the canvas is first laid out.
+    fn view_middle(&self) -> Point {
+        let rect = self.canvas_rect;
+        if !rect.is_finite() || !rect.is_positive() {
+            return self.session.camera.center;
+        }
+        self.to_world(self.canvas_inner(rect).center(), rect, self.canvas_ppp)
+    }
+
+    /// The frame the switch's axes are drawn through, in world space: the one the
+    /// run began in, else the one under `near`, when the axes cross inside it.
+    /// `None` draws them down the whole view: on open canvas, or once they were
+    /// dragged out of that frame.
+    fn axis_frame(&self, near: Option<Point>, at: Point) -> Option<ondin_core::kurbo::Rect> {
+        let (frame, _) = self.draw_target(self.drawing_from().or(near)?);
+        if frame == self.session.page {
+            return None;
+        }
+        self.session
+            .resolved
+            .world_bounds(frame)
+            .filter(|b| b.contains(at))
+    }
+
+    /// The axis whose pill claims the pointer at `screen`, or whose pill is being
+    /// dragged: `true` for the vertical. `screen` is `None` off the canvas.
+    pub(crate) fn mirror_grip(&self, screen: Option<egui::Pos2>) -> Option<bool> {
+        self.mirror_grips.held.or_else(|| {
+            let p = screen?;
+            self.mirror_grips
+                .pills
+                .iter()
+                .find(|(_, r)| r.contains(p))
+                .map(|(vertical, _)| *vertical)
+        })
     }
 
     /// Where the run being drawn began, pen or pencil.
@@ -696,7 +747,7 @@ impl OndinApp {
     pub(crate) fn pin_mirror_axes(&mut self, p: Point) {
         let m = self.session.mirror;
         if m.axes != Axes::Off && m.at.is_none() && self.draw_target(p).0 == self.session.page {
-            self.session.mirror.at = Some(self.session.camera.center);
+            self.session.mirror.at = Some(self.view_middle());
         }
     }
 
@@ -720,6 +771,8 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
+        let from = self.mirror_grips.from.take();
+        self.mirror_grips = Grips::default();
         if !matches!(
             self.tool,
             crate::tools::Tool::Pen | crate::tools::Tool::Pencil | crate::tools::Tool::Node
@@ -742,14 +795,12 @@ impl OndinApp {
             return;
         }
         let (axes, at) = (mirror.axes, mirror.at);
-        let (frame, _) = self.draw_target(at);
-        // Through the frame being drawn in; across the view on open canvas.
-        let span = match frame != self.session.page {
-            true => self.session.resolved.world_bounds(frame),
-            false => None,
-        }
-        .map(|b| self.world_rect_to_screen(b, rect, ppp))
-        .unwrap_or(rect);
+        // Through the frame being drawn in; down the whole view past the rulers
+        // otherwise, so the pill is always where the axis is seen.
+        let span = self
+            .axis_frame(hover, at)
+            .map(|b| self.world_rect_to_screen(b, rect, ppp))
+            .unwrap_or_else(|| self.canvas_inner(rect));
         let at_s = self.to_screen(at, rect, ppp);
         let mut pills = Vec::new();
         if axes.vertical() {
@@ -782,13 +833,19 @@ impl OndinApp {
         for (vertical, r) in pills {
             painter.rect_filled(r, egui::CornerRadius::same(3), ink);
             let id = ui.id().with(("mirror-axis", vertical));
+            let hit = r.expand(3.0);
+            self.mirror_grips.pills.push((vertical, hit));
             let resp = ui
-                .interact(r.expand(3.0), id, egui::Sense::click_and_drag())
+                .interact(hit, id, egui::Sense::click_and_drag())
                 .on_hover_cursor(match vertical {
                     true => egui::CursorIcon::ResizeHorizontal,
                     false => egui::CursorIcon::ResizeVertical,
                 })
                 .on_hover_text("Drag to move the axis · double-click to put it back");
+            if resp.dragged() || resp.is_pointer_button_down_on() {
+                self.mirror_grips.held = Some(vertical);
+                self.mirror_grips.from = Some(from.unwrap_or(self.session.mirror.at));
+            }
             if ui::double_clicked(ui, &resp) {
                 self.session.mirror.at = None;
             } else if resp.dragged()
@@ -910,8 +967,11 @@ impl OndinApp {
             }
         }
         // Where the next point would land on an axis: a ring there and *On axis*,
-        // in the snaps' red. The node tool places points only with its pen.
-        let placing = self.tool != crate::tools::Tool::Node || self.pen.is_some() || self.pen_bias;
+        // in the snaps' red. The node tool places points only with its pen, and
+        // nothing places one on a pill, which moves the axis instead.
+        let placing =
+            (self.tool != crate::tools::Tool::Node || self.pen.is_some() || self.pen_bias)
+                && self.mirror_grip(ui.ctx().pointer_hover_pos()).is_none();
         let shift = ui.input(|i| i.modifiers.shift);
         if placing && let Some(on) = hover.and_then(|w| self.lands_on_axis(w, shift)) {
             let at = self.to_screen(on, rect, ppp);
@@ -1571,5 +1631,199 @@ mod tests {
         assert!(has(&app, id, Point::new(130.0, 40.0)));
         assert!(has(&app, id, Point::new(120.0, 60.0)));
         assert!(mirror_of(&app, id).vertical, "and stays mirrored");
+    }
+
+    const RECT: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+
+    /// One frame of the canvas alone, with these events.
+    fn canvas_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let time = ctx.input(|i| i.time) + 0.1;
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(RECT),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| app.canvas_ui(ui),
+        )
+    }
+
+    /// A few frames with the pointer at `p`, so hover settles; the last's output.
+    fn hover(ctx: &egui::Context, app: &mut OndinApp, p: egui::Pos2) -> egui::FullOutput {
+        for _ in 0..3 {
+            canvas_frame(ctx, app, vec![egui::Event::PointerMoved(p)]);
+        }
+        canvas_frame(ctx, app, vec![egui::Event::PointerMoved(p)])
+    }
+
+    fn primary(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// The vertical pill's hit rect as last painted.
+    fn pill(app: &OndinApp) -> egui::Rect {
+        let pills = &app.mirror_grips.pills;
+        assert_eq!(pills.len(), 1, "one pill: {pills:?}");
+        pills[0].1
+    }
+
+    /// Over a frame the axis runs through it from its middle, the pill on its top
+    /// edge; off it, down the view from the view's middle, the pill under the
+    /// ruler — even with the view's middle inside the frame.
+    ///
+    /// flip: `axis_frame` taking the frame under the axes' crossing → fails at "off the frame".
+    #[test]
+    fn the_axis_runs_through_the_frame_under_the_pointer_or_down_the_view() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        app.session
+            .adopt_document(ondin_core::Document::new(ids.mint()), None);
+        app.session.camera.center = Point::ZERO;
+        app.session.camera.zoom = 1.0;
+        let page = app.session.page;
+        let frame = app.session.ids.mint();
+        let tx = crate::tools::create_artboard(
+            frame,
+            page,
+            0,
+            Affine::IDENTITY,
+            Point::new(-200.0, -100.0),
+            Point::new(200.0, 100.0),
+            ondin_core::peniko::Color::WHITE,
+        );
+        assert!(app.session.commit(tx));
+        app.choose_tool(crate::tools::Tool::Pen);
+        app.session.mirror.axes = Axes::Vertical;
+        canvas_frame(&ctx, &mut app, Vec::new());
+
+        let inside = app.to_screen(Point::new(50.0, 0.0), RECT, 1.0);
+        hover(&ctx, &mut app, inside);
+        let on = pill(&app);
+        let top = app.to_screen(Point::new(0.0, -100.0), RECT, 1.0);
+        assert!(
+            (on.center().x - top.x).abs() < 0.5,
+            "the frame's middle: {on:?}"
+        );
+        assert!((on.top() + 1.0 - top.y).abs() < 0.5, "on the frame: {on:?}");
+
+        let outside = app.to_screen(Point::new(50.0, 250.0), RECT, 1.0);
+        hover(&ctx, &mut app, outside);
+        let off = pill(&app);
+        let inner = app.canvas_inner(RECT);
+        assert!(
+            (off.top() + 1.0 - inner.top()).abs() < 0.5,
+            "off the frame: {off:?}"
+        );
+        assert!(
+            (off.center().x - inner.center().x).abs() < 0.5,
+            "the view's middle: {off:?}"
+        );
+    }
+
+    /// A press on the pill and its drag move the axis: the pen plants nothing, and
+    /// the pill shows no *On axis* chip.
+    ///
+    /// flip: `normal_mode_input` without the pill's claim → fails at "the pen plants nothing".
+    #[test]
+    fn a_drag_on_the_pill_moves_the_axis_and_draws_nothing() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = mirroring_pen(&ctx);
+        canvas_frame(&ctx, &mut app, Vec::new());
+        let p = pill(&app).center();
+        let out = hover(&ctx, &mut app, p);
+        assert!(
+            !out.shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == "On axis")),
+            "no chip on the pill"
+        );
+        let to = p + egui::vec2(40.0, 0.0);
+        canvas_frame(&ctx, &mut app, vec![primary(p, true)]);
+        for i in 1..=4 {
+            let at = p + egui::vec2(10.0 * i as f32, 0.0);
+            canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        canvas_frame(&ctx, &mut app, vec![primary(to, false)]);
+        assert!(app.pen.is_none(), "the pen plants nothing");
+        let at = app.session.mirror.at.expect("dragged");
+        assert!((at.x - 140.0).abs() < 0.5, "the axis moved: {at:?}");
+    }
+
+    /// A right-click during a pill drag puts the axis back where the drag found it,
+    /// and the rest of the drag moves nothing.
+    ///
+    /// flip: `cancel_gesture` without the pill's arm → fails at "put back".
+    #[test]
+    fn a_right_click_mid_drag_puts_the_axis_back() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = mirroring_pen(&ctx);
+        canvas_frame(&ctx, &mut app, Vec::new());
+        let p = pill(&app).center();
+        hover(&ctx, &mut app, p);
+        canvas_frame(&ctx, &mut app, vec![primary(p, true)]);
+        for i in 1..=3 {
+            let at = p + egui::vec2(10.0 * i as f32, 0.0);
+            canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        let moved = app.session.mirror.at.expect("dragged");
+        assert!(
+            (moved.x - 130.0).abs() < 0.5,
+            "the drag moved it: {moved:?}"
+        );
+        // As the app's frame does on a right press, ahead of the UI.
+        assert!(app.cancel_gesture(&ctx));
+        assert_eq!(
+            app.session.mirror.at,
+            Some(Point::new(100.0, 0.0)),
+            "put back"
+        );
+        let on = p + egui::vec2(60.0, 0.0);
+        canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(on)]);
+        canvas_frame(&ctx, &mut app, vec![primary(on, false)]);
+        assert_eq!(
+            app.session.mirror.at,
+            Some(Point::new(100.0, 0.0)),
+            "and stays"
+        );
+        assert!(app.pen.is_none(), "the pen plants nothing");
+    }
+
+    /// Leaving the pen puts a dragged axis back; the pencil and the eyedropper's
+    /// round trip keep it.
+    ///
+    /// flip: `choose_tool` without the reset → fails at "leaving the pen".
+    #[test]
+    fn leaving_the_pen_puts_the_axis_back() {
+        let ctx = egui::Context::default();
+        let mut app = mirroring_pen(&ctx);
+        app.choose_tool(crate::tools::Tool::Pencil);
+        assert!(app.session.mirror.at.is_some(), "the pencil keeps it");
+        app.choose_tool(crate::tools::Tool::Eyedropper);
+        app.choose_tool(crate::tools::Tool::Eyedropper);
+        assert_eq!(app.tool, crate::tools::Tool::Pencil);
+        assert!(
+            app.session.mirror.at.is_some(),
+            "the eyedropper's trip keeps it"
+        );
+        app.choose_tool(crate::tools::Tool::Select);
+        assert_eq!(app.session.mirror.at, None, "leaving the pen");
+        assert_eq!(app.session.mirror.axes, Axes::Vertical, "the axes stay on");
     }
 }

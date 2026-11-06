@@ -1765,6 +1765,16 @@ impl OndinApp {
     /// at `Default`, and a reset would erase one the layers panel claimed earlier.
     fn canvas_cursor(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         let ctx = ui.ctx();
+        // A mirror axis's pill, which covers the canvas, and its drag wherever it goes.
+        let grip = ctx.pointer_hover_pos().filter(|_| resp.contains_pointer());
+        if let Some(vertical) = self.mirror_grip(grip) {
+            ctx.set_cursor_icon(match vertical {
+                true => egui::CursorIcon::ResizeHorizontal,
+                false => egui::CursorIcon::ResizeVertical,
+            });
+            ctx.set_cursor_image(None);
+            return;
+        }
         // `hovered` goes false once a drag leaves the widget.
         let on_canvas = resp.hovered() || resp.dragged();
         if !on_canvas {
@@ -2184,6 +2194,23 @@ impl OndinApp {
         // An armed eyedropper owns every press an armed pan does not, chrome included.
         if self.dropper_armed().is_some() && !panning_armed && !matches!(self.drag, Drag::Pan) {
             self.dropper_input(ui, resp, rect, ppp);
+            return;
+        }
+
+        // A mirror axis's pill moves the axis: the pen, the pencil and the node
+        // tool sit out its press and drag. Not mid-gesture, whose release they need.
+        if !panning_armed
+            && matches!(self.drag, Drag::None)
+            && self.pen.as_ref().is_none_or(|p| !p.shaping)
+            && self.pencil.is_none()
+            && self
+                .mirror_grip(
+                    ui.ctx()
+                        .pointer_interact_pos()
+                        .filter(|_| resp.contains_pointer()),
+                )
+                .is_some()
+        {
             return;
         }
 

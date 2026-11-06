@@ -967,12 +967,7 @@ pub enum MainCopy {
 ///   link stays only if its instance root came along; a member copied on its own
 ///   becomes the copy's own layer, which keeps a duplicate inside its own
 ///   instance from claiming its original's source (`LinkRule::SharedSource`).
-pub(crate) fn settle_copy(
-    doc: &Document,
-    template: &[Node],
-    copy: &mut [Node],
-    mains: MainCopy,
-) -> bool {
+pub fn settle_copy(doc: &Document, template: &[Node], copy: &mut [Node], mains: MainCopy) -> bool {
     let nodes = doc.node_map();
     let in_template: FxHashMap<NodeId, &Node> = template.iter().map(|n| (n.id, n)).collect();
     let root = template

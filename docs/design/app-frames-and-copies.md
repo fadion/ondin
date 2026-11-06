@@ -96,7 +96,8 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   `delete_layers` deletes them (a frame's guides first, `relink_for_delete`); one undo step, and the
   copies end selected. The counts of copied layers and targets never need to match.
 - Several copies from one parent: `insert_subtrees` advances each index only past earlier inserts at or
-  below it. Alt-drag builds its own `InsertSubtree` but uses the same accumulator.
+  below it. Alt-drag builds its own `InsertSubtree` but uses the same accumulator, and settles its
+  copy's links the same way (`component::settle_copy`), so a main's copy is its instance.
 - Names: typed names kept, numbered names increment per destination parent (`build::CopyNames`, §5.7b).
 
 ## What the clipboard carries

@@ -1259,6 +1259,9 @@ struct ClonedSubtree {
     nodes: Vec<ondin_core::Node>,
     /// The remapped root's id, which gets positioned and then selected.
     root: NodeId,
+    /// The copy is an instance of the main it was copied from, and so keeps the
+    /// main's name rather than taking a copy number.
+    instance: bool,
 }
 
 impl Handles {
@@ -3028,15 +3031,24 @@ impl OndinApp {
             let Some(parent) = doc.get(source).and_then(|n| n.parent()) else {
                 continue;
             };
-            let Some((nodes, root)) = ondin_core::remap_subtree(&template, &mut self.session.ids)
+            let Some((mut nodes, root)) =
+                ondin_core::remap_subtree(&template, &mut self.session.ids)
             else {
                 continue;
             };
+            // As duplicate and paste settle a copy: a main's lands as its instance.
+            let instance = ondin_core::component::settle_copy(
+                doc,
+                &template,
+                &mut nodes,
+                ondin_core::component::MainCopy::Instance,
+            );
             copies.push(ClonedSubtree {
                 source,
                 parent,
                 nodes,
                 root,
+                instance,
             });
         }
         self.alt_clone = (!copies.is_empty()).then_some(AltClone {
@@ -3103,6 +3115,9 @@ impl OndinApp {
                 id: copy.root,
                 transform: to_world.inverse() * moved * old_world,
             });
+            if copy.instance {
+                continue;
+            }
             let was_called = copy
                 .nodes
                 .iter()
@@ -21598,6 +21613,54 @@ mod flex_canvas_tests {
         let end = at(app, to);
         held(ctx, app, vec![press(end, false)]);
         frame(ctx, app, Vec::new());
+    }
+
+    /// An Alt-drag of a main drops an instance of it under the main's own name, as
+    /// duplicate and paste do.
+    /// flip: `sync_alt_clone` without `settle_copy` → fails at "not a second main".
+    #[test]
+    fn an_alt_drag_of_a_main_drops_an_instance() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, ..) = app_with_a_row(&ctx);
+        let root = app.session.doc.first_page();
+        let main = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: main,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Artboard {
+                size: Size::new(50.0, 50.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((450.0, 50.0))),
+            name: Some("Chip".into()),
+        }])));
+        app.session.selection.set_one(main);
+        app.create_component();
+        assert!(app.session.doc.get(main).is_some_and(|n| n.component()));
+        alt_drag(
+            &ctx,
+            &mut app,
+            Point::new(475.0, 75.0),
+            Point::new(475.0, 175.0),
+        );
+        let copy = app
+            .session
+            .selection
+            .single()
+            .expect("the copy is selected");
+        assert_ne!(copy, main, "a copy was made");
+        let doc = &app.session.doc;
+        let node = doc.get(copy).expect("the copy");
+        assert!(!node.component(), "not a second main");
+        assert_eq!(
+            ondin_core::component::instance_root(doc, copy),
+            Some(copy),
+            "an instance"
+        );
+        assert_eq!(node.name(), "Chip", "under the main's name");
     }
 
     /// A click selects a flex item where it is drawn, and nothing at its stored place.

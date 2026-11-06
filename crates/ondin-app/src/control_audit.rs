@@ -1145,6 +1145,19 @@ fn sweep_on(theme: Theme) {
     }
     let found = opened(&ctx, &mut app, |_, a| a.open_blend());
     check("blend shapes", app, found);
+    // *Warp…* on the box with a preset picked: the bend card's field and segments.
+    let mut app = with_a_rect(&ctx);
+    {
+        let a = &mut app;
+        let page = a.session.doc.first_page();
+        let id = a.session.doc.get(page).unwrap().children()[0];
+        a.session.selection.set_one(id);
+    }
+    let found = opened(&ctx, &mut app, |_, a| {
+        a.open_warp();
+        a.set_warp_shape(Some(ondin_core::warp::Preset::Arc));
+    });
+    check("warp card", app, found);
     let mut app = with_a_set(&ctx);
     let found = inspector(&ctx, &mut app);
     check("variants card", app, found);

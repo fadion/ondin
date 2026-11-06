@@ -2,7 +2,8 @@
 
 The v1 tool set, the tool rail and how canvas gestures behave: the wheel, the canvas cursors, cancelling, context menus and their
 chrome, selection chrome, multi-selection transforms, the Scale tool, skew, snapping during
-resize, drop outlines, the transform origin (pivot), *Transform again* and *Repeat around origin*.
+resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat around origin* and
+*Warp*.
 
 ## 9.4 v1 tools
 
@@ -26,6 +27,7 @@ resize, drop outlines, the transform origin (pivot), *Transform again* and *Repe
   - Once the gaps are even, the selection shows **spacing handles** on the canvas: drag a gap band to set every gap of its axis, or a layer's centre dot to reorder it (`layout.md`, *Spacing handles on a loose selection*).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Transform again** (the last move, rotation, scale or skew once more) and **Repeat around origin…** (copies turned about the pivot), below.
+- **Warp…**: an envelope round the selection, dragged by its corners or bent by an *Arc*, *Flag* or *Bulge* preset, baked into plain paths (below).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
 - **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
@@ -242,7 +244,7 @@ different verb (`Ctrl` on a side).
 - The `W × H` badge quotes that box: the inspector's numbers for one layer, the oriented box in its own axes for several. It hangs off the edge whose outward normal points most steeply down the screen, so on a rotated rectangle the text is never more than 45° off horizontal.
 - **Hover** outlines exactly what a click would select, `Ctrl` and `Ctrl`+`Alt` included; a frame or a group is traced by its box (the selection box's, hidden children included), since tracing every leaf it holds made a busy ring of a large group. The ring is 3px, against the selection box's 1.2px.
 - `canvas::stroke_outlines` takes a `view` (`canvas::outline_view`, the viewport inflated by the ring width) and rejects subtrees missing it, copying `scene.rs`'s `bounds_cover_subtree`: a group or clipping frame can be rejected whole, a non-clipping frame cannot. Visibility is read through `display_node`, so a layers-panel eye preview counts.
-- **Inspector edits hide the chrome** (box, handles, badge, pivot, hover outline, key-layer trace). `canvas::chrome_hidden` holds the list: `app::ChromeHold` is one term, beside `editing_in_place` (pen, path editing, image editing, gradient handles). A scrub's 1.5s count starts when the button comes up and each keystroke restarts it; the chrome returns on the timeout, on pointer movement over the canvas, or at once on `cancel_gesture`. An edit arms the hide if its transaction `changes_ink` (§5.7): a 90° turn does; the proportion lock and opening the per-corner dialog do not. Box trim moves the box without moving ink, so it commits through `commit_chrome_edit` and keeps its chrome. `app::edit_note` also requires that the control did something.
+- **Inspector edits hide the chrome** (box, handles, badge, pivot, hover outline, key-layer trace). `canvas::chrome_hidden` holds the list: `app::ChromeHold` is one term, beside `editing_in_place` (pen, path editing, image editing, gradient handles, an open warp envelope). A scrub's 1.5s count starts when the button comes up and each keystroke restarts it; the chrome returns on the timeout, on pointer movement over the canvas, or at once on `cancel_gesture`. An edit arms the hide if its transaction `changes_ink` (§5.7): a 90° turn does; the proportion lock and opening the per-corner dialog do not. Box trim moves the box without moving ink, so it commits through `commit_chrome_edit` and keeps its chrome. `app::edit_note` also requires that the control did something.
 - Every inspector control commits through `commit_edit` or `edit_valve` (§9.3). `only_the_layers_panel_commits_without_the_committer` requires `self.session.commit` only in `panels/layers.rs`; the identity row's *Group*/*Ungroup* call the keyboard verbs declared in `app.rs`.
 
 **A lone `Line` gets two end handles instead of a box.** `canvas::lone_line` is `Some` only when the
@@ -598,6 +600,69 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
   a main or an instance root, on, *Copies of a component are linked already*; otherwise off, with
   the reason `create_component_refusal` gives.
 
+### Warp (`warp.rs`, `ondin_core::warp`)
+
+An envelope round the selection's world box, bent on the canvas and baked into plain paths. Nothing
+stays live.
+
+- **Envelopes** (`warp::Envelope`). *Free distort* (`Free([Point; 4])`) is a perspective map of the
+  box onto four dragged corners, so straight lines stay straight. The presets (`Preset { preset,
+  bend, vertical }`, `bend` in `-1..=1`, along the width or, when `vertical`, the height):
+
+  | Preset | Map |
+  | --- | --- |
+  | Arc | the box bent round a circle; the centreline keeps its length and its ends stay level, the top of the bend rises. It folds once the circle's radius falls to half the box's height across the bend, so `max_bend` is min(1, 2w/(πh)) |
+  | Flag | one wave along the box, amplitude bend·h/2, up at the first quarter and down at the third |
+  | Bulge | y·(1 + bend·(1 − 4u²)) about the centre; a negative bend pinches |
+
+- **Refit.** Each outline is carried through the map in world space and refitted with cubics whose
+  handles are the original handles carried by the map's derivative, halved until the fit is within
+  `warp::TOLERANCE` (0.05 world units) of the true image. Under *Free distort* a line stays a line.
+- **Subjects** (`warp::subjects`) open groups and booleans down to their leaves. Refusals
+  (`Refusal::says`), which both the dimmed row and a refused commit give: *Select layers to warp*
+  (nothing selected, or nothing with an outline), *Pictures can't be warped; trace it first*,
+  *Frames can't be warped; warp the layers inside*, *A layer to warp is locked* (anywhere under the
+  selection, since a locked child would be rewritten too), *Warp can't work inside a component or an
+  instance*.
+- **The commit** (`warp::warp`): a path keeps its node and takes the warped outline (`SetGeometry`,
+  radii baked, mirror cleared); any other leaf, shapes and text (outlined) alike, is replaced through
+  `build::replace_with_path` (`app-booleans.md`), keeping its look, name and place. A replaced
+  selected layer is replaced in the selection by its path. One undo step, *Warp* (`icon::WARP`); the
+  status says *Warped*. An envelope left square commits nothing.
+- **The preview** (`warp::preview`) cannot be the commit, since a render preview refuses
+  `DeleteNode`: a path takes its warped outline, and every other shown leaf is hidden
+  (`SetVisible false`) under a stand-in path at its index wearing its look (`build::carried_look`);
+  a hidden leaf gets none. Stand-ins are minted from a copy of the id counter, so the preview spends
+  no ids. It is rebuilt when the envelope changes and put back when another preview cleared it.
+
+**The session** (`WarpSession` on `OndinApp::warp`).
+
+- **Doors.** The layer menu's Structure row *Warp…* (`Item::Warp`, glyph `WARP`, `context-menus.md`
+  §4) and the palette (keywords *distort*, *envelope*, *arc*,
+  *flag*, *bulge*, *bend*, *perspective*). No chord. Opening arms Select if a non-selecting tool was
+  armed, and closes the inspector's popovers and the Repeat and Blend cards.
+- **The canvas.** The session owns every press an armed pan does not (`normal_mode_input`), so the
+  selection cannot change under it; `editing_in_place` hides the selection chrome. `canvas::draw_warp`
+  draws the outline in `SELECT`; mesh lines at thirds in `SELECT_DIM` while a handle is held or the
+  pointer is inside; under *Free distort* the corners as a line end's square handles, under a preset
+  one round handle in the shape dots' look at the warped top of the bend (the left edge when
+  vertical, the flag's first crest), with a *Bend 40%* pill while it is dragged.
+- **Dragging.** A corner lands on the pixel grid when it is on; Shift keeps it on the line of its
+  nearer edge instead. A corner that would make the quad non-convex stops, saying *That corner would
+  fold the shape*. The bend handle and the card's field stop at `max_bend`, saying *That much bend
+  folds the shape*. Picking *Arc* over text says *Put the text on a path to keep it editable*.
+- **The warp bar** takes the path bar's place (`path_bar::warp_bar`, `app-pen-and-nodes.md`): *Free
+  distort*, *Arc*, *Flag* and *Bulge* as one choice (`WARP_FREE`, `WARP_ARC`, `WARP_FLAG`,
+  `WARP_BULGE`); a rule; *Reset the envelope* (`ARROW_COUNTER_CLOCKWISE`, dimmed *The envelope is
+  already square*); a rule; *Done* (`Enter`). A preset hangs a card beside the bar as *Offset* does
+  (`warp_card`): the preset's name as a `ui::eyebrow`, a *Bend* value field in percent (−100 to
+  100), and *Horizontal · Vertical* as `ui::segmented`. The presets share one bend, held to each
+  one's range as they are switched.
+- **Ways out.** `Enter` commits (`Action::Enter`). `Escape` cancels, its own rung after the Blend
+  card's. Choosing any tool cancels (`choose_tool`). A selection change or a document edit under it
+  closes it (`tend_warp`, every frame). Its standing preview is excused in `cancel_gesture`, as the
+  Repeat and Blend cards' are, so a right-click still opens a menu.
+
 ### `Ctrl`+arrow size step
 
 `Ctrl`+arrows step the selection's box by the nudge step (`input::NudgeStep`): 1, or 10 with
@@ -613,6 +678,7 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
 - **A step's name is what teaches *Transform again*.** `again::kind_of` matches the undo-step names the doors pass to `name_step`; renaming one (`Move`, `Rotate`, `Scale`, …) silently stops that door teaching it. `transform_steps_are_recognised_by_name` pins the matcher, not the doors' names.
 - **Hidden is not disarmed.** `editing_in_place` hides the selection chrome but arms nothing off; `selection_handles`, `line_ends`, `grab_rail_handle` and `on_pivot` each refuse under `edited_gradient`, or a hidden handle takes the press from the gradient's (the pivot sits on a new radial's centre). `the_box_handles_step_aside` and `a_hidden_pivot_does_not_take_a_centre_s_press` pin the box handles and the pivot.
 - **The hold's release is not a pick.** egui reports the release that ends a hold as the slot's click; `rail_group`'s `ends_hold` guard keeps it from arming the shown member and closing the row. The row finds the member under a held drag from its own geometry, since the press belongs to the slot and no button in the row reads as hovered. `a_held_press_opens_the_row_and_a_release_over_a_member_picks_it` pins the guard, and its release over the lasso exercises the geometry.
+- **A warp's preview is not its commit.** Previewing `warp::warp`'s transaction would show nothing, since a render preview with a `DeleteNode` is dropped whole; `warp::preview` hides each replaced leaf under a stand-in instead. `a_warp_bakes_a_group_into_paths` pins that the preview deletes nothing.
 - **Same press, two consumers.** The cancel and the context menu share one press: `gesture_cancelled` must be read at the top of `canvas_context_menu`, before any branch selects.
 - **Dropdown keyboard focus.** A dropdown opened by clicking its head leaves `focused() == None`, so `egui_wants_keyboard_input` does not cover it.
 - **Popover flags outlive popovers.** Gate on `popover_heard`, not on the flags, or Escape is swallowed behind a popover nobody is drawing.

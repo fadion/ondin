@@ -101,6 +101,7 @@ impl OndinApp {
         // One card in the popover lane at a time.
         self.close_inspector_popovers();
         self.close_blend();
+        self.close_warp();
         if self.repeat.open {
             return;
         }

@@ -226,7 +226,7 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
 ## The path bar
 
 A short rail floats beside the tool rail, centred on its Pen slot (`OndinApp::pen_button`, whichever
-of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; both bars are drawn by
+of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; every bar is drawn by
 `show_bar`). It shows nothing the canvas does not already offer except *Simplify*, *Offset* and the
 mirror.
 
@@ -242,6 +242,8 @@ mirror.
   *Both axes* as `ui::menu_check` rows, a rule, and *Reset axis*, dimmed until an axis has been
   dragged (*The axis is where it starts*). A pick or a press elsewhere closes it, and so does
   `Escape`, a rung of the ladder; leaving the pen and the pencil drops it.
+- **While a warp envelope is open** the warp bar stands in its place, ahead of both, and the mirror
+  flyout and the Offset card close (`path_bar::warp_bar`, `tools.md` *Warp*).
 
 - **Simplify** (`build::simplify_path`, `simplify_outline`) flattens the drawn outline and refits it
   with `fit`'s cubics, within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units), as *Offset path*'s

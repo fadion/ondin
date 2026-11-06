@@ -282,6 +282,9 @@ pub enum Item {
     /// *Blend shapes…*: the card that makes the steps between two shapes
     /// (`crate::blend`).
     BlendShapes,
+    /// *Warp…*: an envelope round the selection, baked into paths
+    /// (`crate::warp`). Among the conversions because it ends as a path.
+    Warp,
     /// §4 / §5.4 / §5.5 — one shape becomes the `Path` its outline traces
     /// (`build::outline`).
     ///
@@ -627,6 +630,7 @@ impl Item {
         Item::Flatten,
         Item::Divide,
         Item::BlendShapes,
+        Item::Warp,
         Item::OutlineShape,
         Item::OutlineStroke,
         Item::JoinPaths,
@@ -896,6 +900,7 @@ impl Item {
             Item::Divide => s("Divide", icon::DIVIDE, None, Group::Structure),
             // *Blend shapes*, since *Blend* already names the blend mode.
             Item::BlendShapes => s("Blend shapes…", icon::BLEND_SHAPES, None, Group::Structure),
+            Item::Warp => s("Warp…", icon::WARP, None, Group::Structure),
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
             Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
             Item::JoinPaths => s("Join paths", icon::PLUGS_CONNECTED, None, Group::Structure),
@@ -1431,6 +1436,15 @@ impl Item {
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Divide => &["boolean", "split", "cut", "pieces"],
             Item::BlendShapes => &["morph", "tween", "steps", "interpolate"],
+            Item::Warp => &[
+                "distort",
+                "envelope",
+                "arc",
+                "flag",
+                "bulge",
+                "bend",
+                "perspective",
+            ],
             Item::TransformAgain => &["repeat", "again", "redo", "step"],
             Item::RepeatAround => &["radial", "rotate", "copies", "ring", "circular", "array"],
             Item::Restack(_) => &["order", "arrange", "z"],
@@ -1889,6 +1903,8 @@ pub struct LayerState {
     pub divisible: bool,
     /// Why *Blend shapes…* cannot take the selection (`blend::pair`), if not.
     pub blend_refusal: Option<&'static str>,
+    /// Why *Warp…* cannot take the selection (`OndinApp::warp_refusal`), if not.
+    pub warp_refusal: Option<&'static str>,
     /// The layer is a path mirrored across its own axes, which *Flatten* makes plain.
     pub mirrored: bool,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
@@ -2351,6 +2367,18 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
+    // The last conversion, for anything but frames alone; a picture, or a frame
+    // among other layers, is refused by name.
+    if !cx.kinds.iter().all(|k| *k == Kind::Frame) {
+        rows.push(
+            Row::new(Item::Warp)
+                .dim_if(
+                    st.warp_refusal.is_some(),
+                    st.warp_refusal.unwrap_or_default(),
+                )
+                .dim_if(locked, why),
+        );
+    }
     // The group ends on its three submenus. *Align ▸* is horizontal then vertical,
     // as the inspector's row reads; distribute stays the inspector's and the
     // palette's.
@@ -2578,6 +2606,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::Flatten, "Needs two layers or a boolean"),
     (Item::Divide, DIVIDE_NEEDS),
     (Item::BlendShapes, "Blend shapes needs exactly two shapes"),
+    (Item::Warp, "Select layers to warp"),
     (Item::OutlineShape, "Needs one shape"),
     (Item::OutlineStroke, "Needs one stroked shape"),
     (Item::JoinPaths, "Needs two path layers"),
@@ -3343,6 +3372,7 @@ impl OndinApp {
             blend_refusal: ondin_core::blend::pair(&self.session.doc, self.session.selection.ids())
                 .err()
                 .map(|r| r.says()),
+            warp_refusal: self.warp_refusal(),
             mirrored: build::is_mirrored_path(&self.session.doc, id),
             all_slices: self.session.selection.ids().iter().all(|s| {
                 matches!(
@@ -3487,6 +3517,7 @@ impl OndinApp {
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
             Item::Divide => self.divide_selection(),
             Item::BlendShapes => self.open_blend(),
+            Item::Warp => self.open_warp(),
             // No chord, so no `Action`. `hit` rather than the selection (C3); the
             // verb re-checks its own kind, so a stale row refuses.
             Item::OutlineText => {
@@ -4090,12 +4121,12 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 19 rows in three groups, the empty head collapsed, with
+    /// A primitive's menu is 20 rows in three groups, the empty head collapsed, with
     /// the clipboard's rest, the aligns and the order in *Copy/Paste as ▸*, *Align ▸*
     /// and *Arrange ▸*. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_nineteen_rows_in_three_groups() {
+    fn a_primitives_menu_is_twenty_rows_in_three_groups() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let mut cx = open(
@@ -4108,7 +4139,7 @@ mod tests {
         );
         cx.other_pages = vec![(id(7), "Page 2".into())];
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 19, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 20, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 3, "the head is empty and must collapse");
 
         assert_eq!(
@@ -4127,6 +4158,7 @@ mod tests {
                 "Use as mask",
                 "Outline shape",
                 "Outline stroke",
+                "Warp…",
                 "Align",
                 "Arrange",
                 "Move to page",
@@ -4312,9 +4344,9 @@ mod tests {
         assert_eq!(ticked, ["Subtract"]);
     }
 
-    /// A plain boolean's menu: head 3 · Clipboard 6 · Structure 10 · State 3.
+    /// A plain boolean's menu: head 3 · Clipboard 6 · Structure 11 · State 3.
     #[test]
-    fn a_booleans_menu_is_twenty_two_rows() {
+    fn a_booleans_menu_is_twenty_three_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Boolean(BoolOp::Subtract)];
         let groups = build(&open(
@@ -4325,12 +4357,12 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 22, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
     /// arithmetic in each case's message. The bound text child on a rail is the long
-    /// end, at 26.
+    /// end, at 27.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -4347,9 +4379,9 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 22, plus *Flip to other side* and \
+                "text on a rail: the plain 23, plus *Flip to other side* and \
                  *Detach from path*",
-                24,
+                25,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -4370,18 +4402,18 @@ mod tests {
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 19, with *Go to \
+                "a linked shape in an instance: the primitive's 20, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                20,
+                21,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 22, with *Go to main component*, \
+                "a bound text child: text's 23, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                24,
+                25,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -4390,9 +4422,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 24, with the bound \
+                "a bound text child on a rail: the railed 25, with the bound \
                  child's three rows for *Create component* — the long end",
-                26,
+                27,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -4403,8 +4435,8 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 22, with the bound child's three rows for *Create component*",
-                24,
+                 23, with the bound child's three rows for *Create component*",
+                25,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -4436,10 +4468,10 @@ mod tests {
         }
     }
 
-    /// A text layer's menu is 22 rows: head 4 · Clipboard 6 · Structure 9 · State 3.
+    /// A text layer's menu is 23 rows: head 4 · Clipboard 6 · Structure 10 · State 3.
     /// The fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_twenty_two_rows() {
+    fn a_text_layers_menu_is_twenty_three_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -4455,7 +4487,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 22, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Slice selection*, the
@@ -4576,7 +4608,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 19, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 20, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             deep(&groups)
@@ -5144,7 +5176,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 19, "{:?}", labels(&groups));
+        assert_eq!(all, 20, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

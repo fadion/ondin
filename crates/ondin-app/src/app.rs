@@ -993,6 +993,8 @@ pub struct OndinApp {
     pub(crate) repeat: crate::repeat::RepeatCard,
     /// *Blend shapes…*'s card (`crate::blend`).
     pub(crate) blend: crate::blend::BlendCard,
+    /// *Warp…*'s envelope while it is open (`crate::warp`).
+    pub(crate) warp: Option<crate::warp::WarpSession>,
     /// The path bar's mirror flyout is open (`crate::mirror`).
     pub(crate) mirror_open: bool,
     /// The mirror axes' grab pills as last painted (`crate::mirror::Grips`).
@@ -1634,6 +1636,7 @@ impl OndinApp {
             colour_review: Default::default(),
             repeat: Default::default(),
             blend: Default::default(),
+            warp: None,
             mirror_open: false,
             mirror_grips: Default::default(),
             edit_mirror: None,
@@ -2089,6 +2092,8 @@ impl OndinApp {
         self.watch_tokens(&ctx);
         self.poll_simplify();
         self.poll_imports();
+        // Before the bar and the canvas's next frame read the envelope.
+        self.tend_warp();
         if !self.focus {
             // While comparing, the changes card takes the inspector's place.
             if self.session.compare.is_some() {
@@ -2380,6 +2385,7 @@ impl OndinApp {
             // The pen reads Enter itself in `pen_input`.
             Action::Enter if self.repeat.open => self.commit_repeat(),
             Action::Enter if self.blend.open => self.commit_blend(),
+            Action::Enter if self.warp.is_some() => self.commit_warp(),
             Action::Enter if self.pen.is_some() => {}
             Action::Enter => self.enter_action(),
             // The Escape that closes a top-bar dropdown closes only it (an open dropdown
@@ -2681,10 +2687,12 @@ impl OndinApp {
         // `dragged_id` blinks (egui clears it on any button's release), so the gesture
         // preview and `InFlight` are read too; both are absent when nothing is in
         // flight, which keeps this a no-op for the right-click that removes a gradient stop.
-        // The Repeat and Blend cards' previews stand on the gesture preview while
-        // no drag is live; they are no gesture, and a right-click must still open
-        // its menu.
-        let standing = self.repeat_preview_standing() || self.blend_preview_standing();
+        // The Repeat and Blend cards' previews and the warp envelope's stand on the
+        // gesture preview while no drag is live; they are no gesture, and a
+        // right-click must still open its menu.
+        let standing = self.repeat_preview_standing()
+            || self.blend_preview_standing()
+            || self.warp_preview_standing();
         let field = ctx.dragged_id().is_some()
             || (self.session.has_gesture_preview() && !standing)
             || self.in_flight.any()
@@ -2819,6 +2827,8 @@ impl OndinApp {
             self.close_repeat();
         } else if self.blend.open {
             self.close_blend();
+        } else if self.warp.is_some() {
+            self.close_warp();
         } else if self.mirror_open {
             // The path bar's mirror flyout, above the pen it was opened over.
             self.mirror_open = false;
@@ -2972,6 +2982,8 @@ impl OndinApp {
             _ => tool,
         };
         self.remember_rail_pick(tool);
+        // An open envelope is abandoned, as a drag in flight is below.
+        self.close_warp();
         self.dropper_pick = None;
         self.finish_text_first();
         // Abandons the drag in flight, its Alt copy and its preview — not `clear_preview`,

@@ -74,6 +74,7 @@ pub mod tokens;
 pub mod typography;
 pub mod variable;
 pub mod variant;
+pub mod warp;
 
 // Re-export the geometry/paint crates whose types appear in our public API, so
 // downstream crates (and tests) use the exact same versions (§6.3).

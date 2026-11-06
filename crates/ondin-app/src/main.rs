@@ -155,6 +155,7 @@ mod version_diffs;
 mod versions;
 mod view;
 mod vision;
+mod warp;
 
 use ondin_core::{ExportScale, ExportText};
 

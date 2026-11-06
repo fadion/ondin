@@ -2222,6 +2222,13 @@ impl OndinApp {
             return;
         }
 
+        // An open envelope owns every press an armed pan does not, so the selection
+        // it wraps cannot change under it (`crate::warp`).
+        if self.warp.is_some() && !panning_armed && !matches!(self.drag, Drag::Pan) {
+            self.warp_input(ui, resp, rect, ppp);
+            return;
+        }
+
         // A mirror axis's pill moves the axis: the pen, the pencil and the node
         // tool sit out its press and drag. Not mid-gesture, whose release they need.
         if !panning_armed
@@ -3974,7 +3981,7 @@ impl OndinApp {
 
     /// A world point rounded to the pixel grid, when the grid is on, so a shape is
     /// born on whole pixels. Only the grid, not alignment snapping.
-    fn pixel_point(&self, world: Point) -> Point {
+    pub(crate) fn pixel_point(&self, world: Point) -> Point {
         if !self.snap_grid {
             return world;
         }
@@ -7390,12 +7397,14 @@ impl OndinApp {
     }
 
     /// The first two of [`Self::chrome_hidden`]'s reasons: a path, an image or a
-    /// gradient being edited on the canvas, the pen's included.
+    /// gradient being edited on the canvas, the pen's included, or a warp's
+    /// envelope open over the selection.
     pub(crate) fn editing_in_place(&self) -> bool {
         self.pen.is_some()
             || self.edited_path().is_some()
             || self.edited_image().is_some()
             || self.edited_gradient().is_some()
+            || self.warp.is_some()
     }
 
     /// Outline whatever the pointer is over but has not selected: the exact shape,
@@ -7637,6 +7646,72 @@ impl OndinApp {
                 egui::Stroke::new(HANDLE_STROKE_PX, color::SELECT),
                 egui::StrokeKind::Middle,
             );
+        }
+    }
+
+    /// A warp's envelope (`crate::warp`): its outline, the corners or the bend's
+    /// round handle, and, while a handle is in the hand or the pointer is inside,
+    /// the mesh lines at thirds that show how the inside follows. A bend in the hand
+    /// carries its value in a pill.
+    fn draw_warp(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        use ondin_core::kurbo::{BezPath, Shape};
+        let Some(s) = &self.warp else { return };
+        let w = s.warp();
+        let outline = w.outline();
+        let pointer = painter
+            .ctx()
+            .input(|i| i.pointer.latest_pos())
+            .map(|p| self.to_world(p, rect, ppp));
+        if s.grab.is_some() || pointer.is_some_and(|p| outline.contains(p)) {
+            let b = w.bounds;
+            let mut mesh = BezPath::new();
+            for k in [1.0 / 3.0, 2.0 / 3.0] {
+                let x = b.x0 + b.width() * k;
+                let y = b.y0 + b.height() * k;
+                mesh.move_to((x, b.y0));
+                mesh.line_to((x, b.y1));
+                mesh.move_to((b.x0, y));
+                mesh.line_to((b.x1, y));
+            }
+            for sub in self.flatten_to_screen(&w.path(&mesh), rect, ppp) {
+                painter.add(sub.stroked(egui::Stroke::new(1.0, color::SELECT_DIM)));
+            }
+        }
+        for sub in self.flatten_to_screen(&outline, rect, ppp) {
+            painter.add(sub.stroked(egui::Stroke::new(1.0, color::SELECT)));
+        }
+        let ink = egui::Stroke::new(HANDLE_STROKE_PX, color::SELECT);
+        for h in s.handles() {
+            let at = self.to_screen(h, rect, ppp);
+            if s.preset.is_some() {
+                // The shape dots' look: one round handle on the bend.
+                painter.circle(
+                    at,
+                    HANDLE_PX * 0.5,
+                    color::POINT,
+                    egui::Stroke::new(1.5, color::SELECT),
+                );
+            } else {
+                let square = egui::Rect::from_center_size(at, egui::Vec2::splat(HANDLE_PX));
+                painter.rect_filled(square, egui::CornerRadius::ZERO, color::POINT);
+                painter.rect_stroke(
+                    square,
+                    egui::CornerRadius::ZERO,
+                    ink,
+                    egui::StrokeKind::Middle,
+                );
+            }
+        }
+        if matches!(s.grab, Some(crate::warp::Grab::Bend))
+            && let Some(h) = w.handle()
+        {
+            let edge = BadgeEdge {
+                mid: self.to_screen(h, rect, ppp),
+                dir: egui::vec2(1.0, 0.0),
+                out: egui::vec2(0.0, -1.0),
+            };
+            let label = format!("Bend {:.0}%", s.bend * 100.0);
+            paint_size_pill(painter, edge, label, &[], color::BADGE);
         }
     }
 
@@ -9300,6 +9375,7 @@ impl OndinApp {
         self.draw_spacing_bands(painter, rect, ppp);
         self.draw_loose_spacing(painter, rect, ppp);
         self.draw_shape_handles(painter, rect, ppp);
+        self.draw_warp(painter, rect, ppp);
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
         self.draw_slices(ui, painter, rect, ppp, resp);

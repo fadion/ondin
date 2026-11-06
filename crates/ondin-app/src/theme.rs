@@ -1014,6 +1014,16 @@ pub mod icon {
     /// The Arc tool: a quarter circle between two end dots, the line segment's
     /// drawing bent. Not `CIRCLE_NOTCH`, which is the loading spinner.
     pub const ARC: &str = "\u{f04d}";
+    /// *Warp…* and its undo step: an arched envelope with its mesh lines.
+    pub const WARP: &str = "\u{f04e}";
+    /// The warp bar's *Free distort*: a quadrilateral pulled out of square.
+    pub const WARP_FREE: &str = "\u{f04f}";
+    /// The warp bar's *Arc*: a band bent into an arch.
+    pub const WARP_ARC: &str = "\u{f050}";
+    /// The warp bar's *Flag*: a band with one wave through it.
+    pub const WARP_FLAG: &str = "\u{f051}";
+    /// The warp bar's *Bulge*: a box whose top and bottom swell outward.
+    pub const WARP_BULGE: &str = "\u{f052}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1336,6 +1346,11 @@ pub mod icon {
         ("blend-shapes", BLEND_SHAPES),
         ("spiral", SPIRAL),
         ("arc", ARC),
+        ("warp", WARP),
+        ("warp-free", WARP_FREE),
+        ("warp-arc", WARP_ARC),
+        ("warp-flag", WARP_FLAG),
+        ("warp-bulge", WARP_BULGE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

@@ -532,7 +532,7 @@ or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's 
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
 variables browser (inner rungs first) → a text session → the find box → colour review (its own
-inner rungs first) → the Repeat around origin card → the Blend shapes card → the path bar's mirror flyout → a compare →
+inner rungs first) → the Repeat around origin card → the Blend shapes card → an open warp envelope → the path bar's mirror flyout → a compare →
 the pen →
 **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
@@ -616,8 +616,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural
   conversion no reference app binds. `Ctrl+E` is *Flatten*, a different verb, and must not cover
   this one by having the only key. The third reason an `Item` is not an `Action`: "no key was spent".
-- **Outline stroke** and **Join paths** — layer-menu rows (and so palette rows), no chord, as
-  *Outline shape*.
+- **Outline stroke**, **Join paths** and **Warp…** — layer-menu rows (and so palette rows), no
+  chord, as *Outline shape*.
 - **Check contrast** — a View menu row and a palette verb (`Action::CheckContrast`), no chord.
 - **Simulate colour blindness** — a View menu row and a palette verb
   (`Action::SimulateColourBlindness`), no chord.

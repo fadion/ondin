@@ -48,8 +48,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ### Medium
 
-- **Warp and distort.** Free distort by four corners, and arc, flag and bulge presets, baked into
-  a plain path on commit.
 - **Image trace.** A raster sketch or logo to paths (a tracer such as `vtracer`, then `fit` and
   *Simplify*).
 - **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors

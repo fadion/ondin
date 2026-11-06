@@ -18,6 +18,7 @@ use crate::theme::{self, color, icon};
 use crate::tools::Tool;
 use crate::ui::{self, Prefix, Scrub, icon_button, value_field};
 use ondin_core::kurbo::BezPath;
+use ondin_core::warp::Preset;
 use ondin_core::{GeometryPatch, NodeId, NodeKind, Operation, Transaction, build};
 use std::sync::Arc;
 
@@ -191,16 +192,22 @@ enum Verb {
     Offset,
     /// The pen's and the pencil's mirror switch, which opens its flyout.
     Mirror,
+    /// The warp bar's envelopes: *Free distort*, or a preset.
+    WarpShape(Option<Preset>),
+    /// Put the envelope back to square.
+    WarpReset,
     Done,
 }
 
 /// What one frame of the bar answered: the verb clicked, the bar's rect, and the
-/// rects of the two buttons that hang a card or a flyout.
+/// rects of the buttons that hang a card or a flyout.
 struct Shown {
     clicked: Option<Verb>,
     bar: egui::Rect,
     offset: egui::Rect,
     mirror: egui::Rect,
+    /// The lit envelope button, which the warp card's top lines up with.
+    shape: egui::Rect,
 }
 
 impl OndinApp {
@@ -215,6 +222,7 @@ impl OndinApp {
         let at = egui::pos2(self.canvas_rect.left() + GAP, centre_y);
         let mut clicked: Option<Verb> = None;
         let (mut offset, mut mirror) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
+        let mut shape = egui::Rect::NOTHING;
         let shown = egui::Area::new(egui::Id::new("path-bar"))
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::LEFT_CENTER)
@@ -246,6 +254,7 @@ impl OndinApp {
                                     match verb {
                                         Verb::Offset => offset = resp.rect,
                                         Verb::Mirror => mirror = resp.rect,
+                                        Verb::WarpShape(_) if *active => shape = resp.rect,
                                         _ => {}
                                     }
                                     if *enabled && resp.clicked() {
@@ -262,6 +271,116 @@ impl OndinApp {
             bar: shown.response.rect,
             offset,
             mirror,
+            shape,
+        }
+    }
+
+    /// The warp bar, in the path bar's place while an envelope is open: the four
+    /// envelopes as one choice, the way back to square, and the way out. A preset
+    /// hangs its card beside it, as *Offset*'s does.
+    fn warp_bar(&mut self, ctx: &egui::Context) {
+        let Some(s) = &self.warp else { return };
+        let (preset, square) = (s.preset, s.warp().is_identity());
+        let shape = |glyph, tip, p: Option<Preset>| E::Btn {
+            glyph,
+            tip,
+            dimmed: "",
+            active: preset == p,
+            enabled: true,
+            verb: Verb::WarpShape(p),
+        };
+        let bar = [
+            shape(icon::WARP_FREE, "Free distort — drag the corners", None),
+            shape(icon::WARP_ARC, "Arc", Some(Preset::Arc)),
+            shape(icon::WARP_FLAG, "Flag", Some(Preset::Flag)),
+            shape(icon::WARP_BULGE, "Bulge", Some(Preset::Bulge)),
+            E::Sep,
+            E::Btn {
+                glyph: icon::ARROW_COUNTER_CLOCKWISE,
+                tip: "Reset the envelope",
+                dimmed: "The envelope is already square",
+                active: false,
+                enabled: !square,
+                verb: Verb::WarpReset,
+            },
+            E::Sep,
+            E::Btn {
+                glyph: icon::CHECK,
+                tip: "Done (Enter)",
+                dimmed: "",
+                active: false,
+                enabled: true,
+                verb: Verb::Done,
+            },
+        ];
+        let shown = self.show_bar(ctx, &bar);
+        match shown.clicked {
+            Some(Verb::WarpShape(p)) => self.set_warp_shape(p),
+            Some(Verb::WarpReset) => self.reset_warp(),
+            Some(Verb::Done) => return self.commit_warp(),
+            _ => {}
+        }
+        if let Some(p) = self.warp.as_ref().and_then(|s| s.preset) {
+            self.warp_card(ctx, p, shown.bar, shown.shape);
+        }
+    }
+
+    /// A preset's card: its bend, scrubbable, and which way it bends.
+    fn warp_card(
+        &mut self,
+        ctx: &egui::Context,
+        preset: Preset,
+        bar: egui::Rect,
+        button: egui::Rect,
+    ) {
+        let Some(s) = &self.warp else { return };
+        let (bend, vertical) = (s.bend, s.vertical);
+        let (name, glyph) = match preset {
+            Preset::Arc => ("Arc", icon::WARP_ARC),
+            Preset::Flag => ("Flag", icon::WARP_FLAG),
+            Preset::Bulge => ("Bulge", icon::WARP_BULGE),
+        };
+        let at = egui::pos2(bar.right() + GAP, button.top());
+        let mut pct = bend * 100.0;
+        let mut way = None;
+        egui::Area::new(egui::Id::new("warp-card"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at)
+            .show(ctx, |ui| {
+                ui::hold_tab(ui);
+                ui.set_max_width(CARD_W);
+                ui::card(ui, |ui| {
+                    ui.label(ui::eyebrow(name));
+                    ui::labelled(ui, "Bend", |ui| {
+                        let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+                        value_field(
+                            ui,
+                            size,
+                            Prefix::Icon(glyph),
+                            &mut pct,
+                            Scrub::whole(0.5).range(-100.0..=100.0),
+                            |d| d.custom_formatter(|v, _| format!("{v:.0}%")),
+                        )
+                        .on_hover_text("How far it bends — negative bends the other way");
+                    });
+                    let w = ui.available_width();
+                    way = ui::segmented(
+                        ui,
+                        w,
+                        ui::SEGMENT_CELL_H,
+                        2,
+                        usize::from(vertical),
+                        |p, i, r, on| {
+                            ui::segment_label(p, r, ["Horizontal", "Vertical"][i], on);
+                        },
+                    );
+                });
+            });
+        if pct != bend * 100.0 {
+            self.set_warp_bend(pct / 100.0);
+        }
+        if let Some(i) = way {
+            self.set_warp_vertical(i == 1);
         }
     }
 
@@ -305,6 +424,11 @@ impl OndinApp {
 
     /// Draw the path bar and its Offset card while a path's points are being edited.
     pub(crate) fn path_bar(&mut self, ctx: &egui::Context) {
+        if self.warp.is_some() {
+            self.mirror_open = false;
+            self.close_offset_card();
+            return self.warp_bar(ctx);
+        }
         // The mirror's flyout hangs from the drawing bar, or the edit bar's
         // button while the edit's pen is armed.
         if !matches!(self.tool, Tool::Pen | Tool::Pencil) && !self.pen_bias {
@@ -440,7 +564,8 @@ impl OndinApp {
                 return;
             }
             Some(Verb::Mirror) => self.mirror_open = !self.mirror_open,
-            None => {}
+            // The warp bar's own; it stands in for this one.
+            Some(Verb::WarpShape(_) | Verb::WarpReset) | None => {}
         }
         if own_axes {
             self.mirror_open = false;

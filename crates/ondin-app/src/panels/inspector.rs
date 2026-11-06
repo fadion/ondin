@@ -4376,9 +4376,9 @@ impl OndinApp {
                     app.commit_edit(tx);
                 }
             }
-            // A line gets a length in W's slot: its box is not a property of the line.
+            // A line gets a length across the row: its box is not a property of the line.
             if let Some((a, b)) = line_ends {
-                let wide = egui::vec2(fw, 28.0);
+                let wide = egui::vec2(ui.available_width(), 28.0);
                 ui.horizontal(|ui| {
                     let mut len = (b - a).hypot();
                     let (rl, reset_l) = ui::value_field_marked(
@@ -5267,8 +5267,16 @@ impl OndinApp {
         marks: &AppearanceMarks,
     ) {
         use ondin_core::geometry::{MAX_SIDES, MIN_INNER_RATIO, MIN_SIDES};
-        // Half width either way.
-        let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+        // A polygon's sides take the row; a star's points line up under opacity
+        // (the row above spends one smoothing button) and the ratio takes the rest.
+        let full = ui.available_width();
+        let (fw, ratio_w) = match vertices {
+            Vertices::Polygon { .. } => (full, 0.0),
+            Vertices::Star { .. } => {
+                let col = (full - (28.0 + ui::CARD_COL_GAP) - ui::CARD_COL_GAP) / 2.0;
+                (col, full - col - ui::CARD_COL_GAP)
+            }
+        };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
             let (glyph, count, tip) = match vertices {
@@ -5303,7 +5311,7 @@ impl OndinApp {
             let mut pct = inner_ratio * 100.0;
             let (rr, hit) = ui::value_field_marked(
                 ui,
-                egui::vec2(fw, 28.0),
+                egui::vec2(ratio_w, 28.0),
                 Prefix::Icon(icon::STAR_RATIO),
                 marks.ratio.as_ref().map(Mark::field),
                 &mut pct,

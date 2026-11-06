@@ -1050,3 +1050,146 @@ fn a_groups_shadow_is_drawn_in_a_region_clear_of_its_child() {
         "the child's shadow: {count} pixels are off the full frame, by up to {worst}"
     );
 }
+
+/// A shadowed group inside a scaled one, dragged up past the rest of its page in
+/// steps whose damage lies clear of where it was committed, is the full frame
+/// at every step: the page, whose cached box is the committed content, is not
+/// culled away from the regions with the group in it.
+/// flip: `paint_node`'s cull no longer sparing a container `Walk::grown` names →
+/// fails at the second step, where the patched frame loses the group.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_group_dragged_past_the_rest_of_its_page_is_still_drawn() {
+    let _one = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (outer, scaled, shadowed, art, below) =
+        (ids.mint(), ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    let rect = |w: f64, h: f64| NodeKind::Rect {
+        size: Size::new(w, h),
+        corner_radii: Default::default(),
+        corner_smoothing: 0.0,
+    };
+    let white = || {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::WHITE).into(),
+            visible: true,
+        }])
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: outer,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::translate((40.0, 60.0))),
+            name: None,
+        },
+        Operation::CreateNode {
+            id: scaled,
+            parent: outer,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::new([0.75, 0.0, 0.0, 0.75, 0.25, 0.3])),
+            name: None,
+        },
+        Operation::CreateNode {
+            id: shadowed,
+            parent: scaled,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: art,
+            parent: shadowed,
+            index: 0,
+            kind: rect(14.0, 22.0),
+            transform: Some(Affine::translate((6.0, 4.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: art,
+            fills: white(),
+        },
+        Operation::SetEffects {
+            id: shadowed,
+            effects: keyed_by_position([shadow((0.0, 0.8), 0.93, 0.0)]),
+        },
+        // The rest of the page, below the group.
+        Operation::CreateNode {
+            id: below,
+            parent: root,
+            index: 1,
+            kind: rect(30.0, 20.0),
+            transform: Some(Affine::translate((90.0, 90.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: below,
+            fills: white(),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let page = doc.first_page();
+    let size = (W, H);
+    let vp = viewport((0, 0), 2.0, size);
+    let shown = target(&g, size);
+    let spare = target(&g, size);
+    let mut before = RenderOverrides::default();
+    full(&mut g, &doc, &res, &vp, &shown);
+    // Each step's old and new places both lie above the committed page's ink.
+    for (i, dy) in [-30.0, -45.0, -55.0].into_iter().enumerate() {
+        let tx = Transaction(vec![Operation::SetTransform {
+            id: outer,
+            transform: Affine::translate((40.0, 60.0 + dy)),
+        }]);
+        let after = RenderOverrides::from_transaction(&doc, &res, &tx).expect("a preview");
+        let reference = target(&g, size);
+        full_under(&mut g, &doc, &res, &vp, &after, &reference);
+        let damage = ondin_render::scene::damage(&doc, &res, &vp, page, &before, &after)
+            .expect("bounded damage");
+        let regions: Vec<Region> = damage
+            .iter()
+            .filter_map(|r| Region::covering(*r, 2.0, size))
+            .collect();
+        let drawn = g
+            .renderer
+            .render_regions(
+                &g.device,
+                &g.queue,
+                &doc,
+                &res,
+                &vp,
+                &after,
+                &spare.create_view(&Default::default()),
+                &regions,
+                GROUND,
+                &ImageStore::default(),
+                page,
+            )
+            .expect("render regions");
+        assert!(drawn, "step {i}: not pinned");
+        copy_regions(&g.device, &g.queue, &spare, &shown, &regions);
+        let (now, want) = (read(&g, &shown, size), read(&g, &reference, size));
+        let inked = want
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[0] > 200)
+            .count();
+        assert!(inked > 0, "fixture: step {i} draws the group");
+        let (worst, count) = diff(&now, &want, |_, _| true);
+        assert!(
+            worst <= AA_DRIFT,
+            "step {i}: {count} pixels are off the full frame, by up to {worst}"
+        );
+        before = after;
+    }
+}

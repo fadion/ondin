@@ -2507,6 +2507,80 @@ fn a_ghost_of_a_shadowed_group_previews_with_its_shadow() {
     assert_preview_matches_commit(&f.doc, &tx, "dropping a copy of a shadowed group");
 }
 
+/// A shadowed group moved, moved with its ancestor, or with a child grown,
+/// previews in the effect layer its commit draws: the box is measured from the
+/// children as drawn, not from the committed ink, which would clip the group at
+/// its old place for the whole drag. Compared within a thousandth of a unit:
+/// the measure is the painted ink on a fine grid, not the cache's exact box.
+/// flip: `effect_bounds` ignoring `drawn` → fails at "moving a shadowed group";
+/// the measure asked only where `Walk::grown` says → fails at "moving a shadowed
+/// group's ancestor".
+#[test]
+fn a_shadowed_group_moved_or_grown_previews_in_its_committed_layer() {
+    fn layers(calls: &[Call]) -> Vec<([f64; 6], [f64; 4])> {
+        calls
+            .iter()
+            .filter_map(|c| match c {
+                Call::Effect(t, b, _) => Some((*t, *b)),
+                _ => None,
+            })
+            .collect()
+    }
+    fn assert_same_layers(doc: &Document, tx: &Transaction, what: &str) {
+        let res = Resolved::rebuild(doc);
+        let ov = RenderOverrides::from_transaction(doc, &res, tx).expect("representable");
+        let previewed = layers(&record(doc, &res, &ov));
+        let mut committed_doc = doc.clone();
+        committed_doc.apply(tx).unwrap();
+        let committed_res = Resolved::rebuild(&committed_doc);
+        let committed = layers(&record(
+            &committed_doc,
+            &committed_res,
+            &RenderOverrides::default(),
+        ));
+        assert_eq!(previewed.len(), 1, "{what}: one effect layer");
+        assert_eq!(previewed.len(), committed.len(), "{what}");
+        for ((pt, pb), (ct, cb)) in previewed.iter().zip(&committed) {
+            let near = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+            assert!(
+                near(pt, ct) && near(pb, cb),
+                "{what}: {pt:?} {pb:?} against {ct:?} {cb:?}"
+            );
+        }
+    }
+    let mut f = fixture();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetEffects {
+                id: f.group,
+                effects: keyed_by_position([big_shadow()]),
+            },
+            Operation::SetFills {
+                id: f.inner,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(20, 20, 20, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]))
+        .unwrap();
+    let moved = Transaction(vec![Operation::SetTransform {
+        id: f.group,
+        transform: Affine::translate((205.0, 7.0)),
+    }]);
+    assert_same_layers(&f.doc, &moved, "moving a shadowed group");
+    let carried = Transaction(vec![Operation::SetTransform {
+        id: f.artboard,
+        transform: Affine::translate((330.0, 120.0)),
+    }]);
+    assert_same_layers(&f.doc, &carried, "moving a shadowed group's ancestor");
+    let grown = Transaction(vec![Operation::SetGeometry {
+        id: f.inner,
+        geometry: GeometryPatch::Size(Size::new(160.0, 90.0)),
+    }]);
+    assert_same_layers(&f.doc, &grown, "growing a shadowed group's child");
+}
+
 /// **And a ghost of a shadowed *stroked* shape asks for the buffer the stroke
 /// needs** — the same entry, and the half a layer count cannot see.
 ///

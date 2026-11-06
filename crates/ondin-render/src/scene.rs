@@ -1681,16 +1681,20 @@ fn paint_node_pass<P: ScenePainter>(
         || (node.clip() && !outline)
         || matches!(node.kind(), NodeKind::Boolean { .. })
         || (matches!(node.kind(), NodeKind::Group | NodeKind::Root) && !outline);
-    // Never culled: a moving node (cached bounds describe where it *was*) or one
-    // holding a ghost (the bounds cannot know about it). `ink_bounds`, not
-    // `world_bounds` (§5.3a): a drop shadow lands outside the layer's box. A
-    // level-of-detail walk also skips what lands under half a device pixel.
+    // Never culled: a moving node (cached bounds describe where it *was*), one
+    // holding a ghost (the bounds cannot know about it), or a container holding
+    // something the preview patches, whose cached box is the committed one: a
+    // layer dragged past the rest of its page leaves the page's box, and the page
+    // would be skipped with it. `ink_bounds`, not `world_bounds` (§5.3a): a drop
+    // shadow lands outside the layer's box. A level-of-detail walk also skips
+    // what lands under half a device pixel.
     if bounds_cover_subtree
         && !ov.moved(id)
         && ov.ghosts_of(id).next().is_none()
+        && !walk.grown(doc, ov, id)
         && let Some(bounds) = res.ink_bounds(id)
         && (!view.iter().any(|v| intersects(bounds, *v))
-            || (ov.level_of_detail() && sub_pixel(bounds, base) && !walk.grown(doc, ov, id)))
+            || (ov.level_of_detail() && sub_pixel(bounds, base)))
     {
         return;
     }
@@ -1805,7 +1809,28 @@ fn paint_node_pass<P: ScenePainter>(
     // draws unfiltered rather than not at all. Sized from the whole stack, so
     // every pass reads its silhouette from the same buffer box.
     let effect_layer = (!bare && crate::effects::any_ink(effects))
-        .then(|| effect_bounds(res, id, &painted, world, stack))
+        .then(|| {
+            // A container the preview moves (itself or an ancestor) or patches
+            // below is measured from its children as drawn now: its cached ink
+            // stays where the commit put it for the whole drag, and the layer
+            // would cut it off there.
+            // Measured over the view grown by the stack's escape, as the
+            // children are culled below, so a child whose shadow reaches in
+            // from outside still counts.
+            let drawn = (matches!(painted.kind, NodeKind::Group | NodeKind::Root)
+                && (ov.moved(id) || walk.grown(doc, ov, id)))
+            .then(|| {
+                let e = ondin_core::effect::stack_escape(stack);
+                let back = kurbo::Insets::new(e.x1, e.y1, e.x0, e.y0);
+                let grown: Vec<Rect> = view
+                    .iter()
+                    .map(|v| ondin_core::effect::escaped(*v, back, world))
+                    .collect();
+                drawn_children_ink(doc, res, ov, node, id, world, &grown)
+            })
+            .flatten();
+            effect_bounds(res, id, &painted, world, stack, drawn)
+        })
         .flatten();
     // The layer's effects carry a child's ink past the child's own box, so the
     // children are culled against the view grown back by the stack's escape.
@@ -2289,19 +2314,21 @@ fn detail_effects(
 /// `Resolved` caches it in world space, and a backend allocates from `base *
 /// transform * bounds`, so a world rect would apply the world transform twice.
 ///
-/// Built from what is being *drawn*, never `Resolved::ink_bounds` (§15 D341),
-/// which is stale for a whole drag; `assert_preview_matches_commit` holds preview
-/// and commit to the same box. A container's children are the one cached input,
-/// so a preview moving a child *inside* a blurred group is a frame behind.
+/// Built from what is being *drawn*, never `Resolved::ink_bounds`, which is stale
+/// for a whole drag; `assert_preview_matches_commit` holds preview and commit to
+/// the same box. A container takes `drawn`, its children's world ink as the
+/// preview draws them ([`drawn_children_ink`]), when the preview touches it, and
+/// its cached inner ink otherwise.
 fn effect_bounds(
     res: &Resolved,
     id: NodeId,
     painted: &Painted<'_>,
     world: Affine,
     effects: &[ondin_core::Keyed<ondin_core::Effect>],
+    drawn: Option<Rect>,
 ) -> Option<Rect> {
     let base = match painted.kind {
-        NodeKind::Group | NodeKind::Root => res.inner_ink(id)?,
+        NodeKind::Group | NodeKind::Root => drawn.or_else(|| res.inner_ink(id))?,
         // Everything the node draws, a stroke's mitres and a text's descenders
         // included; declines a `Boolean`, which falls back to the cache.
         _ => ondin_core::geometry::world_ink_of_parts(
@@ -2315,6 +2342,65 @@ fn effect_bounds(
     let ink = ondin_core::effect::escaped(base, ondin_core::effect::stack_escape(effects), world);
     Some(world.inverse().transform_rect_bbox(ink))
 }
+
+/// The world box of what a container's children draw under `world`, the
+/// preview's patches, order and ghosts included, measured by walking them with
+/// [`BoundsPainter`] as [`ink_of`] walks a top-level item. `None` when they draw
+/// nothing in `view`.
+///
+/// Walked on a grid of its own, [`MEASURE_GRID`] device units to a world unit,
+/// not the view's: boxes snap to whole device pixels, and on the view's grid the
+/// measure would be off by up to half a screen pixel from the exact ink the
+/// commit's cache holds.
+fn drawn_children_ink(
+    doc: &Document,
+    res: &Resolved,
+    ov: &RenderOverrides,
+    node: &ondin_core::Node,
+    id: NodeId,
+    world: Affine,
+    view: &[Rect],
+) -> Option<Rect> {
+    let base = Affine::scale(MEASURE_GRID);
+    let mut bounds = BoundsPainter { base, ink: None };
+    let (edges, walk) = (Edges::none(), Walk::new(&[]));
+    for child in ov.children_of(id).unwrap_or(node.children()) {
+        if doc.get(*child).is_some_and(|n| n.mask()) {
+            continue;
+        }
+        paint_node(
+            doc,
+            res,
+            ov,
+            *child,
+            world,
+            view,
+            base,
+            &edges,
+            &mut bounds,
+            &walk,
+        );
+    }
+    for ghost in ov.ghosts_of(id) {
+        paint_ghost(
+            doc,
+            ov,
+            &ghost.node,
+            false,
+            world,
+            base,
+            &edges,
+            &mut bounds,
+            None,
+        );
+    }
+    let device = bounds.ink?;
+    Some(base.inverse().transform_rect_bbox(device))
+}
+
+/// Device units per world unit on [`drawn_children_ink`]'s grid: fine enough
+/// that a snapped box is within a ten-thousandth of a unit of its exact place.
+const MEASURE_GRID: f64 = 10_000.0;
 
 /// The outline a background blur shows through, in the node's own space: its
 /// shape, a boolean's result, type's glyphs, a group's children's outlines

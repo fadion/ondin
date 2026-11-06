@@ -202,12 +202,17 @@ impl Bitmap {
         };
         match self {
             Self::Arrow(Some(Badge::Duplicate)) | Self::Node(Some(Badge::Duplicate)) => Recipe {
-                // The copy behind: drawn first, so the front arrow's rim cuts it.
+                // The copy behind: drawn first, so the front arrow's rim and
+                // shadow fall on it. Both sit `DUPLICATE_DROP` lower, so the
+                // copy's mitred tip clears the box's top.
                 layers: vec![
-                    vec![at(G::Arrow).shifted(DUPLICATE_OFFSET.0, DUPLICATE_OFFSET.1)],
-                    vec![at(G::Arrow)],
+                    vec![
+                        at(G::Arrow)
+                            .shifted(DUPLICATE_OFFSET.0, DUPLICATE_DROP + DUPLICATE_OFFSET.1),
+                    ],
+                    vec![at(G::Arrow).shifted(0.0, DUPLICATE_DROP)],
                 ],
-                hot: Hot::ARROW,
+                hot: Hot::DUPLICATE,
                 inverted: matches!(self, Self::Node(_)),
             },
             Self::Arrow(b) | Self::Node(b) => Recipe {
@@ -270,8 +275,12 @@ impl Axis {
     }
 }
 
-/// How far the duplicate cursor's second arrow sits right and down, in units.
-const DUPLICATE_OFFSET: (f32, f32) = (5.5, 3.0);
+/// Where the duplicate cursor's copy sits from the front arrow, in units: 2 pt
+/// right and 3 pt up at the pointing drawings' 0.75 pt a unit.
+const DUPLICATE_OFFSET: (f32, f32) = (8.0 / 3.0, -4.0);
+/// How far both of the duplicate cursor's arrows sit below the plain arrow's
+/// place in the box, in units.
+const DUPLICATE_DROP: f32 = 3.0;
 
 /// The side of the box every drawing is laid out on, in drawing units.
 const BOX: f32 = 32.0;
@@ -316,6 +325,8 @@ impl Hot {
     const TIP: Self = Self(5.5, 5.0);
     /// The dropper's point.
     const DROPPER: Self = Self(5.0, 5.0);
+    /// The duplicate cursor's front arrow's tip.
+    const DUPLICATE: Self = Self(6.0, 4.0 + DUPLICATE_DROP);
 }
 
 /// What one bitmap is made of.
@@ -331,7 +342,7 @@ struct Recipe {
 impl Recipe {
     /// Points per drawing unit: smaller for the drawings that point from a tip.
     fn unit_pt(&self) -> f32 {
-        match [Hot::ARROW, Hot::TIP, Hot::DROPPER].contains(&self.hot) {
+        match [Hot::ARROW, Hot::DUPLICATE, Hot::TIP, Hot::DROPPER].contains(&self.hot) {
             true => POINTING_UNIT_PT,
             false => 1.0,
         }
@@ -489,7 +500,7 @@ impl Glyph {
             ],
             Self::Pen => vec![
                 EvenOdd(
-                    "M5.5 5L16.5 8.6L22.6 19.2L19.2 22.6L8.6 16.5Z\
+                    "M5.5 5L17.2 7.9L22.6 19.2L19.2 22.6L7.9 17.2Z\
                      M14.2 13.2A1 1 0 1 0 12.2 13.2A1 1 0 1 0 14.2 13.2Z\
                      M6.9 6.3L12.5 11.9L11.9 12.5L6.3 6.9Z",
                 ),
@@ -500,21 +511,21 @@ impl Glyph {
                 Fill("M12.2 7.9L26 21.7L21.7 26L7.9 12.2Z"),
             ],
             Self::Dropper => vec![
-                Fill("M5 5L8.6 6.2L18.2 15.8L15.8 18.2L6.2 8.6Z"),
-                Fill("M14.6 18.6L18.6 14.6L21 17L17 21Z"),
-                Fill("M19.4 20.8L20.8 19.4L23 21.6L21.6 23Z"),
-                Circle(24.0, 24.0, 3.4),
+                Fill("M5 5L9 5.8L18.6 15.4L15.4 18.6L5.8 9Z"),
+                Fill("M14.2 19L19 14.2L21.4 16.6L16.6 21.4Z"),
+                Fill("M19.1 21.1L21.1 19.1L23.3 21.3L21.3 23.3Z"),
+                Circle(24.0, 24.0, 3.8),
             ],
             Self::IBeam => vec![
                 Fill(
-                    "M12.6 6.4C14.2 6.4 15.4 6.9 16 7.8C16.6 6.9 17.8 6.4 19.4 6.4V7.6\
-                     C17.6 7.6 16.6 8.2 16.6 9.4H15.4C15.4 8.2 14.4 7.6 12.6 7.6Z",
+                    "M12.8 8C14.3 8 15.4 8.5 16 9.3C16.6 8.5 17.7 8 19.2 8V9.2\
+                     C17.6 9.2 16.6 9.8 16.6 10.9H15.4C15.4 9.8 14.4 9.2 12.8 9.2Z",
                 ),
                 Fill(
-                    "M12.6 25.6C14.2 25.6 15.4 25.1 16 24.2C16.6 25.1 17.8 25.6 19.4 25.6V24.4\
-                     C17.6 24.4 16.6 23.8 16.6 22.6H15.4C15.4 23.8 14.4 24.4 12.6 24.4Z",
+                    "M12.8 24C14.3 24 15.4 23.5 16 22.7C16.6 23.5 17.7 24 19.2 24V22.8\
+                     C17.6 22.8 16.6 22.2 16.6 21.1H15.4C15.4 22.2 14.4 22.8 12.8 22.8Z",
                 ),
-                Rect(15.4, 9.0, 1.2, 14.0, 0.0),
+                Rect(15.4, 10.5, 1.2, 11.0, 0.0),
             ],
             Self::TextOnPath => vec![
                 Rect(13.4, 5.8, 5.2, 1.1, 0.0),
@@ -523,11 +534,11 @@ impl Glyph {
                 Stroke("M9 23.8Q16 17.6 23 23.8", 1.2),
             ],
             Self::Resize => vec![Fill(
-                "M5 16L10 11.5V15.2H22V11.5L27 16L22 20.5V16.8H10V20.5Z",
+                "M5 16L10 12.4V15.2H22V12.4L27 16L22 19.6V16.8H10V19.6Z",
             )],
             Self::Skew => vec![
-                Fill("M5 11.2H22V8.4L27 12.2L22 16V13.2H5Z"),
-                Fill("M27 19H10V16.2L5 20L10 23.8V21H27Z"),
+                Fill("M5 11.2H22V9.1L27 12.2L22 15.3V13.2H5Z"),
+                Fill("M27 19H10V16.9L5 20L10 23.1V21H27Z"),
             ],
             Self::Rotate => vec![
                 Stroke("M8 16.3A10 10 0 0 1 24 16.3", 1.6),
@@ -537,21 +548,21 @@ impl Glyph {
             Self::Guide => vec![
                 Rect(14.3, 8.0, 1.1, 16.0, 0.0),
                 Rect(16.6, 8.0, 1.1, 16.0, 0.0),
-                Fill("M4.5 16L8.5 12.5V15.2H13V16.8H8.5V19.5Z"),
-                Fill("M27.5 16L23.5 12.5V15.2H19V16.8H23.5V19.5Z"),
+                Fill("M4.5 16L8.5 13.1V15.2H13V16.8H8.5V18.9Z"),
+                Fill("M27.5 16L23.5 13.1V15.2H19V16.8H23.5V18.9Z"),
             ],
             Self::Gap => vec![
                 Rect(5.0, 9.5, 1.2, 13.0, 0.0),
                 Rect(25.8, 9.5, 1.2, 13.0, 0.0),
-                Fill("M7.6 16L11.1 12.6V15.2H20.9V12.6L24.4 16L20.9 19.4V16.8H11.1V19.4Z"),
+                Fill("M7.6 16L11.1 13.2V15.2H20.9V13.2L24.4 16L20.9 18.8V16.8H11.1V18.8Z"),
             ],
             Self::Bin => vec![
-                Rect(9.5, 8.5, 13.0, 1.8, 0.6),
-                Rect(13.8, 6.4, 4.4, 1.6, 0.6),
+                Rect(9.5, 10.0, 13.0, 1.8, 0.6),
+                Rect(13.8, 7.9, 4.4, 1.6, 0.6),
                 EvenOdd(
-                    "M11 11.6H21L20 25.5C20 26.1 19.6 26.5 19 26.5H13C12.4 26.5 12 26.1 12 25.5Z\
-                     M14.2 14V23.8H15.1V14Z\
-                     M16.9 14V23.8H17.8V14Z",
+                    "M11 13.1H21L20.1 24C20.1 24.6 19.7 25 19.1 25H12.9C12.3 25 11.9 24.6 11.9 24Z\
+                     M14.2 15.5V22.3H15.1V15.5Z\
+                     M16.9 15.5V22.3H17.8V15.5Z",
                 ),
             ],
             Self::Hand => vec![
@@ -569,7 +580,11 @@ impl Glyph {
                 Rect(13.5, 10.0, 2.8, 7.0, 1.4),
                 Rect(16.8, 10.4, 2.8, 6.6, 1.4),
                 Rect(20.1, 11.6, 2.6, 5.6, 1.3),
-                Fill("M10.2 14.5H22.7V20.5C22.7 24.5 20.5 27 16.5 27H15C12.2 27 10.2 25 10.2 22Z"),
+                // The palm, with the thumb folded in where the open hand's is.
+                Fill(
+                    "M10.2 14.5H22.7V20.5C22.7 24.5 20.5 27 16.5 27H15C12.6 27 10.9 25.9 9.8 24.2\
+                     L8.1 21.4C7.4 20.2 7.7 18.8 8.8 18.2C9.5 17.8 10.2 17.9 10.2 17.9Z",
+                ),
             ],
             Self::Plus => vec![Stroke("M23 20.5V27.5", 1.5), Stroke("M19.5 24H26.5", 1.5)],
             Self::Minus => vec![Stroke("M19.5 24H26.5", 1.5)],
@@ -1262,7 +1277,6 @@ fn draw(
     };
 
     // Premultiplied colour and alpha.
-    let mut px = vec![[0.0f32; 4]; n * n];
     let over = |dst: &mut [f32; 4], rgb: [f32; 3], a: f32| {
         if a <= 0.0 {
             return;
@@ -1273,10 +1287,14 @@ fn draw(
         dst[3] = a + dst[3] * (1.0 - a);
     };
     let total = (ss * ss) as f32;
-    for y in 0..n {
-        for x in 0..n {
-            let texel = &mut px[y * n + x];
-            for layer in &recipe.layers {
+    // Each layer is drawn with its own shadow and laid over the ones before, so
+    // a later layer's shadow falls on an earlier one.
+    let mut px = vec![[0.0f32; 4]; n * n];
+    for layer in &recipe.layers {
+        let mut drawn = vec![[0.0f32; 4]; n * n];
+        for y in 0..n {
+            for x in 0..n {
+                let texel = &mut drawn[y * n + x];
                 let (mut rim, mut core) = (0u32, 0u32);
                 for j in 0..ss {
                     for i in 0..ss {
@@ -1302,18 +1320,21 @@ fn draw(
                 }
                 over(texel, ink, rim as f32 / total);
                 over(texel, fill, core as f32 / total);
+                if let Some(chip) = &chip {
+                    over(texel, ink, chip.digit(x, y));
+                }
             }
-            if let Some(chip) = &chip {
-                over(texel, ink, chip.digit(x, y));
+        }
+        // A glyph that drew nothing would look like the pointer had vanished.
+        if drawn.iter().all(|p| p[3] <= 0.0) {
+            return None;
+        }
+        for (dst, src) in px.iter_mut().zip(with_shadow(drawn, n, scale)) {
+            for k in 0..4 {
+                dst[k] = src[k] + dst[k] * (1.0 - src[3]);
             }
         }
     }
-
-    // A glyph that drew nothing would look like the pointer had vanished.
-    if px.iter().all(|p| p[3] <= 0.0) {
-        return None;
-    }
-    let px = with_shadow(px, n, scale);
 
     let rgba: Vec<u8> = px
         .iter()
@@ -1696,31 +1717,40 @@ mod tests {
         assert!(texel(&img, x as usize, y as usize).1 > 128, "the mitre");
     }
 
-    /// The duplicate cursor's second arrow sits behind the first, down and right:
-    /// its ink reaches further right than the plain arrow's, and the front arrow's
-    /// rim still cuts through it, so the front tip's rim is unchanged.
+    /// The duplicate cursor's copy sits behind the front arrow, up and to the
+    /// right: its ink reaches further right and higher than the front arrow's tip,
+    /// the pointer aims from the front tip, and the front arrow's core is on top
+    /// where the two overlap.
+    /// flip: the copy drawn as the second layer → fails at "the front arrow on top".
     #[test]
     fn the_duplicate_is_a_second_arrow_behind() {
         let ctx = context();
         let plain = draw(&ctx, Bitmap::Arrow(None), 2.0, false).expect("plain");
         let dup = draw(&ctx, Bitmap::Arrow(Some(Badge::Duplicate)), 2.0, false).expect("dup");
-        let reach = |img: &egui::CustomCursorImage| {
+        let inked = |img: &egui::CustomCursorImage| {
             let w = usize::from(img.size[0]);
             (0..w)
-                .rev()
-                .find(|&x| (0..w).any(|y| texel(img, x, y).1 > 200))
-                .unwrap_or(0)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|&(x, y)| texel(img, x, y).1 > 200)
+                .collect::<Vec<_>>()
         };
+        let right = |img| inked(img).iter().map(|p| p.0).max().unwrap_or(0);
+        let top = |img| inked(img).iter().map(|p| p.1).min().unwrap_or(0);
         let u = 2.0 * POINTING_UNIT_PT;
-        assert!(reach(&dup) >= reach(&plain) + (DUPLICATE_OFFSET.0 * u) as usize - 1);
-        // Just inside the front arrow's right edge, where the copy lies under it:
-        // the front arrow's core, not the copy's rim.
-        let (x, y) = ((13.0f32 * u) as usize, (15.0f32 * u) as usize);
-        assert_eq!(
-            texel(&dup, x, y),
-            texel(&plain, x, y),
-            "the front arrow on top"
+        assert!(right(&dup) >= right(&plain) + (DUPLICATE_OFFSET.0 * u) as usize - 1);
+        let hot = [
+            (6.0 * u).round() as u16,
+            ((4.0 + DUPLICATE_DROP) * u).round() as u16,
+        ];
+        assert_eq!(dup.hotspot, hot, "the front arrow's tip");
+        assert!(
+            usize::from(hot[1]) > top(&dup) + (-DUPLICATE_OFFSET.1 * u) as usize - 2,
+            "the copy rises above the front tip"
         );
+        // Inside the front arrow, near its right edge, where the copy lies under
+        // it: the front arrow's dark core.
+        let (x, y) = ((13.0 * u) as usize, ((15.0 + DUPLICATE_DROP) * u) as usize);
+        assert!(texel(&dup, x, y).0 < 40, "the front arrow on top");
     }
 
     /// A turned cursor faces the way it was given: the rotate arc's ink lies

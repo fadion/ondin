@@ -78,13 +78,15 @@ image, and the `CursorIcon` set beside it is the stock fallback when the bitmap 
   `Pencil`, turned `Resize`/`Skew`/`Rotate`, `Crosshair`, `FromCentre`, `Loaded`, `IBeam`,
   `TextOnPath`, `Eyedropper`, `Guide`/`CopyGuide`/`Gap` by axis, `Discard`, `Pan`, `Panning`);
   `cursor::Badge` the badge. One badge means one thing on every base. `Duplicate` is a second
-  arrow of the same size 5.5 pt right and 3 pt down, behind the first. The node arrow is the
+  arrow of the same size 2 pt right and 3 pt up, behind the first; the pointer aims from the
+  front arrow's tip. The node arrow is the
   select arrow with its inks swapped, so the two tools read apart.
 - **Drawn, not taken from the icon font.** Each drawing is SVG path data on a box 32 units square
   (`Glyph::parts`), flattened once and rasterized by supersampling: a rim pass in the set's ink
   (the shape widened by a 1.5 pt mitred outline, mitre limit 8, square caps on strokes), then the
-  core in its fill. Layers paint in order, so the duplicate's front arrow's rim cuts the copy. A
-  soft shadow (blur 0.7 pt, drop 0.6 pt, 32%) is drawn into the bitmap. A drawing aimed from its
+  core in its fill. Layers paint in order, each with its own soft shadow (blur 0.7 pt, drop
+  0.6 pt, 32%) drawn into the bitmap, so the duplicate's front arrow's rim and shadow fall on the
+  copy. A drawing aimed from its
   middle is nudged onto the texel grid so its one-unit lines stay crisp; one aimed from a tip has
   the tip on a texel corner.
 - **A unit is a point, or 0.75 pt for the pointing drawings** (the arrows, pen, pencil and

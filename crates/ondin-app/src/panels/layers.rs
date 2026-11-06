@@ -2038,15 +2038,18 @@ impl OndinApp {
                 RowBadge::Text(s) => (s, egui::FontId::proportional(crate::ui::CAPTION_PT), true),
                 RowBadge::Icon(g, size) => (g.to_string(), theme::icon_font(size), false),
             };
+            let galley = p.layout_no_wrap(s, font, theme::text::faint());
             // Clear of a component mark, which holds the very edge.
             let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
-            // A worded badge ends before a resting eye (§15 D1060; see
-            // `bound_eye_tests`); a glyph badge clears it where it is.
-            let right = match worded && show_eye {
-                true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
-                false => right - edge,
+            // A worded badge ends before a resting eye (`bound_eye_tests`). A glyph
+            // badge sits centred where the lock that takes its slot on hover is,
+            // so the swap does not jump.
+            let right = match (worded, show_eye) {
+                (true, true) => eye_x - BOUND_EYE.x / 2.0 - 4.0,
+                (true, false) => right - edge,
+                (false, _) => lock_x + galley.size().x / 2.0,
             };
-            (p.layout_no_wrap(s, font, theme::text::faint()), right)
+            (galley, right)
         });
         let name_right = name_limit(NameLimit {
             row_right: right,
@@ -3066,6 +3069,49 @@ mod rename_layout_tests {
             ctx.memory(|m| m.focused()),
             Some(rename_field_id(id)),
             "a field that re-takes focus can never be committed or cancelled"
+        );
+    }
+
+    /// A glyph badge rests centred where the lock that takes its slot on hover
+    /// stands, so the swap does not jump.
+    /// flip: a glyph badge ending at the row's edge as a worded one does → fails
+    /// at "on the lock's centre".
+    #[test]
+    fn a_glyph_badge_rests_where_the_lock_shows() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_layer(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetMask { id, mask: true }]))
+        );
+        let centre_of = |out: &egui::FullOutput, glyph: &str| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == glyph => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+        };
+        let _ = frame(&mut app, &ctx);
+        let rest = frame(&mut app, &ctx);
+        let badge = centre_of(&rest, icon::MASK).expect("the mask badge at rest");
+        let hover = |app: &mut OndinApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    egui::vec2(300.0, 600.0),
+                )),
+                events: vec![egui::Event::PointerMoved(egui::pos2(100.0, badge.y))],
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.layers_tree(ui))
+        };
+        let _ = hover(&mut app);
+        let hovered = hover(&mut app);
+        let lock = centre_of(&hovered, icon::LOCK_SIMPLE_OPEN).expect("the lock on hover");
+        assert!(
+            (badge.x - lock.x).abs() < 0.5,
+            "on the lock's centre: badge {badge:?}, lock {lock:?}"
         );
     }
 

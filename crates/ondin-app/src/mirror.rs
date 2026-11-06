@@ -156,6 +156,9 @@ fn across(mut s: PenSubpath, vertical: bool, c: f64, tol: f64) -> Vec<PenSubpath
 /// How near an axis, in screen pt, an end is taken as on it.
 pub(crate) const ON_AXIS_PT: f64 = 8.0;
 
+/// How far the *On axis* chip sits right of and above its ring, in screen pt.
+const AXIS_CHIP_GAP: f32 = 8.0;
+
 /// The grab pill at an axis's end, in screen pt.
 const PILL: egui::Vec2 = egui::vec2(16.0, 10.0);
 
@@ -363,6 +366,36 @@ impl OndinApp {
                 }
             }
         }
+        // Where the next point would land on an axis: a ring there and *On axis*,
+        // in the snaps' red.
+        let shift = ui.input(|i| i.modifiers.shift);
+        if let Some(on) = hover.and_then(|w| self.lands_on_axis(w, shift)) {
+            let at = self.to_screen(on, rect, ppp);
+            painter.circle_stroke(
+                at,
+                crate::canvas::SNAP_RING_PX,
+                egui::Stroke::new(crate::canvas::SNAP_RING_STROKE_PX, color::MEASURE),
+            );
+            ui::canvas_pill(
+                painter,
+                at + egui::vec2(AXIS_CHIP_GAP, -AXIS_CHIP_GAP),
+                egui::Align2::LEFT_BOTTOM,
+                "On axis",
+                color::MEASURE,
+            );
+        }
+    }
+
+    /// Where a point placed at `world` lands on a mirror axis, if it does: the pen's
+    /// next anchor (snapped as its press would be), or where the pencil's stroke
+    /// would end, pulled onto the axis by the commit.
+    pub(crate) fn lands_on_axis(&self, world: Point, shift: bool) -> Option<Point> {
+        let at = match self.tool {
+            crate::tools::Tool::Pen => self.pen_point(world, shift).0,
+            _ => world,
+        };
+        let (on, hit) = self.snap_to_axis(at);
+        hit.then_some(on)
     }
 
     /// The path bar's mirror button and its flyout: the axes, ticked like the View
@@ -508,6 +541,71 @@ mod tests {
         let join = got[0].anchors[1];
         assert_eq!(join.back, ondin_core::kurbo::Vec2::new(-10.0, -4.0));
         assert_eq!(join.out, ondin_core::kurbo::Vec2::new(10.0, -4.0));
+    }
+
+    /// A headless app with the pen armed and the vertical axis at x = 100, the view
+    /// at 100% centred on the origin.
+    fn mirroring_pen(ctx: &egui::Context) -> OndinApp {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        app.session
+            .adopt_document(ondin_core::Document::new(ids.mint()), None);
+        app.canvas_px = (800, 600);
+        app.session.camera.center = Point::ZERO;
+        app.session.camera.zoom = 1.0;
+        app.choose_tool(crate::tools::Tool::Pen);
+        app.session.mirror = Mirror {
+            axes: Axes::Vertical,
+            at: Some(Point::new(100.0, 0.0)),
+        };
+        app
+    }
+
+    /// A point within `ON_AXIS_PT` of the axis lands on it; one further off, or
+    /// with the mirror off, lands nowhere the chip names.
+    #[test]
+    fn the_chip_names_a_point_that_lands_on_the_axis() {
+        let ctx = egui::Context::default();
+        let mut app = mirroring_pen(&ctx);
+        assert_eq!(
+            app.lands_on_axis(Point::new(104.0, 50.0), false),
+            Some(Point::new(100.0, 50.0))
+        );
+        assert_eq!(app.lands_on_axis(Point::new(120.0, 50.0), false), None);
+        app.session.mirror.axes = Axes::Off;
+        assert_eq!(app.lands_on_axis(Point::new(104.0, 50.0), false), None);
+    }
+
+    /// With the pointer by the axis the canvas draws *On axis*; away from it, not.
+    ///
+    /// flip: `mirror_chrome` skipping the chip → fails at the first assertion.
+    #[test]
+    fn the_on_axis_chip_is_painted_by_the_axis_only() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = mirroring_pen(&ctx);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let says_on_axis = |app: &mut OndinApp, x: f32| {
+            let pointer = app.to_screen(Point::new(f64::from(x), 50.0), rect, 1.0);
+            let mut out = None;
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(rect),
+                    events: vec![egui::Event::PointerMoved(pointer)],
+                    ..Default::default()
+                };
+                out = Some(ctx.run_ui(input, |ui| {
+                    let painter = ui.painter().clone();
+                    app.mirror_chrome(ui, &painter, rect, 1.0);
+                }));
+            }
+            out.expect("ran")
+                .shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == "On axis"))
+        };
+        assert!(says_on_axis(&mut app, 103.0), "by the axis");
+        assert!(!says_on_axis(&mut app, 160.0), "away from it");
     }
 
     /// On open canvas the axes default to the view's middle, and a run fixes them

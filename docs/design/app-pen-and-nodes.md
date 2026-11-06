@@ -115,7 +115,10 @@ axis, a horizontal one or both (`crate::mirror`).
   is a dashed `accent_400` line through the frame being drawn in, or across the canvas on open
   canvas, with a 16×10 accent pill at its top end (left end for the horizontal axis) as its grab
   handle: a drag moves that axis, a double-click puts the axes back to the default. While the pen
-  draws, the mirrored run shows at 45% of the pen stroke. The pen's opening status reads
+  draws, the mirrored run shows at 45% of the pen stroke. Where the next point would land on an
+  axis (`lands_on_axis`: the pen's next anchor as its press would snap it, or the pencil's pointer,
+  whose end the commit pulls on) a snap ring and an *On axis* `ui::canvas_pill` show, both in
+  `color::MEASURE`, the snaps' red. The pen's opening status reads
   *Mirroring across the vertical axis · start and end on the axis to close the shape* (the
   horizontal axis likewise; under both axes, *draw from one axis to the other to close the shape*)
   instead of its usual hint.

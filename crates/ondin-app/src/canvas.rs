@@ -4287,7 +4287,7 @@ impl OndinApp {
     /// Snaps on both axes through [`Self::snapping`], excluding the node being
     /// resumed. Shift instead constrains the segment to an eighth of a turn from
     /// the previous anchor ([`Self::axial_corner`]); the first has nothing to constrain.
-    fn pen_point(&self, world: Point, shift: bool) -> (Point, Vec<snap::Guide>) {
+    pub(crate) fn pen_point(&self, world: Point, shift: bool) -> (Point, Vec<snap::Guide>) {
         if shift && let Some(from) = self.pen.as_ref().and_then(|p| p.anchors.last()) {
             return (self.axial_corner(from.at, world), Vec::new());
         }

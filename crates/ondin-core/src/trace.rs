@@ -84,7 +84,7 @@ pub struct Labels {
     pub palette: Vec<Color>,
 }
 
-/// One colour's paths.
+/// One colour's paths: its own pixels and every layer's above it ([`trace`]).
 #[derive(Clone, Debug)]
 pub struct Layer {
     pub colour: Color,
@@ -92,7 +92,7 @@ pub struct Layer {
     pub paths: Vec<BezPath>,
 }
 
-/// A whole trace: the colours' layers, darkest first.
+/// A whole trace: the colours' layers, bottom first.
 #[derive(Clone, Debug, Default)]
 pub struct Traced {
     pub layers: Vec<Layer>,
@@ -155,7 +155,7 @@ pub fn label(b: Bitmap<'_>, s: &Settings) -> Labels {
     labels
 }
 
-/// The picture cut down to `count` colours: a median cut over the opaque pixels,
+/// The picture cut down to `count` colours: a variance cut over the opaque pixels,
 /// refined by a few rounds of nearest-mean, darkest first.
 fn quantized(b: Bitmap<'_>, count: usize) -> Labels {
     let n = b.width * b.height;
@@ -164,7 +164,7 @@ fn quantized(b: Bitmap<'_>, count: usize) -> Labels {
         .filter(|p| opaque(*p))
         .map(|p| [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])])
         .collect();
-    let mut means = median_cut(&opaque_px, count);
+    let mut means = variance_cut(&opaque_px, count);
     let nearest = |c: [f64; 3], means: &[[f64; 3]]| {
         means
             .iter()
@@ -215,38 +215,58 @@ fn quantized(b: Bitmap<'_>, count: usize) -> Labels {
     }
 }
 
-/// Up to `count` mean colours of `px`, by splitting the box with the widest
-/// channel at its median until there are enough boxes.
-fn median_cut(px: &[[f64; 3]], count: usize) -> Vec<[f64; 3]> {
+/// Up to `count` mean colours of `px`, by splitting the box whose colours stray
+/// furthest from their mean (summed squared error) along its channel of most
+/// variance, at the mean, until there are enough boxes.
+///
+/// At the mean, not the median: a median split cuts through one colour's pixels
+/// wherever a colour holds more than half a box, and two flat colours of a logo
+/// came out as one.
+fn variance_cut(px: &[[f64; 3]], count: usize) -> Vec<[f64; 3]> {
     if px.is_empty() {
         return vec![[0.0; 3]];
     }
+    // A box's mean, and per channel its summed squared distance from that mean.
+    let stats = |b: &[[f64; 3]]| {
+        let n = b.len().max(1) as f64;
+        let mean = b.iter().fold([0.0; 3], |s, c| {
+            [s[0] + c[0] / n, s[1] + c[1] / n, s[2] + c[2] / n]
+        });
+        let sse = b.iter().fold([0.0; 3], |s, c| {
+            [
+                s[0] + (c[0] - mean[0]).powi(2),
+                s[1] + (c[1] - mean[1]).powi(2),
+                s[2] + (c[2] - mean[2]).powi(2),
+            ]
+        });
+        (mean, sse)
+    };
     let mut boxes: Vec<Vec<[f64; 3]>> = vec![px.to_vec()];
     while boxes.len() < count {
-        let spread = |b: &Vec<[f64; 3]>| {
-            (0..3)
-                .map(|j| {
-                    let (lo, hi) = b.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
-                        (lo.min(c[j]), hi.max(c[j]))
-                    });
-                    (j, hi - lo)
-                })
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap_or((0, 0.0))
-        };
-        let Some((i, (axis, _))) = boxes
+        let Some((i, axis, at)) = boxes
             .iter()
             .enumerate()
-            .map(|(i, b)| (i, spread(b)))
-            .filter(|(_, b)| b.1 > 0.0)
-            .max_by(|a, b| a.1.1.total_cmp(&b.1.1))
+            .map(|(i, b)| {
+                let (mean, sse) = stats(b);
+                let axis = (0..3)
+                    .max_by(|p, q| sse[*p].total_cmp(&sse[*q]))
+                    .unwrap_or(0);
+                (i, axis, mean[axis], sse.iter().sum::<f64>())
+            })
+            .filter(|(_, _, _, e)| *e > 1e-9)
+            .max_by(|a, b| a.3.total_cmp(&b.3))
+            .map(|(i, axis, at, _)| (i, axis, at))
         else {
             break;
         };
-        let mut b = boxes.swap_remove(i);
-        b.sort_by(|p, q| p[axis].total_cmp(&q[axis]));
-        let upper = b.split_off(b.len() / 2);
-        boxes.push(b);
+        let b = boxes.swap_remove(i);
+        let (lower, upper): (Vec<[f64; 3]>, Vec<[f64; 3]>) =
+            b.into_iter().partition(|c| c[axis] < at);
+        if lower.is_empty() || upper.is_empty() {
+            boxes.push(if lower.is_empty() { upper } else { lower });
+            break;
+        }
+        boxes.push(lower);
         boxes.push(upper);
     }
     boxes
@@ -262,8 +282,9 @@ fn median_cut(px: &[[f64; 3]], count: usize) -> Vec<[f64; 3]> {
         .collect()
 }
 
-/// Merge every region of fewer than `speck²` pixels into the label it shares the
-/// most edge with, the smallest first so a speck in a speck goes with its host.
+/// Merge every region of fewer than `speck²` pixels into the neighbouring region
+/// it shares the most edge with, the smallest first. A merged region's pixels join
+/// the host's, so when a small host is merged in turn its speck goes with it.
 /// An empty region inside a colour counts too: small holes close.
 fn despeckle(l: &mut Labels, speck: f64) {
     let min = (speck.max(0.0) * speck.max(0.0)).ceil() as usize;
@@ -298,12 +319,15 @@ fn despeckle(l: &mut Labels, speck: f64) {
         .collect();
     order.sort_by_key(|r| regions[*r].len());
     for r in order {
-        let own = l.index[regions[r][0]];
-        let mut votes: Vec<(u16, usize)> = Vec::new();
+        // Grown past the floor by the specks merged into it already.
+        if regions[r].is_empty() || regions[r].len() >= min {
+            continue;
+        }
+        let mut votes: Vec<(usize, usize)> = Vec::new();
         for &i in &regions[r] {
             for j in neighbours(i, w, h) {
-                let v = l.index[j];
-                if v != own {
+                let v = region[j];
+                if v != r {
                     match votes.iter_mut().find(|(x, _)| *x == v) {
                         Some((_, n)) => *n += 1,
                         None => votes.push((v, 1)),
@@ -311,11 +335,16 @@ fn despeckle(l: &mut Labels, speck: f64) {
                 }
             }
         }
-        if let Some((v, _)) = votes.into_iter().max_by_key(|(_, n)| *n) {
-            for &i in &regions[r] {
-                l.index[i] = v;
-            }
+        let Some((host, _)) = votes.into_iter().max_by_key(|(_, n)| *n) else {
+            continue;
+        };
+        let to = l.index[regions[host][0]];
+        let members = std::mem::take(&mut regions[r]);
+        for &i in &members {
+            l.index[i] = to;
+            region[i] = host;
         }
+        regions[host].extend(members);
     }
 }
 
@@ -332,12 +361,37 @@ fn neighbours(i: usize, w: usize, h: usize) -> impl Iterator<Item = usize> {
     .flatten()
 }
 
-/// Every colour's loops, fitted and paired into paths.
+/// Every colour's loops, fitted and paired into paths, stacked: the colour with
+/// the most pixels at the bottom, and each layer covering its own pixels and those
+/// of every layer above it.
+///
+/// Stacked rather than abutting: two colours fitted along their shared edge apart
+/// never meet exactly, and the ground shows through the hairline between them.
+/// Each boundary is drawn once, by the upper colour's outline. The commonest
+/// colour is usually the ground, so it is the one that becomes a silhouette.
 pub fn trace(l: &Labels, s: &Settings) -> Traced {
-    let layers = (0..l.palette.len())
-        .map(|k| Layer {
-            colour: l.palette[k],
-            paths: paths_of(&loops(l, k as u16), s),
+    let k = l.palette.len();
+    let mut count = vec![0usize; k];
+    for &i in &l.index {
+        if let Some(c) = count.get_mut(usize::from(i)) {
+            *c += 1;
+        }
+    }
+    let mut order: Vec<usize> = (0..k).filter(|c| count[*c] > 0).collect();
+    order.sort_by_key(|c| std::cmp::Reverse(count[*c]));
+    let mut rank = vec![usize::MAX; k];
+    for (r, c) in order.iter().enumerate() {
+        rank[*c] = r;
+    }
+    let layers = order
+        .iter()
+        .enumerate()
+        .map(|(r, &c)| Layer {
+            colour: l.palette[c],
+            paths: paths_of(
+                &loops(l, |i| rank.get(usize::from(i)).is_some_and(|&q| q >= r)),
+                s,
+            ),
         })
         .filter(|layer| !layer.paths.is_empty())
         .collect();
@@ -347,14 +401,14 @@ pub fn trace(l: &Labels, s: &Settings) -> Traced {
 /// One closed loop's lattice points, in order.
 type Loop = Vec<(i32, i32)>;
 
-/// The closed loops round the pixels labelled `k`, on the pixel-corner lattice,
-/// clockwise on screen round the colour and anticlockwise round its holes. Where
-/// two pixels of the colour touch only at a corner, the loop turns right and
-/// keeps them apart.
-fn loops(l: &Labels, k: u16) -> Vec<Loop> {
+/// The closed loops round the pixels whose label `takes`, on the pixel-corner
+/// lattice, clockwise on screen round them and anticlockwise round their holes.
+/// Where two such pixels touch only at a corner, the loop turns right and keeps
+/// them apart.
+fn loops(l: &Labels, takes: impl Fn(u16) -> bool) -> Vec<Loop> {
     let (w, h) = (l.width as i32, l.height as i32);
     let inside =
-        |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h && l.index[(y * w + x) as usize] == k;
+        |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h && takes(l.index[(y * w + x) as usize]);
     // The edges leaving each lattice point, one bit a direction: +x, +y, −x, −y.
     let stride = (w + 1) as usize;
     let mut out = vec![0u8; stride * (h + 1) as usize];
@@ -444,15 +498,34 @@ fn contains(pts: &[(i32, i32)], p: (f64, f64)) -> bool {
 fn paths_of(loops: &[Loop], s: &Settings) -> Vec<BezPath> {
     let (outer, holes): (Vec<&Loop>, Vec<&Loop>) = loops.iter().partition(|l| area2(l) > 0);
     let mut owned: Vec<Vec<&Loop>> = vec![Vec::new(); outer.len()];
+    // Each outer loop's box and area, so a hole tests the crossing rule only on
+    // the few loops whose box holds it: a noisy picture has thousands of each.
+    let boxes: Vec<((i32, i32, i32, i32), i64)> = outer
+        .iter()
+        .map(|o| {
+            let b = o.iter().fold(
+                (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+                |(x0, y0, x1, y1), &(x, y)| (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+            );
+            (b, area2(o))
+        })
+        .collect();
     for hole in holes {
         // The middle of its first edge is on the hole, inside its outer loop.
         let (a, b) = (hole[0], hole[1 % hole.len()]);
         let p = (f64::from(a.0 + b.0) / 2.0, f64::from(a.1 + b.1) / 2.0);
+        let in_box = |(x0, y0, x1, y1): (i32, i32, i32, i32)| {
+            p.0 >= f64::from(x0)
+                && p.0 <= f64::from(x1)
+                && p.1 >= f64::from(y0)
+                && p.1 <= f64::from(y1)
+        };
         let host = outer
             .iter()
+            .zip(&boxes)
             .enumerate()
-            .filter(|(_, o)| contains(o, p))
-            .min_by_key(|(_, o)| area2(o))
+            .filter(|(_, (o, (b, _)))| in_box(*b) && contains(o, p))
+            .min_by_key(|(_, (_, (_, area)))| *area)
             .map(|(i, _)| i);
         if let Some(i) = host {
             owned[i].push(hole);
@@ -524,9 +597,8 @@ pub fn place(
     scale: f64,
     keep: bool,
 ) -> Result<(crate::Transaction, crate::NodeId), &'static str> {
+    use crate::Operation;
     use crate::kurbo::{Affine, Vec2};
-    use crate::node::NodeKind;
-    use crate::{Brush, Fill, Operation, keyed_by_position};
     let node = doc.get(picture).ok_or("Nothing to trace")?;
     let parent = node.parent().ok_or("Nothing to trace")?;
     if let Some(why) = refusal(doc, picture) {
@@ -543,7 +615,28 @@ pub fn place(
     let to_parent = parent_world.inverse()
         * Affine::translate(Vec2::new(frame.x0, frame.y0))
         * Affine::scale(1.0 / scale);
+    let (scratch, group) = scratch(ids, traced, to_parent).ok_or("Nothing to trace")?;
+    let nodes = scratch.capture_subtree(group).ok_or("Nothing to trace")?;
+    let mut ops = vec![Operation::InsertSubtree {
+        nodes,
+        parent,
+        index: at + 1,
+    }];
+    if !keep {
+        ops.push(Operation::DeleteNode { id: picture });
+    }
+    Ok((crate::Transaction(ops), group))
+}
 
+/// `traced` as a *Trace* group on the first page of a document of its own, its
+/// paths carried through `to`: what [`place`] inserts, and what the card shows.
+pub fn scratch(
+    ids: &mut crate::IdSource,
+    traced: &Traced,
+    to: crate::kurbo::Affine,
+) -> Option<(crate::Document, crate::NodeId)> {
+    use crate::node::NodeKind;
+    use crate::{Brush, Fill, Operation, keyed_by_position};
     let root = ids.mint();
     let mut scratch = crate::Document::new(root);
     let page = scratch.first_page();
@@ -580,7 +673,7 @@ pub fn place(
                 parent: host,
                 index: i,
                 kind: NodeKind::Path {
-                    path: to_parent * path.clone(),
+                    path: to * path.clone(),
                     corner_radii: Vec::new(),
                     corner_smoothing: 0.0,
                     mirror: crate::symmetry::PathMirror::NONE,
@@ -597,19 +690,8 @@ pub fn place(
             });
         }
     }
-    scratch
-        .apply(&crate::Transaction(ops))
-        .map_err(|_| "Nothing to trace")?;
-    let nodes = scratch.capture_subtree(group).ok_or("Nothing to trace")?;
-    let mut ops = vec![Operation::InsertSubtree {
-        nodes,
-        parent,
-        index: at + 1,
-    }];
-    if !keep {
-        ops.push(Operation::DeleteNode { id: picture });
-    }
-    Ok((crate::Transaction(ops), group))
+    scratch.apply(&crate::Transaction(ops)).ok()?;
+    Some((scratch, group))
 }
 
 #[cfg(test)]
@@ -759,39 +841,56 @@ mod tests {
         assert_eq!(bw(&px, 20, 20, &low).paths(), 0);
     }
 
-    /// Colours mode finds the picture's colours, darkest first, each with its own
-    /// paths; transparency is left out.
+    /// Colours mode finds the picture's colours and stacks them, the commonest at
+    /// the bottom: each layer covers its own pixels and every layer's above it, so
+    /// neighbouring colours overlap rather than meet; transparency is left out.
+    /// flip: `trace` taking each colour's own pixels alone → fails at "covers what
+    /// lies above it".
     #[test]
-    fn colours_are_layered_darkest_first() {
-        let px = raster(30, 30, |x, y| match (x / 10, y / 10) {
-            (0, _) => BLACK,
-            (1, 1) => CLEAR,
-            (1, _) => RED,
+    fn colours_are_stacked_commonest_at_the_bottom() {
+        // In cells of 3 pixels: white 360 cells, black 300, red 160 in two pieces
+        // round a clear block.
+        let px = raster(90, 90, |x, y| match (x / 3, y / 3) {
+            (0..10, _) => BLACK,
+            (10..18, 10..20) => CLEAR,
+            (10..18, _) => RED,
             _ => WHITE,
         });
         let s = Settings {
             mode: Mode::Colours { count: 3 },
+            speck: 0.0,
             ..Settings::default()
         };
-        let t = bw(&px, 30, 30, &s);
-        assert_eq!(t.layers.len(), 3);
-        let lum = |c: Color| {
-            let [r, g, b, _] = c.to_rgba8().to_u8_array();
-            0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b)
-        };
-        assert!(
-            t.layers
-                .windows(2)
-                .all(|w| lum(w[0].colour) <= lum(w[1].colour)),
-            "darkest first"
-        );
-        assert_eq!(t.layers[0].colour.to_rgba8().to_u8_array(), BLACK);
-        // The red column is two pieces, split by the transparent cell.
-        let red = t
+        let t = bw(&px, 90, 90, &s);
+        let colours: Vec<[u8; 4]> = t
             .layers
             .iter()
-            .find(|l| l.colour.to_rgba8().to_u8_array() == RED)
-            .expect("red found");
-        assert_eq!(red.paths.len(), 2);
+            .map(|l| l.colour.to_rgba8().to_u8_array())
+            .collect();
+        assert_eq!(colours, vec![WHITE, BLACK, RED], "commonest first");
+        let area = |l: &Layer| l.paths.iter().map(|p| p.area().abs()).sum::<f64>();
+        for (layer, cells) in t.layers.iter().zip([900.0 - 80.0, 540.0 - 80.0, 160.0]) {
+            let (got, want) = (area(layer), cells * 9.0);
+            assert!(
+                (got - want).abs() < 0.04 * want,
+                "covers what lies above it: {got} against {want}"
+            );
+        }
+        assert_eq!(t.layers[2].paths.len(), 2, "the red is two pieces");
+    }
+
+    /// A speck inside a speck goes with its host: a pinhole in a small dot leaves
+    /// nothing behind when the dot is merged away.
+    /// flip: `despeckle` relabelling a merged region without joining it to its
+    /// host → fails at "nothing left".
+    #[test]
+    fn a_speck_in_a_speck_goes_with_it() {
+        let px = raster(20, 20, |x, y| {
+            let dot = (8..11).contains(&x) && (8..11).contains(&y);
+            let pin = (x, y) == (9, 9);
+            if dot && !pin { BLACK } else { WHITE }
+        });
+        let t = bw(&px, 20, 20, &Settings::default());
+        assert_eq!(t.paths(), 0, "nothing left");
     }
 }

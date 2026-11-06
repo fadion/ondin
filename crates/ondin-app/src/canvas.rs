@@ -9802,12 +9802,8 @@ impl OndinApp {
         {
             label = format!("{label} · {mode}");
         }
-        // `any`: if any member refuses to move, the set does.
-        let locked = ids
-            .iter()
-            .any(|id| ondin_core::is_effectively_locked(&self.session.doc, *id));
-
-        paint_size_pill(painter, edge, label, locked, self.selection_hue());
+        let marks = size_badge_marks(&self.session.doc, ids);
+        paint_size_pill(painter, edge, label, &marks, self.selection_hue());
         Some(())
     }
 
@@ -9857,7 +9853,7 @@ impl OndinApp {
             dir: egui::vec2(1.0, 0.0),
             out: egui::vec2(0.0, 1.0),
         };
-        paint_size_pill(painter, edge, label, false, color::BADGE);
+        paint_size_pill(painter, edge, label, &[], color::BADGE);
         Some(())
     }
 
@@ -10539,32 +10535,66 @@ fn segment_readout(from: Point, to: Point) -> String {
     format!("{deg:.0}° · {:.0}", d.hypot())
 }
 
+/// The glyphs a selection's size badge leads with: the filled lock when any
+/// member refuses to move, and for a lone layer what the canvas does not say
+/// otherwise — a main's or an instance's hexagon where it wears no tag
+/// ([`crate::app::wears_tag`]), and the mirror switch's glyph on a mirrored path.
+pub(crate) fn size_badge_marks(doc: &ondin_core::Document, ids: &[NodeId]) -> Vec<&'static str> {
+    let mut marks = Vec::new();
+    if ids
+        .iter()
+        .any(|id| ondin_core::is_effectively_locked(doc, *id))
+    {
+        marks.push(icon::LOCK_SIMPLE_FILL);
+    }
+    let [id] = ids else {
+        return marks;
+    };
+    let Some(node) = doc.get(*id) else {
+        return marks;
+    };
+    if !crate::app::wears_tag(doc, *id) {
+        if node.component() {
+            marks.push(icon::HEXAGON_FILL);
+        } else if ondin_core::component::instance_root(doc, *id) == Some(*id) {
+            marks.push(icon::HEXAGON);
+        }
+    }
+    if let NodeKind::Path { mirror, .. } = node.kind()
+        && !mirror.is_none()
+    {
+        marks.push(icon::FLIP_HORIZONTAL);
+    }
+    marks
+}
+
 /// Paint the size pill under `oriented`, laid out in `frame`.
 ///
 /// Shared by a selection's badge and a shape being drawn. `hue` is the pill's
 /// ground (`color::BADGE`, or `color::COMPONENT`) and picks the ink. A
 /// [`crate::ui::canvas_pill`]'s type, air and ink, painted here because it turns
-/// with the shape and can carry the lock.
+/// with the shape and carries `marks`: icon glyphs ahead of the numbers, such as
+/// the lock ([`size_badge_marks`]).
 fn paint_size_pill(
     painter: &egui::Painter,
     edge: BadgeEdge,
     label: String,
-    locked: bool,
+    marks: &[&'static str],
     hue: egui::Color32,
 ) {
-    /// Gap below the box and the lock-to-text gap. The gap cannot go below
+    /// Gap below the box and the mark-to-text gap. The gap cannot go below
     /// `HANDLE_PICK_PX`, or the pill covers a handle's grab area.
     const GAP: f32 = HANDLE_PICK_PX;
     const PAD: egui::Vec2 = crate::ui::PILL_PAD;
-    const LOCK_GAP: f32 = 5.0;
-    const LOCK_PT: f32 = 10.0;
+    const MARK_GAP: f32 = 5.0;
+    const MARK_PT: f32 = 10.0;
 
     let ink = crate::ui::pill_ink(hue);
     let font = egui::FontId::proportional(crate::ui::BADGE_PT);
     let galley = painter.layout_no_wrap(label, font, ink);
-    let lock_w = if locked { LOCK_PT + LOCK_GAP } else { 0.0 };
+    let marks_w = marks.len() as f32 * (MARK_PT + MARK_GAP);
     let size = egui::vec2(
-        galley.size().x + lock_w + PAD.x * 2.0,
+        galley.size().x + marks_w + PAD.x * 2.0,
         galley.size().y + PAD.y * 2.0,
     );
 
@@ -10576,15 +10606,16 @@ fn paint_size_pill(
     ));
 
     let mut x = -size.x * 0.5 + PAD.x;
-    if locked {
-        crate::ui::paint_lock_filled(
+    for glyph in marks {
+        crate::ui::paint_glyph_centred(
             painter,
-            pill.to_screen(egui::pos2(x + LOCK_PT * 0.5, 0.0)),
-            LOCK_PT,
+            glyph,
+            pill.to_screen(egui::pos2(x + MARK_PT * 0.5, 0.0)),
+            MARK_PT,
             ink,
             pill.angle,
         );
-        x += LOCK_PT + LOCK_GAP;
+        x += MARK_PT + MARK_GAP;
     }
     painter.add(
         egui::epaint::TextShape::new(
@@ -11206,7 +11237,7 @@ mod tests {
                     out: egui::vec2(0.0, 1.0),
                 },
                 size_label(KRect::new(0.0, 0.0, 200.0, 120.0)),
-                false,
+                &[],
                 color::BADGE,
             );
         });
@@ -17452,6 +17483,51 @@ mod frame_menu_door_tests {
         }
     }
 
+    /// A main inside a frame wears no tag, as a nested frame does; a page frame, a
+    /// set on the page and that set's variants keep theirs.
+    /// flip: `wears_tag` tagging a main wherever it sits → fails at "a main inside a frame".
+    #[test]
+    fn a_main_inside_a_frame_wears_no_tag() {
+        let ctx = egui::Context::default();
+        let (mut app, board) = app_with_an_occupied_frame(&ctx);
+        let root = app.session.doc.first_page();
+        let [inner, a, b] = [(); 3].map(|_| app.session.ids.mint());
+        let frame = |id, parent, x: f64| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(30.0, 20.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, 400.0))),
+            name: None,
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(inner, board, 0.0),
+            frame(a, root, 0.0),
+            frame(b, root, 100.0),
+        ])));
+        for id in [inner, a, b] {
+            app.session.selection.set_one(id);
+            app.create_component();
+            assert!(app.session.doc.get(id).is_some_and(|n| n.component()));
+        }
+        app.session.selection.set(vec![a, b]);
+        app.combine_as_variants();
+        let doc = &app.session.doc;
+        let set = doc.get(a).and_then(|n| n.parent()).expect("in a set");
+        assert!(doc.get(set).is_some_and(|n| n.set().is_some()), "the set");
+        assert!(!crate::app::wears_tag(doc, inner), "a main inside a frame");
+        assert!(crate::app::wears_tag(doc, board), "the page frame");
+        assert!(crate::app::wears_tag(doc, set), "the set on the page");
+        assert!(crate::app::wears_tag(doc, a), "its variant");
+        // The size badge says what the missing tag would have.
+        assert_eq!(size_badge_marks(doc, &[inner]), [icon::HEXAGON_FILL]);
+        assert!(size_badge_marks(doc, &[a]).is_empty(), "the tag says it");
+    }
+
     /// Only page frames and mains wear tags: a frame or an instance inside another
     /// frame, a main or an instance has none, while the mains and the instance on
     /// the page keep theirs; an entered instance is tagged wherever it sits.
@@ -17792,8 +17868,8 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// Where two name tags coincide — a page frame's and a main's at its corner — the
-    /// tag painted last (the inner main's) is the one a click picks; paint order and
+    /// Where two name tags coincide — a page frame's and a main's laid on it, corner
+    /// on corner — the tag painted last (the main's) is the one a click picks; paint order and
     /// pick are asserted together so neither can be flipped alone.
     /// flip: remove `.rev()` from `frame_label_at` → fails at the pick assertion (`Page` for `Header`).
     #[test]
@@ -17820,10 +17896,11 @@ mod frame_menu_door_tests {
                 transform: None,
                 name: Some("Page".into()),
             },
+            // On the page above the other, as only a layer on its page wears a tag.
             Operation::CreateNode {
                 id: header,
-                parent: page,
-                index: 0,
+                parent: root,
+                index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 80.0),
                     corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
@@ -17832,7 +17909,6 @@ mod frame_menu_door_tests {
                 transform: None,
                 name: Some("Header".into()),
             },
-            // A nested frame wears a tag only as a main.
             Operation::SetComponent {
                 id: header,
                 component: true,

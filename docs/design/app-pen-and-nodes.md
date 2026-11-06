@@ -142,7 +142,9 @@ axis, a horizontal one or both (`crate::mirror`).
 
 A path drawn mirrored is saved mirrored (`NodeKind::Path::mirror`, `core-model.md`): its axes run
 through the centre of its control box and are kept only while the path is symmetric about them.
-Point editing keeps it symmetric.
+Point editing keeps it symmetric. It wears the mirror switch's `flip-horizontal` glyph twice: at the
+head of its size badge while it is the lone selection (`canvas::size_badge_marks`), and as its layer
+row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and lock cover on hover.
 
 - **Every point edit that keeps the anchor count is made symmetric before it is written**
   (`OndinApp::rewrite_points`, `mirror::symmetric_edit`, reached through `canvas::rewrite_edit` and

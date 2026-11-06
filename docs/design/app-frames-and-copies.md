@@ -11,8 +11,10 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   the design and picks as a group does (`app-selection.md`), so a design of nested frames is not a
   wall of names.
 - **Who wears a tag** is `app::wears_tag`, read by `OndinApp::tagged` (`FrameIndex::tagged`) and
-  `canvas::frame_label`: a page frame, and a main (frame or group) or a component set wherever it
-  sits, its chip or tab being its only handle. A frame or instance inside another frame, a group, a main or an instance wears none.
+  `canvas::frame_label`: a frame, a main (frame or group) or a component set sitting on its page,
+  and the variants of a set that does, whose tags are what tell them apart. A frame, main, set or
+  instance inside another frame, a group, a main or an instance wears none, and picks as a group
+  does; the size badge marks a selected untagged main or instance instead (`app-canvas-chrome.md`).
 - The tag sits above the top-left corner, outside the box: 5px in from the left edge, 5px between
   text bottom and the frame's top edge, 11pt, at the dark theme's `text::muted()` alpha in either theme, in the page's ink (`canvas::ground_text`), or `color::SELECT` when selected. Drawn
   under every overlay but the pixel grid. A frame whose tag cannot reach the canvas has none, so

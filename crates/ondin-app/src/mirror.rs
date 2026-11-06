@@ -1445,13 +1445,19 @@ mod tests {
         anchors(app, id).iter().any(|a| (*a - p).hypot() < 1e-6)
     }
 
-    /// A path drawn mirrored is saved mirrored.
-    /// flip: `finish_pen` without `mark_mirrored` → fails at the assertion.
+    /// A path drawn mirrored is saved mirrored, and its size badge says so.
+    /// flip: `finish_pen` without `mark_mirrored` → fails at the first assertion.
     #[test]
-    fn a_path_drawn_mirrored_is_saved_mirrored() {
+    fn a_path_drawn_mirrored_is_saved_mirrored_and_badged() {
         let ctx = egui::Context::default();
         let (app, id) = mirrored_diamond(&ctx);
         assert!(mirror_of(&app, id).vertical);
+        let marks = crate::canvas::size_badge_marks(&app.session.doc, &[id]);
+        assert_eq!(
+            marks,
+            [crate::theme::icon::FLIP_HORIZONTAL],
+            "the size badge"
+        );
     }
 
     /// Dragging the left anchor of a mirrored path takes the right one with it,

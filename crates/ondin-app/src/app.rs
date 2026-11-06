@@ -353,16 +353,28 @@ mod in_flight_tests {
     }
 }
 
-/// Whether `id` wears a name tag on the canvas: a frame on its page, and a main
-/// or a component set, wherever it sits. A frame inside another frame or a group
-/// is part of the design, picked as a group is, and a tag on each would bury it.
+/// Whether `id` wears a name tag on the canvas: a frame, a main or a component
+/// set sitting on its page, and a variant in a set that does, whose tag is all
+/// that tells the variants apart. Anything inside another frame, group or
+/// component is part of the design, picked as a group is, and a tag on each
+/// would bury it.
 pub(crate) fn wears_tag(doc: &ondin_core::Document, id: NodeId) -> bool {
-    doc.get(id).is_some_and(|n| match n.kind() {
-        NodeKind::Artboard { .. } => {
-            n.component() || n.set().is_some() || ondin_core::query::is_page_frame(doc, id)
-        }
-        NodeKind::Group => n.component(),
-        _ => false,
+    let on_page = |id: NodeId| {
+        doc.get(id)
+            .and_then(|n| n.parent())
+            .is_some_and(|p| doc.is_page(p))
+    };
+    doc.get(id).is_some_and(|n| {
+        let container = match n.kind() {
+            NodeKind::Artboard { .. } => true,
+            NodeKind::Group => n.component(),
+            _ => false,
+        };
+        let in_set = n.component()
+            && n.parent()
+                .filter(|p| doc.get(*p).is_some_and(|s| s.set().is_some()))
+                .is_some_and(on_page);
+        container && (on_page(id) || in_set)
     })
 }
 

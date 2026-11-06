@@ -448,7 +448,7 @@ Component card's faces and the *Create component* / *Duplicate as component* men
 Canvas:
 
 - A main's tag is a chip, `color::COMPONENT` fill (no edge), filled hexagon and name in
-  `COMPONENT_INK`, *N instances* in `COMPONENT_INK_DIM` while selected. Always shown. A group that is a
+  `COMPONENT_INK`, *N instances* in `COMPONENT_INK_DIM` while selected. Shown selected or not, where it is worn. A group that is a
   main gets a canvas label as a page frame does (`OndinApp::tagged`, walked by `canvas::draw_frame_labels`).
 - A frame instance on its page wears a tag: outline hexagon and name in `COMPONENT`, its main's name trailing in
   `COMPONENT_DIM` when they differ — drawn **only while the instance is selected or entered**. The
@@ -459,9 +459,11 @@ Canvas:
   selection/hover outlines are `COMPONENT` (`canvas::chrome_hue`), and so are handles and the size
   badge when every selected layer is one (`selection_hue`); a set and layers inside a component keep
   `SELECT`. Nothing off the canvas takes the hue.
-- A main keeps its chip and a set its tab wherever they sit (`app::wears_tag`); nothing else inside a main or an
-  instance wears a tag but the entered instance, since a frame inside another frame or a group picks as a group does
-  (`app-frames-and-copies.md` §9.4).
+- A main wears its chip and a set its tab only on its page, as a frame its tag, and a set's variants
+  keep theirs (`app::wears_tag`); nothing inside a frame, a main or an instance wears a tag but the
+  entered instance, since a frame inside another frame or a group picks as a group does
+  (`app-frames-and-copies.md` §9.4). A selected main or instance without a tag carries its hexagon
+  in the size badge instead.
 - **An instance picks like a group**, whatever its kind: `query::group_chain` keeps an instance root
   as a rung even when it is a page frame, and `canvas::pick_leaf` does not skip an occupied page frame
   that is an instance — for a frame instance an exception to D22. `Enter` enters it ahead of its text/picture/path arms

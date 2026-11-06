@@ -4392,7 +4392,7 @@ pub fn paint_hexagon_filled(
 /// Set one icon glyph with the middle of its em box on `center`, turned by `rot`
 /// about that point. Every icon is drawn centred in its em box, so its ink is
 /// centred there too.
-fn paint_glyph_centred(
+pub(crate) fn paint_glyph_centred(
     painter: &egui::Painter,
     glyph: &str,
     center: egui::Pos2,

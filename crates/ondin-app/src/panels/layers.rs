@@ -527,6 +527,10 @@ const BADGE_BOUND: f32 = 11.0;
 /// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
 const BADGE_MASK: f32 = 10.0;
 
+/// Type size for a mirrored path's `flip-horizontal`, measured the same way: the
+/// word's height at 100%, 150% and 200%, and the nearer device row at 125%.
+const BADGE_MIRROR: f32 = 11.0;
+
 /// Whether `node` is the shape a `Subtract` cuts into — its base operand, the
 /// one thing about a boolean the tree shows without saying (§15 D244). Operand
 /// order is child order (§15 D113) and only `Subtract` reads it, so the base is
@@ -1785,8 +1789,8 @@ impl OndinApp {
         // The right-hand end of a resting row: one slot (the one the eye and lock
         // take over on hover) for several remarks, in priority order — mask (a mask
         // draws nothing, so its row is the only sign the layer exists), a folded
-        // set's variant count, `{}` for a component-property binding (§15 D982),
-        // then a frame's size or a subtract's base.
+        // set's variant count, `{}` for a component-property binding, then a
+        // frame's size, a subtract's base or a mirrored path's mirror.
         let doc = &self.session.doc;
         let set_count = (node.set().is_some() && self.collapsed.contains(&id))
             .then(|| ondin_core::variant::variants(doc, id).len());
@@ -1809,6 +1813,9 @@ impl OndinApp {
                     "{} × {}",
                     size.width as i64, size.height as i64
                 ))),
+                NodeKind::Path { mirror, .. } if !mirror.is_none() && !subtract_base(doc, node) => {
+                    Some(RowBadge::Icon(icon::FLIP_HORIZONTAL, BADGE_MIRROR))
+                }
                 _ => subtract_base(&self.session.doc, node)
                     .then_some(RowBadge::Icon(icon::DIAMOND, BADGE_BASE)),
             }
@@ -1821,6 +1828,7 @@ impl OndinApp {
                 Some("Bound to a component property")
             }
             Some(RowBadge::Icon(g, _)) if *g == icon::DIAMOND => Some("The subtraction's base"),
+            Some(RowBadge::Icon(g, _)) if *g == icon::FLIP_HORIZONTAL => Some("Mirrored path"),
             _ => None,
         };
         // (node borrow ends here — safe to mutate self below)
@@ -3434,14 +3442,17 @@ mod badge_ink_tests {
                 "800 × 600",
                 egui::FontId::proportional(crate::ui::CAPTION_PT),
             );
-            for (name, badge, size) in [
-                ("diamond", icon::DIAMOND, BADGE_BASE),
-                ("property-bound", icon::PROPERTY_BOUND, BADGE_BOUND),
-                ("mask", icon::MASK, BADGE_MASK),
+            // Half a point either way, or one device row for the mirror glyph,
+            // which at 1.25× snaps to 8.0 or 9.6 about the word's 8.8.
+            for (name, badge, size, tol) in [
+                ("diamond", icon::DIAMOND, BADGE_BASE, 0.51),
+                ("property-bound", icon::PROPERTY_BOUND, BADGE_BOUND, 0.51),
+                ("mask", icon::MASK, BADGE_MASK, 0.51),
+                ("flip-horizontal", icon::FLIP_HORIZONTAL, BADGE_MIRROR, 0.81),
             ] {
                 let glyph = ink_height(&ctx, badge, theme::icon_font(size));
                 assert!(
-                    (glyph - word).abs() <= 0.51,
+                    (glyph - word).abs() <= tol,
                     "at {ppp}× the {name} glyph inks {glyph:.2} at {size} against \
                      the word's {word:.2}"
                 );

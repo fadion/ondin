@@ -2353,6 +2353,10 @@ impl OndinApp {
             Action::ReverseSubpaths => self.reverse_subpaths(),
             // `V` is the pointer, the box marquee's member of its rail slot.
             Action::ChooseTool(Tool::Select) => self.rail_pick(crate::rail::Member::Pointer),
+            // Refused as the rail button is disabled, with the same reason.
+            Action::ChooseTool(Tool::ShapeBuilder) if !self.builder_slot_usable() => {
+                self.session.info(crate::shape_builder::UNAVAILABLE);
+            }
             Action::ChooseTool(tool) => self.choose_tool(tool),
             Action::ZoomIn => {
                 self.session
@@ -8087,12 +8091,6 @@ impl OndinApp {
                 Tool::Scale,
                 "Scale — drag a handle to scale strokes, radii and type with the box (K)",
             ),
-            // With them too: it reshapes what is drawn.
-            E::Btn(
-                icon::SHAPE_BUILDER,
-                Tool::ShapeBuilder,
-                "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)",
-            ),
             E::Sep,
             E::Group(Group::Frame),
             E::Btn(icon::SQUARE, Tool::Rect, "Rectangle (R)"),
@@ -8113,6 +8111,13 @@ impl OndinApp {
             ),
             // No crop button: `Tool::ImageEdit` needs a subject (double-click or `Enter`).
             E::Sep,
+            // The tools that act on the selection rather than draw, used less than
+            // the ones above.
+            E::Btn(
+                icon::SHAPE_BUILDER,
+                Tool::ShapeBuilder,
+                "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)",
+            ),
             E::Btn(
                 icon::EYEDROPPER,
                 Tool::Eyedropper,
@@ -8131,8 +8136,17 @@ impl OndinApp {
                             E::Sep => crate::path_bar::separator(ui),
                             E::Btn(glyph, tool, tip) => {
                                 let active = *tool == self.tool;
-                                let resp = icon_button(ui, glyph, 30.0, 20.0, active, true)
-                                    .on_hover_text(crate::input::keys(tip));
+                                let usable =
+                                    *tool != Tool::ShapeBuilder || self.builder_slot_usable();
+                                let resp = crate::ui::disable_unless(ui, usable, |ui| {
+                                    icon_button(ui, glyph, 30.0, 20.0, active, usable)
+                                })
+                                .inner
+                                .on_hover_text(crate::input::keys(tip))
+                                .on_disabled_hover_text(crate::input::keys(&format!(
+                                    "{} (Shift+M)",
+                                    crate::shape_builder::UNAVAILABLE
+                                )));
                                 if resp.clicked() {
                                     match tool {
                                         // Arming the image tool is picking files.

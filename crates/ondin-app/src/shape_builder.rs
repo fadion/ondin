@@ -9,6 +9,7 @@
 
 use crate::app::OndinApp;
 use crate::theme::{color, icon};
+use crate::tools::Tool;
 use eframe::egui;
 use ondin_core::NodeId;
 use ondin_core::kurbo::{BezPath, Point};
@@ -16,6 +17,10 @@ use ondin_core::shape_builder::{Arrangement, Refusal};
 
 /// The refusal the status line gives when there are no faces to build with.
 pub const NEEDS: &str = "Select two or more overlapping shapes, then drag across them";
+
+/// Why the tool cannot be armed while the selection has too few closed shapes: the
+/// rail button's tooltip, the palette row's reason and `Shift+M`'s status line.
+pub const UNAVAILABLE: &str = "Shape builder needs two or more overlapping shapes";
 
 /// What the status line says while the tool is armed over faces it can build.
 const HINT: &str = "Drag across regions to merge them · Alt-drag to remove";
@@ -85,6 +90,17 @@ impl OndinApp {
             });
         }
         &self.builder_cache.as_ref().expect("filled above").found
+    }
+
+    /// Whether the rail's Shape builder button takes a click: the selection holds
+    /// two closed shapes to cut, or the tool is already armed, so the slot still
+    /// shows which tool is in hand whatever the selection becomes.
+    pub(crate) fn builder_slot_usable(&self) -> bool {
+        self.tool == Tool::ShapeBuilder
+            || ondin_core::shape_builder::can_arrange(
+                &self.session.doc,
+                self.session.selection.ids(),
+            )
     }
 
     /// The faces as last found, for drawing, which cannot find them.
@@ -627,6 +643,48 @@ mod tests {
         app.builder_press(Point::new(211.0, 140.0), false);
         assert!(app.builder.is_none());
         assert_eq!(app.session.status_mut().text, NEEDS);
+    }
+
+    /// The rail button is usable with two shapes selected, not with one, and stays
+    /// usable once armed whatever the selection.
+    ///
+    /// flip: `builder_slot_usable` dropping its armed arm → fails at "armed".
+    #[test]
+    fn the_rail_button_needs_two_shapes_unless_armed() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_circles(&ctx, 1);
+        assert!(
+            app.builder_slot_usable(),
+            "armed with one shape, the slot stays usable"
+        );
+        app.choose_tool(Tool::Select);
+        assert!(!app.builder_slot_usable(), "one shape is too few");
+
+        let (mut app, _, _) = app_with_circles(&ctx, 2);
+        app.choose_tool(Tool::Select);
+        assert!(
+            app.builder_slot_usable(),
+            "two overlapping shapes can be built from"
+        );
+    }
+
+    /// `Shift+M`'s action refuses with one shape selected, saying why, and arms with two.
+    ///
+    /// flip: drop the refusing `ChooseTool(Tool::ShapeBuilder)` arm in `dispatch` →
+    /// fails at "one shape arms nothing".
+    #[test]
+    fn the_shortcut_refuses_as_the_rail_button_does() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_circles(&ctx, 1);
+        app.choose_tool(Tool::Select);
+        app.dispatch(&ctx, crate::input::Action::ChooseTool(Tool::ShapeBuilder));
+        assert_eq!(app.tool, Tool::Select, "one shape arms nothing");
+        assert_eq!(app.session.status_mut().text, UNAVAILABLE);
+
+        let (mut app, _, _) = app_with_circles(&ctx, 2);
+        app.choose_tool(Tool::Select);
+        app.dispatch(&ctx, crate::input::Action::ChooseTool(Tool::ShapeBuilder));
+        assert_eq!(app.tool, Tool::ShapeBuilder, "two shapes arm it");
     }
 
     /// *Divide* leaves one path per face in a selected *Divided* group and says how

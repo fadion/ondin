@@ -219,9 +219,16 @@ plain `Path` layers.
 
 ### The tool (`shape_builder.rs`)
 
-`Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) sits on the rail after Scale: it reshapes
-what is drawn rather than drawing, and stays armed after each edit.
+`Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) sits on the rail above the eyedropper,
+the two tools that act on the selection rather than draw; it stays armed after each edit.
 
+- **Arming needs two closed shapes** the arrangement would cut (`OndinApp::builder_slot_usable`
+  on `shape_builder::can_arrange`, the test *Divide* dims on). Until then the rail button is
+  disabled, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
+  give *Shape builder needs two or more overlapping shapes* (`shape_builder::UNAVAILABLE`), the
+  key on the status line. Once armed, the button stays lit whatever the selection becomes.
+- **Selection chrome** while armed is the selection's box alone, dim: no member outlines, which
+  would bury the face under the pointer, and no handles, since every press builds.
 - Faces are found once per selection and document revision (`OndinApp::builder_faces`), on the
   frame the tool arms; hovering only looks up the face under the pointer.
 - **Hover**: a light white wash and a 2pt `color::POINT` edge on the face under the pointer.

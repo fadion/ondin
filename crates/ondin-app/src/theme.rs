@@ -998,8 +998,8 @@ pub mod icon {
     /// *Divide*, beside *Flatten*: the two overlapping squares of the boolean
     /// family cut into their three faces, each outlined apart.
     pub const DIVIDE: &str = "\u{f048}";
-    /// The shape builder tool: two overlapping circles with a drag's trail across
-    /// them, the dot where it started.
+    /// The shape builder tool: a small circle and a large one overlapping on the
+    /// rail's rising diagonal, the face they share filled.
     pub const SHAPE_BUILDER: &str = "\u{f047}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.

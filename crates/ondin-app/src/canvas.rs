@@ -9056,7 +9056,9 @@ impl OndinApp {
                     );
                 }
             }
-            None if chrome && !lone => {
+            // The shape builder draws its faces over the shapes; their own boxes on
+            // top would bury the face under the pointer.
+            None if chrome && !lone && self.tool != Tool::ShapeBuilder => {
                 for id in self.session.selection.ids() {
                     if let Some(quad) = self.selection_quad(*id, rect, ppp) {
                         // Each box in its own layer's hue.
@@ -9087,9 +9089,12 @@ impl OndinApp {
             && chrome
             && let Some(h) = self.selection_handles(rect, ppp)
         {
-            // A multi-selection's box, dimmer than the members' own outlines.
+            // A multi-selection's box, dimmer than the members' own outlines. The
+            // shape builder keeps only this box, as the bound of what it cuts: every
+            // press there builds, so the handles would offer what it never does.
             let hue = self.selection_hue();
-            if h.target == Target::Selection {
+            let building = self.tool == Tool::ShapeBuilder;
+            if h.target == Target::Selection || building {
                 let quad: Vec<egui::Pos2> = h.corners.iter().map(|(_, p)| *p + offset).collect();
                 let dim = if hue == color::COMPONENT {
                     color::COMPONENT_DIM
@@ -9098,9 +9103,9 @@ impl OndinApp {
                 };
                 painter.add(egui::Shape::closed_line(quad, egui::Stroke::new(1.0, dim)));
             }
-            for (_, pos) in h.corners {
+            for (_, pos) in h.corners.iter().filter(|_| !building) {
                 painter.rect_stroke(
-                    egui::Rect::from_center_size(pos + offset, egui::Vec2::splat(HANDLE_PX)),
+                    egui::Rect::from_center_size(*pos + offset, egui::Vec2::splat(HANDLE_PX)),
                     egui::CornerRadius::ZERO,
                     egui::Stroke::new(HANDLE_STROKE_PX, hue),
                     egui::StrokeKind::Middle,
@@ -24165,5 +24170,120 @@ mod pinch_tests {
         let zoomed = app.session.camera.zoom;
         frame(&ctx, &mut app, Vec::new());
         assert_eq!(app.session.camera.zoom, zoomed, "and no pinch, no zoom");
+    }
+}
+
+#[cfg(test)]
+mod builder_chrome_tests {
+    use super::*;
+    use ondin_core::kurbo::{Affine, Size};
+    use ondin_core::{Document, Operation, Transaction};
+
+    const SIZE: egui::Vec2 = egui::vec2(800.0, 600.0);
+
+    /// A headless app with two overlapping rectangles on a frame, both selected.
+    fn app_with_pair(ctx: &egui::Context) -> OndinApp {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let frame = ids.mint();
+        let mut ops = vec![Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(600.0, 400.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }];
+        let mut pair = Vec::new();
+        for (i, x) in [100.0, 180.0].into_iter().enumerate() {
+            let id = ids.mint();
+            ops.push(Operation::CreateNode {
+                id,
+                parent: frame,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(160.0, 120.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((x, 100.0))),
+                name: None,
+            });
+            pair.push(id);
+        }
+        doc.apply(&Transaction(ops)).expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        app.canvas_px = (SIZE.x as u32, SIZE.y as u32);
+        app.session.selection.set(pair);
+        app
+    }
+
+    /// The canvas's chrome for one frame: (handles, member outlines, dim selection boxes).
+    fn chrome(ctx: &egui::Context, app: &mut OndinApp) -> (usize, usize, usize) {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE);
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                let resp = ui.interact(rect, egui::Id::new("chrome-canvas"), egui::Sense::hover());
+                let painter = ui.painter_at(rect);
+                app.draw_canvas(ui, &painter, rect, 1.0, &resp);
+            },
+        );
+        let (mut handles, mut members, mut boxes) = (0, 0, 0);
+        for c in &out.shapes {
+            match &c.shape {
+                egui::Shape::Rect(r)
+                    if r.stroke.width == HANDLE_STROKE_PX
+                        && r.rect.size() == egui::Vec2::splat(HANDLE_PX) =>
+                {
+                    handles += 1
+                }
+                egui::Shape::Path(p) if p.closed && p.stroke.width == 1.2 => members += 1,
+                egui::Shape::Path(p)
+                    if p.closed
+                        && p.stroke.width == 1.0
+                        && p.stroke.color == egui::epaint::ColorMode::Solid(color::SELECT_DIM) =>
+                {
+                    boxes += 1
+                }
+                _ => {}
+            }
+        }
+        (handles, members, boxes)
+    }
+
+    /// Armed, the shape builder leaves the selection its dim box alone: no member
+    /// outlines and no handles, which Select draws over the same selection.
+    ///
+    /// flip: drop the `ShapeBuilder` guard on the member outlines in `draw_canvas`
+    /// → fails at "no member outlines".
+    #[test]
+    fn the_shape_builder_keeps_only_the_selections_box() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = app_with_pair(&ctx);
+        assert_eq!(
+            chrome(&ctx, &mut app),
+            (4, 2, 1),
+            "the fixture: Select draws four handles, two outlines and the box"
+        );
+
+        app.choose_tool(crate::tools::Tool::ShapeBuilder);
+        let (handles, members, boxes) = chrome(&ctx, &mut app);
+        assert_eq!(
+            members, 0,
+            "no member outlines while the shape builder is armed"
+        );
+        assert_eq!(handles, 0, "no handles: every press builds");
+        assert_eq!(boxes, 1, "the selection's box stays as the bound");
     }
 }

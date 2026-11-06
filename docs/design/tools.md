@@ -31,8 +31,9 @@ resize, drop outlines and the transform origin (pivot).
 
 ### The tool rail (`rail.rs`)
 
-`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale, Shape builder · the Frame slot and the
-five shapes · the Pen slot, Text, Place image · the eyedropper; at its foot the styles-and-variables
+`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot and the
+five shapes · the Pen slot, Text, Place image · Shape builder and the eyedropper, which act on the
+selection and are used less; at its foot the styles-and-variables
 and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
 subject. The five shape tools keep a slot each while the rail has room for them.
 

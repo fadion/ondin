@@ -539,7 +539,9 @@ impl OndinApp {
             ),
         );
         for tool in TOOLS {
-            push(&mut out, Cmd::verb(Item::Tool(tool), None));
+            let why = (tool == Tool::ShapeBuilder && !self.builder_slot_usable())
+                .then_some(crate::shape_builder::UNAVAILABLE);
+            push(&mut out, Cmd::verb(Item::Tool(tool), why));
         }
         push(&mut out, Cmd::verb(Item::PlaceImage, None));
         // Pages: the one way to reach another page with the layers pane hidden.

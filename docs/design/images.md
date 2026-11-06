@@ -1,6 +1,6 @@
 # Images
 
-How pictures live in a document (`ondin_core::image`, §5.5a): the image table, the fill reference, framing and orientation, per-fill adjustments, the decode cache in `ondin-render`, placing, dropping and pasting, and the on-disk form.
+How pictures live in a document (`ondin_core::image`, §5.5a): the image table, the fill reference, framing and orientation, per-fill adjustments, the decode cache in `ondin-render`, placing, dropping and pasting, tracing a picture into paths, and the on-disk form.
 
 ## 5.5a Images (`image.rs`)
 
@@ -93,6 +93,23 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 - **SVG is refused, not rasterized**, sniffed by `svg_in::looks_like_svg` (the single predicate; `app::looks_like_svg` is only the byte adapter with a 512-byte cap and lossy decode). It skips an XML declaration and leading comments, and refuses a BOM deliberately (open question, wants a real file).
 - **A refusal says which thing went wrong and carries the numbers** (`app::ImageRefusal`): unreadable vs. a good picture refused by a bound (e.g. "panorama.png is 70000 x 100; the largest Ondin can draw is 65535 on a side"). `TooMuchPixelData` gets its own sentence. Multi-file failures get one sentence per file. A pasted picture that will not read says only *The pasted picture could not be read* (the bytes are the app's own encode).
 
+## Trace image (`ondin_core::trace`, the app's `trace.rs`)
+
+*Trace image…* turns a picture layer into filled paths. The tracer is written in-house, with no dependency. Three steps, each its own function so the card can show the middle one; paths come out in raster pixels, `(0, 0)` the raster's top-left.
+
+- **`label`** sorts each pixel of a straight-alpha RGBA bitmap into a palette index or `EMPTY`. Alpha under 128 is empty. *Black and white*: luminance on the sRGB values below `threshold` is black, anything else empty. *Colours*: a median cut to `count` (2 to `MAX_COLOURS`, 16) refined by four rounds of nearest-mean, the palette sorted darkest first. Then `despeckle` merges every 4-connected region under speck² pixels into the label it shares the most edge with, smallest first; an empty region counts too, so small holes close.
+- **`trace`** follows pixel edges on the corner lattice, one colour at a time, into loops: clockwise on screen round the colour and anticlockwise round its holes, so the paths fill under non-zero. At a saddle the loop turns right, so pixels touching only at a corner stay apart. Each hole joins the smallest outer loop containing it. Each loop is fitted by `fit::fit_closed` over the midpoints of its pixel edges, so a staircase diagonal reads as a line: accuracy `0.35 + 2.5·(1 − detail)²` px, corner angle `120 − 100·corners` degrees.
+- **`place`** builds the result on a scratch document and inserts it just above the picture in its parent: a *Trace* group (`GROUP_NAME`) holding one filled, unstroked path per outer loop, and with several colours a sub-group per colour named by its hex, darkest first (at the bottom). Without *Keep the picture* it deletes the picture. It refuses inside a boolean, a main or an instance (`INSIDE`), and an empty trace.
+
+The card, `OndinApp::trace`:
+
+- **Door**: *Trace image…* in a picture's menu head (`context-menus.md` §5.7), glyph `icon::TRACE`, and so a palette verb (also found by *vectorize*, *vectorise*, *bitmap*, *raster*, *autotrace*); no chord. `open_trace` takes the one selected layer with a picture fill. A picture in a boolean, a main or an instance is refused before the card opens (`trace::refusal`, the row dims with the sentence), since the group cannot be placed there.
+- **The picture is read as shown**, crop and adjustments included: rendered on a worker by `ondin_export::png::raster_of` at a scale keeping the longer side near `MAX_SIDE` (1200 px), at most `MAX_SCALE` (4×). Traces then run on a worker whenever the settings change, one at a time, as the Offset card's do.
+- **Built as batch rename's and tokens import's cards are**: a `settings::card_modal` with no backdrop in `ui::canvas_popup_area`, 640 wide, `modal_title` *Trace image* with its ×, `card_rule`s and `footer_row_noted`. It counts in `modal_is_up`.
+- **Body**: a split preview, the picture left of a divider and the label image right of it with the fitted outlines in `color::SELECT`; a drag anywhere moves the divider (horizontal-resize cursor); *Still reading the picture* until the render lands, or *This picture can't be read to trace* when it lands empty. Beside it a 236-wide settings column: *Black and white* / *Colours* segmented; one row that swaps with the mode, *Threshold* (%) or *Colours* (#, 2–16); *Detail* (%); *Corners* (%); *Ignore specks under* (px, document pixels, scaled to raster pixels); the *Keep the picture* switch, on. Field prefixes are the units, not glyphs.
+- **Footer**: *N paths · M points*, or *Tracing…* until the trace on show is the one asked for; *Cancel* and *Trace* (Primary, disabled with the preview's sentence until a render lands).
+- **Closing**: Enter (`ui::card_enter`) traces; Escape, the × and *Cancel* close; an edit under it or the picture going closes it. The commit waits for the asked trace (`TraceCard::settle`), places it as one *Trace image* step (glyph `TRACE`), selects the group and says *Traced into N paths*.
+
 ## On disk (§5.11)
 
 The table is written last, sorted by id, one entry per record, embedded bytes as base64 (not serde number arrays). A document with no images writes no key. One file, not a zip (a zip makes every save an opaque blob for version control).
@@ -106,3 +123,4 @@ The table is written last, sorted by id, one entry per record, embedded bytes as
 - Adjustment out-of-range values are refused, not clamped; a NaN matrix is a backend divergence.
 - A crop is normalized to the *oriented* picture; flips must carry the rectangle through `ImageRef::reoriented`.
 - A helper returning half a brush (e.g. `picture_of` dropping the sampler) loses the alpha everywhere.
+- The tracer's turn order at a lattice point (right, straight, left) is what keeps corner-touching pixels apart; turning left at a saddle joins them into one figure-of-eight loop. `corner_touching_pixels_stay_apart` pins it.

@@ -48,8 +48,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ### Medium
 
-- **Image trace.** A raster sketch or logo to paths (a tracer such as `vtracer`, then `fit` and
-  *Simplify*).
 - **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors
   (*Simplify* works on the whole path).
 

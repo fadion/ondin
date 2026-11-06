@@ -176,6 +176,8 @@ pub enum Item {
     EditImage,
     /// §5.7 — the picture's own pixels, *turned* for a turned picture.
     OriginalSize,
+    /// *Trace image…*: the picture to filled paths, on a card (`crate::trace`).
+    TraceImage,
 
     // --- clipboard --------------------------------------------------------
     Cut,
@@ -590,6 +592,7 @@ impl Item {
         Item::EditPoints,
         Item::EditImage,
         Item::OriginalSize,
+        Item::TraceImage,
         Item::Cut,
         Item::Copy,
         Item::PasteHere,
@@ -728,6 +731,7 @@ impl Item {
             // `CROP`, not `IMAGE`: the rail's *Place image* button already wears `IMAGE`.
             Item::EditImage => s("Edit image", icon::CROP, None, Group::Head),
             Item::OriginalSize => s("Original size", icon::NUMBER_SQUARE_ONE, None, Group::Head),
+            Item::TraceImage => s("Trace image…", icon::TRACE, None, Group::Head),
 
             Item::Cut => s("Cut", icon::SCISSORS, Some("Ctrl+X"), Group::Clipboard),
             Item::Copy => s("Copy", icon::COPY, Some("Ctrl+C"), Group::Clipboard),
@@ -1445,6 +1449,7 @@ impl Item {
                 "bend",
                 "perspective",
             ],
+            Item::TraceImage => &["vectorize", "vectorise", "bitmap", "raster", "autotrace"],
             Item::TransformAgain => &["repeat", "again", "redo", "step"],
             Item::RepeatAround => &["radial", "rotate", "copies", "ring", "circular", "array"],
             Item::Restack(_) => &["order", "arrange", "z"],
@@ -1905,6 +1910,9 @@ pub struct LayerState {
     pub blend_refusal: Option<&'static str>,
     /// Why *Warp…* cannot take the selection (`OndinApp::warp_refusal`), if not.
     pub warp_refusal: Option<&'static str>,
+    /// Why *Trace image…* cannot place a trace where the picture stands
+    /// (`trace::refusal`), if not.
+    pub trace_refusal: Option<&'static str>,
     /// The layer is a path mirrored across its own axes, which *Flatten* makes plain.
     pub mirrored: bool,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
@@ -2525,6 +2533,15 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
         // (`OndinApp::begin_image_edit`), and a crop is a resize like *Original size*.
         rows.push(Row::new(Item::EditImage).dim_if(locked, why));
         rows.push(Row::new(Item::OriginalSize).dim_if(locked, why));
+        // The lock reaches it: without *Keep the picture* the trace deletes it.
+        rows.push(
+            Row::new(Item::TraceImage)
+                .dim_if(
+                    st.trace_refusal.is_some(),
+                    st.trace_refusal.unwrap_or_default(),
+                )
+                .dim_if(locked, why),
+        );
     }
     if one && all_are(Kind::Path) {
         rows.push(Row::new(Item::EditPoints).dim_if(locked, why));
@@ -2574,6 +2591,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::EditPoints, "Needs one path"),
     (Item::EditImage, "Needs one layer with a picture"),
     (Item::OriginalSize, "Needs one layer with a picture"),
+    (Item::TraceImage, "Needs one layer with a picture"),
     (
         Item::CreateComponent,
         "Needs a layer that is not a component",
@@ -3373,6 +3391,7 @@ impl OndinApp {
                 .err()
                 .map(|r| r.says()),
             warp_refusal: self.warp_refusal(),
+            trace_refusal: ondin_core::trace::refusal(&self.session.doc, id),
             mirrored: build::is_mirrored_path(&self.session.doc, id),
             all_slices: self.session.selection.ids().iter().all(|s| {
                 matches!(
@@ -3669,6 +3688,8 @@ impl OndinApp {
                     self.resize_to_original(id, w, h);
                 }
             }
+            // The selection: the row is offered on one picture, which the click selected.
+            Item::TraceImage => self.open_trace(),
             // `build::guides_of` covers a subtree; this is the whole page.
             Item::ClearGuides => {
                 let ops: Vec<Operation> = self

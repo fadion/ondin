@@ -270,6 +270,7 @@ Gated on `tools::croppable_fill`, the predicate image editing uses; composes wit
 |---|---|
 | Edit image | one layer; dims on lock (the mode refuses too) |
 | Original size | one layer; resizes to the picture's own (turned) pixels; dims on lock |
+| Trace image… | one layer; dims in a boolean, a main or an instance (*Can't trace inside a boolean, a component or an instance*), and on lock, since without *Keep the picture* the trace deletes it. Opens the trace card (`images.md`, *Trace image*) |
 
 ### 5.8 Multi-selection
 

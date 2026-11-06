@@ -71,6 +71,7 @@ pub mod symmetry;
 pub mod take;
 pub mod text;
 pub mod tokens;
+pub mod trace;
 pub mod typography;
 pub mod variable;
 pub mod variant;

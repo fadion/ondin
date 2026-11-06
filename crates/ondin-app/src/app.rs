@@ -995,6 +995,8 @@ pub struct OndinApp {
     pub(crate) blend: crate::blend::BlendCard,
     /// *Warp…*'s envelope while it is open (`crate::warp`).
     pub(crate) warp: Option<crate::warp::WarpSession>,
+    /// *Trace image…*'s card while it is open (`crate::trace`).
+    pub(crate) trace: Option<crate::trace::TraceCard>,
     /// The path bar's mirror flyout is open (`crate::mirror`).
     pub(crate) mirror_open: bool,
     /// The mirror axes' grab pills as last painted (`crate::mirror::Grips`).
@@ -1637,6 +1639,7 @@ impl OndinApp {
             repeat: Default::default(),
             blend: Default::default(),
             warp: None,
+            trace: None,
             mirror_open: false,
             mirror_grips: Default::default(),
             edit_mirror: None,
@@ -2125,6 +2128,7 @@ impl OndinApp {
         // Unguarded: it is not in a panel, so it works in focus mode.
         self.batch_rename_ui(&ctx, canvas);
         self.tokens_import_ui(&ctx, canvas);
+        self.trace_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
         self.colour_review_ui(&ctx);
@@ -7782,6 +7786,7 @@ impl OndinApp {
             || self.cheatsheet.is_some()
             || self.batch_rename.is_some()
             || self.tokens_import.is_some()
+            || self.trace.is_some()
     }
 
     /// Write the View and Snap switches and the rail's slots to `prefs` when one has

@@ -1024,6 +1024,9 @@ pub mod icon {
     pub const WARP_FLAG: &str = "\u{f051}";
     /// The warp bar's *Bulge*: a box whose top and bottom swell outward.
     pub const WARP_BULGE: &str = "\u{f052}";
+    /// *Trace image…* and its undo step: a curve with its two anchors inside a
+    /// picture's corner marks.
+    pub const TRACE: &str = "\u{f053}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1351,6 +1354,7 @@ pub mod icon {
         ("warp-arc", WARP_ARC),
         ("warp-flag", WARP_FLAG),
         ("warp-bulge", WARP_BULGE),
+        ("trace", TRACE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

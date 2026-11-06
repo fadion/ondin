@@ -1158,6 +1158,25 @@ fn sweep_on(theme: Theme) {
         a.set_warp_shape(Some(ondin_core::warp::Preset::Arc));
     });
     check("warp card", app, found);
+    // *Trace image…* on the box given a picture fill: its segments, fields, switch
+    // and foot. The settings draw whether or not the picture has pixels behind it.
+    let mut app = with_a_rect(&ctx);
+    {
+        let a = &mut app;
+        let page = a.session.doc.first_page();
+        let id = a.session.doc.get(page).unwrap().children()[0];
+        assert!(a.session.commit(Transaction(vec![Operation::SetFills {
+            id,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::image_brush(ondin_core::ImageId("audit".into())).into(),
+                visible: true,
+            }]),
+        }])));
+        a.session.selection.set_one(id);
+    }
+    let found = opened(&ctx, &mut app, |_, a| a.open_trace());
+    assert!(app.trace.is_some(), "the trace card opened");
+    check("trace card", app, found);
     let mut app = with_a_set(&ctx);
     let found = inspector(&ctx, &mut app);
     check("variants card", app, found);

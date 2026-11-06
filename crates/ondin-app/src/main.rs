@@ -147,6 +147,7 @@ mod theme;
 mod thumbs;
 mod tokens_import;
 mod tools;
+mod trace;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
 mod ui;

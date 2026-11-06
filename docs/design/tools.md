@@ -644,19 +644,30 @@ stays live.
 - **The canvas.** The session owns every press an armed pan does not (`normal_mode_input`), so the
   selection cannot change under it; `editing_in_place` hides the selection chrome. `canvas::draw_warp`
   draws the outline in `SELECT`; mesh lines at thirds in `SELECT_DIM` while a handle is held or the
-  pointer is inside; under *Free distort* the corners as a line end's square handles, under a preset
-  one round handle in the shape dots' look at the warped top of the bend (the left edge when
-  vertical, the flag's first crest), with a *Bend 40%* pill while it is dragged.
+  pointer is inside; under *Free distort* the four corners, under a preset one handle at the warped
+  top of the bend (the left edge when vertical, the flag's first crest). Every handle is a round dot
+  in the shape dots' look (`shape_handles::DOT_R`), and the one in the hand inverts as a dragged
+  shape dot does; the envelope is pulled by points, not by the selection's resize squares. While
+  the bend handle is dragged a *Bend 40%* pill sits beside the pointer (`spacing::paint_label`).
+- **Cursor** (`canvas_cursor`). While the envelope is open the canvas shows the arrow, and over a
+  handle or through its drag `handle_cursor`'s dot arrow, never the selection box's resize or rotate
+  cursors: the session swallows every press but its handles', so those would promise a drag.
 - **Dragging.** A corner lands on the pixel grid when it is on; Shift keeps it on the line of its
   nearer edge instead. A corner that would make the quad non-convex stops, saying *That corner would
   fold the shape*. The bend handle and the card's field stop at `max_bend`, saying *That much bend
-  folds the shape*. Picking *Arc* over text says *Put the text on a path to keep it editable*.
+  folds the shape*. Picking *Arc* over text says *Put the text on a path to keep it editable*. A
+  right-click mid-drag puts the corner or bend back (`cancel_warp_grab`, from `cancel_gesture`), and
+  a right-click mid-scrub of the card's *Bend* restores it (`InFlight::warp_scrub`).
+- **Status.** On opening *Warping: drag a corner, or pick a shape on the bar; Enter to finish,
+  Escape to cancel*; on picking a preset *Warping: drag the handle to bend it; Enter to finish,
+  Escape to cancel*.
 - **The warp bar** takes the path bar's place (`path_bar::warp_bar`, `app-pen-and-nodes.md`): *Free
   distort*, *Arc*, *Flag* and *Bulge* as one choice (`WARP_FREE`, `WARP_ARC`, `WARP_FLAG`,
   `WARP_BULGE`); a rule; *Reset the envelope* (`ARROW_COUNTER_CLOCKWISE`, dimmed *The envelope is
   already square*); a rule; *Done* (`Enter`). A preset hangs a card beside the bar as *Offset* does
-  (`warp_card`): the preset's name as a `ui::eyebrow`, a *Bend* value field in percent (−100 to
-  100), and *Horizontal · Vertical* as `ui::segmented`. The presets share one bend, held to each
+  (`warp_card`): one label, *Bend*, as the Offset card has one (the lit bar button names the
+  preset), over a value field in percent (−100 to 100) wearing the preset's glyph, and *Horizontal ·
+  Vertical* as `ui::segmented`. The presets share one bend, held to each
   one's range as they are switched.
 - **Ways out.** `Enter` commits (`Action::Enter`). `Escape` cancels, its own rung after the Blend
   card's. Choosing any tool cancels (`choose_tool`). A selection change or a document edit under it

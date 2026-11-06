@@ -1811,6 +1811,16 @@ impl OndinApp {
         } else if let Some(cursor) = pointer.and_then(|p| self.ruler_cursor(p, rect)) {
             // The ruler bar takes the press from every tool, so the cursor too.
             cursor
+        } else if let Some(s) = &self.warp {
+            // An open envelope swallows every press but its handles' (`warp_input`),
+            // so the selection's resize and rotate cursors would promise a drag.
+            let grabbing = s.grab.is_some();
+            let over =
+                grabbing || pointer.is_some_and(|p| self.warp_handle_at(p, rect, ppp).is_some());
+            match over {
+                true => handle_cursor(grabbing),
+                false => arrow(None),
+            }
         } else {
             match self.tool {
                 Tool::Frame
@@ -7680,38 +7690,32 @@ impl OndinApp {
         for sub in self.flatten_to_screen(&outline, rect, ppp) {
             painter.add(sub.stroked(egui::Stroke::new(1.0, color::SELECT)));
         }
-        let ink = egui::Stroke::new(HANDLE_STROKE_PX, color::SELECT);
-        for h in s.handles() {
-            let at = self.to_screen(h, rect, ppp);
-            if s.preset.is_some() {
-                // The shape dots' look: one round handle on the bend.
-                painter.circle(
-                    at,
-                    HANDLE_PX * 0.5,
-                    color::POINT,
-                    egui::Stroke::new(1.5, color::SELECT),
-                );
-            } else {
-                let square = egui::Rect::from_center_size(at, egui::Vec2::splat(HANDLE_PX));
-                painter.rect_filled(square, egui::CornerRadius::ZERO, color::POINT);
-                painter.rect_stroke(
-                    square,
-                    egui::CornerRadius::ZERO,
-                    ink,
-                    egui::StrokeKind::Middle,
-                );
-            }
-        }
-        if matches!(s.grab, Some(crate::warp::Grab::Bend))
-            && let Some(h) = w.handle()
-        {
-            let edge = BadgeEdge {
-                mid: self.to_screen(h, rect, ppp),
-                dir: egui::vec2(1.0, 0.0),
-                out: egui::vec2(0.0, -1.0),
+        // The shape dots' look, corners and bend alike: the envelope's handles are
+        // points it is pulled by, not the selection's resize squares. The one in
+        // the hand inverts, as a dragged shape dot does.
+        let held = match s.grab {
+            Some(crate::warp::Grab::Corner { i, .. }) => Some(i),
+            Some(crate::warp::Grab::Bend) => Some(0),
+            None => None,
+        };
+        for (k, h) in s.handles().into_iter().enumerate() {
+            let (fill, ring) = match held == Some(k) {
+                true => (color::SELECT, color::POINT),
+                false => (color::POINT, color::SELECT),
             };
+            painter.circle(
+                self.to_screen(h, rect, ppp),
+                crate::shape_handles::DOT_R,
+                fill,
+                egui::Stroke::new(1.5, ring),
+            );
+        }
+        // The value beside the pointer, as a shape dot's drag says it.
+        if matches!(s.grab, Some(crate::warp::Grab::Bend))
+            && let Some(at) = painter.ctx().input(|i| i.pointer.latest_pos())
+        {
             let label = format!("Bend {:.0}%", s.bend * 100.0);
-            paint_size_pill(painter, edge, label, &[], color::BADGE);
+            crate::spacing::paint_label(painter, at, &label, None, color::BADGE);
         }
     }
 

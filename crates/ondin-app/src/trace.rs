@@ -10,20 +10,32 @@
 use crate::app::OndinApp;
 use crate::job::Job;
 use crate::theme::{self, color, icon};
-use crate::ui::{self, FieldButton, Prefix, Scrub};
+use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 use eframe::egui;
 use ondin_core::NodeId;
-use ondin_core::kurbo::{BezPath, Rect};
-use ondin_core::trace::{self, Labels, Mode, Settings, Traced};
+use ondin_core::kurbo::{Affine, Rect};
+use ondin_core::trace::{self, Mode, Settings, Traced};
 use std::sync::Arc;
 
-/// The card's width: batch rename's.
+/// The card's width: room for the preview beside the settings column.
 const W: f32 = 640.0;
 /// The settings column.
 const SIDE_W: f32 = 236.0;
-/// The preview's height.
-const PREVIEW_H: f32 = 262.0;
-const PAD: f32 = 16.0;
+/// The preview's height: a little past the settings column's.
+const PREVIEW_H: f32 = 300.0;
+/// The checkerboard's cell under the preview, the export preview's.
+const CHECKER: f32 = 5.0;
+/// Both previews' textures: linear, with mipmaps, since a 1200-pixel shot is
+/// shown a third that size.
+const TEX: egui::TextureOptions = egui::TextureOptions {
+    mipmap_mode: Some(egui::TextureFilter::Linear),
+    ..egui::TextureOptions::LINEAR
+};
+/// The card's inset, the title row's height and the foot's: batch rename's and
+/// colour review's.
+const PAD: f32 = 14.0;
+const TITLE_H: f32 = 40.0;
+const FOOT_H: f32 = 48.0;
 /// The raster's longer side, at most: enough for a logo's curves, few enough
 /// pixels that a trace lands while the setting is still being scrubbed.
 const MAX_SIDE: f64 = 1200.0;
@@ -40,10 +52,19 @@ struct Shot {
     scale: f64,
 }
 
-/// What one trace made: the labels for the preview's fill, and the paths.
+/// What one trace made: the paths, and them drawn as the canvas will draw them.
 struct Made {
-    labels: Labels,
     traced: Traced,
+    ink: egui::ColorImage,
+}
+
+/// The numbers the card's fields scrub, as a right-click puts them back
+/// (`InFlight::trace_scrub`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TraceNumbers {
+    threshold: f64,
+    colours: f64,
+    settings: Settings,
 }
 
 /// The card while it is open.
@@ -58,17 +79,47 @@ pub(crate) struct TraceCard {
     pub(crate) keep: bool,
     /// Where the preview splits picture from trace, `0..=1` of its width.
     divider: f32,
+    /// Where the divider was when its drag began, which a right-click puts back.
+    divider_from: Option<f32>,
     shooting: Option<Job<Option<Shot>>>,
     shot: Option<Arc<Shot>>,
     /// The render came back with nothing: the card says so rather than waiting.
     unreadable: bool,
     picture_tex: Option<egui::TextureHandle>,
     working: Option<(Settings, Job<Made>)>,
-    landed: Option<(Settings, Arc<Made>)>,
+    landed: Option<(Settings, Arc<Traced>)>,
     trace_tex: Option<egui::TextureHandle>,
 }
 
 impl TraceCard {
+    /// The fields' numbers as they stand.
+    fn numbers(&self) -> TraceNumbers {
+        TraceNumbers {
+            threshold: self.threshold,
+            colours: self.colours,
+            settings: self.settings,
+        }
+    }
+
+    /// Put the fields' numbers back, as a right-click mid-scrub does.
+    pub(crate) fn restore(&mut self, n: TraceNumbers) {
+        self.threshold = n.threshold;
+        self.colours = n.colours;
+        self.settings = n.settings;
+    }
+
+    /// A right-click mid-drag of the divider: back where the drag began. Returns
+    /// whether the divider was in the hand.
+    pub(crate) fn cancel_divider(&mut self) -> bool {
+        match self.divider_from.take() {
+            Some(from) => {
+                self.divider = from;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The settings the card's controls say, in raster pixels.
     fn asked(&self) -> Settings {
         let mut s = self.settings;
@@ -107,11 +158,7 @@ impl TraceCard {
                             [shot.width, shot.height],
                             &shot.rgba,
                         );
-                        self.picture_tex = Some(ctx.load_texture(
-                            "trace-picture",
-                            image,
-                            egui::TextureOptions::LINEAR,
-                        ));
+                        self.picture_tex = Some(ctx.load_texture("trace-picture", image, TEX));
                     }
                 }
                 Ok(None) => {}
@@ -124,13 +171,8 @@ impl TraceCard {
         if let Some((s, job)) = &self.working {
             match job.poll() {
                 Ok(Some(made)) => {
-                    let image = label_image(&made.labels);
-                    self.trace_tex = Some(ctx.load_texture(
-                        "trace-labels",
-                        image,
-                        egui::TextureOptions::NEAREST,
-                    ));
-                    self.landed = Some((*s, Arc::new(made)));
+                    self.trace_tex = Some(ctx.load_texture("trace-ink", made.ink, TEX));
+                    self.landed = Some((*s, Arc::new(made.traced)));
                     self.working = None;
                 }
                 Ok(None) => {}
@@ -164,33 +206,47 @@ impl TraceCard {
             Some((w, job)) if w == s => job.wait(),
             _ => None,
         };
-        let m = m.unwrap_or_else(|| made(&shot, &s));
-        self.landed = Some((s, Arc::new(m)));
+        let traced = match m {
+            Some(m) => m.traced,
+            None => traced_of(&shot, &s),
+        };
+        self.landed = Some((s, Arc::new(traced)));
     }
 }
 
 /// One trace of the shot.
-fn made(shot: &Shot, s: &Settings) -> Made {
+fn traced_of(shot: &Shot, s: &Settings) -> Traced {
     let bitmap = trace::Bitmap {
         rgba: &shot.rgba,
         width: shot.width,
         height: shot.height,
     };
-    let labels = trace::label(bitmap, s);
-    let traced = trace::trace(&labels, s);
-    Made { labels, traced }
+    trace::trace(&trace::label(bitmap, s), s)
 }
 
-/// The labels painted in their colours, the empty ones clear.
-fn label_image(l: &Labels) -> egui::ColorImage {
-    let mut rgba = Vec::with_capacity(l.index.len() * 4);
-    for &k in &l.index {
-        match l.palette.get(usize::from(k)) {
-            Some(c) => rgba.extend_from_slice(&c.to_rgba8().to_u8_array()),
-            None => rgba.extend_from_slice(&[0, 0, 0, 0]),
-        }
+/// One trace of the shot, and it drawn for the preview.
+fn made(shot: &Shot, s: &Settings) -> Made {
+    let traced = traced_of(shot, s);
+    let ink = drawn(&traced, shot.width, shot.height);
+    Made { traced, ink }
+}
+
+/// `traced` drawn at the shot's size as the canvas draws it once placed: the group
+/// `trace::place` would insert, through the export renderer.
+fn drawn(traced: &Traced, width: usize, height: usize) -> egui::ColorImage {
+    let blank = || egui::ColorImage::filled([width, height], egui::Color32::TRANSPARENT);
+    let Some((doc, group)) =
+        trace::scratch(&mut ondin_core::IdSource::new(0), traced, Affine::IDENTITY)
+    else {
+        return blank();
+    };
+    let res = ondin_core::Resolved::rebuild(&doc);
+    let view = Rect::new(0.0, 0.0, width as f64, height as f64);
+    let r = ondin_export::png::raster_region(&doc, &res, &[group], view, &Default::default());
+    if (r.width as usize, r.height as usize) != (width, height) {
+        return blank();
     }
-    egui::ColorImage::from_rgba_unmultiplied([l.width, l.height], &rgba)
+    egui::ColorImage::from_rgba_unmultiplied([width, height], &r.rgba)
 }
 
 enum Act {
@@ -228,6 +284,7 @@ impl OndinApp {
             colours: 4.0,
             keep: true,
             divider: 0.5,
+            divider_from: None,
             shooting: Some(shooting),
             shot: None,
             unreadable: false,
@@ -241,7 +298,7 @@ impl OndinApp {
     /// Place the trace the settings ask for, one *Trace image* step, and select it.
     pub(crate) fn commit_trace(&mut self, mut card: TraceCard) {
         card.settle();
-        let (Some(shot), Some((_, m))) = (&card.shot, &card.landed) else {
+        let (Some(shot), Some((_, traced))) = (&card.shot, &card.landed) else {
             return self.session.info("Nothing to trace");
         };
         let placed = trace::place(
@@ -249,7 +306,7 @@ impl OndinApp {
             &self.session.resolved,
             &mut self.session.ids,
             card.picture,
-            &m.traced,
+            traced,
             shot.frame,
             shot.scale,
             card.keep,
@@ -263,7 +320,7 @@ impl OndinApp {
             self.session.selection.set_one(group);
             self.session.info(format!(
                 "Traced into {}",
-                ui::count_as(m.traced.paths(), "path", "paths")
+                ui::count_as(traced.paths(), "path", "paths")
             ));
         }
     }
@@ -283,6 +340,9 @@ impl OndinApp {
         }
         let enter = ui::card_enter(ctx);
         card.pump(ctx);
+        let cancelled = self.gesture_cancelled;
+        let before = card.numbers();
+        let mut scrubbing = false;
         let area = ui::canvas_popup_area(ctx, egui::Id::new("trace-image"), canvas);
         let mut act = Act::None;
         let mut modal = crate::settings::card_modal(ctx, "trace-image")
@@ -292,7 +352,7 @@ impl OndinApp {
         let modal = modal.show(ctx, |ui| {
             ui.set_width(W);
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 40.0), egui::Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(W, TITLE_H), egui::Sense::hover());
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
@@ -308,10 +368,10 @@ impl OndinApp {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = PAD;
                         let preview_w = W - 3.0 * PAD - SIDE_W;
-                        preview(ui, &mut card, preview_w);
+                        preview(ui, &mut card, preview_w, cancelled);
                         ui.vertical(|ui| {
                             ui.set_width(SIDE_W);
-                            settings(ui, &mut card);
+                            scrubbing = settings(ui, &mut card);
                         });
                     });
                 });
@@ -323,6 +383,11 @@ impl OndinApp {
         });
         if modal.backdrop_response.clicked() {
             return;
+        }
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if scrubbing && !cancelled && self.in_flight.trace_scrub.is_none() {
+            self.in_flight.trace_scrub = Some(before);
         }
         if enter && matches!(act, Act::None) {
             act = Act::Trace;
@@ -361,9 +426,11 @@ fn shoot(doc: &ondin_core::Document, res: &ondin_core::Resolved, id: NodeId) -> 
     })
 }
 
-/// The preview: the picture left of the divider and the trace right of it, its
-/// outlines drawn over its fill. Dragging anywhere in it moves the divider.
-fn preview(ui: &mut egui::Ui, card: &mut TraceCard, w: f32) {
+/// The preview: the picture left of the divider and the trace right of it, drawn
+/// as the canvas will draw it, both on the export preview's checkerboard. Only the
+/// divider's line drags, as the compare's Swipe does; `cancelled` is a right-click
+/// that called a drag off, spent until the button is let go.
+fn preview(ui: &mut egui::Ui, card: &mut TraceCard, w: f32, cancelled: bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, PREVIEW_H), egui::Sense::drag());
     let painter = ui.painter_at(rect);
     // A field's ground and corner: the picture sits in a well.
@@ -383,13 +450,29 @@ fn preview(ui: &mut egui::Ui, card: &mut TraceCard, w: f32) {
         rect.center(),
         egui::vec2(shot.width as f32, shot.height as f32) * fit,
     );
-    if let Some(p) = resp.interact_pointer_pos() {
+    let split_at = |d: f32| rect.left() + rect.width() * d;
+    let held = split_at(card.divider);
+    let near = |p: egui::Pos2| (p.x - held).abs() <= ui::SPLIT_REACH;
+    if resp.drag_started() && !cancelled {
+        let origin = ui.input(|i| i.pointer.press_origin());
+        let grab = origin.is_some_and(near) && resp.dragged_by(egui::PointerButton::Primary);
+        card.divider_from = grab.then_some(card.divider);
+    }
+    if resp.dragged()
+        && !cancelled
+        && card.divider_from.is_some()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
         card.divider = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
     }
-    if resp.hovered() || resp.dragged() {
+    if resp.drag_stopped() {
+        card.divider_from = None;
+    }
+    if card.divider_from.is_some() || resp.hover_pos().is_some_and(near) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
-    let split = rect.left() + rect.width() * card.divider;
+    ui::paint_checkerboard(&painter, shown, CHECKER);
+    let split = split_at(card.divider);
     let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
     let left = painter.with_clip_rect(egui::Rect::from_min_max(
         rect.min,
@@ -405,61 +488,17 @@ fn preview(ui: &mut egui::Ui, card: &mut TraceCard, w: f32) {
     if let Some(tex) = &card.trace_tex {
         right.image(tex.id(), shown, uv, egui::Color32::WHITE);
     }
-    if let Some((_, m)) = &card.landed {
-        let to_screen = |p: ondin_core::kurbo::Point| {
-            egui::pos2(
-                shown.left() + p.x as f32 * fit,
-                shown.top() + p.y as f32 * fit,
-            )
-        };
-        let stroke = egui::Stroke::new(1.0, color::SELECT);
-        for path in m.traced.layers.iter().flat_map(|l| &l.paths) {
-            outline(&right, path, &to_screen, stroke);
-        }
-    }
-    painter.line_segment(
-        [
-            egui::pos2(split, rect.top()),
-            egui::pos2(split, rect.bottom()),
-        ],
-        egui::Stroke::new(1.5, color::bg()),
-    );
-    let grip =
-        egui::Rect::from_center_size(egui::pos2(split, rect.center().y), egui::vec2(8.0, 20.0));
-    painter.rect_filled(grip, 3.0, color::bg());
-}
-
-/// `path`'s outline, flattened, through `to_screen`.
-fn outline(
-    painter: &egui::Painter,
-    path: &BezPath,
-    to_screen: &impl Fn(ondin_core::kurbo::Point) -> egui::Pos2,
-    stroke: egui::Stroke,
-) {
-    use ondin_core::kurbo::PathEl;
-    let mut run: Vec<egui::Pos2> = Vec::new();
-    let flush = |run: &mut Vec<egui::Pos2>| {
-        if run.len() > 1 {
-            painter.add(egui::Shape::closed_line(std::mem::take(run), stroke));
-        }
-        run.clear();
-    };
-    ondin_core::kurbo::flatten(path, 0.5, |el| match el {
-        PathEl::MoveTo(p) => {
-            flush(&mut run);
-            run.push(to_screen(p));
-        }
-        PathEl::LineTo(p) => run.push(to_screen(p)),
-        PathEl::ClosePath => flush(&mut run),
-        _ => {}
-    });
-    flush(&mut run);
+    ui::split_handle(&painter, rect, split);
 }
 
 /// The settings column: the mode, then its threshold or its colours on one row
 /// that swaps with the mode, the detail, the corners, the specks and the switch.
-fn settings(ui: &mut egui::Ui, card: &mut TraceCard) {
-    ui.spacing_mut().item_spacing.y = 11.0;
+/// Its fields carry no prefix, the labels above them saying what they are, and
+/// the specks the `px` unit Settings' nudge fields wear. Answers whether a field
+/// is being scrubbed.
+fn settings(ui: &mut egui::Ui, card: &mut TraceCard) -> bool {
+    let mut scrubbing = false;
+    ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;
     let colours = matches!(card.settings.mode, Mode::Colours { .. });
     if let Some(i) = ui::segmented(
         ui,
@@ -477,71 +516,83 @@ fn settings(ui: &mut egui::Ui, card: &mut TraceCard) {
         };
     }
     let size = egui::vec2(SIDE_W, ui::CONTROL_H);
+    let bare = Prefix::Text("");
     if colours {
         ui::labelled(ui, "Colours", |ui| {
-            ui::value_field(
+            let resp = ui::value_field(
                 ui,
                 size,
-                Prefix::Text("#"),
+                bare,
                 &mut card.colours,
                 Scrub::whole(0.1).range(2.0..=trace::MAX_COLOURS as f64),
                 |d| d.custom_formatter(ui::number(0)),
-            )
-            .on_hover_text("How many colours the picture is cut down to")
+            );
+            scrubbing |= resp.dragged();
+            resp.on_hover_text("How many colours the picture is cut down to")
         });
     } else {
         ui::labelled(ui, "Threshold", |ui| {
-            ui::value_field(
+            let resp = ui::value_field(
                 ui,
                 size,
-                Prefix::Text("%"),
+                bare,
                 &mut card.threshold,
                 Scrub::whole(0.5).range(1.0..=99.0),
                 percent,
-            )
-            .on_hover_text("Pixels darker than this become black")
+            );
+            scrubbing |= resp.dragged();
+            resp.on_hover_text("Pixels darker than this become black")
         });
     }
     let mut detail = card.settings.detail * 100.0;
     ui::labelled(ui, "Detail", |ui| {
-        ui::value_field(
+        let resp = ui::value_field(
             ui,
             size,
-            Prefix::Text("%"),
+            bare,
             &mut detail,
             Scrub::whole(0.5).range(0.0..=100.0),
             percent,
-        )
-        .on_hover_text("How closely the curves follow the picture")
+        );
+        scrubbing |= resp.dragged();
+        resp.on_hover_text("How closely the curves follow the picture")
     });
     card.settings.detail = detail / 100.0;
     let mut corners = card.settings.corners * 100.0;
     ui::labelled(ui, "Corners", |ui| {
-        ui::value_field(
+        let resp = ui::value_field(
             ui,
             size,
-            Prefix::Text("%"),
+            bare,
             &mut corners,
             Scrub::whole(0.5).range(0.0..=100.0),
             percent,
-        )
-        .on_hover_text("How readily a turn stays a sharp corner")
+        );
+        scrubbing |= resp.dragged();
+        resp.on_hover_text("How readily a turn stays a sharp corner")
     });
     card.settings.corners = corners / 100.0;
     ui::labelled(ui, "Ignore specks under", |ui| {
-        ui::value_field(
+        let (resp, _) = ui::value_field_suffixed(
             ui,
             size,
-            Prefix::Text("px"),
+            bare,
+            Some(Suffix {
+                text: "px",
+                clickable: false,
+                tooltip: "",
+            }),
             &mut card.settings.speck,
             Scrub::whole(0.1).range(0.0..=100.0),
             |d| d.custom_formatter(ui::number(1)),
-        )
-        .on_hover_text("Spots and holes smaller than this are left out")
+        );
+        scrubbing |= resp.dragged();
+        resp.on_hover_text("Spots and holes smaller than this are left out")
     });
     if ui::switch_row(ui, "Keep the picture", card.keep, crate::settings::SWITCH_H).clicked() {
         card.keep = !card.keep;
     }
+    scrubbing
 }
 
 /// What the card says while it has no picture to show: still reading it, or
@@ -561,12 +612,12 @@ fn percent(d: egui::DragValue<'_>) -> egui::DragValue<'_> {
 /// The footer: the count, or *Tracing…* until it catches up, then *Cancel* and
 /// *Trace*.
 fn foot(ui: &mut egui::Ui, card: &TraceCard) -> Option<Act> {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 48.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOT_H), egui::Sense::hover());
     let note = match &card.landed {
-        Some((_, m)) if card.done() => format!(
+        Some((_, traced)) if card.done() => format!(
             "{} · {}",
-            ui::count_as(m.traced.paths(), "path", "paths"),
-            ui::count_as(m.traced.points(), "point", "points")
+            ui::count_as(traced.paths(), "path", "paths"),
+            ui::count_as(traced.points(), "point", "points")
         ),
         _ => "Tracing…".to_string(),
     };
@@ -574,8 +625,9 @@ fn foot(ui: &mut egui::Ui, card: &TraceCard) -> Option<Act> {
         egui::pos2(rect.left() + PAD, rect.center().y),
         egui::Align2::LEFT_CENTER,
         note,
-        egui::FontId::proportional(ui::SMALL_PT),
-        theme::text::muted(),
+        // Batch rename's foot note.
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
     );
     let mut child = ui.new_child(
         egui::UiBuilder::new()
@@ -713,6 +765,101 @@ mod tests {
             .unwrap();
         let want = std::f64::consts::PI * 400.0;
         assert!((area - want).abs() < 0.05 * want, "{area} against {want}");
+    }
+
+    /// The preview's trace is drawn as the canvas draws it: ink where the disc
+    /// is, clear around it.
+    #[test]
+    fn the_preview_draws_the_trace_itself() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_disc(&ctx);
+        app.open_trace();
+        let mut card = app.trace.take().expect("opened");
+        card.settle();
+        let shot = card.shot.clone().expect("rendered");
+        let ink = made(&shot, &card.asked()).ink;
+        let alpha = |x: usize, y: usize| ink.pixels[y * shot.width + x].a();
+        let (cx, cy) = (shot.width / 2, shot.height / 2);
+        assert_eq!(alpha(cx, cy), 255, "the disc is inked");
+        assert_eq!(alpha(2, 2), 0, "the ground is not");
+    }
+
+    /// A press on the preview away from the divider moves nothing; a drag of the
+    /// line itself moves it.
+    /// flip: `preview` grabbing the divider wherever the press lands → fails at
+    /// "only the line drags".
+    #[test]
+    fn only_the_divider_line_drags() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_disc(&ctx);
+        app.open_trace();
+        let mut card = app.trace.take().expect("opened");
+        card.settle();
+        let frame = |card: &mut TraceCard, events: Vec<egui::Event>| {
+            let mut rect = egui::Rect::NOTHING;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    preview(ui, card, 300.0, false);
+                    rect = ui.min_rect();
+                },
+            );
+            rect
+        };
+        let rect = frame(&mut card, Vec::new());
+        let button = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let drag = |card: &mut TraceCard, from: egui::Pos2, to: egui::Pos2| {
+            frame(card, vec![egui::Event::PointerMoved(from)]);
+            frame(card, vec![button(true, from)]);
+            for k in 1..=4 {
+                let at = from + (to - from) * (k as f32 / 4.0);
+                frame(card, vec![egui::Event::PointerMoved(at)]);
+            }
+            frame(card, vec![button(false, to)]);
+            frame(card, Vec::new());
+        };
+        let y = rect.center().y;
+        let left = egui::pos2(rect.left() + 20.0, y);
+        drag(&mut card, left, left + egui::vec2(60.0, 0.0));
+        assert_eq!(card.divider, 0.5, "only the line drags");
+        let line = egui::pos2(rect.center().x + 4.0, y);
+        let to = egui::pos2(rect.left() + 60.0, y);
+        drag(&mut card, line, to);
+        assert!((card.divider - 0.2).abs() < 0.01, "{}", card.divider);
+    }
+
+    /// A right-click mid-scrub of Detail puts the number back.
+    /// flip: `trace_ui` not arming `trace_scrub` → fails at "the scrub is armed".
+    #[test]
+    fn a_right_click_winds_a_scrub_back() {
+        use crate::repeat::tests::scrub_then_right_click;
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_disc(&ctx);
+        app.open_trace();
+        app.trace.as_mut().expect("opened").settle();
+        let before = app.trace.as_ref().unwrap().settings.detail;
+        scrub_then_right_click(
+            &ctx,
+            &mut app,
+            egui::Id::new("trace-image"),
+            "Detail",
+            |at| at,
+            |app| {
+                let card = app.trace.as_ref().expect("open");
+                assert_ne!(card.settings.detail, before, "the drag scrubbed it");
+                assert!(app.in_flight.trace_scrub.is_some(), "the scrub is armed");
+            },
+        );
+        let card = app.trace.as_ref().expect("the right-click closed nothing");
+        assert_eq!(card.settings.detail, before, "the detail is back");
     }
 
     /// Without *Keep the picture*, the trace takes the picture's place.

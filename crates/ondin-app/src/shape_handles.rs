@@ -24,8 +24,9 @@ use ondin_core::kurbo::{Affine, Point, RoundedRectRadii, Size, Vec2};
 use ondin_core::{EllipseArc, GeometryPatch, NodeId, NodeKind, Operation, Transaction};
 
 /// A dot's radius, and how near it a press must land, in screen points: the
-/// reach is kept well past the drawn dot so a small dot stays easy to grab.
-const DOT_R: f32 = 3.5;
+/// reach is kept well past the drawn dot so a small dot stays easy to grab. The
+/// warp envelope's handles are drawn at it too.
+pub(crate) const DOT_R: f32 = 3.5;
 const DOT_PICK_PX: f32 = 8.0;
 /// A corner dot's inset while its radius is 0, in screen points.
 const ZERO_INSET_PX: f64 = 12.0;

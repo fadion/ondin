@@ -45,8 +45,6 @@ pub(crate) const CHANGED_INK: egui::Color32 = egui::Color32::from_rgb(0x17, 0x14
 const MARK_OUTSET: f32 = 3.0;
 /// The narrowest a mark's tag is cut to, over a layer narrower than it.
 const TAG_MIN_W: f32 = 48.0;
-/// How near the Swipe handle a press must land to drag it.
-const HANDLE_REACH: f32 = 12.0;
 /// The changes card's row inset and the indent of a row's value lines.
 const ROW_PAD: f32 = 8.0;
 const LINE_INDENT: f32 = 23.0;
@@ -851,7 +849,7 @@ impl OndinApp {
         };
         let split_x = rect.left() + rect.width() * c.split;
         let swipe = c.side == Side::Swipe;
-        let near = |p: egui::Pos2| swipe && (p.x - split_x).abs() <= HANDLE_REACH;
+        let near = |p: egui::Pos2| swipe && (p.x - split_x).abs() <= crate::ui::SPLIT_REACH;
         let dragging = c.split_from.is_some();
         let on_handle = resp.hover_pos().is_some_and(near);
         // A drag a right-click cancelled stays spent until the button is let go:
@@ -885,15 +883,22 @@ impl OndinApp {
         {
             c.split_from = None;
         }
-        let cursor = if dragging || on_handle {
-            egui::CursorIcon::ResizeHorizontal
+        // The drawn cursors, as the canvas's handles wear them: `canvas_cursor` ran
+        // first and set a drawn arrow, which a stock icon alone would sit under.
+        let (icon, bitmap) = if dragging || on_handle {
+            crate::canvas::resize_cursor(egui::vec2(1.0, 0.0))
         } else if resp.dragged() {
-            egui::CursorIcon::Grabbing
+            (
+                egui::CursorIcon::Grabbing,
+                Some(crate::cursor::Bitmap::Panning),
+            )
         } else {
-            egui::CursorIcon::Default
+            crate::canvas::arrow(None)
         };
         if resp.hovered() || resp.dragged() {
-            ui.ctx().set_cursor_icon(cursor);
+            let ctx = ui.ctx();
+            ctx.set_cursor_icon(icon);
+            ctx.set_cursor_image(bitmap.and_then(|b| self.cursors.image(ctx, b)));
         }
         // Marks the overlay hides cannot be clicked.
         if resp.clicked()
@@ -1792,20 +1797,7 @@ fn dashed_rect(painter: &egui::Painter, r: egui::Rect, stroke: egui::Stroke) {
 
 /// Swipe's split: a line down the canvas, a grip on it, and which side is which.
 fn paint_handle(painter: &egui::Painter, rect: egui::Rect, x: f32) {
-    let accent = color::accent();
-    painter.line_segment(
-        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-        egui::Stroke::new(2.0, accent),
-    );
-    let grip = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), egui::vec2(24.0, 36.0));
-    painter.rect_filled(grip, 6.0, accent);
-    painter.text(
-        grip.center(),
-        egui::Align2::CENTER_CENTER,
-        icon::ARROWS_LEFT_RIGHT,
-        theme::icon_font(14.0),
-        egui::Color32::from_rgb(0x10, 0x13, 0x1b),
-    );
+    crate::ui::split_handle(painter, rect, x);
     for (text, align, at) in [
         (
             "THEN",

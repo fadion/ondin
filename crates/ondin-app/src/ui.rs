@@ -2428,6 +2428,29 @@ impl Prefix {
     }
 }
 
+/// How near a [`split_handle`]'s line a press must land to take it.
+pub const SPLIT_REACH: f32 = 12.0;
+
+/// A before-and-after split's divider: an accent line down `rect` at `x`, with a
+/// grip wearing the left-right arrows at its middle. The compare's Swipe and the
+/// trace card's preview draw it; only the line, within [`SPLIT_REACH`], drags.
+pub fn split_handle(painter: &egui::Painter, rect: egui::Rect, x: f32) {
+    let accent = color::accent();
+    painter.line_segment(
+        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+        egui::Stroke::new(2.0, accent),
+    );
+    let grip = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), egui::vec2(24.0, 36.0));
+    painter.rect_filled(grip, 6.0, accent);
+    painter.text(
+        grip.center(),
+        egui::Align2::CENTER_CENTER,
+        icon::ARROWS_LEFT_RIGHT,
+        theme::icon_font(14.0),
+        egui::Color32::from_rgb(0x10, 0x13, 0x1b),
+    );
+}
+
 /// How tall a scrolled list's top fade is ([`scroll_fade_top`]).
 pub const SCROLL_FADE_H: f32 = 20.0;
 

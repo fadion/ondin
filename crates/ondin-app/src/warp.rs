@@ -37,6 +37,9 @@ pub(crate) struct WarpSession {
     pub(crate) vertical: bool,
     /// The handle being dragged.
     pub(crate) grab: Option<Grab>,
+    /// The corners and bend as the drag in hand found them, which a right-click
+    /// puts back.
+    grab_from: ([Point; 4], f64),
     /// The preview built for the envelope it shows.
     built: Option<(Envelope, Transaction)>,
 }
@@ -123,10 +126,12 @@ impl OndinApp {
             bend: 0.4,
             vertical: false,
             grab: None,
+            grab_from: (warp::corners(bounds), 0.4),
             built: None,
         });
-        self.session
-            .info("Drag the corners, or pick a shape on the bar; Enter to finish");
+        self.session.info(
+            "Warping: drag a corner, or pick a shape on the bar; Enter to finish, Escape to cancel",
+        );
     }
 
     /// Close the envelope and leave the layers as they were.
@@ -226,6 +231,10 @@ impl OndinApp {
         }
         if preset == Some(Preset::Arc) && self.warp_takes_text() {
             self.session.info(TEXT_ON_ARC);
+        } else if preset.is_some() {
+            // A preset has one handle, not the corners the opening line named.
+            self.session
+                .info("Warping: drag the handle to bend it; Enter to finish, Escape to cancel");
         }
         self.refresh_warp_preview();
     }
@@ -291,7 +300,12 @@ impl OndinApp {
             let grab = origin.and_then(|p| self.warp_handle_at(p, rect, ppp));
             if let Some(s) = &mut self.warp {
                 s.grab = grab;
+                s.grab_from = (s.corners, s.bend);
             }
+        }
+        // A right-click called the drag off; its release must not pick it up again.
+        if self.gesture_cancelled {
+            return;
         }
         if resp.dragged()
             && let Some(p) = resp.interact_pointer_pos()
@@ -304,6 +318,27 @@ impl OndinApp {
         {
             s.grab = None;
         }
+    }
+
+    /// A right-click mid-drag: the handle in the hand goes back to where its drag
+    /// began. Returns whether one was in the hand.
+    pub(crate) fn cancel_warp_grab(&mut self) -> bool {
+        let Some(s) = &mut self.warp else {
+            return false;
+        };
+        if s.grab.take().is_none() {
+            return false;
+        }
+        (s.corners, s.bend) = s.grab_from;
+        self.refresh_warp_preview();
+        true
+    }
+
+    /// A right-click mid-scrub of the card's Bend: the bend it began from.
+    pub(crate) fn restore_warp_bend(&mut self, bend: f64) {
+        let Some(s) = &mut self.warp else { return };
+        s.bend = bend;
+        self.refresh_warp_preview();
     }
 
     /// The handle under the screen point `p`, if any.
@@ -412,6 +447,63 @@ mod tests {
         app.canvas_px = (800, 600);
         app.session.selection.set(vec![rect, ellipse]);
         (app, rect, ellipse)
+    }
+
+    /// A right-click mid-drag of a corner puts the corner back where the drag
+    /// began and ends the drag; the envelope stays open.
+    /// flip: `cancel_gesture` not calling `cancel_warp_grab` → fails at "a drag
+    /// was called off".
+    #[test]
+    fn a_right_click_puts_a_dragged_corner_back() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_two(&ctx);
+        app.open_warp();
+        let s = app.warp.as_mut().expect("opened");
+        let home = s.corners;
+        s.grab = Some(Grab::Corner {
+            i: 1,
+            from: home[1],
+            edges: [home[1] - home[0], home[1] - home[2]],
+        });
+        s.grab_from = (home, s.bend);
+        app.drag_warp_handle(Point::new(240.0, -30.0), false);
+        assert_ne!(
+            app.warp.as_ref().unwrap().corners,
+            home,
+            "the drag moved it"
+        );
+        assert!(app.cancel_gesture(&ctx), "a drag was called off");
+        let s = app.warp.as_ref().expect("still open");
+        assert_eq!(s.corners, home, "the corner is back");
+        assert!(s.grab.is_none(), "and out of the hand");
+    }
+
+    /// A right-click mid-scrub of the card's Bend puts the bend back.
+    /// flip: `warp_card` not arming `warp_scrub` → fails at "the scrub is armed".
+    #[test]
+    fn a_right_click_winds_a_bend_scrub_back() {
+        use crate::repeat::tests::{scrub_then_right_click, tick_app};
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = tick_app(&ctx);
+        app.open_warp();
+        app.set_warp_shape(Some(Preset::Arc));
+        // Under the fold's limit, so the scrub has room to move it.
+        app.set_warp_bend(0.05);
+        let before = app.warp.as_ref().expect("opened").bend;
+        scrub_then_right_click(
+            &ctx,
+            &mut app,
+            egui::Id::new("warp-card"),
+            "Bend",
+            |at| at,
+            |app| {
+                let s = app.warp.as_ref().expect("open");
+                assert_ne!(s.bend, before, "the drag scrubbed the bend");
+                assert!(app.in_flight.warp_scrub.is_some(), "the scrub is armed");
+            },
+        );
+        let s = app.warp.as_ref().expect("the right-click closed nothing");
+        assert_eq!(s.bend, before, "the bend is back");
     }
 
     /// One envelope round the selection; dragging a corner, then committing, bakes

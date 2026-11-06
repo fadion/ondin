@@ -180,6 +180,10 @@ pub(crate) struct InFlight {
     pub(crate) repeat_scrub: Option<(f64, f64)>,
     /// *Blend shapes…*'s step count as it was when its scrub began, likewise.
     pub(crate) blend_scrub: Option<f64>,
+    /// The warp card's bend as it was when its scrub began, likewise.
+    pub(crate) warp_scrub: Option<f64>,
+    /// The trace card's numbers as they were when a scrub of one began, likewise.
+    pub(crate) trace_scrub: Option<crate::trace::TraceNumbers>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
@@ -258,6 +262,20 @@ mod in_flight_tests {
                 "blend_scrub",
                 InFlight {
                     blend_scrub: Some(5.0),
+                    ..Default::default()
+                },
+            ),
+            (
+                "warp_scrub",
+                InFlight {
+                    warp_scrub: Some(0.4),
+                    ..Default::default()
+                },
+            ),
+            (
+                "trace_scrub",
+                InFlight {
+                    trace_scrub: Some(Default::default()),
                     ..Default::default()
                 },
             ),
@@ -2157,6 +2175,8 @@ impl OndinApp {
             self.in_flight.rename_scrub = None;
             self.in_flight.repeat_scrub = None;
             self.in_flight.blend_scrub = None;
+            self.in_flight.warp_scrub = None;
+            self.in_flight.trace_scrub = None;
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2726,6 +2746,12 @@ impl OndinApp {
             ctx.stop_dragging();
             return true;
         }
+        // And a warp envelope's corner or bend handle, and the trace card's divider.
+        if self.cancel_warp_grab() || self.trace.as_mut().is_some_and(|t| t.cancel_divider()) {
+            self.gesture_cancelled = true;
+            ctx.stop_dragging();
+            return true;
+        }
         if self.drag.is_none() && self.layer_drag.is_none() && !self.pages.dragging() && !field {
             return false;
         }
@@ -2777,6 +2803,14 @@ impl OndinApp {
         }
         if let Some(steps) = self.in_flight.blend_scrub.take() {
             self.blend.restore_scrub(steps);
+        }
+        if let Some(bend) = self.in_flight.warp_scrub.take() {
+            self.restore_warp_bend(bend);
+        }
+        if let Some(n) = self.in_flight.trace_scrub.take()
+            && let Some(card) = &mut self.trace
+        {
+            card.restore(n);
         }
         // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;

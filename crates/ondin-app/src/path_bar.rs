@@ -335,14 +335,15 @@ impl OndinApp {
     ) {
         let Some(s) = &self.warp else { return };
         let (bend, vertical) = (s.bend, s.vertical);
-        let (name, glyph) = match preset {
-            Preset::Arc => ("Arc", icon::WARP_ARC),
-            Preset::Flag => ("Flag", icon::WARP_FLAG),
-            Preset::Bulge => ("Bulge", icon::WARP_BULGE),
+        let glyph = match preset {
+            Preset::Arc => icon::WARP_ARC,
+            Preset::Flag => icon::WARP_FLAG,
+            Preset::Bulge => icon::WARP_BULGE,
         };
         let at = egui::pos2(bar.right() + GAP, button.top());
         let mut pct = bend * 100.0;
         let mut way = None;
+        let mut scrubbing = false;
         egui::Area::new(egui::Id::new("warp-card"))
             .order(egui::Order::Foreground)
             .fixed_pos(at)
@@ -350,18 +351,20 @@ impl OndinApp {
                 ui::hold_tab(ui);
                 ui.set_max_width(CARD_W);
                 ui::card(ui, |ui| {
-                    ui.label(ui::eyebrow(name));
+                    // One label, as the Offset card has: the lit bar button names
+                    // the preset.
                     ui::labelled(ui, "Bend", |ui| {
                         let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
-                        value_field(
+                        let resp = value_field(
                             ui,
                             size,
                             Prefix::Icon(glyph),
                             &mut pct,
                             Scrub::whole(0.5).range(-100.0..=100.0),
                             |d| d.custom_formatter(|v, _| format!("{v:.0}%")),
-                        )
-                        .on_hover_text("How far it bends — negative bends the other way");
+                        );
+                        scrubbing = resp.dragged();
+                        resp.on_hover_text("How far it bends — negative bends the other way");
                     });
                     let w = ui.available_width();
                     way = ui::segmented(
@@ -376,7 +379,12 @@ impl OndinApp {
                     );
                 });
             });
-        if pct != bend * 100.0 {
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if scrubbing && !self.gesture_cancelled && self.in_flight.warp_scrub.is_none() {
+            self.in_flight.warp_scrub = Some(bend);
+        }
+        if pct != bend * 100.0 && !self.gesture_cancelled {
             self.set_warp_bend(pct / 100.0);
         }
         if let Some(i) = way {

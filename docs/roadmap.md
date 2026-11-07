@@ -8,14 +8,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Editor additions
 
-- **A Tools menu** (`TopMenu::Tools`), right of View, a new toolbox glyph and caret, for what works
-  across the document. Checks, which change nothing: *Check contrast* and *Simulate vision*
-  (ticked while on), *Colour review…*. Then bulk edits, each a box and one undo step: *Find and
-  replace…* (`Ctrl+F`), *Batch rename…* (`Ctrl+Shift+R`), and *Clean up…* and *Fill with
-  content…* once built. View loses its last group. Verbs on the selection stay in the context
-  menu, document-level rows in the Document menu, view modes in View, and inserting in the insert
-  picker. The menu joins the one-open-menu rule and, like View and Snap, is disabled while
-  comparing; the palette keeps every row.
 - **Simulate vision** replaces *Simulate colour blindness*: the bar's chip picks one condition —
   the four colour deficiencies (`vision.rs`), blurred vision, loss of contrast, ghosting and
   yellowing — with a severity slider for each. Contrast loss and yellowing are matrices like the
@@ -30,10 +22,11 @@ item's premise can go stale while its ask still reads true.
   CC BY icon set's attribution, a photo's photographer credit and download report.
 - **A content generator** — realistic names, addresses, titles, companies and text for selected
   text layers, a different value per layer, from tables shipped with the app (works offline, a few
-  locales). Avatars are generated (initials, patterns); photos come from the assets browser.
+  locales). Avatars are generated (initials, patterns); photos come from the assets browser. Its
+  door is a Tools menu bulk-edit row, *Fill with content…*.
 - **Clean up…** — a card over the selection, or the page with none, one switch per rule (kept in
-  prefs), a preview grouped by rule as batch rename's is, and one undo step. A core verb, so MCP and
-  Command Mode reach it. Rules:
+  prefs), a preview grouped by rule as batch rename's is, and one undo step; a Tools menu bulk-edit
+  row. A core verb, so MCP and Command Mode reach it. Rules:
   - delete hidden fills, strokes, effects and layout grids, and fills under a visible, fully opaque
     normal-blend solid; never in a list a style supplies;
   - delete hidden layers and empty ones (no children, no visible paint), but not a slice, a layer
@@ -143,7 +136,6 @@ Ideas worth weighing, not yet decided or scheduled.
 - **Justify-all** — blocked upstream in parley (`align_impl`, `pub(crate)` internals); trigger is a
   parley patch (§15 D825).
 - **A stored, user-placed transform origin for a multi-selection** — unparks when a user asks for it.
-- **A Tools menu** — *Check contrast* moves there from the View menu once more tools arrive.
 - UI toolkit revisit (gpui / Xilem), `architecture.md` §9.1.
 - MCP transport hardening (auth, TCP/remote).
 - `vello_hybrid` as a third backend if low-end GPUs demand it.

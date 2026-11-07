@@ -1174,7 +1174,7 @@ impl Item {
             Item::SaveNamedVersion => {
                 s("Save named version…", icon::FLOPPY_DISK, None, Group::File)
             }
-            Item::ColourReview => s("Colour review", icon::PALETTE, None, Group::View),
+            Item::ColourReview => s("Colour review…", icon::PALETTE, None, Group::View),
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
                 icon::ROTATE_LEFT,

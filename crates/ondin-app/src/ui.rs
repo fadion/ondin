@@ -922,18 +922,32 @@ fn menu_check_held(
 /// The painted width a dropdown of [`menu_check`] rows needs so its widest
 /// label fits — `floor` or more, the row's inset on the right as on the left.
 pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f32) -> f32 {
-    let widest = labels
-        .iter()
-        .map(|l| {
-            ctx.fonts_mut(|f| {
-                f.layout_no_wrap(
-                    (*l).to_string(),
-                    egui::FontId::proportional(SMALL_PT),
-                    egui::Color32::WHITE,
-                )
+    let rows: Vec<(&str, Option<&str>)> = labels.iter().map(|l| (*l, None)).collect();
+    menu_check_accel_width(ctx, &rows, pad, floor)
+}
+
+/// [`menu_check_width`] for rows that may carry an accelerator, `(label, accel)`,
+/// measured as [`menu_row`] lays the pair: the label, the gap, the spelled chord.
+pub fn menu_check_accel_width(
+    ctx: &egui::Context,
+    rows: &[(&str, Option<&str>)],
+    pad: f32,
+    floor: f32,
+) -> f32 {
+    let measure = |text: String, pt: f32| {
+        ctx.fonts_mut(|f| {
+            f.layout_no_wrap(text, egui::FontId::proportional(pt), egui::Color32::WHITE)
                 .size()
                 .x
-            })
+        })
+    };
+    let widest = rows
+        .iter()
+        .map(|(label, accel)| {
+            let chord = accel.map_or(0.0, |a| {
+                measure(crate::input::keys(a).into_owned(), CAPTION_PT) + MENU_ACCEL_GAP
+            });
+            measure((*label).to_string(), SMALL_PT) + chord
         })
         .fold(0.0, f32::max);
     // `menu_row`'s label column, then its 8pt right inset.

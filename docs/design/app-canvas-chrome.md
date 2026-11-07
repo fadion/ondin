@@ -1,7 +1,7 @@
 # Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap menus and Settings button,
+pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap/Tools menus and Settings button,
 the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
@@ -104,8 +104,8 @@ marks the original that stays. Toggles live with the key.
 
 ## The contrast check mode (`contrast.rs`)
 
-*View ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
-chord): in the View menu's last group, ticked while on, and a palette row reading *Stop checking contrast* while on.
+*Tools ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
+chord): the Tools menu's first row, ticked while on, and a palette row reading *Stop checking contrast* while on.
 It measures the shown text layers, and with *Non-text* small shapes, against what is drawn behind
 them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
@@ -192,8 +192,8 @@ stack.
 
 ## The colour-blind simulation (`vision.rs`)
 
-*View ▸ Simulate colour blindness* (`Action::SimulateColourBlindness`,
-`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the View menu's row after
+*Tools ▸ Simulate colour blindness* (`Action::SimulateColourBlindness`,
+`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the Tools menu's row after
 *Check contrast*, ticked while on, and a palette row reading *Stop simulating colour blindness*
 while on. One frame of the canvas is shown as someone with a colour-vision deficiency sees it
 (`ondin_render::vision`, `render.md`). `OndinApp::vision` is view state, as the contrast check is:
@@ -225,7 +225,8 @@ simulations barely move.
 
 ## The top bar's right cluster
 
-Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
+Between undo/redo and the zoom readout: **View** (eye + caret), **Snap** (magnet + caret) and
+**Tools** (toolbox + caret), so the bar reads View · Snap · Tools · zoom · Settings.
 
 **The resource meter** (`meter.rs`), left of undo behind a rule, while Settings' *Show resource meter*
 is on (off by default): CPU (`icon::CPU`) and memory (`MEMORY`), each
@@ -246,12 +247,14 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.
-- Rows are `ui::menu_check`, a checkable `ui::menu_row` with no glyph, `ui::MENU_ROW_H` (24) tall,
-  in `ui::menu_frame`; width 160pt or the widest row (`ui::menu_check_width`: the label column
-  `ui::MENU_LABEL_X`, then 8pt). The accent tick sits in the glyph column and keeps it when off; "off"
-  also dims the label.
-- **View** (`OndinApp::view_and_snap_menus`) reads in four groups between separators, so each kind of
-  row is found in one place:
+- `OndinApp::view_snap_tools_menus` draws the three heads, each tooltipped with its name and
+  disabled while comparing (*‹Name› — not while comparing*); comparing also closes whichever is open.
+- View and Snap rows are `ui::menu_check`, a checkable `ui::menu_row` with no glyph, `ui::MENU_ROW_H`
+  (24) tall, in `ui::menu_frame`. The accent tick sits in the glyph column and keeps it when off;
+  "off" also dims the label. Each of the three menus is 160pt or its widest row
+  (`ui::menu_check_accel_width`: the label column `ui::MENU_LABEL_X`, the label and any chord, then
+  8pt).
+- **View** reads in three groups between separators, so each kind of row is found in one place:
   - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,
     *Show grid*, *Show layout grid*;
   - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Pixel preview*, *Private mode*, *Focus mode*, then *Present
@@ -260,9 +263,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   - *Panels ▸* (`PANELS_ROW`, a `ui::submenu_check_row`), whose flyout
     (`OndinApp::panels_flyout`, a `ui::flyout`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
     *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
-    stay together;
-  - *Check contrast* and *Simulate colour blindness*, each ticked while on and never remembered,
-    then *Colour review*, a check row that never ticks and opens the review card.
+    stay together.
 
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
@@ -270,6 +271,20 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   the cheatsheet and the rail's Select slot carry it (`app-selection.md`).
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
+- **Tools** (`OndinApp::tools_menu`, rows from `ToolsRow::ALL`) holds what works across the
+  document. Verbs on the selection stay in the context menu, document-level rows in the Document
+  menu, view modes in View, inserting in the insert picker.
+  - the checks, which change nothing: *Check contrast* and *Simulate colour blindness*, ticked while
+    on and never remembered, then *Colour review…*, never ticked, opening its card;
+  - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
+    `Action::FindText { replace: false }`) and *Batch rename…* (`Ctrl+Shift+R`; dimmed with
+    `private::DECLINE_RENAME` in private mode).
+
+  Every row is a `ui::menu_row` with an empty glyph and `.checked(..)`, so the tick column stays and
+  the labels line up. The bulk edits show their chords from the keymap (`Item::spec().accel`).
+  *Find and replace…* is this menu's own label (`ToolsRow::label`): the palette names the box's two
+  doors, *Find in text…* and *Replace text…*. A pick closes the menu, then acts. The palette keeps
+  every row.
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
   value; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
   centre, clamped like every zoom; anything else says *"Type a zoom percentage, like 150"*) and
@@ -333,7 +348,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 ### One open menu
 
-`app::TopMenu` holds one value — `None | View | Snap | Zoom | Document | KitUpdates` — so menus are
+`app::TopMenu` holds one value — `None | View | Snap | Tools | Zoom | Document | KitUpdates` — so menus are
 mutually exclusive by construction. `OndinApp::dropdown` spells the closing half once (click outside,
 Escape). `OndinApp::context_menu` is the same one-slot shape; opening a context menu clears this field
 and the floating popovers.
@@ -349,7 +364,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
-  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, *Colour review*, tools, place image, zoom, align,
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, *Colour review…*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -450,7 +465,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   *Batch rename…* (`Ctrl+Shift+R`, `Action::BatchRename`, `Item::BatchRename`, State group,
   `CURSOR_TEXT`) opens the box and is always live. With two or more layers selected, `Ctrl+R` and `F2`
   open the box rather than refusing.
-- **Doors.** The chord; the palette, offered with any target (aliases *find*, *replace*, *number*,
+- **Doors.** The chord; *Tools ▸ Batch rename…*; the palette, offered with any target (aliases *find*, *replace*, *number*,
   *bulk*); the layer menu's one rename row, which reads *Batch rename…* with several layers selected
   and *Rename* with one, as `Ctrl+R` does; a `CURSOR_TEXT` button in the
   Layers header between collapse-all and search (*Batch rename (Ctrl+Shift+R)*); the cheatsheet's
@@ -561,7 +576,8 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   ⌘H hides the app) opens with the Replace row showing, unshifted only, since `Ctrl+Shift+H` is
   hide/show. Both are normal-mode
   chords. The palette rows *Find in text…* and *Replace text…* (`Item::FindText`, `ReplaceText`,
-  State group) are also in the cheatsheet's Layer section. Opening again while open only takes the
+  State group) are also in the cheatsheet's Layer section; *Tools ▸ Find and replace…* opens on
+  Find, as `Ctrl+F` does. Opening again while open only takes the
   keyboard back.
 - **Placement.** Not a modal, so the canvas stays live and the matches are found again as the text
   changes. An `Area` at the canvas's top right, 420 wide, 16 below the top (below the rulers when
@@ -631,7 +647,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document with no modes, a variable valued
   the target's colour in every mode, and binds every raw member's users, the target's included;
   with every use on a locked layer it writes nothing, the variable included.
-- **Doors and place.** The View menu's last row, after *Simulate colour blindness* and never ticked,
+- **Doors and place.** *Tools ▸ Colour review…*, after *Simulate colour blindness* and never ticked,
   and the palette (`Item::ColourReview`, unbound). It hangs at the palette's place
   (`ui::canvas_popup_area`), 420 wide, on the settings card's ground (`settings::card_frame`), but is
   no modal: nothing blocks the canvas and a click there leaves it open. It is at most

@@ -428,7 +428,7 @@ fn ancestors<'d>(
 
 /// Whether `action` may run while a compare is open: what moves the view, saves
 /// or leaves, never what edits. The palette and the view switches stay out with
-/// the View and Snap menus: each reaches modes and overlays the compare does not
+/// the View, Snap and Tools menus: each reaches modes and overlays the compare does not
 /// draw, and guarding every one of them is not worth what they add to a diff.
 pub(crate) fn admits(action: &Action) -> bool {
     matches!(

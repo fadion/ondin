@@ -1022,10 +1022,10 @@ pub struct OndinApp {
     pub(crate) show_minimap: bool,
     /// The minimap's drag and remembered shape (`minimap.rs`).
     pub(crate) minimap: crate::minimap::Minimap,
-    /// *View ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
+    /// *Tools ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
     /// document opens with it off.
     pub(crate) contrast: Option<crate::contrast::Contrast>,
-    /// *View ▸ Simulate colour blindness*, while it is on (`vision.rs`). View
+    /// *Tools ▸ Simulate colour blindness*, while it is on (`vision.rs`). View
     /// state, as the contrast check is.
     pub(crate) vision: Option<crate::vision::Vision>,
     /// The batch rename box, while it is open (`batch_rename.rs`).
@@ -1084,11 +1084,56 @@ pub enum TopMenu {
     None,
     View,
     Snap,
+    /// The checks and bulk edits that work across the document.
+    Tools,
     Zoom,
     /// The document menu — the caret beside the document's name.
     Document,
     /// The kit update notice's popover.
     KitUpdates,
+}
+
+/// A row of the top bar's Tools menu ([`OndinApp::tools_menu`]), in its order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolsRow {
+    CheckContrast,
+    SimulateVision,
+    ColourReview,
+    FindReplace,
+    BatchRename,
+}
+
+impl ToolsRow {
+    const ALL: [ToolsRow; 5] = [
+        ToolsRow::CheckContrast,
+        ToolsRow::SimulateVision,
+        ToolsRow::ColourReview,
+        ToolsRow::FindReplace,
+        ToolsRow::BatchRename,
+    ];
+
+    /// The registry's label, except *Find and replace…*: the palette's two rows
+    /// name the box's two doors, and here one row opens it.
+    fn label(self) -> &'static str {
+        use crate::menu::Item;
+        match self {
+            ToolsRow::CheckContrast => Item::CheckContrast.spec().label,
+            ToolsRow::SimulateVision => Item::SimulateColourBlindness.spec().label,
+            ToolsRow::ColourReview => Item::ColourReview.spec().label,
+            ToolsRow::FindReplace => "Find and replace…",
+            ToolsRow::BatchRename => Item::BatchRename.spec().label,
+        }
+    }
+
+    /// The chord a bulk edit shows, from the keymap; the checks have none.
+    fn accel(self) -> Option<&'static str> {
+        use crate::menu::Item;
+        match self {
+            ToolsRow::FindReplace => Item::FindText.spec().accel,
+            ToolsRow::BatchRename => Item::BatchRename.spec().accel,
+            _ => None,
+        }
+    }
 }
 
 /// The system clipboard's text, if it holds any; `None` for an empty one.
@@ -7404,7 +7449,7 @@ impl OndinApp {
                     }
 
                     // Right cluster, reading the resource meter (when on) · undo/redo ·
-                    // View · Snap · zoom · Settings;
+                    // View · Snap · Tools · zoom · Settings;
                     // laid out `right_to_left`, so added in mirror order.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = TOP_GAP;
@@ -7419,7 +7464,7 @@ impl OndinApp {
 
                         self.zoom_control(ui);
                         top_rule(ui);
-                        self.view_and_snap_menus(ui);
+                        self.view_snap_tools_menus(ui);
                         top_rule(ui);
 
                         // Only the buttons' enabled state; the arms finish the text
@@ -7623,28 +7668,34 @@ impl OndinApp {
         egui::Id::new(id).with("flyout")
     }
 
-    /// The **View** and **Snap** dropdowns, each an icon and a caret over a column of
-    /// checkable rows. Focus mode is not a peer of the other switches: it hides all
+    /// The **View**, **Snap** and **Tools** dropdowns, each an icon and a caret over a
+    /// column of rows. Focus mode is not a peer of the other switches: it hides all
     /// chrome and leaves them untouched, so Escape (this menu being hidden) restores them.
     ///
-    /// View reads in four groups: what the canvas draws, the modes (with *Present
-    /// mode* as a verb last), *Panels ▸* opening the panes beside it on hover, and
-    /// *Check contrast*.
-    fn view_and_snap_menus(&mut self, ui: &mut egui::Ui) {
+    /// View reads in three groups: what the canvas draws, the modes (with *Present
+    /// mode* as a verb last), and *Panels ▸* opening the panes beside it on hover.
+    /// Tools' rows are [`Self::tools_menu`]'s.
+    fn view_snap_tools_menus(&mut self, ui: &mut egui::Ui) {
         const ITEM_H: f32 = crate::ui::MENU_ROW_H;
         const MENU_W: f32 = 160.0;
 
         let ctx = ui.ctx().clone();
-        // Neither menu has anything a compare draws or a read-only document takes.
+        // No menu has anything a compare draws or a read-only document takes.
         let comparing = self.session.compare.is_some();
-        if comparing && matches!(self.open_menu, TopMenu::View | TopMenu::Snap) {
+        if comparing
+            && matches!(
+                self.open_menu,
+                TopMenu::View | TopMenu::Snap | TopMenu::Tools
+            )
+        {
             self.open_menu = TopMenu::None;
         }
 
-        // Snap first: in the `right_to_left` cluster the pair then reads View · Snap.
-        for which in [TopMenu::Snap, TopMenu::View] {
+        // Mirror order: in the `right_to_left` cluster they read View · Snap · Tools.
+        for which in [TopMenu::Tools, TopMenu::Snap, TopMenu::View] {
             let (glyph, tip) = match which {
                 TopMenu::View => (icon::EYE, "View"),
+                TopMenu::Tools => (icon::TOOLBOX, "Tools"),
                 _ => (icon::MAGNET, "Snap"),
             };
             // `TOP_GAP` before the caret, matching the zoom readout's.
@@ -7665,6 +7716,7 @@ impl OndinApp {
             }
             let id = match which {
                 TopMenu::View => "view-menu",
+                TopMenu::Tools => "tools-menu",
                 _ => "snap-menu",
             };
             // Where the open flyout's row is, kept across frames while it stays open.
@@ -7678,24 +7730,30 @@ impl OndinApp {
                 head.rect.left() - 8.0,
                 head.rect.bottom() + crate::ui::MENU_GAP,
             );
-            // 160, or wider when a label needs it.
-            let labels: Vec<&str> = match which {
+            // 160, or wider when a label (and its chord) needs it.
+            let rows: Vec<(&str, Option<&str>)> = match which {
                 TopMenu::View => ViewSwitch::VIEW_CANVAS
                     .iter()
                     .chain(&ViewSwitch::VIEW_MODES)
                     .map(|s| s.label())
-                    .chain([
-                        crate::menu::Item::Present.spec().label,
-                        PANELS_ROW,
-                        crate::menu::Item::CheckContrast.spec().label,
-                        crate::menu::Item::SimulateColourBlindness.spec().label,
-                        crate::menu::Item::ColourReview.spec().label,
-                    ])
+                    .chain([crate::menu::Item::Present.spec().label, PANELS_ROW])
+                    .map(|l| (l, None))
                     .collect(),
-                _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
+                TopMenu::Tools => ToolsRow::ALL
+                    .iter()
+                    .map(|r| (r.label(), r.accel()))
+                    .collect(),
+                _ => ViewSwitch::SNAP_MENU
+                    .iter()
+                    .map(|s| (s.label(), None))
+                    .collect(),
             };
-            let width = crate::ui::menu_check_width(&ctx, &labels, crate::ui::MENU_PAD, MENU_W);
+            let width = crate::ui::menu_check_accel_width(&ctx, &rows, crate::ui::MENU_PAD, MENU_W);
             self.dropdown(&ctx, id, anchor, width, &head, |app, ui| {
+                if which == TopMenu::Tools {
+                    app.tools_menu(ui);
+                    return;
+                }
                 // From [`ViewSwitch`], which the chords resolve to.
                 let switch = |app: &mut Self, ui: &mut egui::Ui, sw: ViewSwitch, label: &str| {
                     let on = app.view_switch(sw);
@@ -7737,32 +7795,6 @@ impl OndinApp {
                 if panels.hovered() || panels.clicked() {
                     flyout = Some(panels.rect);
                 }
-                crate::ui::menu_sep(ui);
-                // Ticked while on, but view state rather than a remembered switch.
-                let label = crate::menu::Item::CheckContrast.spec().label;
-                let contrast =
-                    crate::ui::menu_check_response(ui, label, app.contrast.is_some(), ITEM_H);
-                elsewhere |= contrast.hovered();
-                if contrast.clicked() {
-                    app.open_menu = TopMenu::None;
-                    app.toggle_contrast();
-                }
-                let label = crate::menu::Item::SimulateColourBlindness.spec().label;
-                let vision =
-                    crate::ui::menu_check_response(ui, label, app.vision.is_some(), ITEM_H);
-                elsewhere |= vision.hovered();
-                if vision.clicked() {
-                    app.open_menu = TopMenu::None;
-                    app.toggle_vision();
-                }
-                // A tool over the canvas, a verb as *Present* is: no tick.
-                let label = crate::menu::Item::ColourReview.spec().label;
-                let review = crate::ui::menu_check_response(ui, label, false, ITEM_H);
-                elsewhere |= review.hovered();
-                if review.clicked() {
-                    app.open_menu = TopMenu::None;
-                    app.open_colour_review();
-                }
                 if elsewhere {
                     flyout = None;
                 }
@@ -7776,6 +7808,52 @@ impl OndinApp {
                     None => d.remove::<egui::Rect>(flyout_at),
                 });
             });
+        }
+    }
+
+    /// The **Tools** dropdown's rows: the checks, which change nothing and are
+    /// ticked while on, then a hairline and the bulk edits, each opening its box
+    /// with its chord beside it. Every row keeps the tick column, so the labels
+    /// line up. A pick closes the menu before it acts.
+    fn tools_menu(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        for row in ToolsRow::ALL {
+            if row == ToolsRow::FindReplace {
+                crate::ui::menu_sep(ui);
+            }
+            let dim = match row {
+                ToolsRow::BatchRename => {
+                    crate::private::on().then_some(crate::private::DECLINE_RENAME)
+                }
+                _ => None,
+            };
+            let on = match row {
+                ToolsRow::CheckContrast => self.contrast.is_some(),
+                ToolsRow::SimulateVision => self.vision.is_some(),
+                _ => false,
+            };
+            let style = crate::ui::MenuRow::new("", row.label())
+                .checked(on)
+                .accel(row.accel())
+                .enabled(dim.is_none());
+            let resp = crate::ui::menu_row(ui, style, crate::ui::MENU_ROW_H);
+            if let Some(why) = dim {
+                resp.on_hover_text(why);
+                continue;
+            }
+            if !resp.clicked() {
+                continue;
+            }
+            self.open_menu = TopMenu::None;
+            match row {
+                ToolsRow::CheckContrast => self.toggle_contrast(),
+                ToolsRow::SimulateVision => self.toggle_vision(),
+                ToolsRow::ColourReview => self.open_colour_review(),
+                ToolsRow::FindReplace => {
+                    self.dispatch(&ctx, crate::input::Action::FindText { replace: false });
+                }
+                ToolsRow::BatchRename => self.dispatch(&ctx, crate::input::Action::BatchRename),
+            }
         }
     }
 
@@ -14354,7 +14432,6 @@ mod library_wiring_tests {
             .chain([
                 crate::menu::Item::Present.spec().label,
                 crate::app::PANELS_ROW,
-                crate::menu::Item::CheckContrast.spec().label,
             ]);
         for row in rows {
             let end = shapes
@@ -14372,6 +14449,81 @@ mod library_wiring_tests {
                 card.right()
             );
         }
+    }
+
+    /// The Tools menu holds its five rows with each chord inside the card, a
+    /// pick closes it and acts, and View holds none of its rows.
+    ///
+    /// flip: `tools_menu` not clearing `open_menu` on a pick → fails at "and closes
+    /// the menu". Sizing by the labels alone does not bite: the 160pt floor fits
+    /// every row and chord today.
+    #[test]
+    fn the_tools_menu_holds_the_checks_and_bulk_edits() {
+        use super::ToolsRow;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.top_bar(ui)).shapes
+        };
+        let text = |shapes: &[egui::epaint::ClippedShape], label: &str| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+        };
+        app.open_menu = TopMenu::View;
+        frame(&mut app, Vec::new());
+        let shapes = frame(&mut app, Vec::new());
+        for row in ToolsRow::ALL {
+            assert!(
+                text(&shapes, row.label()).is_none(),
+                "View lost {}",
+                row.label()
+            );
+        }
+
+        app.open_menu = TopMenu::Tools;
+        frame(&mut app, Vec::new());
+        let shapes = frame(&mut app, Vec::new());
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("tools-menu")))
+            .expect("the Tools menu's area");
+        let right = card.right() - crate::ui::MENU_PAD - crate::ui::MENU_BORDER;
+        for row in ToolsRow::ALL {
+            let at = text(&shapes, row.label()).unwrap_or_else(|| panic!("{}", row.label()));
+            assert!(at.right() <= right, "{} ends inside", row.label());
+            if let Some(accel) = row.accel() {
+                let chord = text(&shapes, &crate::input::keys(accel)).expect("the chord");
+                assert!(chord.right() <= right + 0.5, "{accel} ends inside the card");
+                assert!(chord.left() > at.right(), "{accel} clear of its label");
+            }
+        }
+
+        let contrast = text(&shapes, ToolsRow::CheckContrast.label())
+            .expect("Check contrast")
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: contrast,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(contrast)]);
+        frame(&mut app, vec![press(true)]);
+        frame(&mut app, vec![press(false)]);
+        assert!(app.contrast.is_some(), "the pick acts");
+        assert_eq!(app.open_menu, TopMenu::None, "and closes the menu");
     }
 
     /// The View menu's *Panels ▸* opens its list on hover, a click there toggles
@@ -14457,7 +14609,7 @@ mod library_wiring_tests {
     /// The View menu's *Panels* row stays lit while its list is open: with the
     /// pointer between the row and the list, where it is over neither, and in the list.
     ///
-    /// flip: `view_and_snap_menus` passing `held: false` for *Panels* → fails at
+    /// flip: `view_snap_tools_menus` passing `held: false` for *Panels* → fails at
     /// "lit in the gap".
     #[test]
     fn the_view_menu_s_panels_row_stays_lit_across_the_gap() {
@@ -14507,13 +14659,22 @@ mod library_wiring_tests {
         let list = ctx
             .memory(|m| m.area_rect(OndinApp::flyout_id("view-menu")))
             .expect("the list's area");
-        let row_left = card.left() + crate::ui::MENU_BORDER + crate::ui::MENU_PAD;
-        assert!(list.right() < row_left, "the list opens to the left");
+        // The list opens on whichever side has room; the sliver is on that side.
+        let inset = crate::ui::MENU_BORDER + crate::ui::MENU_PAD;
+        let (row_edge, list_edge) = if list.right() < card.center().x {
+            (card.left() + inset - 0.5, list.right() + 0.5)
+        } else {
+            (card.right() - inset + 0.5, list.left() - 0.5)
+        };
+        assert!(
+            !list.intersects(card.shrink(inset)),
+            "the list opens beside the rows"
+        );
 
         // Over the sliver between the list and the row, at both of its ends.
         for gap in [
-            egui::pos2(row_left - 0.5, panels.y),
-            egui::pos2(list.right() + 0.5, panels.y),
+            egui::pos2(row_edge, panels.y),
+            egui::pos2(list_edge, panels.y),
         ] {
             for _ in 0..3 {
                 shapes = frame(&mut app, vec![egui::Event::PointerMoved(gap)]);

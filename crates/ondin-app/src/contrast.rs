@@ -4,7 +4,7 @@
 //! measurement is `ondin_export::contrast`'s, as `ondin check contrast` runs it,
 //! on a worker thread.
 //!
-//! *View ▸ Check contrast* or the palette, no chord. It is view state: off when a
+//! *Tools ▸ Check contrast* or the palette, no chord. It is view state: off when a
 //! document opens, never saved, never exported, and present mode (its own branch
 //! of the frame) never draws it. The level and the two switches are preferences
 //! (`prefs.contrast`).
@@ -215,7 +215,7 @@ impl crate::prefs::ContrastPrefs {
 }
 
 impl OndinApp {
-    /// *View ▸ Check contrast*: start the mode over the selection, or the page when
+    /// *Tools ▸ Check contrast*: start the mode over the selection, or the page when
     /// nothing is selected, ending a colour-vision simulation; or end it.
     pub(crate) fn toggle_contrast(&mut self) {
         if self.contrast.is_some() {

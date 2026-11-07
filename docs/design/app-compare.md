@@ -44,8 +44,8 @@ matched by id, so a renamed or moved layer is one change.
   - `OndinApp::dispatch` runs only what `compare::admits` (save, open, new, close and tab keys,
     settings, exports, cheatsheet, *Show in library*, version history, compare, zoom, page steps,
     private mode, Escape) and says `READ_ONLY` for the rest — silently for `Enter`, which the bar
-    reads. The palette and the other view switches are refused with the top bar's View and Snap
-    menus, which are disabled, as are undo and redo: each reaches modes and overlays the compare
+    reads. The palette and the other view switches are refused with the top bar's View, Snap and
+    Tools menus, which are disabled, as are undo and redo: each reaches modes and overlays the compare
     does not draw, and a diff viewer is not worth guarding every one of them for.
   - The canvas runs `compare_input` instead of the mode input and the context menu: any drag pans,
     Swipe's handle drags it, a click on a mark makes it current. The tool rail is hidden, the

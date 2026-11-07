@@ -945,7 +945,7 @@ pub mod icon {
     pub const PLUS_SQUARE: &str = "\u{ed4a}";
     /// Colours as a set: the browser's `+` menu's *Colour variable* and *Number
     /// variable*, Group colors, the picker's row of this document's colours, and
-    /// View's *Colour review*.
+    /// Tools' *Colour review…*.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
     /// A boolean variable: a switch, its knob on.
@@ -1041,6 +1041,9 @@ pub mod icon {
     /// *Pixel-fit*: an arrow pushing a square's corner onto the grid. Not
     /// [`GRID_FOUR`], which means the View menu's grid.
     pub const PIXEL_FIT: &str = "\u{f056}";
+    /// The top bar's Tools menu: a toolbox, its handle up and its lid's band
+    /// latched. Not [`MAGIC_WAND`], which means clean-up.
+    pub const TOOLBOX: &str = "\u{f057}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1372,6 +1375,7 @@ pub mod icon {
         ("split-point", SPLIT_POINT),
         ("knife-cut", KNIFE_CUT),
         ("pixel-fit", PIXEL_FIT),
+        ("toolbox", TOOLBOX),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

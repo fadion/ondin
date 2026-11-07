@@ -2,7 +2,7 @@
 //! a colour-vision deficiency sees it (`ondin_render::vision`), the rest of the
 //! canvas and every piece of edit chrome as they are.
 //!
-//! *View ▸ Simulate colour blindness* or the palette, no chord. View state, as
+//! *Tools ▸ Simulate colour blindness* or the palette, no chord. View state, as
 //! the contrast check is: off when a document opens, never saved, never
 //! exported, never drawn in present mode. The two modes do not run together,
 //! so their bars never stack: starting one ends the other. The deficiency last
@@ -30,7 +30,7 @@ pub(crate) struct Vision {
 }
 
 impl OndinApp {
-    /// *View ▸ Simulate colour blindness*: start the mode on the selection's
+    /// *Tools ▸ Simulate colour blindness*: start the mode on the selection's
     /// frame, or the frame in view, ending the contrast check; or end it.
     pub(crate) fn toggle_vision(&mut self) {
         if self.vision.is_some() {

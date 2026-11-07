@@ -1,4 +1,4 @@
-//! Colour review (View menu, palette): a card at the command palette's place over
+//! Colour review (Tools menu, palette): a card at the command palette's place over
 //! the canvas that lists the near-identical colours of the selection or the
 //! document (`ondin_core::color_review`) and merges each group into one colour,
 //! or into a new variable, as one undo step.

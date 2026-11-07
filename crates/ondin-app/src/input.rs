@@ -88,10 +88,10 @@ pub enum Action {
     /// Show the top-level frames one at a time, fullscreen (`present.rs`).
     /// `Ctrl+Alt+Enter`.
     Present,
-    /// *View ▸ Check contrast*: start or end the contrast check (`contrast.rs`). No
+    /// *Tools ▸ Check contrast*: start or end the contrast check (`contrast.rs`). No
     /// chord.
     CheckContrast,
-    /// *View ▸ Simulate colour blindness*: start or end the colour-vision
+    /// *Tools ▸ Simulate colour blindness*: start or end the colour-vision
     /// simulation (`vision.rs`). No chord.
     SimulateColourBlindness,
     /// *Export as HTML / React / Vue…*: the selection's code export, one zip
@@ -206,7 +206,7 @@ pub enum Action {
     CompareVersion,
     /// *Save named version…*: save, pin a version and ask for its name.
     SaveNamedVersion,
-    /// *Colour review*, unbound: the card that merges near-identical colours
+    /// *Colour review…*, unbound: the card that merges near-identical colours
     /// (`crate::colour_review`).
     ColourReview,
     /// A quarter turn of the selection, each layer about its own origin; `true` is

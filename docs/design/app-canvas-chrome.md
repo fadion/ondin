@@ -259,7 +259,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   *Zoom in*, *Zoom out*, *Actual size*, *Zoom to fit*, *Fit selection*. `OndinApp::zoom_entry`
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
-  one place; the *Panels ▸* flyout alone drops the "Show" its labels need elsewhere. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline mode*,
+  one place; the *Panels ▸* flyout alone drops the "Show" its labels need elsewhere. `input::BINDINGS` has no chord for *Snap to baselines*, *Show layout grid*, *Outline mode*,
   *Show history*, *Show messages*.
 - **Outline mode** draws the artwork as one-device-pixel hairlines of every path the walk would fill
   or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
@@ -323,8 +323,8 @@ and the floating popovers.
 ## The command palette (`palette.rs`)
 
 `Ctrl+K`, alias `Ctrl+/` (`shortcuts.md` §8), in the editor only: in the library `Ctrl+K` stays the
-file search, and the library screen clears an open palette. `input::discovery_chord` reads the
-chord in both `normal_mode` and `text_insert_mode`. With a modal up the chord does nothing, and a
+file search, and the library screen clears an open palette. Both chords are `input::BINDINGS` rows
+read in both modes. With a modal up the chord does nothing, and a
 modal that opens closes the palette. App actions only; typed syntax belongs to Command Mode
 (`vm.md`).
 
@@ -667,7 +667,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 
-- **Doors.** `Ctrl+Shift+/`, ⌃⇧/ on macOS (and `Key::Questionmark`), in the editor (`discovery_chord`, both modes)
+- **Doors.** `Ctrl+Shift+/`, ⌃⇧/ on macOS (and `Key::Questionmark`), in the editor (`cheatsheet_pressed`, both modes)
   and in the library (`dashboard_keys`, through `input::cheatsheet_chord`), and the palette's
   *Keyboard shortcuts* row. Opening it closes the palette and any context menu.
 - **The card.** A `settings::card_modal`, 960 wide and at most 640 tall, each shrunk to the window
@@ -704,8 +704,9 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   an item `sections` names that has lost its chord trips `items_section`'s assertion.
   `every_bound_action_is_on_the_sheet` runs the other way: every key under every modifier set, in
   both modes, must resolve to an action on the sheet or to one kept off it (nudge, size and point
-  steps, Escape, Enter, `PasteRelease`, opacity digits). It checks actions, not spellings, so a
-  second key for an action already shown is the hand list's to carry (`Item::alt_accel`).
+  steps, Escape, Enter, `PasteRelease`, opacity digits). It checks actions, not spellings. A
+  table chord's spelling cannot drift from its binding, since both are one `input::BINDINGS` row;
+  a second key read in code (`F2`, `Backspace`) is `Item::alt_accel`'s to carry by hand.
 
 ## Focus mode
 

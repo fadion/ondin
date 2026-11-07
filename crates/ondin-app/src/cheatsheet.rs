@@ -760,7 +760,8 @@ fn footer(ui: &mut egui::Ui) {
     let mut job = egui::text::LayoutJob::default();
     let dim = egui::TextFormat::simple(font.clone(), theme::text::dim());
     let strong = egui::TextFormat::simple(font.clone(), theme::text::muted());
-    let palette = crate::input::keys("Ctrl+K").replace('+', " + ");
+    let palette =
+        crate::input::keys(Item::Palette.spec().accel.unwrap_or_default()).replace('+', " + ");
     let key = crate::input::key_name;
     for (text, fmt) in [
         ("Run any command by name with ", &dim),
@@ -804,7 +805,7 @@ mod tests {
     /// nothing else — walking the sheet's own sections, so a row added there is
     /// driven too, and each spelling as `egui_winit` delivers it (`resolve_chord`).
     ///
-    /// flip: spelling `Item::ZoomOut`'s accel as `Ctrl+0` → fails at "Zoom out".
+    /// flip: spelling `Item::Copy`'s accel as `Ctrl+Alt+C` → fails at "Copy".
     /// flip: spelling `Item::Boolean(Exclude)`'s accel as `Ctrl+Alt+E` → fails at
     /// "Exclude" (that chord is *Export all*).
     /// flip: `item_row` dropping `Item::Flip(Axis::Y)` → fails at

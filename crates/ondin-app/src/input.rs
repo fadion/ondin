@@ -439,41 +439,6 @@ impl ViewSwitch {
         }
     }
 
-    /// The chord this switch also answers to, as `docs/shortcuts.md` spells it,
-    /// or `None` where it has none.
-    ///
-    /// Lives beside [`Self::label`] rather than in `menu.rs` so no wildcard arm
-    /// there can render a switch with a chord that is not its own.
-    ///
-    /// This is the menu's *spelling*; `resolve` is the binding, and nothing makes
-    /// them agree beyond a hand check. `SnapBaselines`, `LayoutGrid`, `Outline`,
-    /// `History` and `StatusMessages` are `None` (each variant's doc says why).
-    pub fn accel(self) -> Option<&'static str> {
-        Some(match self {
-            Self::Rulers => "Shift+R",
-            Self::Guides => "Ctrl+;",
-            Self::GuideLock => "Ctrl+Alt+;",
-            Self::PixelPreview => "Ctrl+Alt+Y",
-            Self::Grid => "Ctrl+'",
-            Self::Layers => "Ctrl+Alt+\\",
-            Self::Minimap => "Ctrl+Shift+M",
-            Self::Toolbar => "Ctrl+Shift+\\",
-            Self::Focus => "Ctrl+\\",
-            Self::SnapShapes => "Ctrl+U",
-            Self::SnapGuides => "Ctrl+Shift+;",
-            Self::SnapGrid => "Ctrl+Shift+'",
-            Self::Lasso => "Q",
-            Self::Private => "Ctrl+Shift+N",
-            Self::LayoutGrid
-            | Self::Outline
-            | Self::History
-            | Self::StatusMessages
-            | Self::SnapBaselines => {
-                return None;
-            }
-        })
-    }
-
     /// The View menu's first group, what the canvas draws, in the order Illustrator's
     /// View menu reads it: rulers, the guides pulled out of them, then the grid
     /// beside the layout grid so the two read against each other.
@@ -505,8 +470,8 @@ impl ViewSwitch {
     /// Every variant, for the tests that have to walk them.
     ///
     /// Written by hand, so it cannot police the enum on its own; what makes it
-    /// answerable is that `Self::label` and `Self::accel` are exhaustive `match`es
-    /// in this same `impl`, so a new variant fails to compile beside it.
+    /// answerable is that `Self::label` is an exhaustive `match` in this same
+    /// `impl`, so a new variant fails to compile beside it.
     /// `every_view_switch_is_on_exactly_one_menu` checks membership, not count.
     ///
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
@@ -543,6 +508,307 @@ impl ViewSwitch {
         Self::SnapGrid,
         Self::SnapBaselines,
     ];
+}
+
+/// The modifiers a [`Binding`] holds; it answers only with exactly these down.
+///
+/// `ctrl` is egui's `command`, so ⌘ on a Mac. The physical Control key is never
+/// read here: the macOS chords on it are host-dependent and stay code.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Mods {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+}
+
+impl Mods {
+    const NONE: Self = Self::of(false, false, false);
+    const SHIFT: Self = Self::of(false, false, true);
+    const ALT: Self = Self::of(false, true, false);
+    const ALT_SHIFT: Self = Self::of(false, true, true);
+    const CTRL: Self = Self::of(true, false, false);
+    const CTRL_SHIFT: Self = Self::of(true, false, true);
+    const CTRL_ALT: Self = Self::of(true, true, false);
+
+    const fn of(ctrl: bool, alt: bool, shift: bool) -> Self {
+        Self { ctrl, alt, shift }
+    }
+
+    fn held(self, m: egui::Modifiers) -> bool {
+        m.command == self.ctrl && m.alt == self.alt && m.shift == self.shift
+    }
+}
+
+/// The modes a [`Binding`] is read in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scope {
+    Normal,
+    /// A live text session only, where a chord styles the text.
+    Text,
+    Both,
+}
+
+impl Scope {
+    fn admits(self, mode: Mode) -> bool {
+        match self {
+            Self::Both => true,
+            Self::Normal => mode == Mode::Normal,
+            Self::Text => mode == Mode::TextInsert,
+        }
+    }
+}
+
+/// One plain chord: `key` pressed with exactly `mods` held means `action`.
+#[derive(Clone, Copy, Debug)]
+struct Binding {
+    mods: Mods,
+    key: egui::Key,
+    action: Action,
+    scope: Scope,
+    /// Answered but never spelled: no label shows this chord.
+    unshown: bool,
+}
+
+/// A normal-mode [`Binding`].
+const fn bind(mods: Mods, key: egui::Key, action: Action) -> Binding {
+    Binding {
+        mods,
+        key,
+        action,
+        scope: Scope::Normal,
+        unshown: false,
+    }
+}
+
+impl Binding {
+    const fn in_scope(self, scope: Scope) -> Self {
+        Self { scope, ..self }
+    }
+
+    const fn unshown(self) -> Self {
+        Self {
+            unshown: true,
+            ..self
+        }
+    }
+
+    /// The chord as every label spells it, `Ctrl`, `Alt`, `Shift` in that order
+    /// before the key (`Ctrl+Alt+K`); [`keys`] rewrites it for a Mac.
+    fn spelled(&self) -> String {
+        let mut out = String::new();
+        for (held, name) in [
+            (self.mods.ctrl, "Ctrl"),
+            (self.mods.alt, "Alt"),
+            (self.mods.shift, "Shift"),
+        ] {
+            if held {
+                out.push_str(name);
+                out.push('+');
+            }
+        }
+        out.push_str(match self.key {
+            egui::Key::ArrowLeft => "←",
+            egui::Key::ArrowRight => "→",
+            egui::Key::ArrowUp => "↑",
+            egui::Key::ArrowDown => "↓",
+            // egui's own symbol is U+2212, which no label spells.
+            egui::Key::Minus => "-",
+            egui::Key::Quote => "'",
+            egui::Key::Delete => "Del",
+            key => key.symbol_or_name(),
+        });
+        out
+    }
+}
+
+/// Every chord that is a key plus exact modifiers, and what it does: [`resolve`]
+/// reads it, and the menus, palette and cheatsheet spell from it ([`chords`]).
+///
+/// An action's first shown chord is its menu accelerator, its second the
+/// cheatsheet's "or". Chords that need more than a key and exact modifiers are
+/// read in code after the table, each family with its reason.
+const BINDINGS: &[Binding] = {
+    use Action as A;
+    use egui::Key as K;
+    use ondin_core::BoolOp;
+    const NONE: Mods = Mods::NONE;
+    const SHIFT: Mods = Mods::SHIFT;
+    const ALT: Mods = Mods::ALT;
+    const ALT_SHIFT: Mods = Mods::ALT_SHIFT;
+    const CTRL: Mods = Mods::CTRL;
+    const CTRL_SHIFT: Mods = Mods::CTRL_SHIFT;
+    const CTRL_ALT: Mods = Mods::CTRL_ALT;
+    const fn both(b: Binding) -> Binding {
+        b.in_scope(Scope::Both)
+    }
+    const fn text(mods: Mods, key: K, chord: TextChord) -> Binding {
+        bind(mods, key, A::TextStyle(chord)).in_scope(Scope::Text)
+    }
+    &[
+        // File and history; the four a text session also admits finish it first.
+        both(bind(CTRL, K::Z, A::Undo)),
+        both(bind(CTRL_SHIFT, K::Z, A::Redo)),
+        both(bind(CTRL, K::Y, A::Redo)),
+        both(bind(CTRL, K::S, A::Save)),
+        both(bind(CTRL, K::O, A::Open)),
+        bind(CTRL, K::N, A::NewDocument),
+        bind(CTRL, K::W, A::CloseDocument),
+        bind(CTRL, K::Comma, A::OpenSettings),
+        both(bind(CTRL, K::K, A::Palette)),
+        both(bind(CTRL, K::Slash, A::Palette)),
+        bind(CTRL_ALT, K::E, A::ExportAll),
+        bind(CTRL_ALT, K::Enter, A::Present),
+        bind(CTRL, K::PageDown, A::StepPage(true)),
+        bind(CTRL, K::PageUp, A::StepPage(false)),
+        // Structure. The fourth boolean, `Ctrl+Alt+X`, is read off its release.
+        bind(CTRL, K::D, A::Duplicate),
+        bind(CTRL, K::A, A::SelectAll),
+        bind(CTRL, K::G, A::Group),
+        bind(CTRL_SHIFT, K::G, A::Ungroup),
+        bind(CTRL_SHIFT, K::K, A::PlaceImage),
+        bind(CTRL_ALT, K::M, A::Mask),
+        bind(CTRL_ALT, K::K, A::CreateComponent),
+        bind(CTRL_ALT, K::B, A::DetachInstance),
+        bind(CTRL_ALT, K::G, A::FrameSelection),
+        bind(CTRL, K::E, A::Flatten),
+        bind(CTRL_ALT, K::U, A::Boolean(BoolOp::Union)),
+        bind(CTRL_ALT, K::S, A::Boolean(BoolOp::Subtract)),
+        bind(CTRL_ALT, K::I, A::Boolean(BoolOp::Intersect)),
+        // Z-order, on the bracket convention.
+        bind(CTRL_SHIFT, K::CloseBracket, A::Restack(build::ZMove::Front)),
+        bind(CTRL, K::CloseBracket, A::Restack(build::ZMove::Forward)),
+        bind(CTRL, K::OpenBracket, A::Restack(build::ZMove::Backward)),
+        bind(CTRL_SHIFT, K::OpenBracket, A::Restack(build::ZMove::Back)),
+        // Zoom.
+        bind(CTRL, K::Equals, A::ZoomIn),
+        bind(CTRL, K::Minus, A::ZoomOut),
+        bind(CTRL, K::Num0, A::ZoomReset),
+        bind(SHIFT, K::Num0, A::ZoomReset),
+        bind(CTRL, K::Num1, A::ZoomFit),
+        bind(SHIFT, K::Num1, A::ZoomFit),
+        bind(SHIFT, K::Num2, A::ZoomSelection),
+        bind(CTRL, K::Num2, A::ZoomSelection),
+        // The workspace switches.
+        bind(SHIFT, K::R, A::ToggleView(ViewSwitch::Rulers)),
+        bind(CTRL, K::Semicolon, A::ToggleView(ViewSwitch::Guides)),
+        bind(CTRL_ALT, K::Semicolon, A::ToggleView(ViewSwitch::GuideLock)),
+        bind(CTRL_ALT, K::Y, A::ToggleView(ViewSwitch::PixelPreview)),
+        bind(CTRL, K::Quote, A::ToggleView(ViewSwitch::Grid)),
+        bind(CTRL_SHIFT, K::Quote, A::ToggleView(ViewSwitch::SnapGrid)),
+        bind(CTRL, K::U, A::ToggleView(ViewSwitch::SnapShapes)),
+        bind(
+            CTRL_SHIFT,
+            K::Semicolon,
+            A::ToggleView(ViewSwitch::SnapGuides),
+        ),
+        bind(CTRL, K::Backslash, A::ToggleView(ViewSwitch::Focus)),
+        bind(CTRL_ALT, K::Backslash, A::ToggleView(ViewSwitch::Layers)),
+        bind(CTRL_SHIFT, K::Backslash, A::ToggleView(ViewSwitch::Toolbar)),
+        bind(CTRL_SHIFT, K::M, A::ToggleView(ViewSwitch::Minimap)),
+        bind(CTRL_SHIFT, K::N, A::ToggleView(ViewSwitch::Private)),
+        bind(NONE, K::Q, A::ToggleView(ViewSwitch::Lasso)),
+        // Paths, layer state and the selection's verbs.
+        bind(SHIFT, K::D, A::ReverseSubpaths),
+        bind(CTRL_SHIFT, K::H, A::ToggleHidden),
+        bind(CTRL_SHIFT, K::L, A::ToggleLocked),
+        bind(CTRL, K::R, A::Rename),
+        bind(CTRL_SHIFT, K::R, A::BatchRename),
+        bind(CTRL, K::F, A::FindText { replace: false }),
+        bind(SHIFT, K::H, A::Flip(build::Axis::X)),
+        bind(SHIFT, K::V, A::Flip(build::Axis::Y)),
+        bind(SHIFT, K::I, A::InsertPicker),
+        bind(SHIFT, K::S, A::VariablesBrowser),
+        bind(SHIFT, K::A, A::AddLayout),
+        bind(CTRL_ALT, K::P, A::PublishKit),
+        // Align and distribute: Alt without Ctrl.
+        bind(ALT, K::A, A::Align(build::Axis::X, build::Edge::Min)),
+        bind(ALT, K::D, A::Align(build::Axis::X, build::Edge::Max)),
+        bind(ALT, K::W, A::Align(build::Axis::Y, build::Edge::Min)),
+        bind(ALT, K::S, A::Align(build::Axis::Y, build::Edge::Max)),
+        bind(ALT, K::H, A::Align(build::Axis::X, build::Edge::Mid)),
+        bind(ALT, K::V, A::Align(build::Axis::Y, build::Edge::Mid)),
+        bind(ALT_SHIFT, K::H, A::Distribute(build::Axis::X)),
+        bind(ALT_SHIFT, K::V, A::Distribute(build::Axis::Y)),
+        bind(ALT_SHIFT, K::T, A::TidyUp),
+        // Enter steps in; Tab steps the point selection, which only the node tool
+        // takes (`dispatch` leaves Tab to egui's focus ring otherwise).
+        bind(NONE, K::Enter, A::Enter),
+        bind(NONE, K::Tab, A::StepPoint(true)),
+        bind(SHIFT, K::Tab, A::StepPoint(false)),
+        // The single-key tools. `C` is unbound: image editing's door is `Enter`.
+        bind(NONE, K::V, A::ChooseTool(Tool::Select)),
+        bind(NONE, K::H, A::ChooseTool(Tool::Hand)),
+        bind(NONE, K::K, A::ChooseTool(Tool::Scale)),
+        bind(NONE, K::F, A::ChooseTool(Tool::Frame)),
+        bind(SHIFT, K::F, A::ChooseTool(Tool::Slice)),
+        bind(NONE, K::R, A::ChooseTool(Tool::Rect)),
+        bind(NONE, K::O, A::ChooseTool(Tool::Ellipse)),
+        // `O` is the ellipse's published letter; `E` answers too, unshown.
+        bind(NONE, K::E, A::ChooseTool(Tool::Ellipse)).unshown(),
+        bind(NONE, K::G, A::ChooseTool(Tool::Polygon)),
+        bind(NONE, K::S, A::ChooseTool(Tool::Star)),
+        bind(NONE, K::L, A::ChooseTool(Tool::Line)),
+        // The spiral shares the line's slot as the pencil shares the pen's.
+        bind(SHIFT, K::L, A::ChooseTool(Tool::Spiral)),
+        bind(SHIFT, K::M, A::ChooseTool(Tool::ShapeBuilder)),
+        bind(NONE, K::P, A::ChooseTool(Tool::Pen)),
+        bind(SHIFT, K::P, A::ChooseTool(Tool::Pencil)),
+        bind(NONE, K::A, A::ChooseTool(Tool::Node)),
+        bind(NONE, K::T, A::ChooseTool(Tool::Text)),
+        bind(NONE, K::I, A::ChooseTool(Tool::Eyedropper)),
+        // A live text session's styling chords (`docs/shortcuts.md` §10).
+        text(CTRL, K::B, TextChord::Bold),
+        text(CTRL, K::I, TextChord::Italic),
+        text(CTRL, K::U, TextChord::Underline),
+        text(CTRL_SHIFT, K::Period, TextChord::Size(1)),
+        text(CTRL_SHIFT, K::Comma, TextChord::Size(-1)),
+        text(
+            CTRL_SHIFT,
+            K::L,
+            TextChord::Align(ondin_core::TextAlign::Start),
+        ),
+        text(
+            CTRL_SHIFT,
+            K::R,
+            TextChord::Align(ondin_core::TextAlign::End),
+        ),
+        text(
+            CTRL_SHIFT,
+            K::J,
+            TextChord::Align(ondin_core::TextAlign::Justify),
+        ),
+    ]
+};
+
+/// Every binding's spelling, in [`BINDINGS`] order, built once so a label can
+/// hold it as `&'static str`.
+fn spellings() -> &'static [String] {
+    static SPELLED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    SPELLED.get_or_init(|| BINDINGS.iter().map(Binding::spelled).collect())
+}
+
+/// Every shown table chord for `action`, spelled, in table order.
+pub(crate) fn chords(action: Action) -> impl Iterator<Item = &'static str> {
+    BINDINGS
+        .iter()
+        .zip(spellings())
+        .filter(move |(b, _)| !b.unshown && b.action == action)
+        .map(|(_, s)| s.as_str())
+}
+
+/// The chord a menu row shows for `action`: its first in [`BINDINGS`].
+pub(crate) fn accel(action: Action) -> Option<&'static str> {
+    chords(action).next()
+}
+
+/// Push the action of every [`BINDINGS`] chord this frame pressed in `mode`.
+fn table_chords(i: &egui::InputState, mode: Mode, out: &mut Vec<Action>) {
+    out.extend(
+        BINDINGS
+            .iter()
+            .filter(|b| b.scope.admits(mode) && b.mods.held(i.modifiers) && i.key_pressed(b.key))
+            .map(|b| b.action),
+    );
 }
 
 /// The modifiers a chord can be spelled with, as `docs/shortcuts.md` writes them,
@@ -842,107 +1108,41 @@ pub enum TextChord {
 ///
 /// Every binding here carries a modifier: a bare key in a session is a
 /// character, and claiming one would give the buffer a second author.
+///
+/// The table's `Text` and `Both` chords come first. `OndinApp::dispatch` finishes
+/// the session before undo, redo and save, as the top bar's buttons do.
 fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
     ctx.input(|i| {
         let m = i.modifiers;
-        // `Ctrl` without `Alt`, for `normal_mode`'s reason.
-        let cmd_only = m.command && !m.alt;
         let alt_only = !m.command && m.alt;
         let mut out = Vec::new();
-        let on = |pressed: bool, chord: TextChord, out: &mut Vec<Action>| {
-            if pressed {
-                out.push(Action::TextStyle(chord));
-            }
-        };
+        table_chords(i, Mode::TextInsert, &mut out);
 
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::B),
-            TextChord::Bold,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::I),
-            TextChord::Italic,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::U),
-            TextChord::Underline,
-            &mut out,
-        );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::Period),
-            TextChord::Size(1),
-            &mut out,
-        );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::Comma),
-            TextChord::Size(-1),
-            &mut out,
-        );
-
-        // `Alt`+arrows. The editor's caret loop is gated on Alt being *up* for
-        // exactly this, or tracking would also walk the caret.
+        // `Alt`+arrows, code because they answer with Shift either way. The
+        // editor's caret loop is gated on Alt being *up*, or tracking would also
+        // walk the caret.
         for (key, chord) in [
             (egui::Key::ArrowRight, TextChord::Tracking(1)),
             (egui::Key::ArrowLeft, TextChord::Tracking(-1)),
             (egui::Key::ArrowUp, TextChord::Leading(1)),
             (egui::Key::ArrowDown, TextChord::Leading(-1)),
         ] {
-            on(alt_only && i.key_pressed(key), chord, &mut out);
-        }
-
-        // Paragraph alignment, on Illustrator's and Word's letters.
-        for (key, align) in [
-            (egui::Key::L, ondin_core::TextAlign::Start),
-            (egui::Key::C, ondin_core::TextAlign::Center),
-            (egui::Key::R, ondin_core::TextAlign::End),
-            (egui::Key::J, ondin_core::TextAlign::Justify),
-        ] {
-            // `C` is read from the release, with the release's own modifiers:
-            // `egui_winit`'s `is_copy_command` ignores Shift, so `Ctrl+Shift+C`
-            // never arrives as a press.
-            let fired = if key == egui::Key::C {
-                released_with(i, key).is_some_and(|e| e.command && !e.alt && e.shift)
-            } else {
-                cmd_only && m.shift && i.key_pressed(key)
-            };
-            on(fired, TextChord::Align(align), &mut out);
-        }
-
-        // The four document chords. `OndinApp::dispatch` finishes the text
-        // session first (`finish_text_first`), as the top bar's buttons do;
-        // `Open` needs nothing of its own because `go_to_dashboard` already does.
-        //
-        // The guards are `normal_mode`'s, term for term, so `Ctrl+Shift+O` and
-        // `Ctrl+Shift+Y` do not become second spellings; `Ctrl+Shift+Z` is the
-        // one arm that accepts Shift. `ctrl_shift_is_not_a_second_spelling_of_ctrl`
-        // covers `normal_mode`'s arms and not these.
-        for (pressed, action) in [
-            (
-                cmd_only && !m.shift && i.key_pressed(egui::Key::Z),
-                Action::Undo,
-            ),
-            (
-                cmd_only
-                    && ((m.shift && i.key_pressed(egui::Key::Z))
-                        || (!m.shift && i.key_pressed(egui::Key::Y))),
-                Action::Redo,
-            ),
-            (
-                cmd_only && !m.shift && i.key_pressed(egui::Key::S),
-                Action::Save,
-            ),
-            (
-                cmd_only && !m.shift && i.key_pressed(egui::Key::O),
-                Action::Open,
-            ),
-        ] {
-            if pressed {
-                out.push(action);
+            if alt_only && i.key_pressed(key) {
+                out.push(Action::TextStyle(chord));
             }
         }
-        out.extend(discovery_chord(i));
+
+        // Centre, code because it is read off the release with the release's own
+        // modifiers: `egui_winit`'s `is_copy_command` ignores Shift, so
+        // `Ctrl+Shift+C` never arrives as a press.
+        if released_with(i, egui::Key::C).is_some_and(|e| e.command && !e.alt && e.shift) {
+            out.push(Action::TextStyle(TextChord::Align(
+                ondin_core::TextAlign::Center,
+            )));
+        }
+        if cheatsheet_pressed(i) {
+            out.push(Action::Cheatsheet);
+        }
 
         out
     })
@@ -951,30 +1151,23 @@ fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
 /// Whether this frame pressed the cheatsheet's chord — the library's door, which
 /// reads the context itself because `resolve` does not run there.
 pub(crate) fn cheatsheet_chord(ctx: &egui::Context) -> bool {
-    ctx.input(|i| discovery_chord(i) == Some(Action::Cheatsheet))
+    ctx.input(cheatsheet_pressed)
 }
 
-/// The palette's and the cheatsheet's chords, which both modes admit
-/// (`docs/shortcuts.md` §8).
+/// The cheatsheet's chord, which both modes admit (`docs/shortcuts.md` §8). Code,
+/// not table: it is on Control on macOS (`cheatsheet_chord_spelled`).
 ///
 /// `Ctrl+Shift+/` arrives as `Key::Questionmark` on most layouts (§0), so both
-/// spellings are read; the palette's `/` is Shift-up so the two never fire together.
-/// On macOS the cheatsheet is on Control (`cheatsheet_chord_spelled`).
-fn discovery_chord(i: &egui::InputState) -> Option<Action> {
+/// spellings are read; the palette's `Ctrl+/` is Shift-up so the two never fire
+/// together.
+fn cheatsheet_pressed(i: &egui::InputState) -> bool {
     let m = i.modifiers;
-    let cmd_only = m.command && !m.alt;
-    let sheet_held = if on_mac() {
+    let held = if on_mac() {
         m.ctrl && !m.command && !m.alt
     } else {
-        cmd_only
+        m.command && !m.alt
     };
-    if sheet_held
-        && ((m.shift && i.key_pressed(egui::Key::Slash)) || i.key_pressed(egui::Key::Questionmark))
-    {
-        return Some(Action::Cheatsheet);
-    }
-    (cmd_only && !m.shift && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::Slash)))
-        .then_some(Action::Palette)
+    held && ((m.shift && i.key_pressed(egui::Key::Slash)) || i.key_pressed(egui::Key::Questionmark))
 }
 
 /// The modifiers `key` was let go with this frame, as its own release event carries
@@ -993,13 +1186,13 @@ fn released_with(i: &egui::InputState, key: egui::Key) -> Option<egui::Modifiers
     })
 }
 
+/// The normal-mode keymap: the table's chords, then the families that need more
+/// than a key and exact modifiers, each with the reason it is code.
 fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
     ctx.input(|i| {
         let m = i.modifiers;
         let cmd = m.command;
-        // Ctrl *without* Alt: what every command below except the booleans means.
-        // Without it `Ctrl+Alt+S` fired `Save` and `Subtract` together. Pinned by
-        // `save_and_cut_are_not_booleans`.
+        // Ctrl *without* Alt, and neither: what the code-read chords below hold.
         let cmd_only = cmd && !m.alt;
         let plain = !m.command && !m.alt;
         let mut out = Vec::new();
@@ -1009,83 +1202,12 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             }
         };
 
-        // --- file / history (modified keys) ---
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Z),
-            Action::Undo,
-            &mut out,
-        );
-        // `!m.shift` on the `Y` half, so `Ctrl+Shift+Y` is not a second spelling
-        // of Redo (`ctrl_shift_is_not_a_second_spelling_of_ctrl` enumerates the arms).
-        on(
-            cmd_only
-                && ((m.shift && i.key_pressed(egui::Key::Z))
-                    || (!m.shift && i.key_pressed(egui::Key::Y))),
-            Action::Redo,
-            &mut out,
-        );
-        // `!m.shift` stays though nothing answers `Ctrl+Shift+S`: dropping it would
-        // make the freed chord a second spelling of Save.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::S),
-            Action::Save,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::O),
-            Action::Open,
-            &mut out,
-        );
-        // `!m.shift` on both keeps `Ctrl+Shift+N`/`W` unspent. `Alt+W` is *align
-        // top* below, so the Alt term in `cmd_only` cannot be dropped.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::N),
-            Action::NewDocument,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::W),
-            Action::CloseDocument,
-            &mut out,
-        );
-        // `cmd_only` and `!m.shift`, like `Save`: `Ctrl+Shift+,` and `Ctrl+Alt+,`
-        // stay unbound.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Comma),
-            Action::OpenSettings,
-            &mut out,
-        );
-        out.extend(discovery_chord(i));
-        // `Ctrl+Shift+E` is deliberately unbound: plain `Ctrl+E` is *Flatten*, so
-        // that arm's `!m.shift` is all that stops the old export chord flattening
-        // (`a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening`).
-        //
-        // `Ctrl+Alt+E` — *Export all* (§7). Alt without Shift, so `Ctrl+Alt+Shift+E`
-        // is neither.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::E),
-            Action::ExportAll,
-            &mut out,
-        );
-        // `Ctrl+Alt+Enter` — present (Figma's chord). Plain `Ctrl+Enter` stays unbound.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Enter),
-            Action::Present,
-            &mut out,
-        );
-        // `Ctrl+PageDown` / `Ctrl+PageUp` — step pages, as a browser steps tabs.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::PageDown),
-            Action::StepPage(true),
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::PageUp),
-            Action::StepPage(false),
-            &mut out,
-        );
+        table_chords(i, Mode::Normal, &mut out);
+        if cheatsheet_pressed(i) {
+            out.push(Action::Cheatsheet);
+        }
 
-        // --- clipboard / structure ---
+        // --- clipboard: code, because it arrives as events and releases ---
         //
         // The clipboard trio never arrives as a key press: `egui_winit` intercepts
         // Ctrl+C/X/V (and the Insert synonyms) before the `Key` event is built and
@@ -1148,329 +1270,56 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         if v_up.is_some_and(|e| e.command && !e.alt) {
             out.push(Action::PasteRelease);
         }
-        // `!m.shift`: `docs/shortcuts.md` §11 binds `Shift+D` to reverse subpath
-        // direction, so `Ctrl+Shift+D` must not duplicate.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::D),
-            Action::Duplicate,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::A),
-            Action::SelectAll,
-            &mut out,
-        );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::G),
-            Action::Ungroup,
-            &mut out,
-        );
-        // Figma's chord for placing an image; a chord rather than a tool letter
-        // because it opens a file dialog. Illustrator's `Ctrl+Shift+P` is
-        // deliberately not aliased.
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::K),
-            Action::PlaceImage,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::G),
-            Action::Group,
-            &mut out,
-        );
 
-        // *Use as mask*, on Figma's chord. Alt-modified like the booleans, which
-        // also make or change a container.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::M),
-            Action::Mask,
-            &mut out,
-        );
-
-        // *Create component* and *Detach instance*, on Figma's chords
-        // (`shortcuts.md` §12). `Ctrl+Alt` is `AltGr` on many European layouts,
-        // which may type a character instead — a keymap-wide question.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::K),
-            Action::CreateComponent,
-            &mut out,
-        );
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::B),
-            Action::DetachInstance,
-            &mut out,
-        );
-        // *Frame selection*, on Figma's chord; `Ctrl+G` and `Ctrl+Shift+G` are
-        // `cmd_only`, which excludes `Alt`.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::G),
-            Action::FrameSelection,
-            &mut out,
-        );
-
-        // Flatten, on Figma's chord. Not a boolean: it dissolves the selection into
-        // a single path rather than making or changing a container.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::E),
-            Action::Flatten,
-            &mut out,
-        );
-
-        // --- booleans (Figma's chords) ---
+        // --- `Ctrl+Alt+X`: code, because it is read off the release ---
         //
-        // `Ctrl+Alt+U/S/I/X`. Alt keeps them clear of `Ctrl+S` and `Ctrl+X`.
-        //
-        // `X` is read from the release, the others from the press: `egui_winit`
-        // builds no `Key` event for a `Ctrl+X` press whatever else is held
-        // (`is_cut_command` ignores Alt), so `key_pressed(X)` never fires. The
-        // release falls past that guard, as `Ctrl+V` does above.
-        for (key, op) in [
-            (egui::Key::U, ondin_core::BoolOp::Union),
-            (egui::Key::S, ondin_core::BoolOp::Subtract),
-            (egui::Key::I, ondin_core::BoolOp::Intersect),
-            (egui::Key::X, ondin_core::BoolOp::Exclude),
-        ] {
-            let fired = if key == egui::Key::X {
-                released_with(i, key).is_some_and(|e| e.command && e.alt && !e.shift)
-            } else {
-                cmd && m.alt && !m.shift && i.key_pressed(key)
-            };
-            on(fired, Action::Boolean(op), &mut out);
-        }
+        // `egui_winit` builds no `Key` event for a `Ctrl+X` press whatever else is
+        // held (`is_cut_command` ignores Alt). The release falls past that guard,
+        // as `Ctrl+V`'s does above.
+        on(
+            released_with(i, egui::Key::X).is_some_and(|e| e.command && e.alt && !e.shift),
+            Action::Boolean(ondin_core::BoolOp::Exclude),
+            &mut out,
+        );
 
-        // --- z-order (Illustrator/Sketch bracket convention) ---
+        // --- shifted characters: code, because Shift is taken either way ---
         //
-        // Each direction needs both spellings of its key: `Shift`+`[` is `{`,
-        // which egui reports as its own `Key::OpenCurlyBracket`, not a shifted
-        // `OpenBracket`.
-        for (plain_key, curly_key, one_step, all_the_way) in [
-            (
-                egui::Key::CloseBracket,
-                egui::Key::CloseCurlyBracket,
-                build::ZMove::Forward,
-                build::ZMove::Front,
-            ),
-            (
-                egui::Key::OpenBracket,
-                egui::Key::OpenCurlyBracket,
-                build::ZMove::Backward,
-                build::ZMove::Back,
-            ),
-        ] {
-            // `|| m.alt` is `cmd_only` spelled out: without it the `Ctrl+Alt`
-            // bracket chords, which `docs/shortcuts.md` binds to nothing, restack
-            // the selection. Do not collapse it back to `!cmd`.
-            if !cmd || m.alt {
-                continue;
-            }
-            // The curly form only ever arrives with Shift down, so it always
-            // means "all the way"; the plain form is read against the modifier,
-            // for the platforms that do pass the unshifted key through.
-            if i.key_pressed(curly_key) {
-                out.push(Action::Restack(all_the_way));
-            } else if i.key_pressed(plain_key) {
-                out.push(Action::Restack(if m.shift {
-                    all_the_way
-                } else {
-                    one_step
-                }));
+        // egui reports a shifted punctuation key as the character it makes (§0):
+        // each of these is the second spelling of a table chord, accepted whether
+        // or not the layout needed Shift to type it.
+        if cmd_only {
+            for (key, action) in [
+                (egui::Key::Plus, Action::ZoomIn),
+                (
+                    egui::Key::CloseCurlyBracket,
+                    Action::Restack(build::ZMove::Front),
+                ),
+                (
+                    egui::Key::OpenCurlyBracket,
+                    Action::Restack(build::ZMove::Back),
+                ),
+                (egui::Key::Colon, Action::ToggleView(ViewSwitch::SnapGuides)),
+                (egui::Key::Pipe, Action::ToggleView(ViewSwitch::Toolbar)),
+            ] {
+                on(i.key_pressed(key), action, &mut out);
             }
         }
-
-        // --- zoom ---
-        // `ZoomIn` must not exclude Shift: on a US layout `+` is `Shift+=` and
-        // egui reports the logical key, so `Key::Plus` is unreachable without
-        // Shift (`docs/shortcuts.md` §3, §0). The guard goes on the unshifted
-        // `Equals` spelling only.
+        // `Shift+1` as `!`, which unlike the rest wants Shift really down.
         on(
-            cmd_only
-                && (i.key_pressed(egui::Key::Plus)
-                    || (!m.shift && i.key_pressed(egui::Key::Equals))),
-            Action::ZoomIn,
-            &mut out,
-        );
-        // `-` needs no Shift and §3 records no shifted spelling.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Minus),
-            Action::ZoomOut,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Num0),
-            Action::ZoomReset,
-            &mut out,
-        );
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Num1),
+            plain && m.shift && i.key_pressed(egui::Key::Exclamationmark),
             Action::ZoomFit,
             &mut out,
         );
-        // Both spellings of the digit: `Shift`+`1` is `!` and egui reports the
-        // logical key. `Num1` stays for layouts that pass the unshifted digit through.
-        on(
-            plain
-                && m.shift
-                && (i.key_pressed(egui::Key::Exclamationmark) || i.key_pressed(egui::Key::Num1)),
-            Action::ZoomFit,
-            &mut out,
-        );
-        // `Shift+0` and `Shift+2` — Figma's — plus Sketch's `Ctrl+2`. Unlike
-        // `Shift+1`, `)` and `@` (and the UK `"`) have no `egui::Key` variant, so
-        // the logical key falls back to the physical digit and one spelling
-        // suffices (§0).
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::Num0),
-            Action::ZoomReset,
-            &mut out,
-        );
-        on(
-            (plain && m.shift && i.key_pressed(egui::Key::Num2))
-                || (cmd_only && !m.shift && i.key_pressed(egui::Key::Num2)),
-            Action::ZoomSelection,
-            &mut out,
-        );
 
-        // --- view ---
-        //
-        // Shift+R, Figma's chord. It cannot collide with the Rect tool below,
-        // which is gated on Shift being *up* — a plain "R" is still the tool.
+        // --- `F2`: code, because it renames with Shift either way ---
         on(
-            plain && m.shift && i.key_pressed(egui::Key::R),
-            Action::ToggleView(ViewSwitch::Rulers),
-            &mut out,
-        );
-        // The guides, on Illustrator's pair (`docs/shortcuts.md` §6). Told apart by
-        // Alt, so `cmd_only` on the first arm keeps `Ctrl+Alt+;` from firing both.
-        // Neither involves Shift, so `Key::Semicolon` is right; `Ctrl+Shift+;`
-        // arrives as `Key::Colon` and is *Snap to guides* (§0).
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Semicolon),
-            Action::ToggleView(ViewSwitch::Guides),
-            &mut out,
-        );
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Semicolon),
-            Action::ToggleView(ViewSwitch::GuideLock),
-            &mut out,
-        );
-        // Illustrator's pixel preview. Alt keeps it off `Ctrl+Y`, redo, whose arm is
-        // `cmd_only`.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Y),
-            Action::ToggleView(ViewSwitch::PixelPreview),
-            &mut out,
-        );
-
-        // The grid and the three snapping switches, Illustrator's set
-        // (`docs/shortcuts.md` §6).
-        //
-        // `Ctrl+Shift+;` is `:` and `Ctrl+Shift+\` is `|`, which `egui::Key` has
-        // variants for, so they need both spellings; `Ctrl+Shift+'` is `"`, which
-        // has none, so it falls back to the physical `Quote` (§0). The shifted
-        // variant is accepted unconditionally, the plain one read against the
-        // modifier.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Quote),
-            Action::ToggleView(ViewSwitch::Grid),
-            &mut out,
-        );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::Quote),
-            Action::ToggleView(ViewSwitch::SnapGrid),
-            &mut out,
-        );
-        // Illustrator's Smart Guides chord; underline in `Mode::TextInsert`
-        // (`docs/shortcuts.md` §10).
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::U),
-            Action::ToggleView(ViewSwitch::SnapShapes),
-            &mut out,
-        );
-        on(
-            cmd_only
-                && (i.key_pressed(egui::Key::Colon)
-                    || (m.shift && i.key_pressed(egui::Key::Semicolon))),
-            Action::ToggleView(ViewSwitch::SnapGuides),
-            &mut out,
-        );
-
-        // Chrome visibility. `Ctrl+\` is Figma's show/hide-UI chord and lands on
-        // focus mode; the other two are this app's.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::Backslash),
-            Action::ToggleView(ViewSwitch::Focus),
-            &mut out,
-        );
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Backslash),
-            Action::ToggleView(ViewSwitch::Layers),
-            &mut out,
-        );
-        on(
-            cmd_only
-                && (i.key_pressed(egui::Key::Pipe)
-                    || (m.shift && i.key_pressed(egui::Key::Backslash))),
-            Action::ToggleView(ViewSwitch::Toolbar),
-            &mut out,
-        );
-        // The minimap. `M` is a letter, so Shift arrives as a modifier, not a
-        // second key (§0); `Ctrl+Alt+M` is the mask chord, kept apart by Alt.
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::M),
-            Action::ToggleView(ViewSwitch::Minimap),
-            &mut out,
-        );
-        // Private mode: a browser's private window. Clear of `Ctrl+N` by Shift.
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::N),
-            Action::ToggleView(ViewSwitch::Private),
-            &mut out,
-        );
-
-        // --- path direction ---
-        //
-        // `Shift+D` for *direction*; a plain letter is reserved for switching
-        // tool (`single-key tool switches` below). No borrowed-from app has a
-        // shortcut for it.
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::D),
-            Action::ReverseSubpaths,
-            &mut out,
-        );
-
-        // --- layer state (Figma and Sketch, which agree here) ---
-        //
-        // `Ctrl+Shift+H` and `Ctrl+Shift+L`; `Ctrl+Shift+L` as *align left* is a
-        // `Mode::TextInsert` binding (`docs/shortcuts.md` §10).
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::H),
-            Action::ToggleHidden,
-            &mut out,
-        );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::L),
-            Action::ToggleLocked,
-            &mut out,
-        );
-        // Rename, on Figma's chord with the Windows convention as an alias; not
-        // rulers (see [`Action::Rename`]).
-        on(
-            (cmd_only && !m.shift && i.key_pressed(egui::Key::R))
-                || (plain && i.key_pressed(egui::Key::F2)),
+            plain && i.key_pressed(egui::Key::F2),
             Action::Rename,
             &mut out,
         );
-        on(
-            cmd_only && m.shift && i.key_pressed(egui::Key::R),
-            Action::BatchRename,
-            &mut out,
-        );
-        // `Ctrl+Shift+H` is hide/show, so Replace is the unshifted chord only.
-        on(
-            cmd_only && !m.shift && i.key_pressed(egui::Key::F),
-            Action::FindText { replace: false },
-            &mut out,
-        );
+
+        // --- *Replace text…*: code, because its chord depends on the host ---
+        //
         // A Mac's app menu takes ⌘H for *Hide*, so Replace is ⌥⌘F there
         // (`replace_chord`).
         let replace = if on_mac() {
@@ -1479,104 +1328,18 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             cmd_only && !m.shift && i.key_pressed(egui::Key::H)
         };
         on(replace, Action::FindText { replace: true }, &mut out);
-        // Flip, on Figma's pair. `plain` keeps these off `Alt+H`/`Alt+V` (align
-        // centres) below.
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::H),
-            Action::Flip(build::Axis::X),
-            &mut out,
-        );
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::V),
-            Action::Flip(build::Axis::Y),
-            &mut out,
-        );
-        // The insert picker, on `Shift+I` (`docs/shortcuts.md` §13).
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::I),
-            Action::InsertPicker,
-            &mut out,
-        );
-        // The styles and variables browser, on `Shift+S` (`docs/shortcuts.md` §14).
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::S),
-            Action::VariablesBrowser,
-            &mut out,
-        );
-        // *Add flex layout*, on Figma's `Shift+A`; plain `A` is the Node tool.
-        on(
-            plain && m.shift && i.key_pressed(egui::Key::A),
-            Action::AddLayout,
-            &mut out,
-        );
-        // *Publish kit…*, on `Ctrl+Alt+P`, beside the booleans in the `Ctrl+Alt`
-        // namespace.
-        on(
-            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::P),
-            Action::PublishKit,
-            &mut out,
-        );
 
-        // --- align and distribute (Alt, without Ctrl) ---
-        //
-        // The six aligns are Figma exact; the two distributes are ours
-        // (`docs/shortcuts.md` §5). `Alt+Shift` separates them, so the aligns are
-        // `!m.shift`; `!cmd` keeps `Alt+S` clear of `Ctrl+Alt+S` (subtract).
-        let alt_only = !cmd && m.alt;
-        for (key, axis, edge) in [
-            (egui::Key::A, build::Axis::X, build::Edge::Min),
-            (egui::Key::D, build::Axis::X, build::Edge::Max),
-            (egui::Key::W, build::Axis::Y, build::Edge::Min),
-            (egui::Key::S, build::Axis::Y, build::Edge::Max),
-            (egui::Key::H, build::Axis::X, build::Edge::Mid),
-            (egui::Key::V, build::Axis::Y, build::Edge::Mid),
-        ] {
-            on(
-                alt_only && !m.shift && i.key_pressed(key),
-                Action::Align(axis, edge),
-                &mut out,
-            );
-        }
-        for (key, axis) in [
-            (egui::Key::H, build::Axis::X),
-            (egui::Key::V, build::Axis::Y),
-        ] {
-            on(
-                alt_only && m.shift && i.key_pressed(key),
-                Action::Distribute(axis),
-                &mut out,
-            );
-        }
-        // Figma's `Ctrl+Alt+T` is the boolean namespace here; `Alt+Shift` is
-        // arrangement's.
-        on(
-            alt_only && m.shift && i.key_pressed(egui::Key::T),
-            Action::TidyUp,
-            &mut out,
-        );
-
-        // --- selection ---
+        // --- Delete and Escape: code, because they answer under any modifier ---
         on(
             i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
             Action::Delete,
             &mut out,
         );
         on(i.key_pressed(egui::Key::Escape), Action::Escape, &mut out);
-        on(
-            plain && !m.shift && i.key_pressed(egui::Key::Enter),
-            Action::Enter,
-            &mut out,
-        );
-        // Tab steps the point selection along a path, Shift+Tab back. Resolved
-        // here so the focus guard covers it (text fields keep Tab); `dispatch`
-        // ignores it unless the node tool has a path.
-        on(
-            plain && i.key_pressed(egui::Key::Tab),
-            Action::StepPoint(!m.shift),
-            &mut out,
-        );
 
-        // --- arrows: nudge bare, resize with Ctrl (Shift for the coarse step) ---
+        // --- arrows: code, because the step is the user's (`NudgeStep`) ---
+        //
+        // Nudge bare, resize with Ctrl (Shift for the coarse step).
         //
         // One table, because both actions want the same four signed pairs: a resize
         // holds the top-left and moves the opposite edge, so it grows in the arrow's
@@ -1600,10 +1363,11 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             }
         }
 
-        // --- opacity digits (`docs/shortcuts.md` §2) ---
+        // --- opacity digits: code, because each carries its digit ---
         //
-        // `!m.shift` keeps them off the zoom chords (`Shift+0/1/2`) and off
-        // the blend chords below.
+        // Two within 600 ms make one value, counted in the app
+        // (`docs/shortcuts.md` §2). `!m.shift` keeps them off the zoom chords
+        // (`Shift+0/1/2`) and off the blend chords below.
         if plain && !m.shift {
             for (n, key) in [
                 egui::Key::Num0,
@@ -1624,10 +1388,10 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             }
         }
 
-        // --- blend chords (`docs/shortcuts.md` §2) ---
+        // --- blend chords: code, because each carries its digit ---
         //
-        // The physical digit: `#`, `$`, `%`, `^`, `&`, `*` and `(` have no
-        // `egui::Key` variant, as for `Shift+0` and `Shift+2` above.
+        // The physical digit (`docs/shortcuts.md` §2): `#`, `$`, `%`, `^`, `&`, `*`
+        // and `(` have no `egui::Key` variant, as `)` and `@` have none (§0).
         if plain && m.shift {
             for (n, key) in [
                 (3, egui::Key::Num3),
@@ -1641,59 +1405,6 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 on(i.key_pressed(key), Action::BlendChord(n), &mut out);
             }
         }
-
-        // --- single-key tool switches (Figma parity) ---
-        if plain && !m.shift {
-            for (key, tool) in [
-                (egui::Key::V, Tool::Select),
-                (egui::Key::H, Tool::Hand),
-                // Figma's letter for the scale tool, and free here.
-                (egui::Key::K, Tool::Scale),
-                (egui::Key::F, Tool::Frame),
-                (egui::Key::R, Tool::Rect),
-                // `O` is the ellipse's published letter (Figma, Sketch) and `E`
-                // an alias; the rail's tooltip shows `O` only.
-                (egui::Key::O, Tool::Ellipse),
-                (egui::Key::E, Tool::Ellipse),
-                // G and S: Figma has no polygon/star shortcut to match.
-                (egui::Key::G, Tool::Polygon),
-                (egui::Key::S, Tool::Star),
-                (egui::Key::L, Tool::Line),
-                (egui::Key::P, Tool::Pen),
-                // Illustrator's and Sketch's direct-selection letter (Figma's `A`
-                // is the Frame tool).
-                (egui::Key::A, Tool::Node),
-                (egui::Key::T, Tool::Text),
-                // Figma's letter; a second `I` hands back (`choose_tool`).
-                (egui::Key::I, Tool::Eyedropper),
-                // `C` is deliberately unbound: image editing has no letter
-                // (`Enter` on a selected picture is its door).
-            ] {
-                if i.key_pressed(key) {
-                    out.push(Action::ChooseTool(tool));
-                }
-            }
-        }
-        // The common pencil chord, since `P` is the pen; the slice sits on the
-        // frame's letter, as it shares the frame's slot on the rail.
-        if plain && m.shift && i.key_pressed(egui::Key::P) {
-            out.push(Action::ChooseTool(Tool::Pencil));
-        }
-        // The spiral shares the line's slot as the pencil shares the pen's.
-        if plain && m.shift && i.key_pressed(egui::Key::L) {
-            out.push(Action::ChooseTool(Tool::Spiral));
-        }
-        if plain && m.shift && i.key_pressed(egui::Key::M) {
-            out.push(Action::ChooseTool(Tool::ShapeBuilder));
-        }
-        if plain && m.shift && i.key_pressed(egui::Key::F) {
-            out.push(Action::ChooseTool(Tool::Slice));
-        }
-        on(
-            plain && !m.shift && i.key_pressed(egui::Key::Q),
-            Action::ToggleView(ViewSwitch::Lasso),
-            &mut out,
-        );
 
         out
     })
@@ -4130,5 +3841,59 @@ mod release_chord_tests {
             actions(Mode::Normal, vec![release(egui::Key::V, none)], cmd).is_empty(),
             "a bare V let go while Ctrl is down is no paste"
         );
+    }
+}
+
+#[cfg(test)]
+mod binding_table_tests {
+    use super::tests::{actions, key};
+    use super::*;
+
+    /// Every table chord, pressed in each mode its scope admits, resolves to its
+    /// action alone, and in a mode it does not admit to something else.
+    ///
+    /// flip: `Mods::held` ignoring Shift → fails at "Ctrl+Z" (Redo's
+    /// `Ctrl+Shift+Z` also fires Undo).
+    #[test]
+    fn every_table_chord_resolves_to_its_action_alone() {
+        for b in BINDINGS {
+            let held = egui::Modifiers {
+                alt: b.mods.alt,
+                ctrl: b.mods.ctrl,
+                shift: b.mods.shift,
+                mac_cmd: false,
+                command: b.mods.ctrl,
+            };
+            for mode in [Mode::Normal, Mode::TextInsert] {
+                let got = actions(mode, vec![key(b.key, held)], held);
+                if b.scope.admits(mode) {
+                    assert_eq!(got, vec![b.action], "{} in {mode:?}", b.spelled());
+                } else {
+                    assert!(!got.contains(&b.action), "{} in {mode:?}", b.spelled());
+                }
+            }
+        }
+    }
+
+    /// No two table chords share a key and modifiers in a mode both are read in.
+    ///
+    /// flip: binding underline's `Ctrl+U` in `Scope::Both` → fails at "Ctrl+U"
+    /// (normal mode's *Snap to shapes*).
+    #[test]
+    fn no_chord_is_bound_twice() {
+        for (n, a) in BINDINGS.iter().enumerate() {
+            for b in &BINDINGS[n + 1..] {
+                let shared = [Mode::Normal, Mode::TextInsert]
+                    .iter()
+                    .any(|&m| a.scope.admits(m) && b.scope.admits(m));
+                assert!(
+                    !(shared && a.key == b.key && a.mods == b.mods),
+                    "{} is bound to {:?} and {:?}",
+                    a.spelled(),
+                    a.action,
+                    b.action
+                );
+            }
+        }
     }
 }

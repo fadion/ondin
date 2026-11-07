@@ -1,9 +1,13 @@
 # Ondin — keyboard shortcuts
 
 The whole keymap: ✅ bound, ➕ agreed and unbuilt, ⛔ deliberately unbound. The code wins:
-`crates/ondin-app/src/input.rs` (`resolve`, `normal_mode`, `text_insert_mode`,
-`ViewSwitch::accel`) for the editor, `panels/dashboard.rs` (`dashboard_keys`, `search_field`) for
-the library.
+`crates/ondin-app/src/input.rs` for the editor, `panels/dashboard.rs` (`dashboard_keys`,
+`search_field`) for the library. In the editor every chord that is a key plus exact modifiers is
+one row of `input::BINDINGS`, which `resolve` reads and every menu, palette and cheatsheet label
+spells from, so a chord's binding and its text cannot drift. The rest are code in `normal_mode`
+and `text_insert_mode`, each family with its reason: the clipboard events and the release-read
+chords, the shifted characters (§0), `F2`, `Delete` and `Escape` (any modifier), the arrows, the
+digits, and the host-dependent chords below; their labels are spelled by hand.
 
 **Unbuilt:** nothing. The cheatsheet (`Ctrl+Shift+/`, `app-canvas-chrome.md`)
 renders the editor's bindings from the command registry, plus hand-kept Mouse and Library
@@ -250,7 +254,7 @@ one is designated (§15 D113).
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show messages | **unbound** (§15 D1025) |
 
-`ViewSwitch::accel` answers `None` for exactly the unbound rows (`LayoutGrid`, `Outline`, `History`,
+`input::BINDINGS` holds no chord for exactly the unbound rows (`LayoutGrid`, `Outline`, `History`,
 `StatusMessages`, `SnapBaselines`): no free convention to match, and a menu row to reach instead. They are listed
 so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide the
 panels, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
@@ -304,7 +308,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+Alt+Enter` | **present** | ✅ Figma's. `Action::Present`, normal mode only, `cmd && alt && !shift`; plain `Ctrl+Enter` stays unbound. Present mode reads only its own keys (§8b) |
 | `Ctrl+,` | **settings** | ✅ VS Code's; `,` was unspent. ⚠️ **Opens, cannot close**: `resolve` is not called while a modal is up (`Action::OpenSettings` is named for that). Escape, ✕, *Cancel*, backdrop close it. `cmd_only && !m.shift` |
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
-| `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, read by `input::discovery_chord` in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
+| `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, a `BINDINGS` row read in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
 | `Ctrl+/` | **command palette** | ✅ Figma's quick actions, alias; Shift up, so it never reads as `Ctrl+Shift+/` |
 | `Ctrl+Shift+/` · ⌃⇧/ on macOS | **shortcut cheatsheet** | ✅ `Key::Questionmark` too (§0). Editor (both modes) and library (`dashboard_keys`); the chord again closes it, read in `cheatsheet_ui` because `resolve` does not run under a modal |
 
@@ -463,7 +467,7 @@ in a place §0 did not predict; the C/X/V test rule now covers a non-clipboard b
 | `Alt+←` `→` | letter spacing ∓ | ✅ |
 | `Alt+↑` `↓` | line height ∓ | ✅ |
 | `Ctrl+Shift+L` `C` `R` `J` | align left / centre / right / justify | ✅ `C` from the **release** |
-| `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl+S`, `Ctrl+O` | undo, redo, save, open | ✅ since §15 D815; guards match `normal_mode` term for term; `dispatch` calls `finish_text_first` |
+| `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl+S`, `Ctrl+O` | undo, redo, save, open | ✅ since §15 D815; the same `BINDINGS` rows as normal mode, read in both; `dispatch` calls `finish_text_first` |
 | `Ctrl+B` | bold on / off | ✅ `TextChord::Bold`, the family's own face (`text::bold_step`) |
 | `Ctrl+I` | italic on / off | ✅ `TextChord::Italic`, the family's own face (`text::italic_step`) |
 
@@ -568,7 +572,7 @@ on its contents: `OndinApp::begin_image_edit`, `canvas::begin_edit_text` and the
 `enter_action` each refuse, so chord and menu row agree. `A` arms with no check and is shut in
 `canvas::edited_path`.
 
-⚠️ `Delete`/`Backspace` have **no modifier gate** (`normal_mode`, the selection block), so
+⚠️ `Delete`/`Backspace` have **no modifier gate** (`normal_mode`, code rather than a table row), so
 `Ctrl+Backspace` and `Alt+Delete` also delete; know this before binding a chord ending in either.
 On Windows `Shift+Delete` arrives as `Event::Cut`, never as a key.
 

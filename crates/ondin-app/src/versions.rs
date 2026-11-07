@@ -1025,7 +1025,10 @@ fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         if pins {
-            key_chip(ui, "Ctrl+S");
+            key_chip(
+                ui,
+                crate::input::accel(crate::input::Action::Save).unwrap_or_default(),
+            );
             ui.label(
                 egui::RichText::new("saves a version")
                     .size(crate::ui::SMALL_PT)

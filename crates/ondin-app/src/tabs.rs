@@ -1242,7 +1242,8 @@ impl OndinApp {
                     for (i, (which, glyph, label, why)) in rows.into_iter().enumerate() {
                         let mut row = MenuRow::new(glyph, label).enabled(why.is_none());
                         if which == Pick::Close {
-                            row = row.accel(front.then_some("Ctrl+W"));
+                            let close = crate::input::accel(crate::input::Action::CloseDocument);
+                            row = row.accel(close.filter(|_| front));
                         }
                         // On every row once on any, so no hover paints beside it.
                         if let Some(hl) = highlight {

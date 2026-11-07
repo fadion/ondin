@@ -574,7 +574,8 @@ impl ViewState {
 pub struct Spec {
     pub label: &'static str,
     pub glyph: &'static str,
-    /// The chord this row also answers to, as `docs/shortcuts.md` spells it.
+    /// The chord this row also answers to: spelled from the keymap's table
+    /// (`input::accel`) for a table chord, by hand for one read in code.
     pub accel: Option<&'static str>,
     pub group: Group,
     /// Destroys something: drawn red.
@@ -702,13 +703,23 @@ impl Item {
         Item::Join,
     ];
 
+    /// The row's spec. Its accelerator is the table's (`input::accel`) when the
+    /// row's action is a table chord; the `accel` written here is the spelling of
+    /// a chord read in code, and never both.
     pub fn spec(self) -> Spec {
-        let s = |label, glyph, accel, group| Spec {
-            label,
-            glyph,
-            accel,
-            group,
-            danger: false,
+        let table = self.action().and_then(crate::input::accel);
+        let s = |label, glyph, accel: Option<&'static str>, group| {
+            debug_assert!(
+                accel.is_none() || table.is_none(),
+                "{label}: spelled by hand and by the table"
+            );
+            Spec {
+                label,
+                glyph,
+                accel: accel.or(table),
+                group,
+                danger: false,
+            }
         };
         match self {
             Item::EnterGroup => s("Enter group", icon::SIGN_IN, None, Group::Head),
@@ -752,12 +763,7 @@ impl Item {
             ),
             Item::PasteToReplace => s("Paste to replace", icon::CLIPBOARD, None, Group::Clipboard),
             Item::CopyPasteAs => s("Copy/Paste as", icon::CLIPBOARD, None, Group::Clipboard),
-            Item::Duplicate => s(
-                "Duplicate",
-                icon::COPY_SIMPLE,
-                Some("Ctrl+D"),
-                Group::Clipboard,
-            ),
+            Item::Duplicate => s("Duplicate", icon::COPY_SIMPLE, None, Group::Clipboard),
             // Both rows wear the same glyph: one clipboard read two ways.
             Item::CopyProperties => s(
                 "Copy properties",
@@ -779,27 +785,17 @@ impl Item {
             Item::Group => s(
                 "Group selection",
                 icon::SELECTION_PLUS,
-                Some("Ctrl+G"),
+                None,
                 Group::Structure,
             ),
-            Item::FrameSelection => s(
-                "Frame selection",
-                icon::FRAME,
-                Some("Ctrl+Alt+G"),
-                Group::Structure,
-            ),
-            Item::AddLayout => s(
-                "Add flex layout",
-                icon::FLEX_LAYOUT,
-                Some("Shift+A"),
-                Group::Structure,
-            ),
+            Item::FrameSelection => s("Frame selection", icon::FRAME, None, Group::Structure),
+            Item::AddLayout => s("Add flex layout", icon::FLEX_LAYOUT, None, Group::Structure),
             // Component rows and chords (`shortcuts.md` §12); the filled hexagon
             // marks the main each of the first two makes.
             Item::CreateComponent => s(
                 "Create component",
                 icon::HEXAGON_FILL,
-                Some("Ctrl+Alt+K"),
+                None,
                 Group::Structure,
             ),
             Item::DuplicateAsComponent => s(
@@ -820,12 +816,7 @@ impl Item {
                 None,
                 Group::Structure,
             ),
-            Item::DetachInstance => s(
-                "Detach instance",
-                icon::LINK_BREAK,
-                Some("Ctrl+Alt+B"),
-                Group::Structure,
-            ),
+            Item::DetachInstance => s("Detach instance", icon::LINK_BREAK, None, Group::Structure),
             Item::MoveToPage => s("Move to page", icon::FILE, None, Group::Structure),
             // Labelled with the page's name by the list and the palette.
             Item::MoveTo(_) => s("Move to page", icon::FILE, None, Group::Pages),
@@ -873,18 +864,8 @@ impl Item {
                 Group::Structure,
             ),
             Item::AddVariant => s("Add variant", icon::PLUS, None, Group::Structure),
-            Item::Ungroup => s(
-                "Ungroup",
-                icon::SELECTION_SLASH,
-                Some("Ctrl+Shift+G"),
-                Group::Structure,
-            ),
-            Item::Mask => s(
-                "Use as mask",
-                icon::MASK,
-                Some("Ctrl+Alt+M"),
-                Group::Structure,
-            ),
+            Item::Ungroup => s("Ungroup", icon::SELECTION_SLASH, None, Group::Structure),
+            Item::Mask => s("Use as mask", icon::MASK, None, Group::Structure),
             Item::EvenOdd => s("Even-odd fill", icon::EVEN_ODD, None, Group::Structure),
             Item::Boolean(op) => s(
                 match op {
@@ -894,20 +875,11 @@ impl Item {
                     BoolOp::Exclude => "Exclude",
                 },
                 crate::panels::layers::op_glyph(op),
-                Some(match op {
-                    BoolOp::Union => "Ctrl+Alt+U",
-                    BoolOp::Subtract => "Ctrl+Alt+S",
-                    BoolOp::Intersect => "Ctrl+Alt+I",
-                    BoolOp::Exclude => "Ctrl+Alt+X",
-                }),
+                // Exclude's chord is read off its release, so not the table's.
+                (op == BoolOp::Exclude).then_some("Ctrl+Alt+X"),
                 Group::Structure,
             ),
-            Item::Flatten => s(
-                "Flatten",
-                icon::STACK_SIMPLE,
-                Some("Ctrl+E"),
-                Group::Structure,
-            ),
+            Item::Flatten => s("Flatten", icon::STACK_SIMPLE, None, Group::Structure),
             // Deliberately unbound: a one-way conversion is not one keystroke away.
             Item::Divide => s("Divide", icon::DIVIDE, None, Group::Structure),
             // *Blend shapes*, since *Blend* already names the blend mode.
@@ -945,52 +917,27 @@ impl Item {
                     build::ZMove::Backward => icon::ARROW_DOWN,
                     build::ZMove::Back => icon::ARROW_LINE_DOWN,
                 },
-                Some(match mv {
-                    build::ZMove::Front => "Ctrl+Shift+]",
-                    build::ZMove::Forward => "Ctrl+]",
-                    build::ZMove::Backward => "Ctrl+[",
-                    build::ZMove::Back => "Ctrl+Shift+[",
-                }),
+                None,
                 Group::Order,
             ),
 
             Item::Flip(build::Axis::X) => s(
                 "Flip horizontal",
                 icon::FLIP_HORIZONTAL,
-                Some("Shift+H"),
+                None,
                 Group::Transform,
             ),
-            Item::Flip(_) => s(
-                "Flip vertical",
-                icon::FLIP_VERTICAL,
-                Some("Shift+V"),
-                Group::Transform,
-            ),
+            Item::Flip(_) => s("Flip vertical", icon::FLIP_VERTICAL, None, Group::Transform),
             // In State, the menu's one transform row now the flips are the inspector's.
             Item::ResetOrigin => s("Reset origin", icon::CROSSHAIR_SIMPLE, None, Group::State),
 
             // Labelled *Hide* and *Lock* here and renamed by `build` where the
             // state says otherwise — the spec is the default, not the truth.
-            Item::ToggleHidden => s("Hide", icon::EYE_SLASH, Some("Ctrl+Shift+H"), Group::State),
-            Item::ToggleLocked => s(
-                "Lock",
-                icon::LOCK_SIMPLE,
-                Some("Ctrl+Shift+L"),
-                Group::State,
-            ),
-            Item::Rename => s("Rename", icon::CURSOR_TEXT, Some("Ctrl+R"), Group::State),
-            Item::BatchRename => s(
-                "Batch rename…",
-                icon::CURSOR_TEXT,
-                Some("Ctrl+Shift+R"),
-                Group::State,
-            ),
-            Item::FindText => s(
-                "Find in text…",
-                icon::MAGNIFYING_GLASS,
-                Some("Ctrl+F"),
-                Group::State,
-            ),
+            Item::ToggleHidden => s("Hide", icon::EYE_SLASH, None, Group::State),
+            Item::ToggleLocked => s("Lock", icon::LOCK_SIMPLE, None, Group::State),
+            Item::Rename => s("Rename", icon::CURSOR_TEXT, None, Group::State),
+            Item::BatchRename => s("Batch rename…", icon::CURSOR_TEXT, None, Group::State),
+            Item::FindText => s("Find in text…", icon::MAGNIFYING_GLASS, None, Group::State),
             Item::ReplaceText => s(
                 "Replace text…",
                 icon::SWAP,
@@ -1000,12 +947,7 @@ impl Item {
             Item::Suggestion(_) => s("Use suggestion", icon::SWAP, None, Group::Head),
             Item::AddToDictionary => s("Add to dictionary", icon::PLUS, None, Group::Head),
 
-            Item::ZoomSelection => s(
-                "Zoom to selection",
-                icon::SELECTION,
-                Some("Shift+2"),
-                Group::Navigate,
-            ),
+            Item::ZoomSelection => s("Zoom to selection", icon::SELECTION, None, Group::Navigate),
 
             Item::CopyAsSvg => s("Copy as SVG", icon::FILE_SVG, None, Group::Export),
             Item::CopyAsCss => s("Copy as CSS", icon::BRACKETS_CURLY, None, Group::Export),
@@ -1014,12 +956,7 @@ impl Item {
             Item::CopyAsPng(_) => s("Copy as PNG", icon::FILE_IMAGE, None, Group::Export),
             // Beside *Frame selection*: it makes a layer out of the selection.
             Item::SliceSelection => s("Slice selection", icon::KNIFE, None, Group::Structure),
-            Item::ExportAll => s(
-                "Export all",
-                icon::EXPORT,
-                Some("Ctrl+Alt+E"),
-                Group::Export,
-            ),
+            Item::ExportAll => s("Export all", icon::EXPORT, None, Group::Export),
             Item::ExportFrames => s("Export all frames…", icon::EXPORT, None, Group::Export),
             Item::ExportFramesAllPages => s(
                 "Export frames, all pages…",
@@ -1034,18 +971,8 @@ impl Item {
                 Group::Export,
             ),
 
-            Item::SelectAll => s(
-                "Select all",
-                icon::SELECTION_ALL,
-                Some("Ctrl+A"),
-                Group::Clipboard,
-            ),
-            Item::ZoomFit => s(
-                "Zoom to fit",
-                icon::ZOOM_FIT,
-                Some("Ctrl+1"),
-                Group::Navigate,
-            ),
+            Item::SelectAll => s("Select all", icon::SELECTION_ALL, None, Group::Clipboard),
+            Item::ZoomFit => s("Zoom to fit", icon::ZOOM_FIT, None, Group::Navigate),
             Item::ViewSwitch(sw) => s(
                 sw.label(),
                 match sw {
@@ -1072,7 +999,7 @@ impl Item {
                     | ViewSwitch::SnapBaselines
                     | ViewSwitch::Private => icon::SLIDERS_HORIZONTAL,
                 },
-                sw.accel(),
+                None,
                 Group::View,
             ),
 
@@ -1084,18 +1011,8 @@ impl Item {
                 ..s("Delete page", icon::TRASH, None, Group::Pages)
             },
             Item::NewPage => s("New page", icon::PLUS, None, Group::Pages),
-            Item::StepPage(true) => s(
-                "Next page",
-                icon::ARROW_DOWN,
-                Some("Ctrl+PageDown"),
-                Group::Pages,
-            ),
-            Item::StepPage(false) => s(
-                "Previous page",
-                icon::ARROW_UP,
-                Some("Ctrl+PageUp"),
-                Group::Pages,
-            ),
+            Item::StepPage(true) => s("Next page", icon::ARROW_DOWN, None, Group::Pages),
+            Item::StepPage(false) => s("Previous page", icon::ARROW_UP, None, Group::Pages),
             // Labelled with the page's name by the palette.
             Item::GoToPage(_) => s("Go to page", icon::FILE, None, Group::Pages),
             Item::DeleteGuide => Spec {
@@ -1122,31 +1039,16 @@ impl Item {
             Item::ReverseSubpaths => s(
                 "Reverse subpath",
                 icon::ARROWS_CLOCKWISE,
-                Some("Shift+D"),
+                None,
                 Group::Structure,
             ),
             Item::Join => s("Join", icon::PLUGS_CONNECTED, None, Group::Structure),
 
-            Item::Undo => s(
-                "Undo",
-                icon::ARROW_U_UP_LEFT,
-                Some("Ctrl+Z"),
-                Group::History,
-            ),
-            Item::Redo => s(
-                "Redo",
-                icon::ARROW_U_UP_RIGHT,
-                Some("Ctrl+Shift+Z"),
-                Group::History,
-            ),
-            Item::Save => s(
-                "Save a version",
-                icon::FLOPPY_DISK,
-                Some("Ctrl+S"),
-                Group::File,
-            ),
-            Item::NewDocument => s("New file", icon::PLUS, Some("Ctrl+N"), Group::File),
-            Item::CloseDocument => s("Close tab", icon::X, Some("Ctrl+W"), Group::File),
+            Item::Undo => s("Undo", icon::ARROW_U_UP_LEFT, None, Group::History),
+            Item::Redo => s("Redo", icon::ARROW_U_UP_RIGHT, None, Group::History),
+            Item::Save => s("Save a version", icon::FLOPPY_DISK, None, Group::File),
+            Item::NewDocument => s("New file", icon::PLUS, None, Group::File),
+            Item::CloseDocument => s("Close tab", icon::X, None, Group::File),
             Item::NextTab => s(
                 "Next tab",
                 icon::BROWSERS,
@@ -1165,13 +1067,8 @@ impl Item {
                 Some("Ctrl+Shift+T"),
                 Group::File,
             ),
-            Item::Library => s(
-                "Go to the library",
-                icon::SQUARES_FOUR,
-                Some("Ctrl+O"),
-                Group::File,
-            ),
-            Item::Settings => s("Settings", icon::SLIDERS, Some("Ctrl+,"), Group::File),
+            Item::Library => s("Go to the library", icon::SQUARES_FOUR, None, Group::File),
+            Item::Settings => s("Settings", icon::SLIDERS, None, Group::File),
             Item::ExportCode(t) => s(
                 match t {
                     ondin_export::code::Target::Html => "Export as HTML…",
@@ -1184,116 +1081,85 @@ impl Item {
             ),
             Item::ExportEditable(f) => s(f.label(), icon::EXPORT, None, Group::Export),
             Item::Tool(tool) => {
-                let (label, glyph, accel) = match tool {
-                    Tool::Select => ("Tool: Select", icon::CURSOR, "V"),
-                    Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
-                    Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
-                    Tool::ShapeBuilder => ("Tool: Shape builder", icon::SHAPE_BUILDER, "Shift+M"),
+                let (label, glyph) = match tool {
+                    Tool::Select => ("Tool: Select", icon::CURSOR),
+                    Tool::Hand => ("Tool: Hand", icon::HAND),
+                    Tool::Scale => ("Tool: Scale", icon::RESIZE),
+                    Tool::ShapeBuilder => ("Tool: Shape builder", icon::SHAPE_BUILDER),
                     // No letter: C is held for comments.
-                    Tool::Knife => ("Tool: Knife", icon::KNIFE_CUT, ""),
-                    Tool::Frame => ("Tool: Frame", icon::FRAME, "F"),
-                    Tool::Slice => ("Tool: Slice", icon::KNIFE, "Shift+F"),
-                    Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),
-                    Tool::Ellipse => ("Tool: Ellipse", icon::CIRCLE, "O"),
-                    Tool::Polygon => ("Tool: Polygon", icon::TRIANGLE, "G"),
-                    Tool::Star => ("Tool: Star", icon::STAR, "S"),
-                    Tool::Line => ("Tool: Line", icon::LINE_SEGMENT, "L"),
-                    Tool::Spiral => ("Tool: Spiral", icon::SPIRAL, "Shift+L"),
-                    Tool::Arc => ("Tool: Arc", icon::ARC, ""),
-                    Tool::Pen => ("Tool: Pen", icon::PEN_NIB, "P"),
-                    Tool::Pencil => ("Tool: Pencil", icon::PENCIL_SIMPLE, "Shift+P"),
-                    Tool::Node => ("Tool: Edit points", icon::BEZIER_CURVE, "A"),
-                    Tool::Text => ("Tool: Text", icon::TEXT_T, "T"),
-                    Tool::Eyedropper => ("Tool: Eyedropper", icon::EYEDROPPER, "I"),
+                    Tool::Knife => ("Tool: Knife", icon::KNIFE_CUT),
+                    Tool::Frame => ("Tool: Frame", icon::FRAME),
+                    Tool::Slice => ("Tool: Slice", icon::KNIFE),
+                    Tool::Rect => ("Tool: Rectangle", icon::SQUARE),
+                    Tool::Ellipse => ("Tool: Ellipse", icon::CIRCLE),
+                    Tool::Polygon => ("Tool: Polygon", icon::TRIANGLE),
+                    Tool::Star => ("Tool: Star", icon::STAR),
+                    Tool::Line => ("Tool: Line", icon::LINE_SEGMENT),
+                    Tool::Spiral => ("Tool: Spiral", icon::SPIRAL),
+                    Tool::Arc => ("Tool: Arc", icon::ARC),
+                    Tool::Pen => ("Tool: Pen", icon::PEN_NIB),
+                    Tool::Pencil => ("Tool: Pencil", icon::PENCIL_SIMPLE),
+                    Tool::Node => ("Tool: Edit points", icon::BEZIER_CURVE),
+                    Tool::Text => ("Tool: Text", icon::TEXT_T),
+                    Tool::Eyedropper => ("Tool: Eyedropper", icon::EYEDROPPER),
                     // Neither has a letter; [`Self::PlaceImage`] is the image tool's
                     // door and image editing needs a subject.
-                    Tool::Image | Tool::ImageEdit => ("Tool: Image", icon::IMAGE, ""),
+                    Tool::Image | Tool::ImageEdit => ("Tool: Image", icon::IMAGE),
                 };
-                s(
-                    label,
-                    glyph,
-                    (!accel.is_empty()).then_some(accel),
-                    Group::Tools,
-                )
+                s(label, glyph, None, Group::Tools)
             }
-            Item::PlaceImage => s(
-                "Place image…",
-                icon::IMAGE,
-                Some("Ctrl+Shift+K"),
-                Group::Tools,
-            ),
+            Item::PlaceImage => s("Place image…", icon::IMAGE, None, Group::Tools),
             Item::ZoomIn => s(
                 "Zoom in",
                 icon::MAGNIFYING_GLASS_PLUS,
-                Some("Ctrl+="),
+                None,
                 Group::Navigate,
             ),
             Item::ZoomOut => s(
                 "Zoom out",
                 icon::MAGNIFYING_GLASS_MINUS,
-                Some("Ctrl+-"),
+                None,
                 Group::Navigate,
             ),
             Item::ZoomReset => s(
                 "Zoom to 100%",
                 icon::NUMBER_SQUARE_ONE,
-                Some("Ctrl+0"),
+                None,
                 Group::Navigate,
             ),
             Item::Align(axis, edge) => {
                 use build::{Axis, Edge};
-                let (label, glyph, accel) = match (axis, edge) {
-                    (Axis::X, Edge::Min) => ("Align left", icon::ALIGN_LEFT, "Alt+A"),
-                    (Axis::X, Edge::Mid) => (
-                        "Align horizontal centres",
-                        icon::ALIGN_CENTER_HORIZONTAL,
-                        "Alt+H",
-                    ),
-                    (Axis::X, Edge::Max) => ("Align right", icon::ALIGN_RIGHT, "Alt+D"),
-                    (Axis::Y, Edge::Min) => ("Align top", icon::ALIGN_TOP, "Alt+W"),
-                    (Axis::Y, Edge::Mid) => (
-                        "Align vertical centres",
-                        icon::ALIGN_CENTER_VERTICAL,
-                        "Alt+V",
-                    ),
-                    (Axis::Y, Edge::Max) => ("Align bottom", icon::ALIGN_BOTTOM, "Alt+S"),
+                let (label, glyph) = match (axis, edge) {
+                    (Axis::X, Edge::Min) => ("Align left", icon::ALIGN_LEFT),
+                    (Axis::X, Edge::Mid) => {
+                        ("Align horizontal centres", icon::ALIGN_CENTER_HORIZONTAL)
+                    }
+                    (Axis::X, Edge::Max) => ("Align right", icon::ALIGN_RIGHT),
+                    (Axis::Y, Edge::Min) => ("Align top", icon::ALIGN_TOP),
+                    (Axis::Y, Edge::Mid) => ("Align vertical centres", icon::ALIGN_CENTER_VERTICAL),
+                    (Axis::Y, Edge::Max) => ("Align bottom", icon::ALIGN_BOTTOM),
                 };
-                s(label, glyph, Some(accel), Group::Transform)
+                s(label, glyph, None, Group::Transform)
             }
             Item::Distribute(build::Axis::X) => s(
                 "Distribute horizontally",
                 icon::DISTRIBUTE_H,
-                Some("Alt+Shift+H"),
+                None,
                 Group::Transform,
             ),
             Item::Distribute(_) => s(
                 "Distribute vertically",
                 icon::DISTRIBUTE_V,
-                Some("Alt+Shift+V"),
+                None,
                 Group::Transform,
             ),
-            Item::TidyUp => s(
-                "Tidy up",
-                icon::TIDY_UP,
-                Some("Alt+Shift+T"),
-                Group::Transform,
-            ),
-            Item::InsertPicker => s("Insert", icon::HEXAGON, Some("Shift+I"), Group::Kits),
-            Item::VariablesBrowser => s(
-                "Styles and variables",
-                icon::SWATCHES,
-                Some("Shift+S"),
-                Group::Kits,
-            ),
+            Item::TidyUp => s("Tidy up", icon::TIDY_UP, None, Group::Transform),
+            Item::InsertPicker => s("Insert", icon::HEXAGON, None, Group::Kits),
+            Item::VariablesBrowser => s("Styles and variables", icon::SWATCHES, None, Group::Kits),
             Item::ImportTokens => s("Import tokens…", icon::IMPORT, None, Group::Kits),
             Item::ExportTokens => s("Export tokens…", icon::EXPORT, None, Group::Kits),
             Item::UnlinkTokens => s("Unlink tokens file", icon::LINK_BREAK, None, Group::Kits),
-            Item::PublishKit => s(
-                "Publish kit…",
-                icon::UPLOAD_SIMPLE,
-                Some("Ctrl+Alt+P"),
-                Group::Kits,
-            ),
+            Item::PublishKit => s("Publish kit…", icon::UPLOAD_SIMPLE, None, Group::Kits),
             Item::MakeKit => s("Make this a kit", icon::PACKAGE, None, Group::Kits),
             Item::KitsUsed => s("Kits used…", icon::PACKAGE, None, Group::Kits),
             Item::StopSharingKit => s("Stop sharing as kit…", icon::PACKAGE, None, Group::Kits),
@@ -1349,59 +1215,56 @@ impl Item {
             Item::TextChord(chord) => {
                 use crate::input::TextChord;
                 use ondin_core::TextAlign;
+                // The chords read in code carry their spelling here: the
+                // Alt+arrows answer with Shift either way, and centre comes off
+                // the release.
                 let (label, glyph, accel) = match chord {
-                    TextChord::Bold => ("Bold", icon::TEXT_BOLD, "Ctrl+B"),
-                    TextChord::Italic => ("Italic", icon::TEXT_ITALIC, "Ctrl+I"),
-                    TextChord::Underline => ("Underline", icon::TEXT_UNDERLINE, "Ctrl+U"),
-                    TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_SIZE, "Ctrl+Shift+."),
-                    TextChord::Size(_) => ("Smaller text", icon::TEXT_SIZE, "Ctrl+Shift+,"),
-                    TextChord::Tracking(n) if n > 0 => {
-                        ("Wider letter spacing", icon::ARROWS_HORIZONTAL, "Alt+→")
-                    }
-                    TextChord::Tracking(_) => {
-                        ("Tighter letter spacing", icon::ARROWS_HORIZONTAL, "Alt+←")
-                    }
+                    TextChord::Bold => ("Bold", icon::TEXT_BOLD, None),
+                    TextChord::Italic => ("Italic", icon::TEXT_ITALIC, None),
+                    TextChord::Underline => ("Underline", icon::TEXT_UNDERLINE, None),
+                    TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_SIZE, None),
+                    TextChord::Size(_) => ("Smaller text", icon::TEXT_SIZE, None),
+                    TextChord::Tracking(n) if n > 0 => (
+                        "Wider letter spacing",
+                        icon::ARROWS_HORIZONTAL,
+                        Some("Alt+→"),
+                    ),
+                    TextChord::Tracking(_) => (
+                        "Tighter letter spacing",
+                        icon::ARROWS_HORIZONTAL,
+                        Some("Alt+←"),
+                    ),
                     TextChord::Leading(n) if n > 0 => {
-                        ("Taller line height", icon::ARROWS_VERTICAL, "Alt+↑")
+                        ("Taller line height", icon::ARROWS_VERTICAL, Some("Alt+↑"))
                     }
                     TextChord::Leading(_) => {
-                        ("Shorter line height", icon::ARROWS_VERTICAL, "Alt+↓")
+                        ("Shorter line height", icon::ARROWS_VERTICAL, Some("Alt+↓"))
                     }
                     TextChord::Align(TextAlign::Center) => {
-                        ("Centre text", icon::TEXT_ALIGN_CENTER, "Ctrl+Shift+C")
+                        ("Centre text", icon::TEXT_ALIGN_CENTER, Some("Ctrl+Shift+C"))
                     }
                     TextChord::Align(TextAlign::End | TextAlign::Right) => {
-                        ("Align text right", icon::TEXT_ALIGN_RIGHT, "Ctrl+Shift+R")
+                        ("Align text right", icon::TEXT_ALIGN_RIGHT, None)
                     }
                     TextChord::Align(TextAlign::Justify) => {
-                        ("Justify text", icon::TEXT_ALIGN_JUSTIFY, "Ctrl+Shift+J")
+                        ("Justify text", icon::TEXT_ALIGN_JUSTIFY, None)
                     }
                     TextChord::Align(TextAlign::Start | TextAlign::Left) => {
-                        ("Align text left", icon::TEXT_ALIGN_LEFT, "Ctrl+Shift+L")
+                        ("Align text left", icon::TEXT_ALIGN_LEFT, None)
                     }
                 };
-                s(label, glyph, Some(accel), Group::Text)
+                s(label, glyph, accel, Group::Text)
             }
             // Renamed for its card by the palette; this is the label the table sees.
             Item::ShowCard(_) => s("Show card", icon::SLIDERS_HORIZONTAL, None, Group::Panels),
-            Item::Palette => s(
-                "Command palette",
-                icon::MAGNIFYING_GLASS,
-                Some("Ctrl+K"),
-                Group::File,
-            ),
+            Item::Palette => s("Command palette", icon::MAGNIFYING_GLASS, None, Group::File),
             Item::Cheatsheet => s(
                 "Keyboard shortcuts",
                 icon::LIST,
                 Some(crate::input::cheatsheet_chord_spelled()),
                 Group::File,
             ),
-            Item::Present => s(
-                "Present mode",
-                icon::PLAY,
-                Some("Ctrl+Alt+Enter"),
-                Group::View,
-            ),
+            Item::Present => s("Present mode", icon::PLAY, None, Group::View),
             Item::CheckContrast => s("Check contrast", icon::CIRCLE_HALF, None, Group::View),
             Item::SimulateColourBlindness => {
                 s("Simulate colour blindness", icon::EYE, None, Group::View)
@@ -1410,17 +1273,16 @@ impl Item {
     }
 
     /// The chord's second spelling, where `docs/shortcuts.md` binds two — the
-    /// cheatsheet shows both, joined by "or".
+    /// cheatsheet shows both, joined by "or". The table's second chord for the
+    /// row's action, except where the second is read in code.
     pub fn alt_accel(self) -> Option<&'static str> {
         match self {
-            Item::Redo => Some("Ctrl+Y"),
+            // `F2` renames with Shift either way; Backspace deletes under any modifier.
             Item::Rename => Some("F2"),
-            Item::ZoomFit => Some("Shift+1"),
-            Item::ZoomSelection => Some("Ctrl+2"),
-            Item::ZoomReset => Some("Shift+0"),
-            Item::Palette => Some("Ctrl+/"),
             Item::Delete => Some("Backspace"),
-            _ => None,
+            _ => self
+                .action()
+                .and_then(|action| crate::input::chords(action).nth(1)),
         }
     }
 
@@ -5957,23 +5819,24 @@ mod view_switch_registry_tests {
 
     use super::*;
 
-    /// Every switch's chord comes from `ViewSwitch::accel` and no two are the same;
-    /// a chordless switch must stay expressible, or the next one gets a borrowed chord.
+    /// Every switch's chord is its own table chord and no two are the same; a
+    /// chordless switch must stay expressible, or the next one gets a borrowed chord.
     ///
-    /// flip: restoring a `_ => "Ctrl+'"` wildcard in `Item::spec` → fails at "took
-    /// its chord from somewhere other than the switch".
+    /// flip: passing `Some("Ctrl+'")` for every switch in `Item::spec` → fails at
+    /// the spec's "spelled by hand and by the table" for *Show rulers*.
     #[test]
     fn no_two_view_switches_wear_one_chord() {
+        let own = |sw| crate::input::accel(crate::input::Action::ToggleView(sw));
         let mut seen: Vec<(&str, ViewSwitch)> = Vec::new();
         for sw in ViewSwitch::ALL {
             let from_registry = Item::ViewSwitch(sw).spec().accel;
             assert_eq!(
                 from_registry,
-                sw.accel(),
+                own(sw),
                 "{} took its chord from somewhere other than the switch",
                 sw.label()
             );
-            let Some(accel) = sw.accel() else { continue };
+            let Some(accel) = own(sw) else { continue };
             if let Some((_, other)) = seen.iter().find(|(a, _)| *a == accel) {
                 panic!(
                     "{} and {} both answer to {accel}",
@@ -5984,7 +5847,7 @@ mod view_switch_registry_tests {
             seen.push((accel, sw));
         }
         assert!(
-            ViewSwitch::ALL.iter().any(|sw| sw.accel().is_none()),
+            ViewSwitch::ALL.iter().any(|&sw| own(sw).is_none()),
             "a chordless switch must stay expressible"
         );
     }
@@ -7012,5 +6875,190 @@ mod submenu_tests {
         frame(&ctx, &mut app, 0.15, None, mv(move_to));
         frame(&ctx, &mut app, 0.16, None, Vec::new());
         assert_eq!(parent(&app), Some(Item::MoveToPage), "at once");
+    }
+}
+
+#[cfg(test)]
+mod accel_spelling_tests {
+    //! The registry's chord spellings, pinned to the strings the rows showed when
+    //! each was written by hand. Plain backticks: `cargo doc` cannot see this.
+
+    use super::*;
+    use crate::input::TextChord;
+    use ondin_core::TextAlign;
+
+    /// Every row's accelerator and second chord, as Windows and Linux spell them:
+    /// the table's spellings are byte-identical to the hand-kept strings they
+    /// replaced, and an `Item::ALL` row missing here shows no chord.
+    ///
+    /// flip: spelling `Mods::ALT_SHIFT` as `Shift` before `Alt` in
+    /// `Binding::spelled` → fails at "Distribute horizontally".
+    #[test]
+    fn every_accelerator_is_spelled_as_it_was_by_hand() {
+        use build::{Axis, Edge, ZMove};
+        let fixture: Vec<(Item, &str, Option<&str>)> = vec![
+            (Item::Cut, "Ctrl+X", None),
+            (Item::Copy, "Ctrl+C", None),
+            (Item::PasteHere, "Ctrl+V", None),
+            (Item::PasteInPlace, "Ctrl+Shift+V", None),
+            (Item::Duplicate, "Ctrl+D", None),
+            (Item::CopyProperties, "Ctrl+Alt+C", None),
+            (Item::PasteProperties, "Ctrl+Alt+V", None),
+            (Item::Delete, "Del", Some("Backspace")),
+            (Item::Group, "Ctrl+G", None),
+            (Item::FrameSelection, "Ctrl+Alt+G", None),
+            (Item::AddLayout, "Shift+A", None),
+            (Item::CreateComponent, "Ctrl+Alt+K", None),
+            (Item::DetachInstance, "Ctrl+Alt+B", None),
+            (Item::Ungroup, "Ctrl+Shift+G", None),
+            (Item::Mask, "Ctrl+Alt+M", None),
+            (Item::Boolean(BoolOp::Union), "Ctrl+Alt+U", None),
+            (Item::Boolean(BoolOp::Subtract), "Ctrl+Alt+S", None),
+            (Item::Boolean(BoolOp::Intersect), "Ctrl+Alt+I", None),
+            (Item::Boolean(BoolOp::Exclude), "Ctrl+Alt+X", None),
+            (Item::Flatten, "Ctrl+E", None),
+            (Item::Restack(ZMove::Front), "Ctrl+Shift+]", None),
+            (Item::Restack(ZMove::Forward), "Ctrl+]", None),
+            (Item::Restack(ZMove::Backward), "Ctrl+[", None),
+            (Item::Restack(ZMove::Back), "Ctrl+Shift+[", None),
+            (Item::Flip(Axis::X), "Shift+H", None),
+            (Item::Flip(Axis::Y), "Shift+V", None),
+            (Item::ToggleHidden, "Ctrl+Shift+H", None),
+            (Item::ToggleLocked, "Ctrl+Shift+L", None),
+            (Item::Rename, "Ctrl+R", Some("F2")),
+            (Item::BatchRename, "Ctrl+Shift+R", None),
+            (Item::FindText, "Ctrl+F", None),
+            (Item::ZoomSelection, "Shift+2", Some("Ctrl+2")),
+            (Item::ExportAll, "Ctrl+Alt+E", None),
+            (Item::SelectAll, "Ctrl+A", None),
+            (Item::ZoomFit, "Ctrl+1", Some("Shift+1")),
+            (Item::ViewSwitch(ViewSwitch::Rulers), "Shift+R", None),
+            (Item::ViewSwitch(ViewSwitch::Guides), "Ctrl+;", None),
+            (Item::ViewSwitch(ViewSwitch::GuideLock), "Ctrl+Alt+;", None),
+            (
+                Item::ViewSwitch(ViewSwitch::PixelPreview),
+                "Ctrl+Alt+Y",
+                None,
+            ),
+            (Item::ViewSwitch(ViewSwitch::Grid), "Ctrl+'", None),
+            (Item::ViewSwitch(ViewSwitch::Layers), "Ctrl+Alt+\\", None),
+            (Item::ViewSwitch(ViewSwitch::Minimap), "Ctrl+Shift+M", None),
+            (Item::ViewSwitch(ViewSwitch::Toolbar), "Ctrl+Shift+\\", None),
+            (Item::ViewSwitch(ViewSwitch::Focus), "Ctrl+\\", None),
+            (Item::ViewSwitch(ViewSwitch::SnapShapes), "Ctrl+U", None),
+            (
+                Item::ViewSwitch(ViewSwitch::SnapGuides),
+                "Ctrl+Shift+;",
+                None,
+            ),
+            (Item::ViewSwitch(ViewSwitch::SnapGrid), "Ctrl+Shift+'", None),
+            (Item::ViewSwitch(ViewSwitch::Lasso), "Q", None),
+            (Item::ViewSwitch(ViewSwitch::Private), "Ctrl+Shift+N", None),
+            (Item::StepPage(true), "Ctrl+PageDown", None),
+            (Item::StepPage(false), "Ctrl+PageUp", None),
+            (Item::DeleteGuide, "Del", None),
+            (Item::DeletePoints, "Del", None),
+            (Item::ReverseSubpaths, "Shift+D", None),
+            (Item::Undo, "Ctrl+Z", None),
+            (Item::Redo, "Ctrl+Shift+Z", Some("Ctrl+Y")),
+            (Item::Save, "Ctrl+S", None),
+            (Item::NewDocument, "Ctrl+N", None),
+            (Item::CloseDocument, "Ctrl+W", None),
+            (Item::ReopenTab, "Ctrl+Shift+T", None),
+            (Item::Library, "Ctrl+O", None),
+            (Item::Settings, "Ctrl+,", None),
+            (Item::Tool(Tool::Select), "V", None),
+            (Item::Tool(Tool::Hand), "H", None),
+            (Item::Tool(Tool::Scale), "K", None),
+            (Item::Tool(Tool::Frame), "F", None),
+            (Item::Tool(Tool::Slice), "Shift+F", None),
+            (Item::Tool(Tool::Rect), "R", None),
+            (Item::Tool(Tool::Ellipse), "O", None),
+            (Item::Tool(Tool::Polygon), "G", None),
+            (Item::Tool(Tool::Star), "S", None),
+            (Item::Tool(Tool::Line), "L", None),
+            (Item::Tool(Tool::Spiral), "Shift+L", None),
+            (Item::Tool(Tool::ShapeBuilder), "Shift+M", None),
+            (Item::Tool(Tool::Pen), "P", None),
+            (Item::Tool(Tool::Pencil), "Shift+P", None),
+            (Item::Tool(Tool::Node), "A", None),
+            (Item::Tool(Tool::Text), "T", None),
+            (Item::Tool(Tool::Eyedropper), "I", None),
+            (Item::PlaceImage, "Ctrl+Shift+K", None),
+            (Item::ZoomIn, "Ctrl+=", None),
+            (Item::ZoomOut, "Ctrl+-", None),
+            (Item::ZoomReset, "Ctrl+0", Some("Shift+0")),
+            (Item::Align(Axis::X, Edge::Min), "Alt+A", None),
+            (Item::Align(Axis::X, Edge::Mid), "Alt+H", None),
+            (Item::Align(Axis::X, Edge::Max), "Alt+D", None),
+            (Item::Align(Axis::Y, Edge::Min), "Alt+W", None),
+            (Item::Align(Axis::Y, Edge::Mid), "Alt+V", None),
+            (Item::Align(Axis::Y, Edge::Max), "Alt+S", None),
+            (Item::Distribute(Axis::X), "Alt+Shift+H", None),
+            (Item::Distribute(Axis::Y), "Alt+Shift+V", None),
+            (Item::TidyUp, "Alt+Shift+T", None),
+            (Item::InsertPicker, "Shift+I", None),
+            (Item::VariablesBrowser, "Shift+S", None),
+            (Item::PublishKit, "Ctrl+Alt+P", None),
+            (Item::TextChord(TextChord::Bold), "Ctrl+B", None),
+            (Item::TextChord(TextChord::Italic), "Ctrl+I", None),
+            (Item::TextChord(TextChord::Underline), "Ctrl+U", None),
+            (Item::TextChord(TextChord::Size(1)), "Ctrl+Shift+.", None),
+            (Item::TextChord(TextChord::Size(-1)), "Ctrl+Shift+,", None),
+            (Item::TextChord(TextChord::Tracking(1)), "Alt+→", None),
+            (Item::TextChord(TextChord::Tracking(-1)), "Alt+←", None),
+            (Item::TextChord(TextChord::Leading(1)), "Alt+↑", None),
+            (Item::TextChord(TextChord::Leading(-1)), "Alt+↓", None),
+            (
+                Item::TextChord(TextChord::Align(TextAlign::Center)),
+                "Ctrl+Shift+C",
+                None,
+            ),
+            (
+                Item::TextChord(TextChord::Align(TextAlign::End)),
+                "Ctrl+Shift+R",
+                None,
+            ),
+            (
+                Item::TextChord(TextChord::Align(TextAlign::Justify)),
+                "Ctrl+Shift+J",
+                None,
+            ),
+            (
+                Item::TextChord(TextChord::Align(TextAlign::Start)),
+                "Ctrl+Shift+L",
+                None,
+            ),
+            (Item::Palette, "Ctrl+K", Some("Ctrl+/")),
+            (Item::Present, "Ctrl+Alt+Enter", None),
+        ];
+        for &(item, accel, alt) in &fixture {
+            let spec = item.spec();
+            assert_eq!(spec.accel, Some(accel), "{}", spec.label);
+            assert_eq!(item.alt_accel(), alt, "{}'s second chord", spec.label);
+        }
+        // The one host-dependent row `Item::ALL` holds keeps its host's chord.
+        assert_eq!(
+            Item::ReplaceText.spec().accel,
+            Some(crate::input::replace_chord())
+        );
+        // The chordless rows stay chordless.
+        let switches = ViewSwitch::ALL.map(Item::ViewSwitch);
+        let tools = [
+            Item::Tool(Tool::Image),
+            Item::Tool(Tool::ImageEdit),
+            Item::Tool(Tool::Knife),
+            Item::Tool(Tool::Arc),
+            Item::TransformAgain,
+            Item::RepeatAround,
+        ];
+        for item in Item::ALL.iter().chain(&switches).chain(&tools) {
+            if *item == Item::ReplaceText || fixture.iter().any(|(f, ..)| f == item) {
+                continue;
+            }
+            let spec = item.spec();
+            assert_eq!(spec.accel, None, "{} gained a chord", spec.label);
+            assert_eq!(item.alt_accel(), None, "{} gained a second", spec.label);
+        }
     }
 }

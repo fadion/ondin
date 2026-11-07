@@ -5,7 +5,8 @@ The menus as built, with the conditions that shape them. A peer of `shortcuts.md
 `panels/layers.rs` and `pages.rs` (the doors), and `panels/binding.rs` (the inspector field menu, §6.7).
 
 **One registry, two doors.** Every row is an `Item` whose label, glyph, accelerator and group live
-once in `Item::spec`; a menu only chooses *which* rows, and `menu::build` buckets them into the
+once in `Item::spec`, the accelerator spelled from the row's chord in `input::BINDINGS` (by hand
+only for a chord read in code); a menu only chooses *which* rows, and `menu::build` buckets them into the
 canonical groups (§3). The canvas and the layers panel open the **same** menu for a layer — same
 rows, order and wording. The **target** is what is under the pointer, never what is selected (§2).
 A layer menu is the kind's **head** rows, then the **invariant tail** (§4). Groups are separated by

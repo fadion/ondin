@@ -171,7 +171,7 @@ menu on the press would take the release as a row pick):
 - **Promotion.** `Row::promote()` is the one exception: a verb a kind lifts into its head is moved, not duplicated (*Ungroup* on a group, *Flatten* on a boolean).
 - **Submenus.** A row with children (`Row::sub: Vec<Vec<Row>>`) is a submenu, its groups written by the menu function rather than bucketed. Its parent `Item` runs nothing (`perform_menu_item` no-ops `CopyPasteAs`, `BooleanMenu`, `AlignMenu`, `Arrange`, `MoveToPage`); `context_menu_ui` draws the one open submenu beside its row (`context-menus.md` §8).
 - **Rows map to actions.** Most rows hand to an `input::Action`, so a row and its chord cannot mean different things. Rows with no chord (*Paste here*, *Add point here*, key-layer and base-operand designations, guide verbs, or anything `shortcuts.md` does not bind) call their canvas verb directly.
-- **Exhaustive matches.** `Item::spec`'s accelerator match and `menu::ViewState::get` are exhaustive. A chord comes from `ViewSwitch::accel()`; `Row::checked` takes an `Option` so a caller with no answer can say so.
+- **Exhaustive matches.** `Item::spec`'s match and `menu::ViewState::get` are exhaustive. A row's chord is its action's row in `input::BINDINGS`, spelled from there; `Row::checked` takes an `Option` so a caller with no answer can say so.
 - `every_view_switch_is_on_exactly_one_menu` checks membership, not cardinality, across the hand-written `VIEW_CANVAS`, `VIEW_MODES`, `VIEW_PANELS` and `SNAP_MENU`; `Lasso` must be on none. The canvas menu's view rows derive from `VIEW_CANVAS` and `VIEW_MODES` minus `context-menus.md` §6.1's excludes.
 
 **A region opens only the menu it claimed** (R2). Four responses read `secondary_clicked()`: the
@@ -701,7 +701,7 @@ stays live.
 - **Inert `TopMenu` row.** `TopMenu` needs its own Escape arm; without one, Escape closes the menu *and* drops the tool.
 - **Two copies of one resize rule.** `resized_box` and `resize_factors` have diverged twice. Change both, and test both: the box can be identical while the path differs.
 - **Unguarded `draw_drop_indicator`.** It does not check `shown_visible`, so a picture inside a hidden group is still ringed during a file drag.
-- **Accelerators by hand.** Nothing makes `ViewSwitch::accel`/`Item::spec` accelerators agree with `input::resolve`.
+- **Accelerators by hand for the chords read in code.** A table chord's label is spelled from its `input::BINDINGS` row, but the clipboard chords, `Ctrl+Alt+X`, `F2`, `Del`/`Backspace`, centre-align, the text session's Alt+arrows and the host-dependent chords are spelled by hand in `Item::spec`/`Item::alt_accel`; only the cheatsheet's chord test holds those to `input::resolve`.
 - **Clear without `clear_preview`.** `choose_tool` must call `clear_gesture_preview`, not `clear_preview`, or a live text session's content is lost.
 - **Predicate negatives.** `drags_a_box` decides whether arming a tool deletes the selection. When a predicate gains a second consumer, re-check its negative members.
 - **Middle-button pan over the origin fields.** It is still swallowed by their `Area` (unverified).

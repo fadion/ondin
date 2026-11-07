@@ -113,11 +113,11 @@ impl OndinApp {
                 // *Publish kit…*, disabled with its reason when nothing would go
                 // out.
                 let row = crate::ui::MenuRow {
-                    accel: Some(if publishable {
-                        "Ctrl+Alt+P"
+                    accel: if publishable {
+                        Item::PublishKit.spec().accel
                     } else {
-                        "No changes"
-                    }),
+                        Some("No changes")
+                    },
                     enabled: publishable,
                     ..crate::ui::MenuRow::new(icon::UPLOAD_SIMPLE, "Publish kit…")
                 };

@@ -1673,7 +1673,7 @@ pub(crate) mod tests {
     /// Through real frames: `Ctrl+K` opens the palette, typing filters it, and
     /// `Enter` closes it and runs the top row — here *Show rulers*.
     ///
-    /// flip: dropping `discovery_chord` from `normal_mode` → fails at "Ctrl+K opens".
+    /// flip: dropping `Ctrl+K`'s row from `input::BINDINGS` → fails at "Ctrl+K opens".
     #[test]
     fn ctrl_k_typing_and_enter_run_the_top_row() {
         let ctx = egui::Context::default();

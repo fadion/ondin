@@ -90,11 +90,13 @@ multiplayer is one of its considerations.
 - **Queueing `Ctrl+S` and document-leaving transitions on the writer thread** — they read the result on the next line (§15 D393).
 - **A "remember last page" dashboard option** — the default page is a Settings preference (§15 D749).
 - **Reading Figma's `.fig` binary** — the format is unpublished, reading it reverse-engineers another company's product, and it breaks when Figma changes it; Figma files come in by link through the documented REST API.
+- **EPS import** — PostScript is a program, and reading it needs an interpreter (Ghostscript, AGPL); PDF and AI import cover the vector files that matter.
 
 ## Components and layout
 
 - **Pairing a state's layer with rest's by hand** — states pair by lineage key, then name path (§15 D982); an unpaired layer is fixed on the layer itself, where the Variants card's *Select it* leads.
 - **A verb that un-makes a component** — delete the main, which detaches its instances, or detach an instance.
+- **Clean up removing layout from one-child frames** — the layout still pads, aligns and hugs, and code export writes it as flex.
 - **CSS block, inline and float layout, `calc`, `order`, and margins other than `auto`** — layout is flexbox and grid; gap and padding stand in for margins, and the layers panel's order for `order`.
 
 ## Styles and variables

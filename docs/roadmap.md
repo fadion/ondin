@@ -6,6 +6,48 @@ decided. Decided non-goals are in `non-goals.md`; built work is described in `ar
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
 
+## Now · Editor additions
+
+- **Peek at the clean canvas** — holding bare `\` hides the canvas chrome (hover outline, selection
+  box and handles, frame name tags, guides, grids, measures) and releasing it brings it back. Held,
+  not toggled: a live selection that cannot be seen would take a nudge. The peek reads the key's
+  held state, so auto-repeat changes nothing; it ends when the window loses focus, whose release
+  never arrives; and the canvas ignores presses while it lasts, as it does with `Space` held. Not
+  in TextInsert, where `\` types.
+- **Zoom with the scroll wheel** — a Settings preference, off by default: a plain wheel zooms at
+  the cursor and `Ctrl`/`Alt`+wheel pans (`canvas::wheel_input`). Mouse wheels only, told apart by
+  the event's line unit, so a touchpad's two-finger scroll still pans.
+- **Simulate vision** replaces *Simulate colour blindness*: the bar's chip picks one condition —
+  the four colour deficiencies (`vision.rs`), blurred vision, loss of contrast, ghosting and
+  yellowing — with a severity slider for each. Contrast loss and yellowing are matrices like the
+  deficiencies; blur and ghosting sample neighbours, so `VisionPass` gains a second kind of pass.
+  The deficiencies are Machado at full severity today; the slider needs their interpolated matrices.
+- **Four more image adjustments** — duotone, grayscale, invert and hue rotate, beside the seven in
+  `Adjustment::ALL`. Each fits `AdjustPipeline`'s matrix and tone table, so all three writers draw
+  it, SVG through `feColorMatrix`/`feComponentTransfer`.
+- **An assets browser** — open-source icon sets and stock photos in one browser, the providers
+  picked in Settings, an API key where one is needed given there by the user. Icons insert as SVG
+  through the importer; a photo embeds. A provider's licence travels with what it inserted: a
+  CC BY icon set's attribution, a photo's photographer credit and download report.
+- **A content generator** — realistic names, addresses, titles, companies and text for selected
+  text layers, a different value per layer, from tables shipped with the app (works offline, a few
+  locales). Avatars are generated (initials, patterns); photos come from the assets browser.
+- **Clean up…** — a card over the selection, or the page with none, one switch per rule (kept in
+  prefs), a preview grouped by rule as batch rename's is, and one undo step. A core verb, so MCP and
+  Command Mode reach it. Rules:
+  - delete hidden fills, strokes, effects and layout grids, and fills under a visible, fully opaque
+    normal-blend solid; never in a list a style supplies;
+  - delete hidden layers and empty ones (no children, no visible paint), but not a slice, a layer
+    with an Export, an empty layer in a layout parent (a spacer), or a layer a component state
+    pairs with; a hidden main is listed, not deleted, since deleting it detaches its instances;
+  - ungroup one-child groups, skipping one with opacity, a blend mode, effects, a mask or an Export;
+  - remove guides in scope;
+  - skip locked layers (a switch, on by default); nothing inside an instance is touched, only a whole
+    instance goes.
+  Renaming stays in batch rename, which gains a `[Text]` token (a text layer's content) and a
+  default-names-only filter. The styles browser gains an unused filter and *Delete unused* over the
+  document's own styles.
+
 ## Now · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d). A nested instance added

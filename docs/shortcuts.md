@@ -247,6 +247,7 @@ one is designated (§15 D113).
 | — | snap to baselines | **unbound** (§15 D355) |
 | `Ctrl+Alt+;` | lock guides | ✅ Illustrator |
 | `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
+| `\` held | peek at the clean canvas (hide the canvas chrome until released) | ➕ **invented** — beside focus mode's `Ctrl+\`, and compare mode's bare `\` also shows the other picture. Not in TextInsert, where it types |
 | `Ctrl+Shift+N` | private mode | ✅ **invented** — a browser's private-window chord (Chrome's incognito); `Ctrl+N` is new document, kept apart by Shift. The library answers it too |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | — | show history | **unbound**: a list few people keep open |

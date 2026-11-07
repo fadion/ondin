@@ -5,7 +5,7 @@
 use ondin_core::kurbo::{Affine, Size};
 use ondin_core::peniko::Color;
 use ondin_core::svg_in::ImageSink;
-use ondin_core::verbs::{self, Ctx, Done, ParamKind, VerbError};
+use ondin_core::verbs::{self, Ctx, Done, Lent, ParamKind, VerbError};
 use ondin_core::{
     Brush, Document, Fill, Guide, GuideAxis, GuideId, IdSource, ImageEntry, ImageFormat, ImageId,
     ImageSource, NodeId, NodeKind, Operation, Resolved, Transaction, image_brush,
@@ -31,6 +31,7 @@ fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<N
             res: &res,
             ids,
             images: None,
+            contrast: None,
         },
         name,
         &args,
@@ -232,6 +233,7 @@ fn arguments_are_checked_against_the_parameters() {
         res: &res,
         ids: &mut ids,
         images: None,
+        contrast: None,
     };
     let p = page.to_wire();
     let mut refused = |name: &str, args: Value| match verbs::call(&mut ctx, name, &args) {
@@ -366,6 +368,7 @@ fn deleting_a_frame_takes_its_guides_and_undoes() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "delete_node",
         &json!({ "nodes": [frame.to_wire()] }),
@@ -472,6 +475,7 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "insert_subtree",
         &json!({ "parent": page.to_wire(), "tree": tree }),
@@ -504,6 +508,7 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "insert_subtree",
         &json!({ "parent": page.to_wire(), "tree": { "kind": rect(1.0, 1.0), "colour": "red" } }),
@@ -612,6 +617,7 @@ fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "style_text",
         &json!({ "node": w, "attrs": [], "end": 99 }),
@@ -751,6 +757,7 @@ fn a_linked_repeat_makes_instances() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "repeat",
         &json!({ "nodes": [main.to_wire()], "count": 2, "linked": true }),
@@ -848,6 +855,7 @@ fn pixel_fit_puts_a_box_on_whole_units() {
             res: &again,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "pixel_fit",
         &json!({ "nodes": [g.to_wire()] }),
@@ -980,6 +988,7 @@ fn pages_are_added_copied_moved_and_deleted() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "delete_page",
         &json!({ "page": p }),
@@ -1004,6 +1013,7 @@ fn pages_are_added_copied_moved_and_deleted() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "delete_page",
         &json!({ "page": first.to_wire() }),
@@ -1093,6 +1103,7 @@ fn components_are_made_placed_swapped_and_detached() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "make_component",
         &json!({ "nodes": [card.to_wire()] }),
@@ -1123,8 +1134,8 @@ fn a_script_keeps_instances_in_step_with_their_mains() {
         { "verb": "create_instance", "args": { "main": "@f", "parent": "@page" }, "as": "i" },
         { "verb": "set_fills", "args": { "node": "@r", "fills": red } },
     ]);
-    let made =
-        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
     let inst = NodeId::from_wire(&made[3][0]).unwrap();
     let copy = doc.get(inst).unwrap().children()[0];
     assert_eq!(
@@ -1155,8 +1166,8 @@ fn variables_and_modes_are_added_set_and_removed() {
         { "verb": "create_node", "args": { "parent": "@page", "kind": frame(10.0, 10.0) }, "as": "f" },
         { "verb": "set_frame_mode", "args": { "node": "@f", "mode": "@dark" } },
     ]);
-    let made =
-        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
     let table = doc.variables();
     let var: ondin_core::VarId = serde_json::from_value(json!(made[0][0])).unwrap();
     let dark: ondin_core::ModeId = serde_json::from_value(json!(made[1][0])).unwrap();
@@ -1171,7 +1182,7 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert_eq!(doc.get(f).unwrap().modes(), [dark]);
 
     let refused = |doc: &mut Document, ids: &mut IdSource, step: Value| {
-        verbs::run_script(doc, ids, None, &json!([step]))
+        verbs::run_script(doc, ids, Lent::default(), &json!([step]))
             .expect_err("refused")
             .why
     };
@@ -1196,7 +1207,7 @@ fn variables_and_modes_are_added_set_and_removed() {
         { "verb": "remove_mode", "args": { "mode": made[1][0] } },
         { "verb": "remove_variable", "args": { "variable": made[0][0] } },
     ]);
-    verbs::run_script(&mut doc, &mut ids, None, &tidy).unwrap_or_else(|e| panic!("{e}"));
+    verbs::run_script(&mut doc, &mut ids, Lent::default(), &tidy).unwrap_or_else(|e| panic!("{e}"));
     assert!(doc.variables().get(var).is_none());
     assert!(doc.variables().mode(dark).is_none());
     assert!(
@@ -1230,8 +1241,8 @@ fn bind_variable_binds_and_detaches_fields() {
         { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "fill": 0 }, "variable": "@c" } },
         { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": "radius", "variable": "@n" } },
     ]);
-    let made =
-        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
     let x = NodeId::from_wire(&made[2][0]).unwrap();
     let node = doc.get(x).unwrap();
     assert!(
@@ -1245,7 +1256,8 @@ fn bind_variable_binds_and_detaches_fields() {
 
     let detach =
         json!([{ "verb": "bind_variable", "args": { "nodes": [x.to_wire()], "field": "radius" } }]);
-    verbs::run_script(&mut doc, &mut ids, None, &detach).unwrap_or_else(|e| panic!("{e}"));
+    verbs::run_script(&mut doc, &mut ids, Lent::default(), &detach)
+        .unwrap_or_else(|e| panic!("{e}"));
     let node = doc.get(x).unwrap();
     assert!(node.corner_vars().iter().all(Option::is_none));
     let NodeKind::Rect { corner_radii, .. } = node.kind() else {
@@ -1254,7 +1266,8 @@ fn bind_variable_binds_and_detaches_fields() {
     assert_eq!(corner_radii.top_left, 8.0, "detached to what it drew");
 
     let past = json!([{ "verb": "bind_variable", "args": { "nodes": [x.to_wire()], "field": { "corner": 4 } } }]);
-    let err = verbs::run_script(&mut doc, &mut ids, None, &past).expect_err("no fifth corner");
+    let err =
+        verbs::run_script(&mut doc, &mut ids, Lent::default(), &past).expect_err("no fifth corner");
     assert!(err.why.contains("no such place"), "{err}");
 }
 
@@ -1284,8 +1297,8 @@ fn styles_are_added_changed_applied_and_removed() {
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "b" },
         { "verb": "add_style", "args": { "value": { "fills": fills(100) }, "name": "Brand", "nodes": ["@a", "@b"] }, "as": "s" },
     ]);
-    let made =
-        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
     let (a, b) = (
         NodeId::from_wire(&made[0][0]).unwrap(),
         NodeId::from_wire(&made[1][0]).unwrap(),
@@ -1304,7 +1317,8 @@ fn styles_are_added_changed_applied_and_removed() {
         { "verb": "apply_style", "args": { "nodes": [b.to_wire()], "slot": "fills" } },
         { "verb": "add_style", "args": { "from": a.to_wire(), "slot": "fills", "name": "Copy" }, "as": "c" },
     ]);
-    let made = verbs::run_script(&mut doc, &mut ids, None, &more).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &more)
+        .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         (colour(&doc, a), colour(&doc, b)),
         (200, 200),
@@ -1331,7 +1345,7 @@ fn styles_are_added_changed_applied_and_removed() {
     let taken = verbs::run_script(
         &mut doc,
         &mut ids,
-        None,
+        Lent::default(),
         &json!([{ "verb": "add_style", "args": { "value": { "fills": fills(1) }, "name": "Accent" } }]),
     )
     .expect_err("a taken name");
@@ -1340,7 +1354,7 @@ fn styles_are_added_changed_applied_and_removed() {
     verbs::run_script(
         &mut doc,
         &mut ids,
-        None,
+        Lent::default(),
         &json!([{ "verb": "remove_style", "args": { "style": s } }]),
     )
     .unwrap_or_else(|e| panic!("{e}"));
@@ -1374,6 +1388,7 @@ fn properties_are_defined_and_set_on_instances() {
                 res: &res,
                 ids,
                 images: None,
+                contrast: None,
             },
             name,
             &args,
@@ -1447,6 +1462,7 @@ fn properties_are_defined_and_set_on_instances() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "set_instance_property",
         &json!({ "node": inst.to_wire(), "property": "Badge", "value": "yes" }),
@@ -1507,6 +1523,7 @@ fn reset_overrides_puts_an_instance_back() {
             res: &res,
             ids: &mut ids,
             images: None,
+            contrast: None,
         },
         "reset_overrides",
         &json!({ "nodes": [card.to_wire()] }),
@@ -1550,6 +1567,127 @@ fn variants_are_combined_and_switched() {
     assert_eq!(ondin_core::component::main_of(&doc, inst), Some(want));
 }
 
+/// A probe that answers one finding for every layer asked: its fill's colour on
+/// white, held to `needs`.
+struct OnWhite {
+    needs: f64,
+}
+
+impl ondin_core::contrast::Probe for OnWhite {
+    fn measure(
+        &mut self,
+        doc: &Document,
+        ids: &[NodeId],
+        level: ondin_core::contrast::Level,
+    ) -> Vec<ondin_core::contrast::Finding> {
+        use ondin_core::contrast::{Finding, Sample};
+        ids.iter()
+            .filter_map(|id| {
+                let ink = match doc.get(*id)?.paint().fills.first()?.brush.literal()? {
+                    Brush::Solid(c) => *c,
+                    _ => return None,
+                };
+                let sample = Sample {
+                    mode: None,
+                    name: None,
+                    score: 0.0,
+                    needs: self.needs,
+                    ink,
+                    opacity: 1.0,
+                    under: Color::WHITE,
+                    backdrop: Color::WHITE,
+                };
+                let mut f = Finding {
+                    id: *id,
+                    trail: Vec::new(),
+                    ratio: 0.0,
+                    needs: self.needs,
+                    large: false,
+                    non_text: true,
+                    mode: None,
+                    samples: vec![sample.clone()],
+                };
+                f.samples[0].score = sample.score_of(level, ink);
+                f.settle(level);
+                Some(f)
+            })
+            .collect()
+    }
+}
+
+/// `fix_contrast` gives a failing layer the nearest colour that passes, as the
+/// probe it borrows measured it, and leaves a passing one; a caller with no probe
+/// is refused.
+///
+/// flip: `fix_contrast` writing the ink back rather than `contrast::nearest`'s
+/// colour → fails at "the pale layer passes now". Fixing passing findings too
+/// does not bite: `fix_transaction` leaves a paint that passes as it is.
+#[test]
+fn fix_contrast_gives_a_failing_layer_the_nearest_passing_colour() {
+    let (mut doc, mut ids, page) = blank();
+    let fill = |c: Color| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(c).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    let p = page.to_wire();
+    let pale = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let dark = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": pale.to_wire(), "fills": fill(Color::from_rgb8(0xcc, 0xcc, 0xcc)) }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": dark.to_wire(), "fills": fill(Color::BLACK) }),
+    );
+
+    let mut probe = OnWhite { needs: 3.0 };
+    let script =
+        json!([{ "verb": "fix_contrast", "args": { "nodes": [pale.to_wire(), dark.to_wire()] } }]);
+    let lent = Lent {
+        contrast: Some(&mut probe),
+        ..Lent::default()
+    };
+    verbs::run_script(&mut doc, &mut ids, lent, &script).unwrap_or_else(|e| panic!("{e}"));
+    let colour = |id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+        Some(Brush::Solid(c)) => *c,
+        other => panic!("{other:?}"),
+    };
+    let fixed = ondin_core::contrast::Probe::measure(
+        &mut OnWhite { needs: 3.0 },
+        &doc,
+        &[pale],
+        ondin_core::contrast::Level::Aa,
+    );
+    assert!(
+        fixed[0].passes(),
+        "the pale layer passes now: {:?}",
+        colour(pale)
+    );
+    assert_eq!(colour(dark), Color::BLACK, "the passing layer is left");
+
+    let err =
+        verbs::run_script(&mut doc, &mut ids, Lent::default(), &script).expect_err("no probe");
+    assert!(err.why.contains("cannot measure"), "{err}");
+}
+
 /// A sink that takes any picture; its id is the byte length.
 struct Pictures;
 
@@ -1588,8 +1726,16 @@ fn add_image_answers_an_id_a_fill_can_show() {
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "r" },
         { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
     ]);
-    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &script)
-        .unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Lent {
+            images: Some(&mut Pictures),
+            ..Lent::default()
+        },
+        &script,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let id = ImageId(made[0][0].clone());
     assert!(doc.has_image(&id), "{made:?}");
     let r = doc.get(page).unwrap().children()[0];
@@ -1600,18 +1746,29 @@ fn add_image_answers_an_id_a_fill_can_show() {
     );
 
     let again = json!([{ "verb": "add_image", "args": { "bytes": png } }]);
-    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &again)
-        .unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Lent {
+            images: Some(&mut Pictures),
+            ..Lent::default()
+        },
+        &again,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(made[0], std::slice::from_ref(&id.0));
     assert_eq!(doc.images().count(), 1);
 
-    let err = verbs::run_script(&mut doc, &mut ids, None, &again).expect_err("no sink");
+    let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &again).expect_err("no sink");
     assert!(err.why.contains("cannot read pictures"), "{err}");
     let text = base64::engine::general_purpose::STANDARD.encode(b"hello");
     let err = verbs::run_script(
         &mut doc,
         &mut ids,
-        Some(&mut Pictures),
+        Lent {
+            images: Some(&mut Pictures),
+            ..Lent::default()
+        },
         &json!([{ "verb": "add_image", "args": { "bytes": text } }]),
     )
     .expect_err("not a picture");
@@ -1680,8 +1837,16 @@ fn replace_image_keeps_the_framing() {
         { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
         { "verb": "replace_image", "args": { "node": "@r", "image": "@b" } },
     ]);
-    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &script)
-        .unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Lent {
+            images: Some(&mut Pictures),
+            ..Lent::default()
+        },
+        &script,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let r = doc.get(page).unwrap().children()[0];
     let Some(Brush::Image(b)) = doc.get(r).unwrap().paint().fills[0]
         .brush
@@ -1694,7 +1859,8 @@ fn replace_image_keeps_the_framing() {
     assert_eq!(b.image.fit, ondin_core::ImageFit::Tile, "the framing stays");
 
     let missing = json!([{ "verb": "replace_image", "args": { "node": r.to_wire(), "image": "sha256:none" } }]);
-    let err = verbs::run_script(&mut doc, &mut ids, None, &missing).expect_err("no such picture");
+    let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &missing)
+        .expect_err("no such picture");
     assert!(err.why.contains("no such picture"), "{err}");
 }
 
@@ -1712,8 +1878,8 @@ fn a_script_refers_to_what_its_earlier_steps_made() {
         { "verb": "group", "args": { "nodes": ["@a", "@b"] }, "as": "pair" },
         { "verb": "set_name", "args": { "node": "@pair", "name": "Pair" } },
     ]);
-    let made =
-        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
     let pair = NodeId::from_wire(&made[2][0]).expect("a node's wire form");
     assert_eq!(doc.get(pair).unwrap().name(), "Pair");
     assert_eq!(doc.get(page).unwrap().children(), [pair]);
@@ -1723,7 +1889,8 @@ fn a_script_refers_to_what_its_earlier_steps_made() {
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(1.0, 1.0) }, "as": "c" },
         { "verb": "set_name", "args": { "node": "@pair", "name": "x" } },
     ]);
-    let err = verbs::run_script(&mut doc, &mut ids, None, &broken).expect_err("an unknown label");
+    let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &broken)
+        .expect_err("an unknown label");
     assert_eq!(err.step, 2, "{err}");
     assert!(err.why.contains("pair"), "{err}");
     assert_eq!(

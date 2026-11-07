@@ -714,3 +714,34 @@ fn the_strictest_run_sets_the_threshold() {
         .unwrap();
     assert_eq!(only(&check(&d.doc, d.page, Level::Aa)).needs, 4.5);
 }
+
+/// The `fix_contrast` verb, run as a script with `contrast::Measurer` lent: pale
+/// text on white, rendered and measured, takes the nearest passing colour, and
+/// measures as passing after.
+///
+/// flip: `Measurer::measure` answering no findings → fails at "it fails first",
+/// asked of the measurer itself.
+#[test]
+fn the_fix_contrast_verb_fixes_rendered_text() {
+    use ondin_core::contrast::Probe;
+    let mut d = doc((0xbb, 0xbb, 0xbb), 16.0, false);
+    let mut measurer = contrast::Measurer::default();
+    let before = measurer.measure(&d.doc, &[d.text], Level::Aa);
+    assert!(
+        before.len() == 1 && !before[0].passes(),
+        "it fails first: {before:?}"
+    );
+    let script = serde_json::json!([
+        { "verb": "fix_contrast", "args": { "nodes": [d.text.to_wire()] } },
+    ]);
+    let lent = ondin_core::verbs::Lent {
+        contrast: Some(&mut measurer),
+        ..Default::default()
+    };
+    ondin_core::verbs::run_script(&mut d.doc, &mut d.ids, lent, &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        only(&check(&d.doc, d.page, Level::Aa)).passes(),
+        "it passes after"
+    );
+}

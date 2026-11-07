@@ -87,6 +87,16 @@ pub struct Ctx<'a> {
     /// What hashes and sizes a picture's bytes, which core cannot do; `None`
     /// refuses `add_image`.
     pub images: Option<&'a mut dyn ImageSink>,
+    /// What measures contrast against a rendered backdrop, which core cannot do;
+    /// `None` refuses `fix_contrast`.
+    pub contrast: Option<&'a mut dyn crate::contrast::Probe>,
+}
+
+/// What a caller lends a script's verbs that core cannot do itself.
+#[derive(Default)]
+pub struct Lent<'a> {
+    pub images: Option<&'a mut dyn ImageSink>,
+    pub contrast: Option<&'a mut dyn crate::contrast::Probe>,
 }
 
 /// A verb's answer: the edit to commit, the nodes it creates, in order, and the
@@ -376,6 +386,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "Cell" => reads::<Cell>(v),
         "StyleValue" => reads::<StyleInput>(v),
         "BoundField" => reads::<build::BoundField>(v),
+        "Color" => reads::<peniko::Color>(v),
         "PropValue" => match v {
             Value::Bool(_) | Value::String(_) => Ok(()),
             _ => Err("expected true, false or a string".into()),
@@ -454,6 +465,7 @@ pub fn example(model: &str) -> Option<Value> {
         "Cell" => json(&Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))),
         "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
         "BoundField" => json(&build::BoundField::Fill(0)),
+        "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
@@ -512,6 +524,7 @@ const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
 const RESETS: &[&str] = &["all", "fields", "children", "order"];
+const LEVELS: &[&str] = &["aa", "aaa", "apca"];
 const PROP_KINDS: &[&str] = &["boolean", "text", "swap"];
 const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
 
@@ -2301,6 +2314,84 @@ pub static VERBS: &[Verb] = &[
                 .ok_or_else(|| a.invalid("index", "the layer has no fill there"))
         },
     },
+    Verb {
+        name: "fix_contrast",
+        doc: "Give layers whose contrast fails the nearest colour that passes, or a colour or variable you name",
+        params: &[
+            req("nodes", NODES, "text layers and small shapes"),
+            opt(
+                "level",
+                ParamKind::Choice(LEVELS),
+                "the standard: `aa` unless given, `aaa` or `apca`",
+            ),
+            opt(
+                "colour",
+                ParamKind::Model("Color"),
+                "the colour the failing paints take; the nearest passing one unless given",
+            ),
+            opt(
+                "variable",
+                ParamKind::Id("variable"),
+                "a colour variable the failing paints are bound to instead",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::contrast::{Fix, Level};
+            let level = match a.choice("level") {
+                Some("aaa") => Level::Aaa,
+                Some("apca") => Level::Apca,
+                _ => Level::Aa,
+            };
+            let named = match (
+                a.model_opt::<peniko::Color>("colour")?,
+                a.id_opt::<VarId>("variable")?,
+            ) {
+                (Some(_), Some(_)) => {
+                    return Err(a.invalid("variable", "give a colour or a variable, not both"));
+                }
+                (Some(c), None) => Some(Fix::Colour(c)),
+                (None, Some(v)) => {
+                    let var = ctx
+                        .doc
+                        .variables()
+                        .get(v)
+                        .ok_or_else(|| a.invalid("variable", "no variable has that id"))?;
+                    if var.kind != VarKind::Color {
+                        return Err(a.invalid("variable", "not a colour variable"));
+                    }
+                    Some(Fix::Var(v))
+                }
+                (None, None) => None,
+            };
+            let nodes = a.nodes("nodes")?;
+            let probe = ctx
+                .contrast
+                .as_mut()
+                .ok_or(VerbError::Nothing("this caller cannot measure contrast"))?;
+            let findings = probe.measure(ctx.doc, &nodes, level);
+            let mut ops = Vec::new();
+            for f in findings.iter().filter(|f| !f.passes()) {
+                let fix = match named {
+                    Some(fix) => fix,
+                    None => match f
+                        .worst()
+                        .and_then(|w| crate::contrast::nearest(f, level, w.ink))
+                    {
+                        Some(c) => Fix::Colour(c),
+                        // No lightness at that hue passes: left as it is.
+                        None => continue,
+                    },
+                };
+                let new_fill = ctx.ids.mint_item();
+                if let Some(tx) =
+                    crate::contrast::fix_transaction(ctx.doc, f.id, f, level, fix, new_fill)
+                {
+                    ops.extend(tx.0);
+                }
+            }
+            Ok(Done::ops(ops))
+        },
+    },
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",
@@ -2493,7 +2584,7 @@ pub struct ScriptError {
 pub fn run_script(
     doc: &mut Document,
     ids: &mut IdSource,
-    mut images: Option<&mut dyn ImageSink>,
+    mut lent: Lent<'_>,
     script: &Value,
 ) -> Result<Vec<Vec<String>>, ScriptError> {
     let fail = |step: usize, why: String| ScriptError { step, why };
@@ -2517,9 +2608,13 @@ pub fn run_script(
                 doc,
                 res: &res,
                 ids,
-                // A cast, not `as_deref_mut`: it shortens the sink's object lifetime
-                // to this step's borrow, which `&mut`'s invariance otherwise forbids.
-                images: images.as_mut().map(|s| &mut **s as &mut dyn ImageSink),
+                // A cast, not `as_deref_mut`: it shortens the object lifetime to
+                // this step's borrow, which `&mut`'s invariance otherwise forbids.
+                images: lent.images.as_mut().map(|s| &mut **s as &mut dyn ImageSink),
+                contrast: lent
+                    .contrast
+                    .as_mut()
+                    .map(|p| &mut **p as &mut dyn crate::contrast::Probe),
             },
             verb,
             &args,

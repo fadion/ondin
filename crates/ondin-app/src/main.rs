@@ -654,7 +654,12 @@ fn run_script(script: &str, input: Option<&str>, out: &str) -> Result<Vec<String
         None => ondin_core::Document::new(ids.mint()),
     };
     let mut pictures = panels::import_files::Pictures;
-    let made = ondin_core::verbs::run_script(&mut doc, &mut ids, Some(&mut pictures), &steps)
+    let mut measurer = ondin_export::contrast::Measurer::default();
+    let lent = ondin_core::verbs::Lent {
+        images: Some(&mut pictures),
+        contrast: Some(&mut measurer),
+    };
+    let made = ondin_core::verbs::run_script(&mut doc, &mut ids, lent, &steps)
         .map_err(|e| format!("{script}: {e}"))?;
     let bytes = ondin_core::io::save(&doc).map_err(|e| format!("cannot save: {e}"))?;
     atomic::write(std::path::Path::new(out), &bytes)

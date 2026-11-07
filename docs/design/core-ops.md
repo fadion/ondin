@@ -194,7 +194,15 @@ it created. A verb never commits; its caller does, as every edit is committed.
   its `sampler`). A test holds each example to `check_model` and commits the `Tree` one.
 - **A verb is a builder's door, never a second copy of the edit.** Where the app and a verb make the
   same edit, both call one builder (`build::delete` serves the Delete key and `delete_node`). An edit
-  the app still builds itself has no verb until it moves into core.
+  the app still builds itself has no verb until it moves into core. Left in the app on purpose: what
+  the existing verbs already write (hide, lock, *Reset origin*, *Make base operand*, batch rename,
+  *Flip to other side*, the text sizing switch), what MCP does not expose (guides, the fill rule, a
+  page's ground; `mcp.md` *Not exposed*), and the canvas gestures and the inspector's field writers
+  (`slot_transaction`, which *Replace…* on any paint goes through).
+- **What core cannot do, a caller lends** (`verbs::Lent`, held in `Ctx`): `add_image` borrows an
+  `svg_in::ImageSink` to hash and size a picture, `fix_contrast` a `contrast::Probe` to measure
+  against a rendered backdrop (`ondin_export::contrast::Measurer`). A verb without its loan is
+  refused; `ondin run` lends both.
 - **`duplicate` places as `Ctrl+D` does** (`build::duplicate_placements`: the outermost layers, each
   copy one step above its original) and takes its offset as `dx`/`dy`. The clone chain that repeats
   a moved duplicate's step is the app's session state, so the verb has none.

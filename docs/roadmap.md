@@ -1,26 +1,10 @@
 # Ondin — Roadmap
 
 Open work only. **Now** is the work that lands before Command Mode and MCP: the editor's remaining
-gaps, components and layout, code export, and the command registry both later tracks call. The
-**Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+gaps, components and layout, and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
-
-## Now
-
-- **The rest of the command registry.** The verb table is built (`ondin_core::verbs`, `core-ops.md`
-  *The verb registry*), over the headless editing code now in `ondin_core::edit`, and `ondin run`
-  drives it. Left:
-  - **The contrast checker's fix** (`contrast::fix_transaction`) has no verb: it acts on a
-    `Finding` that `ondin_export::contrast` measures by rendering, which core cannot do. A
-    `fix_contrast` verb needs that measurement lent through `verbs::Ctx`, as `add_image` borrows a
-    hasher.
-  - Left in the app on purpose: what the existing verbs already write (hide, lock, *Reset origin*,
-    *Make base operand*, batch rename, *Flip to other side*, the text sizing switch), what MCP does
-    not expose (guides, the fill rule, a page's ground; `mcp.md` *Not exposed*), and the canvas
-    gestures and the inspector's field writers (`slot_transaction`, which *Replace…* on any paint
-    goes through), which become builders only when a verb needs the same edit.
 
 ## Now · Components and layout
 
@@ -62,7 +46,7 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 
 ## Later
 
-- **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (*Now*). Scripts
+- **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
   disclosure, schema place, kit scripts.

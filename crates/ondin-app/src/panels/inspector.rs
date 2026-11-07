@@ -10420,8 +10420,13 @@ impl OndinApp {
             self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Valve(resp));
             return resp.drag_stopped() || ui::defocus_commits(resp);
         }
+        // Only while the control is engaged or has just changed, as `edit_valve` previews:
+        // the picker calls the valve every frame, and an idle control's brush is the
+        // colour from before this frame's pick on another control.
         if let Some(p) = slot.pref_scoped() {
-            self.write_pref_colour(p, &brush);
+            if resp.dragged() || resp.has_focus() || resp.changed() {
+                self.write_pref_colour(p, &brush);
+            }
             return resp.drag_stopped() || ui::defocus_commits(resp);
         }
         let tx = self.slot_transaction(id, slot, brush.clone());

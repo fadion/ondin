@@ -1645,9 +1645,12 @@ mod tests {
         );
     }
 
-    /// The Settings card with the guide colour's picker open beside it, the two
+    /// The Settings card with `which` colour's picker open beside it, the two
     /// drawn each frame as the app draws them. Returns the app and the two rects.
-    fn settings_with_picker(ctx: &egui::Context) -> (OndinApp, egui::Rect, egui::Rect) {
+    fn settings_with_picker(
+        ctx: &egui::Context,
+        which: PrefColour,
+    ) -> (OndinApp, egui::Rect, egui::Rect) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
         app.toggle_settings(ctx);
@@ -1657,12 +1660,7 @@ mod tests {
         let card = ctx
             .memory(|m| m.area_rect(egui::Id::new("settings")))
             .expect("the card is up");
-        app.open_picker_beside(
-            ctx,
-            PaintSlot::Pref(PrefColour::Guide),
-            card,
-            card.center().y,
-        );
+        app.open_picker_beside(ctx, PaintSlot::Pref(which), card, card.center().y);
         for _ in 0..5 {
             frame(ctx, &mut app, Vec::new());
         }
@@ -1708,7 +1706,7 @@ mod tests {
     #[test]
     fn a_colour_picked_over_the_card_is_staged_in_the_form() {
         let ctx = egui::Context::default();
-        let (mut app, card, picker) = settings_with_picker(&ctx);
+        let (mut app, card, picker) = settings_with_picker(&ctx, PrefColour::Guide);
         assert!(
             !card.intersects(picker),
             "beside the card: {card:?} {picker:?}"
@@ -1735,6 +1733,43 @@ mod tests {
         );
     }
 
+    /// A press in the pixel grid colour's picker picks, as the guide's does: the grid's
+    /// picker also draws the alpha field, whose idle frames must not write the colour
+    /// back over the pick.
+    ///
+    /// flip: `valve_slot` writing a Settings colour on every call, not only while the
+    /// control is engaged → fails at "the press reached the picker".
+    #[test]
+    fn a_pick_in_the_grid_colour_s_picker_holds() {
+        let ctx = egui::Context::default();
+        let (mut app, card, picker) = settings_with_picker(&ctx, PrefColour::Grid);
+        assert!(
+            PaintSlot::Pref(PrefColour::Grid).takes_alpha(),
+            "fixture: the picker draws the alpha field"
+        );
+        click(
+            &ctx,
+            &mut app,
+            card.left_top() + egui::vec2(PAD + 4.0, PAD + 4.0),
+        );
+        let before = app.pref_colour(PrefColour::Grid);
+        click(&ctx, &mut app, picker.center());
+        assert_ne!(
+            app.pref_colour(PrefColour::Grid),
+            before,
+            "the press reached the picker"
+        );
+        let picked = app.pref_colour(PrefColour::Grid);
+        for _ in 0..5 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(
+            app.pref_colour(PrefColour::Grid),
+            picked,
+            "idle frames keep it"
+        );
+    }
+
     /// Escape with a Settings colour's picker open closes the picker and keeps the
     /// form; a second Escape discards the form.
     ///
@@ -1742,7 +1777,7 @@ mod tests {
     #[test]
     fn escape_closes_the_picker_before_the_form() {
         let ctx = egui::Context::default();
-        let (mut app, _, _) = settings_with_picker(&ctx);
+        let (mut app, _, _) = settings_with_picker(&ctx, PrefColour::Guide);
         let escape = || egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,

@@ -2951,6 +2951,118 @@ pub fn shown_rows_overridden(doc: &Document, root: NodeId) -> usize {
 
 // ── Defining properties on a main ────────────────────────────────────────────
 
+/// Which property a layer inside a main is bound to, for one kind ([`rebind`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Bind {
+    None,
+    /// The property with this item id.
+    To(ItemId),
+    /// A new property, made under this item id.
+    New(ItemId),
+}
+
+/// An owner's properties with `node` bound, for `kind`, as `pick` says. The layer
+/// comes off **every** property of the kind first, so it is never bound twice for
+/// one field (which [`settle`] would prune silently, losing the new binding); a
+/// new property is named for the layer — `Show {layer}`, `{layer} text`, the
+/// layer's name — made fresh among the others, and a swap property takes `filter`.
+pub fn rebind(
+    props: &[Keyed<Property>],
+    kind: PropKind,
+    node: NodeId,
+    pick: Bind,
+    layer: &str,
+    filter: &str,
+) -> Vec<Keyed<Property>> {
+    let mut next: Vec<Keyed<Property>> = props.to_vec();
+    for p in next.iter_mut().filter(|p| p.kind == kind) {
+        p.value.bound.retain(|b| *b != node);
+    }
+    match pick {
+        Bind::None => {}
+        Bind::To(id) => {
+            if let Some(p) = next.iter_mut().find(|p| p.id == id && p.kind == kind) {
+                p.value.bound.push(node);
+            }
+        }
+        Bind::New(item) => {
+            let name = fresh_name(
+                &next,
+                &match kind {
+                    PropKind::Boolean => format!("Show {layer}"),
+                    PropKind::Text => format!("{layer} text"),
+                    PropKind::Swap | PropKind::Nested => layer.to_string(),
+                },
+            );
+            next.push(Keyed::new(
+                item,
+                Property {
+                    name,
+                    kind,
+                    bound: vec![node],
+                    filter: match kind {
+                        PropKind::Swap => filter.to_string(),
+                        PropKind::Boolean | PropKind::Text | PropKind::Nested => String::new(),
+                    },
+                    preferred: Vec::new(),
+                },
+            ));
+        }
+    }
+    next
+}
+
+/// `base`, or `base 2`, `base 3`… — the first no property has.
+pub fn fresh_name(props: &[Keyed<Property>], base: &str) -> String {
+    let taken = |n: &str| props.iter().any(|p| p.name == n);
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|k| format!("{base} {k}"))
+        .find(|n| !taken(n))
+        .expect("an unbounded range")
+}
+
+/// [`set_property`], with each bound layer the change touches detached from its
+/// variable first, in the same edit, so the detach is the one asked for: a
+/// visibility bound and about to show otherwise, a content bound and about to
+/// read another text.
+pub fn set_property_detaching(
+    doc: &Document,
+    roots: &[NodeId],
+    p: &Property,
+    value: &PropValue,
+) -> Vec<Operation> {
+    let counterparts = roots.iter().flat_map(|r| counterparts(doc, *r, p));
+    let mut ops: Vec<Operation> = match value {
+        PropValue::Boolean(next) => counterparts
+            .filter(|c| {
+                doc.get(*c).is_some_and(|n| n.visible_var().is_some()) && doc.shown(*c) != *next
+            })
+            .flat_map(|c| crate::build::detach_visible_ops(doc, c))
+            .collect(),
+        PropValue::Text(t) => counterparts
+            .filter(|c| {
+                doc.get(*c)
+                    .is_some_and(|n| n.text_vars()[crate::variable::TEXT_CONTENT].is_some())
+                    && !matches!(
+                        doc.resolved_kind(*c).as_deref(),
+                        Some(NodeKind::Text { content, .. }) if content == t
+                    )
+            })
+            .flat_map(|c| {
+                let mut which = [false; 7];
+                which[crate::variable::TEXT_CONTENT] = true;
+                crate::build::detach_text_ops(doc, c, which)
+            })
+            .collect(),
+        PropValue::Swap(_) => Vec::new(),
+    };
+    ops.extend(set_property(doc, roots, p, value));
+    ops
+}
+
 /// Add a property to `owner` — a main or a set — bound to `bound`. `None` for a
 /// name that is empty or taken.
 ///

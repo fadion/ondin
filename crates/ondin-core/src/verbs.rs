@@ -376,6 +376,10 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "Cell" => reads::<Cell>(v),
         "StyleValue" => reads::<StyleInput>(v),
         "BoundField" => reads::<build::BoundField>(v),
+        "PropValue" => match v {
+            Value::Bool(_) | Value::String(_) => Ok(()),
+            _ => Err("expected true, false or a string".into()),
+        },
         "Tree" => reads::<Tree>(v),
         "[Effect]" => reads::<Vec<Effect>>(v),
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
@@ -450,6 +454,7 @@ pub fn example(model: &str) -> Option<Value> {
         "Cell" => json(&Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))),
         "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
         "BoundField" => json(&build::BoundField::Fill(0)),
+        "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::IndentStart(Length::Px(24.0)),
@@ -507,6 +512,7 @@ const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
 const RESETS: &[&str] = &["all", "fields", "children", "order"];
+const PROP_KINDS: &[&str] = &["boolean", "text", "swap"];
 const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
 
 /// The style slot a [`STYLE_SLOTS`] word names.
@@ -1189,6 +1195,157 @@ pub static VERBS: &[Verb] = &[
             crate::variant::switch(ctx.doc, root, to, ctx.ids)
                 .map(Done::edit)
                 .ok_or(VerbError::Nothing("that instance cannot switch variants"))
+        },
+    },
+    Verb {
+        name: "define_property",
+        doc: "Bind a layer inside a main to a component property, a new one unless `property` names one; answers a new one's id",
+        params: &[
+            req("node", NODE, "the layer inside a main"),
+            req(
+                "kind",
+                ParamKind::Choice(PROP_KINDS),
+                "what the property drives: the layer's visibility, its text, or the main a nested instance shows",
+            ),
+            opt(
+                "property",
+                TEXT,
+                "an existing property of that kind to bind to, by name",
+            ),
+            opt(
+                "name",
+                TEXT,
+                "a new property's name; named for the layer unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::variant::{Bind, PropKind};
+            let node_id = a.node("node")?;
+            let n = node(ctx, node_id)?;
+            let owner = crate::variant::owner_above(ctx.doc, node_id)
+                .ok_or_else(|| a.invalid("node", "not a layer inside a main component"))?;
+            let shows = n
+                .link
+                .filter(|l| ctx.doc.get(*l).is_some_and(|m| m.component));
+            let kind = match a.choice("kind") {
+                Some("text") if matches!(n.kind(), NodeKind::Text { .. }) => PropKind::Text,
+                Some("swap") if shows.is_some() => PropKind::Swap,
+                Some("boolean") => PropKind::Boolean,
+                _ => {
+                    return Err(a.invalid(
+                        "kind",
+                        "a text property needs a text layer, a swap one a nested instance",
+                    ));
+                }
+            };
+            let props = ctx
+                .doc
+                .get(owner)
+                .map(|o| o.props().to_vec())
+                .unwrap_or_default();
+            let (pick, item) = match a.text("property") {
+                Some(name) => {
+                    let p = props
+                        .iter()
+                        .find(|p| p.kind == kind && p.name == name)
+                        .ok_or_else(|| {
+                            a.invalid(
+                                "property",
+                                "the main has no property of that kind by that name",
+                            )
+                        })?;
+                    (Bind::To(p.id), None)
+                }
+                None => {
+                    let item = ctx.ids.mint_item();
+                    (Bind::New(item), Some(item))
+                }
+            };
+            let filter = shows
+                .and_then(|m| ctx.doc.get(m))
+                .map(|m| crate::swap::suggested_filter(m.name()))
+                .unwrap_or_default();
+            let mut next = crate::variant::rebind(&props, kind, node_id, pick, n.name(), &filter);
+            if let (Some(item), Some(name)) = (item, a.text("name").map(str::trim)) {
+                let reserved = ctx
+                    .doc
+                    .get(owner)
+                    .and_then(|o| o.set())
+                    .is_some_and(|s| s.props.iter().any(|p| p.name == name));
+                if name.is_empty()
+                    || reserved
+                    || next.iter().any(|p| p.id != item && p.name == name)
+                {
+                    return Err(a.invalid(
+                        "name",
+                        "a property needs a name no other property of the main has",
+                    ));
+                }
+                if let Some(p) = next.iter_mut().find(|p| p.id == item) {
+                    p.value.name = name.to_owned();
+                }
+            }
+            let ops = vec![Operation::SetProperties {
+                id: owner,
+                props: next,
+            }];
+            Ok(match item {
+                Some(item) => Done::making(ops, item.0.to_wire()),
+                None => Done::ops(ops),
+            })
+        },
+    },
+    Verb {
+        name: "set_instance_property",
+        doc: "Set one of an instance's component properties: a visibility, a text, or the main a slot shows",
+        params: &[
+            req("node", NODE, "the instance"),
+            req("property", TEXT, "the property, by name"),
+            req(
+                "value",
+                ParamKind::Model("PropValue"),
+                "true or false, a text, or a main's id, as the property's kind takes",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::variant::{PropKind, PropValue};
+            let root = crate::component::instance_root(ctx.doc, a.node("node")?)
+                .ok_or_else(|| a.invalid("node", "not in an instance"))?;
+            let name = a.text("property").unwrap_or_default();
+            let props = crate::variant::instance_properties(ctx.doc, root);
+            let p = props
+                .iter()
+                .find(|p| p.name == name && p.kind != PropKind::Nested)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = props
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .filter(|n| !n.is_empty())
+                        .collect();
+                    a.invalid(
+                        "property",
+                        format!("its properties are {}", names.join(", ")),
+                    )
+                })?;
+            let v = a.get("value").cloned().unwrap_or(Value::Null);
+            let value = match (p.kind, &v) {
+                (PropKind::Boolean, Value::Bool(b)) => PropValue::Boolean(*b),
+                (PropKind::Text, Value::String(s)) => PropValue::Text(s.clone()),
+                (PropKind::Swap, Value::String(_)) => {
+                    let main = wire(&v).map_err(|why| a.invalid("value", why))?;
+                    if !ctx.doc.get(main).is_some_and(|m| m.component) {
+                        return Err(a.invalid("value", "not a main component"));
+                    }
+                    PropValue::Swap(main)
+                }
+                _ => return Err(a.invalid("value", "not a value of the property's kind")),
+            };
+            Ok(Done::ops(crate::variant::set_property_detaching(
+                ctx.doc,
+                &[root],
+                p,
+                &value,
+            )))
         },
     },
     Verb {

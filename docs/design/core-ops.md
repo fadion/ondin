@@ -237,9 +237,13 @@ it created. A verb never commits; its caller does, as every edit is committed.
   `bind_op` and `remove_ops`. A style value is written as `verbs::StyleInput`, the lists with no
   item ids: a new style mints them, `set_style_value` keeps the style's own by position, and a text
   style's colour and language are cleared (`style::type_part`). `set_style_value` writes the value
-  alone; `style::settle`, in `owed`, carries it to every user. `ondin-mcp`'s
-  `every_phase_3_tool_is_a_registry_verb` holds the tool list to the registry, the tools still to
-  come on its pending list.
+  alone; `style::settle`, in `owed`, carries it to every user. `bind_variable` is
+  `build::bind_field_ops` over a `build::BoundField`, `reset_overrides` is `reset::stated`, and the
+  property verbs are the binding line's `variant::rebind` (a layer taken off every property of the
+  kind before it is bound) and the instance card's `variant::set_property_detaching` (a bound layer
+  the value changes detached in the same edit). A property is named by its name, its value by its
+  kind: a bool, a text, a main's id. `ondin-mcp`'s `every_phase_3_tool_is_a_registry_verb` holds
+  every Phase 3 tool to a verb of its name.
 
 ### 5.7b Layer names (`naming.rs`)
 

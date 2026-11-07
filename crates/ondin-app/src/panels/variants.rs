@@ -26,7 +26,7 @@ use crate::kits::index::KitHeading;
 use crate::theme::{self, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
-use ondin_core::variant::{self, PropKind, PropValue, Property};
+use ondin_core::variant::{self, Bind, PropKind, PropValue, Property, fresh_name, rebind};
 use ondin_core::{Keyed, NodeId, Transaction, component, swap};
 
 /// A row's label column, the width the Component card's dropdowns sit after.
@@ -2084,22 +2084,12 @@ impl OndinApp {
                         // Each bound layer the click changes detached in the edit
                         // itself, the detach the tooltip promises — asked for, so
                         // the floating status says nothing (§15 D1071).
-                        let mut ops: Vec<_> = roots
-                            .iter()
-                            .flat_map(|r| variant::counterparts(doc, *r, p))
-                            .filter(|c| {
-                                doc.get(*c).is_some_and(|n| n.visible_var().is_some())
-                                    && doc.shown(*c) != next
-                            })
-                            .flat_map(|c| ondin_core::build::detach_visible_ops(doc, c))
-                            .collect();
-                        ops.extend(variant::set_property(
+                        out.push(Transaction(variant::set_property_detaching(
                             doc,
                             roots,
                             p,
                             &PropValue::Boolean(next),
-                        ));
-                        out.push(Transaction(ops));
+                        )));
                     }
                 }
                 PropKind::Text => {
@@ -2193,23 +2183,12 @@ impl OndinApp {
                             // says nothing — left to `keep_text_bindings`, the
                             // same key said *Detached copy/cta* here and nothing
                             // on the Type card.
-                            let mut ops: Vec<_> = roots
-                                .iter()
-                                .flat_map(|r| variant::counterparts(doc, *r, p))
-                                .filter(|c| {
-                                    doc.get(*c).is_some_and(|n| n.text_vars()[0].is_some())
-                                        && !matches!(
-                                            doc.resolved_kind(*c).as_deref(),
-                                            Some(ondin_core::NodeKind::Text { content, .. })
-                                                if *content == t
-                                        )
-                                })
-                                .flat_map(|c| {
-                                    ondin_core::build::detach_text_ops(doc, c, CONTENT_ONLY)
-                                })
-                                .collect();
-                            ops.extend(variant::set_property(doc, roots, p, &PropValue::Text(t)));
-                            out.push(Transaction(ops));
+                            out.push(Transaction(variant::set_property_detaching(
+                                doc,
+                                roots,
+                                p,
+                                &PropValue::Text(t),
+                            )));
                         }
                     });
                 }
@@ -2739,70 +2718,6 @@ impl OndinApp {
     }
 }
 
-/// What a binding dropdown was set to ([`rebind`]).
-#[derive(Clone, Copy, Debug)]
-enum Bind {
-    None,
-    /// The property with this item id.
-    To(ondin_core::ItemId),
-    /// *New property…*, made under this item id.
-    New(ondin_core::ItemId),
-}
-
-/// An owner's properties with `node` bound, for `kind`, as `pick` says — the
-/// decision [`OndinApp::bind_line`] commits, lifted out so a test can ask it.
-/// The layer comes off **every** property of the kind first, so it is never
-/// bound twice for one field (which `variant::settle` would prune silently,
-/// losing the new binding); a new property is named for the layer — `Show
-/// {layer}`, `{layer} text`, the layer's name — made fresh among the others,
-/// and a swap property takes `filter`, the suggestion from the main the layer
-/// shows.
-fn rebind(
-    props: &[Keyed<Property>],
-    kind: PropKind,
-    node: NodeId,
-    pick: Bind,
-    layer: &str,
-    filter: &str,
-) -> Vec<Keyed<Property>> {
-    let mut next: Vec<Keyed<Property>> = props.to_vec();
-    for p in next.iter_mut().filter(|p| p.kind == kind) {
-        p.value.bound.retain(|b| *b != node);
-    }
-    match pick {
-        Bind::None => {}
-        Bind::To(id) => {
-            if let Some(p) = next.iter_mut().find(|p| p.id == id && p.kind == kind) {
-                p.value.bound.push(node);
-            }
-        }
-        Bind::New(item) => {
-            let name = fresh_name(
-                &next,
-                &match kind {
-                    PropKind::Boolean => format!("Show {layer}"),
-                    PropKind::Text => format!("{layer} text"),
-                    PropKind::Swap | PropKind::Nested => layer.to_string(),
-                },
-            );
-            next.push(Keyed::new(
-                item,
-                Property {
-                    name,
-                    kind,
-                    bound: vec![node],
-                    filter: match kind {
-                        PropKind::Swap => filter.to_string(),
-                        PropKind::Boolean | PropKind::Text | PropKind::Nested => String::new(),
-                    },
-                    preferred: Vec::new(),
-                },
-            ));
-        }
-    }
-    next
-}
-
 /// The properties a shown nested instance `slot` brings to the card (the
 /// switch's caption, the *Shown from nested* rows): its main's set's variant properties, then its own
 /// component properties — what [`OndinApp::instance_rows`] draws for it.
@@ -3126,18 +3041,6 @@ fn main_default(doc: &ondin_core::Document, main: NodeId, p: &Property) -> Optio
         .iter()
         .find(|b| inside.contains(b))
         .and_then(|b| variant::field_value(doc, *b, p.kind))
-}
-
-/// `base`, or `base 2`, `base 3`… — the first no property has.
-fn fresh_name(props: &[Keyed<Property>], base: &str) -> String {
-    let taken = |n: &str| props.iter().any(|p| p.name == n);
-    if !taken(base) {
-        return base.to_string();
-    }
-    (2..)
-        .map(|k| format!("{base} {k}"))
-        .find(|n| !taken(n))
-        .expect("an unbounded range")
 }
 
 /// A property row's chip over `roots` (§15 D1060; D1070's amendment for a Text

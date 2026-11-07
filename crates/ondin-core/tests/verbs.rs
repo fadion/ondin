@@ -1286,6 +1286,114 @@ fn styles_are_added_changed_applied_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// `define_property` binds a main's text and rectangle to a text and a boolean
+/// property, a named one and one named for its layer, and `set_instance_property`
+/// sets each on an instance by name; a value of the wrong kind is refused.
+///
+/// flip: `rebind` not taking a layer off the kind's other properties → fails at
+/// "the badge is hidden": `variant::settle` prunes the double binding, keeping the
+/// first, so "bound once" holds either way and the new property loses its layer.
+#[test]
+fn properties_are_defined_and_set_on_instances() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, rect_in) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    let title = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": card.to_wire(), "text": "Title" }),
+    )[0];
+    let res = Resolved::rebuild(&doc);
+    let call = |doc: &Document, ids: &mut IdSource, name: &str, args: Value| {
+        verbs::call(
+            &mut Ctx {
+                doc,
+                res: &res,
+                ids,
+                images: None,
+            },
+            name,
+            &args,
+        )
+    };
+    let defined = call(
+        &doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": title.to_wire(), "kind": "text", "name": "Heading" }),
+    )
+    .unwrap();
+    assert!(defined.made.is_some(), "a new property answers its id");
+    let mut tx = defined.tx;
+    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+    doc.apply(&tx).unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": rect_in.to_wire(), "kind": "boolean" }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": rect_in.to_wire(), "kind": "boolean", "name": "Badge" }),
+    );
+    let props = doc.get(card).unwrap().props().to_vec();
+    let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
+    assert!(
+        names.contains(&"Heading") && names.contains(&"Badge"),
+        "{names:?}"
+    );
+    let binding = props.iter().filter(|p| p.bound.contains(&rect_in)).count();
+    assert_eq!(binding, 1, "bound once");
+
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_instance_property",
+        json!({ "node": inst.to_wire(), "property": "Heading", "value": "Hello" }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_instance_property",
+        json!({ "node": inst.to_wire(), "property": "Badge", "value": false }),
+    );
+    let kids = doc.get(inst).unwrap().children().to_vec();
+    let text = kids.iter().find_map(|k| match doc.get(*k).unwrap().kind() {
+        NodeKind::Text { content, .. } => Some(content.clone()),
+        _ => None,
+    });
+    assert_eq!(text.as_deref(), Some("Hello"));
+    assert!(
+        kids.iter().any(|k| !doc.get(*k).unwrap().visible()),
+        "the badge is hidden"
+    );
+
+    let res = Resolved::rebuild(&doc);
+    let wrong = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "set_instance_property",
+        &json!({ "node": inst.to_wire(), "property": "Badge", "value": "yes" }),
+    );
+    assert!(
+        matches!(wrong, Err(VerbError::Invalid { param: "value", .. })),
+        "{wrong:?}"
+    );
+}
+
 /// `reset_overrides` puts an instance's overridden fill back as its main has it,
 /// and refuses layers in no instance.
 ///

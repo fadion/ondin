@@ -498,34 +498,27 @@ impl OndinApp {
             return;
         }
         let enter = ui::card_enter(ctx);
-        let area = ui::canvas_popup_area(ctx, egui::Id::new("tokens-import"), canvas);
         let mut act = Act::None;
         let mut changed = false;
-        // Batch rename's: the settings card without its backdrop or margin.
-        let mut modal = crate::settings::card_modal(ctx, "tokens-import")
-            .area(area)
-            .backdrop_color(egui::Color32::TRANSPARENT);
-        modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
-        let modal = modal.show(ctx, |ui| {
-            ui.set_width(W);
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            if head(ui, &t.path) {
-                act = Act::Cancel;
-            }
-            filters(ui, &t.review, &mut t.filter);
-            ui::card_rule(ui);
-            changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
-            if let Some(note) = note(&t.review) {
+        let hold = crate::settings::CardHold::Modal;
+        let clicked_away =
+            crate::settings::canvas_card(ctx, "tokens-import", canvas, W, hold, |ui| {
+                if head(ui, &t.path) {
+                    act = Act::Cancel;
+                }
+                filters(ui, &t.review, &mut t.filter);
                 ui::card_rule(ui);
-                note_row(ui, &note);
-            }
-            ui::card_rule(ui);
-            if let Some(a) = foot(ui, &mut t) {
-                act = a;
-            }
-            ui::hold_tab(ui);
-        });
-        if modal.backdrop_response.clicked() {
+                changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
+                if let Some(note) = note(&t.review) {
+                    ui::card_rule(ui);
+                    note_row(ui, &note);
+                }
+                ui::card_rule(ui);
+                if let Some(a) = foot(ui, &mut t) {
+                    act = a;
+                }
+            });
+        if clicked_away {
             return;
         }
         if changed {

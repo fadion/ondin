@@ -31,11 +31,8 @@ const TEX: egui::TextureOptions = egui::TextureOptions {
     mipmap_mode: Some(egui::TextureFilter::Linear),
     ..egui::TextureOptions::LINEAR
 };
-/// The card's inset, the title row's height and the foot's: batch rename's and
-/// colour review's.
-const PAD: f32 = 14.0;
-const TITLE_H: f32 = 40.0;
-const FOOT_H: f32 = 48.0;
+/// The card's inset, every canvas card's.
+const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
 /// The raster's longer side, at most: enough for a logo's curves, few enough
 /// pixels that a trace lands while the setting is still being scrubbed.
 const MAX_SIDE: f64 = 1200.0;
@@ -343,45 +340,33 @@ impl OndinApp {
         let cancelled = self.gesture_cancelled;
         let before = card.numbers();
         let mut scrubbing = false;
-        let area = ui::canvas_popup_area(ctx, egui::Id::new("trace-image"), canvas);
         let mut act = Act::None;
-        let mut modal = crate::settings::card_modal(ctx, "trace-image")
-            .area(area)
-            .backdrop_color(egui::Color32::TRANSPARENT);
-        modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
-        let modal = modal.show(ctx, |ui| {
-            ui.set_width(W);
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(W, TITLE_H), egui::Sense::hover());
-            let mut child = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
-            if crate::settings::modal_title(&mut child, "Trace image") {
-                act = Act::Cancel;
-            }
-            ui::card_rule(ui);
-            egui::Frame::NONE
-                .inner_margin(egui::Margin::same(PAD as i8))
-                .show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = PAD;
-                        let preview_w = W - 3.0 * PAD - SIDE_W;
-                        preview(ui, &mut card, preview_w, cancelled);
-                        ui.vertical(|ui| {
-                            ui.set_width(SIDE_W);
-                            scrubbing = settings(ui, &mut card);
+        let hold = crate::settings::CardHold::Modal;
+        let clicked_away =
+            crate::settings::canvas_card(ctx, "trace-image", canvas, W, hold, |ui| {
+                if crate::settings::card_head(ui, W, "Trace image") {
+                    act = Act::Cancel;
+                }
+                ui::card_rule(ui);
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::same(PAD as i8))
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = PAD;
+                            let preview_w = W - 3.0 * PAD - SIDE_W;
+                            preview(ui, &mut card, preview_w, cancelled);
+                            ui.vertical(|ui| {
+                                ui.set_width(SIDE_W);
+                                scrubbing = settings(ui, &mut card);
+                            });
                         });
                     });
-                });
-            ui::card_rule(ui);
-            if let Some(a) = foot(ui, &card) {
-                act = a;
-            }
-            ui::hold_tab(ui);
-        });
-        if modal.backdrop_response.clicked() {
+                ui::card_rule(ui);
+                if let Some(a) = foot(ui, &card) {
+                    act = a;
+                }
+            });
+        if clicked_away {
             return;
         }
         // Armed after a right-click's cancel is answered, so the frame it lands on
@@ -612,7 +597,6 @@ fn percent(d: egui::DragValue<'_>) -> egui::DragValue<'_> {
 /// The footer: the count, or *Tracing…* until it catches up, then *Cancel* and
 /// *Trace*.
 fn foot(ui: &mut egui::Ui, card: &TraceCard) -> Option<Act> {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOT_H), egui::Sense::hover());
     let note = match &card.landed {
         Some((_, traced)) if card.done() => format!(
             "{} · {}",
@@ -621,26 +605,13 @@ fn foot(ui: &mut egui::Ui, card: &TraceCard) -> Option<Act> {
         ),
         _ => "Tracing…".to_string(),
     };
-    ui.painter().text(
-        egui::pos2(rect.left() + PAD, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        note,
-        // Batch rename's foot note.
-        egui::FontId::proportional(ui::CAPTION_PT),
-        theme::text::faint(),
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
     let why_not = card.shot.is_none().then(|| unread(card));
     let state = match why_not {
         None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
     let buttons = [("Cancel", FieldButton::Off), ("Trace", state)];
-    match crate::settings::footer_row_noted(&mut child, &buttons, why_not) {
+    match crate::settings::card_foot(ui, W, &note, &buttons, why_not) {
         Some(0) => Some(Act::Cancel),
         Some(_) if why_not.is_none() => Some(Act::Trace),
         _ => None,

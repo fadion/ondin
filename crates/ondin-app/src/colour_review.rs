@@ -18,11 +18,9 @@ use std::collections::{HashMap, HashSet};
 
 /// The card's width: room for a member row's name, uses, distance and reticle.
 const W: f32 = 420.0;
-/// The card's inset, and the title row's height: batch rename's.
-const PAD: f32 = 14.0;
-const TITLE_H: f32 = 40.0;
-/// The foot holding the merge: batch rename's.
-const FOOT_H: f32 = 48.0;
+/// The card's inset and the foot holding the merge: every canvas card's.
+const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
+const FOOT_H: f32 = crate::settings::CANVAS_CARD_FOOT_H;
 /// The list's inset inside the card; a row's ground spans it, and its content
 /// sits [`ROW_X`] further in, level with the controls above.
 const LIST_X: f32 = PAD - ROW_X;
@@ -294,48 +292,42 @@ impl OndinApp {
         }
         self.refresh_colour_review();
         let canvas = self.canvas_rect;
-        let room = ui::canvas_popup_room(canvas);
         let selected = !self.session.selection.ids().is_empty();
         let threshold = self.prefs.colour_review;
         let doc = &self.session.doc;
         let r = &mut self.colour_review;
         let mut act = None;
-        ui::canvas_popup_area(ctx, egui::Id::new("colour-review"), canvas).show(ctx, |ui| {
-            ui::hold_tab(ui);
-            crate::settings::card_frame().show(ui, |ui| {
-                ui.set_width(W);
-                ui.set_max_height(room);
-                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                if head(ui) {
-                    act = Some(Act::Close);
-                }
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: PAD as i8,
-                        right: PAD as i8,
-                        top: PAD as i8,
-                        bottom: 4,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 10.0;
-                        controls(ui, r, selected, threshold, &mut act);
-                        caption(ui, r, selected, threshold);
-                    });
-                ui.add_space(8.0);
-                ui::card_rule(ui);
-                if r.seen.groups.is_empty() {
-                    empty(ui, r, threshold);
-                    return;
-                }
-                // The title, the controls and the foot keep their place; the
-                // list gives up what the canvas lacks.
-                let list_h = ui::CANVAS_POPUP_LIST_H
-                    .min(ui.available_height() - FOOT_H - 1.0)
-                    .max(HEAD_H * 3.0);
-                let previewed = list(ui, doc, r, list_h, &mut act);
-                ui::card_rule(ui);
-                foot(ui, doc, r, previewed, &mut act);
-            });
+        let hold = crate::settings::CardHold::Open;
+        crate::settings::canvas_card(ctx, "colour-review", canvas, W, hold, |ui| {
+            if crate::settings::card_head(ui, W, "Colour review") {
+                act = Some(Act::Close);
+            }
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: PAD as i8,
+                    right: PAD as i8,
+                    top: PAD as i8,
+                    bottom: 4,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 10.0;
+                    controls(ui, r, selected, threshold, &mut act);
+                    caption(ui, r, selected, threshold);
+                });
+            ui.add_space(8.0);
+            ui::card_rule(ui);
+            if r.seen.groups.is_empty() {
+                empty(ui, r, threshold);
+                return;
+            }
+            // The title, the controls and the foot keep their place; the
+            // list gives up what the canvas lacks.
+            let list_h = ui::CANVAS_POPUP_LIST_H
+                .min(ui.available_height() - FOOT_H - 1.0)
+                .max(HEAD_H * 3.0);
+            let previewed = list(ui, doc, r, list_h, &mut act);
+            ui::card_rule(ui);
+            foot(ui, doc, r, previewed, &mut act);
         });
         self.colour_review_act(ctx, act);
     }
@@ -536,18 +528,6 @@ impl OndinApp {
             self.colour_review.reticle = Some((made, kept));
         }
     }
-}
-
-/// The title row, batch rename's ([`crate::settings::modal_title`] inside
-/// [`PAD`]); true when its close button is clicked.
-fn head(ui: &mut egui::Ui) -> bool {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, TITLE_H), egui::Sense::hover());
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    crate::settings::modal_title(&mut child, "Colour review")
 }
 
 /// The scope and the threshold, side by side.

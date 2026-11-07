@@ -516,6 +516,103 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     .inner
 }
 
+/// A card over the canvas's side inset, tighter than [`PAD`]: its rows run their
+/// dividers edge to edge, so the inset is each row's, not the frame's.
+pub(crate) const CANVAS_CARD_PAD: f32 = 14.0;
+/// A canvas card's title row ([`card_head`]).
+pub(crate) const CANVAS_CARD_HEAD_H: f32 = 40.0;
+/// A canvas card's footer row ([`card_foot`]).
+pub(crate) const CANVAS_CARD_FOOT_H: f32 = 48.0;
+
+/// How a [`canvas_card`] holds the window while it is open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CardHold {
+    /// A modal with a clear backdrop: the selection stays outlined, and a click
+    /// outside is answered for the caller to close on.
+    Modal,
+    /// The canvas stays live under it, and the card takes at most
+    /// [`ui::canvas_popup_room`] of height.
+    Open,
+}
+
+/// The frame every card over the canvas wears: [`card_frame`]'s ground without
+/// its margin, `w` wide, hung from [`ui::canvas_popup_area`], with `Tab` held
+/// inside and no spacing between rows. `body` lays the rows, [`card_head`] first.
+/// Returns whether a [`CardHold::Modal`] card's backdrop was clicked.
+pub(crate) fn canvas_card(
+    ctx: &egui::Context,
+    id: &str,
+    canvas: egui::Rect,
+    w: f32,
+    hold: CardHold,
+    body: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let area = ui::canvas_popup_area(ctx, egui::Id::new(id), canvas);
+    let rows = |ui: &mut egui::Ui| {
+        ui.set_width(w);
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        ui::hold_tab(ui);
+        body(ui)
+    };
+    match hold {
+        CardHold::Modal => {
+            let mut modal = card_modal(ctx, id)
+                .area(area)
+                .backdrop_color(egui::Color32::TRANSPARENT);
+            modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
+            modal.show(ctx, rows).backdrop_response.clicked()
+        }
+        CardHold::Open => {
+            let room = ui::canvas_popup_room(canvas);
+            area.show(ctx, |ui| {
+                card_frame().show(ui, |ui| {
+                    ui.set_max_height(room);
+                    rows(ui);
+                });
+            });
+            false
+        }
+    }
+}
+
+/// A canvas card's title row, `w` wide: [`modal_title`] inside
+/// [`CANVAS_CARD_PAD`]. Returns whether its ✕ was pressed.
+pub(crate) fn card_head(ui: &mut egui::Ui, w: f32, title: &str) -> bool {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, CANVAS_CARD_HEAD_H), egui::Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    modal_title(&mut child, title)
+}
+
+/// A canvas card's footer row, `w` wide: `note` faint on the left, `buttons` on
+/// the right as [`footer_row_noted`] lays them, `why_not` the commit's tooltip.
+/// Returns the index of the button pressed.
+pub(crate) fn card_foot(
+    ui: &mut egui::Ui,
+    w: f32,
+    note: &str,
+    buttons: &[(&str, FieldButton)],
+    why_not: Option<&str>,
+) -> Option<usize> {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, CANVAS_CARD_FOOT_H), egui::Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + CANVAS_CARD_PAD, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        note,
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 10.0)))
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    footer_row_noted(&mut child, buttons, why_not)
+}
+
 /// The *Cancel* / commit pair, right-aligned — `commit` is the commit's label,
 /// *Save changes* or *Create project* — with the commit
 /// [`FieldButton::Primary`] only when `enabled`: there is something to commit.

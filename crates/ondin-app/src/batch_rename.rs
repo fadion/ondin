@@ -28,7 +28,8 @@ const W: f32 = 520.0;
 /// The label column, and the gap after it.
 const LABEL_W: f32 = 72.0;
 const GAP: f32 = 10.0;
-const PAD: f32 = 14.0;
+/// The card's inset, every canvas card's.
+const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
 /// The fields and the numbering controls, as tall as every other control.
 const FIELD_H: f32 = ui::CONTROL_H;
 const NUM_H: f32 = ui::CONTROL_H;
@@ -995,7 +996,6 @@ impl OndinApp {
         let enter = !popup && ui::card_enter(ctx);
         b.take_parts();
 
-        let area = ui::canvas_popup_area(ctx, egui::Id::new("batch-rename"), canvas);
         let why_not = match b.done {
             true => b.plan.why_not(&b.s.find),
             false => Some("Still matching…".to_string()),
@@ -1005,54 +1005,46 @@ impl OndinApp {
         // call that reports it.
         let numbering = b.s.numbering;
         let mut scrubbing = false;
-        // The settings card's ground, hairline, corner and shadow, placed under the
-        // canvas's top edge and without its backdrop or margin: the rows below run
-        // their dividers edge to edge.
-        let mut modal = crate::settings::card_modal(ctx, "batch-rename")
-            .area(area)
-            .backdrop_color(egui::Color32::TRANSPARENT);
-        modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
-        let modal = modal.show(ctx, |ui| {
-            ui.set_width(W);
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            if head(ui) {
-                act = Act::Cancel;
-            }
-            egui::Frame::NONE
-                .inner_margin(egui::Margin {
-                    left: PAD as i8,
-                    right: PAD as i8,
-                    top: PAD as i8,
-                    bottom: 4,
-                })
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = GAP;
-                    scope_row(ui, &mut b.s, b.selected);
-                    find_row(ui, &mut b.s, b.plan.error.as_deref());
-                    template_row(ui, &mut b);
-                    if Template::parse(&b.s.template).has_number() {
-                        scrubbing = number_row(ui, &mut b.s.numbering);
-                        order_row(ui, &mut b.s.order);
-                    }
-                    checks(ui, &mut b.s, b.plan.skipped);
-                });
-            ui.add_space(8.0);
-            ui::card_rule(ui);
-            // Labelled by the scope it was made for: until the new plan's first
-            // part lands, the shown plan is the previous scope's.
-            preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
-            ui::card_rule(ui);
-            if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
-                act = a;
-            }
-            ui::hold_tab(ui);
-        });
+        let hold = crate::settings::CardHold::Modal;
+        let clicked_away =
+            crate::settings::canvas_card(ctx, "batch-rename", canvas, W, hold, |ui| {
+                if crate::settings::card_head(ui, W, "Batch rename") {
+                    act = Act::Cancel;
+                }
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: PAD as i8,
+                        right: PAD as i8,
+                        top: PAD as i8,
+                        bottom: 4,
+                    })
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = GAP;
+                        scope_row(ui, &mut b.s, b.selected);
+                        find_row(ui, &mut b.s, b.plan.error.as_deref());
+                        template_row(ui, &mut b);
+                        if Template::parse(&b.s.template).has_number() {
+                            scrubbing = number_row(ui, &mut b.s.numbering);
+                            order_row(ui, &mut b.s.order);
+                        }
+                        checks(ui, &mut b.s, b.plan.skipped);
+                    });
+                ui.add_space(8.0);
+                ui::card_rule(ui);
+                // Labelled by the scope it was made for: until the new plan's first
+                // part lands, the shown plan is the previous scope's.
+                preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
+                ui::card_rule(ui);
+                if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
+                    act = a;
+                }
+            });
         // Armed after a right-click's cancel is answered, so the frame it lands on
         // cannot re-arm it.
         if scrubbing && !self.gesture_cancelled && self.in_flight.rename_scrub.is_none() {
             self.in_flight.rename_scrub = Some(numbering);
         }
-        if modal.backdrop_response.clicked() && !popup {
+        if clicked_away && !popup {
             return;
         }
         if enter && matches!(act, Act::None) {
@@ -1073,18 +1065,6 @@ enum Act {
     None,
     Rename,
     Cancel,
-}
-
-/// The title row, the settings card's ([`crate::settings::modal_title`]) inside
-/// [`PAD`]; true when its close button is clicked.
-fn head(ui: &mut egui::Ui) -> bool {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 40.0), egui::Sense::hover());
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    crate::settings::modal_title(&mut child, "Batch rename")
 }
 
 /// A grid row: the label in its column, then `add` in the rest.
@@ -1684,29 +1664,17 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
 /// The footer: the hint, then *Cancel* and *Rename* in the dialogs' footer row
 /// (`settings::footer_row_noted`). `why_not` dims Rename and is its tooltip.
 fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act> {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 48.0), egui::Sense::hover());
-    ui.painter().text(
-        egui::pos2(rect.left() + PAD, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        "Enter rename · Esc cancel",
-        egui::FontId::proportional(ui::CAPTION_PT),
-        theme::text::faint(),
-    );
     let go = match changes {
         0 => "Rename".to_string(),
         n => format!("Rename {}", layers(n)),
     };
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
     let state = match why_not {
         None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
     let buttons = [("Cancel", FieldButton::Off), (go.as_str(), state)];
-    match crate::settings::footer_row_noted(&mut child, &buttons, why_not) {
+    let note = "Enter rename · Esc cancel";
+    match crate::settings::card_foot(ui, W, note, &buttons, why_not) {
         Some(0) => Some(Act::Cancel),
         Some(_) => Some(Act::Rename),
         None => None,

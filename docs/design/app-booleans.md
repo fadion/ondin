@@ -199,12 +199,16 @@ plain `Path` layers.
   `MAX_BOOL_COORD`.
 - **Sources** (`shape_builder::arrange`): visible, not effectively locked, not picture-filled,
   outside any boolean and any instance; a rect, ellipse, polygon, star, boolean, or a path whose
-  every subpath is closed. Selected groups are opened into their contents. Any other shown layer
-  (text, pictures, frames, open paths, lines, spirals, arcs, locked shapes) is left out, and
-  `Arrangement::left_out` says so. The work is in world
-  space, so sources under different parents cut each other as drawn. Refusals: `TooFew`,
-  `NoOverlap` (no face covered twice), `Abandoned`. `can_arrange` is the dim test: it counts
-  sources and does no arithmetic.
+  every subpath is closed. Selected groups are opened into their contents.
+- **Cutters**: an open path, a line, an arc or a spiral under the same conditions
+  (`Arrangement::cutters`) fills no face of its own; each of its subpaths, flattened to 0.01 units,
+  cuts every face it crosses through the knife's own surgery (`knife::pieces`, `cut_regions`), each
+  piece covered as its face was. It is left as it is by every edit. Any other shown layer (text,
+  pictures, frames, locked shapes) is left out, and `Arrangement::left_out` says so. The work is in
+  world space, so sources under different parents cut each other as drawn. Refusals: `TooFew`
+  (fewer than two sources, or one and no cutter), `NoOverlap` (no face covered twice and no face
+  cut), `Abandoned`. `can_arrange` is the dim test: it counts sources and cutters and does no
+  arithmetic.
 - **Merge and remove** (`Arrangement::merge`, `remove`): every source covering a picked face
   becomes itself minus the picked faces. A path is rewritten in place; any other kind, a live
   boolean included, is replaced by a path in its slot through `build::replace_with_path`, keeping
@@ -223,10 +227,10 @@ plain `Path` layers.
 `Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) is the first member of the rail's
 Builder slot, with the knife, above the eyedropper; it stays armed after each edit.
 
-- **Arming needs two closed shapes** the arrangement would cut (`OndinApp::builder_slot_usable`
+- **Arming needs two closed shapes, or one and a cutter** (`OndinApp::builder_slot_usable`
   on `shape_builder::can_arrange`, the test *Divide* dims on). Until then its rail member is
   dimmed and a click on it arms nothing, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
-  give *Shape builder needs two or more overlapping shapes* (`shape_builder::UNAVAILABLE`), the
+  give *Shape builder needs overlapping shapes, or a shape and a line across it* (`shape_builder::UNAVAILABLE`), the
   key on the status line. Once armed, the button stays lit whatever the selection becomes.
 - **Selection chrome** while armed is the selection's box alone, dim: no member outlines, which
   would bury the face under the pointer, and no handles, since every press builds.
@@ -244,11 +248,11 @@ Builder slot, with the knife, above the eyedropper; it stays armed after each ed
 - Escape or a right-click drops the drag (`cancel_gesture`) and records nothing; a second Escape
   returns to Select.
 - **Status line**: on arming *Drag across regions to merge them · Alt-drag to remove*, or the
-  refusal *Select two or more overlapping shapes, then drag across them* (`shape_builder::NEEDS`,
+  refusal *Select overlapping shapes, or a shape and a line across it, then drag across them* (`shape_builder::NEEDS`,
   also said by a press with nothing to build), or *The shapes could not be cut into regions*;
   during a drag *Release to merge N regions · Esc to cancel*, *remove* while Alt is held; after it
   *Merged N regions* or *Removed N regions*. The arming hint, these reports and *Divide*'s end in
-  *— only unlocked closed shapes take part; the rest were left out* when the arrangement left part
+  *— only unlocked shapes, paths and lines take part; the rest were left out* when the arrangement left part
   of the selection out (`left_out_note`).
 
 ### Divide's doors
@@ -256,7 +260,7 @@ Builder slot, with the knife, above the eyedropper; it stays armed after each ed
 `menu::Item::Divide`, glyph `divide`, no chord (a one-way conversion is not one keystroke away):
 the context menu's *Boolean ▸* as a second group, the inspector's boolean dropdown under the rule
 above *Flatten*, and the palette (aliases
-boolean, split, cut, pieces). It dims with *Divide needs two or more overlapping shapes*
+boolean, split, cut, pieces). It dims with *Divide needs overlapping shapes, or a shape and a line across it*
 (`menu::DIVIDE_NEEDS`) where `can_arrange` refuses, and is never checked: it leaves no live
 operation. The *Divided* group is selected afterwards and the status line says *Divided into N
 paths*.

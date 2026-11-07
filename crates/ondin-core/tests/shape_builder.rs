@@ -327,3 +327,75 @@ fn shapes_under_different_parents_cut_each_other_where_they_are_drawn() {
         "B is over the lens"
     );
 }
+
+impl Fixture {
+    /// A line in `parent` from `(x0, y)` to `(x1, y)`, frame space.
+    fn line(&mut self, parent: NodeId, x0: f64, x1: f64, y: f64) -> NodeId {
+        let id = self.ids.mint();
+        let index = self.doc.get(parent).unwrap().children().len();
+        self.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Line {
+                end: Point::new(x1 - x0, 0.0),
+            },
+            transform: Some(Affine::translate((x0, y))),
+            name: Some("Line".into()),
+        }]));
+        id
+    }
+}
+
+/// A line across one circle cuts it into two faces, fills neither and is no
+/// source; removing the top face leaves the circle's bottom half and the line
+/// as it was.
+/// flip: `arrange` without `cut_regions` → refuses `NoOverlap` at the fixture's
+/// "an arrangement".
+#[test]
+fn a_line_across_a_shape_cuts_its_face_in_two() {
+    let mut f = Fixture::new();
+    let fr = f.frame;
+    let a = f.circle(fr, 211.0, 140.0, BLUE, "Ellipse 1");
+    let line = f.line(fr, 100.0, 400.0, 140.0);
+    let before = f.doc.get(line).unwrap().clone();
+    let arr = f.arrange(&[a, line]);
+    assert_eq!(arr.regions.len(), 2, "two halves");
+    assert_eq!(arr.sources, [a], "the line is no source");
+    assert_eq!(arr.cutters, [line]);
+    assert!(!arr.left_out, "the line took part");
+    let top = arr.region_at(at(211.0, 100.0)).expect("the top half");
+    let res = f.resolved();
+    let (tx, built) = arr.remove(&f.doc, &res, &mut f.ids, &[top]).unwrap();
+    f.commit(tx);
+    let kept = built.kept[0];
+    let left = f.world(kept);
+    assert!(covers(&left, at(211.0, 180.0)), "the bottom half stays");
+    assert!(!covers(&left, at(211.0, 100.0)), "the top half went");
+    assert_eq!(f.doc.get(line), Some(&before), "the line is untouched");
+}
+
+/// A line through the three circles adds faces where it crosses them, and a line
+/// that crosses nothing cuts nothing; a line alone is too few.
+#[test]
+fn a_line_adds_faces_only_where_it_crosses() {
+    let mut f = Fixture::new();
+    let fr = f.frame;
+    let [a, b, c] = f.venn();
+    let through = f.line(fr, 100.0, 420.0, 140.0);
+    assert!(f.arrange(&[a, b, c, through]).regions.len() > 7);
+    let lone = f.circle(fr, 600.0, 450.0, BLUE, "Lone");
+    let wide = f.line(fr, 100.0, 420.0, 20.0);
+    let res = f.resolved();
+    assert_eq!(
+        shape_builder::arrange(&f.doc, &res, &[lone, wide]).err(),
+        Some(Refusal::NoOverlap),
+        "the line misses the circle"
+    );
+    assert_eq!(
+        shape_builder::arrange(&f.doc, &res, &[wide]).err(),
+        Some(Refusal::TooFew)
+    );
+    assert!(shape_builder::can_arrange(&f.doc, &[lone, wide]));
+    assert!(!shape_builder::can_arrange(&f.doc, &[wide]));
+}

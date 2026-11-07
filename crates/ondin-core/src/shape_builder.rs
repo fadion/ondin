@@ -2,6 +2,10 @@
 //! their planar arrangement ([`crate::boolean::regions`]), which a drag merges or
 //! removes and *Divide* turns each into a path of its own.
 //!
+//! An open path or line in the selection cuts the faces it crosses, along the
+//! Knife's own surgery ([`crate::knife::pieces`]), and fills none of its own; it is
+//! left as it is.
+//!
 //! Everything is worked in world space, so sources under different parents and
 //! transforms cut each other as they are drawn. What lands is plain `Path` layers.
 //! A source the edit takes from is rewritten as a path holding what is left of it,
@@ -23,41 +27,55 @@ pub struct Arrangement {
     outlines: Vec<BezPath>,
     /// The faces, in world space; [`Region::covers`] indexes [`Self::sources`].
     pub regions: Vec<Region>,
+    /// The open paths and lines that cut the faces without filling one of their
+    /// own, bottom of the stack first. They are left as they are.
+    pub cutters: Vec<NodeId>,
     /// Whether the selection held layers the arrangement leaves out: text,
-    /// pictures, frames, open paths and lines.
+    /// pictures and frames.
     pub left_out: bool,
 }
 
 /// Why there is no [`Arrangement`] to build with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    /// Fewer than two closed shapes in the selection.
+    /// Fewer than two closed shapes in the selection, or one and nothing to cut it.
     TooFew,
-    /// The shapes are there but none overlaps another.
+    /// The shapes are there but none overlaps another and no line cuts one.
     NoOverlap,
     /// The arithmetic unwound ([`boolean::failures`]).
     Abandoned,
 }
 
-/// Whether `id` gives the arrangement an outline: a visible, unlocked closed shape,
-/// path or boolean outside any boolean and any instance.
-pub(crate) fn takes_part(doc: &Document, id: NodeId) -> bool {
+/// What a layer is to the arrangement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// A closed outline, whose inside fills faces.
+    Shape,
+    /// An open path or line, which cuts the faces it crosses.
+    Cutter,
+    Out,
+}
+
+/// What `id` is to the arrangement: a visible, unlocked layer outside any boolean
+/// and any instance is a [`Part::Shape`] when it is a closed shape, path or
+/// boolean, a [`Part::Cutter`] when it is an open path, a line, an arc or a spiral.
+fn part(doc: &Document, id: NodeId) -> Part {
     let Some(node) = doc.get(id) else {
-        return false;
+        return Part::Out;
     };
     if crate::is_effectively_locked(doc, id)
         || !doc.shown(id)
         || node.paint().image_fill().is_some()
     {
-        return false;
+        return Part::Out;
     }
     if crate::component::instance_root(doc, id).is_some() {
-        return false;
+        return Part::Out;
     }
     let mut up = node.parent();
     while let Some(p) = up.and_then(|p| doc.get(p)) {
         if matches!(p.kind(), NodeKind::Boolean { .. }) {
-            return false;
+            return Part::Out;
         }
         up = p.parent();
     }
@@ -66,10 +84,19 @@ pub(crate) fn takes_part(doc: &Document, id: NodeId) -> bool {
         | NodeKind::Ellipse { .. }
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
-        | NodeKind::Boolean { .. } => true,
-        NodeKind::Path { path, .. } => is_closed(path),
-        _ => false,
+        | NodeKind::Boolean { .. } => Part::Shape,
+        NodeKind::Path { path, .. } if is_closed(path) => Part::Shape,
+        NodeKind::Path { .. }
+        | NodeKind::Line { .. }
+        | NodeKind::Arc { .. }
+        | NodeKind::Spiral { .. } => Part::Cutter,
+        _ => Part::Out,
     }
+}
+
+/// Whether `id` gives the arrangement a closed outline to fill faces with.
+pub(crate) fn takes_part(doc: &Document, id: NodeId) -> bool {
+    part(doc, id) == Part::Shape
 }
 
 /// Whether every subpath of `path` is closed.
@@ -82,22 +109,87 @@ fn is_closed(path: &BezPath) -> bool {
 }
 
 /// The layers of `selection` that take part, groups opened into their contents,
-/// bottom of the stack first; and whether any selected layer was left out.
-fn sources_of(doc: &Document, selection: &[NodeId]) -> (Vec<NodeId>, bool) {
-    let mut found = Vec::new();
+/// bottom of the stack first: the closed shapes and the cutters. And whether any
+/// selected layer was left out.
+fn sources_of(doc: &Document, selection: &[NodeId]) -> (Vec<NodeId>, Vec<NodeId>, bool) {
+    let (mut shapes, mut cutters) = (Vec::new(), Vec::new());
     let mut left_out = false;
     let mut stack: Vec<NodeId> = build::outermost(doc, selection);
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
         if matches!(node.kind(), NodeKind::Group) {
             stack.extend(node.children().iter().copied());
-        } else if takes_part(doc, id) {
-            found.push(id);
-        } else if doc.shown(id) {
-            left_out = true;
+            continue;
+        }
+        match part(doc, id) {
+            Part::Shape => shapes.push(id),
+            Part::Cutter => cutters.push(id),
+            Part::Out if doc.shown(id) => left_out = true,
+            Part::Out => {}
         }
     }
-    (build::all_in_document_order(doc, &found), left_out)
+    (
+        build::all_in_document_order(doc, &shapes),
+        build::all_in_document_order(doc, &cutters),
+        left_out,
+    )
+}
+
+/// Whether there is enough to arrange: two closed shapes, or one and a cutter.
+fn enough(shapes: usize, cutters: usize) -> bool {
+    shapes >= 2 || (shapes == 1 && cutters > 0)
+}
+
+/// How finely a cutter's curves are followed, in world units: well under what
+/// a pointer or a pixel can tell apart.
+const CUT_TOLERANCE: f64 = 0.01;
+
+/// The world-space polylines `id` cuts along, one per subpath.
+fn trails(doc: &Document, res: &Resolved, id: NodeId) -> Vec<Vec<Point>> {
+    let Some(outline) = world_outline(doc, res, id) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec<Point>> = Vec::new();
+    kurbo::flatten(outline, CUT_TOLERANCE, |el| match el {
+        kurbo::PathEl::MoveTo(p) => out.push(vec![p]),
+        kurbo::PathEl::LineTo(p) => {
+            if let Some(trail) = out.last_mut() {
+                trail.push(p);
+            }
+        }
+        kurbo::PathEl::ClosePath => {
+            if let Some(trail) = out.last_mut()
+                && let Some(first) = trail.first().copied()
+            {
+                trail.push(first);
+            }
+        }
+        _ => {}
+    });
+    out.retain(|t| t.len() >= 2);
+    out
+}
+
+/// `regions` with each face cut along every trail that crosses it, each piece
+/// covered as its face was. A face the cut cannot read is kept whole.
+fn cut_regions(regions: Vec<Region>, trails: &[Vec<Point>]) -> Vec<Region> {
+    let mut out = regions;
+    for trail in trails {
+        out = out
+            .into_iter()
+            .flat_map(|r| match crate::knife::pieces(&r.path, trail) {
+                Some(pieces) if pieces.len() > 1 => pieces
+                    .into_iter()
+                    .map(|path| Region {
+                        path,
+                        covers: r.covers.clone(),
+                    })
+                    .collect(),
+                _ => vec![r],
+            })
+            .collect();
+    }
+    out
 }
 
 /// `id`'s outline in world space, as drawn.
@@ -105,19 +197,22 @@ pub(crate) fn world_outline(doc: &Document, res: &Resolved, id: NodeId) -> Optio
     Some(res.world_transform(id)? * res.local_path(doc, id)?)
 }
 
-/// Whether `selection` holds two or more closed shapes the arrangement would cut —
-/// the cheap test a menu row dims on, with no arithmetic.
+/// Whether `selection` holds two or more closed shapes the arrangement would cut,
+/// or one and an open path or line to cut it — the cheap test a menu row dims on,
+/// with no arithmetic.
 pub fn can_arrange(doc: &Document, selection: &[NodeId]) -> bool {
-    sources_of(doc, selection).0.len() >= 2
+    let (shapes, cutters, _) = sources_of(doc, selection);
+    enough(shapes.len(), cutters.len())
 }
 
-/// Cut `selection`'s closed shapes into their faces.
+/// Cut `selection`'s closed shapes into their faces, and each face along the
+/// open paths and lines that cross it.
 pub fn arrange(
     doc: &Document,
     res: &Resolved,
     selection: &[NodeId],
 ) -> Result<Arrangement, Refusal> {
-    let (candidates, left_out) = sources_of(doc, selection);
+    let (candidates, cutters, left_out) = sources_of(doc, selection);
     let (sources, outlines): (Vec<NodeId>, Vec<BezPath>) = candidates
         .into_iter()
         .filter_map(|id| Some((id, world_outline(doc, res, id)?)))
@@ -126,17 +221,24 @@ pub fn arrange(
                 .is_some_and(|w| w.determinant() != 0.0)
         })
         .unzip();
-    if sources.len() < 2 {
+    let lines: Vec<Vec<Point>> = cutters
+        .iter()
+        .flat_map(|id| trails(doc, res, *id))
+        .collect();
+    if !enough(sources.len(), lines.len()) {
         return Err(Refusal::TooFew);
     }
-    let regions = boolean::regions(&outlines).ok_or(Refusal::Abandoned)?;
-    if !regions.iter().any(|r| r.covers.len() > 1) {
+    let whole = boolean::regions(&outlines).ok_or(Refusal::Abandoned)?;
+    let before = whole.len();
+    let regions = cut_regions(whole, &lines);
+    if regions.len() == before && !regions.iter().any(|r| r.covers.len() > 1) {
         return Err(Refusal::NoOverlap);
     }
     Ok(Arrangement {
         sources,
         outlines,
         regions,
+        cutters,
         left_out,
     })
 }

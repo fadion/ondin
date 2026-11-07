@@ -2591,8 +2591,8 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
 }
 
 /// Why *Divide* is dimmed or refused: the selection has fewer than two closed
-/// shapes, or none of them overlap.
-pub const DIVIDE_NEEDS: &str = "Divide needs two or more overlapping shapes";
+/// shapes and no line to cut one, or nothing overlaps and no line cuts a shape.
+pub const DIVIDE_NEEDS: &str = "Divide needs overlapping shapes, or a shape and a line across it";
 
 /// The layer verbs a menu leaves out for some selections, each with what it
 /// needs — the command palette's *Not available here* rows, shown only when typed

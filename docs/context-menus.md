@@ -164,7 +164,7 @@ on a lone rounded mirrored path, where the two do different things: *Flatten* dr
 
 **Boolean ▸**, two groups: *Union* (`Ctrl+Alt+U`) · *Subtract* (`S`) · *Intersect* (`I`) · *Exclude*
 (`X`), on a lone boolean checkable with its current operation ticked; then, after a rule, *Divide*
-(`Item::Divide`, no chord), which dims *"Divide needs two or more overlapping shapes"* where
+(`Item::Divide`, no chord), which dims *"Divide needs overlapping shapes, or a shape and a line across it"* where
 `shape_builder::can_arrange` refuses and is never checked, leaving no live operation
 (`app-booleans.md`).
 

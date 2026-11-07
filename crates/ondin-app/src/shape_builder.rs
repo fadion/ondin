@@ -1,6 +1,7 @@
 //! The shape builder: drag across the faces the selection's closed shapes cut each
-//! other into, and release merges them into one path; with Alt held it cuts them
-//! out instead. A click lifts the one face under it out as its own path.
+//! other into, open paths and lines cutting them further, and release merges them
+//! into one path; with Alt held it cuts them out instead. A click lifts the one
+//! face under it out as its own path.
 //!
 //! The faces are `ondin_core::shape_builder`'s, found once per selection and
 //! document revision and kept in [`OndinApp::builder_faces`]; hovering only looks
@@ -16,11 +17,13 @@ use ondin_core::kurbo::{BezPath, Point};
 use ondin_core::shape_builder::{Arrangement, Refusal};
 
 /// The refusal the status line gives when there are no faces to build with.
-pub const NEEDS: &str = "Select two or more overlapping shapes, then drag across them";
+pub const NEEDS: &str =
+    "Select overlapping shapes, or a shape and a line across it, then drag across them";
 
 /// Why the tool cannot be armed while the selection has too few closed shapes: the
 /// rail button's tooltip, the palette row's reason and `Shift+M`'s status line.
-pub const UNAVAILABLE: &str = "Shape builder needs two or more overlapping shapes";
+pub const UNAVAILABLE: &str =
+    "Shape builder needs overlapping shapes, or a shape and a line across it";
 
 /// What the status line says while the tool is armed over faces it can build.
 const HINT: &str = "Drag across regions to merge them · Alt-drag to remove";
@@ -61,7 +64,7 @@ pub(crate) struct BuilderDrag {
 /// arrangement left some of the selection out, else nothing.
 pub fn left_out_note(arr: &Arrangement) -> &'static str {
     if arr.left_out {
-        " — only unlocked closed shapes take part; the rest were left out"
+        " — only unlocked shapes, paths and lines take part; the rest were left out"
     } else {
         ""
     }
@@ -93,8 +96,9 @@ impl OndinApp {
     }
 
     /// Whether the rail's Shape builder button takes a click: the selection holds
-    /// two closed shapes to cut, or the tool is already armed, so the slot still
-    /// shows which tool is in hand whatever the selection becomes.
+    /// two closed shapes, or one and a line to cut it, or the tool is already
+    /// armed, so the slot still shows which tool is in hand whatever the selection
+    /// becomes.
     pub(crate) fn builder_slot_usable(&self) -> bool {
         self.tool == Tool::ShapeBuilder
             || ondin_core::shape_builder::can_arrange(

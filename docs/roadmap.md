@@ -31,9 +31,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ### Highest value
 
-- **Open paths and lines in the shape builder.** An open path or line in the selection should cut
-  the faces it crosses without filling one of its own. Today `shape_builder::sources_of` leaves them
-  out of the arrangement, and the status line says so (`left_out_note`).
 - **Pixel-fit.** A command moving anchors and stroke edges onto whole or half pixels, so 16–24px
   icons render crisp.
 

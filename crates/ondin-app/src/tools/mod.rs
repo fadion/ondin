@@ -32,10 +32,10 @@ pub enum Tool {
     /// Select's gestures, with the handle drag scaling the layer *photographically*
     /// instead of editing its geometry — see [`Scaling`].
     Scale,
-    /// Drag across the faces the selection's closed shapes cut each other into to
-    /// merge them, Alt-drag to remove them (`crate::shape_builder`). It reshapes what
-    /// is drawn rather than drawing, so it sits with Select, Hand and Scale, and
-    /// stays armed after each edit.
+    /// Drag across the faces the selection's closed shapes cut each other into (and
+    /// its open paths and lines cut further) to merge them, Alt-drag to remove them
+    /// (`crate::shape_builder`). It reshapes what is drawn rather than drawing, so it
+    /// sits with Select, Hand and Scale, and stays armed after each edit.
     ShapeBuilder,
     /// Drag a line through closed shapes to cut them into the pieces it parts
     /// (`crate::knife`): the selection, or every unlocked shape under the line

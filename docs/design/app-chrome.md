@@ -164,14 +164,14 @@ ondin-app/src/
 ├─ loose_spacing.rs spacing handles on a loose selection in a row, column or grid: gaps dragged, layers reordered (layout.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
 ├─ present.rs       present mode: top-level frames one at a time, page by page, fullscreen (app-canvas-chrome.md)
-├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
+├─ preview.rs       in-flight gesture state (Drag, PenState, PenEdit, TextSession) + PointSet
 ├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json (the window's geometry is eframe's, in window.ron beside it)
 ├─ rulers.rs        ruler bars + ruler guides
 ├─ settings.rs      Settings modal and the app's form-in-a-modal card (card_modal, modal_title, modal_footer, section, caption)
 ├─ snap.rs          snapping (bounds, guides, baselines, equal gaps, pixel grid); draws its own transient lines (not rulers.rs's guides)
 ├─ view.rs          Camera: screen<->world math
 ├─ fonts/           mod.rs FontService (§5.4a); queue.rs three-lane download queue; preview.rs picker rows
-├─ tools/           pure transaction builders (create *, resize, rotate, pen_outline/pen_anchors, ...)
+├─ tools/           Tool, ClickCreate, the drawn counts; re-exports ondin_core::edit (create *, resize, rotate, pen_outline/pen_anchors, ...)
 ├─ panels/          layers.rs, history.rs, inspector.rs, picker.rs, paint.rs (pure Brush algebra + list reorder)
 ├─ ui.rs            shared widgets (cards, fields, segmented, ramps, Hsv, dropdown frame/rows)
 ├─ colour_text.rs   the one parser for a typed or pasted colour (hex, CSS Color 4 sRGB forms)

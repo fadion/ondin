@@ -1081,7 +1081,7 @@ mod tests {
     /// Whether the model would keep the vertical axis on `subs`.
     fn holds(subs: &[PenSubpath]) -> bool {
         let path = crate::tools::pen_path(subs);
-        ondin_core::symmetry::kept(&path, &crate::tools::pen_radii(subs), VERTICAL).vertical
+        ondin_core::symmetry::kept(&path, &ondin_core::edit::pen_radii(subs), VERTICAL).vertical
     }
 
     /// A dragged anchor takes its image with it, mirrored.

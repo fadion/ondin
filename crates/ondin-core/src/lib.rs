@@ -28,6 +28,7 @@ pub mod component;
 pub mod container;
 pub mod diff;
 pub mod document;
+pub mod edit;
 pub mod effect;
 pub mod export;
 pub mod fallback_fonts;

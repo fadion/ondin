@@ -12,7 +12,7 @@ Colors and Missing fonts. The Type card is in `type-panel.md`.
 - **Single layer:** identity, *Frame templates* (frames only), Align, Transform, Position, Item, Container, *Layout grid*, Appearance, Type (text), Fill, Stroke, Effects, Export.
   - A group's or a frame's identity card carries a row under the boolean row: *Resize to fit content* (`build::fit_frame`) at its end, and a dropdown filling the rest. The button moves the frame to its children's union and gives it that size, every child left where it is drawn (a pinned child's insets re-derived by the commit's `keep_insets`; a slice lends no bounds). It is disabled, with the reason, on a group (which always fits), on a frame with a layout (which sizes itself through `fit-content`, so fitting it is a layout edit), on an empty frame and on one that already fits.
   - The dropdown, *Frame* / *Group*, shows the container's kind and turns one into the other (`identity_kind_row`, `OndinApp::convert_container`, `build::convert_container`): the new container takes the old one's slot, name and every layer setting both kinds hold (layout-item settings, insets, pivot, bindings, blend, effects, exports, mask), the children keep their ids and places, a group becomes a frame of its own box (masked runs cut to their mask, slices left out) with no fill and no clip, and a frame's own fills move onto a *Background* rectangle under its children and its strokes onto a *Border* rectangle over them, the order a frame paints in, its clip and layout dropped. A main, a layer in a main, an instance and a component set are refused, since their copies link to the node a conversion replaces; so are an empty group, an empty unpainted frame, a frame that sets a variable mode (only a frame may, and dropping it would recolour what it holds), a mask group and a group inside a boolean or a mask (`build::convert_container_refusal`), the dropdown disabled with the reason.
-  - A slice is a box and what it exports, so it shows identity, Transform (position and W/H; `tools::resizable_size` counts it a sized kind) and Export, nothing else.
+  - A slice is a box and what it exports, so it shows identity, Transform (position and W/H; `edit::resizable_size` counts it a sized kind) and Export, nothing else.
 - **Multi-selection:** the whole inspector, not a count. Transform, Appearance, Fill, Stroke, Group Colors and Export, all on §5.7a's bulk builders, so the app, MCP and CLI agree on what "set the fill of these" means.
   - Text layers add the Type card (the several-layer card writes per layer, §15 D1077). Frames add *Frame templates* and *Layout grid*. Pinnable layers add Position; frames, groups or children of laid containers add Container and Item.
 - **"Mixed" is a panel, not a label** (§15 D53). Every control with room says *Mixed*; only controls too small show a dash (§15 D130): `ui::Swatch::Mixed`, a 16px chip, `ui::segment_mixed`.
@@ -23,9 +23,9 @@ Colors and Missing fonts. The Type card is in `type-panel.md`.
 `inspector_single`'s `size0` falling back to `preview_local_box`, the box the canvas handles use.
 An empty group shows no row.
 
-- **The write.** An authored `size` is replaced. Anything else goes through `tools::resize_box_to`, which puts a pointer at the corner the new box wants and calls `tools::resize_layer`, the bottom-right drag's path, so a typed number and a dragged handle mean the same thing. It asks for geometry only, with no modifiers; the proportion lock is applied to the target size first, and passing `keep_ratio` too would apply it twice.
+- **The write.** An authored `size` is replaced. Anything else goes through `edit::resize_box_to`, which puts a pointer at the corner the new box wants and calls `edit::resize_layer`, the bottom-right drag's path, so a typed number and a dragged handle mean the same thing. It asks for geometry only, with no modifiers; the proportion lock is applied to the target size first, and passing `keep_ratio` too would apply it twice.
 - **Committed values.** Box and transform come from the committed tree, not the preview, so a scrub does not compound.
-- **`Line` and `Arc`** have no W/H. They show one full-width **`L`** row (a line's length, an arc's chord), written through `tools::move_line_end`, anchoring the start point; a `Spiral` has an authored size and shows W/H.
+- **`Line` and `Arc`** have no W/H. They show one full-width **`L`** row (a line's length, an arc's chord), written through `edit::move_line_end`, anchoring the start point; a `Spiral` has an authored size and shows W/H.
 
 **The proportion lock** is a 28×28 `link-simple` button after W and H (broken chain unlocked, whole
 chain locked); W is exactly X's width.
@@ -33,8 +33,8 @@ chain locked); W is exactly X's width.
 - Editing either field scales the other by the aspect measured before either was touched.
 - **Stored on the node** at `Node::proportions_locked` (§5.3) and saved, because it is a constraint on gestures. It reads `DisplayNode::proportions_locked()` and commits `SetProportionsLocked` straight through `session.commit`, a toggle with no valve. The per-corner radius disclosure is view state in `OndinApp`.
 - `canvas::keep_ratio` is the lock XOR Shift, so Shift on a locked layer releases it. Snapping always applies, and the aspect constraint is applied to the snapped pointer: the constraint wins.
-- **Over a set,** the lock reads as all-locked through `tools::proportions_locked` on the whole selection; an empty selection is not locked. Users: handles, multi W/H, `Ctrl`+arrows, the multi chain button.
-- The numeric doors pair through `tools::paired_size`, not the handles' `Resize` flag, which takes the larger factor and would refuse a one-axis shrink.
+- **Over a set,** the lock reads as all-locked through `edit::proportions_locked` on the whole selection; an empty selection is not locked. Users: handles, multi W/H, `Ctrl`+arrows, the multi chain button.
+- The numeric doors pair through `edit::paired_size`, not the handles' `Resize` flag, which takes the larger factor and would refuse a one-axis shrink.
 
 **Sizing modes on W/H** (`layout::size_modes`). The unit is a menu: `px` always; `fit-content` for a
 frame with a layout; `auto` for a group with one; `%` for an in-flow kind that layout can resize.
@@ -53,7 +53,7 @@ container (`inspector::drags_as_a_block`). `inspector::laid_out_xy` answers both
 **The Scale row** appears only while the Scale tool is held: a percentage in W's slot, with `0.5x`
 and `2x` buttons filling the row.
 
-- It passes `tools::Scaling::Photographic`, so strokes, radii and font size scale with the layer. Every W/H path passes `Resize::geometry`.
+- It passes `edit::Scaling::Photographic`, so strokes, radii and font size scale with the layer. Every W/H path passes `Resize::geometry`.
 - **No stored scale.** The field is a verb with a live readout: it applies against the committed box every frame and returns to 100 when the valve closes or the row disappears. The write is `inspector::scale_tx`, resizing the union from `Handle::BottomRight` so the top-left holds, through the ordinary edit valve.
 - During a canvas Scale drag it reads `canvas::live_scale_pct`, the geometric mean of the previewed and committed factors, and commits nothing.
 - `0.5x`/`2x` are `ui::label_button` at `FieldButton::Off`, straight to `commit_edit`; never shown as selected.
@@ -64,10 +64,10 @@ turn 90° counter-clockwise, turn 90° clockwise, flip H, flip V, *Repeat around
 opens and closes the Repeat card (`tools.md`), On while it is up and Disabled with
 `repeat_refusal`'s reason as its tooltip.
 
-- **Skew** is clamped at `tools::MAX_SKEW` (±89°), with the `SKEW` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
+- **Skew** is clamped at `edit::MAX_SKEW` (±89°), with the `SKEW` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
 - **Rotation** shows `Basis::of`'s angle at rest, a latched number during a gesture (§15 D206). It writes by composition (`inspector::turned_about`, `rotate_about · old_world`), never by rebuilding, which would spin a mirrored layer past ±90°. A `Line`'s or `Arc`'s rotation is the world-space start→end angle, written as the delta (typed minus shown) about the pivot.
 - **No `-0°`.** `inspector::shown_degrees` snaps magnitudes under 1e-9° to +0. Tests assert `is_sign_positive`, because `-0.0 == 0.0`.
-- **Quarter turns** go through `tools::rotate_node` about the pivot read from the committed tree (adding 90 to the field is wrong for mirrored and sheared layers). Mirrors use `build::flip`. Both cards draw the row through `inspector::quarters_row(TurnScope)`.
+- **Quarter turns** go through `edit::rotate_node` about the pivot read from the committed tree (adding 90 to the field is wrong for mirrored and sheared layers). Mirrors use `build::flip`. Both cards draw the row through `inspector::quarters_row(TurnScope)`.
 
 ### Transform (multi-selection)
 

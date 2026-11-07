@@ -266,7 +266,7 @@ No head. The baseline menu, 21 rows.
 
 ### 5.7 Any layer with a picture in it
 
-Gated on `tools::croppable_fill`, the predicate image editing uses; composes with 5.4–5.6.
+Gated on `edit::croppable_fill`, the predicate image editing uses; composes with 5.4–5.6.
 
 | Row | Shown / enabled |
 |---|---|

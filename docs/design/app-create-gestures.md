@@ -35,7 +35,7 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 | Tool | `ClickCreate` | Size from |
 | --- | --- | --- |
 | Rect, Ellipse, Polygon, Star | `DefaultBox` | `tools::CLICK_CREATE_SIZE` square at the pointer, tool defaults |
-| Image | `FittedImage` | the picture's own size, aspect kept, shrunk to fit frame/viewport (`tools::fitted_image_size`), **centred** on the pointer |
+| Image | `FittedImage` | the picture's own size, aspect kept, shrunk to fit frame/viewport (`edit::fitted_image_size`), **centred** on the pointer |
 | Text | `TextNode` | what gets typed |
 | Frame, Line, Spiral, Arc | `None` | deliberately (a default frame guesses a layout; a default line, spiral or arc would invent a direction) |
 | Slice | `None` | its click picks the slice under it instead (`tools.md`, *The Slice tool*) |
@@ -52,8 +52,8 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 
 - `Space` held repositions the uncommitted shape: moves `start` by the pointer **delta**.
 - `↑`/`↓` add/remove polygon or star sides, a spiral's half turns, or a rung of the arc's signed
-  sweep ladder (`tools::arc_sweep`); the count lives on `Drag::Create`, held to its range by
-  `tools::step_drawn_count` (sides through `tools::step_sides`, `geometry::MIN_SIDES..=MAX_SIDES`).
+  sweep ladder (`edit::arc_sweep`); the count lives on `Drag::Create`, held to its range by
+  `tools::step_drawn_count` (sides through `edit::step_sides`, `geometry::MIN_SIDES..=MAX_SIDES`).
   A pill beside the pointer gives the count (`tools::drawn_count_label`: `6 sides`, `5 points`,
   `3.5 turns`, `90°`); a polygon or star keeps its size pill under the box as well.
 - Read in the gesture's own loop, not as `Action`s. `dispatch` drops `Action::Nudge` and

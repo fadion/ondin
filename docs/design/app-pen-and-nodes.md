@@ -10,7 +10,7 @@ the node tool (`A`), joining two path layers, per-anchor corner radii, and *Pixe
 - `preview::PenAnchor { at, out, back }`; a corner when both handles are zero. A segment is a line
   when the two handles it uses are zero (`PenAnchor::straight_to`), else a cubic — clicked corners
   stay a polyline in the file.
-- The rubber band is drawn from `tools::pen_outline` (the commit's function), in the commit's ink
+- The rubber band is drawn from `edit::pen_outline` (the commit's function), in the commit's ink
   (`PEN_STROKE_COLOR`/`PEN_STROKE_WIDTH`, black, 2 units). Anchors and handles are chrome in the
   selection colour.
 - **A readout beside the pointer** quotes a segment as *angle · length* (`canvas::segment_readout`;
@@ -32,14 +32,14 @@ the node tool (`A`), joining two path layers, per-anchor corner radii, and *Pixe
   actions dispatch before `pen_input`). Undo cannot help — nothing is committed yet.
 - **Closing**: pressing the first anchor within `PEN_PICK_PX` (7 screen pt — the one radius for pen
   anchors and handles). Inside that radius the pending segment snaps onto the first anchor and it gets
-  a ring (`tools::pen_close_snap`, used by both `canvas::pen_press` and the overlay). The closing press
+  a ring (`edit::pen_close_snap`, used by both `canvas::pen_press` and the overlay). The closing press
   swallows its own release (`gesture_cancelled`).
 
 ### Round-tripping and resuming
 
-- `tools::pen_anchors`: `BezPath` → `Vec<PenSubpath>` (anchors + closed flag). Quads elevated to
+- `edit::pen_anchors`: `BezPath` → `Vec<PenSubpath>` (anchors + closed flag). Quads elevated to
   cubics, several subpaths kept, the duplicate point a `ClosePath` leaves folded onto the first anchor.
-  `tools::pen_path` writes back, `map_subpaths` transforms one, `rewrite_path` commits one
+  `edit::pen_path` writes back, `map_subpaths` transforms one, `rewrite_path` commits one
   `SetGeometry`/`GeometryPatch::Path` **without touching the node's transform**.
 - The round trip can **add** a segment: `pen_outline` draws the closing segment and emits `ClosePath`,
   so `M0,0 L80,0 L80,60 Z` comes back with an explicit `LineTo(0,0)`. `rewrite_path`'s no-op guard
@@ -70,7 +70,7 @@ ordinary stroked `Path` the node tool edits like a pen path.
 - **What lands.** One stroke, no fill, round caps and joins, in the frame under the press
   (`draw_target`). Colour and width are the last pencil path's as it stands now
   (`OndinApp::pencil_last`), so a width changed on it in the Stroke card carries to the next stroke;
-  before any, the pen's (`PEN_STROKE_COLOR`, `PEN_STROKE_WIDTH`). `tools::create_paths` takes the whole
+  before any, the pen's (`PEN_STROKE_COLOR`, `PEN_STROKE_WIDTH`). `edit::create_paths` takes the whole
   `Stroke`. The new path is selected; one stroke is one undo step, *Draw path*.
 - **The tool stays on** after a stroke, unlike the pen: freehand comes in runs. Arming it keeps the
   selection, since a stroke can carry on the selected path.
@@ -117,7 +117,7 @@ axis, a horizontal one or both (`crate::mirror`).
   it was drawn. *Both axes* applies the vertical rule, then the horizontal one over what that made,
   so a quarter drawn from axis to axis closes into a whole.
 - **New runs mirror; extending an end does not.** The pen's and the pencil's new-path finishes go
-  through `OndinApp::mirror_run` and `tools::create_paths` (several subpaths in one `Path` node), one
+  through `OndinApp::mirror_run` and `edit::create_paths` (several subpaths in one `Path` node), one
   undo step under its usual name, *Add path* or *Draw path*, and mark the path with the axes they
   mirrored across (`mirror::mark_mirrored`, `path_mirror_of`), so it is saved mirrored (*Mirrored
   paths*, below). The model keeps only the axes that hold, so a path drawn in a turned frame lands
@@ -173,7 +173,7 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
   images too (`mirrored_inserts`); on a segment that is its own image, one crossing an axis, a point
   within 0.02 of the middle goes in once, at the middle. The point asked for is selected.
 - **Other path writes are not adjusted**: cutting a segment, *Join*, *Reverse* and the rest go
-  straight through `tools::rewrite_path`, and the model drops an axis they break.
+  straight through `edit::rewrite_path`, and the model drops an axis they break.
 - **The axes on the canvas** (`own_axes_chrome`). While the node tool edits a mirrored path, its
   own axes are dashed `accent_400` lines through its control box, `OWN_AXIS_OVERHANG` (16 screen pt)
   past each end, turned with the layer, with no grab pill: the points put them there. A new run
@@ -216,15 +216,15 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
   layers: exactly two `NodeKind::Path` selected, both unlocked, each with an open subpath of two or
   more anchors (a line-tool `Line` is not offered). The key layer, else the first selected, is kept
   with its paint and name; the other's subpaths move into it in world space, re-expressed in the kept
-  layer's space by `tools::rewrite_path`; the nearest pair of open ends between the two (world
-  distance) splice through `tools::join_ends`, the point-level *Join*'s splice; the other layer is
+  layer's space by `edit::rewrite_path`; the nearest pair of open ends between the two (world
+  distance) splice through `edit::join_ends`, the point-level *Join*'s splice; the other layer is
   deleted (with `component::relink_for_delete`). One undo step.
 - **A locked path is not a subject**: `canvas::edited_path` refuses it (the tool still arms, finds
   nothing); `enter_action`'s `Path` arm refuses with a sentence; `reverse_subpaths`' fallback arm asks
   `query::is_effectively_locked` itself.
 - Inspector (`inspector_points`): **Edit Path** identity card with every action dead; Transform = X/Y
   of the selected points; Appearance = opacity; Fill and Stroke still the whole path's. Align buttons
-  act on points (two to align, three to distribute); spacing row via `tools::space_points` (two needed,
+  act on points (two to align, three to distribute); spacing row via `edit::space_points` (two needed,
   first point held). Arrows nudge points.
 
 ## The path bar
@@ -241,7 +241,7 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   point selection allows them; *Reverse* (`Shift+D`); *Split at point*; *Clean up* (the wand);
   *Offset*; *Pixel-fit* (`pixel_fit_points`: the selected points, or the whole path with none
   selected; *Pixel-fit*, below); and *Done* (`Enter`).
-- **Split at point** (`canvas::split_points`, `tools::split_at_points`) cuts the edited path at its
+- **Split at point** (`canvas::split_points`, `edit::split_at_points`) cuts the edited path at its
   selected anchors: a closed run opens there and an open run becomes two subpaths of the same layer.
   The anchor stays on both new ends, which coincide until one is dragged away; the finishing end
   keeps the arriving handle and the starting end the leaving one, so the outline draws as before. Of
@@ -280,12 +280,12 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   `Escape` (a rung, under the Offset card's) and the end of the edit close it. A right-click mid-scrub
   puts the number back (`InFlight::cleanup_scrub`), as every card's does; the Offset card's
   distance too (`offset_scrub`). Its numbers are kept while it is closed (`cleanup_numbers`).
-  - *Remove redundant points* (`tools::redundant_points`) takes out an anchor twinned on the one
+  - *Remove redundant points* (`edit::redundant_points`) takes out an anchor twinned on the one
     before it, one in the middle of a straight run, and one splitting what is a single cubic in
     two, its handles in line and the curves either side that cubic's halves to within 0.001 units;
-    never a rounded corner or an open end. *Add points* (`tools::split_segments`) cuts each segment
+    never a rounded corner or an open end. *Add points* (`edit::split_segments`) cuts each segment
     into pieces of equal length, exactly, so the outline draws as before; the two undo each other.
-    *Smooth selected* (`tools::smooth_points`) moves each selected anchor's handles that far toward
+    *Smooth selected* (`edit::smooth_points`) moves each selected anchor's handles that far toward
     fresh smooth ones, along the line between its neighbours, a third of the shorter leg long.
 - **Simplify** (`build::simplify_outline_within`) flattens the drawn outline and refits it
   with `fit`'s cubics, within the card's accuracy (`SIMPLIFY_ACCURACY`, 0.5 px in the layer's

@@ -16,7 +16,7 @@ Part of §9.4.
 - **Clicking the chip or the label enters image editing** (tooltip *Edit this picture — crop it, move
   it, scale it*), through `OndinApp::begin_image_edit`. The door is
   `inspector::row_edits_the_mode_s_picture`, which compares the row's slot with
-  `tools::croppable_fill`'s answer, so a second image fill's row is inert. A locked layer (or locked
+  `edit::croppable_fill`'s answer, so a second image fill's row is inert. A locked layer (or locked
   group, via `query::is_effectively_locked`) closes the door, with a third tooltip state naming the
   lock. The picker still opens from a locked layer's colour rows.
 - The Fill/Fit/Crop/Tile strip and popover buttons live in the image-editing card, not the row. Mode
@@ -74,7 +74,7 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 - A `Tool` variant because routing, cursor, `chrome_hidden`, the Escape ladder and `Enter`'s toggle are
   keyed off `self.tool`.
 - **Subject is derived**: `canvas::edited_image` — the tool plus a single selection whose first visible
-  image fill (`tools::croppable_fill` → `Paint::image_fill`). Not stored.
+  image fill (`edit::croppable_fill` → `Paint::image_fill`). Not stored.
 - **Four doors**, all calling `OndinApp::begin_image_edit(id)` (selects, takes the tool, prints the
   status line): double-click on a picture (after the group step), `Enter` on a selected one, *Edit
   image* at the head of `context-menus.md` §5.7, and a click on a fill row's chip or label.
@@ -88,10 +88,10 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 - A **handle drag** moves one edge with the picture nailed down in world space; a **drag on the
   picture** slides it under a fixed box. Neither scales the photograph. Side handles are live.
 - `ImageRef::picture_box`: the whole photograph's rectangle from the transform the backends paint with.
-  `tools::crop_resized`: moves the grabbed edge, bounded by that rectangle, and **holds the handle on its
+  `edit::crop_resized`: moves the grabbed edge, bounded by that rectangle, and **holds the handle on its
   own side** (no mirroring). `image::crop_reframed`: re-reads the old mapping at the new box's corners
   so the picture stays still. Crop and frame stay in proportion — no stretch.
-- `crop_resize_tx` aims `tools::resize_layer` at `crop_resized`'s corner and emits **one transaction**
+- `crop_resize_tx` aims `edit::resize_layer` at `crop_resized`'s corner and emits **one transaction**
   with the geometry and the `SetFills` together. The mode is forced to `Crop`. A crop is a resize, so
   the lock reaches it.
 - Both drags capture start values at the press and re-derive each frame (`session.set_preview`). The

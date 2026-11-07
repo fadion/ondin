@@ -12,9 +12,9 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 - **Resize** by corners or sides (`SetGeometry`, §5.6): Shift locks the ratio, or releases it on a proportion-locked layer; Alt scales about the box centre. Group resize is recursive; a multi-selection gets one box for resize, rotate and skew.
 - **Skew**: `Ctrl`-drag a side; Shift holds 15° steps. **Transform origin**: a draggable pivot marker with two numeric fields. **Scale** (`K`): the same gestures, but stroke widths, radii and type scale too.
 - **Shapes**: frame, rect, ellipse, polygon, star, line, spiral, arc. **Text**: edit on the canvas with a real caret.
-- **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
+- **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `edit::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
-- **Spiral** (`Shift+L`) and **Arc** (no key) draw a `Spiral` and an `Arc` node (`core-model.md`) with the line's stroke and no fill. A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends, and it starts at 3.5 turns. `tools::create_spiral` gives the node the true spiral's box at that radius, so the stretch that fills the box is uniform, and turns the node so the end lands on the drag. An arc is dragged from end to end, bulging to the left of the drag, and starts at 90°; `tools::create_arc` places it as `create_line` places a line, the sweep negated under a mirroring parent so the bulge stays where it was drawn. `↑`/`↓` step the turns by halves (½ to 20) or walk the arc's signed ladder (`tools::arc_sweep`): 15° steps up to 345° either way, and below 15° to 5°, then across to −5° and on down the other side, so one drag reaches both bulges. The pill beside the pointer gives the value (`tools::drawn_count_label`: `3.5 turns`, `90°`, `-5°`), placed by `spacing::paint_label` as every pointer readout is. Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is its own kind rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
+- **Spiral** (`Shift+L`) and **Arc** (no key) draw a `Spiral` and an `Arc` node (`core-model.md`) with the line's stroke and no fill. A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends, and it starts at 3.5 turns. `edit::create_spiral` gives the node the true spiral's box at that radius, so the stretch that fills the box is uniform, and turns the node so the end lands on the drag. An arc is dragged from end to end, bulging to the left of the drag, and starts at 90°; `edit::create_arc` places it as `create_line` places a line, the sweep negated under a mirroring parent so the bulge stays where it was drawn. `↑`/`↓` step the turns by halves (½ to 20) or walk the arc's signed ladder (`edit::arc_sweep`): 15° steps up to 345° either way, and below 15° to 5°, then across to −5° and on down the other side, so one drag reaches both bulges. The pill beside the pointer gives the value (`tools::drawn_count_label`: `3.5 turns`, `90°`, `-5°`), placed by `spacing::paint_label` as every pointer readout is. Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is its own kind rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
 - **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
 - **Shape builder** (`Shift+M`): drag across the faces overlapping shapes cut each other into, open paths and lines cutting them further, to merge them, Alt-drag to remove them (`app-booleans.md`).
 - **Knife** (no key; `C` is held for comments): drag a line through closed shapes to cut each into the pieces it parts (`app-booleans.md`, *The knife*).
@@ -254,7 +254,7 @@ different verb (`Ctrl` on a side).
 **A lone `Line` gets two end handles instead of a box.** `canvas::lone_line` is `Some` only when the
 selection is exactly one `Line`; `canvas::line_ends` places the ends.
 
-- Dragging an end (`Drag::LineEnd { id, which }`, `tools::move_line_end`) moves that point. Shift constrains to eighths of a turn about the other end (`axial_corner`); snapping applies to the unshifted case, on both axes. The two ends behave asymmetrically, because of the model (§15 D99).
+- Dragging an end (`Drag::LineEnd { id, which }`, `edit::move_line_end`) moves that point. Shift constrains to eighths of a turn about the other end (`axial_corner`); snapping applies to the unshifted case, on both axes. The two ends behave asymmetrically, because of the model (§15 D99).
 - `canvas::selection_handles` returns `None` on `lone_line` (not on `line_ends`, so an unresolvable transform cannot fall through to the box), suppressing corners, side bands, skew, the rotate ring and their cursors. `draw_size_badge` returns early.
 - The panel shows X/Y as the start point, rotation as the start→end angle, and `L` (length) across the full row where W/H would be. An `Arc` shows the same fields, `L` being its chord, but keeps the selection box: `lone_line` answers only for a `Line`.
 
@@ -273,20 +273,20 @@ Two or more layers get one box; dragging it transforms all of them.
 
 - **Shape.** A transform (`IDENTITY` at rest) plus an extent (`canvas::selection_frame_box`): the union of the members' geometry quads in the box's own axes, so it does not creep under rotation and on stroked members is half a stroke tighter than ink. A member with no box (an empty `Group`) is skipped (`selection_frame_extent`).
 - **Session orientation** lives on `Selection`, not in the document: composed on each commit, dropped when the selection changes, so the box does not snap upright the instant a turn ends.
-- **Resize** runs on the oriented box. `canvas::selection_resize_box` is the committed-tree twin of `selection_frame_box`; `tools::resize_selection` takes `tools::SelectionBox { frame, extent }` and works in frame space (`frame · S · frame⁻¹ · world`); `canvas::resize_axes` maps the handle through the same frame. `Handles` stores no extent; everything recomputes it from the committed tree, because scaling against a previewed box compounds every frame. `snapped_resize` excludes the whole selection from the snap targets.
+- **Resize** runs on the oriented box. `canvas::selection_resize_box` is the committed-tree twin of `selection_frame_box`; `edit::resize_selection` takes `edit::SelectionBox { frame, extent }` and works in frame space (`frame · S · frame⁻¹ · world`); `canvas::resize_axes` maps the handle through the same frame. `Handles` stores no extent; everything recomputes it from the committed tree, because scaling against a previewed box compounds every frame. `snapped_resize` excludes the whole selection from the snap targets.
 - **Typed doors** (`OndinApp::size_step`, `inspector::scale_tx`, the multi W/H fields) keep the upright union, which the panel reports.
 - **Target.** `preview::Target { Layer(NodeId), Selection }` travels on `Drag::Resize`, `Drag::Rotate`, `Drag::Skew` and `Handles.target`; `resize_tx`, `rotate_tx`, `skew_tx`, `keep_ratio`, `snapped_resize` and `resize_axes` dispatch on it, so a drag cannot change target midway.
 - **Style.** 1px `SELECT_DIM`, against each member's 1.2px `SELECT` outline; `COMPONENT_DIM` box and `COMPONENT` handles when every member is a main or instance (§5.3d).
-- **Rotation** turns the arrangement about the union centre (`tools::rotate_selection`, `rotate_node` per member). §15 D50 covers the pivot, the proportion lock over a set, and where `build::outermost` applies.
+- **Rotation** turns the arrangement about the union centre (`edit::rotate_selection`, `rotate_node` per member). §15 D50 covers the pivot, the proportion lock over a set, and where `build::outermost` applies.
 
-**Resize mechanism.** A transform never carries scale (§5.6), so `tools::resize_selection` works like
+**Resize mechanism.** A transform never carries scale (§5.6), so `edit::resize_selection` works like
 `resize_group` with world space for the shared parent: each root is carried through the scale
 (`scaled_about`), projected into its parent, then split by `split_geometry_scale` into the transform
 it keeps and the scale its geometry takes. Shared pieces: `resize_factors` (factors and anchor,
 including the `symmetric` and `keep_ratio` rules) and `scale_geometry` (a leaf's size, a line's end,
 a path's points, or recursion into a container); `resize_group`, `scale_subtree` and
 `resize_geometry` (§5.6) are built from these. An off-axis root under a non-uniform drag gets a skew
-so it lands exactly. Options travel as `tools::Resize { keep_ratio, symmetric, scaling }`. A line's
+so it lands exactly. Options travel as `edit::Resize { keep_ratio, symmetric, scaling }`. A line's
 or path's gradients ride the same scale in `scale_geometry` (`carry_gradients`); box-sized kinds are
 carried at the commit door (§6.2).
 
@@ -356,7 +356,7 @@ and commits once; the value shows beside the pointer.
 different verb on the handles.
 
 - **Shared gates.** Click, marquee, move, rotate ring and pivot behave as under Select. `Tool::selects()` is the shared gate (click, drag start, hover outline, pivot marker, `rulers.rs` guide lines); the cursor shares one match arm.
-- Only `Tool::scaling()` differs; `canvas::resize_opts` passes it into `tools::Resize`.
+- Only `Tool::scaling()` differs; `canvas::resize_opts` passes it into `edit::Resize`.
 - **Proportional by default.** `canvas::keep_ratio` treats the tool as locked, so Shift releases it. Released, scalar properties take the geometric mean of the two factors.
 - **Cursor.** At rest the arrow wears the Scale badge (`canvas::rest_cursor`), the tool's only warning that the gestures differ; a modifier's badge replaces it, and over a handle the resize arrows win.
 - **Numeric door.** The Transform card's Scale % row appears only while the tool is held (`inspector.md`).
@@ -382,7 +382,7 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
 (§5.3), the boxes that export a region of their page (§7).
 
 - **A drag cuts one** through the ordinary create gesture (`app-create-gestures.md`): one *Add slice*
-  step, landing in the frame under the press. `tools::create_slice` rounds both corners to whole world
+  step, landing in the frame under the press. `edit::create_slice` rounds both corners to whole world
   units whether or not the pixel grid is on, since a raster cut on half a pixel blurs its border, and
   gives the slice one export spec, PNG at 1×, so *Export all* takes it at once.
 - **The tool stays on** after a cut, the new slice selected, so slices are cut in runs. A click
@@ -455,19 +455,19 @@ the rail tool, as the narrower ask.
 ### Skew
 
 `Ctrl`-dragging a side skews: the dragged side follows the pointer along its own length, the
-opposite side stays put (`canvas::skew_tx` → `tools::skew_to_handle` / `tools::skew_selection`).
+opposite side stays put (`canvas::skew_tx` → `edit::skew_to_handle` / `edit::skew_selection`).
 
 - **Sides only.** Corners keep resize, with the rotate ring beyond.
 - **Modifier.** `Handles::armed` takes a `skewing` flag and re-reads the side bands, so one statement of handle priority (D14) decides cursor, gesture and hover outline. Ctrl is read at the press.
 - **Measured from the press.** `Drag::Skew` carries the press point, so the grabbed point follows the pointer and a second skew starts from zero.
-- **No pointer snapping** (the pointer stands for an angle); Shift snaps to 15°. **Clamped** to ±89° (`tools::MAX_SKEW`); a wild drag pins at the limit.
-- **Single node, shape or group:** the lean is in the node's own frame on its local box, no recursion. **Multi-selection:** a world-axis lean about the shared upright union; the selection frame is drawn from the same shear (`tools::side_shear`).
+- **No pointer snapping** (the pointer stands for an angle); Shift snaps to 15°. **Clamped** to ±89° (`edit::MAX_SKEW`); a wild drag pins at the limit.
+- **Single node, shape or group:** the lean is in the node's own frame on its local box, no recursion. **Multi-selection:** a world-axis lean about the shared upright union; the selection frame is drawn from the same shear (`edit::side_shear`).
 - **Cursor** points along the side (`Handles::screen_tangent`, the outward normal turned a quarter turn in the box's frame). §15 D52.
 
 ### Resize snapping and Alt
 
 - **Snapped axes.** A resize snaps only the axes its handle travels along. `canvas::resize_axes` maps the handle's box-local outward direction through the box's world transform: a corner claims both axes, an upright side one, a rotated side both. The point box uses the same function.
-- **Alt** keeps the box centre fixed: `tools::resized_box` and `resize_group` take `symmetric` next to `keep_ratio`; Shift and Alt compose. The centre is a fixed pivot, not the node's transform origin: a fixed pivot and a handle tracking the pointer cannot both be honoured (§15 D60), so `resized_box` and `resize_factors` take no pivot.
+- **Alt** keeps the box centre fixed: `edit::resized_box` and `resize_group` take `symmetric` next to `keep_ratio`; Shift and Alt compose. The centre is a fixed pivot, not the node's transform origin: a fixed pivot and a handle tracking the pointer cannot both be honoured (§15 D60), so `resized_box` and `resize_factors` take no pivot.
 - **Alt+Shift.** Under `symmetric` the origin is centred on both axes, including the one the handle does not own (matters when `keep_ratio` drives the second axis, as with a side handle). Both copies of the rule, `resized_box`'s `edge` and `resize_factors`' `pin`, answer the centre before the anchor.
 - **Past the anchor** the shape flips: both copies keep the sign of the scale factor.
 
@@ -537,8 +537,8 @@ delta. Each application is one undo step, *Transform again*; the status says *Ro
   sides grew alike (a stretch has no one factor and keeps the old step); a skew as the world-space
   lean, named by how far the layer's own lean moved. A commit that changed nothing measurable keeps
   the old step.
-- **Applied** through `tools::rotate_node` (rotation), `tools::transform_node` (the skew's lean about
-  the pivot) and `tools::resize_selection` with `Scaling::Photographic` about the pivot (strokes,
+- **Applied** through `edit::rotate_node` (rotation), `edit::transform_node` (the skew's lean about
+  the pivot) and `edit::resize_selection` with `Scaling::Photographic` about the pivot (strokes,
   radii and type scale too).
 - **The palette row names the step**: *Transform again: Rotate 15°* (*Move 24, 0*, *Scale 120%*,
   *Skew 10°*). With nothing learnt it is dim with *Move, rotate or scale something first*; with
@@ -683,9 +683,9 @@ stays live.
 `Ctrl`+arrows step the selection's box by the nudge step (`input::NudgeStep`): 1, or 10 with
 `Shift`. `→` wider, `←` narrower, `↓` taller, `↑` shorter (`shortcuts.md` §11).
 
-- `OndinApp::size_step` uses `tools::resize_box_to` for one layer (grows along its own axes) and `tools::resize_selection` over the upright world union for several.
+- `OndinApp::size_step` uses `edit::resize_box_to` for one layer (grows along its own axes) and `edit::resize_selection` over the upright world union for several.
 - The top-left corner is held, so the step does not `reveal_selection`. One arrow table serves nudge and resize; `normal_mode` picks the verb from the modifier.
-- 1pt floor per axis. With every member proportion-locked, both axes move and the arrow names the driver (`tools::paired_size`). Guides are inert.
+- 1pt floor per axis. With every member proportion-locked, both axes move and the arrow names the driver (`edit::paired_size`). Guides are inert.
 - Bursts coalesce under the undo verb `resize-layers`, separate from nudges.
 
 ## Traps

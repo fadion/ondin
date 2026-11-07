@@ -8,7 +8,7 @@ Built: table, reference, brush, decode cache, framing, image editing (`Tool::Ima
 
 ### Model
 
-- **An image is a fill, not a `NodeKind`.** Any shape, path or boolean can carry one. `Paint::image_fill` is the one spelling of "is this layer a picture" (index of the first visible image fill); `tools::croppable_fill` is a one-line wrapper. Interaction is layer-shaped: placing makes a Rect sized to the image.
+- **An image is a fill, not a `NodeKind`.** Any shape, path or boolean can carry one. `Paint::image_fill` is the one spelling of "is this layer a picture" (index of the first visible image fill); `edit::croppable_fill` is a one-line wrapper. Interaction is layer-shaped: placing makes a Rect sized to the image.
 - **The document owns a table keyed by an opaque `ImageId`**; a `Fill` holds an `ImageRef`. The id is a content hash of the encoded bytes (`sha256:<hex>`, through `ring`, so `sha256sum` of an exported original reproduces it), computed by whoever supplies the bytes; core neither computes nor verifies it. Dedup is the caller's question (`Document::has_image`).
 - **Stored bytes are the encoded original**, never a decoded buffer. `ImageEntry::href` gives `data:<mime>;base64,...` for embedded images, the stored path verbatim for linked ones; it lives in core so a document and its export say the same thing. The original goes out, never a re-encode.
 - **Four accepted encodings: PNG, JPEG, WebP, GIF** (`ImageFormat`, which owns the MIME type). A GIF is its first frame; animation and video are out. TIFF/AVIF are excluded as a decision. The closed list is enforced on decode: `ondin-render`'s `images::signature_is_accepted` uses `image::guess_format` (a fixed magic-byte table, independent of which decoders cargo compiled) and refuses any recognised format outside the four. Feature unification can compile extra decoders (`bmp` on Windows, `tiff` on macOS); without the guard one document would draw on Windows and show the placeholder on Linux. Unrecognised bytes still go to the hinted decoder.
@@ -74,7 +74,7 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 - **Derived buffers**: previews go when stale; full buffers go under `ADJUSTED_BYTES`, stale first then least recently asked. `trim_derived` runs on insert in `pixels` as well as from `prepare` (non-interactive callers prepare once). It evicts a live buffer if no stale one exists.
 - **Thumbnails**: `ImageStore::thumbnail(&ImageRef, edge)` touches neither the ask clock nor `wants_frame`. It reduces first, adjusts second, over a `THUMB_BASE = 128` copy per `ImageId` evicted with the picture. Orientation and crop are applied; the framing mode is not (centre-crop).
 
-## Placing (`Tool::Image`, `tools::create_image`, §9.4)
+## Placing (`Tool::Image`, `edit::create_image`, §9.4)
 
 - **Not a persistent mode**: arming = picking files (rail button / `Ctrl+Shift+K` open the dialog and arm only if something loaded). Each click places one in pick order; after the last, the tool returns to Select.
 - **The cursor carries the count** (`Bitmap::Loaded(Remaining)`: crosshair plus chip, exact to 99, `99+` beyond; plain crosshair when empty).

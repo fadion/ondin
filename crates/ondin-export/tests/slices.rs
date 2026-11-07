@@ -114,8 +114,8 @@ fn a_slice_rasters_its_box_of_the_page() {
     assert_eq!(planned(&doc, &res, slice, spec).pixels, Some((200, 100)));
 }
 
-/// An SVG of a slice takes the slice's box as its `viewBox` and draws the layers
-/// under it, the slice itself not at all.
+/// An SVG of a slice takes the slice's box as its `viewBox`, its corner moved to
+/// `0 0`, and draws the layers under it, the slice itself not at all.
 /// flip: `plan::slice_region` answering `None` → fails at "the layers under it are
 /// drawn".
 #[test]
@@ -129,7 +129,7 @@ fn a_slice_frames_an_svg_on_its_box() {
     );
     let svg = String::from_utf8(plan::render(&doc, &res, &file).expect("rendered")).unwrap();
     assert!(
-        svg.contains(r#"viewBox="100 100 100 50""#),
+        svg.contains(r#"viewBox="0 0 100 50""#),
         "framed on the slice: {svg}"
     );
     assert!(

@@ -125,7 +125,7 @@ Three functions clear editor state by hand-written lists, and nothing checks the
 - `go_to_dashboard` (clears `picker`, `context_menu`, `open_menu`, `rename_entry`, `confirming_close`).
 - `cancel_gesture`: a gate and a clear. The gate is `app::InFlight::any` (`*self != Self::default()`,
   exhaustive by construction) over `session_scrub`, `settings_scrub`, `paint_drag`,
-  `export_quality_scrub`, `grid_scrub`, `grid_paint`, `guide_position_drag`, plus `drag` and
+  `export_scrub`, `grid_scrub`, `grid_paint`, `guide_position_drag`, plus `drag` and
   `layer_drag` named beside it. The clear is still a list (incl. `guide_previews`, `alt_clone`,
   `autopan_total`, `chrome_hold`, `opacity_entry`); `InFlight` fields other than the grid pair are read
   back by their owners on `gesture_cancelled`, so a field that must **restore** something (e.g.

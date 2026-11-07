@@ -92,25 +92,94 @@ pub fn plan(
             });
         }
         for spec in &specs {
+            if let Some(files) = variant_files(doc, node, spec, &opts) {
+                for (variant, wanted) in files {
+                    let path = de_collide(wanted, &mut taken);
+                    out.push(planned(doc, res, variant, spec, path));
+                }
+                continue;
+            }
             // Composed first, sanitized second: the prefix and the name are two
             // halves of one path, so the folder rule must see both.
             let stem = path_stem(&spec.compose(n.name()), &opts);
             let wanted = format!("{stem}.{}", spec.format.extension());
             let path = de_collide(wanted, &mut taken);
-            let (pixels, clamped) = match spec.format.is_raster() {
-                true => raster_size(doc, res, node, spec),
-                false => (None, false),
-            };
-            out.push(PlannedFile {
-                node,
-                spec: spec.clone(),
-                path,
-                pixels,
-                clamped,
-            });
+            out.push(planned(doc, res, node, spec, path));
         }
     }
     out
+}
+
+/// One file of `node` under `spec`, at `path`, sized if it is a raster.
+fn planned(
+    doc: &Document,
+    res: &Resolved,
+    node: NodeId,
+    spec: &ExportSpec,
+    path: String,
+) -> PlannedFile {
+    let (pixels, clamped) = match spec.format.is_raster() {
+        true => raster_size(doc, res, node, spec),
+        false => (None, false),
+    };
+    PlannedFile {
+        node,
+        spec: spec.clone(),
+        path,
+        pixels,
+        clamped,
+    }
+}
+
+/// The files a component set writes under [`ExportSpec::each_variant`]: each
+/// variant, in the order of its values in the set's properties, at
+/// `prefix` + the set's name as a folder, `/`, its values joined by `-` and the
+/// spec's suffix — both parts lower-cased with spaces as `-`
+/// (`icons/arrow-left-24.svg`). Not yet de-collided. `None` when the spec does not
+/// ask for it or `node` is no set.
+pub fn variant_files(
+    doc: &Document,
+    node: NodeId,
+    spec: &ExportSpec,
+    opts: &PlanOptions,
+) -> Option<Vec<(NodeId, String)>> {
+    let set = doc.get(node)?.set().filter(|_| spec.each_variant)?;
+    let slug = |s: &str| {
+        s.to_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join("-")
+    };
+    let folder = path_stem(
+        &format!("{}{}", spec.prefix, slug(doc.get(node)?.name())),
+        opts,
+    );
+    // Where each value sits in its property, so the files follow the set's order.
+    let rank = |values: &[String]| -> Vec<usize> {
+        set.props
+            .iter()
+            .zip(values)
+            .map(|(p, v)| p.values.iter().position(|x| x == v).unwrap_or(usize::MAX))
+            .collect()
+    };
+    let mut variants: Vec<(Vec<usize>, NodeId, String)> = ondin_core::variant::variants(doc, node)
+        .into_iter()
+        .filter_map(|id| {
+            let values = doc.get(id)?.variant();
+            let name = slug(&values.join(" "));
+            let stem = path_stem(&format!("{name}{}", spec.effective_suffix()), opts);
+            Some((rank(values), id, stem))
+        })
+        .collect();
+    // Stable: two variants holding the same values keep their z-order.
+    variants.sort_by(|a, b| a.0.cmp(&b.0));
+    let ext = spec.format.extension();
+    Some(
+        variants
+            .into_iter()
+            .map(|(_, id, stem)| (id, format!("{folder}/{stem}.{ext}")))
+            .collect(),
+    )
 }
 
 /// The pixel size a raster spec produces for this layer, and whether it had to be
@@ -161,15 +230,24 @@ pub(crate) fn framed_box(doc: &Document, res: &Resolved, node: NodeId) -> Option
     }
 }
 
-/// Whether `spec` sets a quality, a trim, a square pad or outlined text that
-/// changes its file: what the editable writers (Penpot, Sketch) have no place
-/// for, so they report it. Each counts only on the formats it acts on.
+/// Whether `spec` sets a quality, a trim, a square pad, outlined text, an SVG
+/// setting or a file per variant that changes its file: what the editable
+/// writers (Penpot, Sketch) have no place for, so they report it. Each counts
+/// only on the formats it acts on.
 pub(crate) fn acting_extras(spec: &ondin_core::ExportSpec) -> bool {
     let plain = ondin_core::ExportSpec::new(spec.format, spec.scale);
     let raster = spec.format.is_raster();
+    let svg = spec.format == ExportFormat::Svg;
     (spec.format == ondin_core::ExportFormat::Jpeg && spec.quality != plain.quality)
-        || (raster && (spec.trim || spec.pad_square))
+        || (raster && spec.trim)
+        || ((raster || svg) && spec.pad_square)
         || (!raster && spec.text != plain.text)
+        || (svg
+            && (spec.colour != plain.colour
+                || spec.strokes != plain.strokes
+                || spec.view != plain.view
+                || spec.precision != plain.precision))
+        || spec.each_variant
 }
 
 /// Render one planned file to bytes. `None` when the layer has no bounds to
@@ -179,18 +257,18 @@ pub(crate) fn acting_extras(spec: &ondin_core::ExportSpec) -> bool {
 /// halfway through a drag cannot leak an uncommitted position into a file
 /// (§15 D264). Nothing here can check that.
 pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<u8>> {
+    // A slice's box included: `svg_spec` frames it as it frames anything else.
+    if file.spec.format == ExportFormat::Svg {
+        let out = crate::svg::svg_spec(doc, res, file.node, &file.spec);
+        return Some(out.svg.into_bytes());
+    }
+    let text = file.spec.text;
     if let Some((view, origins)) = slice_region(doc, res, file.node) {
-        let text = file.spec.text;
         return match file.spec.format {
-            ExportFormat::Svg => Some(
-                crate::svg::svg_region(doc, res, &origins, view, text)
-                    .svg
-                    .into_bytes(),
-            ),
             ExportFormat::Pdf => {
                 crate::pdf::pdf_region(doc, res, &origins, view, text).map(|e| e.pdf)
             }
-            ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp => {
+            _ => {
                 let opts = raster_opts(doc, res, file.node, &file.spec);
                 let r = crate::png::raster_region(doc, res, &origins, view, &opts);
                 Some(encode(&r, &file.spec))
@@ -199,13 +277,8 @@ pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<
     }
     let origins = [file.node];
     match file.spec.format {
-        ExportFormat::Svg => Some(
-            crate::svg::svg_with(doc, res, &origins, file.spec.text)
-                .svg
-                .into_bytes(),
-        ),
-        ExportFormat::Pdf => crate::pdf::pdf_of(doc, res, &origins, file.spec.text).map(|e| e.pdf),
-        ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp => {
+        ExportFormat::Pdf => crate::pdf::pdf_of(doc, res, &origins, text).map(|e| e.pdf),
+        _ => {
             let opts = raster_opts(doc, res, file.node, &file.spec);
             let r = crate::png::raster_of(doc, res, &origins, &opts)?;
             Some(encode(&r, &file.spec))

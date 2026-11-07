@@ -192,9 +192,10 @@ pub(crate) struct InFlight {
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
     pub(crate) effect_drag: Option<crate::panels::paint::EffectDrag>,
-    /// The JPEG quality being scrubbed, and which spec it belongs to; `RenderOverrides`
-    /// cannot preview `SetExports`, and committing every frame would make it uncancellable.
-    pub(crate) export_quality_scrub: Option<(usize, f64)>,
+    /// The export setting being scrubbed (the JPEG quality, an SVG's precision), which
+    /// spec it belongs to, and its in-flight value; `RenderOverrides` cannot preview
+    /// `SetExports`, and committing every frame would make it uncancellable.
+    pub(crate) export_scrub: Option<(crate::panels::ExportNumber, usize, f64)>,
     /// The layout grid a scrub is holding: the frames, the index, the in-flight value.
     /// Read by the panel and `canvas::draw_layout_grids`; a list of frames because the
     /// edit goes to every selected frame.
@@ -223,7 +224,7 @@ mod in_flight_tests {
     use super::*;
 
     /// Each field alone arms the gate.
-    /// flip: `any` as an `||` chain omitting `export_quality_scrub` → fails at that case.
+    /// flip: `any` as an `||` chain omitting `export_scrub` → fails at that case.
     #[test]
     fn every_field_on_its_own_arms_the_gate() {
         assert!(
@@ -298,9 +299,9 @@ mod in_flight_tests {
                 },
             ),
             (
-                "export_quality_scrub",
+                "export_scrub",
                 InFlight {
-                    export_quality_scrub: Some((0, 0.8)),
+                    export_scrub: Some((crate::panels::ExportNumber::Quality, 0, 0.8)),
                     ..Default::default()
                 },
             ),
@@ -796,6 +797,9 @@ pub struct OndinApp {
     pub(crate) export_clipboard: Option<Vec<ondin_core::ExportSpec>>,
     /// The Export panel's rendered preview and what it was built from; one slot.
     pub(crate) export_preview: Option<crate::panels::ExportPreview>,
+    /// How many solid colours an SVG row's `currentColor` would merge, and what that
+    /// was counted from: the settings card's warning, counted once per edit.
+    pub(crate) export_merged: Option<(crate::panels::PreviewKey, usize)>,
     /// The export prefix being typed, and which spec it belongs to; buffered so typing
     /// one name is one undo step.
     pub(crate) export_prefix_text: Option<(usize, String)>,
@@ -1723,6 +1727,7 @@ impl OndinApp {
             export_menu: false,
             export_clipboard: None,
             export_preview: None,
+            export_merged: None,
             export_prefix_text: None,
             export_suffix_text: None,
             stroke_dash_text: None,

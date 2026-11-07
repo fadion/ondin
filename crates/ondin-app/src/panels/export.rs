@@ -15,7 +15,7 @@ use crate::theme::{self, icon};
 use crate::ui::{self, Prefix, Scrub, value_field};
 use ondin_core::{
     ExportBackground, ExportFormat, ExportScale, ExportSpec, ExportText, Keyed, NodeId, Operation,
-    Transaction,
+    SvgColour, SvgStrokes, SvgView, Transaction,
 };
 use ondin_export::{PlanOptions, PlannedFile};
 use std::sync::Arc;
@@ -73,6 +73,32 @@ const POP_INNER: f32 = ui::menu_inner_w(POP_W, ui::POPOVER_PAD);
 const POP_CELL: f32 = ui::CONTROL_H;
 /// Between one labelled section and the next — the shared one.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
+
+/// The settings card's two scrubbable numbers, which share one in-flight slot
+/// (`InFlight::export_scrub`): only one field is dragged at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExportNumber {
+    /// A JPEG's quality, 1–100.
+    Quality,
+    /// An SVG's decimal places, 0–4.
+    Precision,
+}
+
+impl ExportNumber {
+    fn range(self) -> std::ops::RangeInclusive<f64> {
+        match self {
+            ExportNumber::Quality => 1.0..=100.0,
+            ExportNumber::Precision => 0.0..=f64::from(ondin_core::export::MAX_PRECISION),
+        }
+    }
+
+    fn of(self, spec: &ExportSpec) -> u8 {
+        match self {
+            ExportNumber::Quality => spec.quality,
+            ExportNumber::Precision => spec.precision,
+        }
+    }
+}
 
 /// What one row asked for.
 #[derive(Default)]
@@ -553,13 +579,7 @@ impl OndinApp {
                     ("PDF".to_string(), fidelity_clauses(&approximated, &[]))
                 }
                 _ => {
-                    let text = key.spec.text;
-                    let out = match &region {
-                        Some((view, _)) => {
-                            ondin_export::svg::svg_region(doc, res, &origins, *view, text)
-                        }
-                        None => ondin_export::svg::svg_with(doc, res, &origins, text),
-                    };
+                    let out = ondin_export::svg::svg_spec(doc, res, key.node, &key.spec);
                     let note = fidelity_clauses(&out.approximated, &out.round_trip);
                     (format!("SVG · {}", human_bytes(out.svg.len())), note)
                 }
@@ -804,6 +824,12 @@ impl OndinApp {
             // multi-selection (`export_size_label`).
             let size = self.export_size_label(spec, sizing);
             let lined = !size.is_empty();
+            let folder = spec.each_variant
+                && sizing.is_some_and(|id| ondin_core::variant::is_set(&self.session.doc, id));
+            let glyph = match folder {
+                true => icon::FOLDER_SIMPLE,
+                false => icon::FRAME,
+            };
             if lined {
                 ui.allocate_space(egui::vec2(0.0, ROW_LINE_GAP));
                 // `interact_size.y` is a minimum row height (24 in the theme); zeroed
@@ -814,7 +840,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.add_space(2.0);
-                        ui.label(theme::icon_text(icon::FRAME, 12.0, theme::text::faint()));
+                        ui.label(theme::icon_text(glyph, 12.0, theme::text::faint()));
                         ui.label(
                             egui::RichText::new(size)
                                 .size(ui::CAPTION_PT)
@@ -850,14 +876,26 @@ impl OndinApp {
     /// `192×96`, or the reason there is no number.
     ///
     /// Blank over a multi-selection rather than a guess: `Width(512)` is a different
-    /// multiplier on every differently-shaped layer.
+    /// multiplier on every differently-shaped layer. A set exporting each variant
+    /// says how many files go into which folder instead.
     fn export_size_label(&self, spec: &ExportSpec, sizing: Option<NodeId>) -> String {
-        if !spec.format.is_raster() {
-            return String::new();
-        }
         let Some(id) = sizing else {
             return String::new();
         };
+        let opts = PlanOptions {
+            folders_from_names: self.prefs.export_folders_from_names,
+            ..Default::default()
+        };
+        if let Some(files) = ondin_export::plan::variant_files(&self.session.doc, id, spec, &opts) {
+            let folder = files.first().and_then(|(_, p)| p.rsplit_once('/'));
+            return match folder {
+                Some((folder, _)) => format!("{} in {folder}/", ui::count(files.len(), "file")),
+                None => "No variants to export".to_string(),
+            };
+        }
+        if !spec.format.is_raster() {
+            return String::new();
+        }
         match ondin_export::plan::raster_size(&self.session.doc, &self.session.resolved, id, spec) {
             (Some((w, h)), true) => format!("{w}×{h} max"),
             (Some((w, h)), false) => format!("{w}×{h}"),
@@ -933,10 +971,18 @@ impl OndinApp {
                     // --- quality, JPEG only (labelled for its format) ----------
                     if spec.format == ExportFormat::Jpeg {
                         ui::labelled(ui, "JPEG quality", |ui| {
-                            if let Some(q) = self.export_quality_field(ui, index, spec) {
+                            let quality = ExportNumber::Quality;
+                            if let Some(q) =
+                                self.export_number_field(ui, index, quality, spec, POP_INNER)
+                            {
                                 edit(&mut out, spec).quality = q;
                             }
                         });
+                    }
+
+                    // --- colour, strokes, viewBox and precision, SVG only ------
+                    if spec.format == ExportFormat::Svg {
+                        self.export_svg_settings(ui, index, spec, sizing, &mut out);
                     }
 
                     // --- text, vector only ---------------------------------------
@@ -1075,6 +1121,27 @@ impl OndinApp {
                         if pad.clicked() {
                             edit(&mut out, spec).pad_square = !spec.pad_square;
                         }
+                        // Only where it means something: every selected layer is a
+                        // component set.
+                        let sets = self
+                            .export_subjects()
+                            .iter()
+                            .all(|id| ondin_core::variant::is_set(&self.session.doc, *id));
+                        if sets {
+                            let each = ui::toggle_row(
+                                ui,
+                                icon::FOLDER_SIMPLE,
+                                "Each variant as its own file",
+                                ui::FieldButton::on_if(spec.each_variant),
+                                size,
+                            )
+                            .on_hover_text(
+                                "A file per variant, named by its values, in a folder named for the set",
+                            );
+                            if each.clicked() {
+                                edit(&mut out, spec).each_variant = !spec.each_variant;
+                            }
+                        }
                     }
                 })
             })
@@ -1112,63 +1179,210 @@ impl OndinApp {
         out
     }
 
-    /// The JPEG quality field. `Some` on the frame the edit is finished — never
-    /// while the pointer still holds it.
+    /// The settings card's four SVG rows: *Colour*, *Strokes* and *viewBox* as
+    /// segmented pairs, then *Precision*. Under `currentColor` a single layer whose
+    /// solids are more than one colour says how many will merge, so the choice is
+    /// never silent. *From the frame* is unavailable on a layer that is no frame.
+    fn export_svg_settings(
+        &mut self,
+        ui: &mut egui::Ui,
+        index: usize,
+        spec: &ExportSpec,
+        sizing: Option<NodeId>,
+        out: &mut Option<ExportSpec>,
+    ) {
+        let pair = |ui: &mut egui::Ui,
+                    labels: [&'static str; 2],
+                    lit: usize,
+                    enabled: [bool; 2],
+                    tips: [&'static str; 2]| {
+            ui::segmented_tipped(
+                ui,
+                POP_INNER,
+                ui::SEGMENT_CELL_H,
+                2,
+                lit,
+                |i| enabled[i],
+                |i| tips[i],
+                |p, i, r, on| ui::segment_label(p, r, labels[i], on),
+            )
+        };
+
+        ui::labelled(ui, "Colour", |ui| {
+            let lit = usize::from(spec.colour == SvgColour::CurrentColor);
+            let tips = [
+                "Each paint keeps its own colour",
+                "Solid fills and strokes take the page's colour; opacity is kept",
+            ];
+            if let Some(i) = pair(ui, ["As painted", "currentColor"], lit, [true; 2], tips) {
+                edit(out, spec).colour = [SvgColour::AsPainted, SvgColour::CurrentColor][i];
+            }
+            let merged = match (spec.colour, sizing) {
+                (SvgColour::CurrentColor, Some(node)) => self.export_merged_colours(node, spec),
+                _ => 0,
+            };
+            if merged > 1 {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let warn = theme::color::warn();
+                    ui.label(theme::icon_text(icon::WARNING, 13.0, warn));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{merged} colours will all become currentColor"
+                        ))
+                        .size(ui::CAPTION_PT)
+                        .color(warn),
+                    );
+                });
+            }
+        });
+
+        ui::labelled(ui, "Strokes", |ui| {
+            let lit = usize::from(spec.strokes == SvgStrokes::Outline);
+            let tips = [
+                "Strokes stay strokes, which CSS can restyle",
+                "Each stroke becomes the filled shape it draws; the layer is left alone",
+            ];
+            if let Some(i) = pair(ui, ["Keep", "Outline"], lit, [true; 2], tips) {
+                edit(out, spec).strokes = [SvgStrokes::Keep, SvgStrokes::Outline][i];
+            }
+        });
+
+        ui::labelled(ui, "viewBox", |ui| {
+            // Over a multi-selection a frame among the layers is enough: each layer
+            // that is no frame takes its artwork on its own.
+            let framed = self.export_subjects().iter().any(|id| {
+                matches!(
+                    self.session.doc.get(*id).map(|n| n.kind()),
+                    Some(ondin_core::NodeKind::Artboard { .. })
+                )
+            });
+            let lit = match (spec.view, framed) {
+                (SvgView::Frame, true) => 0,
+                _ => 1,
+            };
+            let tips = [
+                match framed {
+                    true => "The frame's own box, whatever its artwork reaches",
+                    false => "Only a frame has its own viewBox",
+                },
+                "Trimmed to the artwork's ink",
+            ];
+            let labels = ["From the frame", "Fit the artwork"];
+            if let Some(i) = pair(ui, labels, lit, [framed, true], tips) {
+                edit(out, spec).view = [SvgView::Frame, SvgView::Artwork][i];
+            }
+        });
+
+        ui::labelled(ui, "Precision", |ui| {
+            let precision = ExportNumber::Precision;
+            if let Some(p) = self.export_number_field(ui, index, precision, spec, POP_INNER) {
+                edit(out, spec).precision = p;
+            }
+        });
+    }
+
+    /// How many solid colours `currentColor` would merge on `node`, counted by
+    /// writing the file once per edit of the layer or the spec.
+    fn export_merged_colours(&mut self, node: NodeId, spec: &ExportSpec) -> usize {
+        let key = PreviewKey {
+            node,
+            spec: spec.clone(),
+            revision: self.session.revision(),
+        };
+        if let Some((k, n)) = &self.export_merged
+            && *k == key
+        {
+            return *n;
+        }
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let n = ondin_export::svg::svg_spec(doc, res, node, spec).merged;
+        self.export_merged = Some((key, n));
+        n
+    }
+
+    /// The JPEG quality or SVG precision field. `Some` on the frame the edit is
+    /// finished — never while the pointer still holds it.
     ///
     /// A hand-wound scrub, because neither shared committer works: `edit_valve`
     /// previews through `RenderOverrides`, which absorbs `SetExports` as a no-op (the
     /// number would not move), and `commit_run` commits every frame while
     /// `cancel_gesture` only drops the preview (a cancel would leave the value).
     ///
-    /// The in-flight value lives in `export_quality_scrub`: the field reads it during
-    /// the drag, the release commits it once, a cancel drops it (as `session_scrub`).
-    /// The cancel is checked before the buffer is read: on that frame egui may still
-    /// report a `changed()`, which would commit the last movement.
-    fn export_quality_field(
+    /// The in-flight value lives in `export_scrub`: the field reads it during the
+    /// drag, the release commits it once, a right-click's cancel drops it (as
+    /// `session_scrub`). The cancel is checked before the buffer is read: on that
+    /// frame egui may still report a `changed()`, which would commit the last movement.
+    fn export_number_field(
         &mut self,
         ui: &mut egui::Ui,
         index: usize,
+        number: ExportNumber,
         spec: &ExportSpec,
+        width: f32,
     ) -> Option<u8> {
         let cancelled = self.gesture_cancelled;
         if cancelled {
-            self.in_flight.export_quality_scrub = None;
+            self.in_flight.export_scrub = None;
         }
-        let held = match self.in_flight.export_quality_scrub {
-            Some((i, v)) if i == index && !cancelled => Some(v),
+        let held = match self.in_flight.export_scrub {
+            Some((n, i, v)) if n == number && i == index && !cancelled => Some(v),
             _ => None,
         };
-        let mut q = held.unwrap_or(spec.quality as f64);
-        let resp = value_field(
-            ui,
-            egui::vec2(POP_INNER, POP_CELL),
-            Prefix::Icon(icon::GAUGE),
-            &mut q,
-            // 0.25, slower than the panel's other 0–100 fields: nothing visibly moves
-            // while dragging, and the useful band is about 60–95.
-            Scrub::whole(0.25).range(1.0..=100.0),
-            |d| d.custom_formatter(ui::number(0)),
-        )
-        .on_hover_text("Lower is a smaller file. 90 unless you have a reason");
-        match quality_step(
+        let mut v = held.unwrap_or(number.of(spec) as f64);
+        let size = egui::vec2(width, POP_CELL);
+        let resp = match number {
+            ExportNumber::Quality => value_field(
+                ui,
+                size,
+                Prefix::Icon(icon::GAUGE),
+                &mut v,
+                // 0.25, slower than the panel's other 0–100 fields: nothing visibly
+                // moves while dragging, and the useful band is about 60–95.
+                Scrub::whole(0.25).range(number.range()),
+                |d| d.custom_formatter(ui::number(0)),
+            )
+            .on_hover_text("Lower is a smaller file. 90 unless you have a reason"),
+            ExportNumber::Precision => {
+                let unit = ui::Suffix {
+                    text: "decimals",
+                    clickable: false,
+                    tooltip: "",
+                };
+                ui::value_field_suffixed(
+                    ui,
+                    size,
+                    Prefix::Icon(icon::HASH),
+                    Some(unit),
+                    &mut v,
+                    // Five values across the field: a slow hand per step.
+                    Scrub::whole(0.05).range(number.range()),
+                    |d| d.custom_formatter(ui::number(0)),
+                )
+                .0
+                .on_hover_text("Fewer places is a smaller file. 2 is past what an icon shows")
+            }
+        };
+        match scrub_step(
             ScrubInput {
                 cancelled,
                 dragged: resp.dragged(),
                 changed: resp.changed(),
                 was_held: held.is_some(),
             },
-            q,
-            spec.quality,
+            number,
+            v,
+            number.of(spec),
         ) {
-            QualityStep::Hold => {
-                self.in_flight.export_quality_scrub = Some((index, q));
+            ScrubStep::Hold => {
+                self.in_flight.export_scrub = Some((number, index, v));
                 None
             }
-            QualityStep::Commit(v) => {
-                self.in_flight.export_quality_scrub = None;
+            ScrubStep::Commit(v) => {
+                self.in_flight.export_scrub = None;
                 Some(v)
             }
-            QualityStep::Nothing => None,
+            ScrubStep::Nothing => None,
         }
     }
 
@@ -2806,7 +3020,7 @@ struct ScrubInput {
 
 /// What the frame should do about it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum QualityStep {
+enum ScrubStep {
     /// Keep the value in the panel's own buffer; commit nothing.
     Hold,
     /// The edit is finished — commit this, once.
@@ -2814,28 +3028,29 @@ enum QualityStep {
     Nothing,
 }
 
-/// The quality field's whole decision, as a function of its inputs alone.
+/// A scrubbed number's whole decision, as a function of its inputs alone.
 ///
 /// The cancel is answered first: on that frame egui may still report a `changed()`,
 /// which would commit the movement the cancel discards. A drag holds and never
 /// commits, since `cancel_gesture` undoes a scrub by dropping a preview and this
 /// field has none. The release is recognised by the buffer, not `drag_stopped()`,
 /// which is not reported on every path out of a drag.
-fn quality_step(input: ScrubInput, value: f64, current: u8) -> QualityStep {
-    let settled = value.round().clamp(1.0, 100.0) as u8;
+fn scrub_step(input: ScrubInput, number: ExportNumber, value: f64, current: u8) -> ScrubStep {
+    let range = number.range();
+    let settled = value.round().clamp(*range.start(), *range.end()) as u8;
     if input.cancelled {
-        return QualityStep::Nothing;
+        return ScrubStep::Nothing;
     }
     if input.dragged {
-        return QualityStep::Hold;
+        return ScrubStep::Hold;
     }
     if input.was_held || input.changed {
         return match settled == current {
-            true => QualityStep::Nothing,
-            false => QualityStep::Commit(settled),
+            true => ScrubStep::Nothing,
+            false => ScrubStep::Commit(settled),
         };
     }
-    QualityStep::Nothing
+    ScrubStep::Nothing
 }
 
 /// The multiplier a list of `rows` exports gets for its next one: 1×, 2×, 3×,
@@ -2857,8 +3072,13 @@ fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
         && !spec.trim
         && !spec.pad_square
         // Outlines kept from a vector format are inert on a raster, as the
-        // popover hides them.
-        && (spec.format.is_raster() || spec.text == ExportText::Live);
+        // popover hides them; so are the SVG settings on any other format.
+        && (spec.format.is_raster() || spec.text == ExportText::Live)
+        && (spec.format != ExportFormat::Svg || {
+            let plain = ExportSpec::new(spec.format, spec.scale);
+            (spec.colour, spec.strokes, spec.view, spec.precision)
+                == (plain.colour, plain.strokes, plain.view, plain.precision)
+        });
     match (open, at_rest) {
         (true, _) => ui::FieldButton::On,
         (false, true) => ui::FieldButton::Off,
@@ -3327,40 +3547,52 @@ mod tests {
     #[test]
     fn a_quality_scrub_holds_commits_once_and_can_be_called_off() {
         let step = |cancelled, dragged, changed, was_held, v: f64| {
-            quality_step(
+            scrub_step(
                 ScrubInput {
                     cancelled,
                     dragged,
                     changed,
                     was_held,
                 },
+                ExportNumber::Quality,
                 v,
                 90,
             )
         };
 
         // Mid-drag: the value is live in the buffer and nothing reaches history.
-        assert_eq!(step(false, true, true, false, 62.0), QualityStep::Hold);
-        assert_eq!(step(false, true, true, true, 41.0), QualityStep::Hold);
+        assert_eq!(step(false, true, true, false, 62.0), ScrubStep::Hold);
+        assert_eq!(step(false, true, true, true, 41.0), ScrubStep::Hold);
 
         // The release: one commit, from the buffer rather than from `drag_stopped`.
-        assert_eq!(
-            step(false, false, false, true, 41.4),
-            QualityStep::Commit(41)
-        );
+        assert_eq!(step(false, false, false, true, 41.4), ScrubStep::Commit(41));
 
         // The right-click, on the frame it lands and on the release after it.
-        assert_eq!(step(true, true, true, true, 41.0), QualityStep::Nothing);
-        assert_eq!(step(true, false, true, true, 41.0), QualityStep::Nothing);
+        assert_eq!(step(true, true, true, true, 41.0), ScrubStep::Nothing);
+        assert_eq!(step(true, false, true, true, 41.0), ScrubStep::Nothing);
 
         // Typed or nudged, with no drag anywhere: committed on the spot.
-        assert_eq!(
-            step(false, false, true, false, 30.0),
-            QualityStep::Commit(30)
-        );
+        assert_eq!(step(false, false, true, false, 30.0), ScrubStep::Commit(30));
         // And a "change" that lands back on the stored value is not an edit.
-        assert_eq!(step(false, false, true, false, 90.0), QualityStep::Nothing);
-        assert_eq!(step(false, false, false, false, 90.0), QualityStep::Nothing);
+        assert_eq!(step(false, false, true, false, 90.0), ScrubStep::Nothing);
+        assert_eq!(step(false, false, false, false, 90.0), ScrubStep::Nothing);
+    }
+
+    /// Each number settles into its own range: a typed 9 places is the most an SVG
+    /// writes, a typed 0 quality the least a JPEG takes.
+    #[test]
+    fn a_scrubbed_number_settles_into_its_own_range() {
+        let typed = ScrubInput {
+            cancelled: false,
+            dragged: false,
+            changed: true,
+            was_held: false,
+        };
+        let precision = ExportNumber::Precision;
+        assert_eq!(scrub_step(typed, precision, 9.0, 2), ScrubStep::Commit(4));
+        assert_eq!(scrub_step(typed, precision, 0.4, 2), ScrubStep::Commit(0));
+        let quality = ExportNumber::Quality;
+        assert_eq!(scrub_step(typed, quality, 0.0, 90), ScrubStep::Commit(1));
     }
 
     /// The `+`'s ladder: 1×, 2×, 3×, then 4× for ever.
@@ -4273,5 +4505,167 @@ mod code_export_tests {
         assert_eq!(code_archive_name("a:b?c").as_deref(), Some("a-b-c.zip"));
         assert_eq!(code_archive_name("Con").as_deref(), Some("_Con.zip"));
         assert_eq!(code_archive_name("  "), None);
+    }
+
+    /// A headless app whose new document's frame is selected and exports one SVG,
+    /// that row's settings open. Answers the app and the frame.
+    fn svg_settings_app(ctx: &egui::Context) -> (crate::app::OndinApp, NodeId) {
+        crate::theme::install(ctx);
+        let mut app = crate::app::OndinApp::headless(ctx);
+        let page = app.session.doc.first_page();
+        let frame = app.session.doc.get(page).expect("the page").children()[0];
+        let spec = ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0));
+        assert!(app.session.commit(Transaction(vec![Operation::SetExports {
+            id: frame,
+            exports: ondin_core::keyed_by_position([spec]),
+        }])));
+        app.session.selection.set_one(frame);
+        app.export_row_open = Some(0);
+        (app, frame)
+    }
+
+    fn precision_of(app: &crate::app::OndinApp, frame: NodeId) -> u8 {
+        app.session.doc.get(frame).expect("the frame").exports()[0]
+            .value
+            .precision
+    }
+
+    /// A right-click mid-scrub of *Precision* puts the number back, writes nothing,
+    /// and leaves the card open, with the pointer on the card or out over the canvas.
+    /// flip: `export_number_field` ignoring `gesture_cancelled` → fails at "the
+    /// precision is back".
+    #[test]
+    fn a_right_click_winds_a_precision_scrub_back() {
+        for outside in [false, true] {
+            let ctx = egui::Context::default();
+            let (mut app, frame) = svg_settings_app(&ctx);
+            let steps = app.session.history.undo_depth();
+            crate::repeat::tests::scrub_then_right_click(
+                &ctx,
+                &mut app,
+                egui::Id::new(("export-settings", 0usize)),
+                "Precision",
+                |at| match outside {
+                    true => egui::pos2(500.0, 400.0),
+                    false => at,
+                },
+                |app| {
+                    let held = app.in_flight.export_scrub.map(|(_, _, v)| v);
+                    assert!(
+                        held.is_some_and(|v| v != 2.0),
+                        "the drag scrubbed it: {held:?}"
+                    );
+                },
+            );
+            assert_eq!(
+                precision_of(&app, frame),
+                2,
+                "the precision is back ({outside})"
+            );
+            assert!(app.in_flight.export_scrub.is_none(), "nothing held");
+            assert_eq!(app.session.history.undo_depth(), steps, "nothing written");
+            assert_eq!(
+                app.export_row_open,
+                Some(0),
+                "the right-click closed nothing"
+            );
+        }
+    }
+
+    /// A set whose SVG row exports each variant plans a file per variant, and the
+    /// row's caption counts them into the set's folder.
+    #[test]
+    fn a_set_row_says_how_many_files_go_into_its_folder() {
+        use ondin_core::variant::{VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let page = app.session.doc.first_page();
+        let [set, a, b] = [(); 3].map(|_| app.session.ids.mint());
+        let frame = |id, parent, index| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(24.0, 24.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Arrow Icons".into()),
+        };
+        let mut ops = vec![
+            frame(set, page, 0),
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp::new("Size", vec!["16".into(), "24".into()])],
+                    ..Default::default()
+                }),
+            },
+        ];
+        for (i, (v, value)) in [(a, "16"), (b, "24")].into_iter().enumerate() {
+            ops.push(frame(v, set, i));
+            ops.push(Operation::SetComponent {
+                id: v,
+                component: true,
+            });
+            ops.push(Operation::SetVariant {
+                id: v,
+                values: vec![value.into()],
+            });
+        }
+        let spec = ExportSpec {
+            each_variant: true,
+            ..ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0))
+        };
+        ops.push(Operation::SetExports {
+            id: set,
+            exports: ondin_core::keyed_by_position([spec.clone()]),
+        });
+        assert!(app.session.commit(Transaction(ops)));
+        let paths: Vec<String> = app
+            .export_plan(&[set])
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(paths, ["arrow-icons/16.svg", "arrow-icons/24.svg"]);
+        assert_eq!(
+            app.export_size_label(&spec, Some(set)),
+            "2 files in arrow-icons/"
+        );
+    }
+
+    /// A closed SVG row's settings button is marked by any SVG setting off its
+    /// default, and a PNG's is not by SVG settings it keeps but does not use.
+    #[test]
+    fn an_svg_setting_marks_the_settings_button() {
+        let svg = ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0));
+        assert_eq!(settings_button_state(&svg, false), ui::FieldButton::Off);
+        for set in [
+            ExportSpec {
+                colour: SvgColour::CurrentColor,
+                ..svg.clone()
+            },
+            ExportSpec {
+                strokes: SvgStrokes::Outline,
+                ..svg.clone()
+            },
+            ExportSpec {
+                view: SvgView::Artwork,
+                ..svg.clone()
+            },
+            ExportSpec {
+                precision: 0,
+                ..svg.clone()
+            },
+        ] {
+            assert_eq!(settings_button_state(&set, false), ui::FieldButton::Set);
+            let png = ExportSpec {
+                format: ExportFormat::Png,
+                ..set
+            };
+            assert_eq!(settings_button_state(&png, false), ui::FieldButton::Off);
+        }
     }
 }

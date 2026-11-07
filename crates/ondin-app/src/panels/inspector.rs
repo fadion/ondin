@@ -11548,7 +11548,7 @@ enum GridStep {
     Nothing,
 }
 
-/// The grid fields' whole decision, as `panels::export`'s `quality_step` is.
+/// The grid fields' whole decision, as `panels::export`'s `scrub_step` is.
 ///
 /// The cancel is answered first: egui may still report that frame's motion as
 /// `changed()`. A drag holds and never commits, since `cancel_gesture` undoes a

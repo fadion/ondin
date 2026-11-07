@@ -16,8 +16,9 @@
 use ondin_core::kurbo::{Affine, BezPath, Insets, Rect, Shape};
 use ondin_core::peniko::{Color, Extend, GradientKind};
 use ondin_core::{
-    BlendMode, Decoration, Document, Effect, EffectKind, ExportText, Fill, Framing, LineStyle,
-    MaskMode, Node, NodeId, NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
+    BlendMode, Decoration, Document, Effect, EffectKind, ExportSpec, ExportText, Fill, Framing,
+    LineStyle, MaskMode, Node, NodeId, NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign,
+    SvgColour, SvgStrokes, SvgView, geometry,
 };
 use ondin_core::{Brush, Keyed};
 use std::fmt::Write;
@@ -37,6 +38,10 @@ pub struct Export {
     pub approximated: Vec<String>,
     /// Features drawn exactly whose document does not survive our own reader.
     pub round_trip: Vec<String>,
+    /// How many different solid colours, opacity aside, `currentColor` stood in
+    /// for — more than one is a choice the export panel names. Zero when the file
+    /// keeps its colours.
+    pub merged: usize,
 }
 
 /// The sink [`emit_node`] pushes into. Not built in `collect_defs`, which has no
@@ -128,7 +133,8 @@ pub(crate) fn svg_linking(
     view: Option<Rect>,
     faces: bool,
 ) -> Export {
-    svg_framed(doc, res, origins, linked, text, view, faces, false)
+    let style = Style::default();
+    svg_framed(doc, res, origins, linked, text, view, faces, false, style)
 }
 
 /// [`svg_linking`] with the view's corner moved to the origin, so the markup
@@ -141,7 +147,46 @@ pub(crate) fn svg_at_zero(
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
     text: ExportText,
 ) -> Export {
-    svg_framed(doc, res, origins, linked, text, None, false, true)
+    let style = Style::default();
+    svg_framed(doc, res, origins, linked, text, None, false, true, style)
+}
+
+/// The file an export spec asks for of `node`: its own subtree, or a slice's box
+/// of its page, framed as [`ExportSpec::view`] says — grown about its centre to a
+/// square under [`ExportSpec::pad_square`] — with the box's corner at `0 0`,
+/// numbers to [`ExportSpec::precision`] places, and solid paint and strokes as
+/// [`ExportSpec::colour`] and [`ExportSpec::strokes`] say.
+pub fn svg_spec(doc: &Document, res: &Resolved, node: NodeId, spec: &ExportSpec) -> Export {
+    let (origins, view) = match crate::plan::slice_region(doc, res, node) {
+        Some((view, origins)) => (origins, Some(view)),
+        None => (vec![node], frame_view(doc, res, node, spec.view)),
+    };
+    let view = match spec.pad_square {
+        true => view.or_else(|| crate::extent(res, &origins)).map(|v| {
+            let side = v.width().max(v.height());
+            Rect::from_center_size(v.center(), (side, side))
+        }),
+        false => view,
+    };
+    let style = Style {
+        current_color: spec.colour == SvgColour::CurrentColor,
+        outline_strokes: spec.strokes == SvgStrokes::Outline,
+        precision: spec.precision,
+    };
+    let linked = Default::default();
+    svg_framed(
+        doc, res, &origins, linked, spec.text, view, false, true, style,
+    )
+}
+
+/// The box [`SvgView::Frame`] frames `node` on: a frame's own world box. `None`
+/// for any other layer and under [`SvgView::Artwork`], which take the ink.
+pub fn frame_view(doc: &Document, res: &Resolved, node: NodeId, view: SvgView) -> Option<Rect> {
+    let framed = matches!(doc.get(node)?.kind(), NodeKind::Artboard { .. });
+    match (view, framed) {
+        (SvgView::Frame, true) => res.world_bounds(node),
+        _ => None,
+    }
 }
 
 #[expect(
@@ -157,7 +202,9 @@ fn svg_framed(
     view: Option<Rect>,
     faces: bool,
     at_zero: bool,
+    style: Style,
 ) -> Export {
+    let _places = PrecisionScope::set(style.precision);
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
     let view = view
         .or_else(|| crate::extent(res, origins))
@@ -180,6 +227,7 @@ fn svg_framed(
         linked,
         text,
         faces,
+        style,
         ..Default::default()
     };
     for id in origins {
@@ -217,6 +265,7 @@ fn svg_framed(
         svg: out,
         approximated: report.approximated,
         round_trip: report.round_trip,
+        merged: defs.merged.borrow().len(),
     }
 }
 
@@ -248,6 +297,53 @@ struct Defs {
     /// (`ExportRun::face`) rather than the document's family — for the PDF
     /// converter, which looks faces up by those names (see [`svg_linking`]).
     faces: bool,
+    /// Not a def: what an export spec asks of the pass ([`svg_spec`]).
+    style: Style,
+    /// The solid colours `currentColor` stood in for, which [`Export::merged`]
+    /// counts. A cell because every emitter holds the defs shared.
+    merged: std::cell::RefCell<std::collections::BTreeSet<[u8; 3]>>,
+}
+
+/// What an export spec asks of the writer beyond the plain file: solid paint as
+/// `currentColor`, strokes as their filled ink, and the decimal places.
+#[derive(Clone, Copy)]
+struct Style {
+    current_color: bool,
+    outline_strokes: bool,
+    precision: u8,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            current_color: false,
+            outline_strokes: false,
+            precision: ondin_core::export::MAX_PRECISION,
+        }
+    }
+}
+
+thread_local! {
+    /// The decimal places [`fmt`] writes, set for one pass by [`svg_framed`]. A
+    /// thread-local because `fmt` is the spelling of every number in the file,
+    /// reached from far too many places to hand a parameter to.
+    static PRECISION: std::cell::Cell<u8> =
+        const { std::cell::Cell::new(ondin_core::export::MAX_PRECISION) };
+}
+
+/// Puts [`PRECISION`] back when the pass ends, a panic included.
+struct PrecisionScope(u8);
+
+impl PrecisionScope {
+    fn set(places: u8) -> Self {
+        Self(PRECISION.with(|p| p.replace(places.min(ondin_core::export::MAX_PRECISION))))
+    }
+}
+
+impl Drop for PrecisionScope {
+    fn drop(&mut self) {
+        PRECISION.with(|p| p.set(self.0));
+    }
 }
 
 /// A def's id: a `String` whose equality is counted in tests. Blind spot: a
@@ -848,6 +944,7 @@ fn missing_picture(doc: &Document, brush: &Brush) -> bool {
 
 /// The missing-image placeholder as markup, from core's `missing_placeholder` so it
 /// cannot drift from `scene::paint_missing`; clipped to the shape's outline.
+#[allow(clippy::too_many_arguments)]
 fn emit_missing(
     out: &mut String,
     node: &Node,
@@ -856,6 +953,7 @@ fn emit_missing(
     derived: Option<&BezPath>,
     slot: &str,
     pad: &str,
+    defs: &Defs,
 ) {
     let Some(frame) = paint_frame(node, res, id) else {
         return;
@@ -874,7 +972,7 @@ fn emit_missing(
         &ground,
         "",
         "",
-        false,
+        defs,
     );
     let cid = format!("mi-{}-{slot}", id.to_wire().replace(':', "_"));
     // The shape as a clip, so the rim reads as an inner border and the cross stops
@@ -1327,7 +1425,7 @@ fn emit_node(
         for (i, f) in visible_fills(&paint) {
             let slot = format!("fill-{i}");
             if missing_picture(doc, f.brush.drawn()) {
-                emit_missing(out, node, res, id, None, &slot, &content_pad);
+                emit_missing(out, node, res, id, None, &slot, &content_pad, defs);
                 continue;
             }
             let clip = framing_of(doc, node, res, id, f.brush.drawn()).and_then(|f| f.clip);
@@ -1504,6 +1602,8 @@ fn emit_shape(
         && fills.len() <= 1
         && match strokes.as_slice() {
             [] => true,
+            // Outlined, a stroke is an element of its own (`emit_strokes`).
+            _ if defs.style.outline_strokes => false,
             // A per-side stroke or a fitted multi-subpath dash is several
             // `<path>`s, so neither can ride the shape's own element.
             [(_, s)] => {
@@ -1530,7 +1630,7 @@ fn emit_shape(
         // Text with no ink at all is black, as in the scene walk; with a stroke
         // the letters stay hollow.
         None if matches!(node.kind(), NodeKind::Text { .. }) && strokes.is_empty() => {
-            r##" fill="#000000""##.to_string()
+            solid_attr("fill", Color::BLACK, defs)
         }
         None => r#" fill="none""#.to_string(),
     };
@@ -1561,7 +1661,7 @@ fn emit_shape(
         &fill,
         &stroke,
         &op,
-        defs.faces,
+        defs,
     );
 }
 
@@ -1730,7 +1830,7 @@ fn emit_stacked(
     for (i, f) in fills {
         let slot = format!("fill-{i}");
         if missing_picture(doc, f.brush.drawn()) {
-            emit_missing(out, node, res, id, derived, &slot, &inner);
+            emit_missing(out, node, res, id, derived, &slot, &inner, defs);
             continue;
         }
         let clip = framing_of(doc, node, res, id, f.brush.drawn()).and_then(|f| f.clip);
@@ -1749,7 +1849,7 @@ fn emit_stacked(
                 &fill,
                 "",
                 "",
-                defs.faces,
+                defs,
             );
         });
     }
@@ -1791,6 +1891,25 @@ fn emit_strokes(
         _ => res.boolean_path(id),
     };
     for (i, s) in strokes {
+        // Outlined, the stroke is the ink it lays filled with its paint, which
+        // already holds its sides, dashes and alignment, so nothing below applies.
+        if defs.style.outline_strokes
+            && let Some(ink) = shape
+                .as_ref()
+                .and_then(|shape| ondin_core::build::stroke_ink(res.used_kind_of(node), shape, s))
+        {
+            let slot = format!("stroke-{i}");
+            let box_clip = framing_of(doc, node, res, id, s.brush.drawn()).and_then(|f| f.clip);
+            with_image_clip(out, box_clip, id, &slot, inner, |out, pad| {
+                let _ = writeln!(
+                    out,
+                    r#"{pad}<path d="{d}"{fill}/>"#,
+                    d = path_d(&ink),
+                    fill = paint_attr("fill", s.brush.drawn(), id, &slot, defs),
+                );
+            });
+            continue;
+        }
         // Unfilled, or it would paint over the fills beneath.
         const UNFILLED: &str = r#" fill="none""#;
         // A per-side stroke is one `<path>` per edge (§6.3); the alignment clip still
@@ -1845,7 +1964,7 @@ fn emit_strokes(
                         defs,
                     ),
                     "",
-                    defs.faces,
+                    defs,
                 ),
             }
         };
@@ -1957,8 +2076,8 @@ fn write_element(
     fill: &str,
     stroke: &str,
     op: &str,
-    // [`Defs::faces`], for text.
-    faces: bool,
+    // For text: [`Defs::faces`], and the run colours' spelling.
+    defs: &Defs,
 ) {
     match kind {
         NodeKind::Rect { .. } => {
@@ -2078,7 +2197,7 @@ fn write_element(
             if on_path.is_some() {
                 let mut spans = String::new();
                 for line in ondin_core::text::export_lines(parts) {
-                    spans.push_str(&tspans(&line.runs, faces));
+                    spans.push_str(&tspans(&line.runs, defs));
                 }
                 // Percent plus `text-anchor` survives a different font. The node's
                 // offset is added to the percentage and leaves the anchor alone: the
@@ -2105,7 +2224,7 @@ fn write_element(
             for line in ondin_core::text::export_lines(parts) {
                 // No `text-anchor`: alignment, indent and justification are already
                 // in the run's `x`, read after `Layout::align`.
-                let spans = tspans(&line.runs, faces);
+                let spans = tspans(&line.runs, defs);
                 // `xml:space`: a viewer collapses runs of spaces and drops an
                 // indent by default, and the PDF converter is such a viewer.
                 let _ = writeln!(
@@ -2136,11 +2255,11 @@ pub(crate) fn face_alias((blob, index): ondin_core::text::FaceFile) -> String {
 /// wherever its face or file changes and names its file's [`face_alias`] ahead
 /// of its family; otherwise neighbouring runs of one style are one `<tspan>`, so
 /// a face change alone writes nothing.
-fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
+fn tspans(runs: &[ondin_core::text::ExportRun], defs: &Defs) -> String {
     type Face<'a> = (Option<&'a str>, Option<ondin_core::text::FaceFile>);
     let mut merged: Vec<(String, &ondin_core::TextStyle, Face)> = Vec::new();
     for run in runs {
-        let face = if faces {
+        let face = if defs.faces {
             (run.face.as_deref(), run.file)
         } else {
             (None, None)
@@ -2157,7 +2276,7 @@ fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
         let _ = write!(
             out,
             "<tspan{attrs}>{text}</tspan>",
-            attrs = run_attrs(style, face, file),
+            attrs = run_attrs(style, face, file, defs),
             text = escape_xml(&text),
         );
     }
@@ -2172,6 +2291,7 @@ fn run_attrs(
     style: &ondin_core::TextStyle,
     face: Option<&str>,
     file: Option<ondin_core::text::FaceFile>,
+    defs: &Defs,
 ) -> String {
     let mut out = String::new();
     let family = face.unwrap_or(&style.font_family);
@@ -2232,15 +2352,7 @@ fn run_attrs(
     // A run's own ink overrides the `<text>`'s; `None` inherits. Alpha rides
     // `fill-opacity`.
     if let Some(c) = style.color {
-        let rgba = c.to_rgba8();
-        let _ = write!(
-            out,
-            r##" fill="#{:02x}{:02x}{:02x}"{}"##,
-            rgba.r,
-            rgba.g,
-            rgba.b,
-            alpha_attr("fill-opacity", rgba.a),
-        );
+        out.push_str(&solid_attr("fill", c, defs));
     }
     if !style.letter_spacing.is_zero() {
         let _ = write!(
@@ -2480,16 +2592,7 @@ fn stroke_attr(
 /// is an SVG error where "no paint" is a picture.
 fn paint_attr(attr: &str, brush: &Brush, id: NodeId, slot: &str, defs: &Defs) -> String {
     match brush {
-        Brush::Solid(c) => {
-            let rgba = c.to_rgba8();
-            format!(
-                r##" {attr}="#{:02x}{:02x}{:02x}"{}"##,
-                rgba.r,
-                rgba.g,
-                rgba.b,
-                alpha_attr(&format!("{attr}-opacity"), rgba.a),
-            )
-        }
+        Brush::Solid(c) => solid_attr(attr, *c, defs),
         // `{attr}-opacity` multiplies the paint server's own alpha, so stops keep
         // `stop-opacity`; through `alpha_attr` so opacity rounds the same everywhere.
         Brush::Gradient(g) => format!(
@@ -2508,6 +2611,22 @@ fn paint_attr(attr: &str, brush: &Brush, id: NodeId, slot: &str, defs: &Defs) ->
             false => format!(r#" {attr}="none""#),
         },
     }
+}
+
+/// A solid paint attribute: a hex colour, or `currentColor` when the pass asks
+/// for it ([`Style::current_color`]). Either way the alpha rides
+/// `{attr}-opacity`, so a duotone of one colour at two opacities survives.
+fn solid_attr(attr: &str, c: Color, defs: &Defs) -> String {
+    let rgba = c.to_rgba8();
+    let alpha = alpha_attr(&format!("{attr}-opacity"), rgba.a);
+    if defs.style.current_color {
+        defs.merged.borrow_mut().insert([rgba.r, rgba.g, rgba.b]);
+        return format!(r#" {attr}="currentColor"{alpha}"#);
+    }
+    format!(
+        r##" {attr}="#{:02x}{:02x}{:02x}"{alpha}"##,
+        rgba.r, rgba.g, rgba.b,
+    )
 }
 
 fn alpha_attr(name: &str, alpha: u8) -> String {
@@ -2607,7 +2726,8 @@ pub(crate) fn fmt(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 {
         return format!("{}", v as i64);
     }
-    let s = format!("{v:.4}");
+    let places = PRECISION.with(|p| p.get()) as usize;
+    let s = format!("{v:.places$}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     // `-0` is dust (a rounded rect's box top is `-8.88e-16`), never worth writing.
     match s {

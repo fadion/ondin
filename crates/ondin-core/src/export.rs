@@ -65,6 +65,26 @@ pub struct ExportSpec {
     /// format changes, as [`Self::quality`] is.
     #[serde(default, skip_serializing_if = "ExportText::is_live")]
     pub text: ExportText,
+    /// How an SVG writes solid paint. SVG only, and kept under other formats as
+    /// [`Self::quality`] is; so are the three below.
+    #[serde(default, skip_serializing_if = "SvgColour::is_painted")]
+    pub colour: SvgColour,
+    /// Whether an SVG writes strokes as strokes or as the filled ink they lay.
+    #[serde(default, skip_serializing_if = "SvgStrokes::is_kept")]
+    pub strokes: SvgStrokes,
+    /// What an SVG's `viewBox` frames.
+    #[serde(default, skip_serializing_if = "SvgView::is_frame")]
+    pub view: SvgView,
+    /// The decimal places an SVG writes its numbers to, 0 to [`MAX_PRECISION`].
+    #[serde(
+        default = "default_precision",
+        skip_serializing_if = "is_default_precision"
+    )]
+    pub precision: u8,
+    /// On a component set, one file per variant in a folder named for the set,
+    /// rather than one picture of the whole set. Inert on any other layer.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub each_variant: bool,
 }
 
 impl ExportSpec {
@@ -80,6 +100,11 @@ impl ExportSpec {
             trim: false,
             pad_square: false,
             text: ExportText::default(),
+            colour: SvgColour::default(),
+            strokes: SvgStrokes::default(),
+            view: SvgView::default(),
+            precision: default_precision(),
+            each_variant: false,
         }
     }
 
@@ -315,6 +340,61 @@ impl ExportText {
     }
 }
 
+/// How an SVG writes solid paint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SvgColour {
+    /// Each paint's own colour.
+    #[default]
+    AsPainted,
+    /// Every solid fill and stroke as `currentColor`, its opacity kept, so the file
+    /// takes its colour from the page. Gradients and pictures keep their own.
+    CurrentColor,
+}
+
+impl SvgColour {
+    fn is_painted(&self) -> bool {
+        matches!(self, SvgColour::AsPainted)
+    }
+}
+
+/// Whether an SVG keeps its strokes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SvgStrokes {
+    /// Strokes as strokes, which CSS can restyle.
+    #[default]
+    Keep,
+    /// Each stroke as the filled ink it lays, as *Outline stroke* makes it, the
+    /// document left alone.
+    Outline,
+}
+
+impl SvgStrokes {
+    fn is_kept(&self) -> bool {
+        matches!(self, SvgStrokes::Keep)
+    }
+}
+
+/// What an SVG's `viewBox` frames. Either way the box starts at `0 0`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SvgView {
+    /// A frame's own box, whatever its artwork's reach, so a 24×24 icon frame
+    /// writes `0 0 24 24`. A layer that is no frame is framed on its artwork.
+    #[default]
+    Frame,
+    /// The artwork's ink, as a raster export frames it.
+    Artwork,
+}
+
+impl SvgView {
+    fn is_frame(&self) -> bool {
+        matches!(self, SvgView::Frame)
+    }
+}
+
+/// The most decimal places an SVG writes, which is also what an SVG written with
+/// no spec of its own (*Copy as SVG*, code export) keeps.
+pub const MAX_PRECISION: u8 = 4;
+
 /// What fills the parts of an export the layer itself does not cover.
 ///
 /// `png_of` starts its walk at the layer, so nothing behind it is painted (§15
@@ -354,6 +434,15 @@ fn default_quality() -> u8 {
 
 fn is_default_quality(q: &u8) -> bool {
     *q == default_quality()
+}
+
+/// Two places: a hundredth of a pixel is past what any icon shows.
+fn default_precision() -> u8 {
+    2
+}
+
+fn is_default_precision(p: &u8) -> bool {
+    *p == default_precision()
 }
 
 fn is_false(b: &bool) -> bool {
@@ -458,6 +547,32 @@ mod tests {
         spec.text = ExportText::Outlines;
         let json = serde_json::to_string(&spec).expect("serialize");
         assert_eq!(json, r#"{"format":"Pdf","text":"Outlines"}"#);
+        assert_eq!(
+            serde_json::from_str::<ExportSpec>(&json).expect("round trip"),
+            spec
+        );
+    }
+
+    /// The SVG settings write nothing at their defaults and read back when set; a
+    /// spec saved before they existed loads at two decimals.
+    #[test]
+    fn svg_settings_are_saved_only_when_set() {
+        let mut spec = ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0));
+        assert_eq!(
+            serde_json::to_string(&spec).expect("serialize"),
+            r#"{"format":"Svg"}"#
+        );
+        assert_eq!(spec.precision, 2);
+        spec.colour = SvgColour::CurrentColor;
+        spec.strokes = SvgStrokes::Outline;
+        spec.view = SvgView::Artwork;
+        spec.precision = 0;
+        spec.each_variant = true;
+        let json = serde_json::to_string(&spec).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"format":"Svg","colour":"CurrentColor","strokes":"Outline","view":"Artwork","precision":0,"each_variant":true}"#
+        );
         assert_eq!(
             serde_json::from_str::<ExportSpec>(&json).expect("round trip"),
             spec

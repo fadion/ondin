@@ -1327,6 +1327,18 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
             "{good:?} is an ordinary export and must still work"
         );
     }
+    // An SVG written past four places, the most the writer has; four itself is fine.
+    for (places, ok) in [(5, false), (4, true)] {
+        let svg = ExportSpec {
+            precision: places,
+            ..ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0))
+        };
+        let out = doc.apply(&Transaction(vec![Operation::SetExports {
+            id: frame,
+            exports: keyed_by_position([svg]),
+        }]));
+        assert_eq!(out.is_ok(), ok, "{places} places");
+    }
 
     // And a file that carries one loses the row rather than the document.
     //

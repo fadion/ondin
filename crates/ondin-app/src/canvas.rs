@@ -15604,12 +15604,12 @@ mod headless_app_tests {
 
         // Neither shows through `has_gesture_preview`: `SetExports` never reaches
         // `set_preview` and `SetGuidePosition` leaves `overrides` empty.
-        app.in_flight.export_quality_scrub = Some((0, 0.8));
+        app.in_flight.export_scrub = Some((crate::panels::ExportNumber::Quality, 0, 0.8));
         assert!(
             app.cancel_gesture(&ctx),
             "the export quality scrub is a witness"
         );
-        app.in_flight.export_quality_scrub = None;
+        app.in_flight.export_scrub = None;
 
         app.in_flight.guide_position_drag = Some((ondin_core::GuideAxis::Vertical, 100.0));
         assert!(

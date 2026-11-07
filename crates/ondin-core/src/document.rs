@@ -3756,12 +3756,13 @@ fn is_paintable(kind: &NodeKind) -> bool {
 /// because `from_label` parses a string and this asks about a value.
 ///
 /// `quality` is `1..=100`, what the JPEG encoder takes; `0` is out of range.
+/// `precision` is at most `MAX_PRECISION`, the places an SVG can be written to.
 pub(crate) fn export_spec_is_usable(spec: &ExportSpec) -> bool {
     let scale = match spec.scale {
         crate::export::ExportScale::Times(n) => n.is_finite() && n > 0.0,
         crate::export::ExportScale::Width(px) | crate::export::ExportScale::Height(px) => px > 0,
     };
-    scale && (1..=100).contains(&spec.quality)
+    scale && (1..=100).contains(&spec.quality) && spec.precision <= crate::export::MAX_PRECISION
 }
 
 /// Apply a geometry patch to a node kind in place, returning the patch that

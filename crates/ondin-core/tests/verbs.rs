@@ -351,6 +351,83 @@ fn duplicate_copies_each_outermost_layer_above_it() {
     assert_eq!((to.x0 - from.x0, to.y0 - from.y0), (30.0, -5.0));
 }
 
+/// `insert_subtree` creates a nested tree in one edit, each layer with the
+/// properties given and its children bottom first, answers its layers root first,
+/// and undoes as one step; a field no layer takes is refused before anything runs.
+///
+/// flip: `tree_ops` creating each child at index 0 → fails at "children bottom first".
+#[test]
+fn insert_subtree_creates_a_tree_in_one_edit() {
+    let (mut doc, mut ids, page) = blank();
+    let fill = serde_json::to_value(Fill {
+        brush: Brush::Solid(Color::from_rgb8(10, 20, 30)).into(),
+        visible: true,
+    })
+    .unwrap();
+    let frame = serde_json::to_value(NodeKind::Artboard {
+        size: Size::new(200.0, 100.0),
+        corner_radii: Default::default(),
+        corner_smoothing: 0.0,
+    })
+    .unwrap();
+    let tree = json!({
+        "kind": frame,
+        "name": "Card",
+        "clip": true,
+        "children": [
+            { "kind": rect(10.0, 10.0), "name": "Back", "fills": [fill], "opacity": 0.5 },
+            { "kind": "Group", "name": "Front", "children": [
+                { "kind": rect(5.0, 5.0), "blend": "multiply", "visible": false },
+            ] },
+        ],
+    });
+    let res = Resolved::rebuild(&doc);
+    let Done { tx, created } = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+        },
+        "insert_subtree",
+        &json!({ "parent": page.to_wire(), "tree": tree }),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let undo = doc.apply(&tx).expect("the tree commits").inverse;
+    let [card, back, front, inner] = created[..] else {
+        panic!("four layers, root first: {created:?}");
+    };
+    assert_eq!(doc.get(page).unwrap().children(), [card]);
+    assert_eq!(
+        doc.get(card).unwrap().children(),
+        [back, front],
+        "children bottom first"
+    );
+    assert_eq!(doc.get(front).unwrap().children(), [inner]);
+    assert_eq!(doc.get(card).unwrap().name(), "Card");
+    let b = doc.get(back).unwrap();
+    assert_eq!((b.paint().fills.len(), b.opacity()), (1, 0.5));
+    let i = doc.get(inner).unwrap();
+    assert!(!i.visible());
+    assert_eq!(i.blend(), ondin_core::BlendMode::Multiply);
+    doc.apply(&undo).expect("the undo applies");
+    assert!(doc.get(page).unwrap().children().is_empty());
+
+    let res = Resolved::rebuild(&doc);
+    let refused = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+        },
+        "insert_subtree",
+        &json!({ "parent": page.to_wire(), "tree": { "kind": rect(1.0, 1.0), "colour": "red" } }),
+    );
+    assert!(
+        matches!(refused, Err(VerbError::Invalid { param: "tree", .. })),
+        "{refused:?}"
+    );
+}
+
 /// A script's later steps name an earlier step's node by its label, and `@page` is
 /// the page; a refusal names its step, counted from 1, and keeps the steps before it.
 ///

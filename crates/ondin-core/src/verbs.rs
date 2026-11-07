@@ -446,6 +446,32 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "insert_subtree",
+        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first",
+        params: &[
+            req("parent", NODE, "the frame, group or page to create it in"),
+            req(
+                "tree",
+                ParamKind::Model("Tree"),
+                "the root layer, its properties and its `children`, bottom first",
+            ),
+            opt(
+                "index",
+                INDEX,
+                "the root's place among the parent's children, 0 the bottom",
+            ),
+        ],
+        run: |ctx, a| {
+            let parent = a.node("parent")?;
+            let count = node(ctx, parent)?.children().len();
+            let index = a.index("index").unwrap_or(count).min(count);
+            let tree = a.model::<Tree>("tree")?;
+            let mut done = Done::default();
+            tree_ops(ctx, a, &tree, parent, index, &mut done)?;
+            Ok(done)
+        },
+    },
+    Verb {
         name: "reparent",
         doc: "Move a layer into another parent, keeping where it is drawn",
         params: &[
@@ -932,6 +958,117 @@ pub static VERBS: &[Verb] = &[
         },
     },
 ];
+
+/// One layer of `insert_subtree`'s tree: what `create_node` takes, the properties
+/// the single-layer verbs set, each in the same form, and the layers inside it.
+/// Ids are minted as it is created, so a caller never writes one.
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Tree {
+    pub kind: NodeKind,
+    pub name: Option<String>,
+    pub transform: Option<Affine>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub opacity: Option<f32>,
+    /// A [`BLENDS`] word.
+    pub blend: Option<String>,
+    pub clip: Option<bool>,
+    pub mask: Option<bool>,
+    pub fills: Option<Vec<Fill>>,
+    pub strokes: Option<Vec<Stroke>>,
+    pub effects: Option<Vec<Effect>>,
+    pub exports: Option<Vec<ExportSpec>>,
+    pub display: Option<Display>,
+    pub item: Option<LayoutItem>,
+    pub insets: Option<Insets>,
+    /// Bottom first.
+    #[serde(default)]
+    pub children: Vec<Tree>,
+}
+
+/// The ops creating `tree` at `index` in `parent`, then its children inside it,
+/// appended to `done` with each layer it mints. A layer is created before its
+/// properties are set, so each op meets the layer it names.
+fn tree_ops(
+    ctx: &mut Ctx<'_>,
+    a: &Args<'_>,
+    tree: &Tree,
+    parent: NodeId,
+    index: usize,
+    done: &mut Done,
+) -> Result<(), VerbError> {
+    let id = ctx.ids.mint();
+    done.created.push(id);
+    let ops = &mut done.tx.0;
+    ops.push(Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind: tree.kind.clone(),
+        transform: tree.transform,
+        name: tree.name.clone(),
+    });
+    if let Some(visible) = tree.visible {
+        ops.push(Operation::SetVisible { id, visible });
+    }
+    if let Some(locked) = tree.locked {
+        ops.push(Operation::SetLocked { id, locked });
+    }
+    if let Some(opacity) = tree.opacity {
+        if !build::valid_opacity(opacity) {
+            return Err(a.invalid("tree", "an opacity is 0 to 1"));
+        }
+        ops.push(Operation::SetOpacity { id, opacity });
+    }
+    if let Some(word) = &tree.blend {
+        if !BLENDS.contains(&word.as_str()) {
+            let why = format!("a blend is one of {}", BLENDS.join(", "));
+            return Err(a.invalid("tree", why));
+        }
+        let blend = blend_of(word);
+        ops.push(Operation::SetBlend { id, blend });
+    }
+    if let Some(clip) = tree.clip {
+        ops.push(Operation::SetClip { id, clip });
+    }
+    if let Some(mask) = tree.mask {
+        ops.push(Operation::SetMask { id, mask });
+    }
+    if let Some(fills) = &tree.fills {
+        let fills = rekeyed(ctx, &[], fills.clone());
+        done.tx.0.push(Operation::SetFills { id, fills });
+    }
+    if let Some(strokes) = &tree.strokes {
+        let strokes = rekeyed(ctx, &[], strokes.clone());
+        done.tx.0.push(Operation::SetStrokes { id, strokes });
+    }
+    if let Some(effects) = &tree.effects {
+        let effects = rekeyed(ctx, &[], effects.clone());
+        done.tx.0.push(Operation::SetEffects { id, effects });
+    }
+    if let Some(exports) = &tree.exports {
+        let exports = rekeyed(ctx, &[], exports.clone());
+        done.tx.0.push(Operation::SetExports { id, exports });
+    }
+    let ops = &mut done.tx.0;
+    if let Some(display) = &tree.display {
+        ops.push(Operation::SetDisplay {
+            id,
+            display: Some(display.clone()),
+        });
+    }
+    if let Some(insets) = tree.insets {
+        ops.push(Operation::SetInsets { id, insets });
+    }
+    if let Some(item) = tree.item {
+        ops.push(Operation::SetLayoutItem { id, item });
+    }
+    for (i, child) in tree.children.iter().enumerate() {
+        tree_ops(ctx, a, child, id, i, done)?;
+    }
+    Ok(())
+}
 
 /// The blend mode a [`BLENDS`] word names.
 fn blend_of(word: &str) -> BlendMode {

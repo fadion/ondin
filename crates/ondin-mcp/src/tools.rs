@@ -202,13 +202,7 @@ mod tests {
     const SESSION: [&str; 3] = ["undo", "redo", "set_selection"];
 
     /// Phase 2 tools with no registry verb yet, each with what it waits on.
-    const UNBOUND: [(&str, &str); 2] = [
-        (
-            "insert_subtree",
-            "a node list's wire form for callers outside the save format",
-        ),
-        ("add_image", "image bytes as an argument"),
-    ];
+    const UNBOUND: [(&str, &str); 1] = [("add_image", "image bytes as an argument")];
 
     /// Every Phase 2 tool is a verb of `ondin_core::verbs` under the same name, a
     /// session tool, or named in [`UNBOUND`] with its reason; none is two of those,

@@ -194,11 +194,17 @@ it created. A verb never commits; its caller does, as every edit is committed.
 - **`duplicate` places as `Ctrl+D` does** (`build::duplicate_placements`: the outermost layers, each
   copy one step above its original) and takes its offset as `dx`/`dy`. The clone chain that repeats
   a moved duplicate's step is the app's session state, so the verb has none.
+- **`insert_subtree` takes a tree, not the save format's node list** (`verbs::Tree`): each layer is
+  `create_node`'s `kind`, `name` and `transform`, the properties the single-layer verbs set in the
+  same forms (visibility, lock, opacity, blend, clip, mask, fills, strokes, effects, exports,
+  display, padding, layout item), and its `children`, bottom first. A caller never writes an id or
+  a parent link; the verb mints them and emits `CreateNode` then the `Set*` ops per layer, in one
+  transaction, so every op's own check applies. Unknown fields are refused.
 - **A paint list written whole keeps its item ids by position** (`item::rekey_by_position`), so an
   instance reads the write as overrides of its main's items.
 - **Phase 2's tool list is held to the registry** (`ondin-mcp`'s `every_write_tool_is_a_registry_verb`):
   every write tool is a verb of the same name, a session tool (`undo`, `redo`, `set_selection`), or
-  named as unbound with what it waits on (`insert_subtree`, `add_image`).
+  named as unbound with what it waits on (`add_image`).
 - **`run_script`** commits a list of `{ verb, args, as }` steps one by one. A string argument
   `"@label"` names the first node an earlier step labelled `label` created, and `"@page"` the first
   page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps

@@ -178,7 +178,8 @@ stack.
   that breaks another is no fix: *Nearest* must pass every mode's worst backdrop, and *Variables*
   lists only variables that pass in every mode, nearest the ink first. When no lightness at the
   hue passes everywhere the card offers only variables, the case modes exist for.
-- **What a fix edits** (`fix_transaction`): the runs and paints whose colour fails the finding,
+- **What a fix edits** (`ondin_core::contrast::fix_transaction`, the `fix_contrast` verb's too): the
+  runs and paints whose colour fails the finding,
   never the backdrop. A bound fill or stroke is judged by its variable's value in each mode against
   that mode's sample, so a variable that adapts to every mode is left bound. A run's own colour is
   replaced in the spans; runs drawing in the fill change the top visible fill. A run's colour

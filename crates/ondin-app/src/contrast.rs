@@ -12,9 +12,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use ondin_core::contrast::{Fix, fix_transaction};
 use ondin_core::kurbo::{Point, Rect};
 use ondin_core::peniko::Color;
-use ondin_core::{Brush, BrushSource, CharAttr, Document, Fill, NodeId, Operation, Transaction};
+use ondin_core::{Document, NodeId, Operation, Transaction};
 use ondin_export::contrast::{self, Finding, Level, Options, Prepared, Report};
 
 use crate::app::OndinApp;
@@ -138,13 +139,6 @@ struct FixCard {
     opening: bool,
     /// An Enter this frame, taken from the keymap by `contrast_claim_keys`.
     enter: bool,
-}
-
-/// A fix the card offers.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Fix {
-    Colour(Color),
-    Var(ondin_core::VarId),
 }
 
 impl Contrast {
@@ -1278,167 +1272,6 @@ fn side_effects(doc: &Document, id: NodeId, tx: &Transaction) -> Vec<String> {
     out
 }
 
-/// `brush`'s colour as it draws in `mode`: a bound one's variable read there.
-fn colour_in(
-    doc: &Document,
-    brush: &BrushSource,
-    mode: Option<ondin_core::ModeId>,
-) -> Option<Color> {
-    match brush {
-        BrushSource::Literal(Brush::Solid(c)) => Some(*c),
-        BrushSource::Literal(_) => None,
-        BrushSource::Bound { var, alpha } => match doc.variables().resolve_opt(*var, mode) {
-            Some(ondin_core::Value::Color(c)) => Some(c.multiply_alpha(*alpha)),
-            _ => None,
-        },
-    }
-}
-
-/// Whether `brush` fails `f`: a bound colour is judged by its own value in each
-/// sample's mode, so a variable that adapts to every mode's backdrop passes.
-fn brush_fails(doc: &Document, f: &Finding, level: Level, brush: &BrushSource) -> bool {
-    f.samples
-        .iter()
-        .any(|s| colour_in(doc, brush, s.mode).is_some_and(|c| !s.passes_with(level, c)))
-}
-
-/// The edit `fix` makes to `id`: the runs and paints whose colour fails `f` take
-/// the new colour, or the variable. A run's own colour is replaced in the spans; a
-/// run drawn in the fill changes the fill. Binding a variable goes through the
-/// fill (a run's colour cannot be bound), so a failing run's own colour is
-/// cleared onto it, and a passing run that drew in the fill keeps its colour. A
-/// mark changes only the paints its measured ink came from. `new_fill` keys a
-/// fill added to a text that had no visible one. `None` when nothing fails.
-pub(crate) fn fix_transaction(
-    doc: &Document,
-    id: NodeId,
-    f: &Finding,
-    level: Level,
-    fix: Fix,
-    new_fill: ondin_core::ItemId,
-) -> Option<Transaction> {
-    let node = doc.get(id)?;
-    let fails = |c: Color| !f.passes_with(level, c);
-    let paint = doc.resolved_paint(id, node.paint());
-    let solid = |b: &Brush| match b {
-        Brush::Solid(c) => Some(*c),
-        _ => None,
-    };
-    let replace = |old: &BrushSource| -> BrushSource {
-        match fix {
-            Fix::Colour(c) => BrushSource::Literal(Brush::Solid(c)),
-            Fix::Var(var) => BrushSource::Bound {
-                var,
-                alpha: match old {
-                    BrushSource::Literal(Brush::Solid(c)) => c.components[3],
-                    BrushSource::Bound { alpha, .. } => *alpha,
-                    BrushSource::Literal(_) => 1.0,
-                },
-            },
-        }
-    };
-    let mut ops = Vec::new();
-    if let Some(text) = ondin_core::TextRef::of(node.kind()) {
-        let top = node.paint().fills.iter().rposition(|x| x.visible);
-        let stroked = node.paint().strokes.iter().any(|s| s.visible);
-        // What a run with no colour of its own draws: the top fill, else black,
-        // or nothing for outlined type.
-        let top_colour = match top {
-            Some(i) => paint.fills.get(i).and_then(|p| solid(p.brush.drawn())),
-            None if stroked => Some(Color::TRANSPARENT),
-            None => Some(Color::BLACK),
-        };
-        let runs = text.spans.runs(text.style, text.content.len());
-        let mut spans = text.spans.clone();
-        let (mut spans_changed, mut onto_fill) = (false, false);
-        let fill_fails = runs.iter().any(|(_, s)| s.color.is_none())
-            && match top {
-                Some(i) => brush_fails(doc, f, level, &node.paint().fills[i].brush),
-                None => !stroked && fails(Color::BLACK),
-            };
-        for (range, style) in &runs {
-            if let Some(c) = style.color
-                && fails(c)
-            {
-                let attr = match fix {
-                    Fix::Colour(n) => CharAttr::Color(Some(n)),
-                    Fix::Var(_) => {
-                        onto_fill = true;
-                        CharAttr::Color(None)
-                    }
-                };
-                spans.set(range.clone(), attr, text.style);
-                spans_changed = true;
-            }
-        }
-        if onto_fill && !fill_fails {
-            // The fill is about to change under the runs that drew in it and passed.
-            for (range, style) in &runs {
-                if style.color.is_none()
-                    && let Some(c) = top_colour
-                {
-                    spans.set(range.clone(), CharAttr::Color(Some(c)), text.style);
-                }
-            }
-        }
-        if spans_changed {
-            ops.push(Operation::SetTextSpans { id, spans });
-        }
-        if fill_fails || onto_fill {
-            let mut fills = node.paint().fills.clone();
-            match top {
-                Some(i) => {
-                    let b = replace(&fills[i].brush);
-                    fills[i].brush = b;
-                }
-                // On top of the hidden fills, which stay as they were.
-                None => fills.push(ondin_core::Keyed::new(
-                    new_fill,
-                    Fill {
-                        brush: replace(&BrushSource::Literal(Brush::Solid(Color::BLACK))),
-                        visible: true,
-                    },
-                )),
-            }
-            ops.push(Operation::SetFills { id, fills });
-        }
-    } else {
-        // Only the paints the measured ink came from: a white box with a dark
-        // border that fails is fixed by its border, its fill left white.
-        let changes = |brush: &BrushSource| {
-            f.samples
-                .iter()
-                .any(|s| colour_in(doc, brush, s.mode) == Some(s.ink))
-                && brush_fails(doc, f, level, brush)
-        };
-        let mut fills = node.paint().fills.clone();
-        let mut fills_changed = false;
-        for fl in fills.iter_mut() {
-            if fl.visible && changes(&fl.brush) {
-                let b = replace(&fl.brush);
-                fl.brush = b;
-                fills_changed = true;
-            }
-        }
-        let mut strokes = node.paint().strokes.clone();
-        let mut strokes_changed = false;
-        for st in strokes.iter_mut() {
-            if st.visible && changes(&st.brush) {
-                let b = replace(&st.brush);
-                st.brush = b;
-                strokes_changed = true;
-            }
-        }
-        if fills_changed {
-            ops.push(Operation::SetFills { id, fills });
-        }
-        if strokes_changed {
-            ops.push(Operation::SetStrokes { id, strokes });
-        }
-    }
-    (!ops.is_empty()).then_some(Transaction(ops))
-}
-
 /// A passing chip's words: the score alone, and `large` when only the text's
 /// size makes it pass.
 fn pass_text(f: &Finding, level: Level) -> String {
@@ -1872,7 +1705,7 @@ fn hex(c: Color) -> String {
 mod tests {
     use super::*;
     use ondin_core::kurbo::{Affine, Size};
-    use ondin_core::{NodeKind, TextSizing, TextStyle};
+    use ondin_core::{Brush, CharAttr, Fill, NodeKind, TextSizing, TextStyle};
 
     /// One whole app frame at a fixed window size, the clock a twentieth of a
     /// second on (short enough for a press and release to be a click), with

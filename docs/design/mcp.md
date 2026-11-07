@@ -130,7 +130,7 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 
 #### Not exposed, on purpose
 
-Guides, layout grids, a page's ground, the fill rule and the proportions lock (visual only, irrelevant to an agent; §15 D1095, D1096). Paragraph spans travel inside `set_paragraph_style`.
+Guides, layout grids, a page's ground, the fill rule and the proportions lock (visual only, irrelevant to an agent; §15 D1095, D1096). Paragraph spans travel inside `style_paragraphs`.
 
 ## Traps
 

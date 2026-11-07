@@ -14,19 +14,15 @@ item's premise can go stale while its ask still reads true.
   drives it. Left:
   - **Edits the app still builds itself.** A verb is a builder's door, so an edit built in
     `ondin-app` moves into a core builder before its verb exists, as delete and duplicate did
-    (`build::delete`, `build::duplicate_placements`). The discrete commands that build their ops in
-    place:
-    - Guides: `paste_guides`, `duplicate_guides`, `remove_selected_guides`, `rulers::remove_guide`
-      and `remove_all_guides`, the menu's *Clear guides*.
-    - Layer commands: `toggle_hidden`/`toggle_locked` (outermost layers), `create_component`,
-      `repeat::linked_ring`, `pixel_fit`, `resize_to_original`, `flip_text_path`, the menu's fill
-      rule and *Reset origin*, `designate_key`, `join_layers`, `commit_batch_rename`.
-    - Pictures and paste: `replace_image_fill`/`replace_image_with`, `paste_text`, the PDF import's
-      `place_pdf`, `replace_with_clipboard`'s delete.
-    - The contrast checker's `fix_transaction`.
-    The canvas gestures and the inspector's field writers (`slot_transaction`, `transform_marks`,
-    `layout.rs`) build ops too; they become builders only when a verb needs the same edit.
-    `set_text_sizing` stays: it reads the app's shaped layout, and its op is `set_geometry`'s.
+    (`build::delete`, `build::duplicate_placements`). The commands no verb reaches yet that build
+    their ops in place: `repeat::linked_ring`, `pixel_fit`, `resize_to_original`, `flip_text_path`,
+    `join_layers`, `replace_image_fill`/`replace_image_with`, `paste_text`, and the contrast
+    checker's `fix_transaction`. `create_component` is Phase 3's `make_component`.
+    Left in the app on purpose: what the existing verbs already write (hide, lock, *Reset origin*,
+    *Make base operand*, batch rename), what MCP does not expose (guides, the fill rule, a page's
+    ground; `mcp.md` *Not exposed*), `set_text_sizing` (it reads the app's shaped layout; its op is
+    `set_geometry`'s), and the canvas gestures and the inspector's field writers, which become
+    builders only when a verb needs the same edit.
 
 ## Now · Components and layout
 

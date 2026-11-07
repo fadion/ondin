@@ -577,6 +577,88 @@ fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
     );
 }
 
+/// The JSON a `kind` argument takes for an open path from `a` to `b`.
+fn segment(a: (f64, f64), b: (f64, f64)) -> Value {
+    let mut path = ondin_core::kurbo::BezPath::new();
+    path.move_to(a);
+    path.line_to(b);
+    serde_json::to_value(NodeKind::Path {
+        path,
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
+    })
+    .unwrap()
+}
+
+/// `join_paths` splices two open paths at their nearest ends into the first, and
+/// the second goes; a path with no open end is refused.
+///
+/// flip: `edit::path_join_ends` keeping the farthest pair → fails at "joined at
+/// the near ends".
+#[test]
+fn join_paths_splices_the_nearest_ends() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let a = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": segment((0.0, 0.0), (10.0, 0.0)) }),
+    )[0];
+    let b = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": segment((12.0, 0.0), (30.0, 5.0)) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "join_paths",
+        json!({ "node": a.to_wire(), "other": b.to_wire() }),
+    );
+    assert!(doc.get(b).is_none(), "the second path went");
+    let res = Resolved::rebuild(&doc);
+    let (_, subs) = ondin_core::edit::path_subpaths(&doc, &res, a).unwrap();
+    let at: Vec<(f64, f64)> = subs[0].anchors.iter().map(|x| (x.at.x, x.at.y)).collect();
+    assert_eq!(subs.len(), 1);
+    assert_eq!(
+        at,
+        [(0.0, 0.0), (10.0, 0.0), (12.0, 0.0), (30.0, 5.0)],
+        "joined at the near ends"
+    );
+}
+
+/// `repeat` makes a group of the original and its copies round the point, named
+/// for the count.
+#[test]
+fn repeat_makes_a_ring_in_a_group() {
+    let (mut doc, mut ids, page) = blank();
+    let at = serde_json::to_value(Affine::translate((100.0, 0.0))).unwrap();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0), "name": "Tick", "transform": at }),
+    )[0];
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "repeat",
+        json!({ "nodes": [r.to_wire()], "count": 4, "x": 0, "y": 0 }),
+    )[0];
+    let group = doc.get(g).unwrap();
+    assert_eq!(group.children().len(), 4);
+    assert_eq!(group.name(), "Tick × 4");
+    let res = Resolved::rebuild(&doc);
+    let b = res.world_bounds(g).unwrap();
+    assert!(
+        (b.x0 + 110.0).abs() < 1e-6 && (b.x1 - 110.0).abs() < 1e-6,
+        "{b:?}"
+    );
+}
+
 /// `set_size` sizes any kind: a rectangle's size, a group by its box (its child
 /// scaled with it).
 ///

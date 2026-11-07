@@ -6359,7 +6359,6 @@ impl OndinApp {
     pub(crate) fn join_layers_subject(
         &self,
     ) -> Result<(NodeId, NodeId, PointRef, PointRef), &'static str> {
-        const NO_ENDS: &str = "Both paths need an open end";
         let sel = &self.session.selection;
         let [a, b] = sel.ids() else {
             return Err("Needs two path layers");
@@ -6373,56 +6372,23 @@ impl OndinApp {
         {
             return Err("One of these paths is locked");
         }
-        let (_, ka) = self.edited_subpaths(keep).ok_or(NO_ENDS)?;
-        let (_, kb) = self.edited_subpaths(other).ok_or(NO_ENDS)?;
-        let ends = |subs: &[crate::preview::PenSubpath]| -> Vec<(PointRef, Point)> {
-            let mut out = Vec::new();
-            for (s, sub) in subs.iter().enumerate() {
-                if sub.closed || sub.anchors.len() < 2 {
-                    continue;
-                }
-                let last = sub.anchors.len() - 1;
-                out.push(((s, 0), sub.anchors[0].at));
-                out.push(((s, last), sub.anchors[last].at));
-            }
-            out
-        };
-        let mut best: Option<(f64, PointRef, PointRef)> = None;
-        for (ra, pa) in ends(&ka) {
-            for (rb, pb) in ends(&kb) {
-                let d = (pa - pb).hypot();
-                if best.is_none_or(|(bd, ..)| d < bd) {
-                    best = Some((d, ra, (rb.0 + ka.len(), rb.1)));
-                }
-            }
-        }
-        let (_, ra, rb) = best.ok_or(NO_ENDS)?;
+        let (ra, rb) =
+            tools::path_join_ends(&self.session.doc, &self.session.resolved, keep, other)?;
         Ok((keep, other, ra, rb))
     }
 
     /// *Join paths*: the second path layer's subpaths move into the first, and the
     /// nearest pair of open ends between them splice into one run
-    /// ([`Self::join_layers_subject`], `tools::join_ends`). The kept layer keeps its
+    /// ([`Self::join_layers_subject`], `tools::join_paths`). The kept layer keeps its
     /// paint and name; the other goes. One undo step.
     pub(crate) fn join_layers(&mut self) {
-        let Ok((keep, other, a, b)) = self.join_layers_subject() else {
+        let Ok((keep, other, _, _)) = self.join_layers_subject() else {
             return;
         };
-        let (Some((world, mut list)), Some((_, theirs))) =
-            (self.edited_subpaths(keep), self.edited_subpaths(other))
+        let Ok(tx) = tools::join_paths(&self.session.doc, &self.session.resolved, keep, other)
         else {
             return;
         };
-        list.extend(theirs);
-        let Some((list, _)) = tools::join_ends(&list, a, b) else {
-            return;
-        };
-        let mut tx = tools::rewrite_path(keep, world, &list, None);
-        tx.0.push(Operation::DeleteNode { id: other });
-        tx.0.extend(ondin_core::component::relink_for_delete(
-            &self.session.doc,
-            &[other],
-        ));
         if self.session.commit(tx) {
             self.session.selection.set_one(keep);
             self.session.info("Joined two paths");

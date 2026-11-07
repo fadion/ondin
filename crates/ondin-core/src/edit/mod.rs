@@ -3341,6 +3341,69 @@ pub fn path_subpaths(
     Some((world, subpaths))
 }
 
+/// Why two paths cannot be joined: one has no open end.
+pub const NO_OPEN_ENDS: &str = "Both paths need an open end";
+
+/// The nearest pair of open ends between the paths `keep` and `other`, in world
+/// space: an end of `keep`'s subpaths, and one of `other`'s numbered as if its
+/// subpaths followed `keep`'s.
+pub fn path_join_ends(
+    doc: &Document,
+    res: &Resolved,
+    keep: NodeId,
+    other: NodeId,
+) -> Result<(PointRef, PointRef), &'static str> {
+    let (_, ka) = path_subpaths(doc, res, keep).ok_or(NO_OPEN_ENDS)?;
+    let (_, kb) = path_subpaths(doc, res, other).ok_or(NO_OPEN_ENDS)?;
+    let ends = |subs: &[PenSubpath]| -> Vec<(PointRef, Point)> {
+        let mut out = Vec::new();
+        for (s, sub) in subs.iter().enumerate() {
+            if sub.closed || sub.anchors.len() < 2 {
+                continue;
+            }
+            let last = sub.anchors.len() - 1;
+            out.push(((s, 0), sub.anchors[0].at));
+            out.push(((s, last), sub.anchors[last].at));
+        }
+        out
+    };
+    let mut best: Option<(f64, PointRef, PointRef)> = None;
+    for (ra, pa) in ends(&ka) {
+        for (rb, pb) in ends(&kb) {
+            let d = (pa - pb).hypot();
+            if best.is_none_or(|(bd, ..)| d < bd) {
+                best = Some((d, ra, (rb.0 + ka.len(), rb.1)));
+            }
+        }
+    }
+    let (_, ra, rb) = best.ok_or(NO_OPEN_ENDS)?;
+    Ok((ra, rb))
+}
+
+/// *Join paths*: `other`'s subpaths move into `keep`, the nearest pair of open ends
+/// between them spliced into one run ([`path_join_ends`], [`join_ends`]). `keep`
+/// keeps its paint and name; `other` is deleted as *Delete* deletes it.
+pub fn join_paths(
+    doc: &Document,
+    res: &Resolved,
+    keep: NodeId,
+    other: NodeId,
+) -> Result<Transaction, &'static str> {
+    let (a, b) = path_join_ends(doc, res, keep, other)?;
+    let (Some((world, mut list)), Some((_, theirs))) = (
+        path_subpaths(doc, res, keep),
+        path_subpaths(doc, res, other),
+    ) else {
+        return Err(NO_OPEN_ENDS);
+    };
+    list.extend(theirs);
+    let (list, _) = join_ends(&list, a, b).ok_or(NO_OPEN_ENDS)?;
+    let mut tx = rewrite_path(keep, world, &list, None);
+    tx.0.push(Operation::DeleteNode { id: other });
+    tx.0.extend(crate::component::relink_for_delete(doc, &[other]));
+    Ok(tx)
+}
+
 /// A point edit of the path `id` written back: `subpaths` is `base` edited, both in
 /// world space. A path mirrored across its own axes is made symmetric again first
 /// (`symmetry::symmetric_edit`), so editing one side moves its image.

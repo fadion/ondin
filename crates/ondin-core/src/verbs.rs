@@ -742,6 +742,82 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "join_paths",
+        doc: "Join two paths at their nearest open ends into the first; the second goes",
+        params: &[
+            req("node", NODE, "the path kept, with its paint and name"),
+            req("other", NODE, "the path joined into it"),
+        ],
+        run: |ctx, a| {
+            let (keep, other) = (a.node("node")?, a.node("other")?);
+            if keep == other {
+                return Err(a.invalid("other", "a path cannot join itself"));
+            }
+            crate::edit::join_paths(ctx.doc, ctx.res, keep, other)
+                .map(Done::edit)
+                .map_err(VerbError::Nothing)
+        },
+    },
+    Verb {
+        name: "repeat",
+        doc: "Repeat layers round a point into a new group, as spokes or a ring; answers the group",
+        params: &[
+            req("nodes", NODES, "the layers to repeat, sharing a parent"),
+            req(
+                "count",
+                INDEX,
+                "how many in all, the originals counted: 2 to 360",
+            ),
+            opt(
+                "angle",
+                ParamKind::Number,
+                "degrees from one to the next, clockwise; a full turn split evenly unless given",
+            ),
+            opt(
+                "turn",
+                BOOL,
+                "whether each copy turns with its step, as spokes do; true unless given",
+            ),
+            opt(
+                "x",
+                ParamKind::Number,
+                "the point repeated round, across the page; the layers' centre unless given",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "the point repeated round, down the page",
+            ),
+        ],
+        run: |ctx, a| {
+            let nodes = a.nodes("nodes")?;
+            let count = a.index("count").unwrap_or(0);
+            if !(2..=crate::repeat::MAX_COUNT).contains(&count) {
+                return Err(a.invalid("count", "expected 2 to 360"));
+            }
+            let mut ring = crate::repeat::Ring::full(count, a.bool("turn").unwrap_or(true));
+            if let Some(deg) = a.number("angle") {
+                ring.step = deg.to_radians();
+            }
+            let centre = crate::repeat::centre(ctx.res, &nodes)
+                .ok_or(VerbError::Nothing("the layers have no bounds"))?;
+            let pivot = kurbo::Point::new(
+                a.number("x").unwrap_or(centre.x),
+                a.number("y").unwrap_or(centre.y),
+            );
+            let (tx, group) = crate::repeat::repeat(
+                ctx.doc,
+                ctx.res,
+                ctx.ids,
+                &nodes,
+                pivot,
+                ring,
+                crate::repeat::Place::Group,
+            )?;
+            Ok(Done::made(tx, group.into_iter().collect()))
+        },
+    },
+    Verb {
         name: "align",
         doc: "Line layers up on one edge or centre of the box round them all",
         params: &[

@@ -3601,52 +3601,49 @@ impl OndinApp {
     pub(crate) fn create_component(&mut self) {
         use ondin_core::component::NotMain;
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
-        let doc = &self.session.doc;
-        match (ids.as_slice(), self.create_component_refusal()) {
-            ([], _) => self.session.info("Select a layer to make a component"),
-            (_, Some(NotMain::Already)) => self.session.info("Already a component"),
-            (_, Some(why)) => self.session.fail(crate::menu::create_refusal(why)),
-            ([one], None) if create_in_place(doc, *one) => {
-                self.session
-                    .commit(Transaction(vec![Operation::SetComponent {
-                        id: *one,
-                        component: true,
-                    }]));
+        let made = build::make_component(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            &ids,
+        );
+        match made {
+            Err(build::MakeError::Nothing) => {
+                self.session.info("Select a layer to make a component")
             }
-            _ => {
-                let wrapped = ids.len();
-                match build::frame(doc, &self.session.resolved, &mut self.session.ids, &ids) {
-                    Ok((mut tx, frame)) => {
-                        tx.0.push(Operation::SetComponent {
-                            id: frame,
-                            component: true,
-                        });
-                        if self.session.commit(tx) {
-                            self.session.selection.set_one(frame);
-                            let name = crate::private::layer(&self.session.doc, frame).into_owned();
-                            self.session.info(format!(
-                                "Created “{name}” — {} wrapped in a frame · Ctrl+Z to undo",
-                                crate::ui::count(wrapped, "layer")
-                            ));
-                        }
-                    }
-                    Err(e) => self.session.fail(format!("Cannot make a component: {e}")),
+            Err(build::MakeError::Not(NotMain::Already)) => {
+                self.session.info("Already a component")
+            }
+            Err(build::MakeError::Not(why)) => self.session.fail(crate::menu::create_refusal(why)),
+            Err(build::MakeError::Frame(e)) => {
+                self.session.fail(format!("Cannot make a component: {e}"))
+            }
+            // In place: no toast, since the tree kept its shape.
+            Ok((tx, main)) if ids == [main] => {
+                self.session.commit(tx);
+            }
+            Ok((tx, main)) => {
+                if self.session.commit(tx) {
+                    self.session.selection.set_one(main);
+                    let name = crate::private::layer(&self.session.doc, main).into_owned();
+                    self.session.info(format!(
+                        "Created “{name}” — {} wrapped in a frame · Ctrl+Z to undo",
+                        crate::ui::count(ids.len(), "layer")
+                    ));
                 }
             }
         }
     }
 
     /// Why *Create component* would refuse the selection, or `None` when it would commit
-    /// — asked by [`Self::create_component`] and the menu row's dimming alike. In place
-    /// for one frame or group (`component::why_not_main`), else for the wrap.
+    /// — asked by [`Self::create_component`] and the menu row's dimming alike
+    /// (`component::why_not_make`).
     pub(crate) fn create_component_refusal(&self) -> Option<ondin_core::component::NotMain> {
         let doc = &self.session.doc;
-        let ids = build::outermost(doc, self.session.selection.ids());
-        match ids.as_slice() {
-            [] => None,
-            [one] if create_in_place(doc, *one) => ondin_core::component::why_not_main(doc, *one),
-            _ => ondin_core::component::why_not_wrap(doc, &ids),
-        }
+        ondin_core::component::why_not_make(
+            doc,
+            &build::outermost(doc, self.session.selection.ids()),
+        )
     }
 
     /// *Detach instance* (`Ctrl+Alt+B`): every instance the selection sits in becomes
@@ -4229,13 +4226,6 @@ impl OndinApp {
             })
             .unwrap_or_default()
     }
-}
-
-/// Whether *Create component* on the one layer `id` makes it the main where it
-/// stands — a frame or a group — rather than wrapping it in a new frame first.
-pub(crate) fn create_in_place(doc: &ondin_core::Document, id: NodeId) -> bool {
-    doc.get(id)
-        .is_some_and(|n| matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group))
 }
 
 // --- clipboard and structure ---------------------------------------------

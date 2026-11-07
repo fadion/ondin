@@ -592,6 +592,103 @@ pub fn mask(
     Ok((Transaction(ops), group_id))
 }
 
+/// An instance of `main` (a set's default variant, for a set) put on top of
+/// `parent`, at the main's own transform, or with its laid-out box centred on the
+/// world point `centre` ([`centred_on`]). Answers the edit and the instance; `None`
+/// when `main` is gone.
+pub fn place_instance(
+    doc: &Document,
+    ids: &mut IdSource,
+    main: NodeId,
+    parent: NodeId,
+    centre: Option<Point>,
+) -> Option<(Transaction, NodeId)> {
+    let main = match doc.get(main)? {
+        n if n.set().is_some() => crate::kit::default_variant(doc, main)?,
+        _ => main,
+    };
+    let nodes = doc.capture_subtree(main)?;
+    let (mut tx, made) = insert_subtrees(
+        doc,
+        ids,
+        &[Placement {
+            nodes,
+            parent,
+            index: None,
+        }],
+        Vec2::ZERO,
+    );
+    let instance = *made.first()?;
+    if let Some(op) = centre.and_then(|c| centred_on(doc, &tx, instance, c)) {
+        tx.0.push(op);
+    }
+    Some((tx, instance))
+}
+
+/// The `SetTransform` that puts `instance`, just inserted by `tx` at its main's own
+/// transform, with its box centred on the world point `centre`. Measured by laying
+/// out the document `tx` leaves, the one place the copy's box is known whatever the
+/// main is: a vendored main is never resolved, a group's box is its children's,
+/// and a frame that hugs its content stores the size it was drawn at.
+pub fn centred_on(
+    doc: &Document,
+    tx: &Transaction,
+    instance: NodeId,
+    centre: Point,
+) -> Option<Operation> {
+    let mut scratch = doc.clone();
+    scratch.apply(tx).ok()?;
+    let at = scratch.get(instance)?.transform();
+    let res = Resolved::rebuild(&scratch);
+    let bounds = res.world_bounds(instance)?;
+    // The shift is in world space; the transform is in the parent's.
+    let parent = scratch.get(instance)?.parent()?;
+    let into = res.world_transform(parent)?.inverse();
+    let shift = into * centre - into * bounds.center();
+    Some(Operation::SetTransform {
+        id: instance,
+        transform: Affine::translate(shift) * at,
+    })
+}
+
+/// Why [`make_component`] made nothing.
+#[derive(Debug)]
+pub enum MakeError {
+    /// No layers were given.
+    Nothing,
+    /// `component::why_not_make`'s rule.
+    Not(crate::component::NotMain),
+    /// The wrapping frame was refused.
+    Frame(OpError),
+}
+
+/// *Create component*: one frame or group made a main where it stands, or the
+/// outermost of `layers` wrapped in a new frame ([`frame`]) made the main. Answers
+/// the edit and the main.
+pub fn make_component(
+    doc: &Document,
+    res: &Resolved,
+    ids: &mut IdSource,
+    layers: &[NodeId],
+) -> Result<(Transaction, NodeId), MakeError> {
+    let layers = outermost(doc, layers);
+    if layers.is_empty() {
+        return Err(MakeError::Nothing);
+    }
+    if let Some(why) = crate::component::why_not_make(doc, &layers) {
+        return Err(MakeError::Not(why));
+    }
+    let (mut tx, main) = match layers.as_slice() {
+        [one] if crate::component::makes_in_place(doc, *one) => (Transaction(Vec::new()), *one),
+        _ => frame(doc, res, ids, &layers).map_err(MakeError::Frame)?,
+    };
+    tx.0.push(Operation::SetComponent {
+        id: main,
+        component: true,
+    });
+    Ok((tx, main))
+}
+
 /// [`group`]'s sibling: wrap `members` in a new **frame** ([`NodeKind::Artboard`])
 /// sized to their union, preserving world positions and z-order
 /// ([`container_slot`]). Returns the transaction and the frame's id.

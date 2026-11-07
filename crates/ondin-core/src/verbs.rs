@@ -500,6 +500,21 @@ fn node<'d>(ctx: &Ctx<'d>, id: NodeId) -> Result<&'d crate::node::Node, VerbErro
         .ok_or(VerbError::Refused(OpError::NoSuchNode(id)))
 }
 
+/// What `make_component` says for a rule it refused by.
+fn not_main(why: crate::component::NotMain) -> &'static str {
+    use crate::component::NotMain;
+    match why {
+        NotMain::Kind => "only a frame or a group can become a component",
+        NotMain::Already => "already a component",
+        NotMain::Inside => "a component cannot sit inside a component or an instance",
+        NotMain::Instance => "an instance cannot become a component; detach it first",
+        NotMain::Holds => "a component cannot hold another component or a component set",
+        NotMain::SetKind => {
+            "a component set holds one kind of layer; its variants are another kind"
+        }
+    }
+}
+
 /// The text layer the `node` argument names, its styling and its text.
 fn text_of<'d>(
     ctx: &Ctx<'d>,
@@ -922,6 +937,163 @@ pub static VERBS: &[Verb] = &[
                 &a.nodes("nodes")?,
                 axis,
             )))
+        },
+    },
+    // --- components -----------------------------------------------------------
+    Verb {
+        name: "make_component",
+        doc: "Make a frame or group a main component, or wrap layers in a frame made one; answers the main",
+        params: &[req(
+            "nodes",
+            NODES,
+            "one frame or group, or the layers to wrap",
+        )],
+        run: |ctx, a| match build::make_component(ctx.doc, ctx.res, ctx.ids, &a.nodes("nodes")?) {
+            Ok((tx, main)) => Ok(Done::made(tx, vec![main])),
+            Err(build::MakeError::Nothing) => {
+                Err(VerbError::Nothing("no layers to make a component of"))
+            }
+            Err(build::MakeError::Not(why)) => Err(VerbError::Nothing(not_main(why))),
+            Err(build::MakeError::Frame(e)) => Err(e.into()),
+        },
+    },
+    Verb {
+        name: "create_instance",
+        doc: "Place an instance of a main component, or of a set's default variant, in `parent`; answers it",
+        params: &[
+            req("main", NODE, "the main component or set"),
+            req("parent", NODE, "the frame, group or page to place it in"),
+            opt(
+                "x",
+                ParamKind::Number,
+                "where its box is centred, across the parent; at the main's own place unless given",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "where its box is centred, down the parent",
+            ),
+        ],
+        run: |ctx, a| {
+            let (main, parent) = (a.node("main")?, a.node("parent")?);
+            let m = node(ctx, main)?;
+            if !m.component() && m.set().is_none() {
+                return Err(a.invalid("main", "not a main component or a set"));
+            }
+            node(ctx, parent)?;
+            let centre = match (a.number("x"), a.number("y")) {
+                (None, None) => None,
+                (x, y) => {
+                    let into = ctx.res.world_transform(parent).unwrap_or(Affine::IDENTITY);
+                    Some(into * kurbo::Point::new(x.unwrap_or(0.0), y.unwrap_or(0.0)))
+                }
+            };
+            let (tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, centre)
+                .ok_or(VerbError::Nothing("the set has no variant to place"))?;
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "detach_instance",
+        doc: "Turn the instances layers sit in into ordinary layers that keep their look",
+        params: &[req("nodes", NODES, "instances, or layers inside them")],
+        run: |ctx, a| {
+            let mut roots: Vec<NodeId> = a
+                .nodes("nodes")?
+                .iter()
+                .filter_map(|id| crate::component::instance_root(ctx.doc, *id))
+                .collect();
+            roots.sort();
+            roots.dedup();
+            let ops: Vec<Operation> = build::outermost(ctx.doc, &roots)
+                .iter()
+                .filter_map(|r| crate::component::detach(ctx.doc, *r))
+                .flat_map(|tx| tx.0)
+                .collect();
+            if ops.is_empty() {
+                return Err(VerbError::Nothing("none of the layers is in an instance"));
+            }
+            Ok(Done::ops(ops))
+        },
+    },
+    Verb {
+        name: "swap_instance",
+        doc: "Show another main in an instance, its overrides carried by name",
+        params: &[
+            req("node", NODE, "the instance, or a nested copy inside one"),
+            req("main", NODE, "the main to show, of the same kind"),
+        ],
+        run: |ctx, a| {
+            let (copy, main) = (a.node("node")?, a.node("main")?);
+            // An instance linked straight to a main relinks; a nested copy swaps,
+            // carrying its variant values by name, as the instance card does.
+            let tx = if crate::swap::can_relink(ctx.doc, copy) {
+                crate::swap::can_relink_to(ctx.doc, copy, main)
+                    .then(|| crate::variant::switch(ctx.doc, copy, main, ctx.ids))
+                    .flatten()
+            } else {
+                crate::variant::swap_carrying(ctx.doc, copy, main)
+            };
+            tx.map(Done::edit).ok_or(VerbError::Nothing(
+                "that instance cannot show that main: it must be a main of the same kind",
+            ))
+        },
+    },
+    Verb {
+        name: "combine_as_variants",
+        doc: "Combine main components of one kind into a component set; answers the set",
+        params: &[req(
+            "nodes",
+            NODES,
+            "the mains, sharing a parent and in no set",
+        )],
+        run: |ctx, a| {
+            let mains = a.nodes("nodes")?;
+            if !crate::variant::one_kind(ctx.doc, &mains) {
+                return Err(VerbError::Nothing(
+                    "a component set holds one kind of layer: these mains mix frames and groups",
+                ));
+            }
+            let (tx, set) = crate::variant::combine(ctx.doc, ctx.res, ctx.ids, &mains)?;
+            Ok(Done::made(tx, vec![set]))
+        },
+    },
+    Verb {
+        name: "switch_variant",
+        doc: "Show another variant in an instance by one property's value",
+        params: &[
+            req("node", NODE, "the instance of a variant"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "its value to show"),
+        ],
+        run: |ctx, a| {
+            let root = a.node("node")?;
+            let main = crate::component::main_of(ctx.doc, root)
+                .ok_or_else(|| a.invalid("node", "not an instance"))?;
+            let set = crate::variant::set_of(ctx.doc, main)
+                .and_then(|s| ctx.doc.get(s)?.set())
+                .ok_or_else(|| a.invalid("node", "its main is in no component set"))?;
+            let name = a.text("property").unwrap_or_default();
+            let prop = set
+                .props
+                .iter()
+                .position(|p| p.name == name)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = set.props.iter().map(|p| p.name.as_str()).collect();
+                    a.invalid(
+                        "property",
+                        format!("the set's properties are {}", names.join(", ")),
+                    )
+                })?;
+            let value = a.text("value").unwrap_or_default();
+            let to = crate::variant::switch_target(ctx.doc, main, prop, value)
+                .ok_or_else(|| a.invalid("value", "no variant of the set has it"))?;
+            if to == main {
+                return Ok(Done::default());
+            }
+            crate::variant::switch(ctx.doc, root, to, ctx.ids)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("that instance cannot switch variants"))
         },
     },
     // --- pages ----------------------------------------------------------------
@@ -1681,7 +1853,11 @@ pub fn run_script(
             &args,
         )
         .map_err(|e| fail(n, e.to_string()))?;
-        doc.apply(&done.tx).map_err(|e| fail(n, e.to_string()))?;
+        // What the components owe the edit, as an import commits: instances follow
+        // their mains and links settle.
+        let mut tx = done.tx;
+        crate::propagate::owed(doc, &mut tx, ids);
+        doc.apply(&tx).map_err(|e| fail(n, e.to_string()))?;
         let made: Vec<String> = done
             .created
             .iter()

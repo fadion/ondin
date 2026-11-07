@@ -338,6 +338,24 @@ pub enum NotMain {
     SetKind,
 }
 
+/// Whether *Create component* on the one layer `id` makes it the main where it
+/// stands — a frame or a group — rather than wrapping it in a new frame first.
+pub fn makes_in_place(doc: &Document, id: NodeId) -> bool {
+    doc.get(id)
+        .is_some_and(|n| matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group))
+}
+
+/// Why *Create component* would refuse the outermost layers `ids`, or `None` when
+/// it would commit: in place for one frame or group ([`why_not_main`]), else for
+/// the wrap ([`why_not_wrap`]).
+pub fn why_not_make(doc: &Document, ids: &[NodeId]) -> Option<NotMain> {
+    match ids {
+        [] => None,
+        [one] if makes_in_place(doc, *one) => why_not_main(doc, *one),
+        _ => why_not_wrap(doc, ids),
+    }
+}
+
 /// Why `id` could not be made a main component in place, or `None` when it can —
 /// [`check`]'s own rules, and `variant::check`'s, asked ahead so a menu row can
 /// say so rather than the commit refusing. The subtree is asked too, as the

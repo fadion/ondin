@@ -19,10 +19,13 @@ fn blank() -> (Document, IdSource, NodeId) {
     (Document::new(page), ids, page)
 }
 
-/// Run `name` with `args` on `doc` and commit its edit; answers what it created.
+/// Run `name` with `args` on `doc` and commit its edit, with what the components owe
+/// it, as a script does; answers what it created.
 fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<NodeId> {
     let res = Resolved::rebuild(doc);
-    let Done { tx, created, .. } = verbs::call(
+    let Done {
+        mut tx, created, ..
+    } = verbs::call(
         &mut Ctx {
             doc,
             res: &res,
@@ -33,9 +36,51 @@ fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<N
         &args,
     )
     .unwrap_or_else(|e| panic!("{name}: {e}"));
+    ondin_core::propagate::owed(doc, &mut tx, ids);
     doc.apply(&tx)
         .unwrap_or_else(|e| panic!("{name} commits: {e}"));
     created
+}
+
+/// The JSON a `kind` argument takes for a frame of `w` × `h`.
+fn frame(w: f64, h: f64) -> Value {
+    serde_json::to_value(NodeKind::Artboard {
+        size: Size::new(w, h),
+        corner_radii: Default::default(),
+        corner_smoothing: 0.0,
+    })
+    .unwrap()
+}
+
+/// A frame of `w` × `h` named `name` holding one rectangle, made a main component
+/// through `make_component`; answers the main and its rectangle.
+fn main_component(
+    doc: &mut Document,
+    ids: &mut IdSource,
+    page: NodeId,
+    name: &str,
+    w: f64,
+) -> (NodeId, NodeId) {
+    let f = run(
+        doc,
+        ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(w, 40.0), "name": name }),
+    )[0];
+    let r = run(
+        doc,
+        ids,
+        "create_node",
+        json!({ "parent": f.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    let made = run(
+        doc,
+        ids,
+        "make_component",
+        json!({ "nodes": [f.to_wire()] }),
+    );
+    assert_eq!(made, [f], "a frame is made a main where it stands");
+    (f, r)
 }
 
 /// The JSON a `kind` argument takes for a rectangle of `w` × `h`.
@@ -901,6 +946,163 @@ fn pages_are_added_copied_moved_and_deleted() {
         &json!({ "page": first.to_wire() }),
     );
     assert!(matches!(last, Err(VerbError::Nothing(_))), "{last:?}");
+}
+
+/// The component verbs: a rectangle wrapped and made a main, an instance placed
+/// centred on a point that follows its main's edit, swapped to another main, and
+/// detached; a frame already a main is refused.
+///
+/// flip: the test's commit without `propagate::owed` → fails at "the instance
+/// follows its main".
+#[test]
+fn components_are_made_placed_swapped_and_detached() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let (card, inner) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    let (other, _) = main_component(&mut doc, &mut ids, page, "Other", 100.0);
+
+    let loose = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(5.0, 5.0) }),
+    )[0];
+    let wrapped = run(
+        &mut doc,
+        &mut ids,
+        "make_component",
+        json!({ "nodes": [loose.to_wire()] }),
+    )[0];
+    assert_ne!(wrapped, loose, "a rectangle is wrapped in a frame first");
+    assert!(doc.get(wrapped).unwrap().component());
+
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": p, "x": 500, "y": 300 }),
+    )[0];
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(
+        res.world_bounds(inst).unwrap().center(),
+        ondin_core::kurbo::Point::new(500.0, 300.0)
+    );
+    assert_eq!(ondin_core::component::main_of(&doc, inst), Some(card));
+
+    let red = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": inner.to_wire(), "fills": red }),
+    );
+    let copy = doc.get(inst).unwrap().children()[0];
+    assert_eq!(
+        doc.get(copy).unwrap().paint().fills.len(),
+        1,
+        "the instance follows its main"
+    );
+
+    run(
+        &mut doc,
+        &mut ids,
+        "swap_instance",
+        json!({ "node": inst.to_wire(), "main": other.to_wire() }),
+    );
+    assert_eq!(ondin_core::component::main_of(&doc, inst), Some(other));
+
+    run(
+        &mut doc,
+        &mut ids,
+        "detach_instance",
+        json!({ "nodes": [inst.to_wire()] }),
+    );
+    assert_eq!(ondin_core::component::main_of(&doc, inst), None);
+
+    let res = Resolved::rebuild(&doc);
+    let again = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "make_component",
+        &json!({ "nodes": [card.to_wire()] }),
+    );
+    assert!(
+        matches!(again, Err(VerbError::Nothing(why)) if why.contains("already")),
+        "{again:?}"
+    );
+}
+
+/// A script commits each step with what the components owe it, so an instance
+/// follows an edit its main took in a later step.
+///
+/// flip: `run_script` committing without `propagate::owed` → fails at "the
+/// instance follows its main".
+#[test]
+fn a_script_keeps_instances_in_step_with_their_mains() {
+    let (mut doc, mut ids, page) = blank();
+    let red = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    let script = json!([
+        { "verb": "create_node", "args": { "parent": "@page", "kind": frame(50.0, 50.0) }, "as": "f" },
+        { "verb": "create_node", "args": { "parent": "@f", "kind": rect(10.0, 10.0) }, "as": "r" },
+        { "verb": "make_component", "args": { "nodes": ["@f"] } },
+        { "verb": "create_instance", "args": { "main": "@f", "parent": "@page" }, "as": "i" },
+        { "verb": "set_fills", "args": { "node": "@r", "fills": red } },
+    ]);
+    let made =
+        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let inst = NodeId::from_wire(&made[3][0]).unwrap();
+    let copy = doc.get(inst).unwrap().children()[0];
+    assert_eq!(
+        doc.get(copy).unwrap().paint().fills.len(),
+        1,
+        "the instance follows its main"
+    );
+    assert!(doc.get(page).is_some());
+}
+
+/// `combine_as_variants` makes a set of two mains, and `switch_variant` shows the
+/// other variant in an instance by its property's value.
+#[test]
+fn variants_are_combined_and_switched() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, _) = main_component(&mut doc, &mut ids, page, "Size=Small", 60.0);
+    let (b, _) = main_component(&mut doc, &mut ids, page, "Size=Large", 120.0);
+    let set = run(
+        &mut doc,
+        &mut ids,
+        "combine_as_variants",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    let vs = doc.get(set).unwrap().set().cloned().expect("a set");
+    let prop = vs.props[0].clone();
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": set.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    let shown = ondin_core::component::main_of(&doc, inst).unwrap();
+    let want = if shown == a { b } else { a };
+    let value = doc.get(want).unwrap().variant()[0].clone();
+    run(
+        &mut doc,
+        &mut ids,
+        "switch_variant",
+        json!({ "node": inst.to_wire(), "property": prop.name, "value": value }),
+    );
+    assert_eq!(ondin_core::component::main_of(&doc, inst), Some(want));
 }
 
 /// A sink that takes any picture; its id is the byte length.

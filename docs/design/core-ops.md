@@ -217,10 +217,19 @@ it created. A verb never commits; its caller does, as every edit is committed.
   name; it adds no layer. Core can neither hash nor decode, so the caller lends `Ctx::images`
   (`svg_in::ImageSink`, as an import does); a caller without one is refused. Bytes the table
   already holds add nothing and answer the same id.
-- **`run_script`** commits a list of `{ verb, args, as }` steps one by one. A string argument
-  `"@label"` stands for the first thing an earlier step labelled `label` made (a node's wire form,
-  or `add_image`'s id), and `"@page"` for the first page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps
-  before it. `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
+- **`run_script`** commits a list of `{ verb, args, as }` steps one by one, each with what the
+  components owe it (`propagate::owed`, as an import commits), so instances follow their mains. The
+  commit door's binding passes before `owed` (`EditorSession::commit_inner`) are not run. A string
+  argument `"@label"` stands for the first thing an earlier step labelled `label` made (a node's
+  wire form, or `add_image`'s id), and `"@page"` for the first page; labels belong to one script.
+  A refusal names its step, counted from 1, and keeps the steps before it.
+  `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
+- **Phase 3's verbs call the builders the app's component doors call**: `build::make_component`
+  (*Create component*, in place or wrapped), `build::place_instance` and `build::centred_on` (the
+  picker's placement), `component::detach`, `variant::combine`, `variant::switch` and
+  `variant::swap_carrying` (the instance card's *Main* relink and nested *Swap*). `ondin-mcp`'s
+  `every_phase_3_tool_is_a_registry_verb` holds the tool list to the registry, the tools still to
+  come on its pending list.
 
 ### 5.7b Layer names (`naming.rs`)
 

@@ -234,4 +234,46 @@ mod tests {
             assert!(PHASE_2.contains(&name), "`{name}` is no Phase 2 tool");
         }
     }
+
+    /// Phase 3 tools with no registry verb yet.
+    const PHASE_3_PENDING: [&str; 17] = [
+        "define_property",
+        "set_instance_property",
+        "reset_overrides",
+        "add_variable",
+        "remove_variable",
+        "rename_variable",
+        "set_variable_value",
+        "add_mode",
+        "remove_mode",
+        "rename_mode",
+        "set_frame_mode",
+        "bind_variable",
+        "add_style",
+        "remove_style",
+        "rename_style",
+        "set_style_value",
+        "apply_style",
+    ];
+
+    /// Every Phase 3 tool is a verb of the same name or pending, never both, so
+    /// adding a verb forces its name off the pending list.
+    ///
+    /// flip: renaming the registry's `make_component` → fails at "neither".
+    #[test]
+    fn every_phase_3_tool_is_a_registry_verb() {
+        use ondin_core::verbs;
+        for tool in PHASE_3 {
+            let verb = verbs::find(tool).is_some();
+            let pending = PHASE_3_PENDING.contains(&tool);
+            assert!(verb || pending, "`{tool}` is neither a verb nor pending");
+            assert!(
+                !(verb && pending),
+                "`{tool}` is a verb now; take it off the pending list"
+            );
+        }
+        for name in PHASE_3_PENDING {
+            assert!(PHASE_3.contains(&name), "`{name}` is no Phase 3 tool");
+        }
+    }
 }

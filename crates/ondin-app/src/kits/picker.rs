@@ -16,8 +16,8 @@ use crate::theme::{self, color, icon};
 use crate::ui;
 use eframe::egui;
 use ondin_core::kit::Published;
-use ondin_core::kurbo::{Affine, Rect, Vec2};
-use ondin_core::{Document, NodeId, Operation, Transaction};
+use ondin_core::kurbo::Affine;
+use ondin_core::{Document, NodeId, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, mpsc};
 
@@ -1050,29 +1050,11 @@ fn build_placement(
             },
         )?,
         Source::Local(main) => {
-            let main = match doc.get(*main) {
-                Some(n) if n.set().is_some() => ondin_core::kit::default_variant(doc, *main),
-                Some(_) => Some(*main),
-                None => None,
-            };
-            main.and_then(|m| doc.capture_subtree(m))
-                .map(|nodes| {
-                    let (tx, made) = ondin_core::build::insert_subtrees(
-                        doc,
-                        ids,
-                        &[ondin_core::build::Placement {
-                            nodes,
-                            parent,
-                            index: None,
-                        }],
-                        Vec2::ZERO,
-                    );
-                    (tx, made[0])
-                })
-                .ok_or_else(|| "That component is no longer here".to_string())?
+            return ondin_core::build::place_instance(doc, ids, *main, parent, Some(centre))
+                .ok_or_else(|| "That component is no longer here".to_string());
         }
     };
-    if let Some(op) = centred(doc, &tx, instance, centre) {
+    if let Some(op) = ondin_core::build::centred_on(doc, &tx, instance, centre) {
         tx.0.push(op);
     }
     Ok((tx, instance))
@@ -1117,36 +1099,6 @@ fn dropped_on_canvas(
 /// the search box, and the frame's hairline at top and bottom.
 fn list_height(height: f32) -> f32 {
     height - 2.0 * PAD - 2.0 - SEARCH_H - SEARCH_GAP
-}
-
-/// The `SetTransform` that puts `instance` — just inserted by `tx` at its main's
-/// own transform — with its box centred on `centre`. Measured by laying out the
-/// document the transaction leaves, which is the one place the copy's box is
-/// known whatever the main is: a vendored main is never resolved, and a group's
-/// box is its children's.
-fn centred(
-    doc: &Document,
-    tx: &Transaction,
-    instance: NodeId,
-    centre: ondin_core::kurbo::Point,
-) -> Option<Operation> {
-    let mut scratch = doc.clone();
-    scratch.apply(tx).ok()?;
-    let at = scratch.get(instance)?.transform();
-    // The laid-out box for every kind, a frame's too: a frame that hugs its
-    // content stores the size it was drawn at, not the one layout gives it
-    // (§15 D874), and centring the stored box put a hugging main off the aim.
-    let res = ondin_core::Resolved::rebuild(&scratch);
-    let bounds: Rect = res.world_bounds(instance)?;
-    // The shift is in world space; the transform is in the parent's, a frame's when
-    // a tile was dropped on one.
-    let parent = scratch.get(instance)?.parent()?;
-    let into = res.world_transform(parent)?.inverse();
-    let shift = into * centre - into * bounds.center();
-    Some(Operation::SetTransform {
-        id: instance,
-        transform: Affine::translate(shift) * at,
-    })
 }
 
 /// The kits an instance in the document comes from (§15 D1028): every node on a
@@ -1943,7 +1895,7 @@ pub(crate) mod tests {
     use ondin_core::kurbo::Size;
     use ondin_core::meta::KitMark;
     use ondin_core::variant::{VariantProp, VariantSet};
-    use ondin_core::{IdSource, NodeKind};
+    use ondin_core::{IdSource, NodeKind, Operation};
     use std::path::PathBuf;
 
     /// Hold the placement being built until the returned sender is sent to, so a
@@ -2150,7 +2102,7 @@ pub(crate) mod tests {
     /// A tile let go over a frame lands inside it, centred on the release point,
     /// though the frame is turned; a click still lands at the top level; a group
     /// takes a drop only once it has a layout.
-    /// flip: `centred` shifting in world space rather than the parent's → fails at
+    /// flip: `build::centred_on` shifting in world space rather than the parent's → fails at
     /// "centred on the release"; `drop_container_at` refusing groups → "flex group".
     #[test]
     fn a_tile_dropped_on_a_frame_lands_inside_it() {
@@ -3500,7 +3452,7 @@ pub(crate) mod tests {
         );
 
         let aim = ondin_core::kurbo::Point::new(500.0, 300.0);
-        let op = super::centred(&doc, &Transaction(vec![]), f, aim).unwrap();
+        let op = ondin_core::build::centred_on(&doc, &Transaction(vec![]), f, aim).unwrap();
         doc.apply(&Transaction(vec![op])).unwrap();
         let b = ondin_core::Resolved::rebuild(&doc).world_bounds(f).unwrap();
         assert_eq!(b.center(), aim, "the laid-out box is centred on the aim");

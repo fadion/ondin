@@ -316,7 +316,7 @@ impl OndinApp {
         ring: Ring,
     ) -> Result<(Transaction, Option<NodeId>), String> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        let (mut tx, main) = match crate::app::create_in_place(doc, id) {
+        let (mut tx, main) = match ondin_core::component::makes_in_place(doc, id) {
             true => (Transaction(Vec::new()), id),
             false => {
                 let (mut tx, group) = build::group(doc, res, &mut self.session.ids, &[id])

@@ -16,8 +16,9 @@ item's premise can go stale while its ask still reads true.
     `Finding` that `ondin_export::contrast` measures by rendering, which core cannot do. A
     `fix_contrast` verb needs that measurement lent through `verbs::Ctx`, as `add_image` borrows a
     hasher.
-  - **Phase 3's verbs**, `make_component` first: `create_component` and the linked ring
-    (`repeat::linked_ring`) build a component in the app.
+  - **The rest of Phase 3's verbs** (`ondin-mcp`'s `PHASE_3_PENDING`): properties and overrides,
+    variables and modes, bindings, styles. The linked ring (`repeat::linked_ring`) still makes its
+    component in the app: it wraps in a group, where `build::make_component` wraps in a frame.
   - Left in the app on purpose: what the existing verbs already write (hide, lock, *Reset origin*,
     *Make base operand*, batch rename, *Flip to other side*, the text sizing switch), what MCP does
     not expose (guides, the fill rule, a page's ground; `mcp.md` *Not exposed*), and the canvas

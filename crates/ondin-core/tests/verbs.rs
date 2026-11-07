@@ -469,6 +469,86 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
     );
 }
 
+/// The page verbs: a page added where asked, duplicated with its layers below it as
+/// `… copy`, moved, marked a draft, and deleted with its layers in an edit that
+/// undoes; the last page is never deleted.
+///
+/// flip: `page::duplicate` placing the copy at the original's own index → fails at
+/// "the copy sits below its page".
+#[test]
+fn pages_are_added_copied_moved_and_deleted() {
+    let (mut doc, mut ids, first) = blank();
+    let landing = run(&mut doc, &mut ids, "add_page", json!({ "name": "Landing" }))[0];
+    let p = landing.to_wire();
+    run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    );
+    let copy = run(&mut doc, &mut ids, "duplicate_page", json!({ "page": p }))[0];
+    let order = |doc: &Document| doc.page_ids().collect::<Vec<_>>();
+    assert_eq!(
+        order(&doc),
+        [first, landing, copy],
+        "the copy sits below its page"
+    );
+    assert_eq!(doc.get(copy).unwrap().name(), "Landing copy");
+    assert_eq!(doc.get(copy).unwrap().children().len(), 1);
+
+    run(
+        &mut doc,
+        &mut ids,
+        "move_page",
+        json!({ "page": copy.to_wire(), "index": 0 }),
+    );
+    assert_eq!(order(&doc), [copy, first, landing]);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_page_draft",
+        json!({ "page": p, "draft": true }),
+    );
+    assert!(doc.page(landing).unwrap().draft);
+
+    let res = Resolved::rebuild(&doc);
+    let Done { tx, .. } = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "delete_page",
+        &json!({ "page": p }),
+    )
+    .unwrap();
+    let undo = doc.apply(&tx).expect("the delete commits").inverse;
+    assert_eq!(order(&doc), [copy, first]);
+    doc.apply(&undo).expect("the undo applies");
+    assert_eq!(doc.get(landing).unwrap().children().len(), 1);
+
+    run(&mut doc, &mut ids, "delete_page", json!({ "page": p }));
+    run(
+        &mut doc,
+        &mut ids,
+        "delete_page",
+        json!({ "page": copy.to_wire() }),
+    );
+    let res = Resolved::rebuild(&doc);
+    let last = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "delete_page",
+        &json!({ "page": first.to_wire() }),
+    );
+    assert!(matches!(last, Err(VerbError::Nothing(_))), "{last:?}");
+}
+
 /// A sink that takes any picture; its id is the byte length.
 struct Pictures;
 

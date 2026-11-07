@@ -12,7 +12,10 @@
 //! [`Document::pages`]: crate::document::Document::pages
 //! [`Node::mode`]: crate::node::Node
 
-use crate::id::NodeId;
+use crate::document::Document;
+use crate::guide::{Guide, GuideId};
+use crate::id::{IdSource, NodeId};
+use crate::op::{Operation, Transaction};
 use peniko::Color;
 
 /// The name a new document's one page carries, and the stem new pages number
@@ -42,6 +45,128 @@ pub fn free_name<'a>(taken: impl IntoIterator<Item = &'a str>) -> String {
         .map(|n| format!("{PAGE_STEM} {n}"))
         .find(|name| !taken.contains(&name.as_str()))
         .expect("an unbounded range finds a free number")
+}
+
+/// The names `doc`'s pages carry, in order.
+fn names(doc: &Document) -> Vec<String> {
+    doc.page_ids()
+        .filter_map(|p| doc.get(p).map(|n| n.name().to_owned()))
+        .collect()
+}
+
+/// *New page*: a page at `index` in the order (clamped to the end), named `name`
+/// or else the first free `Page N`, on `ground`. Answers the new page.
+pub fn add(
+    doc: &Document,
+    ids: &mut IdSource,
+    index: usize,
+    name: Option<String>,
+    ground: Option<Color>,
+) -> (Transaction, NodeId) {
+    let id = ids.mint();
+    let name = name.unwrap_or_else(|| free_name(names(doc).iter().map(String::as_str)));
+    let tx = Transaction(vec![Operation::AddPage {
+        id,
+        index: index.min(doc.pages().len()),
+        name,
+        ground,
+        draft: false,
+        modes: Vec::new(),
+    }]);
+    (tx, id)
+}
+
+/// *Duplicate page*: a copy of `page` directly below it, named `… copy` (`… copy 2`
+/// when that is taken), with its ground, draft flag and modes, its layers copied
+/// as *Duplicate* copies them and its guides moved onto the copies. Answers the
+/// new page; `None` when `page` is no page.
+pub fn duplicate(
+    doc: &Document,
+    ids: &mut IdSource,
+    page: NodeId,
+) -> Option<(Transaction, NodeId)> {
+    let (index, info, root) = (doc.page_index(page)?, doc.page(page)?, doc.get(page)?);
+    let id = ids.mint();
+    let taken = names(doc);
+    let stem = format!("{} copy", root.name());
+    let name = std::iter::once(stem.clone())
+        .chain((2..).map(|n| format!("{stem} {n}")))
+        .find(|n| !taken.contains(n))
+        .expect("an unbounded range finds a free name");
+    let mut ops = vec![Operation::AddPage {
+        id,
+        index: index + 1,
+        name,
+        ground: info.ground,
+        draft: info.draft,
+        modes: root.modes().to_vec(),
+    }];
+    let templates: Vec<Vec<crate::node::Node>> = root
+        .children()
+        .iter()
+        .filter_map(|c| doc.capture_subtree(*c))
+        .collect();
+    let placements: Vec<crate::build::Placement> = templates
+        .iter()
+        .enumerate()
+        .map(|(i, t)| crate::build::Placement {
+            nodes: t.clone(),
+            parent: id,
+            index: Some(i),
+        })
+        .collect();
+    let (copies, _) = crate::build::insert_subtrees(doc, ids, &placements, Default::default());
+    // Old id → new, read off the inserts, which keep each template's order.
+    let mut map = rustc_hash::FxHashMap::default();
+    map.insert(page, id);
+    let inserted = copies.0.iter().filter_map(|op| match op {
+        Operation::InsertSubtree { nodes, .. } => Some(nodes),
+        _ => None,
+    });
+    for (template, nodes) in templates.iter().zip(inserted) {
+        for (from, to) in template.iter().zip(nodes) {
+            map.insert(from.id(), to.id());
+        }
+    }
+    ops.extend(copies.0);
+    let guides: Vec<Guide> = doc
+        .guides()
+        .iter()
+        .filter(|g| doc.page_of(g.owner) == Some(page))
+        .copied()
+        .collect();
+    for g in guides {
+        if let Some(owner) = map.get(&g.owner) {
+            ops.push(Operation::AddGuide {
+                guide: Guide {
+                    id: GuideId(ids.mint()),
+                    owner: *owner,
+                    ..g
+                },
+            });
+        }
+    }
+    Some((Transaction(ops), id))
+}
+
+/// *Delete page*: its guides, then its layers as *Delete* deletes them (a main
+/// among them detaching its instances on other pages), then the page. `None` when
+/// `page` is no page or the document's last.
+pub fn delete(doc: &Document, page: NodeId) -> Option<Transaction> {
+    doc.page_index(page)?;
+    if doc.pages().len() == 1 {
+        return None;
+    }
+    let layers = doc.get(page)?.children().to_vec();
+    let mut ops: Vec<Operation> = doc
+        .guides()
+        .iter()
+        .filter(|g| g.owner == page)
+        .map(|g| Operation::RemoveGuide { id: g.id })
+        .collect();
+    ops.extend(crate::build::delete(doc, &layers).0);
+    ops.push(Operation::RemovePage { id: page });
+    Some(Transaction(ops))
 }
 
 #[cfg(test)]

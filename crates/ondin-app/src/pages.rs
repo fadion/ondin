@@ -284,17 +284,13 @@ impl OndinApp {
     pub(crate) fn add_page(&mut self) {
         self.finish_text_first();
         let doc = &self.session.doc;
-        let taken: Vec<String> = doc.page_ids().map(|p| self.page_name(p)).collect();
-        let name = ondin_core::page::free_name(taken.iter().map(String::as_str));
-        let id = self.session.ids.mint();
-        let tx = Transaction(vec![Operation::AddPage {
-            id,
-            index: doc.pages().len(),
-            name,
-            ground: doc.own_ground(self.session.page),
-            draft: false,
-            modes: Vec::new(),
-        }]);
+        let (tx, id) = ondin_core::page::add(
+            doc,
+            &mut self.session.ids,
+            doc.pages().len(),
+            None,
+            doc.own_ground(self.session.page),
+        );
         self.name_step_as(crate::menu::Item::NewPage);
         if !self.session.commit(tx) {
             return;
@@ -368,76 +364,13 @@ impl OndinApp {
     /// one undo step.
     pub(crate) fn duplicate_page(&mut self, page: NodeId) {
         self.finish_text_first();
-        let doc = &self.session.doc;
-        let (Some(index), Some(info), Some(root)) =
-            (doc.page_index(page), doc.page(page), doc.get(page))
+        let Some((tx, id)) =
+            ondin_core::page::duplicate(&self.session.doc, &mut self.session.ids, page)
         else {
             return;
         };
-        let id = self.session.ids.mint();
-        let taken: Vec<String> = doc.page_ids().map(|p| self.page_name(p)).collect();
-        // `Pricing copy`, then `Pricing copy 2` when that is taken.
-        let stem = format!("{} copy", root.name());
-        let name = std::iter::once(stem.clone())
-            .chain((2..).map(|n| format!("{stem} {n}")))
-            .find(|n| !taken.contains(n))
-            .expect("an unbounded range finds a free name");
-        let mut ops = vec![Operation::AddPage {
-            id,
-            index: index + 1,
-            name,
-            ground: info.ground,
-            draft: info.draft,
-            modes: root.modes().to_vec(),
-        }];
-        let templates: Vec<Vec<ondin_core::Node>> = root
-            .children()
-            .iter()
-            .filter_map(|c| doc.capture_subtree(*c))
-            .collect();
-        let placements: Vec<build::Placement> = templates
-            .iter()
-            .enumerate()
-            .map(|(i, t)| build::Placement {
-                nodes: t.clone(),
-                parent: id,
-                index: Some(i),
-            })
-            .collect();
-        let (copies, _) =
-            build::insert_subtrees(doc, &mut self.session.ids, &placements, Default::default());
-        // Old id → new, read off the inserts, which keep each template's order.
-        let mut map = std::collections::HashMap::new();
-        map.insert(page, id);
-        let inserted = copies.0.iter().filter_map(|op| match op {
-            Operation::InsertSubtree { nodes, .. } => Some(nodes),
-            _ => None,
-        });
-        for (template, nodes) in templates.iter().zip(inserted) {
-            for (from, to) in template.iter().zip(nodes) {
-                map.insert(from.id(), to.id());
-            }
-        }
-        ops.extend(copies.0);
-        let pages_guides: Vec<ondin_core::Guide> = doc
-            .guides()
-            .iter()
-            .filter(|g| doc.page_of(g.owner) == Some(page))
-            .copied()
-            .collect();
-        for g in pages_guides {
-            if let Some(owner) = map.get(&g.owner) {
-                ops.push(Operation::AddGuide {
-                    guide: ondin_core::Guide {
-                        id: ondin_core::GuideId(self.session.ids.mint()),
-                        owner: *owner,
-                        ..g
-                    },
-                });
-            }
-        }
         self.name_step_as(crate::menu::Item::DuplicatePage);
-        if self.session.commit(Transaction(ops)) {
+        if self.session.commit(tx) {
             self.go_to_page(id);
             self.start_new_page_rename(id);
             self.session.info("Duplicated the page");
@@ -519,33 +452,21 @@ impl OndinApp {
         let name = self.page_name(page);
         // Read now: the page is gone by the time the toast is written.
         let shown = self.shown_page_name(page);
-        let layers: Vec<NodeId> = doc
-            .get(page)
-            .map(|n| n.children().to_vec())
-            .unwrap_or_default();
-        let mut ops: Vec<Operation> = doc
-            .guides()
-            .iter()
-            .filter(|g| g.owner == page)
-            .map(|g| Operation::RemoveGuide { id: g.id })
-            .collect();
-        ops.extend(build::guides_of(doc, &layers));
-        ops.extend(layers.iter().map(|id| Operation::DeleteNode { id: *id }));
-        let relinks = ondin_core::component::relink_for_delete(doc, &layers);
-        let detached = relinks
-            .iter()
-            .filter(|op| {
-                matches!(op, Operation::SetLink { id, link: None }
+        let Some(tx) = ondin_core::page::delete(doc, page) else {
+            return;
+        };
+        let detached =
+            tx.0.iter()
+                .filter(|op| {
+                    matches!(op, Operation::SetLink { id, link: None }
                     if ondin_core::component::instance_root(doc, *id) == Some(*id))
-            })
-            .count();
-        ops.extend(relinks);
-        ops.push(Operation::RemovePage { id: page });
+                })
+                .count();
         // The page above, or the one below for the first.
         let above = doc.pages()[index.saturating_sub(1).max(usize::from(index == 0))].id;
         let leaving = page == self.session.page;
         self.name_step_as(crate::menu::Item::DeletePage);
-        if self.session.commit(Transaction(ops)) {
+        if self.session.commit(tx) {
             // The step's subject is the page, which its first-named layer is not.
             if let Some(note) = self.session.history.current_note_mut() {
                 note.subject = Some(name.clone());

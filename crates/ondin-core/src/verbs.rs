@@ -747,6 +747,88 @@ pub static VERBS: &[Verb] = &[
             )))
         },
     },
+    // --- pages ----------------------------------------------------------------
+    Verb {
+        name: "add_page",
+        doc: "Add a page; answers it",
+        params: &[
+            opt(
+                "name",
+                TEXT,
+                "its name; the first free `Page N` unless given",
+            ),
+            opt(
+                "index",
+                INDEX,
+                "its place in the page order, 0 the first; last unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let index = a.index("index").unwrap_or(usize::MAX);
+            let name = a.text("name").map(str::to_owned);
+            let (tx, id) = crate::page::add(ctx.doc, ctx.ids, index, name, None);
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "duplicate_page",
+        doc: "Copy a page below it, with its layers and guides; answers the copy",
+        params: &[req("page", NODE, "the page")],
+        run: |ctx, a| {
+            let page = a.node("page")?;
+            let (tx, id) = crate::page::duplicate(ctx.doc, ctx.ids, page)
+                .ok_or_else(|| a.invalid("page", "not a page"))?;
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "delete_page",
+        doc: "Delete a page with its layers and guides; instances of a main on it are detached",
+        params: &[req("page", NODE, "the page")],
+        run: |ctx, a| {
+            let page = a.node("page")?;
+            if !ctx.doc.is_page(page) {
+                return Err(a.invalid("page", "not a page"));
+            }
+            crate::page::delete(ctx.doc, page)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("a document keeps at least one page"))
+        },
+    },
+    Verb {
+        name: "move_page",
+        doc: "Move a page to `index` in the page order, 0 the first",
+        params: &[
+            req("page", NODE, "the page"),
+            req("index", INDEX, "its new place"),
+        ],
+        run: |ctx, a| {
+            let page = a.node("page")?;
+            if !ctx.doc.is_page(page) {
+                return Err(a.invalid("page", "not a page"));
+            }
+            let last = ctx.doc.pages().len() - 1;
+            Ok(Done::ops(vec![Operation::MovePage {
+                id: page,
+                index: a.index("index").unwrap_or(0).min(last),
+            }]))
+        },
+    },
+    Verb {
+        name: "set_page_draft",
+        doc: "Mark a page as a draft, left out of publishing, export all and present, or not",
+        params: &[req("page", NODE, "the page"), req("draft", BOOL, "a draft")],
+        run: |ctx, a| {
+            let page = a.node("page")?;
+            if !ctx.doc.is_page(page) {
+                return Err(a.invalid("page", "not a page"));
+            }
+            Ok(Done::ops(vec![Operation::SetPageDraft {
+                id: page,
+                draft: a.bool("draft").unwrap_or(true),
+            }]))
+        },
+    },
     // --- placement and geometry -------------------------------------------
     Verb {
         name: "set_transform",
@@ -801,9 +883,9 @@ pub static VERBS: &[Verb] = &[
     // --- layer state --------------------------------------------------------
     Verb {
         name: "set_name",
-        doc: "Rename a layer",
+        doc: "Rename a layer or a page",
         params: &[
-            req("node", NODE, "the layer"),
+            req("node", NODE, "the layer or page"),
             req("name", TEXT, "its new name"),
         ],
         run: |_, a| {

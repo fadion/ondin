@@ -38,7 +38,8 @@ Phase 2 — write (1:1 with operations/composites):
 `set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `set_fills`, `set_strokes`,
 `set_effects`, `add_image(bytes) -> ImageId`, `set_display`, `set_layout_item`, `set_insets`,
-`set_exports`, `undo()`, `redo()`, `set_selection(ids)`.
+`set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
+`move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 
 Phase 3 — components, variables and styles (through the verbs, never the raw ops):
 `make_component(id)`, `create_instance(main, parent, at)`, `detach_instance(id)`,
@@ -63,7 +64,9 @@ Which of this is built: the `ondin-mcp` crate holds the tool list (`PHASE_1` to 
 
 #### Conventions
 
-- `create_node`, `insert_subtree` and `duplicate` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
+- A page is named by its root node's id: `create_node`'s and `insert_subtree`'s parent may be one,
+  and `set_name` renames one.
+- `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
 - `set_blend(ids, mode)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.

@@ -16,8 +16,6 @@ item's premise can go stale while its ask still reads true.
     `ondin-app` moves into a core builder before its verb exists, as delete and duplicate did
     (`build::delete`, `build::duplicate_placements`). The discrete commands that build their ops in
     place:
-    - Pages (`pages.rs`): `add_page`, `commit_page_name`, `toggle_page_draft`, the page drag's
-      `MovePage`, `duplicate_page`, `delete_page_now`. MCP's tools owe pages too (*Later*).
     - Text (`typography.rs`): `set_text_sizing`, and `text_chord`'s character and paragraph
       attributes (`one_char_attrs_tx`, `para_attrs_tx`), which a range-aware verb would take.
     - Guides: `paste_guides`, `duplicate_guides`, `remove_selected_guides`, `rulers::remove_guide`
@@ -81,8 +79,8 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   the commit pass sequence out of `EditorSession::commit_inner`; kits and library code out of the app
   for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and
-  specified beside used values (§15 D868). The tools owe pages: the snapshot lists them, but no tool
-  takes a page (`export_svg`/`export_png`, `create_node`'s parent, page add/rename/move).
+  specified beside used values (§15 D868). The page verbs are built; `export_svg` and `export_png`
+  still take no page.
 
 ## Later · Platform and dependencies
 

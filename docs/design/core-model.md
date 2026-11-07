@@ -12,7 +12,7 @@ ondin-core/src/
 ├─ id.rs           # NodeId { actor, seq }, IdSource
 ├─ node.rs         # Node, NodeKind, Paint, Fill, Stroke, TextStyle, Pivot
 ├─ effect.rs       # Effect, EffectKind, Shadow, Filters — the effect stack and its escape (§5.3a)
-├─ page.rs         # Page { id, ground, draft }, free_name — the page table's half of a page (§5.5)
+├─ page.rs         # Page { id, ground, draft }, free_name; add, duplicate, delete — the page edits (§5.5)
 ├─ guide.rs        # Guide, GuideId, GuideAxis — ruler guides; document state, not nodes (§5.5)
 ├─ layout.rs       # LayoutGrid, GridAxis, GridAlign, tracks() — a frame's columns and rows;
 │                  #   chrome over a node, never in the scene (§5.3b)
@@ -222,6 +222,10 @@ pub struct Guide {                 // guide.rs
 
 - **A page is a parentless `NodeKind::Root` listed in `pages`.** Its layers are that root's subtree; its name is the root's name and its modes the root's `Node::modes` (§5.3f); the ground and draft flag live in `Page`. Every page shares one origin, so a layer moved between pages keeps its coordinates. Components, styles, variables, images and the vault belong to the document and serve every page. Pages are roots in a table rather than nodes under one root so that the structural operations, the loader's tree rules and the clipboard's rules hold unchanged: Delete, Reparent and Reorder refuse a page as they refuse the vault (`CannotModifyRoot`), and `capture_subtree` answers `None` for one (it still captures the vault whole, which the kit verbs read).
 - `Document::new` makes a one-page document named `Page 1` (`page::PAGE_STEM`); new pages take the lowest free `Page N` (`page::free_name`). The vault is never a page.
+- The page edits are core builders the pages list and the page verbs share: `page::add`,
+  `page::duplicate` (below the page, `… copy`, its layers copied as *Duplicate* copies them and its
+  guides moved onto the copies) and `page::delete` (the page's guides, its layers as *Delete* takes
+  them, then `RemovePage`; never the last page). Renaming, moving and the draft flag are one op each.
 - A **draft** page is left out of everything that gathers from every page — kit publishing (§5.3e), *Export all* and *Export frames, all pages…* (§7), presenting past the current page, batch rename's *All pages* past the current page, the library cover — and kept by everything aimed at it directly. `gathered_pages` is what those read.
 - **Document state that is not a node:** each page's `ground` and `draft`, and `guides`. People set them for the artwork, not the sitting, so they are saved with the file; neither loosens the document/view-data line (§9.2, §9.3). Which page is current is view state and never saved (`app-chrome.md`, *Pages*).
 - A page's `ground` is a colour of its own, opaque, or `None`: no colour of its own, drawn on the viewer's default — the app's theme canvas (`theme::color::canvas()`), `DEFAULT_CANVAS_BACKGROUND` for everything headless (CLI, SVG/PNG, the MCP snapshot). `Document::ground` answers own-or-`DEFAULT_CANVAS_BACKGROUND`, so headless output is the same whichever; `own_ground` answers the stored colour, and the app resolves through `session::page_ground` instead. A new document, a new page made from a page without a colour, and an imported page without a colour of its own start at `None`. It is changed only through `SetPageGround` (invariant 2) and is per page, not an `EditorSession` preference. (§15 D28)

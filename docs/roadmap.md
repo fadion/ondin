@@ -44,10 +44,6 @@ item's premise can go stale while its ask still reads true.
   3. The app's editing `Item`s call the same verbs with the selection filled in. What needs the
      menu's target or the pointer stays an `Item` of the app's own.
 
-  Apart from those, keys resolve to `Item`s through one binding table, so a chord's binding and
-  its menu spelling are one value; today they agree only because the cheatsheet's tests check them
-  (`ViewSwitch::accel`'s doc says so).
-
 ## Now · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d). A nested instance added

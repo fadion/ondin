@@ -21,6 +21,7 @@ use crate::node::{
 };
 use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::resolve::Resolved;
+use crate::style::{StyleId, StyleSlot, StyleValue};
 use crate::svg_in::ImageSink;
 use crate::typography::{CharAttr, Length, ParaAttr};
 use crate::variable::{Cell, CollectionId, ModeId, VarId, VarKind};
@@ -373,6 +374,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "[CharAttr]" => reads::<Vec<CharAttr>>(v),
         "[ParaAttr]" => reads::<Vec<ParaAttr>>(v),
         "Cell" => reads::<Cell>(v),
+        "StyleValue" => reads::<StyleInput>(v),
         "Tree" => reads::<Tree>(v),
         "[Effect]" => reads::<Vec<Effect>>(v),
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
@@ -445,6 +447,7 @@ pub fn example(model: &str) -> Option<Value> {
             CharAttr::LetterSpacing(Length::Em(0.02)),
         ]),
         "Cell" => json(&Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))),
+        "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::IndentStart(Length::Px(24.0)),
@@ -501,6 +504,18 @@ const BOOL_OPS: &[&str] = &["union", "subtract", "intersect", "exclude"];
 const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
+const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
+
+/// The style slot a [`STYLE_SLOTS`] word names.
+fn slot_of(word: &str) -> StyleSlot {
+    match word {
+        "strokes" => StyleSlot::Strokes,
+        "effects" => StyleSlot::Effects,
+        "text" => StyleSlot::Text,
+        "layout" => StyleSlot::Layout,
+        _ => StyleSlot::Fills,
+    }
+}
 const MOVES: &[&str] = &["front", "forward", "backward", "back"];
 /// The blend modes by [`BlendMode::label`], as the snapshot names them, in
 /// [`BlendMode::ALL`]'s order.
@@ -529,6 +544,52 @@ fn node<'d>(ctx: &Ctx<'d>, id: NodeId) -> Result<&'d crate::node::Node, VerbErro
     ctx.doc
         .get(id)
         .ok_or(VerbError::Refused(OpError::NoSuchNode(id)))
+}
+
+/// A style's value as a caller writes it: the lists as the single-layer verbs take
+/// them, with no item ids, which the verb keys.
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+pub enum StyleInput {
+    Fills(Vec<Fill>),
+    Strokes(Vec<Stroke>),
+    Effects(Vec<Effect>),
+    Text(Box<TextStyle>),
+    Layout(Box<crate::style::LayoutStyle>),
+}
+
+/// `input` as a style holds it, each list position keeping the item id `own`'s
+/// list holds there (fresh ids past it, or for a new style), and a text style
+/// with its colour and language cleared (`style::type_part`).
+fn style_value(ctx: &mut Ctx<'_>, input: StyleInput, own: Option<&StyleValue>) -> StyleValue {
+    match (input, own) {
+        (StyleInput::Fills(v), Some(StyleValue::Fills(o))) => StyleValue::Fills(rekeyed(ctx, o, v)),
+        (StyleInput::Fills(v), _) => StyleValue::Fills(rekeyed(ctx, &[], v)),
+        (StyleInput::Strokes(v), Some(StyleValue::Strokes(o))) => {
+            StyleValue::Strokes(rekeyed(ctx, o, v))
+        }
+        (StyleInput::Strokes(v), _) => StyleValue::Strokes(rekeyed(ctx, &[], v)),
+        (StyleInput::Effects(v), Some(StyleValue::Effects(o))) => {
+            StyleValue::Effects(rekeyed(ctx, o, v))
+        }
+        (StyleInput::Effects(v), _) => StyleValue::Effects(rekeyed(ctx, &[], v)),
+        (StyleInput::Text(t), _) => StyleValue::Text(Box::new(crate::style::type_part(&t))),
+        (StyleInput::Layout(l), _) => StyleValue::Layout(l),
+    }
+}
+
+/// The style the `style` argument names, the document's own.
+fn own_style<'d>(ctx: &Ctx<'d>, a: &Args<'_>) -> Result<&'d crate::style::Style, VerbError> {
+    let id: StyleId = a.id("style")?;
+    let st = ctx
+        .doc
+        .styles()
+        .get(id)
+        .ok_or_else(|| a.invalid("style", "no style has that id"))?;
+    if st.origin.is_some() {
+        return Err(a.invalid("style", "a kit's style is read-only here"));
+    }
+    Ok(st)
 }
 
 /// What `make_component` says for a rule it refused by.
@@ -1299,6 +1360,172 @@ pub static VERBS: &[Verb] = &[
             crate::variable::frame_mode_ops(ctx.doc, a.node("node")?, c, mode)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("node", why))
+        },
+    },
+    // --- styles -----------------------------------------------------------------
+    Verb {
+        name: "add_style",
+        doc: "Add a style from a value or from a layer's look, and apply it to layers; answers its id",
+        params: &[
+            opt(
+                "value",
+                ParamKind::Model("StyleValue"),
+                "what it holds; or give `from`",
+            ),
+            opt(
+                "from",
+                NODE,
+                "a layer whose look in `slot` it takes; or give `value`",
+            ),
+            opt(
+                "slot",
+                ParamKind::Choice(STYLE_SLOTS),
+                "the slot `from` is read in",
+            ),
+            opt(
+                "name",
+                TEXT,
+                "its name; `<Slot> style`, numbered if taken, unless given",
+            ),
+            opt("nodes", NODES, "layers to apply it to"),
+        ],
+        run: |ctx, a| {
+            let value = match (a.model_opt::<StyleInput>("value")?, a.get("from")) {
+                (Some(input), None) => style_value(ctx, input, None),
+                (None, Some(_)) => {
+                    let slot = a.choice("slot").map(slot_of).ok_or(VerbError::Missing {
+                        verb: "add_style",
+                        param: "slot",
+                    })?;
+                    crate::style::value_drawn(ctx.doc, a.node("from")?, slot).ok_or_else(|| {
+                        a.invalid("from", "it has nothing in that slot to make a style of")
+                    })?
+                }
+                _ => {
+                    return Err(a.invalid("value", "give a `value` or a `from` layer, one of them"));
+                }
+            };
+            let slot = value.slot();
+            let styles = ctx.doc.styles();
+            let name = match a.text("name").map(str::trim) {
+                Some(n) => {
+                    if let Some(why) = crate::style::name_refusal(styles, slot, n, None) {
+                        return Err(a.invalid("name", why));
+                    }
+                    n.to_owned()
+                }
+                None => crate::style::free_name(styles, slot, &format!("{} style", slot.title())),
+            };
+            let id = ctx.ids.mint_style();
+            let mut ops = vec![crate::style::add_op(id, &name, value)];
+            if a.get("nodes").is_some() {
+                ops.extend(
+                    a.nodes("nodes")?
+                        .into_iter()
+                        .map(|n| crate::style::bind_op(n, slot, Some(id))),
+                );
+            }
+            Ok(Done::making(ops, id.0.to_wire()))
+        },
+    },
+    Verb {
+        name: "remove_style",
+        doc: "Remove a style; its users keep the look they drew",
+        params: &[req("style", ParamKind::Id("style"), "the style")],
+        run: |ctx, a| {
+            let id = own_style(ctx, a)?.id;
+            Ok(Done::ops(crate::style::remove_ops(ctx.doc, &[id])))
+        },
+    },
+    Verb {
+        name: "rename_style",
+        doc: "Rename a style",
+        params: &[
+            req("style", ParamKind::Id("style"), "the style"),
+            req("name", TEXT, "its new name, unique among its slot's"),
+        ],
+        run: |ctx, a| {
+            let id: StyleId = a.id("style")?;
+            crate::style::rename_ops(ctx.doc.styles(), id, a.text("name").unwrap_or_default())
+                .map(Done::ops)
+                .map_err(|why| a.invalid("name", why))
+        },
+    },
+    Verb {
+        name: "set_style_value",
+        doc: "Change what a style holds; every layer applying it follows",
+        params: &[
+            req("style", ParamKind::Id("style"), "the style"),
+            req(
+                "value",
+                ParamKind::Model("StyleValue"),
+                "its new value, of its own slot",
+            ),
+        ],
+        run: |ctx, a| {
+            let st = own_style(ctx, a)?;
+            let (id, own) = (st.id, st.value.clone());
+            let value = style_value(ctx, a.model("value")?, Some(&own));
+            if value.slot() != own.slot() {
+                return Err(a.invalid(
+                    "value",
+                    format!(
+                        "a {} style holds {} only",
+                        own.slot().title(),
+                        own.slot().title()
+                    ),
+                ));
+            }
+            Ok(Done::ops(vec![Operation::SetStyleValue { id, value }]))
+        },
+    },
+    Verb {
+        name: "apply_style",
+        doc: "Apply a style to layers, or detach them from the style in a slot",
+        params: &[
+            req("nodes", NODES, "the layers"),
+            opt(
+                "style",
+                ParamKind::Id("style"),
+                "the style; absent detaches",
+            ),
+            opt(
+                "slot",
+                ParamKind::Choice(STYLE_SLOTS),
+                "the slot to detach; the style's when it is given",
+            ),
+        ],
+        run: |ctx, a| {
+            let nodes = a.nodes("nodes")?;
+            let (style, slot) = match a.id_opt::<StyleId>("style")? {
+                Some(id) => {
+                    let st = ctx
+                        .doc
+                        .styles()
+                        .get(id)
+                        .ok_or_else(|| a.invalid("style", "no style has that id"))?;
+                    (Some(id), st.slot())
+                }
+                None => {
+                    let slot = a.choice("slot").map(slot_of).ok_or(VerbError::Missing {
+                        verb: "apply_style",
+                        param: "slot",
+                    })?;
+                    (None, slot)
+                }
+            };
+            let ops = nodes
+                .into_iter()
+                .filter(|n| {
+                    style.is_some()
+                        || ctx
+                            .doc
+                            .get(*n)
+                            .is_some_and(|x| x.styles().get(slot).is_some())
+                })
+                .map(|n| crate::style::bind_op(n, slot, style))
+                .collect();
+            Ok(Done::ops(ops))
         },
     },
     // --- pages ----------------------------------------------------------------

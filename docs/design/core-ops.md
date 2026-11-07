@@ -232,7 +232,12 @@ it created. A verb never commits; its caller does, as every edit is committed.
   `add_mode_ops`, `mode_name_refusal`, `frame_mode_ops`, beside `remove_ops`, `remove_mode_ops` and
   `rename_mode_ops`. A verb takes a cell as a typed `Cell`; the browser's text parsing (`--name`
   for an alias, colour text) stays the browser's. Ids that are not a layer's are `ParamKind::Id`, in
-  the node wire form, and a verb that makes one answers it in `Done::made`. `ondin-mcp`'s
+  the node wire form, and a verb that makes one answers it in `Done::made`. The style verbs share
+  `style::add_op` (behind *Create style…*'s `create_ops`), `name_refusal`, `rename_ops`,
+  `bind_op` and `remove_ops`. A style value is written as `verbs::StyleInput`, the lists with no
+  item ids: a new style mints them, `set_style_value` keeps the style's own by position, and a text
+  style's colour and language are cleared (`style::type_part`). `set_style_value` writes the value
+  alone; `style::settle`, in `owed`, carries it to every user. `ondin-mcp`'s
   `every_phase_3_tool_is_a_registry_verb` holds the tool list to the registry, the tools still to
   come on its pending list.
 

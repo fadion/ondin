@@ -709,29 +709,17 @@ impl OndinApp {
             );
         }
         if enter || edit.lost_focus() {
-            let text = n.text.trim().to_string();
-            let taken = self
-                .session
-                .doc
-                .styles()
-                .by_name(style.slot(), &text)
-                .is_some_and(|s| s.id != style.id);
-            if text.is_empty() || taken {
-                n.refusal = Some(if text.is_empty() {
-                    "A style needs a name.".into()
-                } else {
-                    format!("{text} already exists.")
-                });
-                n.focus = true;
-                self.style_naming = Some(n);
-                return;
-            }
-            if text != style.name {
-                self.session.name_step("Rename style", icon::CURSOR_TEXT);
-                self.commit_edit(Transaction(vec![Operation::SetStyleName {
-                    id: style.id,
-                    name: text,
-                }]));
+            match style::rename_ops(self.session.doc.styles(), style.id, &n.text) {
+                Err(why) => {
+                    n.refusal = Some(why);
+                    n.focus = true;
+                    self.style_naming = Some(n);
+                }
+                Ok(ops) if !ops.is_empty() => {
+                    self.session.name_step("Rename style", icon::CURSOR_TEXT);
+                    self.commit_edit(Transaction(ops));
+                }
+                Ok(_) => {}
             }
             return;
         }

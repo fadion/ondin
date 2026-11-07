@@ -1143,6 +1143,97 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// The style verbs, as a script: a fill style added from a value and applied, its
+/// value changed and its users following, renamed, detached from a layer that
+/// keeps its look, one made from a layer, and removed. A taken name is refused.
+///
+/// flip: `style_value` keying a changed list from scratch → fails at "the fill
+/// keeps its item id".
+#[test]
+fn styles_are_added_changed_applied_and_removed() {
+    let (mut doc, mut ids, page) = blank();
+    let fills = |r: u8| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(Color::from_rgb8(r, 0, 0)).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    let colour =
+        |doc: &Document, id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+            Some(Brush::Solid(c)) => c.to_rgba8().r,
+            other => panic!("{other:?}"),
+        };
+    let script = json!([
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "a" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "b" },
+        { "verb": "add_style", "args": { "value": { "fills": fills(100) }, "name": "Brand", "nodes": ["@a", "@b"] }, "as": "s" },
+    ]);
+    let made =
+        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let (a, b) = (
+        NodeId::from_wire(&made[0][0]).unwrap(),
+        NodeId::from_wire(&made[1][0]).unwrap(),
+    );
+    let s = made[2][0].clone();
+    assert_eq!((colour(&doc, a), colour(&doc, b)), (100, 100), "applied");
+    let style: ondin_core::style::StyleId = serde_json::from_value(json!(s)).unwrap();
+    let item = match &doc.styles().get(style).unwrap().value {
+        ondin_core::style::StyleValue::Fills(f) => f[0].id,
+        _ => unreachable!(),
+    };
+
+    let more = json!([
+        { "verb": "set_style_value", "args": { "style": s, "value": { "fills": fills(200) } } },
+        { "verb": "rename_style", "args": { "style": s, "name": "Accent" } },
+        { "verb": "apply_style", "args": { "nodes": [b.to_wire()], "slot": "fills" } },
+        { "verb": "add_style", "args": { "from": a.to_wire(), "slot": "fills", "name": "Copy" }, "as": "c" },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, None, &more).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        (colour(&doc, a), colour(&doc, b)),
+        (200, 200),
+        "users follow"
+    );
+    let st = doc.styles().get(style).unwrap();
+    assert_eq!(st.name, "Accent");
+    match &st.value {
+        ondin_core::style::StyleValue::Fills(f) => {
+            assert_eq!(f[0].id, item, "the fill keeps its item id")
+        }
+        _ => unreachable!(),
+    }
+    assert!(
+        doc.get(b)
+            .unwrap()
+            .styles()
+            .get(ondin_core::style::StyleSlot::Fills)
+            .is_none(),
+        "b detached"
+    );
+    assert!(!made[3].is_empty());
+
+    let taken = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        None,
+        &json!([{ "verb": "add_style", "args": { "value": { "fills": fills(1) }, "name": "Accent" } }]),
+    )
+    .expect_err("a taken name");
+    assert!(taken.why.contains("already exists"), "{taken}");
+
+    verbs::run_script(
+        &mut doc,
+        &mut ids,
+        None,
+        &json!([{ "verb": "remove_style", "args": { "style": s } }]),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(doc.styles().get(style).is_none());
+    assert_eq!(colour(&doc, a), 200, "a keeps the look it drew");
+    assert!(doc.get(page).is_some());
+}
+
 /// `combine_as_variants` makes a set of two mains, and `switch_variant` shows the
 /// other variant in an instance by its property's value.
 #[test]

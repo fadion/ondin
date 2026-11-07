@@ -972,7 +972,14 @@ pub fn create_ops(
 ) -> Option<Vec<Operation>> {
     // `None` for a layout style of a layer with no layout — nothing to make one of.
     let value = value_drawn(doc, from, slot)?;
-    let mut ops = vec![Operation::AddStyle {
+    let mut ops = vec![add_op(id, name, value)];
+    ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));
+    Some(ops)
+}
+
+/// The op that adds the document's own style `id`, named `name`, holding `value`.
+pub fn add_op(id: StyleId, name: &str, value: StyleValue) -> Operation {
+    Operation::AddStyle {
         style: Style {
             id,
             name: name.to_string(),
@@ -981,9 +988,45 @@ pub fn create_ops(
             forked: None,
             description: String::new(),
         },
-    }];
-    ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));
-    Some(ops)
+    }
+}
+
+/// Why `name` cannot name a style of `slot` (`except` the one being renamed), or
+/// `None`: it needs one, and no other of the document's own styles of the slot
+/// has it.
+pub fn name_refusal(
+    styles: &Styles,
+    slot: StyleSlot,
+    name: &str,
+    except: Option<StyleId>,
+) -> Option<String> {
+    if name.is_empty() {
+        return Some("A style needs a name.".into());
+    }
+    let taken = styles
+        .by_name(slot, name)
+        .is_some_and(|s| Some(s.id) != except);
+    taken.then(|| format!("{name} already exists."))
+}
+
+/// Rename the style `id`: refused by [`name_refusal`] or for a kit's style, which
+/// is read-only here; nothing when the name is the one it has.
+pub fn rename_ops(styles: &Styles, id: StyleId, name: &str) -> Result<Vec<Operation>, String> {
+    let name = name.trim();
+    let st = styles.get(id).ok_or("No style has that id.")?;
+    if st.origin.is_some() {
+        return Err("A kit's style is read-only here.".into());
+    }
+    if let Some(why) = name_refusal(styles, st.slot(), name, Some(id)) {
+        return Err(why);
+    }
+    Ok(match st.name == name {
+        true => Vec::new(),
+        false => vec![Operation::SetStyleName {
+            id,
+            name: name.to_owned(),
+        }],
+    })
 }
 
 /// `node`'s values in `slot` **as drawn** — what a style made of it would hold.

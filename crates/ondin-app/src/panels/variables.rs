@@ -1443,28 +1443,18 @@ impl OndinApp {
         let table = doc.variables();
         match act {
             Act::StyleName(id, text) => {
-                let text = text.trim().to_string();
-                let Some(st) = doc.styles().get(id) else {
+                if doc.styles().get(id).is_none() {
                     self.var_edit_done();
                     return;
-                };
-                let taken = doc
-                    .styles()
-                    .by_name(st.slot(), &text)
-                    .is_some_and(|o| o.id != id);
-                if text.is_empty() {
-                    self.var_refuse("A style needs a name.".into());
-                } else if taken {
-                    self.var_refuse(format!("{text} already exists."));
-                } else {
-                    let changed = st.name != text;
-                    self.var_edit_done();
-                    if changed {
-                        self.session.name_step("Rename style", icon::CURSOR_TEXT);
-                        self.commit_edit(Transaction(vec![Operation::SetStyleName {
-                            id,
-                            name: text,
-                        }]));
+                }
+                match ondin_core::style::rename_ops(doc.styles(), id, &text) {
+                    Err(why) => self.var_refuse(why),
+                    Ok(ops) => {
+                        self.var_edit_done();
+                        if !ops.is_empty() {
+                            self.session.name_step("Rename style", icon::CURSOR_TEXT);
+                            self.commit_edit(Transaction(ops));
+                        }
                     }
                 }
             }

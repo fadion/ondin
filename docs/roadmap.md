@@ -111,13 +111,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **egui 0.36** is blocked by vello requiring wgpu 29 (check — last asked 2026-09-03). Re-derive
   `ui::menu_rows`' button-style arithmetic when it moves.
 
-## Later · Tooling
-
-- **The review skills' census rows are never controlled** (§15 D827): the rows in `codebase-review`'s
-  and `release-review`'s fact sheet are descriptions a pass turns into commands. Trigger: the next
-  review's Pass 0 — write each command down and run it against a fixture that must match and one
-  that must not before trusting its count.
-
 ## Considerations
 
 Ideas worth weighing, not yet decided or scheduled.

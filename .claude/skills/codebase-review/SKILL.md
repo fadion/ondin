@@ -176,20 +176,59 @@ cargo clippy --workspace --all-targets -- -W clippy::pedantic -W clippy::nursery
 **plus the same sweep per package** — the workspace form drops a member crate's output. Then the
 census below, written to `review/facts.md`.
 
-| Row | Kind | Feeds |
-| --- | --- | --- |
-| `unwrap()` / `expect()` / `panic!` / `unreachable!` / raw `[i]` **outside test modules** | census (**64** production sites, measured 2026-09-03 — ~1,330 more are inside `#[cfg(test)]`) — split by crate and by whether the input is user-controllable | L1 panic surface; **invariant 8** ("operations never panic on bad input") |
-| `unsafe` blocks | census (2 today — enumerate both) | L5 |
-| `#[allow(...)]` in source | census (**38** attributes) — each is a silenced signal | L3 |
-| `TODO` / `FIXME` / `XXX` / `HACK` | census (2) | L3 / triage |
-| `cargo deny check` (installed), `cargo tree --duplicates` | census | L5 / L3 |
-| `cargo llvm-cov --workspace --summary-only` per file (installed) | census | L6 / A5 baseline |
-| `#[ignore]` sites + their reason strings | census (**25** attributes) | L6 — a gate nothing runs |
-| Contiguous `///` run lengths, module docs (`//!`, runs starting at line 1) excluded, sorted desc with the item each precedes | census | A6 doc-comment theft |
-| `pub` items in `ondin-core` with zero callers in the workspace | **candidate list** — counts per module only; `dead_code` never fires on a `pub` lib item | L3 |
-| Structs deriving `PartialEq` (any crate) with fields written but never read | **candidate list** — a derived `PartialEq` silences `dead_code` on an unread field, measured | L3 |
-| `.clone()` inside per-frame closures / the scene walk / per-keystroke paths | **candidate list** — counts per file only | L4 |
-| `get`/`set_preview` call sites vs. `preview_guide` call sites | **candidate list** — the second preview path every `set_preview` owes beside it | L1 |
+**Every census row is a written command. Run it, don't re-derive it.** The source rows come
+from `census.sh` beside this file, which reads `HEAD` (pass `--rev <sha>` to pin the round's
+opening SHA). Run its controls first and stop if they fail:
+
+```bash
+MSYS_NO_PATHCONV=1 bash .claude/skills/codebase-review/census.sh selftest   # must end "selftest passed"
+```
+
+`selftest` runs each row against a fixture that must match and one that must not, and runs
+every row as a command so that one dying early under `pipefail` is caught. The *Controls*
+list below says what each fixture is. The counts are for `HEAD` on 2026-11-07 (`1e5f9ecd`). A
+count far from its figure is a finding about the tree or the command; find out which before
+you write it down. `C=.claude/skills/codebase-review/census.sh` below.
+
+| Row | Kind | Command → count (2026-11-07) | Feeds |
+| --- | --- | --- | --- |
+| `.unwrap()` / `.expect(` / `panic!` / `unreachable!` / `todo!` **outside test modules** | census, split by crate. The split by whether the input is user-controllable is the pass's call. | `bash $C panics` → **169** production (unwrap 1, expect 144, panic 3, unreachable 21), 10,113 in tests | L1 panic surface; **invariant 8** ("operations never panic on bad input") |
+| Raw indexing and slicing (`x[i]`, `x[a..b]`; `[..]` skipped) outside test modules | census of sites, by crate | `bash $C index` → **2,923** production, 4,613 in tests | L1 |
+| `unsafe` | census: enumerate every site | `bash $C unsafe` → **61**, all platform FFI in `ondin-app`, none in tests | L5 |
+| `#[allow(...)]` / `#![allow(...)]` / `cfg_attr(…, allow(…))` | census of attributes. Each is a silenced signal. | `bash $C allow` → **105** production, 7 in tests | L3 |
+| `TODO` / `FIXME` / `XXX` / `HACK` markers (the word opening a comment, or followed by `:` / `(`) | census | `bash $C todo` → **0** (four prose mentions of a dependency's TODO are not markers) | L3 / triage |
+| `cargo deny check` | census | `cargo deny check 2>&1 \| grep -oE '^(advisories.*\|error\[[a-z-]+\]\|warning\[[a-z-]+\])' \| sort \| uniq -c` → **advisories FAILED**: 12 vulnerabilities (`zip` 4, `rustls` 4, `quick-xml` 2, `rustls-webpki` 1, `webpki-roots` 1). Bans, licenses and sources ok, with 45 duplicate and 2 yanked warnings. | L5 / L3 |
+| `cargo tree --duplicates` | census of crate names | `cargo tree --workspace --duplicates --depth 0 --target all -e normal,build,dev \| grep -E '^[A-Za-z0-9_-]+ v' \| awk '{print $1}' \| sort -u \| wc -l` → **56** (28 for the host target alone) | L3 |
+| Line coverage per file | census | `cargo llvm-cov --workspace --summary-only` → not run on 2026-11-07, because it is a full instrumented test run. It is the tool's own output and has no hand-written filter. | L6 / A5 baseline |
+| `#[ignore]` sites and their reason strings | census of attributes | `bash $C ignore` → **61** (60 with a reason, 1 without: `keychain.rs:44`) | L6 — a gate nothing runs |
+| Contiguous `///` run lengths, sorted desc, each with the item below it (`//!` and runs at line 1 excluded) | census | `TOP=40 bash $C docruns` → longest **47** (`ondin-core/tests/resolve.rs:3749`); longest in production 37 (`propagate.rs:518`, `propagate_structure`) | A6 doc-comment theft |
+| `pub` items in `ondin-core` with zero callers in the workspace | **candidate list** — counts per module only; `dead_code` never fires on a `pub` lib item | — | L3 |
+| Structs deriving `PartialEq` (any crate) with fields written but never read | **candidate list**: a derived `PartialEq` silences `dead_code` on an unread field. Only the population is mechanical. | `bash $C partialeq` → **245** production structs derive it (core 133, app 77, export 29, render 6) | L3 |
+| `.clone()` inside per-frame closures / the scene walk / per-keystroke paths | **candidate list** — counts per file only | — | L4 |
+| `set_preview*` / `get_preview` call sites vs. `preview_guide` call sites | **candidate list**: every `set_preview` owes the second preview path beside it | `bash $C preview` → **36** set/get against **3** guide calls, per file | L1 |
+
+*Controls* (in `census.sh selftest`, which has one fixture tree and one two-commit repository):
+
+- **The test split.** These must be T: a `#[cfg(test)]` fn, a `#[cfg(test)]` struct field, a
+  `mod tests` containing a `'}'` char literal, a file pulled in by `#[cfg(test)] mod outline;`,
+  and a `tests/` file. These must be P: the struct after the fn, the field after the field,
+  and production code after `mod tests`.
+- **`panics`, `index`, `unsafe`, `allow`, `ignore`.** Must match: real sites. Must not match:
+  the same tokens in a `//!` doc, a `///` doc, a string, a raw string with `"` inside, and a
+  `/* */` comment. `index` must also skip `&[u8]`, `Vec<[u8; 2]>`, `vec![[…]]` and `v[..]`.
+- **`todo`.** Must match: `// TODO:` and `/* FIXME`. Must not match: "the TODO" in prose and in
+  a string.
+- **`docruns`.** A three-line run directly above `fn`, and a two-line run above
+  `#[allow] fn`. Each must name the `fn`, longest first.
+- **The ERE trap.** `grep -cE` with a backslash before a backtick must return 0 on a line the
+  plain pattern returns 1 for. If that ever stops being true, grep has changed.
+- **`cargo deny`, `cargo tree`.** These filters were checked by hand on 2026-11-07.
+  - The `cargo deny` filter must count `error[vulnerability]` and `warning[duplicate]` at line
+    start, and must not count an indented one or a bare `error:`.
+  - The `cargo tree` filter must keep `base64 v0.22.1` and drop a `├── foo v1` tree line.
+- **`partialeq`, `preview`.** No fixture. The real tree was cross-checked by hand on
+  2026-11-07 against `git grep`. Production plus test plus comment hits added up to the raw
+  grep: preview 36 + 43 + 0 = 79; `PartialEq` 245 structs + 284 enums = 529 production derives.
 
 **Separate a census from a candidate list.** A census is mechanical and its output is a fact. A
 grep whose hits still need per-site judgment is a *candidate list*, and it belongs in the fact
@@ -197,15 +236,16 @@ sheet as counts and file distribution only, feeding a later pass. Putting one in
 buries the real facts under hundreds of undifferentiated hits or quietly turns Pass 0 into a model
 pass.
 
-⚠️ **Count attributes, not mentions — in this repo the difference is large.** Round 1's Pass 0
-found three of the numbers above inflated by doc comments *discussing* the attribute being counted:
-`#[allow]` grepped 39 against 38 real attributes, and `#[ignore]` grepped **33 against 25**, an
-eight-mention gap that is the origin of the "33" this table carried until 2026-09-03. A codebase
-whose comments are 43% of its production lines and which writes about its own gates at length will
-do this to any bare grep. **And a naive `#[cfg(test)]` split is worse than an inflated count**: the
-first such module in `inspector.rs` starts at line 832 of 17,887, so "count everything above the
-first `#[cfg(test)]`" discards 95% of the file. Round 1 used a brace-matched scanner and validated
-it against raw grep; anything less is not reproducible.
+⚠️ **Count attributes, not mentions — in this repo the difference is large.** Its comments are a
+large share of its production lines, and it writes about its own gates at length. So a bare grep
+counts the doc comments that *discuss* `#[allow]` or `#[ignore]`, and the string fixtures that
+contain them. **A naive `#[cfg(test)]` split is worse than an inflated count**: `inspector.rs`'s
+first `#[cfg(test)]` sits far above its last production code, so "everything above the first one"
+throws most of the file away. `census.sh` avoids both. Its scanner strips comments, strings and
+char literals before it matches anything. It skips each `#[cfg(test)]` item to its closing brace,
+or to its `;` or `,` when it has no body. A new row goes into `census.sh` with its own fixture
+pair in `selftest`, never as a one-off grep. **In GNU grep ERE a backslash before a backtick
+matches nothing**, and a check that returns 0 can be asserting the opposite of the truth.
 
 **Note explicitly whatever failed to run.** A silently dropped census reads later as a clean result.
 

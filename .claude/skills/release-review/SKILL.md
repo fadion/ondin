@@ -183,19 +183,50 @@ Create `findings.md` **first** (header + pass log with P0 `in progress`) and an 
 then write `facts.md`. Everything here is scoped to the range — the whole-repo census is the
 periodic review's job, and repeating it buries the twenty facts that are about this release.
 
-| Row | Kind | Feeds |
-| --- | --- | --- |
-| `cargo clippy --workspace --all-targets -- -W clippy::pedantic -W clippy::nursery`, filtered to changed files | census | L1/L3 |
-| `unwrap()` / `expect()` / `panic!` / raw `[i]` **added** by the range, outside tests | census | L1 panic surface |
-| `#[allow(...)]` added | census — each is a silenced signal | L3 |
-| `TODO` / `FIXME` / `HACK` added | census | L3 / triage |
-| New `src/*.rs` modules, and whether each is named in `docs/architecture.md` | census | L8 |
-| Test-count delta per changed file (`#[test]` added vs. changed lines) | census | L6 |
-| New intra-doc `[` links added inside `#[cfg(test)]` prose or under `crates/*/tests/` | census — **the correct population is zero** (§15 D319, D622) | L8 |
-| New `#[ignore]` without a reason string | census | L6 |
-| New `///` runs over 52 lines, and whether each describes the item beneath it | **candidate list** — judgment deferred | R2 (doc-comment theft) |
-| New `NodeKind` / `Operation` variants, and every predicate that should have gained an arm | **candidate list** — counts and sites only | R1 |
-| New `&mut self` decision methods on `OndinApp` | **candidate list** | R1 — no test can observe their call sites (§15 D269) |
+**Every census row is a written command**, run through the periodic review's
+`../codebase-review/census.sh` in its `range` mode. Read that skill's Phase 2 for how the scanner
+classes a line as production or test, and for what each fixture is. A row counts only the hits
+on lines the range **added**, and classes each one by scanning the file as it stands at `HEAD`. The
+release-only rows have their own fixtures, in a two-commit repository built by `selftest`. Run
+the controls first and stop if they fail:
+
+```bash
+MSYS_NO_PATHCONV=1 bash .claude/skills/codebase-review/census.sh selftest   # must end "selftest passed"
+```
+
+In the table, `R=…/census.sh range <base>`. The counts are for `v0.12.0..HEAD` at `1e5f9ecd` on
+2026-11-07, which is 64 commits and 124 changed `.rs` files. They show the scale to expect on a
+range, not a target.
+
+| Row | Kind | Command → count (`v0.12.0..1e5f9ecd`, 2026-11-07) | Feeds |
+| --- | --- | --- | --- |
+| Clippy pedantic + nursery, workspace and then per package, filtered to the files the range changed | census | `bash $R clippy` → **9,008** warnings in 118 of the 124 files | L1/L3 |
+| `.unwrap()` / `.expect(` / `panic!` / `unreachable!` / `todo!` **added**, outside tests | census | `bash $R panics` → **8** production (expect 6, panic 1, unreachable 1), 289 in tests | L1 panic surface |
+| Raw indexing and slicing **added**, outside tests | census of sites | `bash $R index` → **488** production, 196 in tests | L1 panic surface |
+| `#[allow(...)]` added | census — each is a silenced signal | `bash $R allow` → **5**, all production | L3 |
+| `TODO` / `FIXME` / `XXX` / `HACK` markers added | census | `bash $R todo` → **0** | L3 / triage |
+| New `src/*.rs` modules, and how many lines of `docs/architecture.md` and `docs/design/` name the file (`name.rs`) | census | `bash $R newmods` → **21** new, of which 3 are named nowhere: `pixel_fit.rs`, `symmetry.rs`, `tight_stroke.rs` | L8 |
+| Test-count delta per changed file: `#[test]` attributes in the whole file at base and at `HEAD`, beside its +/- lines. A negative delta is a **removed** test. | census | `bash $R testdelta` → net **+185** across the 124 files; one file loses tests (`cursor.rs`, 19 → 11) | L6 |
+| New intra-doc `[` links on `///` / `//!` lines added inside `#[cfg(test)]` prose, under `crates/*/tests/`, or in `build.rs` | census — **the correct population is zero** (§15 D319, D622) | `bash $R testlinks` → **0** | L8 |
+| New `#[ignore]` without a reason string | census | `bash $R ignore` (the `-` rows) → **0** (1 added, and it has a reason) | L6 |
+| New `///` runs over 52 lines, and whether each describes the item beneath it | **candidate list** — judgment deferred. The run lengths are mechanical. | `bash $R docruns` (`MIN=52` by default; a run counts when it contains an added line) → **0** | R2 (doc-comment theft) |
+| New `NodeKind` / `Operation` variants, and every predicate that should have gained an arm | **candidate list** — counts and sites only | — | R1 |
+| New `&mut self` decision methods on `OndinApp` | **candidate list** | — | R1 — no test can observe their call sites (§15 D269) |
+
+*Release-only controls*, in the two-commit fixture. Each row must count what the head commit
+adds and must not count the unchanged lines:
+
+- **The added-line rows.** The unchanged `fn old` line and an unchanged `v[0]` must not count,
+  and neither must a production doc link.
+- **`testdelta`.** It must report one `#[test]` going to two, and a new `tests/` file going from
+  none to one. Its +/- lines must equal `git diff --numstat`.
+- **`newmods`.** It must name `fresh.rs`, which a design doc names, and must not count
+  `lonely.rs`, which appears there only as a prose word.
+- **`docruns`, with `MIN=0`.** It must report the added run and not the unchanged one.
+- **The `clippy` filter.** It must keep the changed file, whether the path is written with
+  backslashes or forward ones. It must drop `ui.rs` and `panels/lib.rs`.
+
+Each `range` call scans both trees again, about 25 s apiece. The cargo run is extra.
 
 Deletions are facts too: a **removed** test, a removed guard, a removed `#[cfg(test)]` module
 belongs in the census beside the additions. Note explicitly whatever failed to run — a silently

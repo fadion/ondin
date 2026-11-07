@@ -433,11 +433,8 @@ impl OndinApp {
                                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                                 let (r, _) = ui.allocate_exact_size(field, egui::Sense::hover());
                                 let note = match card.redundant {
-                                    0 => "Every point shapes the path".to_owned(),
-                                    k => format!(
-                                        "{} nothing",
-                                        ui::count_as(k, "point changes", "points change")
-                                    ),
+                                    0 => "Nothing to remove".to_owned(),
+                                    k => format!("{} can go", ui::count_as(k, "point", "points")),
                                 };
                                 ui.painter().text(
                                     egui::pos2(r.left(), r.center().y),
@@ -451,8 +448,14 @@ impl OndinApp {
                             .inner;
                         let b = match card.redundant {
                             0 => b.on_hover_text("Every point shapes the path"),
-                            _ => b.on_hover_text("Take out the points that change nothing"),
+                            _ => b.on_hover_text("Take out the points the shape doesn't need"),
                         };
+                        // Always shown, whatever the count, so the card keeps its height.
+                        caption(
+                            ui,
+                            "Points along a straight line, doubled points, and points that \
+                             split one curve in two. The shape stays exactly as it is.",
+                        );
                         row(Row::Remove, None, b);
                     });
 
@@ -480,15 +483,22 @@ impl OndinApp {
                         let (f, b) = ui
                             .horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                                let f = ui::value_field(
-                                    ui,
-                                    field,
-                                    Prefix::Text(""),
-                                    &mut n.amount,
-                                    Scrub::whole(0.5).range(0.0..=100.0),
-                                    |d| d.custom_formatter(|v, _| format!("{v:.0}%")),
-                                )
-                                .on_hover_text("How far the handles go toward smooth");
+                                // Dimmed with its button: with no points there is
+                                // nothing for the amount to act on.
+                                let f = ui
+                                    .add_enabled_ui(points > 0, |ui| {
+                                        ui::value_field(
+                                            ui,
+                                            field,
+                                            Prefix::Text(""),
+                                            &mut n.amount,
+                                            Scrub::whole(0.5).range(0.0..=100.0),
+                                            |d| d.custom_formatter(|v, _| format!("{v:.0}%")),
+                                        )
+                                    })
+                                    .inner
+                                    .on_hover_text("How far the handles go toward smooth")
+                                    .on_disabled_hover_text("Select points to smooth them");
                                 let b = ui::label_button(ui, "Smooth", button, state(points > 0));
                                 (f, b)
                             })
@@ -801,5 +811,66 @@ mod tests {
         );
         assert!(!painted(&out, &|s| s == "Fitting…"), "no flash");
         assert!(painted(&out, &|s| s.starts_with("64 points → ")));
+    }
+
+    /// Drag across the field under the card's `label` eyebrow.
+    fn drag_field(ctx: &egui::Context, app: &mut OndinApp, label: &str) {
+        let mut out = pass(ctx, app, Vec::new());
+        for _ in 0..10 {
+            out = pass(ctx, app, Vec::new());
+        }
+        let eyebrow = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == label.to_uppercase() => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the {label} eyebrow"));
+        let field = egui::pos2(
+            eyebrow.left() + 40.0,
+            eyebrow.bottom() + ui::SECTION_LABEL_GAP + ui::CONTROL_H / 2.0,
+        );
+        let button = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(ctx, app, vec![egui::Event::PointerMoved(field)]);
+        pass(ctx, app, vec![button(true, field)]);
+        for dx in [10.0, 30.0, 60.0] {
+            pass(
+                ctx,
+                app,
+                vec![egui::Event::PointerMoved(field + egui::vec2(dx, 0.0))],
+            );
+        }
+        pass(ctx, app, vec![button(false, field + egui::vec2(60.0, 0.0))]);
+        pass(ctx, app, Vec::new());
+    }
+
+    /// With no points selected, Smooth's amount is dimmed with its button and a
+    /// drag across it moves nothing; with one selected, the same drag scrubs it.
+    ///
+    /// flip: the amount field drawn enabled always → fails at "dimmed".
+    #[test]
+    fn smooth_s_amount_is_dimmed_with_no_points() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        pass(&ctx, &mut app, Vec::new());
+        app.toggle_cleanup(id);
+        let before = app.cleanup_numbers.amount;
+        drag_field(&ctx, &mut app, "Smooth selected");
+        assert_eq!(app.cleanup_numbers.amount, before, "dimmed");
+
+        app.points.set_one(id, (0, 3));
+        drag_field(&ctx, &mut app, "Smooth selected");
+        assert_ne!(
+            app.cleanup_numbers.amount, before,
+            "fixture: the drag reaches the field"
+        );
     }
 }

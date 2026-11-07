@@ -266,15 +266,16 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   `popover_head` *Clean up* with its ×) of four `ui::labelled` rows, each a field and a word button
   of one width: *Simplify* (accuracy in px, from `SIMPLIFY_MIN_ACCURACY` to 20, *Apply*, with
   *64 points → 9* under it, which keeps the last count while a refit is in flight and says
-  *Fitting…* only after `FIT_PATIENCE`), *Remove redundant points* (*9 points change nothing*,
-  *Remove*), *Add points* (a bare count, 2–16, its tooltip saying it is the pieces each segment is
+  *Fitting…* only after `FIT_PATIENCE`), *Remove redundant points* (*9 points can go* or *Nothing to
+  remove*, *Remove*, with a standing caption naming the three kinds it takes and that the shape stays
+  exactly as it is), *Add points* (a bare count, 2–16, its tooltip saying it is the pieces each segment is
   cut into, *Add*) and *Smooth selected* (an amount in percent,
   *Smooth*, with *Acts on the 4 selected points* under it). A row's result shows on the canvas
   through the gesture preview while its button is hovered or focused or its field scrubbed or
   typed in, never as the pointer merely crosses the card, and the points it would take away are
   dotted in the snaps' red. Its button commits it as one step: *Simplify*, *Remove points*,
-  *Add points* or *Smooth*. *Remove* dims when every point shapes the path and *Smooth* with
-  *Select points to smooth them*. It opens with *Apply* focused, so the wand and then `Enter`
+  *Add points* or *Smooth*. *Remove* dims when every point shapes the path, and *Smooth* and its
+  amount field with *Select points to smooth them*. It opens with *Apply* focused, so the wand and then `Enter`
   simplifies in one go. It stays open while points are picked for *Smooth*; the wand, its ×,
   `Escape` (a rung, under the Offset card's) and the end of the edit close it. A right-click mid-scrub
   puts the number back (`InFlight::cleanup_scrub`), as every card's does; the Offset card's

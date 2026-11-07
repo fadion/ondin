@@ -390,9 +390,6 @@ fn on_axis(
 /// How near an axis, in screen pt, an end is taken as on it.
 pub(crate) const ON_AXIS_PT: f64 = 8.0;
 
-/// How far the *On axis* chip sits right of and above its ring, in screen pt.
-const AXIS_CHIP_GAP: f32 = 8.0;
-
 /// How far a mirrored path's own axis runs past its box, in screen pt.
 const OWN_AXIS_OVERHANG: f64 = 16.0;
 
@@ -1000,18 +997,7 @@ impl OndinApp {
         let shift = ui.input(|i| i.modifiers.shift);
         if placing && let Some(on) = hover.and_then(|w| self.lands_on_axis(w, shift)) {
             let at = self.to_screen(on, rect, ppp);
-            painter.circle_stroke(
-                at,
-                crate::canvas::SNAP_RING_PX,
-                egui::Stroke::new(crate::canvas::SNAP_RING_STROKE_PX, color::MEASURE),
-            );
-            ui::canvas_pill(
-                painter,
-                at + egui::vec2(AXIS_CHIP_GAP, -AXIS_CHIP_GAP),
-                egui::Align2::LEFT_BOTTOM,
-                "On axis",
-                color::MEASURE,
-            );
+            crate::canvas::draw_snap_target(painter, at, "On axis", false);
         }
     }
 

@@ -192,7 +192,11 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
 - Click selects an anchor, `Shift` adds, a drag from empty canvas marquees points, live, as a box or
   a lasso (`Shift` toggles, `Alt` removes; `app-selection.md`, *The marquee and the lasso*), dragging moves all
   selected anchors. Handles drag from their dots, or are pulled out of an anchor with `Ctrl`+drag;
-  `Alt` breaks the pair. Dragging a handle back onto its anchor within `PEN_PICK_PX` retracts it.
+  `Alt` breaks the pair. `Shift` steps the handle to an eighth of a turn measured on the canvas
+  (`canvas::handle_step`, the pen's `axial_corner`), its length free, and draws a dashed line
+  through the anchor along it with the angle on a pill (`draw_handle_step`); the soft pull onto the
+  axes and the partner handle is off meanwhile, and both keys can be held. Dragging a handle back
+  onto its anchor within `PEN_PICK_PX` retracts it.
   `Delete` removes points and heals. `Enter` steps in and out; `Escape` unwinds a rung. Every grab goes
   through `canvas::node_grab`, which offers only drawn handles.
 - Point editing also covers adding a point on a segment, bending a segment directly, keyboard anchor

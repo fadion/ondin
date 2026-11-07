@@ -22,6 +22,7 @@ taken whole by every snap function.
 | Ruler guides | `OndinApp::guide_lines` → `snap::GuideLines { x, y }` | via `shown_guide` (a dragged guide snaps where it looks); frame-scoped guides projected only if the frame is `rulers::upright` (angle and skew ≈ 0, mirrors allowed; a quarter turn is not upright). No culling. |
 | Layout grids | `OndinApp::layout_grid_lines`, appended to the guide lines | under *Snap to guides*, and only while *Show layout grid* is on (`show_layout_grids`): both edges of every visible track of a shown frame, laid out on and clipped to the frame's used box (the one the grid is drawn on, so a hug, a stretch or a bound size counts), x for columns and y for rows (swapped under a quarter turn), in world space; they match as ruler guides do (tie wins, no mark). A frame that is moving or inside what moves is skipped (its grid travels with it), and so is one turned off the axes; a mirrored frame snaps. No culling. |
 | Baselines | `canvas::baseline_lines` → `Vec<f64>` world ys | from cached `TextLayout::baselines` of visible text in view, excluding the gesture's whole subtree (`snap::is_inside_any`); rotated/skewed text contributes nothing, a half-turn is admitted (off-diagonal test); own switch, on by default, unbound |
+| Point targets | `OndinApp::point_snapping` → `snap::Outlines { anchors, segments, centres }` | for a dragged **point** only, under *Snap to shapes*: the drawn outlines (`Resolved::local_path`, text has none) of up to `SNAP_TARGET_LIMIT` nodes in view outside the gesture's subtree, their anchors, their segments near the pointer and their boxes' centres; plus the edited path's own anchors that are not moving and its segments touching none of them, and the pen's run so far |
 | Pixel grid | `snap::pixel_delta` | fallback only |
 
 `rulers::upright` also decides the dotted guide extension and whether `rulers::measure_guide` can
@@ -67,8 +68,27 @@ for Move and Resize, never stashed on `Drag`.
   the node's world transform (threshold 0.3, so a 45° edge claims both). A multi-selection uses
   `canvas::selection_frame`, the transform its handles are drawn with.
 - No spacing snap on a resize (it would have to move the anchored edge).
-- `snap_point` also serves line endpoints, pen anchors and point/segment drags, all under *Snap to
-  grid*; it rounds the dragged edge only.
+- `snap_point` also serves line endpoints, pen anchors and point/segment drags; the grid rounds
+  the dragged edge only.
+
+### Points (`snap_point` with `Outlines`)
+
+A pen anchor, a node-tool point or segment drag and a line's end are given point targets
+(`OndinApp::point_snapping`); a resize is not. With both axes free, `snap::point_target` first
+looks within the tolerance for, in this order, an **anchor**, an **intersection** of two segments,
+a segment's **midpoint**, a shape's **centre**, and the nearest point **on a path**. The first kind
+in reach wins even over a nearer one of a later kind, and the point lands on it exactly, on both
+axes, never rounded to the grid, so a logo's tip meets cleanly. Crossings are exact for two lines
+and found by halving both segments' parameter ranges while their control boxes overlap otherwise
+(`snap::crossings`, capped for segments lying along each other). Shift-constrained, no point target
+is tried. Failing them, an anchor's x or y competes with node edges as an alignment and draws a
+line from the anchor to the point. The pen's Shift keeps its eighths and snaps nothing; a new run's
+anchor that landed on geometry is not then pulled onto a mirror axis.
+
+What landed is drawn by `canvas::draw_snap_target`, the mirror's *On axis* mark too: a ring of
+`SNAP_RING_PX` in the measure red and a pill naming it — *Anchor*, *Intersection* (with a × in
+the ring, since there is no anchor there), *Midpoint*, *Centre*, *On path*. A point is too small
+for a line to say what it matched. The pen shows its mark on hover from before its first anchor.
 
 ### Dragged guide (`snap_guide`)
 

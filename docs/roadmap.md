@@ -34,10 +34,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **Open paths and lines in the shape builder.** An open path or line in the selection should cut
   the faces it crosses without filling one of its own. Today `shape_builder::sources_of` leaves them
   out of the arrangement, and the status line says so (`left_out_note`).
-- **Snapping for points.** Pen anchors and dragged points snap to the pixel grid only
-  (`app-snapping.md`, `snap_point`). Add anchors and segments of other paths, intersections, and,
-  for node-tool handles, `Shift` angle steps (`canvas::handle_tx` reads `Alt` only; the pen already
-  steps by 45°).
 - **Cutting paths.** Split a path at an anchor into two subpaths, delete a segment to open a closed
   path, and a knife that cuts along a drawn line. *Delete* on points always heals.
 - **Icon-ready SVG export.** Options for `currentColor`, a viewBox from the frame, number precision,

@@ -17,11 +17,11 @@
 //! Pure geometry over `Resolved` bounds: no document mutation, no egui.
 
 use crate::measure::{self, Axis, Measure};
-use ondin_core::kurbo::{Point, Rect, Vec2};
+use ondin_core::kurbo::{ParamCurve, ParamCurveNearest, PathSeg, Point, Rect, Vec2};
 use ondin_core::{Document, NodeId, Resolved};
 
 /// How close (in screen pixels) an edge must come before it snaps.
-const TOLERANCE_PX: f64 = 6.0;
+pub(crate) const TOLERANCE_PX: f64 = 6.0;
 
 /// Round to the pixel grid, whose pitch is **one world unit**.
 ///
@@ -51,6 +51,10 @@ pub struct Snapping {
     pub targets: Vec<Rect>,
     /// Ruler guides. Empty when *Snap to guides* is off.
     pub guides: GuideLines,
+    /// Other outlines' anchors and segments, for a dragged **point** to land on
+    /// ([`snap_point`]). Empty when *Snap to shapes* is off, and for every gesture
+    /// that moves a box.
+    pub outlines: Outlines,
     /// Text baselines in world space, as bare ys. Empty when *Snap to baselines*
     /// is off, or when nothing in view is a text node.
     ///
@@ -75,12 +79,57 @@ impl Snapping {
     pub fn none(zoom: f64) -> Self {
         Self {
             targets: Vec::new(),
+            outlines: Outlines::default(),
             guides: GuideLines::default(),
             baselines: Vec::new(),
             pixel: false,
             zoom,
         }
     }
+}
+
+/// The geometry a dragged point can land on, in world space.
+#[derive(Clone, Debug, Default)]
+pub struct Outlines {
+    /// Every anchor in view: a target, and an x and a y a point can line up with.
+    pub anchors: Vec<Point>,
+    /// The segments near the pointer, whose crossings, midpoints and nearest points
+    /// are targets. Only those near it: everything else is out of reach.
+    pub segments: Vec<PathSeg>,
+    /// The centres of the shapes in view.
+    pub centres: Vec<Point>,
+}
+
+/// What a point snap landed on, in [`PointKind::label`]'s order of priority: a
+/// target of an earlier kind in reach wins over a nearer one of a later kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointKind {
+    Anchor,
+    Intersection,
+    Midpoint,
+    Centre,
+    OnPath,
+}
+
+impl PointKind {
+    /// The word on the pill beside the ring: a point is too small for a line to say
+    /// what it matched.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Anchor => "Anchor",
+            Self::Intersection => "Intersection",
+            Self::Midpoint => "Midpoint",
+            Self::Centre => "Centre",
+            Self::OnPath => "On path",
+        }
+    }
+}
+
+/// A point snap: where the point landed and what it landed on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointMark {
+    pub at: Point,
+    pub kind: PointKind,
 }
 
 /// The ruler guides worth snapping to, split by the axis each one pins.
@@ -117,13 +166,25 @@ pub struct Marks {
     pub guides: Vec<Guide>,
     /// The gaps a spacing snap equalized, labelled. Empty for every other snap.
     pub gaps: Vec<Measure>,
+    /// The geometry a dragged point landed on, drawn as a ring and its name.
+    pub point: Option<PointMark>,
 }
 
 impl From<Vec<Guide>> for Marks {
     fn from(guides: Vec<Guide>) -> Self {
         Marks {
             guides,
+            ..Marks::default()
+        }
+    }
+}
+
+impl From<PointSnap> for Marks {
+    fn from(s: PointSnap) -> Self {
+        Marks {
+            guides: s.guides,
             gaps: Vec::new(),
+            point: s.mark,
         }
     }
 }
@@ -150,6 +211,9 @@ enum Matched {
     /// `nearest_of` to recover its winning feature.
     Baseline(f64),
     Spacing(Spacing),
+    /// An anchor of another outline a dragged point lines up with: its line runs
+    /// from the anchor to the point.
+    Anchor(Point),
 }
 
 /// What a **spacing** match was, kept so the gaps can be measured once the delta
@@ -379,6 +443,8 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
             // Unreachable (a baseline is only offered to `best_y`); spelled out so
             // an x-bearing source added later has to decide here.
             Matched::Baseline(_) => {}
+            // Unreachable: anchors are offered to a dragged point only.
+            Matched::Anchor(_) => {}
         }
     } else {
         // Nothing claimed this axis, so the pixel grid takes it. The leading edge
@@ -417,6 +483,7 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
                 from: snapped.min_x(),
                 to: snapped.max_x(),
             }),
+            Matched::Anchor(_) => {}
         }
     } else if s.pixel && axes.1 {
         snap.adjust.y = pixel_delta(moving.min_y());
@@ -452,25 +519,61 @@ pub fn constrain(raw: Vec2, axes: (bool, bool)) -> Vec2 {
 pub struct PointSnap {
     pub at: Point,
     pub guides: Vec<Guide>,
+    /// The geometry the point landed on, when it landed on [`Snapping::outlines`].
+    pub mark: Option<PointMark>,
 }
 
-/// Snap a dragged **point** — a resize handle — onto nearby features, on the
-/// axes it is free to move.
+/// Snap a dragged **point** — a resize handle, a pen anchor, a node-tool point —
+/// onto nearby features, on the axes it is free to move.
 ///
 /// The resize counterpart of [`snap_rect`]: a resize moves one corner or edge and
 /// must leave the opposite one in place, which snapping the whole box would not.
 ///
 /// `axes` says which world axes the handle travels along (`OndinApp::resize_axes`);
-/// snapping any other would move the anchored edge.
+/// snapping any other would move the anchored edge. With both free, the point
+/// first tries to land on [`Snapping::outlines`] ([`point_target`]), exactly and on
+/// both axes at once; failing that, an anchor's x or y lines it up as a box's edge does.
 pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
+    if axes == (true, true)
+        && let Some(mark) = point_target(at, s, tolerance)
+    {
+        return PointSnap {
+            at: mark.at,
+            guides: Vec::new(),
+            mark: Some(mark),
+        };
+    }
     let mut out = PointSnap {
         at,
         guides: Vec::new(),
+        mark: None,
     };
 
     let mut best_x: Option<(f64, f64, Matched)> = None;
     let mut best_y: Option<(f64, f64, Matched)> = None;
+    for a in &s.outlines.anchors {
+        if axes.0 {
+            consider(
+                &mut best_x,
+                at.x,
+                a.x,
+                tolerance,
+                Matched::Anchor(*a),
+                false,
+            );
+        }
+        if axes.1 {
+            consider(
+                &mut best_y,
+                at.y,
+                a.y,
+                tolerance,
+                Matched::Anchor(*a),
+                false,
+            );
+        }
+    }
     for target in &s.targets {
         if axes.0 {
             for t in [target.min_x(), target.center().x, target.max_x()] {
@@ -511,12 +614,17 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     if let Some((_, delta, what)) = best_x {
         out.at.x += delta;
         // A line from the target to the handle; none for a ruler guide.
-        if let Matched::Node(t) = what {
+        let span = match what {
+            Matched::Node(t) => Some((t.min_y(), t.max_y())),
+            Matched::Anchor(a) => Some((a.y, a.y)),
+            _ => None,
+        };
+        if let Some((lo, hi)) = span {
             out.guides.push(Guide {
                 axis: Axis::Vertical,
                 at: out.at.x,
-                from: t.min_y().min(out.at.y),
-                to: t.max_y().max(out.at.y),
+                from: lo.min(out.at.y),
+                to: hi.max(out.at.y),
             });
         }
     } else if s.pixel && axes.0 {
@@ -527,12 +635,17 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     }
     if let Some((_, delta, what)) = best_y {
         out.at.y += delta;
-        if let Matched::Node(t) = what {
+        let span = match what {
+            Matched::Node(t) => Some((t.min_x(), t.max_x())),
+            Matched::Anchor(a) => Some((a.x, a.x)),
+            _ => None,
+        };
+        if let Some((lo, hi)) = span {
             out.guides.push(Guide {
                 axis: Axis::Horizontal,
                 at: out.at.y,
-                from: t.min_x().min(out.at.x),
-                to: t.max_x().max(out.at.x),
+                from: lo.min(out.at.x),
+                to: hi.max(out.at.x),
             });
         }
     } else if s.pixel && axes.1 {
@@ -540,6 +653,127 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     }
     out
 }
+
+/// The geometry within `tolerance` of `at` a dragged point lands on, the first
+/// [`PointKind`] in reach winning: an anchor, a crossing of two segments, a
+/// segment's midpoint, a shape's centre, and last the nearest point on a segment.
+pub fn point_target(at: Point, s: &Snapping, tolerance: f64) -> Option<PointMark> {
+    let nearest = |points: &mut dyn Iterator<Item = Point>| {
+        points
+            .map(|p| (p.distance(at), p))
+            .filter(|(d, _)| *d <= tolerance)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, p)| p)
+    };
+    let mark = |at, kind| PointMark { at, kind };
+    if let Some(p) = nearest(&mut s.outlines.anchors.iter().copied()) {
+        return Some(mark(p, PointKind::Anchor));
+    }
+    let reach = Rect::from_center_size(at, (2.0 * tolerance, 2.0 * tolerance));
+    let near: Vec<PathSeg> = s
+        .outlines
+        .segments
+        .iter()
+        .copied()
+        .filter(|seg| reaches(*seg, reach))
+        .collect();
+    let mut crossed = Vec::new();
+    for (i, a) in near.iter().enumerate() {
+        for b in &near[i + 1..] {
+            crossings(*a, *b, &mut crossed);
+        }
+    }
+    if let Some(p) = nearest(&mut crossed.into_iter()) {
+        return Some(mark(p, PointKind::Intersection));
+    }
+    if let Some(p) = nearest(&mut near.iter().map(|seg| seg.eval(0.5))) {
+        return Some(mark(p, PointKind::Midpoint));
+    }
+    if let Some(p) = nearest(&mut s.outlines.centres.iter().copied()) {
+        return Some(mark(p, PointKind::Centre));
+    }
+    let on = near.iter().map(|seg| seg.eval(seg.nearest(at, 1e-9).t));
+    nearest(&mut on.into_iter()).map(|p| mark(p, PointKind::OnPath))
+}
+
+/// Whether `seg` could pass through `area`: its control box meets it.
+pub(crate) fn reaches(seg: PathSeg, area: Rect) -> bool {
+    overlaps(seg_bounds(seg), area)
+}
+
+/// A segment's box, control points included, which is all a reach test needs.
+fn seg_bounds(seg: PathSeg) -> Rect {
+    match seg {
+        PathSeg::Line(l) => Rect::from_points(l.p0, l.p1),
+        PathSeg::Quad(q) => Rect::from_points(q.p0, q.p1).union_pt(q.p2),
+        PathSeg::Cubic(c) => Rect::from_points(c.p0, c.p1).union_pt(c.p2).union_pt(c.p3),
+    }
+}
+
+/// Whether two closed boxes share a point; a flat box (a straight segment along an
+/// axis) still overlaps, where `Rect::intersect` would call it empty.
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+}
+
+/// Where two segments cross, appended to `out`. Two lines are solved exactly; a
+/// curve is halved alongside the other while their boxes overlap, down to a box
+/// [`CROSSING_EPS`] across. Two segments lying along each other give nothing
+/// useful, so the work is capped rather than run out.
+fn crossings(a: PathSeg, b: PathSeg, out: &mut Vec<Point>) {
+    if let (PathSeg::Line(l), PathSeg::Line(m)) = (a, b) {
+        let (r, s) = (l.p1 - l.p0, m.p1 - m.p0);
+        let denom = r.cross(s);
+        if denom.abs() < 1e-12 {
+            return;
+        }
+        let q = m.p0 - l.p0;
+        let (t, u) = (q.cross(s) / denom, q.cross(r) / denom);
+        if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+            out.push(l.eval(t));
+        }
+        return;
+    }
+    let mut budget = CROSSING_BUDGET;
+    let mut found = Vec::new();
+    let mut stack = vec![(0.0, 1.0, 0.0, 1.0)];
+    while let Some((a0, a1, b0, b1)) = stack.pop() {
+        if budget == 0 {
+            break;
+        }
+        budget -= 1;
+        let (sa, sb) = (a.subsegment(a0..a1), b.subsegment(b0..b1));
+        let (ba, bb) = (seg_bounds(sa), seg_bounds(sb));
+        if !overlaps(ba, bb) {
+            continue;
+        }
+        let small = |r: Rect| r.width().max(r.height()) < CROSSING_EPS;
+        if small(ba) && small(bb) {
+            let p = ba.center();
+            if !found
+                .iter()
+                .any(|q: &Point| q.distance(p) < CROSSING_EPS * 10.0)
+            {
+                found.push(p);
+            }
+            continue;
+        }
+        let (am, bm) = ((a0 + a1) / 2.0, (b0 + b1) / 2.0);
+        stack.extend([
+            (a0, am, b0, bm),
+            (a0, am, bm, b1),
+            (am, a1, b0, bm),
+            (am, a1, bm, b1),
+        ]);
+    }
+    out.extend(found);
+}
+
+/// How small, in world units, the boxes [`crossings`] halves down to get before a
+/// crossing is read off them: well under anything a pointer or a pixel can tell.
+const CROSSING_EPS: f64 = 1e-6;
+/// The most box pairs [`crossings`] looks at for one pair of segments.
+const CROSSING_BUDGET: usize = 20_000;
 
 /// Snap a ruler guide being dragged onto the edges and centres of nearby nodes.
 ///
@@ -1508,5 +1742,116 @@ mod tests {
             (102.4, 204.0),
             "a locked axis is untouched even with the grid on"
         );
+    }
+
+    fn line(a: (f64, f64), b: (f64, f64)) -> PathSeg {
+        PathSeg::Line(ondin_core::kurbo::Line::new(a, b))
+    }
+
+    /// Two crossing lines, an X through (50, 50), and one corner anchor at (0, 0),
+    /// with the pixel grid on.
+    fn an_x() -> Snapping {
+        Snapping {
+            outlines: Outlines {
+                anchors: vec![Point::new(0.0, 0.0)],
+                segments: vec![
+                    line((0.0, 0.0), (100.0, 100.0)),
+                    line((0.0, 100.3), (100.0, 0.3)),
+                ],
+                centres: vec![Point::new(30.0, 70.0)],
+            },
+            pixel: true,
+            ..Snapping::none(1.0)
+        }
+    }
+
+    /// In reach of several, the first kind wins, not the nearest one: an anchor over
+    /// the path it sits on, a crossing over both lines, then a midpoint, a centre,
+    /// and last the nearest point on a segment.
+    ///
+    /// flip: `point_target` asking for midpoints before crossings → fails at
+    /// "the crossing beats the midpoints".
+    #[test]
+    fn a_point_lands_on_the_first_kind_of_target_in_reach() {
+        let s = an_x();
+        let hit = |x, y| point_target(Point::new(x, y), &s, 6.0).map(|m| m.kind);
+        assert_eq!(
+            hit(1.0, 1.0),
+            Some(PointKind::Anchor),
+            "over the line it ends"
+        );
+        // Both lines' midpoints sit within a pixel of the crossing.
+        assert_eq!(
+            hit(52.0, 49.0),
+            Some(PointKind::Intersection),
+            "the crossing beats the midpoints"
+        );
+        assert_eq!(hit(31.0, 69.0), Some(PointKind::Centre));
+        assert_eq!(hit(80.0, 83.0), Some(PointKind::OnPath));
+        assert_eq!(hit(80.0, 50.0), None, "nothing in reach");
+    }
+
+    /// A point that lands on geometry lands exactly: the crossing at (50.15, 50.15)
+    /// is not rounded to the pixel grid, and nothing else is drawn for it.
+    #[test]
+    fn a_point_on_geometry_is_not_rounded_to_the_grid() {
+        let out = snap_point(Point::new(52.0, 49.0), FREE, &an_x());
+        let mark = out.mark.expect("landed on the crossing");
+        assert!(
+            (out.at.x - 50.15).abs() < 1e-9 && (out.at.y - 50.15).abs() < 1e-9,
+            "{:?}",
+            out.at
+        );
+        assert_eq!(mark.at, out.at);
+        assert!(out.guides.is_empty());
+
+        // Constrained to one axis, no point snap: it would move the locked one.
+        let locked = snap_point(Point::new(52.0, 49.0), (true, false), &an_x());
+        assert!(locked.mark.is_none());
+        assert_eq!(locked.at.y, 49.0);
+    }
+
+    /// Out of reach of every target, a point still lines up with an anchor's x or y,
+    /// with a line drawn from the anchor to it.
+    #[test]
+    fn a_point_lines_up_with_an_anchor() {
+        let s = Snapping {
+            outlines: Outlines {
+                anchors: vec![Point::new(10.0, 10.0)],
+                ..Outlines::default()
+            },
+            ..Snapping::none(1.0)
+        };
+        let out = snap_point(Point::new(12.0, 200.0), FREE, &s);
+        assert_eq!(out.at, Point::new(10.0, 200.0));
+        assert!(out.mark.is_none());
+        let [g] = out.guides.as_slice() else {
+            panic!("one line: {:?}", out.guides)
+        };
+        assert_eq!(
+            (g.axis, g.at, g.from, g.to),
+            (Axis::Vertical, 10.0, 10.0, 200.0)
+        );
+    }
+
+    /// A curve and a line cross where both are: every crossing found lies on both,
+    /// to well under a pixel, and a curve crossed twice gives two.
+    #[test]
+    fn a_curve_and_a_line_cross_where_both_are() {
+        use ondin_core::kurbo::{CubicBez, ParamCurveNearest};
+        let arch = PathSeg::Cubic(CubicBez::new(
+            (0.0, 100.0),
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 100.0),
+        ));
+        let across = line((-10.0, 40.0), (110.0, 40.0));
+        let mut found = Vec::new();
+        crossings(arch, across, &mut found);
+        assert_eq!(found.len(), 2, "{found:?}");
+        for p in found {
+            assert!((p.y - 40.0).abs() < 1e-5, "{p:?}");
+            assert!(arch.nearest(p, 1e-12).distance_sq < 1e-10, "{p:?}");
+        }
     }
 }

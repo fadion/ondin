@@ -31,7 +31,7 @@ use crate::view::Camera;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
-use ondin_core::kurbo::{Affine, Point, Rect as KRect, Vec2};
+use ondin_core::kurbo::{Affine, PathEl, PathSeg, Point, Rect as KRect, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::text::TextParts;
 use ondin_core::{
@@ -969,6 +969,37 @@ const TANGENT_SNAP_PX: f32 = 4.0;
 /// Deliberately not [`PEN_PICK_PX`], which is a target area.
 pub(crate) const SNAP_RING_PX: f32 = 5.0;
 pub(crate) const SNAP_RING_STROKE_PX: f32 = 2.0;
+/// How far a snap target's name sits right of and above its ring, in screen pt.
+const SNAP_CHIP_GAP: f32 = 8.0;
+/// How far a Shift-stepped handle's dashed line runs past the handle's end, and
+/// as far the other way from the anchor, in screen pt.
+const HANDLE_STEP_OVERHANG_PX: f32 = 40.0;
+/// Half the arms of the × inside an intersection's ring, in screen pt: an
+/// intersection has no anchor of its own to sit on.
+const SNAP_CROSS_PX: f32 = 2.5;
+
+/// A point a placed or dragged point lands on: a ring in the snaps' red and a pill
+/// naming it (*Anchor*, *On axis*, …), with a × in the ring when `cross`.
+pub(crate) fn draw_snap_target(painter: &egui::Painter, at: egui::Pos2, name: &str, cross: bool) {
+    let stroke = egui::Stroke::new(SNAP_RING_STROKE_PX, color::MEASURE);
+    painter.circle_stroke(at, SNAP_RING_PX, stroke);
+    if cross {
+        let (d, e) = (
+            egui::vec2(SNAP_CROSS_PX, SNAP_CROSS_PX),
+            egui::vec2(SNAP_CROSS_PX, -SNAP_CROSS_PX),
+        );
+        let thin = egui::Stroke::new(1.0, color::MEASURE);
+        painter.line_segment([at - d, at + d], thin);
+        painter.line_segment([at - e, at + e], thin);
+    }
+    crate::ui::canvas_pill(
+        painter,
+        at + egui::vec2(SNAP_CHIP_GAP, -SNAP_CHIP_GAP),
+        egui::Align2::LEFT_BOTTOM,
+        name,
+        color::MEASURE,
+    );
+}
 /// Side of a path anchor's marker in the node tool, in screen pt. Its corners
 /// sit just inside `PEN_PICK_PX`; raise that too, or they stop being grabbable.
 const POINT_PX: f32 = 9.0;
@@ -3773,6 +3804,7 @@ impl OndinApp {
             } else {
                 Vec::new()
             },
+            outlines: snap::Outlines::default(),
             guides: if self.snap_guides {
                 let mut lines = self.guide_lines();
                 let grids = self.layout_grid_lines(moving);
@@ -3790,6 +3822,91 @@ impl OndinApp {
             pixel: self.snap_grid,
             zoom,
         }
+    }
+
+    /// [`Self::snapping`] for a dragged **point** near `near`, with the outlines it can
+    /// land on ([`snap::Outlines`]): the anchors, centres and segments of the shapes in
+    /// view outside `moving`, and of `own`'s path, the one being edited, its anchors
+    /// but the moving ones and its segments but those touching them. Under *Snap to
+    /// shapes*, as the boxes are.
+    pub(crate) fn point_snapping(
+        &self,
+        moving: &[NodeId],
+        own: Option<(NodeId, &[PointRef])>,
+        near: Point,
+    ) -> snap::Snapping {
+        let mut s = self.snapping(moving);
+        if !self.snap_shapes {
+            return s;
+        }
+        let reach = snap::TOLERANCE_PX / self.points_per_world();
+        let reach = KRect::from_center_size(near, (2.0 * reach, 2.0 * reach));
+        let out = &mut s.outlines;
+        let keep = |seg: PathSeg, out: &mut snap::Outlines| {
+            if snap::reaches(seg, reach) {
+                out.segments.push(seg);
+            }
+        };
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let view = self.session.camera.viewport(self.canvas_px).view;
+        let mut taken = 0;
+        for id in ondin_core::nodes_in_view(res, self.session.page, view) {
+            if moving.contains(&id) || snap::is_inside_any(doc, id, moving) || !doc.shown(id) {
+                continue;
+            }
+            let Some(path) = res.local_path(doc, id) else {
+                continue;
+            };
+            let Some(world) = res.world_transform(id) else {
+                continue;
+            };
+            let path = world * path;
+            for el in path.elements() {
+                match el {
+                    PathEl::MoveTo(p) | PathEl::LineTo(p) => out.anchors.push(*p),
+                    PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => out.anchors.push(*p),
+                    PathEl::ClosePath => {}
+                }
+            }
+            for seg in path.segments() {
+                keep(seg, out);
+            }
+            out.centres.extend(res.world_bounds(id).map(|b| b.center()));
+            taken += 1;
+            if taken >= SNAP_TARGET_LIMIT {
+                break;
+            }
+        }
+        if let Some((id, points)) = own
+            && let Some((_, subpaths)) = self.edited_subpaths(id)
+        {
+            for (s_i, sub) in subpaths.iter().enumerate() {
+                for (a_i, a) in sub.anchors.iter().enumerate() {
+                    if !points.contains(&(s_i, a_i)) {
+                        out.anchors.push(a.at);
+                    }
+                    let Some((from, to)) = tools::segment_ends(&subpaths, (s_i, a_i)) else {
+                        continue;
+                    };
+                    if points.contains(&from) || points.contains(&to) {
+                        continue;
+                    }
+                    let (p, q) = (
+                        &subpaths[from.0].anchors[from.1],
+                        &subpaths[to.0].anchors[to.1],
+                    );
+                    let seg = match p.out == Vec2::ZERO && q.back == Vec2::ZERO {
+                        true => PathSeg::Line(ondin_core::kurbo::Line::new(p.at, q.at)),
+                        false => tools::segment_cubic(&subpaths, (s_i, a_i)).map_or(
+                            PathSeg::Line(ondin_core::kurbo::Line::new(p.at, q.at)),
+                            PathSeg::Cubic,
+                        ),
+                    };
+                    keep(seg, out);
+                }
+            }
+        }
+        s
     }
 
     /// The edges of every visible layout-grid track, in world space, for
@@ -4069,7 +4186,12 @@ impl OndinApp {
         let target = if shift {
             self.axial_corner(anchor, world)
         } else {
-            snap::snap_point(world, (true, true), &self.snapping(&[id])).at
+            snap::snap_point(
+                world,
+                (true, true),
+                &self.point_snapping(&[id], None, world),
+            )
+            .at
         };
         tools::move_line_end(doc, res, id, which, target)
     }
@@ -4515,9 +4637,9 @@ impl OndinApp {
     /// Snaps on both axes through [`Self::snapping`], excluding the node being
     /// resumed. Shift instead constrains the segment to an eighth of a turn from
     /// the previous anchor ([`Self::axial_corner`]); the first has nothing to constrain.
-    pub(crate) fn pen_point(&self, world: Point, shift: bool) -> (Point, Vec<snap::Guide>) {
+    pub(crate) fn pen_point(&self, world: Point, shift: bool) -> (Point, snap::Marks) {
         if shift && let Some(from) = self.pen.as_ref().and_then(|p| p.anchors.last()) {
-            return (self.axial_corner(from.at, world), Vec::new());
+            return (self.axial_corner(from.at, world), snap::Marks::default());
         }
         let moving: Vec<NodeId> = self
             .pen
@@ -4525,15 +4647,23 @@ impl OndinApp {
             .and_then(|p| p.editing.as_ref())
             .map(|e| vec![e.id])
             .unwrap_or_default();
-        let snapped = snap::snap_point(world, (true, true), &self.snapping(&moving));
-        // A new run's anchor near a mirror axis lands on it, where the halves join.
-        if moving.is_empty() {
+        let mut s = self.point_snapping(&moving, None, world);
+        // The run's own anchors so far: a new one lines up with them, or lands on one.
+        if self.snap_shapes
+            && let Some(pen) = &self.pen
+        {
+            s.outlines.anchors.extend(pen.anchors.iter().map(|a| a.at));
+        }
+        let snapped = snap::snap_point(world, (true, true), &s);
+        // A new run's anchor near a mirror axis lands on it, where the halves join,
+        // unless it already sits on geometry.
+        if moving.is_empty() && snapped.mark.is_none() {
             let (on, hit) = self.snap_to_axis(snapped.at);
             if hit {
-                return (on, Vec::new());
+                return (on, snap::Marks::default());
             }
         }
-        (snapped.at, snapped.guides)
+        (snapped.at, snapped.into())
     }
 
     fn pen_press(&mut self, world: Point, shift: bool) {
@@ -5308,7 +5438,7 @@ impl OndinApp {
                 }
             }
             Drag::Handle { id, at, side } => {
-                let tx = self.handle_tx(id, at, side, world, alt);
+                let tx = self.handle_tx(id, at, side, world, alt, shift);
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
@@ -5900,28 +6030,32 @@ impl OndinApp {
         self.rewrite_scrub(id, world, subpaths)
     }
 
-    /// The delta a node-tool drag should apply, and the lines explaining it. The
+    /// The delta a node-tool drag should apply, and the marks explaining it. The
     /// aimed point `base` snaps, not the box round the set; Shift constrains as in
-    /// [`Self::snapped_move`], and the path is excluded from the targets since its
-    /// bounds move with it.
+    /// [`Self::snapped_move`]. The path's box is left out of the targets since it
+    /// moves with the points, but its anchors and segments that stay put are in
+    /// ([`Self::point_snapping`]).
     fn snapped_point(
         &self,
         id: NodeId,
         base: Option<Point>,
         raw: Vec2,
         shift: bool,
-    ) -> (Vec2, Vec<snap::Guide>) {
+    ) -> (Vec2, snap::Marks) {
         if !self.gesture_travelled(raw) {
-            return (raw, Vec::new());
+            return (raw, snap::Marks::default());
         }
         let axes = snap::move_axes(raw, shift);
         let delta = snap::constrain(raw, axes);
         let Some(base) = base else {
-            return (delta, Vec::new());
+            return (delta, snap::Marks::default());
         };
         let want = base + delta;
-        let result = snap::snap_point(want, axes, &self.snapping(&[id]));
-        (delta + (result.at - want), result.guides)
+        // A mirrored path's images move too.
+        let moving = self.with_mirrored_points(id, &self.subject_points(id));
+        let s = self.point_snapping(&[id], Some((id, &moving)), want);
+        let result = snap::snap_point(want, axes, &s);
+        (delta + (result.at - want), result.into())
     }
 
     /// Whether a gesture has travelled far enough to be one — the gate on every
@@ -6282,22 +6416,88 @@ impl OndinApp {
         }
     }
 
-    fn handle_tx(&self, id: NodeId, at: PointRef, side: Side, to: Point, alt: bool) -> Transaction {
+    /// Pull the handle `side` of the anchor `at` to `to`; Alt breaks the pair. With
+    /// Shift the handle steps to an eighth of a turn on the canvas
+    /// ([`Self::handle_step`]), and the soft pull onto the axes and the partner
+    /// handle is off, since the step already decides the angle.
+    fn handle_tx(
+        &self,
+        id: NodeId,
+        at: PointRef,
+        side: Side,
+        to: Point,
+        alt: bool,
+        shift: bool,
+    ) -> Transaction {
         let Some((world, mut subpaths)) = self.edited_subpaths(id) else {
             return Transaction::default();
         };
         let zoom = self.points_per_world();
         let snap = f64::from(PEN_PICK_PX) / zoom;
-        tools::pull_handle(
-            &mut subpaths,
-            at,
-            side,
-            to,
-            alt,
-            snap,
-            f64::from(TANGENT_SNAP_PX) / zoom,
-        );
+        let (to, tangent) = match shift.then(|| self.handle_step(id, at, to)).flatten() {
+            Some(stepped) => (stepped, 0.0),
+            None => (to, f64::from(TANGENT_SNAP_PX) / zoom),
+        };
+        tools::pull_handle(&mut subpaths, at, side, to, alt, snap, tangent);
         self.rewrite_edit(id, world, subpaths)
+    }
+
+    /// Where a Shift-dragged handle of the anchor `at` lands for the pointer at `to`:
+    /// on the nearest eighth of a turn from the anchor, measured on the canvas so 0°,
+    /// 45° and 90° are across, diagonal and up, its length the pointer's projection.
+    /// `None` when the anchor is gone.
+    fn handle_step(&self, id: NodeId, at: PointRef, to: Point) -> Option<Point> {
+        let (_, subpaths) = self.edited_subpaths(id)?;
+        let anchor = subpaths.get(at.0)?.anchors.get(at.1)?.at;
+        Some(self.axial_corner(anchor, to))
+    }
+
+    /// The angle a Shift-dragged handle stepped to: a dashed line through its anchor
+    /// along it, both ways, in the snaps' red, and the angle on a pill beside the
+    /// anchor, counted anticlockwise from across as on a protractor.
+    fn draw_handle_step(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        ppp: f32,
+        id: NodeId,
+        at: PointRef,
+        pointer: Point,
+    ) {
+        let (Some(end), Some(anchor)) = (
+            self.handle_step(id, at, pointer),
+            self.anchor_position(id, at),
+        ) else {
+            return;
+        };
+        let (a, e) = (
+            self.to_screen(anchor, rect, ppp),
+            self.to_screen(end, rect, ppp),
+        );
+        let along = e - a;
+        if along.length() < 1.0 {
+            return;
+        }
+        let reach = along.normalized() * (along.length() + HANDLE_STEP_OVERHANG_PX);
+        let ink = egui::Stroke::new(1.0, color::MEASURE);
+        painter.extend(egui::Shape::dashed_line(
+            &[a - reach, a + reach],
+            ink,
+            4.0,
+            4.0,
+        ));
+        let degrees = (f64::from(-along.y)
+            .atan2(f64::from(along.x))
+            .to_degrees()
+            .round() as i32)
+            .rem_euclid(360);
+        crate::ui::canvas_pill(
+            painter,
+            a + egui::vec2(SNAP_CHIP_GAP, -SNAP_CHIP_GAP),
+            egui::Align2::LEFT_BOTTOM,
+            &format!("{degrees}°"),
+            color::MEASURE,
+        );
     }
 
     /// The **committed** outline and radii of `id`, for `rewrite_path`'s no-op
@@ -9582,10 +9782,12 @@ impl OndinApp {
         // Over the selection chrome, so no hairline crosses the number.
         self.draw_measures(ui, painter, rect, ppp, resp);
 
-        // Snap lines for the live gesture; the pen's come from the hover position.
+        // Snap lines for the live gesture; the pen's come from the hover position,
+        // from before its first anchor too.
+        let pen_hover = self.pen.is_some() || self.tool == Tool::Pen;
         if let Some(p) = resp
             .interact_pointer_pos()
-            .or_else(|| resp.hover_pos().filter(|_| self.pen.is_some()))
+            .or_else(|| resp.hover_pos().filter(|_| pen_hover))
         {
             let world = self.to_world(p, rect, ppp);
             let (shift, ctrl) =
@@ -9598,17 +9800,17 @@ impl OndinApp {
                 }
                 Drag::Points { id, grab, anchor } => {
                     let base = self.anchor_position(*id, *anchor);
-                    self.snapped_point(*id, base, world - *grab, shift).1.into()
+                    self.snapped_point(*id, base, world - *grab, shift).1
                 }
                 // A bend moves control points, which nothing snaps.
                 Drag::Segment { id, at, t, grab } if !ctrl => {
                     let base = self.segment_position(*id, *at, *t);
-                    self.snapped_point(*id, base, world - *grab, shift).1.into()
+                    self.snapped_point(*id, base, world - *grab, shift).1
                 }
                 Drag::PointBox {
                     id, handle, grab, ..
                 } => self.snapped_point_box(*id, *handle, *grab, world).1.into(),
-                _ if self.pen.is_some() => self.pen_point(world, shift).1.into(),
+                _ if pen_hover => self.pen_point(world, shift).1,
                 _ => snap::Marks::default(),
             };
             // A snap's guide is a distance shown, so it wears the measure's hue.
@@ -9626,6 +9828,14 @@ impl OndinApp {
             // The gaps an equal-spacing snap made, drawn as Alt-hover measures.
             for m in marks.gaps {
                 self.draw_measure(painter, rect, ppp, m);
+            }
+            if let Some(p) = marks.point {
+                let at = self.to_screen(p.at, rect, ppp);
+                let cross = p.kind == snap::PointKind::Intersection;
+                draw_snap_target(painter, at, p.kind.label(), cross);
+            }
+            if shift && let Drag::Handle { id, at, .. } = self.drag {
+                self.draw_handle_step(painter, rect, ppp, id, at, world);
             }
         }
 
@@ -25095,5 +25305,124 @@ mod builder_chrome_tests {
         );
         assert_eq!(handles, 0, "no handles: every press builds");
         assert_eq!(boxes, 1, "the selection's box stays as the bound");
+    }
+}
+
+#[cfg(test)]
+mod point_snap_tests {
+    use super::*;
+    use ondin_core::kurbo::{BezPath, Size};
+    use ondin_core::{Document, Operation, Transaction};
+
+    /// A headless app at 100% holding a 100 × 60 rect at the origin and an open
+    /// path (200, 0) → (300, 0) → (300, 100) beside it; the path selected under the
+    /// node tool.
+    fn app_with_rect_and_path(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0x5A9);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (rect, path) = (ids.mint(), ids.mint());
+        let mut p = BezPath::new();
+        p.move_to((200.0, 0.0));
+        p.line_to((300.0, 0.0));
+        p.line_to((300.0, 100.0));
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 60.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: path,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Path {
+                    path: p,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
+                },
+                transform: None,
+                name: None,
+            },
+        ]))
+        .expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        app.canvas_px = (1200, 1200);
+        app.session.camera.zoom = 1.0;
+        app.session.selection.set_one(path);
+        app.tool = Tool::Node;
+        assert_eq!(app.edited_path(), Some(path), "fixture: the path is edited");
+        (app, path)
+    }
+
+    /// The pen's next anchor lands exactly on another shape's corner and says so;
+    /// with *Snap to shapes* off it only rounds to the grid.
+    #[test]
+    fn the_pen_lands_on_another_shape_s_corner() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_rect_and_path(&ctx);
+        app.tool = Tool::Pen;
+        let (at, marks) = app.pen_point(Point::new(101.5, 58.7), false);
+        assert_eq!(at, Point::new(100.0, 60.0));
+        assert_eq!(marks.point.map(|m| m.kind), Some(snap::PointKind::Anchor));
+        app.snap_shapes = false;
+        let (at, marks) = app.pen_point(Point::new(101.5, 58.7), false);
+        assert!(marks.point.is_none());
+        assert_eq!(at, Point::new(102.0, 59.0));
+    }
+
+    /// A dragged point lands on what of its own path stays put — the far segment's
+    /// midpoint — and not on the segment it drags along with it.
+    ///
+    /// flip: `point_snapping` keeping segments that touch a moving anchor → fails at
+    /// "not on its own moving segment".
+    #[test]
+    fn a_dragged_point_lands_on_its_own_path_but_not_what_it_moves() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_rect_and_path(&ctx);
+        app.points.set_one(id, (0, 0));
+        let base = Some(Point::new(200.0, 0.0));
+        let (delta, marks) = app.snapped_point(id, base, Vec2::new(100.6, 49.3), false);
+        assert_eq!(Point::new(200.0, 0.0) + delta, Point::new(300.0, 50.0));
+        assert_eq!(marks.point.map(|m| m.kind), Some(snap::PointKind::Midpoint));
+
+        // Halfway along the segment the point drags: (250, 0) is its midpoint.
+        let (_, marks) = app.snapped_point(id, base, Vec2::new(50.4, 1.0), false);
+        assert!(marks.point.is_none(), "not on its own moving segment");
+    }
+
+    /// Shift steps a handle to an eighth of a turn on the canvas, its length the
+    /// pointer's projection, from a pointer too far off the diagonal for the soft
+    /// axis pull to catch.
+    ///
+    /// flip: `handle_tx` ignoring `shift` → fails at the handle's offset, (50, -40).
+    #[test]
+    fn shift_steps_a_handle_by_an_eighth_of_a_turn() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_rect_and_path(&ctx);
+        let at = (0, 1);
+        assert_eq!(
+            app.handle_step(id, at, Point::new(350.0, -40.0)),
+            Some(Point::new(345.0, -45.0))
+        );
+        let tx = app.handle_tx(id, at, Side::Out, Point::new(350.0, -40.0), false, true);
+        assert!(app.session.commit(tx));
+        let NodeKind::Path {
+            path, corner_radii, ..
+        } = app.session.doc.get(id).expect("the path").kind()
+        else {
+            panic!("a path");
+        };
+        let subs = tools::pen_anchors(path, corner_radii);
+        assert_eq!(subs[0].anchors[1].out, Vec2::new(45.0, -45.0));
     }
 }

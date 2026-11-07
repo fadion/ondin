@@ -596,13 +596,14 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
 - **Linked** makes the original a component first — in place for a frame or group, else wrapped in a
   group named after the layer and made the main (not *Create component*'s frame: the wrapper only
   carries the link, and a frame would add a clip and a fill), so the ring group reads *‹layer› ×
-  ‹count›* — then repeats that main, so the copies are its instances. Both halves are built on a
-  scratch copy of the document and commit as one *Repeat* step; the status says *Made Tick a
+  ‹count›* — then repeats that main, so the copies are its instances (`repeat::linked`, the
+  `repeat` verb's `linked`). Both halves are built on a scratch copy of the document and commit as
+  one *Repeat* step; the status says *Made Tick a
   component and 11 linked copies around the origin*. Off is the default, and the choice is kept per
   document in memory (`Session::repeat_linked`). Where it cannot apply the switch is disabled, its
   reason both tooltip and caption: several layers, off, *Linked copies repeat one layer at a time*;
   a main or an instance root, on, *Copies of a component are linked already*; otherwise off, with
-  the reason `create_component_refusal` gives.
+  *Create component*'s reason (`repeat::why_not_linked` decides which).
 
 ### Warp (`warp.rs`, `ondin_core::warp`)
 

@@ -961,9 +961,14 @@ pub static VERBS: &[Verb] = &[
                 ParamKind::Number,
                 "the point repeated round, down the page",
             ),
+            opt(
+                "linked",
+                BOOL,
+                "make the one layer a component first, so its copies are instances; false unless given",
+            ),
         ],
         run: |ctx, a| {
-            let nodes = a.nodes("nodes")?;
+            let nodes = build::outermost(ctx.doc, &a.nodes("nodes")?);
             let count = a.index("count").unwrap_or(0);
             if !(2..=crate::repeat::MAX_COUNT).contains(&count) {
                 return Err(a.invalid("count", "expected 2 to 360"));
@@ -978,15 +983,30 @@ pub static VERBS: &[Verb] = &[
                 a.number("x").unwrap_or(centre.x),
                 a.number("y").unwrap_or(centre.y),
             );
-            let (tx, group) = crate::repeat::repeat(
-                ctx.doc,
-                ctx.res,
-                ctx.ids,
-                &nodes,
-                pivot,
-                ring,
-                crate::repeat::Place::Group,
-            )?;
+            let (tx, group) = if a.bool("linked").unwrap_or(false) {
+                use crate::repeat::NotLinked;
+                match crate::repeat::why_not_linked(ctx.doc, &nodes) {
+                    Some(NotLinked::Several) => {
+                        return Err(a.invalid("linked", "linked copies repeat one layer at a time"));
+                    }
+                    Some(NotLinked::Linked) => {
+                        return Err(a.invalid("linked", "copies of a component are linked already"));
+                    }
+                    Some(NotLinked::Not(why)) => return Err(a.invalid("linked", not_main(why))),
+                    None => {}
+                }
+                crate::repeat::linked(ctx.doc, ctx.res, ctx.ids, nodes[0], pivot, ring)?
+            } else {
+                crate::repeat::repeat(
+                    ctx.doc,
+                    ctx.res,
+                    ctx.ids,
+                    &nodes,
+                    pivot,
+                    ring,
+                    crate::repeat::Place::Group,
+                )?
+            };
             Ok(Done::made(tx, group.into_iter().collect()))
         },
     },

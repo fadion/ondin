@@ -159,3 +159,66 @@ pub fn repeat(
     }
     Ok((Transaction(ops), group))
 }
+
+/// Why a *Linked* ring cannot make its original a component first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotLinked {
+    /// Linked copies repeat one layer at a time.
+    Several,
+    /// It is a main or an instance: its copies are linked already.
+    Linked,
+    /// *Create component*'s rule (`component::why_not_make`).
+    Not(crate::component::NotMain),
+}
+
+/// Why a linked ring of the outermost layers `roots` would refuse, or `None`.
+pub fn why_not_linked(doc: &Document, roots: &[NodeId]) -> Option<NotLinked> {
+    let [one] = roots else {
+        return Some(NotLinked::Several);
+    };
+    let node = doc.get(*one)?;
+    if node.component() || crate::component::instance_root(doc, *one) == Some(*one) {
+        return Some(NotLinked::Linked);
+    }
+    crate::component::why_not_make(doc, roots).map(NotLinked::Not)
+}
+
+/// A *Linked* ring of `id`: the layer made a component where it stands (a frame
+/// or a group), or wrapped in a group made the component, then repeated, so its
+/// copies land as instances. A group rather than *Create component*'s frame: the
+/// wrapper only carries the link, and a frame would add a clip and a fill nobody
+/// asked for. The wrapper takes the layer's name, so the main, its instances and
+/// the ring read as the layer. Worked on a scratch copy so both halves are one edit.
+pub fn linked(
+    doc: &Document,
+    res: &Resolved,
+    ids: &mut IdSource,
+    id: NodeId,
+    pivot: Point,
+    ring: Ring,
+) -> Result<(Transaction, Option<NodeId>), OpError> {
+    let (mut tx, main) = match crate::component::makes_in_place(doc, id) {
+        true => (Transaction(Vec::new()), id),
+        false => {
+            let (mut tx, group) = build::group(doc, res, ids, &[id])?;
+            if let Some(node) = doc.get(id) {
+                tx.0.push(Operation::SetName {
+                    id: group,
+                    name: node.name().to_string(),
+                });
+            }
+            (tx, group)
+        }
+    };
+    tx.0.push(Operation::SetComponent {
+        id: main,
+        component: true,
+    });
+    let mut after = doc.clone();
+    let outcome = after.apply(&tx)?;
+    let mut laid = res.clone();
+    laid.update(&after, &outcome.dirty);
+    let (more, group) = repeat(&after, &laid, ids, &[main], pivot, ring, Place::Group)?;
+    tx.0.extend(more.0);
+    Ok((tx, group))
+}

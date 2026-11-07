@@ -704,6 +704,69 @@ fn repeat_makes_a_ring_in_a_group() {
     );
 }
 
+/// A linked `repeat` makes its rectangle a component inside a group named for it,
+/// its copies instances of that main; a main is refused, its copies being linked
+/// already.
+///
+/// flip: `repeat::linked` repeating the layer rather than the main it made →
+/// fails at "one main among": the wrapper made the main is left out of the ring.
+#[test]
+fn a_linked_repeat_makes_instances() {
+    let (mut doc, mut ids, page) = blank();
+    let at = serde_json::to_value(Affine::translate((100.0, 0.0))).unwrap();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0), "name": "Tick", "transform": at }),
+    )[0];
+    let ring = run(
+        &mut doc,
+        &mut ids,
+        "repeat",
+        json!({ "nodes": [r.to_wire()], "count": 3, "x": 0, "y": 0, "linked": true }),
+    )[0];
+    let kids = doc.get(ring).unwrap().children().to_vec();
+    assert_eq!(kids.len(), 3);
+    let mains: Vec<NodeId> = kids
+        .iter()
+        .copied()
+        .filter(|k| doc.get(*k).unwrap().component())
+        .collect();
+    let [main] = mains[..] else {
+        panic!("one main among {kids:?}");
+    };
+    assert_eq!(doc.get(main).unwrap().name(), "Tick");
+    assert!(
+        kids.iter()
+            .filter(|k| **k != main)
+            .all(|k| ondin_core::component::main_of(&doc, *k) == Some(main)),
+        "the copies are instances"
+    );
+
+    let res = Resolved::rebuild(&doc);
+    let again = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "repeat",
+        &json!({ "nodes": [main.to_wire()], "count": 2, "linked": true }),
+    );
+    assert!(
+        matches!(
+            again,
+            Err(VerbError::Invalid {
+                param: "linked",
+                ..
+            })
+        ),
+        "{again:?}"
+    );
+}
+
 /// `set_size` sizes any kind: a rectangle's size, a group by its box (its child
 /// scaled with it).
 ///

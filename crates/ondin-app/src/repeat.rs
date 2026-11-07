@@ -12,7 +12,7 @@ use crate::ui::{self, FieldButton, Prefix, Scrub};
 use eframe::egui;
 use ondin_core::kurbo::Point;
 use ondin_core::repeat::{self, Place, Ring};
-use ondin_core::{IdSource, NodeId, Operation, Transaction, build};
+use ondin_core::{IdSource, NodeId, Transaction, build};
 
 /// The card's width: a popover's.
 const W: f32 = crate::app::POPOVER_W;
@@ -179,24 +179,22 @@ impl OndinApp {
 
     /// Why *Linked* cannot apply to the selection, if it cannot.
     fn linked_refusal(&self) -> Option<LinkedRefusal> {
+        use repeat::NotLinked;
         let doc = &self.session.doc;
         let roots = build::outermost(doc, self.session.selection.ids());
-        let [one] = roots.as_slice() else {
-            return Some(LinkedRefusal {
+        Some(match repeat::why_not_linked(doc, &roots)? {
+            NotLinked::Several => LinkedRefusal {
                 why: "Linked copies repeat one layer at a time",
                 on: false,
-            });
-        };
-        let node = doc.get(*one)?;
-        if node.component() || ondin_core::component::instance_root(doc, *one) == Some(*one) {
-            return Some(LinkedRefusal {
+            },
+            NotLinked::Linked => LinkedRefusal {
                 why: "Copies of a component are linked already",
                 on: true,
-            });
-        }
-        self.create_component_refusal().map(|why| LinkedRefusal {
-            why: crate::menu::create_refusal(why),
-            on: false,
+            },
+            NotLinked::Not(why) => LinkedRefusal {
+                why: crate::menu::create_refusal(why),
+                on: false,
+            },
         })
     }
 
@@ -265,7 +263,15 @@ impl OndinApp {
         let ring = self.repeat.ring();
         let linked = self.repeats_linked();
         let made = match linked {
-            true => self.linked_ring(roots[0], pivot, ring),
+            true => repeat::linked(
+                &self.session.doc,
+                &self.session.resolved,
+                &mut self.session.ids,
+                roots[0],
+                pivot,
+                ring,
+            )
+            .map_err(|e| e.to_string()),
             false => repeat::repeat(
                 &self.session.doc,
                 &self.session.resolved,
@@ -301,55 +307,6 @@ impl OndinApp {
         };
         self.session.info(said);
         self.leave_repeat();
-    }
-
-    /// The edit that makes `id` a component where it stands, or wraps it in a
-    /// group made the component, then repeats that main: its copies land as
-    /// instances. A group rather than *Create component*'s frame: the wrapper only
-    /// carries the link, and a frame would add a clip and a fill nobody asked for.
-    /// It takes the layer's name, so the main, its instances and the ring read as
-    /// the layer. Worked on a scratch copy so both halves are one step.
-    fn linked_ring(
-        &mut self,
-        id: NodeId,
-        pivot: Point,
-        ring: Ring,
-    ) -> Result<(Transaction, Option<NodeId>), String> {
-        let (doc, res) = (&self.session.doc, &self.session.resolved);
-        let (mut tx, main) = match ondin_core::component::makes_in_place(doc, id) {
-            true => (Transaction(Vec::new()), id),
-            false => {
-                let (mut tx, group) = build::group(doc, res, &mut self.session.ids, &[id])
-                    .map_err(|e| e.to_string())?;
-                if let Some(node) = doc.get(id) {
-                    tx.0.push(Operation::SetName {
-                        id: group,
-                        name: node.name().to_string(),
-                    });
-                }
-                (tx, group)
-            }
-        };
-        tx.0.push(Operation::SetComponent {
-            id: main,
-            component: true,
-        });
-        let mut after = doc.clone();
-        let outcome = after.apply(&tx).map_err(|e| e.to_string())?;
-        let mut laid = res.clone();
-        laid.update(&after, &outcome.dirty);
-        let (more, group) = repeat::repeat(
-            &after,
-            &laid,
-            &mut self.session.ids,
-            &[main],
-            pivot,
-            ring,
-            Place::Group,
-        )
-        .map_err(|e| e.to_string())?;
-        tx.0.extend(more.0);
-        Ok((tx, group))
     }
 
     /// Draw the card when it is open, keep its preview up, and act on this
@@ -535,7 +492,7 @@ impl OndinApp {
 pub(crate) mod tests {
     use super::*;
     use ondin_core::kurbo::{Affine, Size, Vec2};
-    use ondin_core::{Document, NodeKind, Pivot};
+    use ondin_core::{Document, NodeKind, Operation, Pivot};
 
     /// A headless app holding a frame with an 18 × 58 tick at (311, 72), its
     /// transform origin moved 70 below its box to (320, 200), and the tick
@@ -675,7 +632,7 @@ pub(crate) mod tests {
     /// since a rectangle cannot be one, and every copy an instance of it, in one
     /// step; the ring wears the tick's name, and the pivot the card raised goes
     /// back down.
-    /// flip: `linked_ring` wrapping with `build::frame` → fails at the group-kind assertion.
+    /// flip: `repeat::linked` wrapping with `build::frame` → fails at the group-kind assertion.
     #[test]
     fn linked_wraps_the_tick_in_a_main_and_lands_the_copies_as_its_instances() {
         let ctx = egui::Context::default();

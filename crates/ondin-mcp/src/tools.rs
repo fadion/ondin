@@ -236,11 +236,7 @@ mod tests {
     }
 
     /// Phase 3 tools with no registry verb yet.
-    const PHASE_3_PENDING: [&str; 3] = [
-        "define_property",
-        "set_instance_property",
-        "reset_overrides",
-    ];
+    const PHASE_3_PENDING: [&str; 2] = ["define_property", "set_instance_property"];
 
     /// Every Phase 3 tool is a verb of the same name or pending, never both, so
     /// adding a verb forces its name off the pending list.

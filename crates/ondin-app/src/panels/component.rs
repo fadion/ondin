@@ -319,7 +319,7 @@ impl OndinApp {
         // ops **place** it: a pivot alone moves nothing. The append is
         // `placement_stated`'s.
         if let Some((_, _, ops)) = cards.iter_mut().find(|(t, ..)| *t == "Transform") {
-            *ops = placement_stated(doc, Transaction(std::mem::take(ops))).0;
+            *ops = ondin_core::reset::placement_stated(doc, Transaction(std::mem::take(ops))).0;
         }
         self.card_overrides = cards;
         self.field_overrides = fields;
@@ -334,39 +334,16 @@ impl OndinApp {
     }
 
     /// `tx`, a reset, with the item of every layer it resizes stated beside the
-    /// size — the reset's own where it resets the item, else the layer's unchanged
-    /// — so `build::flex_holds` does not take the reset for the hand's resize
-    /// ([`OndinApp::commit_reset`]'s first point). The context menu's reset
-    /// (`OndinApp::reset_tx`) takes it too.
-    pub(crate) fn items_stated(&self, mut tx: Transaction) -> Transaction {
-        let doc = &self.session.doc;
-        let mut stated: Vec<Operation> = Vec::new();
-        for op in &tx.0 {
-            let Operation::SetGeometry { id, geometry } = op else {
-                continue;
-            };
-            let named =
-                |o: &Operation| matches!(o, Operation::SetLayoutItem { id: i, .. } if i == id);
-            if !geometry.resizes() || tx.0.iter().any(named) || stated.iter().any(named) {
-                continue;
-            }
-            if let Some(n) = doc.get(*id) {
-                stated.push(Operation::SetLayoutItem {
-                    id: *id,
-                    item: *n.item(),
-                });
-            }
-        }
-        tx.0.extend(stated);
-        tx
+    /// size ([`OndinApp::commit_reset`]'s first point; `reset::items_stated`).
+    pub(crate) fn items_stated(&self, tx: Transaction) -> Transaction {
+        ondin_core::reset::items_stated(&self.session.doc, tx)
     }
 
-    /// `tx`, a reset, with every placed copy's insets stated beside it — the
-    /// module's `placement_stated`, which says why. The context menu's and the
-    /// Component card's resets take it (`OndinApp::reset_tx`), as the Transform
-    /// header's does.
+    /// `tx`, a reset, with every placed copy's insets stated beside it
+    /// (`reset::placement_stated`, which says why), as the Transform header's
+    /// reset takes it.
     pub(crate) fn placement_stated(&self, tx: Transaction) -> Transaction {
-        placement_stated(&self.session.doc, tx)
+        ondin_core::reset::placement_stated(&self.session.doc, tx)
     }
 
     /// Commit an instance's reset from the inspector (a field's ↺, a card header's
@@ -1217,46 +1194,6 @@ fn rounded_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
     }
     pts.push(pts[0]);
     pts
-}
-
-/// `tx`, a reset, with the **placement stated** beside every write that places a
-/// copy (a `SetTransform`, or a `SetGeometry` that resizes) and has no `SetInsets`
-/// in `tx`: the insets of its **slot source** (`reset::slot_source_of`), or its
-/// own for an instance root. The commit door reads a bare placement as the hand's
-/// (`keep_insets` re-pins it, `kept_flow_translations` drops it); a `SetInsets`
-/// stands both down. ⚠️ **The slot, not `source_of`, for a swapped copy.**
-/// ⚠️ **One helper for every reset door** (`reset_tx`, `gather_card_overrides`);
-/// a field's own reset (`transform_marks`) states its insets per axis.
-fn placement_stated(doc: &ondin_core::Document, mut tx: Transaction) -> Transaction {
-    let mut placed: Vec<NodeId> =
-        tx.0.iter()
-            .filter_map(|op| match op {
-                Operation::SetTransform { id, .. } => Some(*id),
-                Operation::SetGeometry { id, geometry } if geometry.resizes() => Some(*id),
-                _ => None,
-            })
-            .filter(|id| {
-                !tx.0
-                    .iter()
-                    .any(|op| matches!(op, Operation::SetInsets { id: i, .. } if i == id))
-            })
-            .collect();
-    placed.sort();
-    placed.dedup();
-    for id in placed {
-        let from = if ondin_core::reset::placement_is_own(doc, id) {
-            Some(id)
-        } else {
-            ondin_core::reset::slot_source_of(doc, id)
-        };
-        if let Some(n) = from.and_then(|s| doc.get(s)) {
-            tx.0.push(Operation::SetInsets {
-                id,
-                insets: *n.insets(),
-            });
-        }
-    }
-    tx
 }
 
 /// The inspector card that shows the field `op` writes, by title, or `None` for a

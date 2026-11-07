@@ -4000,17 +4000,16 @@ impl OndinApp {
             self.session.info("Select an instance to reset");
             return None;
         }
-        let ops = ondin_core::reset::reset(doc, kind, &scopes, &mut self.session.ids);
+        // A reset is neither a resize nor the hand placing a pinned or laid-out layer;
+        // `reset::stated` says so beside it, so the commit door does not re-pin or drop it.
+        let ops = ondin_core::reset::stated(doc, kind, &scopes, &mut self.session.ids);
         if ops.is_empty() {
             // The card's *Reset all* tooltip's words.
             self.session
                 .info("Nothing here differs from the main component");
             return None;
         }
-        // A reset is neither a resize nor the hand placing a pinned or laid-out layer;
-        // its insets are stated so the commit door does not re-pin or drop it.
-        let ops = self.placement_stated(Transaction(ops));
-        Some(self.items_stated(ops))
+        Some(Transaction(ops))
     }
 
     /// Select a freshly made group, and leave it shut in the layers tree.

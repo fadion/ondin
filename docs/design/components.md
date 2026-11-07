@@ -261,8 +261,9 @@ alone); reset all (fields, missing counterparts, the main's order).
 - A reset states placement fully: every placing write carries the axis's insets (the node's own where
   its placement is its own, else its **slot source**'s, `reset::slot_source_of`), or `keep_insets`
   re-pins it against the copy's frame; an instance root writes its own insets back. Every reset states
-  the layout item of each layer it resizes (`OndinApp::items_stated`), or `keep_flex_sizes` reads it as
-  the hand's resize.
+  the layout item of each layer it resizes (`reset::items_stated`), or `keep_flex_sizes` reads it as
+  the hand's resize. `reset::stated` is a reset with both (`reset::placement_stated` the insets), the
+  context menu's door and `reset_overrides`'.
 
 ### The verbs
 

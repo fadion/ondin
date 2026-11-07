@@ -506,6 +506,7 @@ const BOOL_OPS: &[&str] = &["union", "subtract", "intersect", "exclude"];
 const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
+const RESETS: &[&str] = &["all", "fields", "children", "order"];
 const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
 
 /// The style slot a [`STYLE_SLOTS`] word names.
@@ -1188,6 +1189,36 @@ pub static VERBS: &[Verb] = &[
             crate::variant::switch(ctx.doc, root, to, ctx.ids)
                 .map(Done::edit)
                 .ok_or(VerbError::Nothing("that instance cannot switch variants"))
+        },
+    },
+    Verb {
+        name: "reset_overrides",
+        doc: "Put instances, or layers inside them, back as their main has them",
+        params: &[
+            req("nodes", NODES, "instances, or layers inside them"),
+            opt(
+                "scope",
+                ParamKind::Choice(RESETS),
+                "everything (`all`, unless given), the fields alone, removed children restored, or the order",
+            ),
+        ],
+        run: |ctx, a| {
+            let scopes: Vec<NodeId> = build::outermost(ctx.doc, &a.nodes("nodes")?)
+                .into_iter()
+                .filter(|id| crate::component::instance_root(ctx.doc, *id).is_some())
+                .collect();
+            if scopes.is_empty() {
+                return Err(VerbError::Nothing("none of the layers is in an instance"));
+            }
+            let kind = match a.choice("scope") {
+                Some("fields") => crate::reset::Kind::Fields,
+                Some("children") => crate::reset::Kind::Children,
+                Some("order") => crate::reset::Kind::Order,
+                _ => crate::reset::Kind::All,
+            };
+            Ok(Done::ops(crate::reset::stated(
+                ctx.doc, kind, &scopes, ctx.ids,
+            )))
         },
     },
     // --- variables and modes ----------------------------------------------------

@@ -1111,6 +1111,77 @@ pub fn reset(doc: &Document, kind: Kind, scopes: &[NodeId], ids: &mut IdSource) 
     }
 }
 
+/// [`reset`] as a commit takes it: with every placed copy's insets and every
+/// resized layer's item stated beside it ([`placement_stated`], [`items_stated`]),
+/// so the commit door reads neither as the hand's.
+pub fn stated(doc: &Document, kind: Kind, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
+    let tx = Transaction(reset(doc, kind, scopes, ids));
+    items_stated(doc, placement_stated(doc, tx)).0
+}
+
+/// `tx`, a reset, with the **placement stated** beside every write that places a
+/// copy (a `SetTransform`, or a `SetGeometry` that resizes) and has no `SetInsets`
+/// in `tx`: the insets of its **slot source** ([`slot_source_of`]), or its own for
+/// an instance root. The commit door reads a bare placement as the hand's
+/// (`keep_insets` re-pins it, `kept_flow_translations` drops it); a `SetInsets`
+/// stands both down. ⚠️ **The slot, not `source_of`, for a swapped copy.** A
+/// field's own reset in the inspector states its insets per axis instead.
+pub fn placement_stated(doc: &Document, mut tx: Transaction) -> Transaction {
+    let mut placed: Vec<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetTransform { id, .. } => Some(*id),
+                Operation::SetGeometry { id, geometry } if geometry.resizes() => Some(*id),
+                _ => None,
+            })
+            .filter(|id| {
+                !tx.0
+                    .iter()
+                    .any(|op| matches!(op, Operation::SetInsets { id: i, .. } if i == id))
+            })
+            .collect();
+    placed.sort();
+    placed.dedup();
+    for id in placed {
+        let from = if placement_is_own(doc, id) {
+            Some(id)
+        } else {
+            slot_source_of(doc, id)
+        };
+        if let Some(n) = from.and_then(|s| doc.get(s)) {
+            tx.0.push(Operation::SetInsets {
+                id,
+                insets: *n.insets(),
+            });
+        }
+    }
+    tx
+}
+
+/// `tx`, a reset, with the item of every layer it resizes stated beside the size:
+/// the reset's own where it resets the item, else the layer's unchanged, so
+/// `build::flex_holds` does not take the reset for the hand's resize.
+pub fn items_stated(doc: &Document, mut tx: Transaction) -> Transaction {
+    let mut stated: Vec<Operation> = Vec::new();
+    for op in &tx.0 {
+        let Operation::SetGeometry { id, geometry } = op else {
+            continue;
+        };
+        let named = |o: &Operation| matches!(o, Operation::SetLayoutItem { id: i, .. } if i == id);
+        if !geometry.resizes() || tx.0.iter().any(named) || stated.iter().any(named) {
+            continue;
+        }
+        if let Some(n) = doc.get(*id) {
+            stated.push(Operation::SetLayoutItem {
+                id: *id,
+                item: *n.item(),
+            });
+        }
+    }
+    tx.0.extend(stated);
+    tx
+}
+
 /// The structure under each scope put back, **no field**: the missing
 /// counterparts restored at every depth, then every parent's order — the order
 /// read on the document the restore leaves, so a restored child is ordered with

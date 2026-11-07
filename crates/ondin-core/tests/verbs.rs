@@ -1286,6 +1286,66 @@ fn styles_are_added_changed_applied_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// `reset_overrides` puts an instance's overridden fill back as its main has it,
+/// and refuses layers in no instance.
+///
+/// flip: `reset_overrides` keeping the layers that sit in no instance and
+/// resetting those → fails at "a loose layer is refused".
+#[test]
+fn reset_overrides_puts_an_instance_back() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, _) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    let copy = doc.get(inst).unwrap().children()[0];
+    let red = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": copy.to_wire(), "fills": red }),
+    );
+    assert_eq!(
+        doc.get(copy).unwrap().paint().fills.len(),
+        1,
+        "fixture: overridden"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "reset_overrides",
+        json!({ "nodes": [inst.to_wire()] }),
+    );
+    assert!(
+        doc.get(copy).unwrap().paint().fills.is_empty(),
+        "the main has no fill"
+    );
+
+    let res = Resolved::rebuild(&doc);
+    let loose = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "reset_overrides",
+        &json!({ "nodes": [card.to_wire()] }),
+    );
+    assert!(
+        matches!(loose, Err(VerbError::Nothing(_))),
+        "a loose layer is refused: {loose:?}"
+    );
+}
+
 /// `combine_as_variants` makes a set of two mains, and `switch_variant` shows the
 /// other variant in an instance by its property's value.
 #[test]

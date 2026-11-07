@@ -1072,6 +1072,77 @@ fn a_script_keeps_instances_in_step_with_their_mains() {
     assert!(doc.get(page).is_some());
 }
 
+/// The variable and mode verbs, run as a script whose labels carry their ids: a
+/// colour variable added and renamed, a mode added and named, its value set there,
+/// a frame made to show it, then the mode and the variable removed. A taken name
+/// and a value of another kind are refused.
+///
+/// flip: `variable::set_cell_ops` taking a value of any kind → fails at "a number
+/// is refused".
+#[test]
+fn variables_and_modes_are_added_set_and_removed() {
+    let (mut doc, mut ids, page) = blank();
+    let blue = serde_json::to_value(ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255))).unwrap();
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "color", "name": "brand/primary" }, "as": "v" },
+        { "verb": "add_mode", "args": { "name": "Dark" }, "as": "dark" },
+        { "verb": "set_variable_value", "args": { "variable": "@v", "mode": "@dark", "value": blue } },
+        { "verb": "rename_variable", "args": { "variable": "@v", "name": "brand/accent" } },
+        { "verb": "rename_mode", "args": { "mode": "@dark", "name": "Night" } },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": frame(10.0, 10.0) }, "as": "f" },
+        { "verb": "set_frame_mode", "args": { "node": "@f", "mode": "@dark" } },
+    ]);
+    let made =
+        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let table = doc.variables();
+    let var: ondin_core::VarId = serde_json::from_value(json!(made[0][0])).unwrap();
+    let dark: ondin_core::ModeId = serde_json::from_value(json!(made[1][0])).unwrap();
+    let v = table.get(var).unwrap();
+    assert_eq!(v.name, "brand/accent");
+    assert_eq!(
+        v.cells.get(&dark),
+        Some(&ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255)))
+    );
+    assert_eq!(table.mode(dark).unwrap().name, "Night");
+    let f = NodeId::from_wire(&made[5][0]).unwrap();
+    assert_eq!(doc.get(f).unwrap().modes(), [dark]);
+
+    let refused = |doc: &mut Document, ids: &mut IdSource, step: Value| {
+        verbs::run_script(doc, ids, None, &json!([step]))
+            .expect_err("refused")
+            .why
+    };
+    let taken = refused(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "add_variable", "args": { "kind": "color", "name": "brand/accent" } }),
+    );
+    assert!(taken.contains("already exists"), "{taken}");
+    let number = serde_json::to_value(ondin_core::Cell::Number(3.0)).unwrap();
+    let wrong = refused(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "set_variable_value", "args": { "variable": made[0][0], "mode": made[1][0], "value": number } }),
+    );
+    assert!(
+        wrong.contains("another kind"),
+        "a number is refused: {wrong}"
+    );
+
+    let tidy = json!([
+        { "verb": "remove_mode", "args": { "mode": made[1][0] } },
+        { "verb": "remove_variable", "args": { "variable": made[0][0] } },
+    ]);
+    verbs::run_script(&mut doc, &mut ids, None, &tidy).unwrap_or_else(|e| panic!("{e}"));
+    assert!(doc.variables().get(var).is_none());
+    assert!(doc.variables().mode(dark).is_none());
+    assert!(
+        doc.get(f).unwrap().modes().is_empty(),
+        "the frame inherits again"
+    );
+    assert!(doc.get(page).is_some());
+}
+
 /// `combine_as_variants` makes a set of two mains, and `switch_variant` shows the
 /// other variant in an instance by its property's value.
 #[test]

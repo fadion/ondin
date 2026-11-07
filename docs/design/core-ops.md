@@ -227,7 +227,12 @@ it created. A verb never commits; its caller does, as every edit is committed.
 - **Phase 3's verbs call the builders the app's component doors call**: `build::make_component`
   (*Create component*, in place or wrapped), `build::place_instance` and `build::centred_on` (the
   picker's placement), `component::detach`, `variant::combine`, `variant::switch` and
-  `variant::swap_carrying` (the instance card's *Main* relink and nested *Swap*). `ondin-mcp`'s
+  `variant::swap_carrying` (the instance card's *Main* relink and nested *Swap*); and the variables
+  browser's edits, `variable::add_variable_ops`, `rename_variable_ops`, `set_cell_ops`,
+  `add_mode_ops`, `mode_name_refusal`, `frame_mode_ops`, beside `remove_ops`, `remove_mode_ops` and
+  `rename_mode_ops`. A verb takes a cell as a typed `Cell`; the browser's text parsing (`--name`
+  for an alias, colour text) stays the browser's. Ids that are not a layer's are `ParamKind::Id`, in
+  the node wire form, and a verb that makes one answers it in `Done::made`. `ondin-mcp`'s
   `every_phase_3_tool_is_a_registry_verb` holds the tool list to the registry, the tools still to
   come on its pending list.
 

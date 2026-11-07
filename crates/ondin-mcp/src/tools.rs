@@ -236,18 +236,10 @@ mod tests {
     }
 
     /// Phase 3 tools with no registry verb yet.
-    const PHASE_3_PENDING: [&str; 17] = [
+    const PHASE_3_PENDING: [&str; 9] = [
         "define_property",
         "set_instance_property",
         "reset_overrides",
-        "add_variable",
-        "remove_variable",
-        "rename_variable",
-        "set_variable_value",
-        "add_mode",
-        "remove_mode",
-        "rename_mode",
-        "set_frame_mode",
         "bind_variable",
         "add_style",
         "remove_style",

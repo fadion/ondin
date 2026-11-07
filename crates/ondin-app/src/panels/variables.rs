@@ -761,7 +761,7 @@ impl OndinApp {
             Menu::Style(_) => 5.0,
             Menu::StyleGroup(..) => 3.0,
             Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
-            Menu::Words(v, _) => table.get(*v).map_or(0, |v| flex_words(v).len()) as f32,
+            Menu::Words(v, _) => table.get(*v).map_or(0, |v| var::flex_words(v).len()) as f32,
         };
         // The estimate places only a menu's first frame; from then on it is placed
         // by the size it painted at, since its rows come and go with what it acts on.
@@ -1338,7 +1338,7 @@ impl OndinApp {
                                 Some(Cell::String(s)) => s.clone(),
                                 _ => String::new(),
                             };
-                            for word in flex_words(v) {
+                            for word in var::flex_words(v) {
                                 let r = ui::MenuRow::new("", word).checked(held == word);
                                 if ui::menu_row(ui, r, MENU_ROW_H).clicked() {
                                     acts.push(Act::Cell(v.id, *m, word.to_string(), None));
@@ -1611,73 +1611,41 @@ impl OndinApp {
             Act::NewVar(kind) => {
                 // Into the collection on show.
                 let shown = self.shown_collection();
-                let first = self.session.ids.mint_mode();
                 let table = self.session.doc.variables();
-                let (mut ops, modes) = var::columns_for_new(table, shown, first);
-                let (stem, cell) = match kind {
-                    VarKind::Color => ("colour", Cell::Color(Color::WHITE)),
-                    VarKind::Number => ("number", Cell::Number(0.0)),
-                    VarKind::Boolean => ("boolean", Cell::Boolean(true)),
-                    // A word to start from rather than nothing (§15 D1069): an
-                    // empty string bound to a text's content draws no text at
-                    // all, which reads as a fault.
-                    VarKind::String => ("string", Cell::String("Text".into())),
+                let Ok((ops, id)) =
+                    var::add_variable_ops(table, &mut self.session.ids, shown, kind, None, None)
+                else {
+                    return;
                 };
-                let taken: Vec<&str> = table
-                    .of_collection(shown)
-                    .map(|v| v.name.as_str())
-                    .collect();
-                let name = free_name(&taken, stem, 1);
-                let id = self.session.ids.mint_var();
-                ops.push(Operation::AddVariable {
-                    var: Variable {
-                        id,
-                        name: name.clone(),
-                        kind,
-                        cells: modes.into_iter().map(|m| (m, cell.clone())).collect(),
-                        scope: None,
-                        origin: None,
-                        forked: None,
-                        description: String::new(),
-                    },
-                });
                 self.session.name_step("New variable", icon::BRACKETS_CURLY);
-                if self.commit_edit(Transaction(ops))
-                    && let Some(b) = self.var_browser.as_mut()
-                {
-                    b.edit = Some(Edit::Name {
-                        var: id,
-                        text: name,
-                    });
-                    b.edit_focus = true;
+                if self.commit_edit(Transaction(ops)) {
+                    let name = self.session.doc.variables().get(id).map(|v| v.name.clone());
+                    if let (Some(b), Some(text)) = (self.var_browser.as_mut(), name) {
+                        b.edit = Some(Edit::Name { var: id, text });
+                        b.edit_focus = true;
+                    }
                 }
             }
             Act::NewMode => {
                 // A mode of the collection on show, copying its first.
                 let shown = self.shown_collection();
-                let table = self.session.doc.variables();
-                let Some(col) = table.collection(shown) else {
+                let Ok((ops, id)) =
+                    var::add_mode_ops(&self.session.doc, &mut self.session.ids, shown, None)
+                else {
                     return;
                 };
-                let taken: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
-                let name = free_name(&taken, "Mode", col.modes.len() + 1);
-                let id = self.session.ids.mint_mode();
-                let doc = &self.session.doc;
-                let ops = match col.default_mode() {
-                    Some(first) => var::copy_mode_ops(doc, first, id, &name, col.modes.len()),
-                    // Named `free_name`'s *Mode 1*, with its width when ticked.
-                    None => var::columns_for_new(table, shown, id).0,
-                };
                 self.session.name_step("New mode", icon::COLUMNS_PLUS_RIGHT);
-                if !ops.is_empty()
-                    && self.commit_edit(Transaction(ops))
-                    && let Some(b) = self.var_browser.as_mut()
-                {
-                    b.edit = Some(Edit::Mode {
-                        mode: id,
-                        text: name,
-                    });
-                    b.edit_focus = true;
+                if !ops.is_empty() && self.commit_edit(Transaction(ops)) {
+                    let name = self
+                        .session
+                        .doc
+                        .variables()
+                        .mode(id)
+                        .map(|m| m.name.clone());
+                    if let (Some(b), Some(text)) = (self.var_browser.as_mut(), name) {
+                        b.edit = Some(Edit::Mode { mode: id, text });
+                        b.edit_focus = true;
+                    }
                 }
             }
             Act::MoveMode(mode, to) => {
@@ -1696,7 +1664,7 @@ impl OndinApp {
                 let taken: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
                 let stem = format!("{} copy", col.modes[index].name);
                 let name = if taken.contains(&stem.as_str()) {
-                    free_name(&taken, &stem, 2)
+                    var::numbered_name(&taken, &stem, 2)
                 } else {
                     stem
                 };
@@ -1707,36 +1675,20 @@ impl OndinApp {
                     self.commit_edit(Transaction(ops));
                 }
             }
-            Act::Name(id, text) => {
-                let text = text.trim().to_string();
-                let c = table
-                    .collection_of(id)
-                    .map_or(table.first_collection().id, |c| c.id);
-                match name_refusal(table, c, &text, Some(id)) {
-                    Some(why) => self.var_refuse(why),
-                    None => {
-                        let changed = table.get(id).is_some_and(|v| v.name != text);
-                        self.var_edit_done();
-                        if changed {
-                            self.session.name_step("Rename variable", icon::CURSOR_TEXT);
-                            self.commit_edit(Transaction(vec![Operation::SetVariableName {
-                                id,
-                                name: text,
-                            }]));
-                        }
+            Act::Name(id, text) => match var::rename_variable_ops(table, id, &text) {
+                Err(why) => self.var_refuse(why),
+                Ok(ops) => {
+                    self.var_edit_done();
+                    if !ops.is_empty() {
+                        self.session.name_step("Rename variable", icon::CURSOR_TEXT);
+                        self.commit_edit(Transaction(ops));
                     }
                 }
-            }
+            },
             Act::ModeName(id, text) => {
                 let text = text.trim().to_string();
-                // Unique in its collection: two collections may both have *Dark*.
-                let taken = table
-                    .collection_of_mode(id)
-                    .is_some_and(|c| c.modes.iter().any(|m| m.id != id && m.name == text));
-                if text.is_empty() {
-                    self.var_refuse("A mode needs a name.".into());
-                } else if taken {
-                    self.var_refuse(format!("{text} already exists."));
+                if let Some(why) = var::mode_name_refusal(table, id, &text) {
+                    self.var_refuse(why);
                 } else {
                     let ops = var::rename_mode_ops(doc, id, &text);
                     self.var_edit_done();
@@ -1788,7 +1740,7 @@ impl OndinApp {
                 };
                 let stem = format!("{} copy", v.name);
                 let name = if taken.contains(&stem.as_str()) {
-                    free_name(&taken, &stem, 2)
+                    var::numbered_name(&taken, &stem, 2)
                 } else {
                     stem
                 };
@@ -1849,7 +1801,7 @@ impl OndinApp {
                     .iter()
                     .map(|c| c.name.as_str())
                     .collect();
-                let name = free_name(&taken, "Collection", table.collections().len() + 1);
+                let name = var::numbered_name(&taken, "Collection", table.collections().len() + 1);
                 let (id, mode) = (
                     self.session.ids.mint_collection(),
                     self.session.ids.mint_mode(),
@@ -1900,7 +1852,7 @@ impl OndinApp {
                     .collect();
                 let stem = format!("{} copy", col.name);
                 let name = if taken.contains(&stem.as_str()) {
-                    free_name(&taken, &stem, 2)
+                    var::numbered_name(&taken, &stem, 2)
                 } else {
                     stem
                 };
@@ -1969,7 +1921,8 @@ impl OndinApp {
                             .iter()
                             .map(|c| c.name.as_str())
                             .collect();
-                        let name = free_name(&taken, "Collection", table.collections().len() + 1);
+                        let name =
+                            var::numbered_name(&taken, "Collection", table.collections().len() + 1);
                         let (id, mode) = (
                             self.session.ids.mint_collection(),
                             self.session.ids.mint_mode(),
@@ -2056,7 +2009,7 @@ impl OndinApp {
         let table = self.session.doc.variables();
         let Some(v) = table.get(id) else { return false };
         // A string of flex words takes only those words, read as the word.
-        let words = flex_words(v);
+        let words = var::flex_words(v);
         let parsed = match parse_cell(table, v, mode, &text) {
             Ok(Cell::String(s)) if !words.is_empty() => words
                 .iter()
@@ -2071,25 +2024,20 @@ impl OndinApp {
                 .ok_or_else(|| format!("{} holds {}.", v.name, words.join(", "))),
             other => other,
         };
-        let same = parsed.as_ref().is_ok_and(|c| v.cells.get(&mode) == Some(c));
-        let cell = match parsed {
-            Ok(cell) => cell,
+        let ops = match parsed.and_then(|cell| var::set_cell_ops(table, id, mode, cell)) {
+            Ok(ops) => ops,
             Err(why) => {
                 self.var_refuse(why);
                 return false;
             }
         };
         self.var_edit_done();
-        if same {
+        if ops.is_empty() {
             return true;
         }
         self.session
             .name_step("Variable value", icon::BRACKETS_CURLY);
-        self.commit_edit(Transaction(vec![Operation::SetVariableCell {
-            id,
-            mode,
-            cell,
-        }]))
+        self.commit_edit(Transaction(ops))
     }
 
     fn var_refuse(&mut self, why: String) {
@@ -2107,15 +2055,6 @@ impl OndinApp {
             b.refused = None;
         }
     }
-}
-
-/// `stem n` for the first `n` from `from` that `taken` does not hold — the
-/// browser's own `naming::free_name`, over a slice: a table is a few dozen names.
-fn free_name(taken: &[&str], stem: &str, from: usize) -> String {
-    (from.max(1)..)
-        .map(|n| format!("{stem} {n}"))
-        .find(|c| !taken.contains(&c.as_str()))
-        .expect("an unbounded range has a free name")
 }
 
 /// A field family as the scope popover lists it.
@@ -2137,21 +2076,6 @@ pub(crate) fn field_label(f: Field) -> &'static str {
         Field::FlexDirection => "Flex direction",
         Field::FlexWrap => "Flex wrap",
         Field::Visible => "Visibility",
-    }
-}
-
-/// The words a string scoped to flex directions or wraps alone may hold, in
-/// order; empty for any other variable, whose cells are typed.
-fn flex_words(v: &Variable) -> Vec<&'static str> {
-    match v.scope {
-        Some(s) if v.kind == VarKind::String && var::holds_its_words(v) && !s.is_empty() => {
-            if s.fields().all(Field::needs_scope) {
-                s.fields().flat_map(Field::words).collect()
-            } else {
-                Vec::new()
-            }
-        }
-        _ => Vec::new(),
     }
 }
 
@@ -2509,27 +2433,6 @@ pub(crate) fn number_text(x: f64) -> String {
 /// Whether `name` sits in group `path` or below it.
 fn in_group(name: &str, path: &str) -> bool {
     path.is_empty() || name.starts_with(&format!("{path}/"))
-}
-
-/// Why `name` cannot be a variable's in collection `c` (`except` the one being
-/// renamed), if it cannot — empty, an empty group part, or taken there. Colour
-/// review's new variable is refused the same way.
-pub(crate) fn name_refusal(
-    table: &ondin_core::Variables,
-    c: CollectionId,
-    name: &str,
-    except: Option<VarId>,
-) -> Option<String> {
-    if name.is_empty() {
-        return Some("A variable needs a name.".into());
-    }
-    if name.split('/').any(|s| s.trim().is_empty()) {
-        return Some("A name cannot have an empty group.".into());
-    }
-    let taken = table
-        .of_collection(c)
-        .any(|v| v.name == name && Some(v.id) != except);
-    taken.then(|| format!("{name} already exists."))
 }
 
 /// The document's own variables under group `path` — what its menu deletes and
@@ -3889,7 +3792,7 @@ fn var_row(
                 super::binding::bool_word(!b).into(),
                 None,
             ));
-        } else if !flex_words(v).is_empty()
+        } else if !var::flex_words(v).is_empty()
             && matches!(c, Cell::String(_))
             && !ui::double_clicked(ui, &cell_resp)
             && cell_resp.clicked()

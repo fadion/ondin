@@ -400,7 +400,7 @@ impl OndinApp {
             Some(Act::Create(g)) => {
                 let name = r.naming.as_ref().map(|(n, _)| n.trim().to_string());
                 if let Some(name) = name
-                    && crate::panels::variables::name_refusal(
+                    && ondin_core::variable::name_refusal(
                         self.session.doc.variables(),
                         self.session.doc.variables().first_collection().id,
                         &name,
@@ -1139,8 +1139,7 @@ fn naming(
         .color(theme::text::faint()),
     );
     let t = doc.variables();
-    let refusal =
-        crate::panels::variables::name_refusal(t, t.first_collection().id, name.trim(), None);
+    let refusal = ondin_core::variable::name_refusal(t, t.first_collection().id, name.trim(), None);
     let mut typed = name.clone();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 7.0;

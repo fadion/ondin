@@ -3441,6 +3441,255 @@ pub fn bound_in(n: &crate::Node, f: Field) -> impl Iterator<Item = VarId> + '_ {
     list.into_iter()
 }
 
+// --- the variables browser's edits --------------------------------------------
+
+/// `Stem N` for the lowest `N ≥ from` no name in `taken` uses.
+pub fn numbered_name(taken: &[&str], stem: &str, from: usize) -> String {
+    (from.max(1)..)
+        .map(|n| format!("{stem} {n}"))
+        .find(|c| !taken.contains(&c.as_str()))
+        .expect("an unbounded range has a free name")
+}
+
+/// Why `name` cannot name a variable of collection `c` (`except` the one being
+/// renamed), or `None`: it needs one, no group of it may be empty, and no other
+/// variable of the collection has it.
+pub fn name_refusal(
+    table: &Variables,
+    c: CollectionId,
+    name: &str,
+    except: Option<VarId>,
+) -> Option<String> {
+    if name.is_empty() {
+        return Some("A variable needs a name.".into());
+    }
+    if name.split('/').any(|s| s.trim().is_empty()) {
+        return Some("A name cannot have an empty group.".into());
+    }
+    let taken = table
+        .of_collection(c)
+        .any(|v| v.name == name && Some(v.id) != except);
+    taken.then(|| format!("{name} already exists."))
+}
+
+/// Why `name` cannot name `mode`, or `None`: it needs one, and no other mode of
+/// its collection has it (two collections may both have *Dark*).
+pub fn mode_name_refusal(table: &Variables, mode: ModeId, name: &str) -> Option<String> {
+    if name.is_empty() {
+        return Some("A mode needs a name.".into());
+    }
+    let taken = table
+        .collection_of_mode(mode)
+        .is_some_and(|c| c.modes.iter().any(|m| m.id != mode && m.name == name));
+    taken.then(|| format!("{name} already exists."))
+}
+
+/// What a new variable of `kind` holds in every mode, and the stem it is named
+/// from. A string starts as a word rather than nothing: an empty string bound to
+/// a text's content draws no text at all, which reads as a fault.
+pub fn new_variable_default(kind: VarKind) -> (&'static str, Cell) {
+    match kind {
+        VarKind::Color => ("colour", Cell::Color(Color::WHITE)),
+        VarKind::Number => ("number", Cell::Number(0.0)),
+        VarKind::Boolean => ("boolean", Cell::Boolean(true)),
+        VarKind::String => ("string", Cell::String("Text".into())),
+    }
+}
+
+/// *New variable* in collection `c`: `name`, or the first free `stem N`, holding
+/// `value` (the kind's default when `None`) in every mode, the collection's first
+/// mode made when it has none. Answers the ops and the variable.
+pub fn add_variable_ops(
+    table: &Variables,
+    ids: &mut crate::IdSource,
+    c: CollectionId,
+    kind: VarKind,
+    name: Option<&str>,
+    value: Option<Cell>,
+) -> Result<(Vec<crate::Operation>, VarId), String> {
+    if table.collection(c).is_none() {
+        return Err("No collection has that id.".into());
+    }
+    let (stem, default) = new_variable_default(kind);
+    let name = match name.map(str::trim) {
+        Some(name) => {
+            if let Some(why) = name_refusal(table, c, name, None) {
+                return Err(why);
+            }
+            name.to_owned()
+        }
+        None => {
+            let taken: Vec<&str> = table.of_collection(c).map(|v| v.name.as_str()).collect();
+            numbered_name(&taken, stem, 1)
+        }
+    };
+    let cell = value.unwrap_or(default);
+    if let Some(k) = cell.kind().filter(|k| *k != kind) {
+        return Err(format!("A {kind:?} variable cannot hold a {k:?} value.").to_lowercase());
+    }
+    if matches!(cell, Cell::Alias(_)) {
+        return Err("A new variable takes a value, not an alias; set one after.".into());
+    }
+    let (mut ops, modes) = columns_for_new(table, c, ids.mint_mode());
+    let id = ids.mint_var();
+    ops.push(crate::Operation::AddVariable {
+        var: Variable {
+            id,
+            name,
+            kind,
+            cells: modes.into_iter().map(|m| (m, cell.clone())).collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    });
+    Ok((ops, id))
+}
+
+/// Rename the variable `id`: refused by [`name_refusal`] in its collection,
+/// nothing when the name is the one it has.
+pub fn rename_variable_ops(
+    table: &Variables,
+    id: VarId,
+    name: &str,
+) -> Result<Vec<crate::Operation>, String> {
+    let name = name.trim();
+    let v = table.get(id).ok_or("No variable has that id.")?;
+    let c = table
+        .collection_of(id)
+        .map_or(table.first_collection().id, |c| c.id);
+    if let Some(why) = name_refusal(table, c, name, Some(id)) {
+        return Err(why);
+    }
+    Ok(match v.name == name {
+        true => Vec::new(),
+        false => vec![crate::Operation::SetVariableName {
+            id,
+            name: name.to_owned(),
+        }],
+    })
+}
+
+/// *New mode* in collection `c`: `name`, or the first free `Mode N`, a copy of the
+/// collection's first mode put last, or its first mode when it has none.
+/// Answers the ops and the mode.
+pub fn add_mode_ops(
+    doc: &crate::Document,
+    ids: &mut crate::IdSource,
+    c: CollectionId,
+    name: Option<&str>,
+) -> Result<(Vec<crate::Operation>, ModeId), String> {
+    let table = doc.variables();
+    let col = table.collection(c).ok_or("No collection has that id.")?;
+    let taken: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
+    let name = match name.map(str::trim) {
+        Some("") => return Err("A mode needs a name.".into()),
+        Some(n) if taken.contains(&n) => return Err(format!("{n} already exists.")),
+        Some(n) => n.to_owned(),
+        None => numbered_name(&taken, "Mode", col.modes.len() + 1),
+    };
+    let id = ids.mint_mode();
+    let ops = match col.default_mode() {
+        Some(first) => copy_mode_ops(doc, first, id, &name, col.modes.len()),
+        // `columns_for_new` names the first mode *Mode 1*.
+        None => {
+            let mut ops = columns_for_new(table, c, id).0;
+            if name != "Mode 1" {
+                ops.push(crate::Operation::SetModeName { id, name });
+            }
+            ops
+        }
+    };
+    Ok((ops, id))
+}
+
+/// Set the variable `id`'s value in `mode`: refused for a value of another kind,
+/// an alias of another kind or one that would loop, and a word a flex variable
+/// does not hold; nothing when it holds that value already.
+pub fn set_cell_ops(
+    table: &Variables,
+    id: VarId,
+    mode: ModeId,
+    cell: Cell,
+) -> Result<Vec<crate::Operation>, String> {
+    let v = table.get(id).ok_or("No variable has that id.")?;
+    if table.collection_of_mode(mode).map(|c| c.id) != table.collection_of(id).map(|c| c.id) {
+        return Err("That mode is not one of the variable's collection.".into());
+    }
+    match &cell {
+        Cell::Alias(target) => {
+            let t = table
+                .get(*target)
+                .ok_or("No variable has the alias's id.")?;
+            if t.kind != v.kind {
+                return Err(format!("{} is another kind of variable.", t.name));
+            }
+            if table.would_loop(id, mode, *target) {
+                return Err(format!(
+                    "{} already points to {}. That would loop.",
+                    t.name, v.name
+                ));
+            }
+        }
+        c if c.kind() != Some(v.kind) => {
+            return Err(format!("{} holds another kind of value.", v.name));
+        }
+        Cell::String(s) => {
+            let words = flex_words(v);
+            if !words.is_empty() && !words.contains(&s.as_str()) {
+                return Err(format!("{} holds {}.", v.name, words.join(", ")));
+            }
+        }
+        _ => {}
+    }
+    Ok(match v.cells.get(&mode) == Some(&cell) {
+        true => Vec::new(),
+        false => vec![crate::Operation::SetVariableCell { id, mode, cell }],
+    })
+}
+
+/// The words a string variable scoped to flex fields may hold, or none for any.
+pub fn flex_words(v: &Variable) -> Vec<&'static str> {
+    match v.scope {
+        Some(s) if v.kind == VarKind::String && holds_its_words(v) && !s.is_empty() => {
+            if s.fields().all(Field::needs_scope) {
+                s.fields().flat_map(Field::words).collect()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Set the frame or page `id`'s mode of collection `c` to `mode`, or back to
+/// inheriting it for `None`, its other collections' modes kept; nothing when it
+/// already shows that.
+pub fn frame_mode_ops(
+    doc: &crate::Document,
+    id: NodeId,
+    c: CollectionId,
+    mode: Option<ModeId>,
+) -> Result<Vec<crate::Operation>, String> {
+    let node = doc.get(id).ok_or("No layer has that id.")?;
+    if !doc.is_page(id) && !matches!(node.kind(), crate::NodeKind::Artboard { .. }) {
+        return Err("Only a frame or a page picks a mode.".into());
+    }
+    let table = doc.variables();
+    if let Some(m) = mode
+        && table.collection_of_mode(m).map(|col| col.id) != Some(c)
+    {
+        return Err("That mode is not one of the collection's.".into());
+    }
+    let set = node.modes().to_vec();
+    let modes = with_mode(table, &set, ModeOwner::Collection(c), mode);
+    Ok(match modes == set {
+        true => Vec::new(),
+        false => vec![crate::Operation::SetModes { id, modes }],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

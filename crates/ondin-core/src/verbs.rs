@@ -14,7 +14,6 @@ use crate::document::Document;
 use crate::effect::Effect;
 use crate::export::ExportSpec;
 use crate::id::{IdSource, NodeId};
-use crate::image::ImageId;
 use crate::item::{Keyed, PastTheEnd, rekey_by_position};
 use crate::node::{
     BlendMode, BlockStyle, BoolOp, CharSpans, Fill, NodeKind, ParagraphStyle, Pivot, Stroke,
@@ -24,6 +23,7 @@ use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::resolve::Resolved;
 use crate::svg_in::ImageSink;
 use crate::typography::{CharAttr, Length, ParaAttr};
+use crate::variable::{Cell, CollectionId, ModeId, VarId, VarKind};
 use kurbo::Affine;
 use serde_json::{Map, Value};
 
@@ -44,6 +44,9 @@ pub enum ParamKind {
     Choice(&'static [&'static str]),
     /// A model value in its serde form; the name says which type.
     Model(&'static str),
+    /// The id of a thing that is not a layer, in the node wire form; the name says
+    /// which: a variable, a mode, a collection, a style.
+    Id(&'static str),
 }
 
 /// One parameter of a [`Verb`].
@@ -86,12 +89,13 @@ pub struct Ctx<'a> {
 }
 
 /// A verb's answer: the edit to commit, the nodes it creates, in order, and the
-/// picture it adds to the image table.
+/// id of what else it made (a picture, a variable, a mode, a style) as a caller
+/// names it.
 #[derive(Debug, Default)]
 pub struct Done {
     pub tx: Transaction,
     pub created: Vec<NodeId>,
-    pub image: Option<ImageId>,
+    pub made: Option<String>,
 }
 
 impl Done {
@@ -110,7 +114,15 @@ impl Done {
         Self {
             tx,
             created,
-            image: None,
+            made: None,
+        }
+    }
+
+    /// `ops`, which make the thing whose id is `made`.
+    fn making(ops: Vec<Operation>, made: String) -> Self {
+        Self {
+            made: Some(made),
+            ..Self::ops(ops)
         }
     }
 }
@@ -272,6 +284,19 @@ impl<'a> Args<'a> {
         serde_json::from_value(v.clone()).map_err(|e| self.invalid(name, e))
     }
 
+    /// The `Id` parameter `name`, as the id type it names.
+    pub fn id<T: serde::de::DeserializeOwned>(&self, name: &'static str) -> Result<T, VerbError> {
+        self.model(name)
+    }
+
+    /// The `Id` parameter `name` when given.
+    pub fn id_opt<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &'static str,
+    ) -> Result<Option<T>, VerbError> {
+        self.model_opt(name)
+    }
+
     /// The `Model` parameter `name` when given.
     pub fn model_opt<T: serde::de::DeserializeOwned>(
         &self,
@@ -321,6 +346,9 @@ fn check_kind(kind: ParamKind, v: &Value) -> Result<(), String> {
             _ => Err(format!("expected one of {}", words.join(", "))),
         },
         ParamKind::Model(model) => check_model(model, v),
+        ParamKind::Id(what) => wire(v)
+            .map(|_| ())
+            .map_err(|_| format!("expected a {what}'s id")),
     }
 }
 
@@ -344,6 +372,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "TextStyle" => reads::<TextStyle>(v),
         "[CharAttr]" => reads::<Vec<CharAttr>>(v),
         "[ParaAttr]" => reads::<Vec<ParaAttr>>(v),
+        "Cell" => reads::<Cell>(v),
         "Tree" => reads::<Tree>(v),
         "[Effect]" => reads::<Vec<Effect>>(v),
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
@@ -415,6 +444,7 @@ pub fn example(model: &str) -> Option<Value> {
             CharAttr::Size(24.0),
             CharAttr::LetterSpacing(Length::Em(0.02)),
         ]),
+        "Cell" => json(&Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::IndentStart(Length::Px(24.0)),
@@ -470,6 +500,7 @@ const INDEX: ParamKind = ParamKind::Index;
 const BOOL_OPS: &[&str] = &["union", "subtract", "intersect", "exclude"];
 const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
+const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
 const MOVES: &[&str] = &["front", "forward", "backward", "back"];
 /// The blend modes by [`BlendMode::label`], as the snapshot names them, in
 /// [`BlendMode::ALL`]'s order.
@@ -1096,6 +1127,180 @@ pub static VERBS: &[Verb] = &[
                 .ok_or(VerbError::Nothing("that instance cannot switch variants"))
         },
     },
+    // --- variables and modes ----------------------------------------------------
+    Verb {
+        name: "add_variable",
+        doc: "Add a variable holding one value in every mode; answers its id",
+        params: &[
+            req("kind", ParamKind::Choice(VAR_KINDS), "what it holds"),
+            opt(
+                "name",
+                TEXT,
+                "its name, `/` between groups; the first free `kind N` unless given",
+            ),
+            opt(
+                "value",
+                ParamKind::Model("Cell"),
+                "what it holds; the kind's default unless given",
+            ),
+            opt(
+                "collection",
+                ParamKind::Id("collection"),
+                "its collection; the first unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let kind: VarKind =
+                serde_json::from_value(Value::from(a.choice("kind").unwrap_or("color")))
+                    .map_err(|e| a.invalid("kind", e))?;
+            let table = ctx.doc.variables();
+            let c = a
+                .id_opt::<CollectionId>("collection")?
+                .unwrap_or(table.first_collection().id);
+            let value = a.model_opt::<Cell>("value")?;
+            let (ops, id) =
+                crate::variable::add_variable_ops(table, ctx.ids, c, kind, a.text("name"), value)
+                    .map_err(|why| a.invalid("name", why))?;
+            Ok(Done::making(ops, id.0.to_wire()))
+        },
+    },
+    Verb {
+        name: "remove_variable",
+        doc: "Remove a variable; its users keep the value they drew, and aliases of it resolve",
+        params: &[req("variable", ParamKind::Id("variable"), "the variable")],
+        run: |ctx, a| {
+            let id: VarId = a.id("variable")?;
+            if ctx.doc.variables().get(id).is_none() {
+                return Err(a.invalid("variable", "no variable has that id"));
+            }
+            Ok(Done::ops(crate::variable::remove_ops(ctx.doc, &[id])))
+        },
+    },
+    Verb {
+        name: "rename_variable",
+        doc: "Rename a variable",
+        params: &[
+            req("variable", ParamKind::Id("variable"), "the variable"),
+            req("name", TEXT, "its new name, `/` between groups"),
+        ],
+        run: |ctx, a| {
+            let id: VarId = a.id("variable")?;
+            crate::variable::rename_variable_ops(
+                ctx.doc.variables(),
+                id,
+                a.text("name").unwrap_or_default(),
+            )
+            .map(Done::ops)
+            .map_err(|why| a.invalid("name", why))
+        },
+    },
+    Verb {
+        name: "set_variable_value",
+        doc: "Set what a variable holds in one mode: a value, or an alias of another variable",
+        params: &[
+            req("variable", ParamKind::Id("variable"), "the variable"),
+            req(
+                "mode",
+                ParamKind::Id("mode"),
+                "the mode, of the variable's collection",
+            ),
+            req(
+                "value",
+                ParamKind::Model("Cell"),
+                "the value, or `{ \"alias\": <variable id> }`",
+            ),
+        ],
+        run: |ctx, a| {
+            let (id, mode): (VarId, ModeId) = (a.id("variable")?, a.id("mode")?);
+            crate::variable::set_cell_ops(ctx.doc.variables(), id, mode, a.model("value")?)
+                .map(Done::ops)
+                .map_err(|why| a.invalid("value", why))
+        },
+    },
+    Verb {
+        name: "add_mode",
+        doc: "Add a mode to a collection, a copy of its first; answers its id",
+        params: &[
+            opt(
+                "name",
+                TEXT,
+                "its name; the first free `Mode N` unless given",
+            ),
+            opt(
+                "collection",
+                ParamKind::Id("collection"),
+                "the collection; the first unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let c = a
+                .id_opt::<CollectionId>("collection")?
+                .unwrap_or(ctx.doc.variables().first_collection().id);
+            let (ops, id) = crate::variable::add_mode_ops(ctx.doc, ctx.ids, c, a.text("name"))
+                .map_err(|why| a.invalid("name", why))?;
+            Ok(Done::making(ops, id.0.to_wire()))
+        },
+    },
+    Verb {
+        name: "remove_mode",
+        doc: "Remove a mode; frames that picked it inherit their collection's again",
+        params: &[req("mode", ParamKind::Id("mode"), "the mode")],
+        run: |ctx, a| {
+            let mode: ModeId = a.id("mode")?;
+            if ctx.doc.variables().mode(mode).is_none() {
+                return Err(a.invalid("mode", "no mode has that id"));
+            }
+            Ok(Done::ops(crate::variable::remove_mode_ops(ctx.doc, mode)))
+        },
+    },
+    Verb {
+        name: "rename_mode",
+        doc: "Rename a mode",
+        params: &[
+            req("mode", ParamKind::Id("mode"), "the mode"),
+            req("name", TEXT, "its new name, unique in its collection"),
+        ],
+        run: |ctx, a| {
+            let mode: ModeId = a.id("mode")?;
+            let name = a.text("name").unwrap_or_default().trim();
+            if let Some(why) = crate::variable::mode_name_refusal(ctx.doc.variables(), mode, name) {
+                return Err(a.invalid("name", why));
+            }
+            Ok(Done::ops(crate::variable::rename_mode_ops(
+                ctx.doc, mode, name,
+            )))
+        },
+    },
+    Verb {
+        name: "set_frame_mode",
+        doc: "Pick which mode of a collection a frame or page shows, or let it inherit",
+        params: &[
+            req("node", NODE, "the frame or page"),
+            opt("mode", ParamKind::Id("mode"), "the mode; absent inherits"),
+            opt(
+                "collection",
+                ParamKind::Id("collection"),
+                "the collection; the mode's, else the first",
+            ),
+        ],
+        run: |ctx, a| {
+            let table = ctx.doc.variables();
+            let mode = a.id_opt::<ModeId>("mode")?;
+            let c = match (a.id_opt::<CollectionId>("collection")?, mode) {
+                (Some(c), _) => c,
+                (None, Some(m)) => {
+                    table
+                        .collection_of_mode(m)
+                        .ok_or_else(|| a.invalid("mode", "no mode has that id"))?
+                        .id
+                }
+                (None, None) => table.first_collection().id,
+            };
+            crate::variable::frame_mode_ops(ctx.doc, a.node("node")?, c, mode)
+                .map(Done::ops)
+                .map_err(|why| a.invalid("node", why))
+        },
+    },
     // --- pages ----------------------------------------------------------------
     Verb {
         name: "add_page",
@@ -1593,10 +1798,7 @@ pub static VERBS: &[Verb] = &[
                     entry,
                 }]
             };
-            Ok(Done {
-                image: Some(id),
-                ..Done::ops(ops)
-            })
+            Ok(Done::making(ops, id.0))
         },
     },
     Verb {
@@ -1816,7 +2018,7 @@ pub struct ScriptError {
 /// Run `script` against `doc`, each step committed before the next reads it: a list
 /// of `{ "verb": name, "args": { … }, "as": label }`. A string argument `"@label"`
 /// stands for the first thing an earlier step labelled `label` made, a node's wire
-/// form or a picture's image id, and `"@page"` for the first page. Answers what each
+/// form or another thing's id ([`Done::made`]), and `"@page"` for the first page. Answers what each
 /// step made, in those forms; on a refusal `doc` keeps the steps before it.
 pub fn run_script(
     doc: &mut Document,
@@ -1862,7 +2064,7 @@ pub fn run_script(
             .created
             .iter()
             .map(|id| id.to_wire())
-            .chain(done.image.map(|id| id.0))
+            .chain(done.made)
             .collect();
         if let Some(label) = step.get("as").and_then(Value::as_str) {
             let first = made

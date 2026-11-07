@@ -672,7 +672,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   is bound. The button keeps the last choice. Naming a new variable turns the foot into *New colour variable ·
   value HEX in every mode*, a field seeded `color/` with the caret at its end, *Cancel* and *Create
   and merge*; a name is refused as the variables browser refuses one
-  (`panels::variables::name_refusal`).
+  (`variable::name_refusal`).
 - **Status.** Undo steps *Merge colours* and *Merge into a new variable*. *Merged N colours into X · U
   uses on L layers*, then *· K took its value instead of binding* and *· K on locked layers left*
   when they apply. The first names no reason, for it has several: stops, shadows and text colours

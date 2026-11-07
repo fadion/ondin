@@ -2065,9 +2065,12 @@ pub fn step_drawn_count(shape: Tool, count: u32, up: bool, down: bool) -> u32 {
     (i64::from(count) + delta).clamp(i64::from(*range.start()), i64::from(*range.end())) as u32
 }
 
-/// What the pill says of a spiral's or arc's [`drawn_count`]: `3.5 turns`, `90°`.
+/// What the pill says of the [`drawn_count`]: `6 sides`, `5 points`, `3.5 turns`,
+/// `90°`. Polygon and star counts start at three, so they are always plural.
 pub fn drawn_count_label(shape: Tool, count: u32) -> Option<String> {
     match shape {
+        Tool::Polygon => Some(format!("{count} sides")),
+        Tool::Star => Some(format!("{count} points")),
         Tool::Spiral => {
             let half = if count % 2 == 1 { ".5" } else { "" };
             let unit = if count == 2 { "turn" } else { "turns" };
@@ -9648,7 +9651,8 @@ mod spiral_arc_tests {
         assert_eq!(drawn_count(Tool::Arc), ARC_DEFAULT_STEPS);
     }
 
-    /// The pill says turns in halves and the sweep in degrees; other tools say nothing.
+    /// The pill says sides, points, turns in halves and the sweep in degrees; other
+    /// tools say nothing.
     #[test]
     fn the_pill_names_turns_and_sweep() {
         assert_eq!(
@@ -9671,6 +9675,14 @@ mod spiral_arc_tests {
             drawn_count_label(Tool::Arc, ARC_SIDE_RUNGS - 1).as_deref(),
             Some("-5°")
         );
-        assert_eq!(drawn_count_label(Tool::Polygon, 5), None);
+        assert_eq!(
+            drawn_count_label(Tool::Polygon, 5).as_deref(),
+            Some("5 sides")
+        );
+        assert_eq!(
+            drawn_count_label(Tool::Star, 3).as_deref(),
+            Some("3 points")
+        );
+        assert_eq!(drawn_count_label(Tool::Rect, 5), None);
     }
 }

@@ -54,6 +54,8 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 - `↑`/`↓` add/remove polygon or star sides, a spiral's half turns, or a rung of the arc's signed
   sweep ladder (`tools::arc_sweep`); the count lives on `Drag::Create`, held to its range by
   `tools::step_drawn_count` (sides through `tools::step_sides`, `geometry::MIN_SIDES..=MAX_SIDES`).
+  A pill beside the pointer gives the count (`tools::drawn_count_label`: `6 sides`, `5 points`,
+  `3.5 turns`, `90°`); a polygon or star keeps its size pill under the box as well.
 - Read in the gesture's own loop, not as `Action`s. `dispatch` drops `Action::Nudge` and
   `Action::SizeStep` while a create drag is up. The armed-pan cursor excludes a live create drag.
 

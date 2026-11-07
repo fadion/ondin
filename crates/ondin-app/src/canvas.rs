@@ -10119,7 +10119,8 @@ impl OndinApp {
 
     /// The size pill under a shape being *drawn*: `draw_size_badge` reads
     /// `selection.ids()`, and a shape being drawn is not selected until it commits.
-    /// A spiral's or arc's says its turns or sweep instead, under the pointer.
+    /// The count `↑`/`↓` step goes beside the pointer: a polygon's sides or a star's
+    /// points as well as the size, a spiral's turns or an arc's sweep instead.
     fn draw_create_badge(
         &self,
         ui: &egui::Ui,
@@ -10129,12 +10130,12 @@ impl OndinApp {
         resp: &egui::Response,
     ) -> Option<()> {
         // Beside the pointer, as every pointer readout sits (`spacing::paint_label`).
+        // A polygon or star keeps its size pill too; a spiral or arc has no box.
         if let Drag::Create { shape, sides, .. } = &self.drag
             && let Some(label) = tools::drawn_count_label(*shape, *sides)
+            && let Some(at) = resp.interact_pointer_pos()
         {
-            let at = resp.interact_pointer_pos()?;
             crate::spacing::paint_label(painter, at, &label, None, color::BADGE);
-            return Some(());
         }
         let box_ = self.create_outline_box(ui, rect, ppp, resp)?;
         let label = size_label(box_);
@@ -15053,6 +15054,73 @@ mod headless_app_tests {
             "Space during a create drag repositions the shape rather than panning, \
              so the cursor stays the tool's own"
         );
+    }
+
+    /// A polygon or star being drawn shows its count beside the pointer and keeps
+    /// its size pill under the box.
+    /// flip: `draw_create_badge` returning after the count pill → fails at "keeps the size pill".
+    #[test]
+    fn a_drawn_polygon_shows_its_sides_and_its_size() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let start = app.to_world(egui::pos2(200.0, 200.0), area, 1.0);
+        let at = egui::pos2(360.0, 320.0);
+        for (shape, sides, want) in [(Tool::Polygon, 7, "7 sides"), (Tool::Star, 5, "5 points")] {
+            app.drag = Drag::Create {
+                id: a,
+                parent: app.session.doc.first_page(),
+                parent_world: Affine::IDENTITY,
+                start,
+                shape,
+                sides,
+                last: start,
+            };
+            let mut texts = Vec::new();
+            for events in [
+                // The probe exists a frame before the press lands on it.
+                vec![egui::Event::PointerMoved(egui::pos2(200.0, 200.0))],
+                vec![egui::Event::PointerButton {
+                    pos: egui::pos2(200.0, 200.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                vec![egui::Event::PointerMoved(at)],
+                vec![egui::Event::PointerMoved(at)],
+            ] {
+                let input = egui::RawInput {
+                    screen_rect: Some(area),
+                    events,
+                    ..Default::default()
+                };
+                let out = ctx.run_ui(input, |ui| {
+                    let resp = ui.interact(
+                        area,
+                        egui::Id::new("badge-probe"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    let _ = app.draw_create_badge(ui, ui.painter(), area, 1.0, &resp);
+                });
+                texts = out
+                    .shapes
+                    .iter()
+                    .filter_map(|c| match &c.shape {
+                        egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            assert!(
+                texts.iter().any(|t| t == want),
+                "{want} beside the pointer: {texts:?}"
+            );
+            assert!(
+                texts.iter().any(|t| t.contains('×')),
+                "keeps the size pill: {texts:?}"
+            );
+        }
     }
 
     /// A move dragged across the moved layer's own corner keeps the arrow; the

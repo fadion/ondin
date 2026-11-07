@@ -4648,20 +4648,27 @@ impl OndinApp {
 
     /// Where a pen anchor pressed at `world` lands, and the lines explaining it.
     ///
-    /// Snaps on both axes through [`Self::snapping`], excluding the node being
-    /// resumed. Shift instead constrains the segment to an eighth of a turn from
-    /// the previous anchor ([`Self::axial_corner`]); the first has nothing to constrain.
+    /// Snaps on both axes through [`Self::point_snapping`]. A node the pen is
+    /// extending is no box target, but its other subpaths' anchors and segments are,
+    /// so a new subpath lands on the path it joins. Shift instead constrains the
+    /// segment to an eighth of a turn from the previous anchor
+    /// ([`Self::axial_corner`]); the first has nothing to constrain.
     pub(crate) fn pen_point(&self, world: Point, shift: bool) -> (Point, snap::Marks) {
         if shift && let Some(from) = self.pen.as_ref().and_then(|p| p.anchors.last()) {
             return (self.axial_corner(from.at, world), snap::Marks::default());
         }
-        let moving: Vec<NodeId> = self
-            .pen
-            .as_ref()
-            .and_then(|p| p.editing.as_ref())
-            .map(|e| vec![e.id])
+        let editing = self.pen.as_ref().and_then(|p| p.editing.as_ref());
+        let moving: Vec<NodeId> = editing.map(|e| vec![e.id]).unwrap_or_default();
+        // The run being drawn, by its committed index; the pen's own anchors stand
+        // in for it below.
+        let drawn: Vec<PointRef> = editing
+            .map(|e| {
+                let n = e.subpaths.get(e.active).map_or(0, |s| s.anchors.len());
+                (0..n).map(|a| (e.active, a)).collect()
+            })
             .unwrap_or_default();
-        let mut s = self.point_snapping(&moving, None, world);
+        let own = editing.map(|e| (e.id, drawn.as_slice()));
+        let mut s = self.point_snapping(&moving, own, world);
         // The run's own anchors so far: a new one lines up with them, or lands on one.
         if self.snap_shapes
             && let Some(pen) = &self.pen
@@ -4925,8 +4932,8 @@ impl OndinApp {
                     from_start: false,
                     minted: true,
                 });
-                // Snapped only once `editing` is set, so `pen_point` excludes the
-                // host from the targets for the first anchor too.
+                // Snapped only once `editing` is set, so `pen_point` reads the host
+                // as the path being extended for the first anchor too.
                 let at = self.pen_point(world, shift).0;
                 if let Some(pen) = self.pen.as_mut() {
                     pen.anchors = vec![PenAnchor::corner(at)];
@@ -25453,5 +25460,23 @@ mod point_snap_tests {
         };
         let subs = tools::pen_anchors(path, corner_radii);
         assert_eq!(subs[0].anchors[1].out, Vec2::new(45.0, -45.0));
+    }
+
+    /// A new subpath drawn into the edited path lands on that path's corner, as it
+    /// would on any other layer's.
+    ///
+    /// flip: `pen_point` passing no `own` → fails at the first assertion, (301, 99).
+    #[test]
+    fn a_new_subpath_lands_on_the_path_it_joins() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_rect_and_path(&ctx);
+        app.pen_verb_press(id, Point::new(500.0, 500.0), false, PenVerb::NewSubpath);
+        assert!(
+            app.pen.as_ref().is_some_and(|p| p.editing.is_some()),
+            "fixture: the pen is drawing into the path"
+        );
+        let (at, marks) = app.pen_point(Point::new(301.2, 98.9), false);
+        assert_eq!(at, Point::new(300.0, 100.0));
+        assert_eq!(marks.point.map(|m| m.kind), Some(snap::PointKind::Anchor));
     }
 }

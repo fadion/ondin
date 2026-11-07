@@ -77,6 +77,18 @@ events, not egui's smoothed deltas (§15 D26).
 | `Shift`+scroll | pan horizontally |
 | `Ctrl`/`Cmd`+scroll, `Alt`+scroll | zoom at the cursor (`Alt` is Adobe's spelling) |
 
+Settings' *Zoom with the scroll wheel* (`CanvasPrefs::wheel_zooms`, off by default) swaps the plain
+and `Ctrl`/`Alt` meanings for a mouse wheel only (`canvas::wheel_travel`): a notch zooms at the
+cursor and `Ctrl`/`Alt`+notch pans vertically; `Shift`+notch still pans sideways, and a touchpad's
+scroll and pinch keep the table's meanings. Only the canvas passes the preference; the minimap and
+present mode do not.
+
+- **A mouse is told by its delta, not its unit** (`canvas::is_mouse_wheel`): a page delta, or a line
+  delta of whole lines. On Windows winit reports every wheel message as lines, a precision touchpad's
+  scroll and pinch included, but a touchpad's come in fractions of a line and a notch is one.
+  Points are never a mouse. Limit: a free-spinning wheel's fractional lines read as a touchpad and
+  pan. `the_wheel_zoom_preference_swaps_a_mouse_wheel_only` pins it.
+
 ### Canvas cursors (`cursor.rs`)
 
 Over the canvas the app draws every cursor itself, the arrow included, so each says what a press

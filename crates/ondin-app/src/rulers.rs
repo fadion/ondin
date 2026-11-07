@@ -533,8 +533,8 @@ impl OndinApp {
             self.draw_ruler_bars(painter, rect, ppp, hover);
         }
 
-        // The lines are gated by `guides_on`, not by `rulers_on`.
-        if !self.guides_on() {
+        // The lines are gated by `guides_on`, not by `rulers_on`; a peek hides them.
+        if !self.guides_on() || self.peeking {
             return;
         }
 
@@ -786,7 +786,8 @@ impl OndinApp {
 
         // Where the numbers count from, and what the selection spans.
         let origin = self.ruler_origin();
-        let extent = self.selection_extent();
+        // A peek shows no trace of the selection, its band here included.
+        let extent = self.selection_extent().filter(|_| !self.peeking);
 
         // The world range each bar covers, as offsets from the origin, so with a
         // frame selected `0` lands on the frame's edge.

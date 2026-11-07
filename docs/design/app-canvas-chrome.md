@@ -2,7 +2,7 @@
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap menus and Settings button,
-the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, private mode and
+the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
 
@@ -319,8 +319,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - Rightmost: `icon::SLIDERS`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
 - Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
-  library's Settings shares the theme row only), nudge step, the **Canvas** rows (*Ruler guides
-  colour* and *Ruler guides thickness*, *Adaptive pixel grid* with its caption, and *Pixel grid
+  library's Settings shares the theme row only), nudge step, the **Canvas** rows (*Zoom with the
+  scroll wheel* with its caption, `tools.md` *The wheel*; *Ruler guides colour* and *Ruler guides thickness*, *Adaptive pixel grid* with its caption, and *Pixel grid
   colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on;
   `app-rulers-guides.md`, `prefs::CanvasPrefs`), *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
@@ -750,6 +750,27 @@ none of the rules below are its.
   guard so they get the first Escape.
 - **Every flag `modal_is_up` reads must be a card drawn whenever it is set**, or an undrawn card holds
   every key.
+
+## The peek
+
+Holding bare `\` shows the artwork with the canvas chrome hidden; letting go brings it back. Held,
+not toggled: a live selection that cannot be seen would take a nudge.
+
+- **The key** (`canvas::peek_held`): its held state, so auto-repeat changes nothing; not with
+  `Ctrl`/`Cmd`/`Alt`, while a control holds the keyboard or while the window is unfocused. egui
+  clears held keys when the window loses focus, whose release would never arrive, so that ends it.
+- **Only from rest.** `OndinApp::canvas_ui` sets `OndinApp::peeking` each frame, and only in
+  `Mode::Normal` with no drag, no compare (which spends bare `\` on its own toggle) and no armed
+  eyedropper: a gesture never loses its release to a peek, and in a text session `\` types.
+- **What shows.** `draw_canvas` draws the artwork texture (vision simulation, outline mode and pixel
+  preview still apply: they are view modes, not chrome) without the adaptive grid's shading, then
+  only the ruler bars, which frame it, and returns before every other overlay.
+  `draw_rulers_and_guides` skips the guides while peeking and the bars drop the selection's band,
+  so no trace of the selection shows; `contrast_badges` is skipped too.
+- **Presses do nothing**: the mode input and `canvas_context_menu` are skipped and the cursor is the
+  plain arrow. The wheel and a pinch still pan and zoom.
+- The cheatsheet lists it as a hand-kept row in its Mouse section, since no binding renders it.
+- `holding_backslash_hides_the_chrome_until_released` pins the hiding and the end on lost focus.
 
 ## Private mode (`private.rs`)
 

@@ -337,7 +337,7 @@ impl crate::app::OndinApp {
             center: bounds.center(),
             zoom: fit_zoom(bounds, px),
         };
-        let (pan, zoom) = crate::canvas::wheel_travel(&ctx, rect.height());
+        let (pan, zoom) = crate::canvas::wheel_travel(&ctx, rect.height(), false);
         let factor = crate::canvas::wheel_zoom_factor(zoom) * crate::canvas::pinch_zoom(&ctx);
         let Some(p) = self.presenting.as_mut() else {
             return;

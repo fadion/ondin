@@ -1100,6 +1100,89 @@ fn space_down(ui: &egui::Ui) -> bool {
     !control && ui.input(|i| i.key_down(egui::Key::Space))
 }
 
+/// Whether bare `\` is held for the canvas's peek: the key's held state, so
+/// auto-repeat changes nothing, and never while a control holds the keyboard or
+/// the window is unfocused (whose release would never arrive).
+fn peek_held(ui: &egui::Ui) -> bool {
+    // Two reads, never nested: the context lock is not re-entrant.
+    let control = ui.ctx().memory(|m| m.focused()).is_some();
+    !control
+        && ui.input(|i| {
+            i.focused
+                && i.key_down(egui::Key::Backslash)
+                && !(i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt)
+        })
+}
+
+#[cfg(test)]
+mod peek_tests {
+    use crate::app::OndinApp;
+    use eframe::egui;
+
+    fn backslash(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Backslash,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Holding `\` hides the canvas chrome (here the pixel grid's lines) until it
+    /// is released, and a window that loses focus ends it.
+    ///
+    /// flip: `draw_canvas` without its `peeking` return → fails at "held, the grid is hidden"
+    #[test]
+    fn holding_backslash_hides_the_chrome_until_released() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.show_grid = true;
+        app.show_rulers = false;
+        app.session.camera.zoom = 16.0;
+        app.prefs.canvas.grid_adaptive = false;
+        let ink = crate::ui::color_to_egui(app.prefs.canvas.grid_ink);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.canvas_ui(ui),
+            );
+            out.shapes
+                .iter()
+                .filter(|c| {
+                    matches!(&c.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == ink)
+                })
+                .count()
+        };
+        frame(&mut app, Vec::new());
+        assert!(frame(&mut app, Vec::new()) > 8, "fixture: the grid shows");
+        assert_eq!(
+            frame(&mut app, vec![backslash(true)]),
+            0,
+            "held, the grid is hidden"
+        );
+        assert!(app.peeking);
+        assert_eq!(
+            frame(&mut app, Vec::new()),
+            0,
+            "and stays hidden while held"
+        );
+        assert!(
+            frame(&mut app, vec![backslash(false)]) > 8,
+            "released, it is back"
+        );
+        frame(&mut app, vec![backslash(true)]);
+        assert!(app.peeking, "fixture: peeking again");
+        frame(&mut app, vec![egui::Event::WindowFocused(false)]);
+        assert!(!app.peeking, "losing focus ends the peek");
+    }
+}
+
 #[cfg(test)]
 mod space_down_tests {
     use eframe::egui;
@@ -1708,6 +1791,14 @@ impl OndinApp {
 
         self.wheel_input(ui, &resp, rect, ppp);
 
+        // Only from rest, so a gesture never loses its release to a peek; a compare
+        // spends bare `\` on its own toggle, and in text it types.
+        self.peeking = self.mode == Mode::Normal
+            && matches!(self.drag, Drag::None)
+            && self.session.compare.is_none()
+            && self.dropper_armed().is_none()
+            && peek_held(ui);
+
         self.canvas_cursor(ui, &resp, rect, ppp);
 
         // Before the mode input, so this frame's gesture reads the panned camera
@@ -1723,7 +1814,7 @@ impl OndinApp {
             self.draw_canvas(ui, &painter, rect, ppp, &resp);
             return;
         }
-        if self.context_menu.is_none() && !self.tabs.menu_was_up {
+        if self.context_menu.is_none() && !self.tabs.menu_was_up && !self.peeking {
             match self.mode {
                 // A picker opened over a text session can pick too.
                 Mode::TextInsert if self.dropper_armed().is_some() => {
@@ -1754,7 +1845,7 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
-        if !resp.secondary_clicked() {
+        if !resp.secondary_clicked() || self.peeking {
             return;
         }
         // A right-click that cancelled a gesture is spent, selection included: the
@@ -1872,7 +1963,10 @@ impl OndinApp {
         let pointer = resp.hover_pos().or(resp.interact_pointer_pos());
         let world = pointer.map(|p| self.to_world(p, rect, ppp));
         let mods = ui.input(|i| i.modifiers);
-        let (icon, bitmap) = if panning || middle {
+        let (icon, bitmap) = if self.peeking {
+            // A peek takes no press, so the cursor promises none.
+            arrow(None)
+        } else if panning || middle {
             (egui::CursorIcon::Grabbing, Some(Bitmap::Panning))
         } else if armed {
             (egui::CursorIcon::Grab, Some(Bitmap::Pan))
@@ -8333,7 +8427,8 @@ impl OndinApp {
     }
 
     /// The wheel: scroll pans, `Shift`+scroll pans sideways, `Ctrl`+scroll zooms
-    /// at the cursor, and so does a trackpad pinch ([`pinch_zoom`]). Read from raw
+    /// at the cursor, and so does a trackpad pinch ([`pinch_zoom`]); *Zoom with the
+    /// scroll wheel* swaps a mouse's plain and `Ctrl` meanings ([`wheel_travel`]). Read from raw
     /// `MouseWheel` events, so a zoom notch is a step, and gated on hover since
     /// `Context::input` is global.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
@@ -8351,7 +8446,7 @@ impl OndinApp {
         }) else {
             return;
         };
-        let (pan, zoom) = wheel_travel(ui.ctx(), rect.height());
+        let (pan, zoom) = wheel_travel(ui.ctx(), rect.height(), self.prefs.canvas.wheel_zooms);
         let factor = wheel_zoom_factor(zoom) * pinch_zoom(ui.ctx());
 
         if pan != egui::Vec2::ZERO {
@@ -9599,6 +9694,7 @@ impl OndinApp {
         // preview's enlarged texture; a compare shows no grid.
         let lattice = (self.prefs.canvas.grid_adaptive
             && preview.is_none()
+            && !self.peeking
             && self.session.compare.is_none())
         .then(|| self.grid_placed(rect, ppp))
         .flatten()
@@ -9640,6 +9736,13 @@ impl OndinApp {
         // The eyedropper reads what was just drawn.
         if self.dropper_frame(ui, resp, rect, ppp) {
             ui.ctx().request_repaint();
+        }
+
+        // A peek shows the artwork and the ruler bars, which frame it, and nothing
+        // drawn over it.
+        if self.peeking {
+            self.draw_rulers_and_guides(painter, rect, ppp, None);
+            return;
         }
 
         // A compare draws its own chrome and none of the editing's.
@@ -10958,7 +11061,10 @@ fn badge_text_angle(dir: egui::Vec2) -> f32 {
 /// This frame's wheel travel in points, as `(pan, zoom)`: `Ctrl` or `Alt` zooms,
 /// `Shift` pans sideways, a plain wheel pans. `page` is what one page of a
 /// page-unit wheel is worth. Shared by the canvas and present mode.
-pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) {
+///
+/// `wheel_zooms` swaps a mouse wheel's plain and `Ctrl`/`Alt` meanings
+/// ([`is_mouse_wheel`]); a touchpad's two-finger scroll and pinch keep theirs.
+pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32, wheel_zooms: bool) -> (egui::Vec2, f32) {
     // Read before taking the input lock — `Context::options` takes its own.
     let per_line = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
     ctx.input(|i| {
@@ -10980,7 +11086,14 @@ pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) 
             };
             // `x + y` when modified: the platform may have swapped the axis.
             // `Alt` aliases `Ctrl` (`docs/shortcuts.md` §9).
-            if modifiers.command || modifiers.alt {
+            let zoom_key = modifiers.command || modifiers.alt;
+            if wheel_zooms && is_mouse_wheel(*unit, *delta) && !modifiers.shift {
+                if zoom_key {
+                    pan.y += d.x + d.y;
+                } else {
+                    zoom += d.x + d.y;
+                }
+            } else if zoom_key {
                 zoom += d.x + d.y;
             } else if modifiers.shift {
                 pan.x += d.x + d.y;
@@ -10990,6 +11103,77 @@ pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) 
         }
         (pan, zoom)
     })
+}
+
+/// Whether a wheel event came from a mouse's notched wheel rather than a touchpad:
+/// a page delta, or a line delta of whole lines. Not the line unit alone: on
+/// Windows every wheel message, a precision touchpad's scroll and pinch included,
+/// arrives in lines, but a touchpad's come in fractions of one and a notch is one.
+/// A free-spinning wheel's fractional lines read as a touchpad and pan.
+pub(crate) fn is_mouse_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2) -> bool {
+    match unit {
+        egui::MouseWheelUnit::Point => false,
+        egui::MouseWheelUnit::Page => true,
+        egui::MouseWheelUnit::Line => {
+            delta != egui::Vec2::ZERO && delta.x.fract() == 0.0 && delta.y.fract() == 0.0
+        }
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use eframe::egui;
+
+    fn wheel(unit: egui::MouseWheelUnit, y: f32, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, y),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        }
+    }
+
+    fn travel(ev: egui::Event, wheel_zooms: bool) -> (egui::Vec2, f32) {
+        let ctx = egui::Context::default();
+        let mut out = (egui::Vec2::ZERO, 0.0);
+        let input = egui::RawInput {
+            events: vec![ev],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            out = super::wheel_travel(ui.ctx(), 100.0, wheel_zooms);
+        });
+        out
+    }
+
+    /// With the preference on, a notch zooms and `Ctrl`+notch pans; a touchpad's
+    /// fractional lines and points pan, and its pinch (`Ctrl`, fractional) zooms.
+    ///
+    /// flip: `is_mouse_wheel` answering true for every line delta → fails at "a touchpad's fractional lines pan"
+    #[test]
+    fn the_wheel_zoom_preference_swaps_a_mouse_wheel_only() {
+        use egui::{Modifiers as M, MouseWheelUnit as U};
+        let (pan, zoom) = travel(wheel(U::Line, 1.0, M::NONE), false);
+        assert!(zoom == 0.0 && pan.y != 0.0, "off: a notch pans");
+        let (pan, zoom) = travel(wheel(U::Line, 1.0, M::NONE), true);
+        assert!(zoom > 0.0 && pan == egui::Vec2::ZERO, "on: a notch zooms");
+        let (pan, zoom) = travel(wheel(U::Line, -2.0, M::COMMAND), true);
+        assert!(zoom == 0.0 && pan.y < 0.0, "on: Ctrl+notch pans");
+        let (pan, zoom) = travel(wheel(U::Line, 0.25, M::NONE), true);
+        assert!(
+            zoom == 0.0 && pan.y > 0.0,
+            "a touchpad's fractional lines pan"
+        );
+        let (pan, zoom) = travel(wheel(U::Point, 12.0, M::NONE), true);
+        assert!(zoom == 0.0 && pan.y > 0.0, "points pan");
+        let (_, zoom) = travel(wheel(U::Line, 0.3, M::COMMAND), true);
+        assert!(zoom > 0.0, "a Windows pinch still zooms");
+        let (pan, zoom) = travel(wheel(U::Line, 1.0, M::SHIFT), true);
+        assert!(
+            zoom == 0.0 && pan.x != 0.0,
+            "Shift+notch still pans sideways"
+        );
+    }
 }
 
 /// The zoom factor for `zoom` points of [`wheel_travel`]: a 40pt wheel notch is

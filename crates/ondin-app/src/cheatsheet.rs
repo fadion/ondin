@@ -310,6 +310,8 @@ fn sections(lead: Lead) -> Vec<Section> {
             title: "Mouse",
             rows: vec![
                 hand_row("Pan", &["Space+drag"]),
+                // Held, read in `canvas::peek_held`, so no binding to render from.
+                hand_row("Peek at the clean canvas", &["\\ held"]),
                 hand_row("Duplicate while moving", &["Alt+drag"]),
                 hand_row("Constrain, keep ratio", &["Shift+drag"]),
                 hand_row("Resize from the centre", &["Alt+drag"]),

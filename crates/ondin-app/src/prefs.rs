@@ -168,10 +168,15 @@ impl Default for BatchRenamePrefs {
     }
 }
 
-/// The Settings modal's *Canvas* section: how ruler guides and the pixel grid draw.
+/// The Settings modal's *Canvas* section: what the wheel does, and how ruler guides
+/// and the pixel grid draw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CanvasPrefs {
+    /// A mouse wheel zooms the canvas at the cursor and `Ctrl`/`Alt`+wheel pans
+    /// (`canvas::wheel_travel`). Off: scroll-to-pan is the design-tool default,
+    /// and a touchpad's two-finger scroll pans either way.
+    pub wheel_zooms: bool,
     /// What a guide with no colour of its own draws in ([`ondin_core::Guide::color_or`]).
     pub guide_colour: Color,
     /// A guide's line in points, [`Self::GUIDE_MIN`]–[`Self::GUIDE_MAX`]; a selected
@@ -201,6 +206,7 @@ impl CanvasPrefs {
 impl Default for CanvasPrefs {
     fn default() -> Self {
         Self {
+            wheel_zooms: false,
             guide_colour: ondin_core::DEFAULT_GUIDE_COLOR,
             guide_thickness: 1,
             grid_adaptive: true,

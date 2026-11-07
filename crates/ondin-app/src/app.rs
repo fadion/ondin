@@ -1006,6 +1006,9 @@ pub struct OndinApp {
     /// installed by `draw_canvas`). Not a preference: a launch into it would look
     /// like a broken document.
     pub(crate) outline_view: bool,
+    /// Bare `\` is held over the canvas: the canvas chrome is hidden and presses do
+    /// nothing (`canvas::peek_held`). Set by `canvas_ui` each frame.
+    pub(crate) peeking: bool,
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
     pub(crate) pixel_preview: bool,
@@ -1671,6 +1674,7 @@ impl OndinApp {
             show_grid: view.grid,
             show_layout_grids: view.layout_grids,
             outline_view: false,
+            peeking: false,
             pixel_preview: false,
             show_layers: view.layers,
             show_history: view.history,
@@ -2129,7 +2133,10 @@ impl OndinApp {
             .show(ui, |ui| {
                 self.canvas_ui(ui);
                 // After the canvas's own widget, so a badge wins the pointer over it.
-                self.contrast_badges(ui);
+                // Chrome on the artwork, so a peek hides them.
+                if !self.peeking {
+                    self.contrast_badges(ui);
+                }
             })
             .response
             .rect;

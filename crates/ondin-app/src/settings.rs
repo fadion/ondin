@@ -367,12 +367,29 @@ impl OndinApp {
         }
     }
 
-    /// The *Canvas* section's rows: the guide colour and thickness, the adaptive
+    /// The *Canvas* section's rows: the wheel-zoom switch, the guide colour and thickness, the adaptive
     /// grid switch, and the grid's own colour, dimmed while adaptive is on. The
     /// colours go through [`PaintSlot::Pref`]; the rest into `canvas`. Returns whether
     /// the thickness is being scrubbed.
     fn canvas_rows(&mut self, ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
         let defaults = CanvasPrefs::default();
+        if ui::switch_row(
+            ui,
+            "Zoom with the scroll wheel",
+            canvas.wheel_zooms,
+            SWITCH_H,
+        )
+        .on_hover_text("A mouse wheel zooms at the cursor; Ctrl or Alt with it pans")
+        .clicked()
+        {
+            canvas.wheel_zooms = !canvas.wheel_zooms;
+        }
+        caption(
+            ui,
+            "Ctrl or Alt with the wheel pans instead. A touchpad's two-finger scroll \
+             still pans.",
+        );
+        ui.add_space(ROW_GAP);
         self.pref_colour_row(
             ui,
             PrefColour::Guide,
@@ -1526,6 +1543,7 @@ mod tests {
                 large: 25.0,
             },
             canvas: CanvasPrefs {
+                wheel_zooms: true,
                 guide_colour: ondin_core::peniko::Color::from_rgb8(217, 70, 143),
                 guide_thickness: 3,
                 grid_adaptive: false,

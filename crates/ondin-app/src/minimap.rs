@@ -248,7 +248,7 @@ impl OndinApp {
         if let Some(p) = resp.hover_pos()
             && self.minimap.drag.is_none()
         {
-            let (pan, zoom) = crate::canvas::wheel_travel(&ctx, map.height());
+            let (pan, zoom) = crate::canvas::wheel_travel(&ctx, map.height(), false);
             let factor = crate::canvas::wheel_zoom_factor(pan.x + pan.y + zoom)
                 * crate::canvas::pinch_zoom(&ctx);
             if factor != 1.0 {

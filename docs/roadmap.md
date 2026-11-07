@@ -8,15 +8,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Editor additions
 
-- **Peek at the clean canvas** — holding bare `\` hides the canvas chrome (hover outline, selection
-  box and handles, frame name tags, guides, grids, measures) and releasing it brings it back. Held,
-  not toggled: a live selection that cannot be seen would take a nudge. The peek reads the key's
-  held state, so auto-repeat changes nothing; it ends when the window loses focus, whose release
-  never arrives; and the canvas ignores presses while it lasts, as it does with `Space` held. Not
-  in TextInsert, where `\` types.
-- **Zoom with the scroll wheel** — a Settings preference, off by default: a plain wheel zooms at
-  the cursor and `Ctrl`/`Alt`+wheel pans (`canvas::wheel_input`). Mouse wheels only, told apart by
-  the event's line unit, so a touchpad's two-finger scroll still pans.
 - **A Tools menu** (`TopMenu::Tools`), right of View, a new toolbox glyph and caret, for what works
   across the document. Checks, which change nothing: *Check contrast* and *Simulate vision*
   (ticked while on), *Colour review…*. Then bulk edits, each a box and one undo step: *Find and

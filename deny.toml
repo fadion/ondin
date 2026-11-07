@@ -6,8 +6,9 @@
 # Guards the dependency tree so a future `cargo update` cannot silently pull in a
 # crate whose license is incompatible with shipping Ondin under MIT.
 #
-# CI runs `check licenses` on every push (`.github/workflows/ci.yml`, §15 D955),
-# and the `release` skill's Phase 0 runs it locally.
+# CI runs `check licenses bans sources` on every push (`.github/workflows/ci.yml`);
+# advisories are left out there because the database changes without a commit.
+# The `release` skill's Phase 0 runs the full check locally.
 
 [licenses]
 # Every license we accept. All permissive except MPL-2.0, which is weak

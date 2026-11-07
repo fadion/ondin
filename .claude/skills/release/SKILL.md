@@ -60,15 +60,16 @@ cargo test --workspace --release
 ```
 
 ```bash
-cargo deny check licenses
+cargo deny check
 ```
 
 Why the surprising ones are there: the per-package clippy loop compiles different
 code from the workspace run (feature unification); `--document-private-items` is
 what makes the doc gate read most of this tree; the release test is the only thing
-that runs under the release cfg (§15 D597). ⚠️ **`licenses`, not a bare `cargo
-deny check`** — a *new* advisory is a conversation with the user;
-`deny.toml` holds the ignores and their reasons.
+that runs under the release cfg (§15 D597). `cargo deny check` is the full check,
+advisories included, which CI leaves out. ⚠️ **A red advisory stops the release:**
+it is a newly published one, and fixing or ignoring it is a conversation with the
+user. `deny.toml` holds the ignores and their reasons.
 
 Then the two gated suites, **which no CI runner can run** — a GPU and a network
 font fetch. This machine has an RTX 4070 Ti; a carried-forward "unverifiable" is

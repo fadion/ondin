@@ -70,11 +70,13 @@ jobs:
       # gate*).
       - name: Rustdoc
         run: cargo doc --workspace --no-deps --document-private-items
-      # Licenses only; `deny.toml` carries the advisory policy and its ignores.
-      - name: License policy
+      # Everything but advisories: the advisory database changes without a commit,
+      # so a newly published advisory would fail every push. The release flow runs
+      # the full check instead.
+      - name: Dependency policy
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check licenses
+          command: check licenses bans sources
 
   test:
     name: Build & test (${{ matrix.os }})

@@ -838,7 +838,7 @@ pub(crate) fn text_button(ui: &mut egui::Ui, label: &str, state: FieldButton) ->
 }
 
 /// The width [`text_button`] gives `label`: the text and its padding.
-fn text_button_w(ui: &egui::Ui, label: &str) -> f32 {
+pub(crate) fn text_button_w(ui: &egui::Ui, label: &str) -> f32 {
     let text = ui.ctx().fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),

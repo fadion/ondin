@@ -971,6 +971,10 @@ pub(crate) const SNAP_RING_PX: f32 = 5.0;
 pub(crate) const SNAP_RING_STROKE_PX: f32 = 2.0;
 /// How far a snap target's name sits right of and above its ring, in screen pt.
 const SNAP_CHIP_GAP: f32 = 8.0;
+/// The radius of the dot on each point the Clean up card would take away, in
+/// screen pt: under an anchor marker's half side, so a kept anchor beside one
+/// still reads as a marker.
+const DROPPING_DOT_PX: f32 = 2.5;
 /// How far a Shift-stepped handle's dashed line runs past the handle's end, and
 /// as far the other way from the anchor, in screen pt.
 const HANDLE_STEP_OVERHANG_PX: f32 = 40.0;
@@ -5201,7 +5205,7 @@ impl OndinApp {
 
     /// The edited path's subpaths in **world** space from the committed document —
     /// the fixed origin an edit is computed from, since the preview compounds.
-    fn edited_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
+    pub(crate) fn edited_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
         let NodeKind::Path {
             path, corner_radii, ..
         } = self.session.doc.get(id)?.kind()
@@ -5232,7 +5236,12 @@ impl OndinApp {
 
     /// Write a point edit of `id` made from [`Self::edited_subpaths`], kept
     /// symmetric on a mirrored path (`OndinApp::rewrite_points`).
-    fn rewrite_edit(&self, id: NodeId, world: Affine, subpaths: Vec<PenSubpath>) -> Transaction {
+    pub(crate) fn rewrite_edit(
+        &self,
+        id: NodeId,
+        world: Affine,
+        subpaths: Vec<PenSubpath>,
+    ) -> Transaction {
         let base = self.edited_subpaths(id).map(|(_, b)| b).unwrap_or_default();
         self.rewrite_points(id, world, &base, subpaths)
     }
@@ -9837,6 +9846,15 @@ impl OndinApp {
             if shift && let Drag::Handle { id, at, .. } = self.drag {
                 self.draw_handle_step(painter, rect, ppp, id, at, world);
             }
+        }
+
+        // The points the Clean up card's shown row would take away, in the snaps' red.
+        for p in self.cleanup_dropping() {
+            painter.circle_filled(
+                self.to_screen(*p, rect, ppp),
+                DROPPING_DOT_PX,
+                color::MEASURE,
+            );
         }
 
         // As chrome, since the renderer's ghost can be culled with the root.

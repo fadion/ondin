@@ -42,11 +42,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **Pixel-fit.** A command moving anchors and stroke edges onto whole or half pixels, so 16–24px
   icons render crisp.
 
-### Medium
-
-- **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors
-  (*Simplify* works on the whole path).
-
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

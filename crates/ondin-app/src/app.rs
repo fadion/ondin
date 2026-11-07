@@ -184,6 +184,10 @@ pub(crate) struct InFlight {
     pub(crate) warp_scrub: Option<f64>,
     /// The trace card's numbers as they were when a scrub of one began, likewise.
     pub(crate) trace_scrub: Option<crate::trace::TraceNumbers>,
+    /// The Clean up card's numbers as they were when a scrub of one began, likewise.
+    pub(crate) cleanup_scrub: Option<crate::cleanup::CleanupNumbers>,
+    /// The Offset card's distance as it was when its scrub began, likewise.
+    pub(crate) offset_scrub: Option<f64>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
@@ -276,6 +280,20 @@ mod in_flight_tests {
                 "trace_scrub",
                 InFlight {
                     trace_scrub: Some(Default::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "cleanup_scrub",
+                InFlight {
+                    cleanup_scrub: Some(Default::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "offset_scrub",
+                InFlight {
+                    offset_scrub: Some(4.0),
                     ..Default::default()
                 },
             ),
@@ -864,8 +882,10 @@ pub struct OndinApp {
     pub(crate) pen_button: egui::Rect,
     /// The path bar's Offset card, while it is open (`crate::path_bar`).
     pub(crate) offset_card: Option<crate::path_bar::OffsetCard>,
-    /// The path bar's *Simplify*, while its worker runs.
-    pub(crate) simplifying: Option<crate::path_bar::Simplifying>,
+    /// The path bar's Clean up card, while it is open (`crate::cleanup`).
+    pub(crate) cleanup: Option<crate::cleanup::CleanupCard>,
+    /// The Clean up card's numbers, kept while it is closed.
+    pub(crate) cleanup_numbers: crate::cleanup::CleanupNumbers,
     /// Exports rendering and writing on workers (`panels::export`).
     pub(crate) exports: Vec<crate::panels::RunningExport>,
     /// Dropped and picked files being read on workers, oldest first (`crate::import`).
@@ -1597,7 +1617,8 @@ impl OndinApp {
             kit_button: egui::Rect::NOTHING,
             pen_button: egui::Rect::NOTHING,
             offset_card: None,
-            simplifying: None,
+            cleanup: None,
+            cleanup_numbers: Default::default(),
             exports: Vec::new(),
             imports: Vec::new(),
             png_copy: None,
@@ -2111,7 +2132,6 @@ impl OndinApp {
 
         self.watch_kits(&ctx);
         self.watch_tokens(&ctx);
-        self.poll_simplify();
         self.poll_imports();
         // Before the bar and the canvas's next frame read the envelope.
         self.tend_warp();
@@ -2177,6 +2197,8 @@ impl OndinApp {
             self.in_flight.blend_scrub = None;
             self.in_flight.warp_scrub = None;
             self.in_flight.trace_scrub = None;
+            self.in_flight.cleanup_scrub = None;
+            self.in_flight.offset_scrub = None;
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2716,7 +2738,8 @@ impl OndinApp {
         // right-click must still open its menu.
         let standing = self.repeat_preview_standing()
             || self.blend_preview_standing()
-            || self.warp_preview_standing();
+            || self.warp_preview_standing()
+            || self.cleanup_preview_standing();
         let field = ctx.dragged_id().is_some()
             || (self.session.has_gesture_preview() && !standing)
             || self.in_flight.any()
@@ -2812,6 +2835,13 @@ impl OndinApp {
         {
             card.restore(n);
         }
+        // And the path bar's two cards'.
+        if let Some(n) = self.in_flight.cleanup_scrub.take() {
+            self.cleanup_numbers = n;
+        }
+        if let Some(d) = self.in_flight.offset_scrub.take() {
+            self.restore_offset_scrub(d);
+        }
         // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;
         self.in_flight.grid_paint = None;
@@ -2879,8 +2909,10 @@ impl OndinApp {
             // A chrome field surrendered focus to this `Escape`. Below `cancel_gesture`,
             // which a valved field's cancel must still reach to set `gesture_cancelled`.
         } else if self.offset_card.is_some() {
-            // The path bar's card, above the pen bias and the points it was opened over.
+            // The path bar's cards, above the pen bias and the points they were opened over.
             self.drop_offset_card();
+        } else if self.cleanup.is_some() {
+            self.close_cleanup();
         } else if self.pen_bias {
             // The bias, above the points it was armed over.
             self.pen_bias = false;

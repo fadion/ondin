@@ -231,15 +231,15 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
 
 A short rail floats beside the tool rail, centred on its Pen slot (`OndinApp::pen_button`, whichever
 of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; every bar is drawn by
-`show_bar`). It shows nothing the canvas does not already offer except *Simplify*, *Offset* and the
-mirror.
+`show_bar`). It shows nothing the canvas does not already offer except *Clean up*, *Offset* and
+the mirror.
 
 - **While a path's points are edited** (`canvas::edited_path`) it holds the node tool's verbs: select
   points (`A`), the pen bias (`P`) and Mirror, the edit's own switch with the drawing bar's flyout,
   dimmed until the pen bias is picked (*Pick the pen to mirror what it draws*) and on a mirrored
   path, whose runs follow its own axes; *Make corner*, *Make smooth* and *Join*, dimmed until the
-  point selection allows them; *Reverse* (`Shift+D`); *Split at point*; *Simplify*; *Offset*; and
-  *Done* (`Enter`).
+  point selection allows them; *Reverse* (`Shift+D`); *Split at point*; *Clean up* (the wand);
+  *Offset*; and *Done* (`Enter`).
 - **Split at point** (`canvas::split_points`, `tools::split_at_points`) cuts the edited path at its
   selected anchors: a closed run opens there and an open run becomes two subpaths of the same layer.
   The anchor stays on both new ends, which coincide until one is dragged away; the finishing end
@@ -258,11 +258,34 @@ mirror.
   dragged (*The axis is where it starts*). A pick or a press elsewhere closes it, and so does
   `Escape`, a rung of the ladder; leaving the pen and the pencil drops it.
 - **While a warp envelope is open** the warp bar stands in its place, ahead of both, and the mirror
-  flyout and the Offset card close (`path_bar::warp_bar`, `tools.md` *Warp*).
+  flyout and the two cards close (`path_bar::warp_bar`, `tools.md` *Warp*).
 
-- **Simplify** (`build::simplify_path`, `simplify_outline`) flattens the drawn outline and refits it
-  with `fit`'s cubics, within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units), as *Offset path*'s
-  refit does. Turns sharper than `SIMPLIFY_CORNER_DEG` (15°), read over a few accuracies rather than
+- **The Clean up card** (`crate::cleanup`) hangs beside the bar, its top on the wand's, as the
+  Offset card does, and the two replace each other. It is a popover (`ui::menu_frame`,
+  `popover_head` *Clean up* with its ×) of four `ui::labelled` rows, each a field and a word button
+  of one width: *Simplify* (accuracy in px, from `SIMPLIFY_MIN_ACCURACY` to 20, *Apply*, with
+  *64 points → 9* under it), *Remove redundant points* (*9 points change nothing*, *Remove*),
+  *Add points* (*Split each segment in* 2–16, *Add*) and *Smooth selected* (an amount in percent,
+  *Smooth*, with *Acts on the 4 selected points* under it). A row's result shows on the canvas
+  through the gesture preview while its button is hovered or focused or its field scrubbed or
+  typed in, never as the pointer merely crosses the card, and the points it would take away are
+  dotted in the snaps' red. Its button commits it as one step: *Simplify*, *Remove points*,
+  *Add points* or *Smooth*. *Remove* dims when every point shapes the path and *Smooth* with
+  *Select points to smooth them*. It opens with *Apply* focused, so the wand and then `Enter`
+  simplifies in one go. It stays open while points are picked for *Smooth*; the wand, its ×,
+  `Escape` (a rung, under the Offset card's) and the end of the edit close it. A right-click mid-scrub
+  puts the number back (`InFlight::cleanup_scrub`), as every card's does; the Offset card's
+  distance too (`offset_scrub`). Its numbers are kept while it is closed (`cleanup_numbers`).
+  - *Remove redundant points* (`tools::redundant_points`) takes out an anchor twinned on the one
+    before it, one in the middle of a straight run, and one splitting what is a single cubic in
+    two, its handles in line and the curves either side that cubic's halves to within 0.001 units;
+    never a rounded corner or an open end. *Add points* (`tools::split_segments`) cuts each segment
+    into pieces of equal length, exactly, so the outline draws as before; the two undo each other.
+    *Smooth selected* (`tools::smooth_points`) moves each selected anchor's handles that far toward
+    fresh smooth ones, along the line between its neighbours, a third of the shorter leg long.
+- **Simplify** (`build::simplify_outline_within`) flattens the drawn outline and refits it
+  with `fit`'s cubics, within the card's accuracy (`SIMPLIFY_ACCURACY`, 0.5 px in the layer's
+  units, at first), as *Offset path*'s refit does. Turns sharper than `SIMPLIFY_CORNER_DEG` (15°), read over a few accuracies rather than
   between neighbouring points, stay corners, so a drawn polyline loses its jitter and a real corner
   survives; a run its chord already passes within the accuracy of becomes a line. kurbo's simplifier,
   which an earlier version used, wants a smooth source: on a drawn polyline it looped and strayed tens
@@ -297,17 +320,17 @@ mirror.
   belongs in that catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
   stored path back, radii included. Every distance asks for the mirror the card opened with
-  (`OffsetCard::mirror`), so going back to zero restores an axis a lopsided offset dropped. A press outside the card, `Escape`, or the edit ending closes it.
+  (`OffsetCard::mirror`), so going back to zero restores an axis a lopsided offset dropped. A primary press outside the card, `Escape`, or the edit ending closes it;
+  a right-click does not, since mid-scrub it is the scrub's cancel.
 - Both write a new path with no corner radii, the radii baked into the curves, and clear the point
   selection, whose anchors are gone.
 - Both run on a worker thread (`crate::job::Job`), so the frame loop never waits on the arithmetic.
-  The Offset card keeps one offset in flight; the preview shows the newest that has landed, and a
-  scrub that moved on asks again when it does. Only the release waits, for the distance it ends on,
-  so the commit is what the field says. A *Simplify* that lands after its path changed is dropped,
-  and says so; one landing during a drag or a pen run waits for it to end; a second ask while one
-  runs says *Still simplifying*; leaving the document drops it.
+  Each card keeps one in flight; the preview shows the newest that has landed, and a scrub that
+  moved on asks again when it does. Only the commit waits, for the number the field shows. The
+  Clean up card reads its path again whenever the stored path changes (`CleanupCard::basis`), its
+  own commits included, dropping the refits of the old one; leaving the document closes it.
 - The Offset card writes only over the path it opened on or last committed (`OffsetCard::owns`):
-  an undo, a redo, a landed *Simplify* or any other edit of the path closes it, committing nothing.
+  an undo, a redo, a clean-up or any other edit of the path closes it, committing nothing.
   Closed by a press elsewhere while its field still holds a typed distance, it commits that
   distance, as any field does on losing focus; Escape closes it committing nothing.
 

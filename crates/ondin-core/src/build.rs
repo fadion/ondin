@@ -1542,6 +1542,10 @@ pub fn outline_text(
 /// pixel at 100%.
 pub const SIMPLIFY_ACCURACY: f64 = 0.5;
 
+/// The least accuracy [`simplify_outline_within`] fits to: the outline is
+/// flattened finer than this first, so a smaller one would chase the chords.
+pub const SIMPLIFY_MIN_ACCURACY: f64 = 0.05;
+
 /// The sharpest turn, in degrees, *Simplify* smooths over. A sharper one stays a
 /// corner, so a drawn polyline loses its jitter and a real corner survives.
 pub const SIMPLIFY_CORNER_DEG: f64 = 15.0;
@@ -1596,6 +1600,14 @@ pub fn simplify_path(doc: &Document, id: NodeId) -> Result<Transaction, OpError>
 /// polygons are: `kurbo::simplify` wants a smooth source, and on a drawn polyline
 /// it looped and strayed tens of units from the outline.
 pub fn simplify_outline(path: &kurbo::BezPath) -> kurbo::BezPath {
+    simplify_outline_within(path, SIMPLIFY_ACCURACY)
+}
+
+/// [`simplify_outline`] within `accuracy` of the outline rather than
+/// [`SIMPLIFY_ACCURACY`]: the Clean up card's *Simplify*. A larger accuracy drops
+/// more points and strays further.
+pub fn simplify_outline_within(path: &kurbo::BezPath, accuracy: f64) -> kurbo::BezPath {
+    let accuracy = accuracy.max(SIMPLIFY_MIN_ACCURACY);
     let mut out = kurbo::BezPath::new();
     for sub in crate::geometry::subpaths(path) {
         let closed = matches!(sub.elements().last(), Some(kurbo::PathEl::ClosePath));
@@ -1609,10 +1621,10 @@ pub fn simplify_outline(path: &kurbo::BezPath) -> kurbo::BezPath {
             points.pop();
         }
         let fitted = match closed && points.len() >= 3 {
-            true => crate::fit::fit_closed(&points, SIMPLIFY_ACCURACY, SIMPLIFY_CORNER_DEG),
-            false => crate::fit::fit_open(&points, SIMPLIFY_ACCURACY, SIMPLIFY_CORNER_DEG),
+            true => crate::fit::fit_closed(&points, accuracy, SIMPLIFY_CORNER_DEG),
+            false => crate::fit::fit_open(&points, accuracy, SIMPLIFY_CORNER_DEG),
         };
-        out.extend(straightened(&fitted, SIMPLIFY_ACCURACY).iter());
+        out.extend(straightened(&fitted, accuracy).iter());
     }
     out
 }

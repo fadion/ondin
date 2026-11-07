@@ -109,6 +109,7 @@ mod loose_spacing;
 mod shape_handles;
 // No blanket `dead_code` allow here: the plain build is the gate that catches an
 // unwired item. `store::versions` (test-only callers) carries its own allow.
+mod cleanup;
 mod library;
 mod logging;
 mod machine_dir;

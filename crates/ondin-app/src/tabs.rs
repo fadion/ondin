@@ -498,8 +498,8 @@ impl OndinApp {
         self.export_row_open = None;
         self.export_menu = false;
         self.drop_offset_card();
-        // Its answer is for this document's path; another may share the node id.
-        self.simplifying = None;
+        // Its refits are of this document's path; another may share the node id.
+        self.close_cleanup();
         self.open_menu = crate::app::TopMenu::None;
         self.context_menu = None;
         self.palette = None;

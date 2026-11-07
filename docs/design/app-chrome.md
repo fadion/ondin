@@ -143,6 +143,7 @@ ondin-app/src/
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
 ├─ minimap.rs       the minimap card at the canvas's bottom left (app-canvas-chrome.md)
 ├─ path_bar.rs      the path bar beside the rail while points are edited or the pen or pencil is armed (app-pen-and-nodes.md); the warp bar and card in its place (tools.md)
+├─ cleanup.rs       the path bar's Clean up card: simplify, remove or add points, smooth (app-pen-and-nodes.md)
 ├─ mirror.rs        mirror while drawing: the axes, the joining rule, the canvas axes and the flyout; a mirrored path kept symmetric under point editing (app-pen-and-nodes.md)
 ├─ rail.rs          the tool rail's grouped slots and their members' row (tools.md)
 ├─ pencil.rs        the pencil: the freehand trail, its fit on release, extending and closing (app-pen-and-nodes.md)

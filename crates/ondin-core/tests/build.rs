@@ -5291,6 +5291,45 @@ fn simplify_refits_a_polyline_and_keeps_real_corners() {
     assert!(tx.0.is_empty(), "a square is already as simple as it gets");
 }
 
+/// A looser accuracy refits a jagged ring with fewer curves, each still within it
+/// of the ring, and an accuracy under the floor fits at the floor.
+/// flip: `simplify_outline_within` fitting at `SIMPLIFY_ACCURACY` whatever it is
+/// asked → fails at "fewer at 4".
+#[test]
+fn simplify_within_a_looser_accuracy_drops_more() {
+    use ondin_core::kurbo::{BezPath, ParamCurve};
+    let (r, c) = (100.0, Point::new(100.0, 100.0));
+    let mut ring = BezPath::new();
+    for i in 0..96 {
+        let a = i as f64 / 96.0 * std::f64::consts::TAU;
+        // A wobble of 1.5 units every other point: noise a tight fit must follow.
+        let p = c + Vec2::new(a.cos(), a.sin()) * (r + if i % 2 == 0 { 1.5 } else { 0.0 });
+        if i == 0 {
+            ring.move_to(p)
+        } else {
+            ring.line_to(p)
+        }
+    }
+    ring.close_path();
+    let tight = build::simplify_outline_within(&ring, 0.5)
+        .segments()
+        .count();
+    let loose = build::simplify_outline_within(&ring, 4.0);
+    assert!(
+        loose.segments().count() < tight,
+        "fewer at 4: {} against {tight}",
+        loose.segments().count()
+    );
+    for seg in loose.segments() {
+        let d = (seg.eval(0.5) - c).hypot();
+        assert!((d - r - 0.75).abs() < 4.5, "within the accuracy: {d}");
+    }
+    assert_eq!(
+        build::simplify_outline_within(&ring, 0.0),
+        build::simplify_outline_within(&ring, build::SIMPLIFY_MIN_ACCURACY)
+    );
+}
+
 /// The pencil's fit: a shaky hand-drawn loop comes back as a few smooth curves with no
 /// corner and no seam, and kept corners bound a straight run as a line.
 /// flip: `freehand_outline` ignoring `corners` → fails at "an anchor at the first kept

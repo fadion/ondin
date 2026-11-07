@@ -1,16 +1,17 @@
 //! The path bar: a short rail beside the tool rail while a path's points are being
 //! edited, holding the node tool's verbs — select or add points, corner and smooth,
-//! join, reverse, split, simplify, offset — and the way out. While the pen or the pencil
-//! draws new paths it holds the mirror switch instead (`crate::mirror`).
+//! join, reverse, split, clean up, offset — and the way out. While the pen or the
+//! pencil draws new paths it holds the mirror switch instead (`crate::mirror`).
 //!
 //! It floats over the canvas, the ruler included, centred on the rail's Pen button,
-//! so it reads as that button's drawer. *Offset* opens a card with one scrubbable
-//! distance field, previewed through the edit valve and always measured from the
-//! outline the card opened on, so scrubbing back to zero gives the path back.
+//! so it reads as that button's drawer. *Clean up* opens its card (`crate::cleanup`)
+//! beside it. *Offset* opens a card with one scrubbable distance field, previewed
+//! through the edit valve and always measured from the outline the card opened on,
+//! so scrubbing back to zero gives the path back.
 //!
-//! Both path operations run on a worker ([`Job`]), so a scrub never waits on the
-//! arithmetic: the preview shows the newest offset that has landed, and only the
-//! release waits for the distance it ends on.
+//! The offset runs on a worker ([`Job`]), so a scrub never waits on the arithmetic:
+//! the preview shows the newest offset that has landed, and only the release waits
+//! for the distance it ends on.
 
 use crate::app::OndinApp;
 use crate::job::Job;
@@ -23,8 +24,8 @@ use ondin_core::{GeometryPatch, NodeId, NodeKind, Operation, Transaction, build}
 use std::sync::Arc;
 
 /// The gap between the tool rail's edge and the bar, and between the bar and the
-/// Offset card.
-const GAP: f32 = 8.0;
+/// card it hangs beside it.
+pub(crate) const GAP: f32 = 8.0;
 /// The bar's width: the tool rail's.
 const BAR_W: f32 = 46.0;
 /// The Offset card's width.
@@ -159,14 +160,6 @@ impl OffsetCard {
     }
 }
 
-/// *Simplify* on its worker: the path it was asked of, as stored then, so an answer
-/// that lands after the path changed is dropped rather than written over the change.
-pub(crate) struct Simplifying {
-    id: NodeId,
-    asked: NodeKind,
-    job: Job<BezPath>,
-}
-
 /// One entry of the bar.
 enum E {
     Sep,
@@ -189,7 +182,7 @@ enum Verb {
     Join,
     Reverse,
     Split,
-    Simplify,
+    CleanUp,
     Offset,
     /// The pen's and the pencil's mirror switch, which opens its flyout.
     Mirror,
@@ -206,6 +199,7 @@ struct Shown {
     clicked: Option<Verb>,
     bar: egui::Rect,
     offset: egui::Rect,
+    cleanup: egui::Rect,
     mirror: egui::Rect,
     /// The lit envelope button, which the warp card's top lines up with.
     shape: egui::Rect,
@@ -223,7 +217,7 @@ impl OndinApp {
         let at = egui::pos2(self.canvas_rect.left() + GAP, centre_y);
         let mut clicked: Option<Verb> = None;
         let (mut offset, mut mirror) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
-        let mut shape = egui::Rect::NOTHING;
+        let (mut shape, mut cleanup) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
         let shown = egui::Area::new(egui::Id::new("path-bar"))
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::LEFT_CENTER)
@@ -254,6 +248,7 @@ impl OndinApp {
                                             }));
                                     match verb {
                                         Verb::Offset => offset = resp.rect,
+                                        Verb::CleanUp => cleanup = resp.rect,
                                         Verb::Mirror => mirror = resp.rect,
                                         Verb::WarpShape(_) if *active => shape = resp.rect,
                                         _ => {}
@@ -271,6 +266,7 @@ impl OndinApp {
             clicked,
             bar: shown.response.rect,
             offset,
+            cleanup,
             mirror,
             shape,
         }
@@ -431,11 +427,12 @@ impl OndinApp {
         }
     }
 
-    /// Draw the path bar and its Offset card while a path's points are being edited.
+    /// Draw the path bar and its cards while a path's points are being edited.
     pub(crate) fn path_bar(&mut self, ctx: &egui::Context) {
         if self.warp.is_some() {
             self.mirror_open = false;
             self.close_offset_card();
+            self.close_cleanup();
             return self.warp_bar(ctx);
         }
         // The mirror's flyout hangs from the drawing bar, or the edit bar's
@@ -447,6 +444,7 @@ impl OndinApp {
             // The edit's own mirror switch ends with it.
             self.edit_mirror = None;
             self.close_offset_card();
+            self.close_cleanup();
             if matches!(self.tool, Tool::Pen | Tool::Pencil) {
                 self.drawing_bar(ctx);
             }
@@ -541,11 +539,11 @@ impl OndinApp {
             E::Sep,
             E::Btn {
                 glyph: icon::MAGIC_WAND,
-                tip: "Simplify — fewer points, the same shape",
+                tip: "Clean up — simplify, remove or add points, smooth",
                 dimmed: "",
-                active: false,
+                active: self.cleanup.is_some(),
                 enabled: true,
-                verb: Verb::Simplify,
+                verb: Verb::CleanUp,
             },
             E::Btn {
                 glyph: icon::ARROWS_OUT_CARDINAL,
@@ -576,7 +574,7 @@ impl OndinApp {
             Some(Verb::Join) => self.join_points(),
             Some(Verb::Reverse) => self.reverse_subpaths(),
             Some(Verb::Split) => self.split_points(None),
-            Some(Verb::Simplify) => self.simplify_edited_path(ctx),
+            Some(Verb::CleanUp) => self.toggle_cleanup(id),
             Some(Verb::Offset) => self.toggle_offset_card(id),
             Some(Verb::Done) => {
                 self.choose_tool(Tool::Select);
@@ -595,101 +593,18 @@ impl OndinApp {
         if self.offset_card.is_some() {
             self.offset_card_ui(ctx, bar_rect, offset_button);
         }
-    }
-
-    /// *Simplify* over the edited path, on a worker; [`Self::poll_simplify`] commits
-    /// it as `build::simplify_path` would. A second ask while one runs is ignored.
-    pub(crate) fn simplify_edited_path(&mut self, ctx: &egui::Context) {
-        let Some(id) = self.edited_path() else { return };
-        if self.simplifying.is_some() {
-            self.session.info("Still simplifying");
-            return;
-        }
-        let Some(asked) = self.session.doc.get(id).map(|n| n.kind().clone()) else {
-            return;
-        };
-        let Some(drawn) =
-            ondin_core::geometry::local_path(&asked).filter(|p| !p.elements().is_empty())
-        else {
-            self.session.info(format!(
-                "Could not simplify: {}",
-                ondin_core::OpError::EmptyGeometry
-            ));
-            return;
-        };
-        let job = Job::spawn("ondin-simplify", ctx, move || {
-            build::simplify_outline(&drawn)
-        });
-        self.simplifying = Some(Simplifying { id, asked, job });
-    }
-
-    /// Commit a *Simplify* that has landed, in one step, unless the path changed while
-    /// it ran or the refit has no fewer segments. Every frame, focus mode included.
-    pub(crate) fn poll_simplify(&mut self) {
-        let Some(s) = &self.simplifying else { return };
-        // Held while a drag or a pen run is live: either writes back a path from
-        // before the refit when it ends, and a handle drag names old anchors.
-        if !self.drag.is_none() || self.pen.is_some() {
-            return;
-        }
-        let fitted = match s.job.poll() {
-            Ok(None) => return,
-            Ok(Some(fitted)) => Some(fitted),
-            Err(()) => None,
-        };
-        let Some(Simplifying { id, asked, .. }) = self.simplifying.take() else {
-            return;
-        };
-        self.land_simplify(id, &asked, fitted);
-    }
-
-    /// Write the refit `fitted` of the path `id`, asked of it as `asked`.
-    fn land_simplify(&mut self, id: NodeId, asked: &NodeKind, fitted: Option<BezPath>) {
-        let Some(fitted) = fitted else {
-            self.session.fail("Could not simplify: the worker stopped");
-            return;
-        };
-        if self.session.doc.get(id).map(|n| n.kind()) != Some(asked) {
-            self.session
-                .info("Simplify was dropped: the path changed while it ran");
-            return;
-        }
-        let NodeKind::Path { path: stored, .. } = asked else {
-            return;
-        };
-        if fitted.segments().count() >= stored.segments().count() {
-            self.session.info("Already as simple as it gets");
-            return;
-        }
-        let tx = Transaction(vec![Operation::SetGeometry {
-            id,
-            geometry: GeometryPatch::Path {
-                path: fitted,
-                corner_radii: Vec::new(),
-                mirror: None,
-            },
-        }]);
-        self.session.name_step("Simplify", icon::MAGIC_WAND);
-        if self.session.commit(tx) {
-            // The anchors are new, so the old point references mean nothing.
-            self.points.clear();
-            self.session.info("Simplified");
+        if self.cleanup.is_some() {
+            self.cleanup_ui(ctx, bar_rect, shown.cleanup);
         }
     }
 
-    /// Wait for a running *Simplify* and land it (tests only).
-    #[cfg(test)]
-    pub(crate) fn settle_simplify(&mut self) {
-        if let Some(Simplifying { id, asked, job }) = self.simplifying.take() {
-            self.land_simplify(id, &asked, job.wait());
-        }
-    }
-
-    /// Open the Offset card on `id`, or close it.
+    /// Open the Offset card on `id`, or close it. The Clean up card, which hangs in
+    /// the same place, closes.
     fn toggle_offset_card(&mut self, id: NodeId) {
         if self.offset_card.take().is_some() {
             return;
         }
+        self.close_cleanup();
         let Some(NodeKind::Path {
             path,
             corner_radii,
@@ -774,6 +689,9 @@ impl OndinApp {
         };
         let at = egui::pos2(bar.right() + GAP, button.top());
         let fresh = card.pump(ctx);
+        // Before the field: `value_field` applies this frame's drag delta inside
+        // the call that reports the drag.
+        let before = card.distance;
         let mut field: Option<egui::Response> = None;
         let shown = egui::Area::new(egui::Id::new("offset-card"))
             .order(egui::Order::Foreground)
@@ -805,6 +723,7 @@ impl OndinApp {
                     });
                 });
             });
+        let field_dragged = field.as_ref().is_some_and(|f| f.dragged());
         // An offset landing while the field is held still is shown too.
         if let Some(resp) = field
             && (crate::panels::interacting(&resp) || (fresh && resp.has_focus()))
@@ -820,9 +739,16 @@ impl OndinApp {
                 self.points.clear();
             }
         }
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if field_dragged && !self.gesture_cancelled && self.in_flight.offset_scrub.is_none() {
+            self.in_flight.offset_scrub = Some(before);
+        }
         let card_rect = shown.response.rect;
+        // The primary button only: a right-click mid-scrub cancels the scrub, and
+        // closing the card on it would commit the distance it was calling off.
         let pressed_away = ctx.input(|i| {
-            i.pointer.any_pressed()
+            i.pointer.primary_pressed()
                 && i.pointer
                     .interact_pos()
                     .is_some_and(|p| !card_rect.contains(p) && !button.contains(p))
@@ -830,6 +756,13 @@ impl OndinApp {
         self.offset_card = Some(card);
         if pressed_away {
             self.close_offset_card();
+        }
+    }
+
+    /// Put back the distance a right-click cancelled the Offset card's scrub of.
+    pub(crate) fn restore_offset_scrub(&mut self, distance: f64) {
+        if let Some(card) = &mut self.offset_card {
+            card.distance = distance;
         }
     }
 }
@@ -859,14 +792,14 @@ pub(crate) fn separator(ui: &mut egui::Ui) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ondin_core::kurbo::Shape;
     use ondin_core::{Document, IdSource};
 
     /// A closed path, 64 straight sides round a circle of radius 50, with one radius
     /// on its first corner, selected under the node tool.
-    fn app_with_a_ring(ctx: &egui::Context) -> (OndinApp, NodeId) {
+    pub(crate) fn app_with_a_ring(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(7);
         let root = ids.mint();
@@ -906,7 +839,8 @@ mod tests {
         (app, id)
     }
 
-    fn stored(app: &OndinApp, id: NodeId) -> (BezPath, Vec<f64>) {
+    /// The path `id` stores, and its corner radii.
+    pub(crate) fn stored(app: &OndinApp, id: NodeId) -> (BezPath, Vec<f64>) {
         let Some(NodeKind::Path {
             path, corner_radii, ..
         }) = app.session.doc.get(id).map(|n| n.kind())
@@ -990,24 +924,6 @@ mod tests {
         );
     }
 
-    /// Simplify refits the ring in one undo step and drops the point selection,
-    /// whose anchors are gone.
-    #[test]
-    fn simplify_is_one_step_and_clears_the_points() {
-        let ctx = egui::Context::default();
-        let (mut app, id) = app_with_a_ring(&ctx);
-        app.points.set_one(id, (0, 3));
-        let depth = app.session.history.undo_depth();
-        let segments = stored(&app, id).0.segments().count();
-        app.simplify_edited_path(&ctx);
-        app.settle_simplify();
-        let (path, radii) = stored(&app, id);
-        assert!(path.segments().count() < segments / 4, "refitted");
-        assert!(radii.is_empty(), "the radius is baked into the curves");
-        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
-        assert!(app.points.is_empty(), "the old anchors are gone");
-    }
-
     /// *Split at point* opens the ring at the selected anchor in one step, and keeps
     /// one of the two new ends selected, the one whose run leaves toward the pointer.
     /// flip: `split_points` comparing the neighbours the other way round → fails at
@@ -1048,27 +964,43 @@ mod tests {
         );
     }
 
-    /// A *Simplify* that lands after the path changed writes nothing. flip:
-    /// `land_simplify` skipping its check of the asked-of kind → fails at "dropped".
+    /// A right-click mid-scrub of the Offset card's distance puts the distance back,
+    /// writes nothing and leaves the card open, with the pointer on the card or out
+    /// over the canvas.
+    ///
+    /// flip: `cancel_gesture` not restoring `offset_scrub` → fails at "the distance
+    /// is back".
     #[test]
-    fn simplify_landing_on_a_changed_path_is_dropped() {
-        let ctx = egui::Context::default();
-        let (mut app, id) = app_with_a_ring(&ctx);
-        app.simplify_edited_path(&ctx);
-        assert!(app.simplifying.is_some(), "on the worker");
-        let mut moved = stored(&app, id).0;
-        moved.apply_affine(ondin_core::kurbo::Affine::translate((5.0, 0.0)));
-        app.session.commit(Transaction(vec![Operation::SetGeometry {
-            id,
-            geometry: GeometryPatch::Path {
-                path: moved.clone(),
-                corner_radii: Vec::new(),
-                mirror: None,
-            },
-        }]));
-        app.settle_simplify();
-        assert_eq!(stored(&app, id).0, moved, "dropped");
-        assert!(app.session.status().text.contains("dropped"), "and said so");
+    fn a_right_click_winds_an_offset_scrub_back() {
+        use crate::repeat::tests::{pass, scrub_then_right_click};
+        for outside in [false, true] {
+            let ctx = egui::Context::default();
+            let (mut app, id) = app_with_a_ring(&ctx);
+            pass(&ctx, &mut app, Vec::new());
+            app.toggle_offset_card(id);
+            let path = stored(&app, id);
+            scrub_then_right_click(
+                &ctx,
+                &mut app,
+                egui::Id::new("offset-card"),
+                "Offset",
+                |at| match outside {
+                    true => egui::pos2(700.0, 500.0),
+                    false => at,
+                },
+                |app| {
+                    let card = app.offset_card.as_ref().expect("open");
+                    assert_ne!(card.distance, 0.0, "the drag scrubbed it");
+                    assert!(app.in_flight.offset_scrub.is_some(), "the scrub is armed");
+                },
+            );
+            let card = app
+                .offset_card
+                .as_ref()
+                .expect("the right-click closed nothing");
+            assert_eq!(card.distance, 0.0, "the distance is back ({outside})");
+            assert_eq!(stored(&app, id), path, "nothing written");
+        }
     }
 
     /// The Offset card closes when the path changes under it (an undo, another

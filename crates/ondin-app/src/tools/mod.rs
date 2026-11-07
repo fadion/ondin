@@ -3063,6 +3063,25 @@ fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
             _ => (long, -long),
         });
     }
+    fresh_handles(sub, i)
+}
+
+/// The `(out, back)` anchor `i` of `sub` gets made smooth from scratch, whatever
+/// handles it has: along the line between its neighbours, each a third of the
+/// shorter leg, or along its one leg at an open end.
+fn fresh_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
+    let an = sub.anchors.get(i)?;
+    let n = sub.anchors.len();
+    let prev = match (i > 0, sub.closed && n > 1) {
+        (true, _) => Some(i - 1),
+        (false, true) => Some(n - 1),
+        (false, false) => None,
+    };
+    let next = match (i + 1 < n, sub.closed && n > 1) {
+        (true, _) => Some(i + 1),
+        (false, true) => Some(0),
+        (false, false) => None,
+    };
     let leg = |j: usize| sub.anchors.get(j).map(|o| o.at - an.at);
     match (prev.and_then(leg), next.and_then(leg)) {
         (Some(back_leg), Some(out_leg)) => {
@@ -3081,6 +3100,166 @@ fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
         }
         (None, None) => None,
     }
+}
+
+/// *Smooth selected*: move each anchor of `points`' handles `amount` (0–1) of the
+/// way from where they are to [`fresh_handles`]' — all the way is *Make smooth*
+/// from scratch, none leaves them.
+pub fn smooth_points(subpaths: &mut [PenSubpath], points: &[PointRef], amount: f64) {
+    let amount = amount.clamp(0.0, 1.0);
+    for &(s, a) in points {
+        let Some((out, back)) = subpaths.get(s).and_then(|sub| fresh_handles(sub, a)) else {
+            continue;
+        };
+        if let Some(an) = subpaths.get_mut(s).and_then(|sub| sub.anchors.get_mut(a)) {
+            an.out = an.out.lerp(out, amount);
+            an.back = an.back.lerp(back, amount);
+        }
+    }
+}
+
+/// How far, in world units, the outline may move for a point to count as changing
+/// nothing ([`redundant_points`]).
+const REDUNDANT_EPS: f64 = 1e-3;
+
+/// The anchors whose removal leaves the outline as it is, taken out, and where each
+/// stood. Three kinds, each checked against the run as it is after the ones before:
+///
+/// - one on a zero-length segment, the twin of the anchor before it;
+/// - one between two lines it lies straight along;
+/// - one splitting what is one cubic in two, its handles in line and the curves
+///   either side the two halves of a single cubic.
+///
+/// A rounded corner draws more than its anchor, so it is kept, and so are a run's
+/// open ends and the last two anchors of a run.
+pub fn redundant_points(subpaths: &[PenSubpath]) -> (Vec<PenSubpath>, Vec<Point>) {
+    let mut out = subpaths.to_vec();
+    let mut gone = Vec::new();
+    for sub in &mut out {
+        let mut i = 0;
+        while i < sub.anchors.len() {
+            let n = sub.anchors.len();
+            let inner = sub.closed || (i > 0 && i + 1 < n);
+            if n <= 2 || !inner || sub.anchors[i].radius != 0.0 {
+                i += 1;
+                continue;
+            }
+            let (p, q) = ((i + n - 1) % n, (i + 1) % n);
+            let (a, b, c) = (sub.anchors[p], sub.anchors[i], sub.anchors[q]);
+            let Some((out_a, back_c)) = merged_handles(a, b, c) else {
+                i += 1;
+                continue;
+            };
+            sub.anchors[p].out = out_a;
+            sub.anchors[q].back = back_c;
+            sub.anchors.remove(i);
+            gone.push(b.at);
+            // The anchor now at `i` meets new neighbours; look at it again, and at
+            // the one before, whose own merge may have just become possible.
+            i = i.saturating_sub(1);
+        }
+    }
+    (out, gone)
+}
+
+/// The handles `a` leaves on and `c` arrives on once `b` between them goes, if `b`
+/// changes nothing ([`redundant_points`]).
+fn merged_handles(a: PenAnchor, b: PenAnchor, c: PenAnchor) -> Option<(Vec2, Vec2)> {
+    let near = |u: Vec2| u.hypot() <= REDUNDANT_EPS;
+    // A twin of the anchor before: `a` takes over `b`'s way out.
+    if near(b.at - a.at) && near(a.out) && near(b.back) {
+        return Some((b.out, c.back));
+    }
+    if near(b.at - c.at) && near(b.out) && near(c.back) {
+        return Some((a.out, b.back));
+    }
+    let straight = [a.out, b.back, b.out, c.back].into_iter().all(near);
+    if straight {
+        let (ab, bc) = (b.at - a.at, c.at - b.at);
+        let off = ab.cross(bc).abs() / (ab + bc).hypot().max(f64::EPSILON);
+        return (off <= REDUNDANT_EPS && ab.dot(bc) > 0.0).then_some((Vec2::ZERO, Vec2::ZERO));
+    }
+    let (lb, lo) = (b.back.hypot(), b.out.hypot());
+    if lb <= REDUNDANT_EPS || lo <= REDUNDANT_EPS {
+        return None;
+    }
+    // Where along the one cubic `b` would sit, from how its handles divide.
+    let t = lb / (lb + lo);
+    let p1 = a.at + a.out / t;
+    let p2 = c.at + c.back / (1.0 - t);
+    let whole = CubicBez::new(a.at, p1, p2, c.at);
+    let left = CubicBez::new(a.at, a.at + a.out, b.at + b.back, b.at);
+    let right = CubicBez::new(b.at, b.at + b.out, c.at + c.back, c.at);
+    let same = |x: CubicBez, y: CubicBez| {
+        [(x.p0, y.p0), (x.p1, y.p1), (x.p2, y.p2), (x.p3, y.p3)]
+            .iter()
+            .all(|(u, v)| u.distance(*v) <= REDUNDANT_EPS)
+    };
+    (same(whole.subsegment(0.0..t), left) && same(whole.subsegment(t..1.0), right))
+        .then_some((p1 - a.at, p2 - c.at))
+}
+
+/// *Add points*: cut every segment into `pieces` of equal length, the new anchors
+/// smooth where the segment curves, so the outline draws as before.
+pub fn split_segments(subpaths: &[PenSubpath], pieces: usize) -> Vec<PenSubpath> {
+    use ondin_core::kurbo::ParamCurveArclen;
+    let pieces = pieces.max(1);
+    let mut out = Vec::with_capacity(subpaths.len());
+    for (s, sub) in subpaths.iter().enumerate() {
+        let n = sub.anchors.len();
+        let mut anchors: Vec<PenAnchor> = Vec::with_capacity(n * pieces);
+        // The arriving handle the last piece of a curve leaves the next anchor.
+        let mut arriving: Option<Vec2> = None;
+        for i in 0..n {
+            let mut here = sub.anchors[i];
+            if let Some(back) = arriving.take() {
+                here.back = back;
+            }
+            anchors.push(here);
+            let Some(curve) = segment_cubic(subpaths, (s, i)) else {
+                continue;
+            };
+            let length = curve.arclen(1e-6);
+            if pieces < 2 || length <= f64::EPSILON {
+                continue;
+            }
+            let j = (i + 1) % n;
+            let straight = sub.anchors[i].out == Vec2::ZERO && sub.anchors[j].back == Vec2::ZERO;
+            let mut cuts = vec![0.0];
+            cuts.extend(
+                (1..pieces).map(|k| curve.inv_arclen(length * k as f64 / pieces as f64, 1e-6)),
+            );
+            cuts.push(1.0);
+            let parts: Vec<CubicBez> = cuts
+                .windows(2)
+                .map(|w| curve.subsegment(w[0]..w[1]))
+                .collect();
+            let handle = |v: Vec2| if straight { Vec2::ZERO } else { v };
+            if let Some(last) = anchors.last_mut() {
+                last.out = handle(parts[0].p1 - parts[0].p0);
+            }
+            for w in parts.windows(2) {
+                anchors.push(PenAnchor {
+                    at: w[1].p0,
+                    out: handle(w[1].p1 - w[1].p0),
+                    back: handle(w[0].p2 - w[0].p3),
+                    radius: 0.0,
+                });
+            }
+            let end = parts[parts.len() - 1];
+            let back = handle(end.p2 - end.p3);
+            // The closing segment arrives at the run's first anchor, already placed.
+            match j == 0 {
+                true => anchors[0].back = back,
+                false => arriving = Some(back),
+            }
+        }
+        out.push(PenSubpath {
+            anchors,
+            closed: sub.closed,
+        });
+    }
+    out
 }
 
 /// The selected anchors, paired with where they sit on `axis`, sorted along it.
@@ -8001,6 +8180,73 @@ mod tests {
         let whole = pen_outline(&subs[0].anchors, true);
         let opened = pen_outline(&split[0].anchors, false);
         assert_same_shape(&whole, &opened);
+    }
+
+    /// *Add points* cuts every segment, the curve too, into pieces that draw the
+    /// same outline; and *Remove redundant points* takes exactly those anchors back
+    /// out, leaving the four it started from.
+    ///
+    /// flip: `merged_handles` without its cubic case → fails at the count taken
+    /// out, 6 of 8 (only the straight sides' points go).
+    #[test]
+    fn added_points_draw_the_same_and_are_redundant() {
+        let subs = quad_with_a_curve();
+        let whole = pen_outline(&subs[0].anchors, true);
+        let three = split_segments(&subs, 3);
+        assert_eq!(three[0].anchors.len(), 12);
+        assert!(three[0].closed);
+        assert_same_shape(&whole, &pen_outline(&three[0].anchors, true));
+
+        let (back, gone) = redundant_points(&three);
+        assert_eq!(gone.len(), 8);
+        assert_eq!(back[0].anchors.len(), 4, "back to four");
+        assert_same_shape(&whole, &pen_outline(&back[0].anchors, true));
+        let (none, nothing) = redundant_points(&subs);
+        assert!(nothing.is_empty(), "every corner of the quad shapes it");
+        assert_eq!(none[0].anchors.len(), 4);
+    }
+
+    /// A point twinned on the one before it is redundant, and so is one in the
+    /// middle of a straight run; an open run's ends never are.
+    #[test]
+    fn twins_and_straight_middles_are_redundant() {
+        let corner = |x, y| PenAnchor::corner(Point::new(x, y));
+        let run = vec![PenSubpath {
+            anchors: vec![
+                corner(0.0, 0.0),
+                corner(0.0, 0.0),
+                corner(50.0, 0.0),
+                corner(100.0, 0.0),
+                corner(100.0, 50.0),
+            ],
+            closed: false,
+        }];
+        let (left, gone) = redundant_points(&run);
+        let at: Vec<Point> = left[0].anchors.iter().map(|a| a.at).collect();
+        assert_eq!(
+            at,
+            vec![
+                Point::new(0.0, 0.0),
+                Point::new(100.0, 0.0),
+                Point::new(100.0, 50.0)
+            ]
+        );
+        assert_eq!(gone, vec![Point::new(0.0, 0.0), Point::new(50.0, 0.0)]);
+    }
+
+    /// *Smooth selected* moves a corner's handles the amount of the way to fresh
+    /// smooth ones, and leaves the anchors it was not given.
+    #[test]
+    fn smoothing_by_an_amount_moves_handles_part_way() {
+        let mut subs = quad_with_a_curve();
+        let mut full = subs.clone();
+        smooth_points(&mut full, &[(0, 1)], 1.0);
+        smooth_points(&mut subs, &[(0, 1)], 0.5);
+        let (half, whole) = (subs[0].anchors[1], full[0].anchors[1]);
+        assert!(whole.out.hypot() > 1.0, "fully smooth has handles");
+        assert_eq!(half.out, whole.out * 0.5);
+        assert_eq!(half.back, whole.back * 0.5);
+        assert_eq!(subs[0].anchors[0].out, Vec2::ZERO, "only the anchor given");
     }
 
     /// An open run splits in two at an inner anchor, and its ends refuse.

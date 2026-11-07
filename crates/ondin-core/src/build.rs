@@ -3425,6 +3425,135 @@ pub fn delete(doc: &Document, ids: &[NodeId]) -> Transaction {
     Transaction(ops)
 }
 
+// --- text styling -----------------------------------------------------------
+
+/// A text layer's styling as an edit of it reads it: the character and paragraph
+/// defaults, the runs over each, and the slots bound to variables.
+pub struct TextStyling<'a> {
+    pub id: NodeId,
+    pub style: &'a crate::typography::TextStyle,
+    pub spans: &'a crate::typography::CharSpans,
+    pub paragraph: &'a crate::typography::ParagraphStyle,
+    pub para_spans: &'a crate::typography::ParaSpans,
+    pub vars: crate::variable::TextVars,
+}
+
+impl<'a> TextStyling<'a> {
+    /// `node`'s styling, and its text; `None` for a layer that is not text.
+    pub fn of(node: &'a Node) -> Option<(Self, &'a str)> {
+        let NodeKind::Text {
+            content,
+            style,
+            spans,
+            para_spans,
+            paragraph,
+            ..
+        } = node.kind()
+        else {
+            return None;
+        };
+        let styling = Self {
+            id: node.id(),
+            style,
+            spans,
+            paragraph,
+            para_spans,
+            vars: node.text_vars(),
+        };
+        Some((styling, content))
+    }
+}
+
+/// Character attributes written as the layer's defaults, each one's runs over
+/// `range` dropped, so the attribute holds there. Both ops always come back, with
+/// whether they change anything beside them: setting the default alone would leave
+/// a run overriding it.
+pub fn char_defaults(
+    t: &TextStyling<'_>,
+    range: std::ops::Range<usize>,
+    attrs: Vec<crate::typography::CharAttr>,
+) -> (Transaction, bool) {
+    let mut style = t.style.clone();
+    let mut spans = t.spans.clone();
+    let (mut kept, _) = crate::variable::span_defaults(t.vars, &style, t.paragraph);
+    for attr in attrs {
+        let kind = attr.kind();
+        style.set(attr.clone());
+        kept.set(attr);
+        spans.clear(range.clone(), kind, &kept);
+    }
+    let changes = style != *t.style || spans != *t.spans;
+    let tx = Transaction(vec![
+        Operation::SetTextStyle {
+            id: t.id,
+            style,
+            spans: None,
+        },
+        Operation::SetTextSpans { id: t.id, spans },
+    ]);
+    (tx, changes)
+}
+
+/// [`char_defaults`]' paragraph twin, down to the order of the two ops: the style
+/// op re-states the run list, then the runs op installs the one computed here.
+pub fn para_defaults(
+    t: &TextStyling<'_>,
+    range: std::ops::Range<usize>,
+    attrs: Vec<crate::typography::ParaAttr>,
+) -> (Transaction, bool) {
+    let mut paragraph = t.paragraph.clone();
+    let mut spans = t.para_spans.clone();
+    let (_, mut kept) = crate::variable::span_defaults(t.vars, t.style, &paragraph);
+    for attr in attrs {
+        let kind = attr.kind();
+        paragraph.set(attr);
+        kept.set(attr);
+        spans.clear(range.clone(), kind, &kept);
+    }
+    let changes = paragraph != *t.paragraph || spans != *t.para_spans;
+    let tx = Transaction(vec![
+        Operation::SetParagraphStyle {
+            id: t.id,
+            paragraph,
+            spans: None,
+        },
+        Operation::SetParagraphSpans { id: t.id, spans },
+    ]);
+    (tx, changes)
+}
+
+/// Character attributes as runs over `range` of the text, the defaults kept, as
+/// the text editor styles a selection.
+pub fn char_runs(
+    t: &TextStyling<'_>,
+    range: std::ops::Range<usize>,
+    attrs: Vec<crate::typography::CharAttr>,
+) -> Transaction {
+    let mut spans = t.spans.clone();
+    let (kept, _) = crate::variable::span_defaults(t.vars, t.style, t.paragraph);
+    for attr in attrs {
+        spans.set(range.clone(), attr, &kept);
+    }
+    Transaction(vec![Operation::SetTextSpans { id: t.id, spans }])
+}
+
+/// Paragraph attributes as runs over the paragraphs `range` of `content` reaches
+/// (`text::paragraph_bounds`), the defaults kept.
+pub fn para_runs(
+    t: &TextStyling<'_>,
+    content: &str,
+    range: std::ops::Range<usize>,
+    attrs: Vec<crate::typography::ParaAttr>,
+) -> Transaction {
+    let mut spans = t.para_spans.clone();
+    let (_, kept) = crate::variable::span_defaults(t.vars, t.style, t.paragraph);
+    let range = crate::text::paragraph_bounds(content, range);
+    for attr in attrs {
+        spans.set(range.clone(), attr, &kept);
+    }
+    Transaction(vec![Operation::SetParagraphSpans { id: t.id, spans }])
+}
+
 // --- bulk property edits over a selection ---------------------------------
 
 /// Every node in the subtrees rooted at `ids`, each visited exactly once, in a

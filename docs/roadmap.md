@@ -16,8 +16,6 @@ item's premise can go stale while its ask still reads true.
     `ondin-app` moves into a core builder before its verb exists, as delete and duplicate did
     (`build::delete`, `build::duplicate_placements`). The discrete commands that build their ops in
     place:
-    - Text (`typography.rs`): `set_text_sizing`, and `text_chord`'s character and paragraph
-      attributes (`one_char_attrs_tx`, `para_attrs_tx`), which a range-aware verb would take.
     - Guides: `paste_guides`, `duplicate_guides`, `remove_selected_guides`, `rulers::remove_guide`
       and `remove_all_guides`, the menu's *Clear guides*.
     - Layer commands: `toggle_hidden`/`toggle_locked` (outermost layers), `create_component`,
@@ -28,6 +26,7 @@ item's premise can go stale while its ask still reads true.
     - The contrast checker's `fix_transaction`.
     The canvas gestures and the inspector's field writers (`slot_transaction`, `transform_marks`,
     `layout.rs`) build ops too; they become builders only when a verb needs the same edit.
+    `set_text_sizing` stays: it reads the app's shaped layout, and its op is `set_geometry`'s.
 
 ## Now · Components and layout
 

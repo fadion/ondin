@@ -36,7 +36,8 @@ Phase 2 — write (1:1 with operations/composites):
 `create_node`, `insert_subtree`, `delete_node`, `reparent`, `reorder`, `group(ids)`, `ungroup(id)`,
 `duplicate(id)`, `set_transform`, `set_pivot`, `set_geometry`, `set_name`, `set_visible`,
 `set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
-`set_text_spans`, `set_paragraph_style`, `set_block_style`, `set_fills`, `set_strokes`,
+`set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
+`style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
 `set_effects`, `add_image(bytes) -> ImageId`, `set_display`, `set_layout_item`, `set_insets`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
@@ -64,6 +65,9 @@ Which of this is built: the `ondin-mcp` crate holds the tool list (`PHASE_1` to 
 
 #### Conventions
 
+- `style_text` and `style_paragraphs` are how an agent styles part of a text: a range counted in
+  characters becomes runs over it, as the text editor writes a selection; the whole text becomes the
+  layer's defaults with that attribute's runs dropped, as the type panel writes it.
 - A page is named by its root node's id: `create_node`'s and `insert_subtree`'s parent may be one,
   and `set_name` renames one.
 - `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.

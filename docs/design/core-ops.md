@@ -204,6 +204,11 @@ it created. A verb never commits; its caller does, as every edit is committed.
   display, padding, layout item), and its `children`, bottom first. A caller never writes an id or
   a parent link; the verb mints them and emits `CreateNode` then the `Set*` ops per layer, in one
   transaction, so every op's own check applies. Unknown fields are refused.
+- **`style_text` and `style_paragraphs` take a range in characters** and write as the app does:
+  the whole text through `build::char_defaults`/`para_defaults` (the type panel's write: new
+  defaults, that attribute's runs dropped), a shorter range through `build::char_runs`/`para_runs`
+  (the text editor's: runs over it, a paragraph attribute widened to the paragraphs it reaches).
+  `build::TextStyling` is what the four read, from a node or from the panel's subject.
 - **A paint list written whole keeps its item ids by position** (`item::rekey_by_position`), so an
   instance reads the write as overrides of its main's items.
 - **Phase 2's tool list is held to the registry** (`ondin-mcp`'s `every_write_tool_is_a_registry_verb`):

@@ -23,6 +23,7 @@ use crate::node::{
 use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::resolve::Resolved;
 use crate::svg_in::ImageSink;
+use crate::typography::{CharAttr, Length, ParaAttr};
 use kurbo::Affine;
 use serde_json::{Map, Value};
 
@@ -341,6 +342,8 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "ParagraphStyle" => reads::<ParagraphStyle>(v),
         "Pivot" => reads::<Pivot>(v),
         "TextStyle" => reads::<TextStyle>(v),
+        "[CharAttr]" => reads::<Vec<CharAttr>>(v),
+        "[ParaAttr]" => reads::<Vec<ParaAttr>>(v),
         "Tree" => reads::<Tree>(v),
         "[Effect]" => reads::<Vec<Effect>>(v),
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
@@ -407,6 +410,15 @@ pub fn example(model: &str) -> Option<Value> {
         "ParagraphStyle" => json(&ParagraphStyle::default()),
         "Pivot" => json(&Pivot::Normalized(Vec2::new(0.5, 0.5))),
         "TextStyle" => json(&TextStyle::default()),
+        "[CharAttr]" => json(&vec![
+            CharAttr::Weight(700),
+            CharAttr::Size(24.0),
+            CharAttr::LetterSpacing(Length::Em(0.02)),
+        ]),
+        "[ParaAttr]" => json(&vec![
+            ParaAttr::Spacing(Length::Px(12.0)),
+            ParaAttr::IndentStart(Length::Px(24.0)),
+        ]),
         "Tree" => serde_json::json!({
             "kind": json(&NodeKind::Artboard {
                 size: Size::new(320.0, 200.0),
@@ -486,6 +498,36 @@ fn node<'d>(ctx: &Ctx<'d>, id: NodeId) -> Result<&'d crate::node::Node, VerbErro
     ctx.doc
         .get(id)
         .ok_or(VerbError::Refused(OpError::NoSuchNode(id)))
+}
+
+/// The text layer the `node` argument names, its styling and its text.
+fn text_of<'d>(
+    ctx: &Ctx<'d>,
+    a: &Args<'_>,
+) -> Result<(build::TextStyling<'d>, &'d str), VerbError> {
+    build::TextStyling::of(node(ctx, a.node("node")?)?)
+        .ok_or_else(|| a.invalid("node", "not a text layer"))
+}
+
+/// The byte range of `content` the `start` and `end` arguments name in characters,
+/// and whether it is all of it.
+fn char_range(a: &Args<'_>, content: &str) -> Result<(std::ops::Range<usize>, bool), VerbError> {
+    let chars = content.chars().count();
+    let (start, end) = (
+        a.index("start").unwrap_or(0),
+        a.index("end").unwrap_or(chars),
+    );
+    if start > end || end > chars {
+        let why = format!("the text has {chars} characters");
+        return Err(a.invalid(if end > chars { "end" } else { "start" }, why));
+    }
+    let byte = |n: usize| {
+        content
+            .char_indices()
+            .nth(n)
+            .map_or(content.len(), |(b, _)| b)
+    };
+    Ok((byte(start)..byte(end), start == 0 && end == chars))
 }
 
 /// One op per node of the `nodes` argument, built by `op`.
@@ -1052,6 +1094,70 @@ pub static VERBS: &[Verb] = &[
                 id: a.node("node")?,
                 block: a.model::<BlockStyle>("block")?,
             }]))
+        },
+    },
+    Verb {
+        name: "style_text",
+        doc: "Set character attributes on a text layer, over all of it or a range of its characters",
+        params: &[
+            req("node", NODE, "the text layer"),
+            req(
+                "attrs",
+                ParamKind::Model("[CharAttr]"),
+                "the attributes to set",
+            ),
+            opt(
+                "start",
+                INDEX,
+                "the first character styled, counted from 0; 0 unless given",
+            ),
+            opt(
+                "end",
+                INDEX,
+                "the character after the last styled; the end unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let attrs = a.model::<Vec<CharAttr>>("attrs")?;
+            let (t, content) = text_of(ctx, a)?;
+            let (range, whole) = char_range(a, content)?;
+            Ok(Done::edit(if whole {
+                build::char_defaults(&t, range, attrs).0
+            } else {
+                build::char_runs(&t, range, attrs)
+            }))
+        },
+    },
+    Verb {
+        name: "style_paragraphs",
+        doc: "Set paragraph attributes on a text layer, over all of it or the paragraphs a range of its characters reaches",
+        params: &[
+            req("node", NODE, "the text layer"),
+            req(
+                "attrs",
+                ParamKind::Model("[ParaAttr]"),
+                "the attributes to set",
+            ),
+            opt(
+                "start",
+                INDEX,
+                "the first character of the range, counted from 0; 0 unless given",
+            ),
+            opt(
+                "end",
+                INDEX,
+                "the character after the range; the end unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let attrs = a.model::<Vec<ParaAttr>>("attrs")?;
+            let (t, content) = text_of(ctx, a)?;
+            let (range, whole) = char_range(a, content)?;
+            Ok(Done::edit(if whole {
+                build::para_defaults(&t, range, attrs).0
+            } else {
+                build::para_runs(&t, content, range, attrs)
+            }))
         },
     },
     // --- paint --------------------------------------------------------------

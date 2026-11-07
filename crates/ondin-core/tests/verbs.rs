@@ -469,6 +469,114 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
     );
 }
 
+/// `style_text` sets a range of characters as runs, counted in characters, not
+/// bytes, and the whole text as its defaults with that attribute's runs dropped;
+/// `style_paragraphs` reaches the whole paragraph a range touches; a range past the
+/// text is refused.
+///
+/// flip: `char_range` taking the arguments as byte offsets → fails at "the run
+/// covers `world`".
+#[test]
+fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
+    use ondin_core::{CharAttr, Length, ParaAttr};
+    let (mut doc, mut ids, page) = blank();
+    let content = "Héllo world\nSecond";
+    let kind = serde_json::to_value(NodeKind::Text {
+        content: content.into(),
+        style: Box::default(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    })
+    .unwrap();
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": kind }),
+    )[0];
+    let w = t.to_wire();
+    let bold = serde_json::to_value(vec![CharAttr::Weight(700)]).unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "style_text",
+        json!({ "node": w, "attrs": bold, "start": 6, "end": 11 }),
+    );
+    let text = |doc: &Document| match doc.get(t).unwrap().kind().clone() {
+        NodeKind::Text {
+            style,
+            spans,
+            para_spans,
+            ..
+        } => (style, spans, para_spans),
+        _ => unreachable!(),
+    };
+    let (style, spans, _) = text(&doc);
+    let world = content.find("world").unwrap();
+    assert_eq!(
+        spans.values_in(&style, ondin_core::CharAttrKind::Weight, world..world + 5),
+        [CharAttr::Weight(700)],
+        "the run covers `world`"
+    );
+    assert_eq!(
+        style.get(ondin_core::CharAttrKind::Weight),
+        CharAttr::Weight(400)
+    );
+
+    run(
+        &mut doc,
+        &mut ids,
+        "style_text",
+        json!({ "node": w, "attrs": serde_json::to_value(vec![CharAttr::Weight(300)]).unwrap() }),
+    );
+    let (style, spans, _) = text(&doc);
+    assert_eq!(
+        style.get(ondin_core::CharAttrKind::Weight),
+        CharAttr::Weight(300)
+    );
+    assert!(
+        spans.is_empty(),
+        "the whole-text write drops the weight's runs"
+    );
+
+    let spacing = serde_json::to_value(vec![ParaAttr::Spacing(Length::Px(12.0))]).unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "style_paragraphs",
+        json!({ "node": w, "attrs": spacing, "start": 14, "end": 15 }),
+    );
+    let (_, _, para) = text(&doc);
+    let second = content.find("Second").unwrap();
+    assert_eq!(para.as_slice().len(), 1);
+    assert_eq!(
+        (para.as_slice()[0].start, para.as_slice()[0].end),
+        (second, content.len())
+    );
+
+    let res = Resolved::rebuild(&doc);
+    let past = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+        },
+        "style_text",
+        &json!({ "node": w, "attrs": [], "end": 99 }),
+    );
+    assert!(
+        matches!(past, Err(VerbError::Invalid { param: "end", .. })),
+        "{past:?}"
+    );
+}
+
 /// `set_blend` takes the modes as the snapshot labels them and writes as the panel
 /// does: the outermost layers only, and Pass through as Normal on a layer that is
 /// not a frame or group, in a tree's layers too.

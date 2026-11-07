@@ -49,6 +49,7 @@ use crate::ui::{
 };
 use eframe::egui;
 use ondin_core::Brush;
+use ondin_core::build;
 use ondin_core::kurbo::Size;
 use ondin_core::peniko::Color;
 use ondin_core::style::StyleSlot;
@@ -122,6 +123,18 @@ pub(crate) struct TypeSubject {
 }
 
 impl TypeSubject {
+    /// What the core text-styling builders read of this subject.
+    fn styling(&self) -> build::TextStyling<'_> {
+        build::TextStyling {
+            id: self.id,
+            style: &self.style,
+            spans: &self.spans,
+            paragraph: &self.paragraph,
+            para_spans: &self.para_spans,
+            vars: self.text_vars,
+        }
+    }
+
     /// The panel's subject for `id`, or `None` if it is not a text node, read
     /// through the preview so every control tracks a live drag.
     pub(crate) fn of(app: &OndinApp, id: NodeId) -> Option<Self> {
@@ -4410,65 +4423,14 @@ fn variant_attrs(v: &text::FontVariant, coords: &[AxisSetting]) -> Vec<CharAttr>
 
 /// [`char_attrs_tx`] for `subject`'s own layer alone.
 fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
-    let mut style = subject.style.clone();
-    let mut spans = subject.spans.clone();
-    let (mut kept, _) =
-        ondin_core::variable::span_defaults(subject.text_vars, &style, &subject.paragraph);
-    for attr in attrs {
-        let kind = attr.kind();
-        style.set(attr.clone());
-        kept.set(attr);
-        spans.clear(subject.range.clone(), kind, &kept);
-    }
-    let changes = style != subject.style || spans != subject.spans;
-    (
-        Transaction(vec![
-            Operation::SetTextStyle {
-                id: subject.id,
-                style,
-                spans: None,
-            },
-            Operation::SetTextSpans {
-                id: subject.id,
-                spans,
-            },
-        ]),
-        changes,
-    )
+    build::char_defaults(&subject.styling(), subject.range.clone(), attrs)
 }
 
 /// The whole-node write for a spannable paragraph attribute: set the **defaults**
-/// and drop the overrides of that one attribute over the range.
-///
-/// [`char_attrs_tx`]'s twin, down to the order of the two operations: the style op
-/// re-states the span list (`Document::op_set_paragraph_style`), then the spans op
-/// installs the list computed here. Only the click path may act on the changed flag.
+/// and drop the overrides of that one attribute over the range
+/// (`build::para_defaults`). Only the click path may act on the changed flag.
 fn para_attrs_tx(subject: &TypeSubject, attrs: Vec<ParaAttr>) -> (Transaction, bool) {
-    let mut paragraph = subject.paragraph.clone();
-    let mut spans = subject.para_spans.clone();
-    let (_, mut kept) =
-        ondin_core::variable::span_defaults(subject.text_vars, &subject.style, &paragraph);
-    for attr in attrs {
-        let kind = attr.kind();
-        paragraph.set(attr);
-        kept.set(attr);
-        spans.clear(subject.para_range.clone(), kind, &kept);
-    }
-    let changes = paragraph != subject.paragraph || spans != subject.para_spans;
-    (
-        Transaction(vec![
-            Operation::SetParagraphStyle {
-                id: subject.id,
-                paragraph,
-                spans: None,
-            },
-            Operation::SetParagraphSpans {
-                id: subject.id,
-                spans,
-            },
-        ]),
-        changes,
-    )
+    build::para_defaults(&subject.styling(), subject.para_range.clone(), attrs)
 }
 
 /// One axis's current coordinate, or the font's own default where nothing has

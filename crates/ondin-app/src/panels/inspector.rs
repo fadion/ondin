@@ -1086,7 +1086,7 @@ impl OndinApp {
     ///
     /// `mixed` puts the chip on the mixed dash and the hex on the word; the canvas
     /// is never mixed.
-    fn single_paint_row(
+    pub(crate) fn single_paint_row(
         &mut self,
         ui: &mut egui::Ui,
         size: egui::Vec2,
@@ -9945,6 +9945,9 @@ impl OndinApp {
         if let Some(cs) = slot.char_scoped() {
             return self.char_slot_color(id, cs).map(Brush::Solid);
         }
+        if let Some(p) = slot.pref_scoped() {
+            return self.pref_colour(p).map(Brush::Solid);
+        }
         match slot {
             PaintSlot::Canvas => {
                 return Some(Brush::Solid(self.session.preview_ground()));
@@ -10039,7 +10042,8 @@ impl OndinApp {
             | PaintSlot::GroupGradient(_)
             | PaintSlot::TextDecoration(_)
             | PaintSlot::TextColor
-            | PaintSlot::VarCell(..) => unreachable!("answered above"),
+            | PaintSlot::VarCell(..)
+            | PaintSlot::Pref(_) => unreachable!("answered above"),
         }
     }
     /// The brush at a location, read through the preview so the picker tracks a live
@@ -10164,6 +10168,10 @@ impl OndinApp {
         slot: PaintSlot,
         brush: Brush,
     ) -> Transaction {
+        // Every verb diverts a Settings colour before asking for a transaction.
+        if slot.pref_scoped().is_some() {
+            return Transaction(Vec::new());
+        }
         let Some(node) = self.session.display_node(id) else {
             return Transaction(Vec::new());
         };
@@ -10204,6 +10212,7 @@ impl OndinApp {
             },
             // A variable's cell takes the colour, alpha and all, ending an alias it
             // held; a gradient is refused.
+            PaintSlot::Pref(_) => unreachable!("diverted above"),
             PaintSlot::VarCell(var, mode) => match brush {
                 Brush::Solid(c) => Transaction(vec![Operation::SetVariableCell {
                     id: var,
@@ -10353,6 +10362,10 @@ impl OndinApp {
             self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Commit);
             return;
         }
+        if let Some(p) = slot.pref_scoped() {
+            self.write_pref_colour(p, &brush);
+            return;
+        }
         // Cloned: the retarget below reads the brush after the commit.
         let tx = self.slot_transaction(id, slot, brush.clone());
         self.name_slot_step(slot);
@@ -10375,6 +10388,10 @@ impl OndinApp {
             self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Step(verb));
             return;
         }
+        if let Some(p) = slot.pref_scoped() {
+            self.write_pref_colour(p, &brush);
+            return;
+        }
         let tx = self.slot_transaction(id, slot, brush.clone());
         self.name_slot_step(slot);
         self.note_edit(None, &tx);
@@ -10388,6 +10405,10 @@ impl OndinApp {
     pub(crate) fn preview_slot(&mut self, id: NodeId, slot: PaintSlot, brush: Brush) -> bool {
         if let Some(cs) = slot.char_scoped() {
             return self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Preview);
+        }
+        // The draft is a preview already: nothing is saved until *Save changes*.
+        if let Some(p) = slot.pref_scoped() {
+            return self.write_pref_colour(p, &brush);
         }
         let tx = self.slot_transaction(id, slot, brush);
         self.session.set_preview(&tx);
@@ -10414,6 +10435,10 @@ impl OndinApp {
         // preview and commits at its end (§9.3).
         if let Some(cs) = slot.char_scoped() {
             self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Valve(resp));
+            return resp.drag_stopped() || ui::defocus_commits(resp);
+        }
+        if let Some(p) = slot.pref_scoped() {
+            self.write_pref_colour(p, &brush);
             return resp.drag_stopped() || ui::defocus_commits(resp);
         }
         let tx = self.slot_transaction(id, slot, brush.clone());
@@ -10446,6 +10471,8 @@ impl OndinApp {
             | PaintSlot::SelectionAll(PaintTarget::Stroke) => ("Stroke", icon::STROKE),
             PaintSlot::Canvas => ("Canvas colour", icon::PAINT_BUCKET),
             PaintSlot::Guide => ("Guide colour", icon::RULER),
+            // Never committed: a Settings colour is staged in the form's draft.
+            PaintSlot::Pref(_) => return,
             PaintSlot::TextDecoration(super::paint::DecorationSide::Underline) => {
                 ("Underline colour", icon::TEXT_UNDERLINE)
             }

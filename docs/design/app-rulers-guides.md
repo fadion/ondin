@@ -89,9 +89,14 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 
 | State | Ink |
 | --- | --- |
-| Resting | 1px, guide's own colour |
-| Hover | same 1px + position chip + dotted extension |
-| Selected | 2px `color::SELECT` (overrides a recoloured guide) + chip |
+| Resting | the Settings thickness (1–5pt, default 1), guide's own colour or the Settings default |
+| Hover | same width + position chip + dotted extension |
+| Selected | one point thicker, `color::SELECT` (overrides a recoloured guide) + chip |
+
+- **The default colour and the thickness are per-user** (`prefs::CanvasPrefs`, the Settings modal's
+  *Canvas* section). A guide with `color: None` draws in `guide_colour` (`Guide::color_or`), which
+  starts at `DEFAULT_GUIDE_COLOR`; the document never stores the default. Every width keeps a solid
+  core at display scales 1.0–2.0 (`snap_across_axis`).
 
 - A frame-scoped guide shows a dotted continuation beyond its frame on hover/selection, same width and
   colour; none for page-wide guides or guides in rotated frames (`rulers::upright`). The solid segment is
@@ -107,7 +112,7 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 - **Guide** identity card: ruler icon, fixed name (*Guide* / *N Guides*), no eye, no lock.
 - **Transform**: one full-width position field per axis present; each reads *Mixed* or a shared value.
 - **Appearance**: colour plus a reset (dead at default) writing `color: None` so the guide follows the
-  default again. Shared implementation with the canvas ground: `inspector::colour_panel` over a
+  Settings default again; *Mixed* and the swatch compare against that default. Shared implementation with the canvas ground: `inspector::colour_panel` over a
   `ColourCard`, row `single_paint_row`; each caller builds its own reset transaction.
 - *Remove* and *Remove all Guides* are 28×28 icon buttons in the card body, each one transaction.
 

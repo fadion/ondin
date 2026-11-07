@@ -26,7 +26,8 @@
 
 use crate::app::OndinApp;
 use crate::input::NudgeStep;
-use crate::prefs::{Prefs, ThemePref};
+use crate::panels::paint::{PaintSlot, PrefColour};
+use crate::prefs::{CanvasPrefs, Prefs, ThemePref};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 
@@ -65,6 +66,10 @@ const BUTTON_PAD_X: f32 = ui::LABEL_BUTTON_PAD_X;
 pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
 /// The *Default font* dropdown: room for a long family name beside its label.
 const DEFAULT_FONT_W: f32 = 200.0;
+/// The *Canvas* section's controls beside their labels: a colour row with its
+/// reset, or the thickness field, so their right and left edges line up. Narrower
+/// than [`DEFAULT_FONT_W`], whose labels are shorter.
+const PREF_CONTROL_W: f32 = 168.0;
 
 /// Type size of a row's label — [`ui::SWITCH_ROW_LABEL_PT`], because half these
 /// rows *are* switch rows and a caption beside one has to match it.
@@ -82,6 +87,7 @@ const BUTTON_PT: f32 = ui::CONTROL_PT;
 pub(crate) struct Settings {
     theme: ThemePref,
     nudge: NudgeStep,
+    canvas: CanvasPrefs,
     tree_guides: bool,
     collapse_groups_on_open: bool,
     resource_meter: bool,
@@ -96,6 +102,7 @@ impl Settings {
         Self {
             theme: prefs.theme,
             nudge: prefs.nudge,
+            canvas: prefs.canvas,
             tree_guides: prefs.tree_guides,
             collapse_groups_on_open: prefs.collapse_groups_on_open,
             resource_meter: prefs.resource_meter,
@@ -105,10 +112,19 @@ impl Settings {
         }
     }
 
-    /// Put a nudge pair back — what `OndinApp::cancel_gesture` calls to undo a
-    /// right-clicked scrub. A setter because the whole pair is what a cancel restores.
-    pub(crate) fn set_nudge(&mut self, nudge: NudgeStep) {
-        self.nudge = nudge;
+    /// The form's scrubbable numbers, as a scrub's start snapshots them.
+    pub(crate) fn scrubbed(&self) -> Scrubbed {
+        Scrubbed {
+            nudge: self.nudge,
+            guide_thickness: self.canvas.guide_thickness,
+        }
+    }
+
+    /// Put the scrubbable numbers back — what `OndinApp::cancel_gesture` calls to
+    /// undo a right-clicked scrub.
+    pub(crate) fn restore(&mut self, s: Scrubbed) {
+        self.nudge = s.nudge;
+        self.canvas.guide_thickness = s.guide_thickness;
     }
 
     /// The theme picked in the form, which the chrome previews while the modal
@@ -124,6 +140,7 @@ impl Settings {
         let web_fonts_changed = prefs.web_fonts != self.web_fonts;
         prefs.theme = self.theme;
         prefs.nudge = self.nudge;
+        prefs.canvas = self.canvas;
         prefs.tree_guides = self.tree_guides;
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
         prefs.resource_meter = self.resource_meter;
@@ -132,6 +149,14 @@ impl Settings {
         prefs.web_fonts = self.web_fonts;
         web_fonts_changed
     }
+}
+
+/// The numbers a Settings field scrubs, as they were when a scrub began: what a
+/// right-click cancel puts back (`InFlight::settings_scrub`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Scrubbed {
+    nudge: NudgeStep,
+    guide_thickness: u8,
 }
 
 /// The settings button's box and glyph on both screens — the editor's
@@ -187,6 +212,16 @@ impl OndinApp {
             return;
         };
         let saved = Settings::from_prefs(&self.prefs);
+        // A picker open on one of the form's colours takes Escape first, so the press
+        // closes it rather than discarding the whole form.
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.slot.pref_scoped().is_some())
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.picker = None;
+        }
 
         let mut decision = None;
         let modal = card("settings", ctx, |ui| {
@@ -215,9 +250,9 @@ impl OndinApp {
             section(ui, "Nudge");
             // Before the fields: `value_field` applies this frame's drag delta inside
             // the call that reports `drag_started()`.
-            let before = draft.nudge;
+            let before = draft.scrubbed();
             let half = egui::vec2((ui.available_width() - COL_GAP) / 2.0, FIELD_H);
-            let dragging = ui
+            let mut dragging = ui
                 .horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = COL_GAP;
                     let a = nudge_field(ui, half, "Step", &mut draft.nudge.small);
@@ -225,6 +260,10 @@ impl OndinApp {
                     a || b
                 })
                 .inner;
+
+            // --- canvas ------------------------------------------------
+            section(ui, "Canvas");
+            dragging |= self.canvas_rows(ui, &mut draft.canvas);
             // The cancel is answered before the snapshot is armed (as in
             // `panels::export`'s quality field): on the frame a gesture is called
             // off, nothing may re-arm it.
@@ -296,6 +335,13 @@ impl OndinApp {
             }
         });
 
+        // The two colours are written through their paint slot, by the hex fields
+        // above and by the picker, into `self.settings`; the rest of the form into
+        // `draft`. Taken back before the draft is saved or written over them.
+        if let Some(live) = &self.settings {
+            draft.canvas.guide_colour = live.canvas.guide_colour;
+            draft.canvas.grid_ink = live.canvas.grid_ink;
+        }
         // The backdrop and Escape both mean Cancel. Read after the body, because
         // `should_close` consumes the Escape press.
         if modal.should_close() {
@@ -319,6 +365,139 @@ impl OndinApp {
             // Still open: keep whatever was typed into it this frame.
             None => self.settings = Some(draft),
         }
+    }
+
+    /// The *Canvas* section's rows: the guide colour and thickness, the adaptive
+    /// grid switch, and the grid's own colour, dimmed while adaptive is on. The
+    /// colours go through [`PaintSlot::Pref`]; the rest into `canvas`. Returns whether
+    /// the thickness is being scrubbed.
+    fn canvas_rows(&mut self, ui: &mut egui::Ui, canvas: &mut CanvasPrefs) -> bool {
+        let defaults = CanvasPrefs::default();
+        self.pref_colour_row(
+            ui,
+            PrefColour::Guide,
+            canvas.guide_colour != defaults.guide_colour,
+        );
+        ui.add_space(ROW_GAP);
+        let mut thickness = f64::from(canvas.guide_thickness);
+        let (lo, hi) = (CanvasPrefs::GUIDE_MIN, CanvasPrefs::GUIDE_MAX);
+        let dragging = labelled_row(ui, "Ruler guides thickness", |ui| {
+            let (resp, _) = ui::value_field_suffixed(
+                ui,
+                egui::vec2(PREF_CONTROL_W, FIELD_H),
+                Prefix::Text(""),
+                Some(Suffix {
+                    text: "pt",
+                    clickable: false,
+                    tooltip: "",
+                }),
+                &mut thickness,
+                // As slow as the nudge fields: five whole steps.
+                Scrub::whole(0.1).range(f64::from(lo)..=f64::from(hi)),
+                |d| d.custom_formatter(ui::number(0)),
+            );
+            resp.on_hover_text("How thick a guide is drawn; a selected one is a point thicker")
+                .dragged()
+        });
+        canvas.guide_thickness = (thickness.round() as u8).clamp(lo, hi);
+        ui.add_space(ROW_GAP);
+        if ui::switch_row(ui, "Adaptive pixel grid", canvas.grid_adaptive, SWITCH_H)
+            .on_hover_text("Shade the grid from the pixels under it")
+            .clicked()
+        {
+            canvas.grid_adaptive = !canvas.grid_adaptive;
+        }
+        caption(
+            ui,
+            "Each grid line is a shade lighter or darker than the pixel under it, \
+             so the grid shows on any fill.",
+        );
+        ui.add_space(ROW_GAP);
+        ui.add_enabled_ui(!canvas.grid_adaptive, |ui| {
+            self.pref_colour_row(ui, PrefColour::Grid, canvas.grid_ink != defaults.grid_ink);
+        })
+        .response
+        .on_disabled_hover_text("Turn off Adaptive pixel grid to pick a colour");
+        dragging
+    }
+
+    /// One colour row: its label, the inspector's swatch-and-hex row on the slot,
+    /// and the reset beside it, live while the colour differs from its default.
+    fn pref_colour_row(&mut self, ui: &mut egui::Ui, which: PrefColour, resettable: bool) {
+        let slot = PaintSlot::Pref(which);
+        let (label, edit, reset) = match which {
+            PrefColour::Guide => (
+                "Ruler guides colour",
+                "Edit the default guide colour",
+                ("Reset the guide colour", "Already the default guide colour"),
+            ),
+            PrefColour::Grid => (
+                "Pixel grid colour",
+                "Edit the pixel grid colour",
+                (
+                    "Reset the pixel grid colour",
+                    "Already the default pixel grid colour",
+                ),
+            ),
+        };
+        let Some(colour) = self.pref_colour(which) else {
+            return;
+        };
+        let row_y = ui.cursor().min.y;
+        let opened = labelled_row(ui, label, |ui| {
+            let reset_w = FIELD_H;
+            let (live, dead) = reset;
+            if ui::field_button(
+                ui,
+                icon::ARROW_COUNTER_CLOCKWISE,
+                reset_w,
+                FieldButton::enabled_if(resettable),
+            )
+            .on_hover_text(if resettable { live } else { dead })
+            .clicked()
+                && resettable
+            {
+                let to = match which {
+                    PrefColour::Guide => CanvasPrefs::default().guide_colour,
+                    PrefColour::Grid => CanvasPrefs::default().grid_ink,
+                };
+                self.write_pref_colour(which, &ondin_core::Brush::Solid(to));
+            }
+            let size = egui::vec2(PREF_CONTROL_W - reset_w - COL_GAP, FIELD_H);
+            self.single_paint_row(ui, size, slot, colour, false, edit)
+        });
+        if opened && let Some(card) = ui.ctx().memory(|m| m.area_rect(egui::Id::new("settings"))) {
+            self.open_picker_beside(ui.ctx(), slot, card, row_y);
+        }
+    }
+
+    /// The Settings draft's colour for `which`, or `None` while the modal is shut.
+    pub(crate) fn pref_colour(&self, which: PrefColour) -> Option<ondin_core::peniko::Color> {
+        let canvas = &self.settings.as_ref()?.canvas;
+        Some(match which {
+            PrefColour::Guide => canvas.guide_colour,
+            PrefColour::Grid => canvas.grid_ink,
+        })
+    }
+
+    /// Put `brush`'s colour in the Settings draft — every slot verb's route for a
+    /// [`PaintSlot::Pref`]. A guide's is made opaque. Whether there was a draft to write.
+    pub(crate) fn write_pref_colour(
+        &mut self,
+        which: PrefColour,
+        brush: &ondin_core::Brush,
+    ) -> bool {
+        let Some((_, colour)) = crate::panels::paint::stops_of(brush).first().copied() else {
+            return false;
+        };
+        let Some(settings) = self.settings.as_mut() else {
+            return false;
+        };
+        match which {
+            PrefColour::Guide => settings.canvas.guide_colour = colour.with_alpha(1.0),
+            PrefColour::Grid => settings.canvas.grid_ink = colour,
+        }
+        true
     }
 
     /// *`180 MB` of web font cache · Clear*. The number is the point: the cache is
@@ -780,6 +959,28 @@ pub(crate) fn section(ui: &mut egui::Ui, label: &str) {
     ui.add_space(SECTION_AIR);
 }
 
+/// A row's label on the left and its controls on the right, laid as
+/// *Default font*'s row is: `controls` adds them right to left, first at the edge.
+fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = COL_GAP;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().interact_size.y = FIELD_H;
+            let out = controls(ui);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(LABEL_PT)
+                        .color(ui::switch_row_ink(ui.is_enabled())),
+                );
+            });
+            out
+        })
+        .inner
+    })
+    .inner
+}
+
 /// A sentence under the row above it, wrapped to the card.
 ///
 /// Closer than [`ROW_GAP`], because a caption belongs to the row above it.
@@ -1212,12 +1413,15 @@ mod tests {
 
         // The state a live scrub leaves, set directly: the cancel is under test,
         // not egui's drag detection.
-        app.in_flight.settings_scrub = Some(before);
+        app.in_flight.settings_scrub = Some(before_form(&app).scrubbed());
+        let mut canvas = before_form(&app).canvas;
+        canvas.guide_thickness = 4;
         app.settings = Some(Settings {
             nudge: NudgeStep {
                 small: 37.0,
                 large: before.large,
             },
+            canvas,
             ..before_form(&app)
         });
 
@@ -1229,6 +1433,15 @@ mod tests {
             app.settings.as_ref().expect("still open").nudge,
             before,
             "the pair the scrub started from is what comes back"
+        );
+        assert_eq!(
+            app.settings
+                .as_ref()
+                .expect("still open")
+                .canvas
+                .guide_thickness,
+            CanvasPrefs::default().guide_thickness,
+            "and so does the guide thickness"
         );
         assert!(
             app.in_flight.settings_scrub.is_none(),
@@ -1295,6 +1508,7 @@ mod tests {
             Settings {
                 theme: ThemePref::Dark,
                 nudge: NudgeStep::default(),
+                canvas: CanvasPrefs::default(),
                 tree_guides: true,
                 collapse_groups_on_open: false,
                 resource_meter: false,
@@ -1310,6 +1524,12 @@ mod tests {
             nudge: NudgeStep {
                 small: 0.5,
                 large: 25.0,
+            },
+            canvas: CanvasPrefs {
+                guide_colour: ondin_core::peniko::Color::from_rgb8(217, 70, 143),
+                guide_thickness: 3,
+                grid_adaptive: false,
+                grid_ink: ondin_core::peniko::Color::from_rgba8(40, 120, 220, 90),
             },
             tree_guides: false,
             collapse_groups_on_open: true,
@@ -1423,5 +1643,118 @@ mod tests {
             (stops[2].right() - edge).abs() < 0.5,
             "the commit is rightmost"
         );
+    }
+
+    /// The Settings card with the guide colour's picker open beside it, the two
+    /// drawn each frame as the app draws them. Returns the app and the two rects.
+    fn settings_with_picker(ctx: &egui::Context) -> (OndinApp, egui::Rect, egui::Rect) {
+        theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        app.toggle_settings(ctx);
+        for _ in 0..5 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("settings")))
+            .expect("the card is up");
+        app.open_picker_beside(
+            ctx,
+            PaintSlot::Pref(PrefColour::Guide),
+            card,
+            card.center().y,
+        );
+        for _ in 0..5 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        let picker = ctx
+            .memory(|m| m.area_rect(egui::Id::new("colour-picker")))
+            .expect("the picker is up");
+        (app, card, picker)
+    }
+
+    /// One frame of the modal and the picker, in the app's order.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            app.settings_ui(ui.ctx());
+            app.picker_ui(ui.ctx());
+        });
+    }
+
+    /// A click at `at`, pressed and released over two frames.
+    fn click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(ctx, app, vec![egui::Event::PointerMoved(at), button(true)]);
+        frame(ctx, app, vec![button(false)]);
+        frame(ctx, app, Vec::new());
+    }
+
+    /// The picker opens beside the card and stays live over it after a press on the
+    /// card raises the modal: a press in the picker picks into the form's draft,
+    /// and neither cancels the form nor reaches the saved preferences.
+    ///
+    /// flip: `picker_ui` without its `move_to_top` for a Settings slot → fails at
+    /// "the press is not a backdrop click": the buried picker's press lands on the
+    /// modal's backdrop and discards the form.
+    #[test]
+    fn a_colour_picked_over_the_card_is_staged_in_the_form() {
+        let ctx = egui::Context::default();
+        let (mut app, card, picker) = settings_with_picker(&ctx);
+        assert!(
+            !card.intersects(picker),
+            "beside the card: {card:?} {picker:?}"
+        );
+        // On the title, which does nothing but raise the modal.
+        click(
+            &ctx,
+            &mut app,
+            card.left_top() + egui::vec2(PAD + 4.0, PAD + 4.0),
+        );
+        let before = app.pref_colour(PrefColour::Guide);
+        click(&ctx, &mut app, picker.center());
+        assert!(app.settings.is_some(), "the press is not a backdrop click");
+        assert!(app.picker.is_some(), "and the picker is still open");
+        assert_ne!(
+            app.pref_colour(PrefColour::Guide),
+            before,
+            "the press reached the picker"
+        );
+        assert_eq!(
+            app.prefs.canvas.guide_colour,
+            CanvasPrefs::default().guide_colour,
+            "nothing is saved before Save changes"
+        );
+    }
+
+    /// Escape with a Settings colour's picker open closes the picker and keeps the
+    /// form; a second Escape discards the form.
+    ///
+    /// flip: `settings_ui` without its Escape guard → fails at "the form stays".
+    #[test]
+    fn escape_closes_the_picker_before_the_form() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = settings_with_picker(&ctx);
+        let escape = || egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&ctx, &mut app, vec![escape()]);
+        assert!(app.picker.is_none(), "the picker closes");
+        assert!(app.settings.is_some(), "the form stays");
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, vec![escape()]);
+        assert!(app.settings.is_none(), "a second Escape discards the form");
     }
 }

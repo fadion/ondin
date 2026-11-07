@@ -168,10 +168,10 @@ pub(crate) struct InFlight {
     /// The typographic spans as they were when the field scrub began: what a
     /// right-click cancel puts back, and the only record of it.
     pub(crate) session_scrub: Option<(NodeId, CharSpans, ParaSpans)>,
-    /// The Settings modal's nudge pair as it was when the field scrub began (the modal
-    /// writes its own draft, not `RenderOverrides`). Also keeps the cancel gate armed
-    /// after egui clears `ctx.dragged_id()` on any button's release.
-    pub(crate) settings_scrub: Option<crate::input::NudgeStep>,
+    /// The Settings modal's scrubbable numbers as they were when a field scrub began
+    /// (the modal writes its own draft, not `RenderOverrides`). Also keeps the cancel
+    /// gate armed after egui clears `ctx.dragged_id()` on any button's release.
+    pub(crate) settings_scrub: Option<crate::settings::Scrubbed>,
     /// The batch rename box's numbering as it was when a From, Step or Pad scrub
     /// began, for the same reasons as [`Self::settings_scrub`].
     pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
@@ -245,7 +245,7 @@ mod in_flight_tests {
             (
                 "settings_scrub",
                 InFlight {
-                    settings_scrub: Some(crate::input::NudgeStep::default()),
+                    settings_scrub: Some(crate::settings::Scrubbed::default()),
                     ..Default::default()
                 },
             ),
@@ -2817,11 +2817,11 @@ impl OndinApp {
         {
             self.restyle_session_with(spans, para_spans);
         }
-        // And the Settings modal's nudge pair.
-        if let Some(nudge) = self.in_flight.settings_scrub.take()
+        // And the Settings modal's scrubbed numbers.
+        if let Some(scrubbed) = self.in_flight.settings_scrub.take()
             && let Some(settings) = &mut self.settings
         {
-            settings.set_nudge(nudge);
+            settings.restore(scrubbed);
         }
         // And the batch rename box's numbering.
         if let Some(n) = self.in_flight.rename_scrub.take()

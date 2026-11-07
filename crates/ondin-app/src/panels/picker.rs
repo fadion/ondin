@@ -339,6 +339,28 @@ fn picker_window() -> egui::Window<'static> {
         .frame(ui::menu_frame(ui::POPOVER_PAD))
 }
 impl OndinApp {
+    /// Open the picker on a node-less `slot` left of `card`, a popover's gap away
+    /// and a little above the row at `row_y`, as the inspector's opens left of its
+    /// cards; retarget it when one is open.
+    pub(crate) fn open_picker_beside(
+        &mut self,
+        ctx: &egui::Context,
+        slot: PaintSlot,
+        card: egui::Rect,
+        row_y: f32,
+    ) {
+        let page = self.session.page;
+        if let Some(p) = self.picker.as_mut() {
+            return p.retarget(page, slot);
+        }
+        let screen = ctx.input(|i| i.content_rect());
+        let (left, top) = (screen.min.x + 12.0, screen.min.y + 12.0);
+        let spawn = egui::pos2(
+            (card.left() - WIDTH - crate::app::POPOVER_GAP).max(left),
+            (row_y - 40.0).clamp(top, (screen.max.y - HEIGHT_HINT).max(top)),
+        );
+        self.picker = Some(Picker::new(page, slot, spawn));
+    }
     /// Draw the picker if one is open. Closes itself when its target has gone
     /// (the layer was deleted, or the fill row it points at was removed).
     pub(crate) fn picker_ui(&mut self, ctx: &egui::Context) {
@@ -406,6 +428,8 @@ impl OndinApp {
                     || self.session.doc.variables().get(var).is_none()
                     || self.session.doc.variables().mode(mode).is_none()
             }
+            // A Settings colour belongs to the open form, whatever is selected.
+            PaintSlot::Pref(_) => self.settings.is_none(),
             _ => !self.session.selection.contains(node),
         };
         // A cell's previewed colour lives only while a button is held, so a
@@ -450,13 +474,20 @@ impl OndinApp {
         if !placed {
             window = window.current_pos(spawn);
         }
-        window.show(ctx, |ui| {
+        let shown = window.show(ctx, |ui| {
             ui::hold_tab(ui);
             ui.set_width(WIDTH - ui::POPOVER_PAD * 2.0);
             // One number across every popover in the app.
             ui.spacing_mut().item_spacing.y = crate::ui::POPOVER_SECTION_GAP;
             close = self.picker_body(ui, node, slot, &brush, box_size);
         });
+        // Over the Settings modal, which a press raises to the top: put back above
+        // it, the picker stays live and the press is not a backdrop click.
+        if slot.pref_scoped().is_some()
+            && let Some(shown) = &shown
+        {
+            ctx.move_to_top(shown.response.layer_id);
+        }
         if let Some(p) = &mut self.picker {
             p.placed = true;
         }

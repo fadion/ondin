@@ -299,6 +299,22 @@ pub enum PaintSlot {
     /// browser). Solid only, alpha kept; the picker's *Variables* face makes the
     /// cell an alias where a layer's makes a binding.
     VarCell(ondin_core::VarId, ondin_core::ModeId),
+    /// A colour in the Settings modal's draft, not the document
+    /// ([`PaintSlot::pref_scoped`]); node-less, as [`PaintSlot::Canvas`] is.
+    Pref(PrefColour),
+}
+
+/// Which Settings colour a [`PaintSlot::Pref`] edits (`prefs::CanvasPrefs`).
+///
+/// Its write is the draft's, staged until *Save changes* as every Settings row is,
+/// so it makes no undo step. `OndinApp::write_pref_colour` is the route every slot
+/// verb diverts it to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PrefColour {
+    /// The colour a guide with no colour of its own draws in. Opaque, as a guide is.
+    Guide,
+    /// The pixel grid's ink while *Adaptive pixel grid* is off, alpha and all.
+    Grid,
 }
 
 /// Which of a text node's two decorations a [`PaintSlot::TextDecoration`] names.
@@ -426,6 +442,15 @@ impl PaintSlot {
         }
     }
 
+    /// The Settings colour this is, or `None` for every slot that writes the
+    /// document. The one predicate every slot verb asks, as [`Self::char_scoped`] is.
+    pub fn pref_scoped(self) -> Option<PrefColour> {
+        match self {
+            PaintSlot::Pref(p) => Some(p),
+            _ => None,
+        }
+    }
+
     /// Whether this slot can hold a gradient.
     ///
     /// This answers whether the picker's gradient tabs are live (they are shown
@@ -446,6 +471,7 @@ impl PaintSlot {
                 | PaintSlot::Effect(_)
                 | PaintSlot::Grid(_)
                 | PaintSlot::VarCell(..)
+                | PaintSlot::Pref(_)
         )
     }
 
@@ -453,7 +479,10 @@ impl PaintSlot {
     /// behind it to be transparent against, and a guide faded to nothing is a deleted
     /// guide.
     pub fn takes_alpha(self) -> bool {
-        !matches!(self, PaintSlot::Canvas | PaintSlot::Guide)
+        !matches!(
+            self,
+            PaintSlot::Canvas | PaintSlot::Guide | PaintSlot::Pref(PrefColour::Guide)
+        )
     }
 }
 

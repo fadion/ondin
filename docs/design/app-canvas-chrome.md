@@ -301,7 +301,10 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - Rightmost: `icon::SLIDERS`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
 - Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
-  library's Settings shares the theme row only), nudge step, *Show tree guides* and *Collapse groups on open* (under a
+  library's Settings shares the theme row only), nudge step, the **Canvas** rows (*Ruler guides
+  colour* and *Ruler guides thickness*, *Adaptive pixel grid* with its caption, and *Pixel grid
+  colour*, dimmed with *Turn off Adaptive pixel grid to pick a colour* while adaptive is on;
+  `app-rulers-guides.md`, `prefs::CanvasPrefs`), *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
   its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a, and *Check spelling*), the web-font switch and
   cache row. `Ctrl+,` opens it (and only opens:

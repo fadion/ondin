@@ -12,17 +12,17 @@ item's premise can go stale while its ask still reads true.
 - **The rest of the command registry.** The verb table is built (`ondin_core::verbs`, `core-ops.md`
   *The verb registry*), over the headless editing code now in `ondin_core::edit`, and `ondin run`
   drives it. Left:
-  - **Edits the app still builds itself.** A verb is a builder's door, so an edit built in
-    `ondin-app` moves into a core builder before its verb exists, as delete and duplicate did
-    (`build::delete`, `build::duplicate_placements`). The commands no verb reaches yet that build
-    their ops in place: `repeat::linked_ring`, `pixel_fit`, `resize_to_original`, `flip_text_path`,
-    `join_layers`, `replace_image_fill`/`replace_image_with`, `paste_text`, and the contrast
-    checker's `fix_transaction`. `create_component` is Phase 3's `make_component`.
-    Left in the app on purpose: what the existing verbs already write (hide, lock, *Reset origin*,
-    *Make base operand*, batch rename), what MCP does not expose (guides, the fill rule, a page's
-    ground; `mcp.md` *Not exposed*), `set_text_sizing` (it reads the app's shaped layout; its op is
-    `set_geometry`'s), and the canvas gestures and the inspector's field writers, which become
-    builders only when a verb needs the same edit.
+  - **The contrast checker's fix** (`contrast::fix_transaction`) has no verb: it acts on a
+    `Finding` that `ondin_export::contrast` measures by rendering, which core cannot do. A
+    `fix_contrast` verb needs that measurement lent through `verbs::Ctx`, as `add_image` borrows a
+    hasher.
+  - **Phase 3's verbs**, `make_component` first: `create_component` and the linked ring
+    (`repeat::linked_ring`) build a component in the app.
+  - Left in the app on purpose: what the existing verbs already write (hide, lock, *Reset origin*,
+    *Make base operand*, batch rename, *Flip to other side*, the text sizing switch), what MCP does
+    not expose (guides, the fill rule, a page's ground; `mcp.md` *Not exposed*), and the canvas
+    gestures and the inspector's field writers (`slot_transaction`, which *Replace…* on any paint
+    goes through), which become builders only when a verb needs the same edit.
 
 ## Now · Components and layout
 

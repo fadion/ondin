@@ -33,12 +33,14 @@ Phase 1 — read/export (ship first):
 `list_styles() -> StyleTable`.
 
 Phase 2 — write (1:1 with operations/composites):
-`create_node`, `insert_subtree`, `delete_node`, `reparent`, `reorder`, `group(ids)`, `ungroup(id)`,
-`duplicate(id)`, `set_transform`, `set_pivot`, `set_geometry`, `set_name`, `set_visible`,
+`create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `delete_node`,
+`reparent`, `reorder`, `group(ids)`, `ungroup(id)`, `duplicate(id)`, `join_paths(id, other)`,
+`repeat(ids, count, angle?, turn?)`, `set_transform`, `set_pivot`, `set_geometry`,
+`set_size(id, width, height)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
 `set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
-`set_effects`, `add_image(bytes) -> ImageId`, `set_display`, `set_layout_item`, `set_insets`,
+`set_effects`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `set_display`, `set_layout_item`, `set_insets`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 

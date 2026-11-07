@@ -67,8 +67,8 @@ Why the surprising ones are there: the per-package clippy loop compiles differen
 code from the workspace run (feature unification); `--document-private-items` is
 what makes the doc gate read most of this tree; the release test is the only thing
 that runs under the release cfg (§15 D597). ⚠️ **`licenses`, not a bare `cargo
-deny check`** — `advisories` is deliberately red on two quick-xml entries;
-`deny.toml` has the analysis, and a *new* advisory is a conversation with the user.
+deny check`** — a *new* advisory is a conversation with the user;
+`deny.toml` holds the ignores and their reasons.
 
 Then the two gated suites, **which no CI runner can run** — a GPU and a network
 font fetch. This machine has an RTX 4070 Ti; a carried-forward "unverifiable" is

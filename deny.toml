@@ -7,8 +7,7 @@
 # crate whose license is incompatible with shipping Ondin under MIT.
 #
 # CI runs `check licenses` on every push (`.github/workflows/ci.yml`, §15 D955),
-# and the `release` skill's Phase 0 runs it locally. Licenses only — see the
-# advisories note below for why not a bare `cargo deny check`.
+# and the `release` skill's Phase 0 runs it locally.
 
 [licenses]
 # Every license we accept. All permissive except MPL-2.0, which is weak
@@ -63,36 +62,23 @@ unmaintained = "workspace"
 # Vulnerabilities are denied by default. Any entry added below must be a
 # conscious, reviewed exception naming the advisory and why it is unreachable.
 #
-# 🚨 `cargo deny check advisories` is RED as of 2026-09-16, deliberately left so.
-# Two advisories remain, and both are quick-xml < 0.41 (RUSTSEC-2026-0194,
-# -0195): quadratic parse time on duplicate attribute names, and unbounded
-# namespace allocation in `NsReader`.
+# Fix an advisory with `cargo update` or a version bump first; ignore one only
+# when no release of the crate pulling it in is patched.
 #
-# Neither reaches a shipped **Windows** build. `cargo tree -i quick-xml --target
-# x86_64-pc-windows-msvc` prints nothing at all — quick-xml arrives only on Linux,
-# through `wayland-scanner`, a build-time proc macro over Wayland's own vendored
-# protocol XML rather than over anything a user supplies. **Since Linux builds
-# ship (§15 D956) that is the case that matters, and it holds there too**: a proc
-# macro runs in the compiler and is not linked into the binary. ⚠️ **And Ondin's SVG
-# import — the only untrusted XML it reads — uses `roxmltree`, not quick-xml**, so
-# these do not touch the parser they look like they are about.
-#
-# They are not ignored, because they are not fixable here either: `cargo update -p
-# quick-xml` is a no-op, the version being held at 0.39.4 by `wayland-scanner`'s
-# own requirement (winit → smithay → wayland-scanner). It moves when winit's
-# Wayland stack does. Do not add an `ignore` entry to make this green — a red line
-# that names a real, unfixable constraint is worth more than a silenced one.
-#
-# ⚠️ Two others were here and were FIXED on 2026-09-16 rather than ignored, which
-# is the outcome this block is for:
-#   * RUSTSEC-2026-0285 — rustls < 0.23.45, TLS 1.3 handshake messages accepted
-#     across encryption-level boundaries. This one DID reach the shipped build,
-#     via `ureq` (how the Font tab downloads a web font). `cargo update -p rustls`
-#     → 0.23.45, pulling rustls-webpki 0.103.15 with it.
-#   * RUSTSEC-2026-0257 — webbrowser < 1.2.2, `BROWSER` argument injection, whose
-#     fault is in the crate's `src/unix.rs` and so was unreachable on Windows.
-#     `cargo update -p webbrowser` → 1.2.4 anyway.
-ignore = []
+# The `zip` entries below are held at 8.x by `velopack` 1.2, which requires
+# `zip` ^8.6; the only `velopack` on zip 9 is a pre-release. All four are faults
+# of `ZipArchive::extract` / `ZipStreamReader::extract`, which neither Ondin
+# (the `.sketch` import and the export archive read and write entry by entry) nor
+# `velopack` (its bundle copies entries out through `by_index`) calls. The
+# workspace's own `zip` stays on 8.x beside it: on 9 it would compile a second
+# copy and leave these advisories in the tree all the same. Drop them when
+# `velopack` moves to zip 9, and move the workspace's `zip` with it.
+ignore = [
+    { id = "RUSTSEC-2026-0367", reason = "zip <9 SUID bits kept by ZipArchive::extract, which nothing in the tree calls" },
+    { id = "RUSTSEC-2026-0368", reason = "zip <9 symlink escape in ZipArchive::extract, which nothing in the tree calls" },
+    { id = "RUSTSEC-2026-0369", reason = "zip <9 permissions through symlinks in extract(), which nothing in the tree calls" },
+    { id = "RUSTSEC-2026-0429", reason = "zip <9 abort on a large symlink entry in ZipArchive::extract, which nothing in the tree calls" },
+]
 
 [bans]
 # Duplicate versions are unavoidable in a GPU + windowing tree; surface them

@@ -70,9 +70,7 @@ jobs:
       # gate*).
       - name: Rustdoc
         run: cargo doc --workspace --no-deps --document-private-items
-      # **Licenses only.** `cargo deny check` would also run `advisories`, which
-      # is deliberately red on two quick-xml entries that reach no shipped build
-      # and cannot be updated from here — `deny.toml` carries the analysis.
+      # Licenses only; `deny.toml` carries the advisory policy and its ignores.
       - name: License policy
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

@@ -110,7 +110,13 @@ pub struct Guide {
 impl Guide {
     /// The colour to draw this guide in.
     pub fn color(&self) -> Color {
-        self.color.unwrap_or(DEFAULT_GUIDE_COLOR)
+        self.color_or(DEFAULT_GUIDE_COLOR)
+    }
+
+    /// The colour to draw this guide in where guides with no colour of their own
+    /// draw in `default`: the app's per-user default.
+    pub fn color_or(&self, default: Color) -> Color {
+        self.color.unwrap_or(default)
     }
 }
 

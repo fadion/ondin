@@ -16,6 +16,7 @@
 
 use crate::input::NudgeStep;
 use ondin_core::ExportSpec;
+use ondin_core::peniko::Color;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -167,6 +168,47 @@ impl Default for BatchRenamePrefs {
     }
 }
 
+/// The Settings modal's *Canvas* section: how ruler guides and the pixel grid draw.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CanvasPrefs {
+    /// What a guide with no colour of its own draws in ([`ondin_core::Guide::color_or`]).
+    pub guide_colour: Color,
+    /// A guide's line in points, [`Self::GUIDE_MIN`]–[`Self::GUIDE_MAX`]; a selected
+    /// guide draws one point thicker.
+    pub guide_thickness: u8,
+    /// Shade each grid pixel from the pixel under it (`ondin_render::grid_ink`),
+    /// rather than in [`Self::grid_ink`].
+    pub grid_adaptive: bool,
+    /// The pixel grid's ink while [`Self::grid_adaptive`] is off, straight alpha.
+    pub grid_ink: Color,
+}
+
+impl CanvasPrefs {
+    /// The thinnest and thickest guide the Settings field offers.
+    pub const GUIDE_MIN: u8 = 1;
+    pub const GUIDE_MAX: u8 = 5;
+    /// The grid's fixed ink: a neutral mid-grey at low alpha, which shows on white
+    /// and black and on nothing near mid-grey.
+    pub const GRID_INK: Color = Color::from_rgba8(128, 128, 128, 60);
+
+    /// [`Self::guide_thickness`] held to its range, as a stroke width.
+    pub fn guide_width(&self) -> f32 {
+        f32::from(self.guide_thickness.clamp(Self::GUIDE_MIN, Self::GUIDE_MAX))
+    }
+}
+
+impl Default for CanvasPrefs {
+    fn default() -> Self {
+        Self {
+            guide_colour: ondin_core::DEFAULT_GUIDE_COLOR,
+            guide_thickness: 1,
+            grid_adaptive: true,
+            grid_ink: Self::GRID_INK,
+        }
+    }
+}
+
 /// Everything the Settings modal writes, plus the export habits the export
 /// panel's popover writes.
 ///
@@ -199,6 +241,8 @@ pub struct Prefs {
     pub export_on_save: bool,
     /// How far an arrow key moves the selection, and how far with Shift held.
     pub nudge: NudgeStep,
+    /// How ruler guides and the pixel grid draw.
+    pub canvas: CanvasPrefs,
     /// Draw the dashed lines that join a layer row to the container it is in
     /// (`panels::layers`'s `tree_guide_segments`).
     ///
@@ -397,6 +441,7 @@ impl Default for Prefs {
             export_folders_from_names: false,
             export_on_save: false,
             nudge: NudgeStep::default(),
+            canvas: CanvasPrefs::default(),
             tree_guides: true,
             collapse_groups_on_open: false,
             resource_meter: false,

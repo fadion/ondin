@@ -72,13 +72,19 @@ pub(crate) fn interacting(resp: &egui::Response) -> bool {
 /// The colour every guide in a set is drawn in, or `None` where they disagree.
 ///
 /// Compared as the drawn colour rather than the `Option` override, so a guide on
-/// the default and one explicitly set to it agree, as the swatch shows.
-fn shared_guide_colour(guides: &[ondin_core::Guide]) -> Option<ondin_core::peniko::Color> {
+/// the default and one explicitly set to it agree, as the swatch shows. `default`
+/// is what a guide with no colour of its own draws in (`CanvasPrefs::guide_colour`).
+fn shared_guide_colour(
+    guides: &[ondin_core::Guide],
+    default: ondin_core::peniko::Color,
+) -> Option<ondin_core::peniko::Color> {
     let [first, rest @ ..] = guides else {
         return None;
     };
-    let colour = first.color();
-    rest.iter().all(|g| g.color() == colour).then_some(colour)
+    let colour = first.color_or(default);
+    rest.iter()
+        .all(|g| g.color_or(default) == colour)
+        .then_some(colour)
 }
 /// Drive every layer in `ids` to one proportion-lock state, as one transaction — the
 /// multi Transform card's chain button.
@@ -935,14 +941,15 @@ impl OndinApp {
         self.panel(ui, "Transform", None, |app, ui| {
             app.guide_position_fields(ui, guides);
         });
-        let agreed = shared_guide_colour(guides);
+        let default = self.prefs.canvas.guide_colour;
+        let agreed = shared_guide_colour(guides, default);
         // Live when any of them has been recoloured.
         let any_override = guides.iter().any(|g| g.color.is_some());
         self.colour_panel(
             ui,
             ColourCard {
                 slot: PaintSlot::Guide,
-                base: agreed.unwrap_or(ondin_core::DEFAULT_GUIDE_COLOR),
+                base: agreed.unwrap_or(default),
                 mixed: agreed.is_none(),
                 swatch_hover: "Edit the guide colour",
                 reset_hover: ("Reset the guide colour", "Already the default guide colour"),
@@ -9957,8 +9964,9 @@ impl OndinApp {
             }
             PaintSlot::Guide => {
                 let guides = self.selected_guides();
-                let colour =
-                    shared_guide_colour(&guides).or_else(|| guides.first().map(|g| g.color()))?;
+                let default = self.prefs.canvas.guide_colour;
+                let colour = shared_guide_colour(&guides, default)
+                    .or_else(|| guides.first().map(|g| g.color_or(default)))?;
                 return Some(Brush::Solid(colour));
             }
             PaintSlot::Selection(target, i) => {
@@ -20459,12 +20467,14 @@ mod subject_tests {
         );
     }
 
-    /// A guide on the default and one naming that default agree: the comparison is the drawn colour.
+    /// A guide on the default and one naming that default agree: the comparison is the drawn
+    /// colour, against the user's default rather than the core's.
     ///
-    /// flip: `g.color()` → `g.color` in `shared_guide_colour` → fails at the second assertion.
+    /// flip: `shared_guide_colour` reading `color()` for `color_or(default)` → fails at the first
+    /// assertion.
     #[test]
     fn two_guides_agree_about_a_colour_one_of_them_names_and_the_other_inherits() {
-        let default = ondin_core::DEFAULT_GUIDE_COLOR;
+        let default = ondin_core::peniko::Color::from_rgb8(217, 70, 143);
         let other = ondin_core::peniko::Color::from_rgb8(9, 200, 30);
         let g = |i: u64, color| Guide {
             id: GuideId(ondin_core::IdSource::new(i).mint()),
@@ -20475,22 +20485,22 @@ mod subject_tests {
         };
 
         assert_eq!(
-            super::shared_guide_colour(&[g(1, None), g(2, None)]),
+            super::shared_guide_colour(&[g(1, None), g(2, None)], default),
             Some(default),
             "two guides on the default agree about it"
         );
         assert_eq!(
-            super::shared_guide_colour(&[g(1, None), g(2, Some(default))]),
+            super::shared_guide_colour(&[g(1, None), g(2, Some(default))], default),
             Some(default),
             "and so do one on it and one that names it"
         );
         assert_eq!(
-            super::shared_guide_colour(&[g(1, None), g(2, Some(other))]),
+            super::shared_guide_colour(&[g(1, None), g(2, Some(other))], default),
             None,
             "two visibly different guides are Mixed"
         );
         assert_eq!(
-            super::shared_guide_colour(&[]),
+            super::shared_guide_colour(&[], default),
             None,
             "and an empty set has no colour to share"
         );

@@ -151,6 +151,15 @@ fn guide_ink(colour: ondin_core::peniko::Color, selected: bool, fade: bool) -> e
     }
 }
 
+/// A guide's stroke in points at the Settings thickness `base`: one point more
+/// while selected.
+fn guide_stroke_width(base: f32, selected: bool) -> f32 {
+    match selected {
+        true => base + 1.0,
+        false => base,
+    }
+}
+
 /// A coordinate snapped onto the device-pixel grid, so a hairline stays a
 /// hairline. `grid::draw_pixel_grid` calls it too.
 ///
@@ -546,7 +555,7 @@ impl OndinApp {
                 inner,
                 ppp,
                 &line,
-                shown.color(),
+                shown.color_or(self.prefs.canvas.guide_colour),
                 selected,
                 selected || hovered == Some(guide.id),
             );
@@ -557,8 +566,8 @@ impl OndinApp {
         // inside `guide_ink`, after the selection blue replaces the colour.
         if let Drag::Guide(d) = &self.drag {
             let colour = match d.id.and_then(|id| self.session.doc.guide(id)) {
-                Some(g) => self.shown_guide(g).color(),
-                None => ondin_core::DEFAULT_GUIDE_COLOR,
+                Some(g) => self.shown_guide(g).color_or(self.prefs.canvas.guide_colour),
+                None => self.prefs.canvas.guide_colour,
             };
             if let Some(line) = self.guide_line_of(d.axis, d.owner, d.position, rect, inner, ppp) {
                 self.draw_guide_faded(
@@ -634,7 +643,7 @@ impl OndinApp {
         fade: bool,
     ) {
         let ink = guide_ink(colour, selected, fade);
-        let width = if selected { 2.0 } else { 1.0 };
+        let width = guide_stroke_width(self.prefs.canvas.guide_width(), selected);
         let at = |v: f32| snap_across_axis(v, ppp, width);
         // Snapped across the line only; rounding along it would shorten a scoped
         // guide.
@@ -2084,15 +2093,25 @@ mod guide_geometry_tests {
         out
     }
 
-    /// Both guide weights keep a fully covered device pixel at every ordinary
-    /// display scale, and the selected weight has more solid pixels than the
-    /// resting one. Asserts the core, not crispness: a fractional device width
-    /// cannot put both edges on the grid.
+    /// At every thickness Settings offers, both guide weights keep a fully
+    /// covered device pixel at every ordinary display scale, and the selected
+    /// weight has more solid pixels than the resting one. Asserts the core, not
+    /// crispness: a fractional device width cannot put both edges on the grid.
     #[test]
     fn the_two_guide_weights_keep_a_solid_core_at_every_scale() {
-        for ppp in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+        let (lo, hi) = (
+            crate::prefs::CanvasPrefs::GUIDE_MIN,
+            crate::prefs::CanvasPrefs::GUIDE_MAX,
+        );
+        for (ppp, base) in [1.0f32, 1.25, 1.5, 1.75, 2.0]
+            .into_iter()
+            .flat_map(|ppp| (lo..=hi).map(move |t| (ppp, f32::from(t))))
+        {
             let mut cores = Vec::new();
-            for width in [1.0f32, 2.0] {
+            for width in [
+                guide_stroke_width(base, false),
+                guide_stroke_width(base, true),
+            ] {
                 let at = snap_across_axis(100.3, ppp, width);
                 let cov = coverage(at, ppp, width);
                 let core = cov.iter().copied().fold(0.0f32, f32::max);
@@ -2237,6 +2256,48 @@ mod guide_grab_tests {
             .expect("add the guide");
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
         (app, id, rect, 1.0)
+    }
+
+    /// A guide with no colour of its own draws in the Settings default at the
+    /// Settings thickness, and one point thicker in the selection blue once picked.
+    ///
+    /// flip: `draw_guide_inner` reading a fixed 1pt base for the thickness → fails at "3pt".
+    #[test]
+    fn a_guide_draws_in_the_settings_colour_and_thickness() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, id, rect, ppp) = app_with_guide(&ctx, GuideAxis::Vertical, 300.0);
+        let pink = ondin_core::peniko::Color::from_rgb8(217, 70, 143);
+        app.prefs.canvas.guide_colour = pink;
+        app.prefs.canvas.guide_thickness = 3;
+        let strokes = |app: &OndinApp| -> Vec<egui::Stroke> {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                app.draw_rulers_and_guides(ui.painter(), rect, ppp, None);
+            });
+            out.shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke } if points[0].x == points[1].x => {
+                        Some(*stroke)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let ink = crate::ui::color_to_egui(pink);
+        let at_rest = strokes(&app);
+        assert!(
+            at_rest.iter().any(|s| s.color == ink && s.width == 3.0),
+            "3pt in the default: {at_rest:?}"
+        );
+        app.session.selection.set_guide(id);
+        let picked = strokes(&app);
+        assert!(
+            picked
+                .iter()
+                .any(|s| s.color == color::SELECT && s.width == 4.0),
+            "one point thicker, in blue: {picked:?}"
+        );
     }
 
     /// Pressing a guide anywhere in its pick band leaves it where it was. Swept

@@ -459,24 +459,26 @@ const BOOL_OPS: &[&str] = &["union", "subtract", "intersect", "exclude"];
 const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const MOVES: &[&str] = &["front", "forward", "backward", "back"];
-const BLENDS: &[&str] = &[
-    "pass_through",
-    "normal",
-    "darken",
-    "multiply",
-    "color_burn",
-    "lighten",
-    "screen",
-    "color_dodge",
-    "overlay",
-    "soft_light",
-    "hard_light",
-    "difference",
-    "exclusion",
-    "hue",
-    "saturation",
-    "color",
-    "luminosity",
+/// The blend modes by [`BlendMode::label`], as the snapshot names them, in
+/// [`BlendMode::ALL`]'s order.
+pub const BLENDS: &[&str] = &[
+    "Pass through",
+    "Normal",
+    "Darken",
+    "Multiply",
+    "Color burn",
+    "Lighten",
+    "Screen",
+    "Color dodge",
+    "Overlay",
+    "Soft light",
+    "Hard light",
+    "Difference",
+    "Exclusion",
+    "Hue",
+    "Saturation",
+    "Color",
+    "Luminosity",
 ];
 
 /// The layer named `id`, or [`OpError::NoSuchNode`].
@@ -936,14 +938,22 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_blend",
-        doc: "Set how layers blend with what is under them",
+        doc: "Set how layers blend with what is under them; Pass through is Normal on a layer that is not a frame or group",
         params: &[
-            req("nodes", NODES, "the layers"),
+            req(
+                "nodes",
+                NODES,
+                "the layers; a member inside another is left to it",
+            ),
             req("blend", ParamKind::Choice(BLENDS), "the mode"),
         ],
-        run: |_, a| {
-            let blend = blend_of(a.choice("blend").unwrap_or("normal"));
-            each(a, |id| Operation::SetBlend { id, blend })
+        run: |ctx, a| {
+            let blend = blend_of(a.choice("blend").unwrap_or("Normal"));
+            Ok(Done::edit(build::set_blend_all(
+                ctx.doc,
+                &a.nodes("nodes")?,
+                blend,
+            )))
         },
     },
     Verb {
@@ -1262,7 +1272,11 @@ fn tree_ops(
             let why = format!("a blend is one of {}", BLENDS.join(", "));
             return Err(a.invalid("tree", why));
         }
-        let blend = blend_of(word);
+        // As `build::set_blend_all` lands it, for a layer it cannot see yet.
+        let blend = match blend_of(word) {
+            m if m.allowed_on(&tree.kind) => m,
+            _ => BlendMode::Normal,
+        };
         ops.push(Operation::SetBlend { id, blend });
     }
     if let Some(clip) = tree.clip {
@@ -1306,27 +1320,12 @@ fn tree_ops(
     Ok(())
 }
 
-/// The blend mode a [`BLENDS`] word names.
-fn blend_of(word: &str) -> BlendMode {
-    match word {
-        "pass_through" => BlendMode::PassThrough,
-        "darken" => BlendMode::Darken,
-        "multiply" => BlendMode::Multiply,
-        "color_burn" => BlendMode::ColorBurn,
-        "lighten" => BlendMode::Lighten,
-        "screen" => BlendMode::Screen,
-        "color_dodge" => BlendMode::ColorDodge,
-        "overlay" => BlendMode::Overlay,
-        "soft_light" => BlendMode::SoftLight,
-        "hard_light" => BlendMode::HardLight,
-        "difference" => BlendMode::Difference,
-        "exclusion" => BlendMode::Exclusion,
-        "hue" => BlendMode::Hue,
-        "saturation" => BlendMode::Saturation,
-        "color" => BlendMode::Color,
-        "luminosity" => BlendMode::Luminosity,
-        _ => BlendMode::Normal,
-    }
+/// The blend mode a [`BLENDS`] label names; Normal for none.
+fn blend_of(label: &str) -> BlendMode {
+    BlendMode::ALL
+        .into_iter()
+        .find(|m| m.label() == label)
+        .unwrap_or(BlendMode::Normal)
 }
 
 /// Why a script stopped: the step, counted from 1, and what went wrong there.

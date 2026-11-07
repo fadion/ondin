@@ -416,7 +416,7 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
         "children": [
             { "kind": rect(10.0, 10.0), "name": "Back", "fills": [fill], "opacity": 0.5 },
             { "kind": "Group", "name": "Front", "children": [
-                { "kind": rect(5.0, 5.0), "blend": "multiply", "visible": false },
+                { "kind": rect(5.0, 5.0), "blend": "Multiply", "visible": false },
             ] },
         ],
     });
@@ -466,6 +466,81 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
     assert!(
         matches!(refused, Err(VerbError::Invalid { param: "tree", .. })),
         "{refused:?}"
+    );
+}
+
+/// `set_blend` takes the modes as the snapshot labels them and writes as the panel
+/// does: the outermost layers only, and Pass through as Normal on a layer that is
+/// not a frame or group, in a tree's layers too.
+///
+/// flip: `set_blend` writing a `SetBlend` per node given → fails at "the child is left
+/// to its group".
+#[test]
+fn set_blend_writes_the_outermost_layers_by_label() {
+    let labels: Vec<&str> = ondin_core::BlendMode::ALL
+        .iter()
+        .map(|m| m.label())
+        .collect();
+    assert_eq!(verbs::BLENDS, labels, "the choice is the snapshot's labels");
+
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let a = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let b = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let group = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [a.to_wire()] }),
+    )[0];
+    let wire = [group.to_wire(), a.to_wire()];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_blend",
+        json!({ "nodes": wire, "blend": "Color burn" }),
+    );
+    assert_eq!(
+        doc.get(group).unwrap().blend(),
+        ondin_core::BlendMode::ColorBurn
+    );
+    assert_eq!(
+        doc.get(a).unwrap().blend(),
+        ondin_core::BlendMode::Normal,
+        "the child is left to its group"
+    );
+
+    run(
+        &mut doc,
+        &mut ids,
+        "set_blend",
+        json!({ "nodes": [group.to_wire(), b.to_wire()], "blend": "Pass through" }),
+    );
+    assert_eq!(
+        doc.get(group).unwrap().blend(),
+        ondin_core::BlendMode::PassThrough
+    );
+    assert_eq!(doc.get(b).unwrap().blend(), ondin_core::BlendMode::Normal);
+
+    let leaf = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": p, "tree": { "kind": rect(1.0, 1.0), "blend": "Pass through" } }),
+    )[0];
+    assert_eq!(
+        doc.get(leaf).unwrap().blend(),
+        ondin_core::BlendMode::Normal
     );
 }
 

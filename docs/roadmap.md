@@ -17,6 +17,14 @@ item's premise can go stale while its ask still reads true.
 - **Zoom with the scroll wheel** — a Settings preference, off by default: a plain wheel zooms at
   the cursor and `Ctrl`/`Alt`+wheel pans (`canvas::wheel_input`). Mouse wheels only, told apart by
   the event's line unit, so a touchpad's two-finger scroll still pans.
+- **A Tools menu** (`TopMenu::Tools`), right of View, a new toolbox glyph and caret, for what works
+  across the document. Checks, which change nothing: *Check contrast* and *Simulate vision*
+  (ticked while on), *Colour review…*. Then bulk edits, each a box and one undo step: *Find and
+  replace…* (`Ctrl+F`), *Batch rename…* (`Ctrl+Shift+R`), and *Clean up…* and *Fill with
+  content…* once built. View loses its last group. Verbs on the selection stay in the context
+  menu, document-level rows in the Document menu, view modes in View, and inserting in the insert
+  picker. The menu joins the one-open-menu rule and, like View and Snap, is disabled while
+  comparing; the palette keeps every row.
 - **Simulate vision** replaces *Simulate colour blindness*: the bar's chip picks one condition —
   the four colour deficiencies (`vision.rs`), blurred vision, loss of contrast, ghosting and
   yellowing — with a severity slider for each. Contrast loss and yellowing are matrices like the

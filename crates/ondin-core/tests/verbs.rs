@@ -971,6 +971,40 @@ fn add_image_answers_an_id_a_fill_can_show() {
     assert!(err.why.contains("not a PNG"), "{err}");
 }
 
+/// `create_text` makes a text layer whose box's top-left is where it was asked
+/// for, wrapping a line longer than the width given.
+///
+/// The verb's default style has no box trim, so its box's offset is zero and
+/// dropping the offset from the placement does not bite here; the offset matters
+/// only once the verb takes a trimmed style.
+#[test]
+fn create_text_places_its_box() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": p, "text": "Hello there", "x": 20, "y": 30 }),
+    )[0];
+    let res = Resolved::rebuild(&doc);
+    let b = res.world_bounds(t).unwrap();
+    assert!(
+        (b.x0 - 20.0).abs() < 1e-6 && (b.y0 - 30.0).abs() < 1e-6,
+        "the box's corner is at x, y: {b:?}"
+    );
+    let narrow = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": p, "text": "a much longer line of words", "width": 40 }),
+    )[0];
+    let NodeKind::Text { sizing, .. } = doc.get(narrow).unwrap().kind() else {
+        unreachable!()
+    };
+    assert_eq!(*sizing, ondin_core::TextSizing::AutoHeight(40.0));
+}
+
 /// `replace_image` swaps the picture a fill shows and keeps its framing; a picture
 /// the document does not hold is refused.
 ///

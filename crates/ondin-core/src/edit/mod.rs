@@ -1702,6 +1702,38 @@ pub fn create_text(
     }])
 }
 
+/// A text layer holding `content` in `parts`' style, measured: its kind, its box's
+/// size, and the box's offset from the layer's origin. The text goes in as typing
+/// it would (`\r\n` is one break). One line wider than `wrap` wraps at it,
+/// growing downward (`AutoHeight`); otherwise the box follows the text.
+pub fn text_layer_kind(
+    content: &str,
+    mut parts: crate::TextParts,
+    wrap: Option<f64>,
+) -> (NodeKind, Size, Vec2) {
+    let mut editor = crate::text::TextEdit::new("", parts.clone());
+    editor.insert(content);
+    let mut layout = editor.text_layout();
+    if let Some(width) = wrap.filter(|w| layout.size.width > *w) {
+        parts.sizing = TextSizing::AutoHeight(width);
+        editor.restyle(parts.clone());
+        layout = editor.text_layout();
+    }
+    let kind = NodeKind::Text {
+        content: editor.content().to_string(),
+        style: Box::new(parts.style),
+        spans: parts.spans,
+        para_spans: parts.para_spans,
+        paragraph: parts.paragraph,
+        block: parts.block,
+        sizing: parts.sizing,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    (kind, layout.size, layout.origin)
+}
+
 /// The size to place an image at inside a box of `frame` — shrink to fit, never
 /// scale up (§5.5a), preserving aspect. A degenerate box falls back to the
 /// intrinsic size, since a zero-sized layer cannot be seen or fixed.

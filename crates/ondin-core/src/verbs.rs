@@ -584,6 +584,63 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "create_text",
+        doc: "Create a text layer in `parent`, its box sized to the text; answers it",
+        params: &[
+            req("parent", NODE, "the frame, group or page to create it in"),
+            req(
+                "text",
+                TEXT,
+                "what it says; a line break starts a paragraph",
+            ),
+            opt(
+                "x",
+                ParamKind::Number,
+                "its box's left edge in the parent; 0 unless given",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "its box's top edge in the parent; 0 unless given",
+            ),
+            opt(
+                "width",
+                ParamKind::Number,
+                "the width a longer line wraps at; none unless given",
+            ),
+            opt(
+                "index",
+                INDEX,
+                "its place among the parent's children, 0 the bottom",
+            ),
+            opt("name", TEXT, "its name"),
+        ],
+        run: |ctx, a| {
+            let parent = a.node("parent")?;
+            let count = node(ctx, parent)?.children().len();
+            let wrap = a.number("width");
+            if wrap.is_some_and(|w| w <= 0.0) {
+                return Err(a.invalid("width", "a width is more than 0"));
+            }
+            let (kind, _, offset) = crate::edit::text_layer_kind(
+                a.text("text").unwrap_or_default(),
+                crate::TextParts::default(),
+                wrap,
+            );
+            let at = kurbo::Vec2::new(a.number("x").unwrap_or(0.0), a.number("y").unwrap_or(0.0));
+            let id = ctx.ids.mint();
+            let tx = Transaction(vec![Operation::CreateNode {
+                id,
+                parent,
+                index: a.index("index").unwrap_or(count).min(count),
+                kind,
+                transform: Some(Affine::translate(at - offset)),
+                name: a.text("name").map(str::to_owned),
+            }]);
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
         name: "delete_node",
         doc: "Delete layers, with their frames' guides; instances of a deleted main are detached",
         params: &[req("nodes", NODES, "the layers to delete")],

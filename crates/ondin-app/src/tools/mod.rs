@@ -21,7 +21,7 @@ pub use ondin_core::edit::{
     rotate_points, rotate_selection, segment_cubic, segment_ends, segment_is_straight,
     segment_point, set_smoothness, side_shear, skew_selection, skew_to_handle, smooth_points,
     solid_stroke, space_points, split_at_points, split_segments, splittable, step_sides,
-    subpaths_touched, tangent_snap, transform_node, turn_about,
+    subpaths_touched, tangent_snap, text_layer_kind, transform_node, turn_about,
 };
 
 /// The active canvas tool. `Select` manipulates existing nodes; the others draw

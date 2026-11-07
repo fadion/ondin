@@ -5451,3 +5451,34 @@ fn placing_an_image_the_document_already_has_adds_no_second_copy() {
         "the second layer still points at the one copy"
     );
 }
+
+/// A text layer wraps only once its line outruns the width it is given, and then
+/// at that width with a height that follows the text (`AutoHeight`, never `Fixed`);
+/// a line exactly as wide stays auto. `\r\n` goes in as one break.
+///
+/// flip: `>=` for `>` in `text_layer_kind`'s wrap test → fails at "exactly fits".
+#[test]
+fn a_text_layer_wraps_only_once_it_outruns_the_width() {
+    let parts = crate::TextParts::default();
+    let sizing = |kind: &NodeKind| match kind {
+        NodeKind::Text { sizing, .. } => *sizing,
+        _ => unreachable!(),
+    };
+    let (kind, size, _) = text_layer_kind("a line of some words", parts.clone(), None);
+    assert_eq!(sizing(&kind), TextSizing::Auto);
+    let w = size.width;
+    assert!(w > 10.0, "{size:?}");
+    let (kind, ..) = text_layer_kind("a line of some words", parts.clone(), Some(w));
+    assert_eq!(sizing(&kind), TextSizing::Auto, "exactly fits");
+    let (kind, ..) = text_layer_kind("a line of some words", parts.clone(), Some(w - 1.0));
+    assert_eq!(
+        sizing(&kind),
+        TextSizing::AutoHeight(w - 1.0),
+        "a hair over wraps"
+    );
+    let (kind, ..) = text_layer_kind("one\r\ntwo", parts, None);
+    let NodeKind::Text { content, .. } = kind else {
+        unreachable!()
+    };
+    assert_eq!(content, "one\ntwo");
+}

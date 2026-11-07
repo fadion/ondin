@@ -6931,45 +6931,21 @@ impl OndinApp {
     /// that would not read as SVG lands (`crate::import`).
     pub(crate) fn paste_text(&mut self, text: &str, at: Option<Point>) -> bool {
         let (centre, parent, parent_world) = self.paste_placement(at);
-
-        // Through a `TextEdit`: `insert` normalizes `\r\n` (a bare `TextEdit::new`
-        // would double-space every line).
-        let mut parts = self.new_text_parts();
-        let mut editor = TextEdit::new("", parts.clone());
-        editor.insert(text);
-        let mut layout = editor.text_layout();
-
         // Wrapped to the frame's used width, or the view's.
         let available = match self.session.resolved.used_kind(&self.session.doc, parent) {
             Some(NodeKind::Artboard { size, .. }) => size.width,
             _ => self.session.camera.viewport(self.canvas_px).view.width(),
         };
-        if let Some(sizing) = wrapped_paste_sizing(layout.size.width, available) {
-            parts.sizing = sizing;
-            editor.restyle(parts.clone());
-            layout = editor.text_layout();
-        }
-
-        let local =
-            centred_paste_origin(parent_world.inverse() * centre, layout.size, layout.origin);
+        let (kind, size, offset) =
+            tools::text_layer_kind(text, self.new_text_parts(), Some(available));
+        let local = centred_paste_origin(parent_world.inverse() * centre, size, offset);
         let id = self.session.ids.mint();
         let index = self.child_count(parent);
         let tx = Transaction(vec![Operation::CreateNode {
             id,
             parent,
             index,
-            kind: NodeKind::Text {
-                content: editor.content().to_string(),
-                style: Box::new(parts.style.clone()),
-                spans: parts.spans.clone(),
-                para_spans: parts.para_spans.clone(),
-                paragraph: parts.paragraph.clone(),
-                block: parts.block,
-                sizing: parts.sizing,
-                on_path: None,
-                on_path_flip: false,
-                on_path_offset: 0.0,
-            },
+            kind,
             transform: Some(Affine::translate(local)),
             name: None,
         }]);
@@ -10872,13 +10848,6 @@ fn centred_paste_origin(centre: Point, size: ondin_core::kurbo::Size, box_offset
     (centre - size.to_vec2() / 2.0 - box_offset).to_vec2()
 }
 
-/// The sizing a pasted text layer needs when its one auto-width line would outrun
-/// the page, or `None` when auto width fits. `AutoHeight`, not `Fixed`; exactly
-/// fits stays auto (`>=` would wrap a paste that fits).
-fn wrapped_paste_sizing(shaped_width: f64, available: f64) -> Option<ondin_core::TextSizing> {
-    (shaped_width > available).then_some(ondin_core::TextSizing::AutoHeight(available))
-}
-
 /// An owned copy of `s`, or `None` when empty: `Context::copy_text("")` still
 /// counts as a copy and would clear the user's clipboard.
 fn non_empty(s: &str) -> Option<String> {
@@ -13240,25 +13209,6 @@ mod pivot_marker_tests {
 #[cfg(test)]
 mod paste_text_tests {
     use super::*;
-    use ondin_core::TextSizing;
-
-    /// A paste that fits keeps auto width; one that does not wraps at the page, as
-    /// `create_image_at` does.
-    /// flip: `>=` for `>` in `wrapped_paste_sizing` → fails at "exactly fits" only
-    #[test]
-    fn a_pasted_line_wraps_only_once_it_outruns_the_page() {
-        assert_eq!(wrapped_paste_sizing(10.0, 100.0), None, "well inside");
-        assert_eq!(
-            wrapped_paste_sizing(100.0, 100.0),
-            None,
-            "exactly fits, so auto width is still the answer"
-        );
-        assert_eq!(
-            wrapped_paste_sizing(100.1, 100.0),
-            Some(TextSizing::AutoHeight(100.0)),
-            "a hair over wraps, at the page's width and not the line's"
-        );
-    }
 
     /// A root, a frame, a group in the frame, a rect in the group, and a rect
     /// straight on the canvas, returned in that order.
@@ -13392,17 +13342,6 @@ mod paste_text_tests {
             100.0,
             "the box's own centre has to land on the point, not the node's origin"
         );
-    }
-
-    /// A wrapped paste is `AutoHeight`, never `Fixed`, which would clip at a height nobody chose.
-    #[test]
-    fn a_wrapped_paste_keeps_its_height_the_contents() {
-        let sizing = wrapped_paste_sizing(500.0, 200.0).expect("this one wraps");
-        assert!(
-            !sizing.height_is_authored(),
-            "{sizing:?} would fix a height the paste never asked for"
-        );
-        assert_eq!(sizing.wrap_width(), Some(200.0));
     }
 }
 

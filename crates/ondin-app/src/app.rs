@@ -5561,21 +5561,20 @@ impl OndinApp {
         if ids.is_empty() {
             return None;
         }
-        // A frame's guides go with it, and first: the inverse runs reversed, so this order
-        // restores the frame before its guides (the other order cannot be undone).
-        let mut ops = build::guides_of(&self.session.doc, &ids);
-        let guides = ops.len();
-        ops.extend(ids.iter().map(|id| Operation::DeleteNode { id: *id }));
-        // Links into what is deleted climb past it, or `component::check` refuses the commit.
-        let relinks = ondin_core::component::relink_for_delete(&self.session.doc, &ids);
-        let detached = relinks
-            .iter()
-            .filter(|op| {
-                matches!(op, Operation::SetLink { id, link: None }
+        // The registry's `delete_node` edit: the frames' guides, the layers, and the
+        // relinks that detach a deleted main's instances. Counted for the status line.
+        let tx = build::delete(&self.session.doc, &ids);
+        let guides =
+            tx.0.iter()
+                .filter(|op| matches!(op, Operation::RemoveGuide { .. }))
+                .count();
+        let detached =
+            tx.0.iter()
+                .filter(|op| {
+                    matches!(op, Operation::SetLink { id, link: None }
                     if ondin_core::component::instance_root(&self.session.doc, *id) == Some(*id))
-            })
-            .count();
-        ops.extend(relinks);
+                })
+                .count();
         // For the message, so as drawn.
         let name = match ids.as_slice() {
             [one] => (self.session.doc.get(*one).is_some())
@@ -5595,7 +5594,7 @@ impl OndinApp {
             })
             .filter(|(_, src, _)| going.contains(src))
             .collect();
-        if !self.session.commit(Transaction(ops)) {
+        if !self.session.commit(tx) {
             return None;
         }
         self.session.selection.clear();

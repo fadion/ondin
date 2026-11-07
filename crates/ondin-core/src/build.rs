@@ -3379,6 +3379,17 @@ pub fn guides_of(doc: &Document, ids: &[NodeId]) -> Vec<Operation> {
         .collect()
 }
 
+/// Delete the subtrees rooted at `ids`, outermost only: their frames' guides first
+/// ([`guides_of`]), then the layers, then the relinks that detach the instances of a
+/// deleted main (`component::relink_for_delete`), without which the commit is refused.
+pub fn delete(doc: &Document, ids: &[NodeId]) -> Transaction {
+    let ids = outermost(doc, ids);
+    let mut ops = guides_of(doc, &ids);
+    ops.extend(ids.iter().map(|id| Operation::DeleteNode { id: *id }));
+    ops.extend(crate::component::relink_for_delete(doc, &ids));
+    Transaction(ops)
+}
+
 // --- bulk property edits over a selection ---------------------------------
 
 /// Every node in the subtrees rooted at `ids`, each visited exactly once, in a

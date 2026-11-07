@@ -231,6 +231,13 @@ enum Command {
         theirs: String,
         out: Option<String>,
     },
+    /// Run a script of registry verbs (`ondin_core::verbs::run_script`) against
+    /// `input`, or a new document, and write the result to `out`.
+    Run {
+        script: String,
+        input: Option<String>,
+        out: String,
+    },
     /// Write the document's variables and styles as DTCG `tokens.json`
     /// (`ondin_export::dtcg`), `mode` naming the mode whose values are `$value`.
     TokensExport {
@@ -344,6 +351,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("tokens") => parse_tokens(&args[1..]),
         Some("merge") => parse_merge(&args[1..]),
         Some("check") => parse_check(&args[1..]),
+        Some("run") => parse_run(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -595,6 +603,70 @@ fn run_merge(base: &str, ours: &str, theirs: &str, out: Option<&str>) -> Result<
         eprintln!("conflict: {c}");
     }
     Ok(merged.conflicts.is_empty())
+}
+
+fn parse_run(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str = "usage: ondin run <script.json> [--in <file.ondin>] -o <out.ondin>";
+    let (mut script, mut input, mut out) = (None, None, None);
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--in" | "-o" | "--out") => {
+                i += 1;
+                let value = args
+                    .get(i)
+                    .filter(|v| !v.starts_with('-'))
+                    .ok_or_else(|| format!("{flag} wants a file\n{USAGE}"))?
+                    .clone();
+                match flag {
+                    "--in" => input = Some(value),
+                    _ => out = Some(value),
+                }
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option {other}\n{USAGE}"));
+            }
+            other if script.is_some() => {
+                return Err(format!("one script at a time; also got {other}\n{USAGE}"));
+            }
+            other => script = Some(other.to_string()),
+        }
+        i += 1;
+    }
+    match (script, out) {
+        (Some(script), Some(out)) => Ok(Command::Run { script, input, out }),
+        _ => Err(USAGE.to_string()),
+    }
+}
+
+/// [`Command::Run`]: the script's steps committed one by one, the result saved
+/// atomically. Answers a line per step that created something.
+fn run_script(script: &str, input: Option<&str>, out: &str) -> Result<Vec<String>, String> {
+    let text = std::fs::read_to_string(script).map_err(|e| format!("cannot read {script}: {e}"))?;
+    let steps: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{script} is not JSON: {e}"))?;
+    let mut ids = ondin_core::IdSource::new(session::random_actor());
+    let mut doc = match input {
+        Some(file) => {
+            let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+            ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?
+        }
+        None => ondin_core::Document::new(ids.mint()),
+    };
+    let made = ondin_core::verbs::run_script(&mut doc, &mut ids, &steps)
+        .map_err(|e| format!("{script}: {e}"))?;
+    let bytes = ondin_core::io::save(&doc).map_err(|e| format!("cannot save: {e}"))?;
+    atomic::write(std::path::Path::new(out), &bytes)
+        .map_err(|e| format!("cannot write {out}: {e}"))?;
+    Ok(made
+        .iter()
+        .enumerate()
+        .filter(|(_, ids)| !ids.is_empty())
+        .map(|(i, ids)| {
+            let wire: Vec<String> = ids.iter().map(|id| id.to_wire()).collect();
+            format!("step {}: {}", i + 1, wire.join(" "))
+        })
+        .collect())
 }
 
 fn parse_tokens(args: &[String]) -> Result<Command, String> {
@@ -932,6 +1004,14 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Ok(Command::Run { script, input, out }) => {
+            run_script(&script, input.as_deref(), &out).map(|lines| {
+                for line in lines {
+                    println!("{line}");
+                }
+                eprintln!("wrote {out}");
+            })
+        }
         // `diff`'s codes: 1 is "conflicts", so a failure is 2.
         Ok(Command::Merge {
             base,

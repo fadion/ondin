@@ -137,6 +137,7 @@ pub fn reparent_preserving_world(doc, res, id, new_parent, index) -> Result<Tran
 pub fn baked(doc, res, id) -> Vec<Operation>;  // store where it is drawn — before leaving a layout
 pub fn baked_ops(id, node, local: Affine, kind) -> Vec<Operation>;
 pub fn group / mask / ungroup / ungroup_all / outermost / guides_of;
+pub fn delete(doc, ids) -> Transaction;  // guides_of first, the layers, then relink_for_delete
 pub fn image_ids_in(nodes) -> Vec<ImageId>;  // sorted, unique, hidden fills included
 pub fn missing_image_ops(doc, held) -> Vec<Operation>;  // AddImage for what this doc lacks — FIRST in the tx
 // bulk property edits over a selection
@@ -175,6 +176,30 @@ Further rules:
 - **Any disagreement is `Mixed`; the only empty panel is one where nothing in scope is painted.** An unpainted target among painted ones must not read as "No stroke". `shared_over_*` fold a getter over every paint of every target; a target with no paint disagrees with every value (absence is a value). A mixed row writes with `edit_*_all`, preserving each target's list length, order and untouched properties.
 - Every builder emits **one** transaction (invariant 5) and skips no-op writes, so an unedited field blur produces nothing.
 - **`Basis` and `Orientation`:** `transform` may carry reflection and skew (§5.6); `atan2(b, a)` is wrong for both. `Basis::of` is the single decomposition (`Orientation::of` = `Basis::of(t).orientation`). The split is RQ by Gram–Schmidt: every **invertible** 2×2 factors uniquely as `R(θ) · skewX(k) · mirror · diag(sx, sy)`, which lets a world-space edit be pushed onto a node whatever its parents did. `Basis::of` is total and lossy (for reporting: a collapsed node reads 0°, not blank); `Basis::exact` is partial and exact (`None` for rank-1 or sub-`DEGENERATE`; for rewriting). `scale` is the non-negative residual; the reflection stays in `Orientation::mirror`. `skew` is radians in `(-π/2, π/2)` with SVG/CSS `skewX` semantics (matrix coefficient `tan(skew)`; a 25° skew emits `matrix(1 0 0.4663 1 …)`). `R(θ)·FLIP_Y` and `R(θ+π)·FLIP_X` are the same reflection, so `of` reports the axis leaving the smaller angle (flipping an upright layer must not read −180°). The inspector's rewrites guard on `exact`: `inspector::multi_angle_tx` refuses a member with no exact split, and the skew field of `inspector::inspector_transform` withholds the write when `Basis::exact` is `None` while still showing the lossy reading.
+
+### The verb registry (`verbs.rs`)
+
+`verbs::VERBS` is every document edit a caller outside the canvas can name: an MCP tool, a Command Mode
+line, a step of `ondin run`. A `Verb` is a public name (MCP's, spelled for an agent: `set_fills`,
+`boolean`), a one-line doc, typed `Param`s (`ParamKind`: a node or nodes by wire form, a number, an
+index, a bool, text, one of a fixed set of words, or a model value in its serde form), and a function
+from a `Ctx` (document, `Resolved`, `IdSource`) to a `Done`: the `Transaction` to commit and the nodes
+it created. A verb never commits; its caller does, as every edit is committed.
+
+- **Arguments are checked before a verb runs** (`verbs::call`): a JSON object holding every required
+  parameter, none it does not take, each of its kind. Each refusal names the verb and the parameter.
+- **A verb is a builder's door, never a second copy of the edit.** Where the app and a verb make the
+  same edit, both call one builder (`build::delete` serves the Delete key and `delete_node`). An edit
+  the app still builds itself has no verb until it moves into core.
+- **A paint list written whole keeps its item ids by position** (`item::rekey_by_position`), so an
+  instance reads the write as overrides of its main's items.
+- **Phase 2's tool list is held to the registry** (`ondin-mcp`'s `every_write_tool_is_a_registry_verb`):
+  every write tool is a verb of the same name, a session tool (`undo`, `redo`, `set_selection`), or
+  named as unbound with what it waits on (`insert_subtree`, `duplicate`, `add_image`).
+- **`run_script`** commits a list of `{ verb, args, as }` steps one by one. A string argument
+  `"@label"` names the first node an earlier step labelled `label` created, and `"@page"` the first
+  page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps
+  before it. `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
 
 ### 5.7b Layer names (`naming.rs`)
 

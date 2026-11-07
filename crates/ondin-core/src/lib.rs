@@ -76,6 +76,7 @@ pub mod trace;
 pub mod typography;
 pub mod variable;
 pub mod variant;
+pub mod verbs;
 pub mod warp;
 
 // Re-export the geometry/paint crates whose types appear in our public API, so

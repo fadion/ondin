@@ -197,4 +197,46 @@ mod tests {
             );
         }
     }
+
+    /// Phase 2 tools that act on the session, not the document: no verb answers them.
+    const SESSION: [&str; 3] = ["undo", "redo", "set_selection"];
+
+    /// Phase 2 tools with no registry verb yet, each with what it waits on.
+    const UNBOUND: [(&str, &str); 3] = [
+        (
+            "insert_subtree",
+            "a node list's wire form for callers outside the save format",
+        ),
+        (
+            "duplicate",
+            "the app's duplicate keeps a clone chain for repeats; the verb must too",
+        ),
+        ("add_image", "image bytes as an argument"),
+    ];
+
+    /// Every Phase 2 tool is a verb of `ondin_core::verbs` under the same name, a
+    /// session tool, or named in [`UNBOUND`] with its reason; none is two of those,
+    /// so binding a verb forces its line out of the list.
+    ///
+    /// flip: renaming the registry's `set_fills` → fails at "neither a verb".
+    #[test]
+    fn every_write_tool_is_a_registry_verb() {
+        use ondin_core::verbs;
+        let unbound: Vec<&str> = UNBOUND.iter().map(|(n, _)| *n).collect();
+        for tool in PHASE_2 {
+            let verb = verbs::find(tool).is_some();
+            let listed = SESSION.contains(&tool) || unbound.contains(&tool);
+            assert!(
+                verb || listed,
+                "`{tool}` is neither a verb nor a session or unbound tool"
+            );
+            assert!(
+                !(verb && listed),
+                "`{tool}` is a verb now; take it out of SESSION or UNBOUND"
+            );
+        }
+        for name in SESSION.iter().chain(&unbound) {
+            assert!(PHASE_2.contains(name), "`{name}` is no Phase 2 tool");
+        }
+    }
 }

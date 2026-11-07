@@ -16,7 +16,7 @@ pub use ondin_core::edit::{
     line_ends_world, map_subpaths, move_line_end, move_points, paired_size, path_subpaths,
     pen_anchors, pen_close_snap, pen_outline, pen_path, point_spacings, points_box,
     proportions_locked, pull_handle, redundant_points, remove_points, remove_segments,
-    resizable_size, resize_box_to, resize_layer, resize_points, resize_selection,
+    resizable_size, resize_box_to, resize_layer, resize_points, resize_selection, resize_to,
     resized_text_sizing, reverse_subpaths, rewrite_path, rewrite_points, rotate_node,
     rotate_points, rotate_selection, segment_cubic, segment_ends, segment_is_straight,
     segment_point, set_smoothness, side_shear, skew_selection, skew_to_handle, smooth_points,

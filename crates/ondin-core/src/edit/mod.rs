@@ -502,6 +502,21 @@ pub fn resize_box_to(doc: &Document, res: &Resolved, id: NodeId, want: Size) -> 
     )
 }
 
+/// Make `id` `want` wide and high, whatever its kind: an authored size is set, a
+/// text box becomes a fixed one, and any other kind is resized by its box
+/// ([`resize_box_to`]).
+pub fn resize_to(doc: &Document, res: &Resolved, id: NodeId, want: Size) -> Transaction {
+    let Some(node) = doc.get(id) else {
+        return Transaction::default();
+    };
+    let geometry = match node.kind() {
+        NodeKind::Text { .. } => GeometryPatch::TextSizing(TextSizing::Fixed(want)),
+        k if resizable_size(k).is_some() => GeometryPatch::Size(want),
+        _ => return resize_box_to(doc, res, id, want),
+    };
+    Transaction(vec![Operation::SetGeometry { id, geometry }])
+}
+
 /// Put one end of the line `id` at the world point `target`.
 ///
 /// A `Line` stores only its far point; the near one is the node's origin (§5.3).

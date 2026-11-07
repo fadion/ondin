@@ -925,6 +925,29 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "set_size",
+        doc: "Make a layer this wide and high, whatever its kind; a text gets a fixed box",
+        params: &[
+            req("node", NODE, "the layer"),
+            req("width", ParamKind::Number, "its width"),
+            req("height", ParamKind::Number, "its height"),
+        ],
+        run: |ctx, a| {
+            let id = a.node("node")?;
+            node(ctx, id)?;
+            let want = kurbo::Size::new(
+                a.number("width").unwrap_or(0.0),
+                a.number("height").unwrap_or(0.0),
+            );
+            if want.width < 0.0 || want.height < 0.0 {
+                return Err(a.invalid("width", "a size is not negative"));
+            }
+            Ok(Done::edit(crate::edit::resize_to(
+                ctx.doc, ctx.res, id, want,
+            )))
+        },
+    },
+    Verb {
         name: "pixel_fit",
         doc: "Put layers' edges and points on whole units, so they render crisp; text and turned layers are left",
         params: &[req(

@@ -577,6 +577,45 @@ fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
     );
 }
 
+/// `set_size` sizes any kind: a rectangle's size, a group by its box (its child
+/// scaled with it).
+///
+/// flip: `edit::resize_to` writing `GeometryPatch::Size` for every kind → fails at
+/// the group's commit, which refuses a size on a group.
+#[test]
+fn set_size_sizes_any_kind() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_size",
+        json!({ "node": r.to_wire(), "width": 40, "height": 20 }),
+    );
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(res.world_bounds(r).unwrap().size(), Size::new(40.0, 20.0));
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [r.to_wire()] }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_size",
+        json!({ "node": g.to_wire(), "width": 80, "height": 20 }),
+    );
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(res.world_bounds(r).unwrap().size(), Size::new(80.0, 20.0));
+}
+
 /// `pixel_fit` puts a rectangle's box on whole units, through the group it is in,
 /// and leaves a layer that is already there as it is.
 ///

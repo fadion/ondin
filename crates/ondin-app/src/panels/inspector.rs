@@ -8770,28 +8770,11 @@ impl OndinApp {
         Some((e.width, e.height))
     }
 
-    /// Put `id`'s box at `w` × `h`, the picture's own pixels.
-    ///
-    /// The W/H fields' three spellings: an authored `size`, a `Text` node's
-    /// `TextSizing` (reachable: a drop or paste can put a picture on one), and
-    /// `resize_box_to` for a kind with no size field.
+    /// Put `id`'s box at `w` × `h`, the picture's own pixels, through
+    /// `edit::resize_to` (a text a drop or paste put a picture on included).
     pub(crate) fn resize_to_original(&mut self, id: NodeId, w: f64, h: f64) {
         let size = Size::new(w, h);
-        let kind = self.session.display_node(id).map(|n| n.kind().clone());
-        let tx = match kind {
-            Some(NodeKind::Text { .. }) => Transaction(vec![Operation::SetGeometry {
-                id,
-                geometry: GeometryPatch::TextSizing(TextSizing::Fixed(size)),
-            }]),
-            Some(k) if tools::resizable_size(&k).is_some() => {
-                Transaction(vec![Operation::SetGeometry {
-                    id,
-                    geometry: GeometryPatch::Size(size),
-                }])
-            }
-            Some(_) => tools::resize_box_to(&self.session.doc, &self.session.resolved, id, size),
-            None => Transaction(Vec::new()),
-        };
+        let tx = tools::resize_to(&self.session.doc, &self.session.resolved, id, size);
         self.commit_edit(tx);
     }
 

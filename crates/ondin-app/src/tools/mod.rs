@@ -13,14 +13,15 @@ pub use ondin_core::edit::{
     create_image, create_image_in_box, create_line, create_paths, create_polygon, create_rect,
     create_slice, create_spiral, create_star, create_text, crop_resized, croppable_fill,
     distribute_points, gesture_text_sizing, insert_point, join_ends, join_runs, joinable_ends,
-    line_ends_world, map_subpaths, move_line_end, move_points, paired_size, pen_anchors,
-    pen_close_snap, pen_outline, pen_path, point_spacings, points_box, proportions_locked,
-    pull_handle, redundant_points, remove_points, remove_segments, resizable_size, resize_box_to,
-    resize_layer, resize_points, resize_selection, resized_text_sizing, reverse_subpaths,
-    rewrite_path, rotate_node, rotate_points, rotate_selection, segment_cubic, segment_ends,
-    segment_is_straight, segment_point, set_smoothness, side_shear, skew_selection, skew_to_handle,
-    smooth_points, solid_stroke, space_points, split_at_points, split_segments, splittable,
-    step_sides, subpaths_touched, tangent_snap, transform_node, turn_about,
+    line_ends_world, map_subpaths, move_line_end, move_points, paired_size, path_subpaths,
+    pen_anchors, pen_close_snap, pen_outline, pen_path, point_spacings, points_box,
+    proportions_locked, pull_handle, redundant_points, remove_points, remove_segments,
+    resizable_size, resize_box_to, resize_layer, resize_points, resize_selection,
+    resized_text_sizing, reverse_subpaths, rewrite_path, rewrite_points, rotate_node,
+    rotate_points, rotate_selection, segment_cubic, segment_ends, segment_is_straight,
+    segment_point, set_smoothness, side_shear, skew_selection, skew_to_handle, smooth_points,
+    solid_stroke, space_points, split_at_points, split_segments, splittable, step_sides,
+    subpaths_touched, tangent_snap, transform_node, turn_about,
 };
 
 /// The active canvas tool. `Select` manipulates existing nodes; the others draw

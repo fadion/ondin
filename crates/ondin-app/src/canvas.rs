@@ -5265,16 +5265,7 @@ impl OndinApp {
     /// The edited path's subpaths in **world** space from the committed document —
     /// the fixed origin an edit is computed from, since the preview compounds.
     pub(crate) fn edited_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
-        let NodeKind::Path {
-            path, corner_radii, ..
-        } = self.session.doc.get(id)?.kind()
-        else {
-            return None;
-        };
-        let world = self.session.resolved.world_transform(id)?;
-        let mut subpaths = tools::pen_anchors(path, corner_radii);
-        tools::map_subpaths(&mut subpaths, world);
-        Some((world, subpaths))
+        tools::path_subpaths(&self.session.doc, &self.session.resolved, id)
     }
 
     /// The same, read **through the preview** — where the points are right now.

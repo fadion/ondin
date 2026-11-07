@@ -3308,6 +3308,55 @@ pub fn rewrite_path(
     }])
 }
 
+/// The path `id` holds, as world-space subpaths, with its world transform.
+pub fn path_subpaths(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+) -> Option<(Affine, Vec<PenSubpath>)> {
+    let NodeKind::Path {
+        path, corner_radii, ..
+    } = doc.get(id)?.kind()
+    else {
+        return None;
+    };
+    let world = res.world_transform(id)?;
+    let mut subpaths = pen_anchors(path, corner_radii);
+    map_subpaths(&mut subpaths, world);
+    Some((world, subpaths))
+}
+
+/// A point edit of the path `id` written back: `subpaths` is `base` edited, both in
+/// world space. A path mirrored across its own axes is made symmetric again first
+/// (`symmetry::symmetric_edit`), so editing one side moves its image.
+pub fn rewrite_points(
+    doc: &Document,
+    id: NodeId,
+    world: Affine,
+    base: &[PenSubpath],
+    mut subpaths: Vec<PenSubpath>,
+) -> Transaction {
+    let Some(NodeKind::Path {
+        path,
+        corner_radii,
+        mirror,
+        ..
+    }) = doc.get(id).map(|n| n.kind())
+    else {
+        return Transaction(Vec::new());
+    };
+    if !mirror.is_none() {
+        let to_local = world.inverse();
+        let mut base = base.to_vec();
+        map_subpaths(&mut base, to_local);
+        map_subpaths(&mut subpaths, to_local);
+        let at = crate::symmetry::centre(&pen_path(&base));
+        crate::symmetry::symmetric_edit(&base, &mut subpaths, *mirror, at);
+        map_subpaths(&mut subpaths, world);
+    }
+    rewrite_path(id, world, &subpaths, Some((path, corner_radii)))
+}
+
 #[cfg(test)]
 mod tests;
 

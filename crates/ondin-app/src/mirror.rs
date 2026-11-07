@@ -9,16 +9,17 @@
 //! axis closes into a whole.
 //!
 //! A path drawn mirrored is saved mirrored (`ondin_core::symmetry`), and point
-//! editing keeps it so ([`symmetric_edit`]), its axis points locked to the axes;
+//! editing keeps it so ([`ondin_core::symmetry::symmetric_edit`]), its axis points
+//! locked to the axes;
 //! a new run drawn inside it mirrors across its own axes ([`OndinApp::mirror_frame`]).
 
 use crate::app::OndinApp;
-use crate::preview::{PenAnchor, PenSubpath, PointRef};
+use crate::preview::{PenSubpath, PointRef};
 use crate::theme::color;
 use crate::ui;
 use eframe::egui;
-use ondin_core::kurbo::{Affine, Point, Vec2};
-use ondin_core::symmetry::PathMirror;
+use ondin_core::kurbo::{Affine, Point};
+use ondin_core::symmetry::{PathMirror, partners};
 use ondin_core::{NodeId, NodeKind, Operation, Transaction};
 
 /// Which axes the pen and the pencil mirror across.
@@ -205,186 +206,6 @@ fn across(mut s: PenSubpath, vertical: bool, c: f64, tol: f64) -> Vec<PenSubpath
             }]
         }
     }
-}
-
-// --- a mirrored path under point editing -----------------------------------
-
-/// A handle offset reflected across a vertical or horizontal axis.
-fn flip(v: Vec2, vertical: bool) -> Vec2 {
-    match vertical {
-        true => Vec2::new(-v.x, v.y),
-        false => Vec2::new(v.x, -v.y),
-    }
-}
-
-/// `a`'s image across the axis `x = c` (or `y = c`): `swap` when the run passes
-/// its image the other way round, so the image's arriving handle is the image of
-/// `a`'s leaving one.
-fn image_of(a: &PenAnchor, vertical: bool, c: f64, swap: bool) -> PenAnchor {
-    let (out, back) = match swap {
-        true => (flip(a.back, vertical), flip(a.out, vertical)),
-        false => (flip(a.out, vertical), flip(a.back, vertical)),
-    };
-    PenAnchor {
-        at: ondin_core::symmetry::reflect(a.at, vertical, c),
-        out,
-        back,
-        radius: a.radius,
-    }
-}
-
-/// Each anchor's image across one axis among `subs`, by flat index, with
-/// whether the run passes it the other way round; `None` where no anchor sits
-/// at the image.
-///
-/// The way round comes from the neighbours, not the handles: a corner has none
-/// to tell by, and pulling one out of it must still land on the right side.
-fn partners(subs: &[PenSubpath], vertical: bool, c: f64, tol: f64) -> Vec<Option<(usize, bool)>> {
-    let flat: Vec<&PenAnchor> = subs.iter().flat_map(|s| &s.anchors).collect();
-    // Each anchor's neighbours along its run, by flat index.
-    let mut prev = Vec::with_capacity(flat.len());
-    let mut next = Vec::with_capacity(flat.len());
-    let mut start = 0;
-    for s in subs {
-        let n = s.anchors.len();
-        for i in 0..n {
-            let wrap = |j: usize| start + j % n;
-            prev.push(match (i, s.closed) {
-                (0, false) => None,
-                (0, true) => Some(wrap(n - 1)),
-                _ => Some(start + i - 1),
-            });
-            next.push(match (i + 1 == n, s.closed) {
-                (true, false) => None,
-                _ => Some(wrap(i + 1)),
-            });
-        }
-        start += n;
-    }
-    let at: Vec<Option<usize>> = flat
-        .iter()
-        .map(|a| {
-            let want = ondin_core::symmetry::reflect(a.at, vertical, c);
-            flat.iter().position(|b| (b.at - want).hypot() <= tol)
-        })
-        .collect();
-    (0..flat.len())
-        .map(|a| {
-            let p = at[a]?;
-            let image = |j: Option<usize>| j.and_then(|j| at[j]);
-            let swap = match (next[a], prev[a]) {
-                (Some(_), _) => image(next[a]).is_some() && image(next[a]) == prev[p],
-                (None, Some(_)) => image(prev[a]).is_some() && image(prev[a]) == next[p],
-                (None, None) => false,
-            };
-            Some((p, swap))
-        })
-        .collect()
-}
-
-/// Whether point editing moved, reshaped or re-rounded anchor `a` into `b`.
-fn changed(a: &PenAnchor, b: &PenAnchor, eps: f64) -> bool {
-    (a.at - b.at).hypot() > eps
-        || (a.out - b.out).hypot() > eps
-        || (a.back - b.back).hypot() > eps
-        || (a.radius - b.radius).abs() > eps
-}
-
-/// `edited`, made symmetric again across `mirror`'s axes through `at` after a
-/// point edit that started from the symmetric `base`, both in the path's own
-/// space. Where an anchor changed, its image takes the reflection of it; where
-/// both did, the first in order wins. An anchor on an axis stays on it, its two
-/// handles each other's image. An edit that changed how many anchors there are
-/// is left alone: the model drops the axis if it no longer holds.
-pub(crate) fn symmetric_edit(
-    base: &[PenSubpath],
-    edited: &mut [PenSubpath],
-    mirror: ondin_core::symmetry::PathMirror,
-    at: Point,
-) {
-    let shape = |s: &[PenSubpath]| s.iter().map(|s| s.anchors.len()).collect::<Vec<_>>();
-    if shape(base) != shape(edited) {
-        return;
-    }
-    let size = base
-        .iter()
-        .flat_map(|s| &s.anchors)
-        .map(|a| (a.at - at).hypot())
-        .fold(0.0, f64::max);
-    let tol = 1e-6 * (1.0 + size);
-    let flat_base: Vec<PenAnchor> = base.iter().flat_map(|s| s.anchors.clone()).collect();
-    for (vertical, c, on) in [
-        (true, at.x, mirror.vertical),
-        (false, at.y, mirror.horizontal),
-    ] {
-        if !on {
-            continue;
-        }
-        let pairs = partners(base, vertical, c, tol);
-        let mut flat: Vec<PenAnchor> = edited.iter().flat_map(|s| s.anchors.clone()).collect();
-        let mut done = vec![false; flat.len()];
-        for a in 0..flat.len() {
-            let Some((p, swap)) = pairs[a] else { continue };
-            if done[a] {
-                continue;
-            }
-            done[a] = true;
-            done[p] = true;
-            let (ca, cp) = (
-                changed(&flat_base[a], &flat[a], tol),
-                changed(&flat_base[p], &flat[p], tol),
-            );
-            if a == p {
-                if ca {
-                    flat[a] = on_axis(&flat_base[a], &flat[a], vertical, c, swap, tol);
-                }
-            } else if ca {
-                flat[p] = image_of(&flat[a], vertical, c, swap);
-            } else if cp {
-                flat[a] = image_of(&flat[p], vertical, c, swap);
-            }
-        }
-        let mut it = flat.into_iter();
-        for sub in edited.iter_mut() {
-            for a in &mut sub.anchors {
-                *a = it.next().expect("one anchor per anchor");
-            }
-        }
-    }
-}
-
-/// An anchor on the axis after an edit: pulled back onto it, so it slides along
-/// it, with the handle the edit moved deciding the other.
-fn on_axis(
-    was: &PenAnchor,
-    now: &PenAnchor,
-    vertical: bool,
-    c: f64,
-    swap: bool,
-    tol: f64,
-) -> PenAnchor {
-    let mut a = *now;
-    match vertical {
-        true => a.at.x = c,
-        false => a.at.y = c,
-    }
-    // A run crossing the axis meets its image here: each handle is the other's.
-    // One running along the axis keeps both handles on it.
-    match swap {
-        true if (now.back - was.back).hypot() > tol && (now.out - was.out).hypot() <= tol => {
-            a.out = flip(a.back, vertical);
-        }
-        true => a.back = flip(a.out, vertical),
-        false => {
-            let along = |v: Vec2| match vertical {
-                true => Vec2::new(0.0, v.y),
-                false => Vec2::new(v.x, 0.0),
-            };
-            a.out = along(a.out);
-            a.back = along(a.back);
-        }
-    }
-    a
 }
 
 /// How near an axis, in screen pt, an end is taken as on it.
@@ -586,26 +407,17 @@ impl OndinApp {
         (frame.to_world * q, on)
     }
 
-    /// `subpaths` (world), a point edit of `id` that started from `base`, made
-    /// symmetric again across the path's own axes when it is mirrored
-    /// ([`symmetric_edit`]), then written back as `tools::rewrite_path` writes it.
+    /// `subpaths` (world), a point edit of `id` that started from `base`, written
+    /// back through [`ondin_core::edit::rewrite_points`], which keeps a mirrored
+    /// path symmetric.
     pub(crate) fn rewrite_points(
         &self,
         id: NodeId,
         world: Affine,
         base: &[PenSubpath],
-        mut subpaths: Vec<PenSubpath>,
+        subpaths: Vec<PenSubpath>,
     ) -> Transaction {
-        if let Some((mirror, _, _)) = self.path_mirror(id) {
-            let to_local = world.inverse();
-            let mut base = base.to_vec();
-            crate::tools::map_subpaths(&mut base, to_local);
-            crate::tools::map_subpaths(&mut subpaths, to_local);
-            let at = ondin_core::symmetry::centre(&crate::tools::pen_path(&base));
-            symmetric_edit(&base, &mut subpaths, mirror, at);
-            crate::tools::map_subpaths(&mut subpaths, world);
-        }
-        crate::tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
+        crate::tools::rewrite_points(&self.session.doc, id, world, base, subpaths)
     }
 
     /// Where adding a point at `t` along the segment leaving `at` on `id` adds one,
@@ -1064,106 +876,8 @@ impl OndinApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const VERTICAL: PathMirror = PathMirror {
-        vertical: true,
-        horizontal: false,
-    };
-
-    /// A closed diamond about x = 0, clockwise from the top: top and bottom on the
-    /// axis, right and left each other's image.
-    fn diamond() -> Vec<PenSubpath> {
-        let mut d = run(&[(0.0, -10.0), (10.0, 0.0), (0.0, 10.0), (-10.0, 0.0)]);
-        d.closed = true;
-        vec![d]
-    }
-
-    /// Whether the model would keep the vertical axis on `subs`.
-    fn holds(subs: &[PenSubpath]) -> bool {
-        let path = crate::tools::pen_path(subs);
-        ondin_core::symmetry::kept(&path, &ondin_core::edit::pen_radii(subs), VERTICAL).vertical
-    }
-
-    /// A dragged anchor takes its image with it, mirrored.
-    /// flip: `symmetric_edit` returning early → fails at "the image followed".
-    #[test]
-    fn a_moved_anchor_moves_its_image() {
-        let base = diamond();
-        let mut edited = base.clone();
-        edited[0].anchors[1].at = Point::new(14.0, 2.0);
-        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
-        assert_eq!(
-            edited[0].anchors[3].at,
-            Point::new(-14.0, 2.0),
-            "the image followed"
-        );
-        assert!(holds(&edited));
-    }
-
-    /// The image's own edit wins when only it moved.
-    #[test]
-    fn an_edit_on_the_image_side_carries_back() {
-        let base = diamond();
-        let mut edited = base.clone();
-        edited[0].anchors[3].radius = 4.0;
-        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
-        assert_eq!(edited[0].anchors[1].radius, 4.0);
-        assert!(holds(&edited));
-    }
-
-    /// An anchor on the axis is locked to it: dragged off, it slides along it.
-    /// flip: `on_axis` keeping `now.at` → fails at "still on the axis".
-    #[test]
-    fn an_axis_anchor_slides_along_the_axis() {
-        let base = diamond();
-        let mut edited = base.clone();
-        edited[0].anchors[0].at = Point::new(3.0, -12.0);
-        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
-        assert_eq!(
-            edited[0].anchors[0].at,
-            Point::new(0.0, -12.0),
-            "still on the axis"
-        );
-        assert!(holds(&edited));
-    }
-
-    /// A handle pulled out of a corner lands on its image's matching side, which
-    /// the neighbours decide since a corner has no handle to tell by; on the axis,
-    /// the other handle becomes its image.
-    /// flip: `partners` answering `swap` false always → fails at the handle assertion.
-    #[test]
-    fn a_handle_pulled_from_a_corner_mirrors_onto_the_right_side() {
-        let base = diamond();
-        let mut edited = base.clone();
-        edited[0].anchors[1].out = Vec2::new(0.0, 5.0);
-        edited[0].anchors[0].out = Vec2::new(6.0, 0.0);
-        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
-        assert_eq!(edited[0].anchors[3].back, Vec2::new(0.0, 5.0));
-        assert_eq!(edited[0].anchors[3].out, Vec2::ZERO);
-        assert_eq!(edited[0].anchors[0].back, Vec2::new(-6.0, 0.0));
-        assert!(holds(&edited));
-    }
-
-    /// Both axes: one moved anchor takes all three images with it.
-    #[test]
-    fn both_axes_carry_an_edit_to_all_four_quarters() {
-        let mut sq = run(&[(10.0, 10.0), (-10.0, 10.0), (-10.0, -10.0), (10.0, -10.0)]);
-        sq.closed = true;
-        let base = vec![sq];
-        let mut edited = base.clone();
-        edited[0].anchors[0].at = Point::new(12.0, 15.0);
-        let both = PathMirror {
-            vertical: true,
-            horizontal: true,
-        };
-        symmetric_edit(&base, &mut edited, both, Point::ZERO);
-        let ats: Vec<Point> = edited[0].anchors.iter().map(|a| a.at).collect();
-        assert_eq!(
-            ats,
-            [(12.0, 15.0), (-12.0, 15.0), (-12.0, -15.0), (12.0, -15.0)]
-                .map(|(x, y)| Point::new(x, y))
-        );
-    }
+    use crate::preview::PenAnchor;
+    use ondin_core::kurbo::Vec2;
 
     fn run(points: &[(f64, f64)]) -> PenSubpath {
         PenSubpath {

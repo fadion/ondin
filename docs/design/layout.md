@@ -57,7 +57,8 @@ Code export (§7) writes this model as CSS under the same names, `Start`/`End` a
 |---|---|
 | Container | `display` (unset / flex / grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `justify-items` (grid), `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`), `grid-auto-flow` |
 | Item | `width`/`height` (auto / px / %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto / line / span), `position` (in flow / absolute) with `top`/`right`/`bottom`/`left` (px / % / auto) |
-| Not built | `margin` other than `auto`, `order`, named grid areas, `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout (the engine supports each, so each is cheap later) |
+| Not built | `aspect-ratio`, named grid areas, `auto-fill`/`auto-fit` (`roadmap.md`; the engine supports each) |
+| Not to be built | `margin` other than `auto`, `order`, `calc`, block/inline/float layout (`non-goals.md`) |
 
 ### Who is a container
 

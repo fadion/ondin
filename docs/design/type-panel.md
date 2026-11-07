@@ -168,7 +168,7 @@ start of the field.
 
 - A `Length` field's px range is derived from its `%` range at the current font size (`typography::px_range_for`, matching `Length::in_unit`), so a unit switch cannot change the number. There is no separate px cap.
 - Each field gets the `Bounds` for its own quantity. `DECORATION_THICKNESS` floors at zero, and the model floors thickness too (§5.4). `DECORATION_OFFSET` goes both ways. `INDENT` serves the three indents. `MAX_TRACKING_PCT` is tracking's alone.
-- Open: the caps for paragraph spacing, indents and decoration all hold an inherited 200% that was never chosen (`roadmap.md`, *Later · Parked decisions*).
+- Open: the caps for paragraph spacing, indents and decoration all hold an inherited 200% that was never chosen (`roadmap.md`, *Parked decisions*).
 
 **Reporting.** Every `Length` field reports on a frame where the value changed and again on the
 frame the drag ends. The release frame is the one `edit_valve` commits on.

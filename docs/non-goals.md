@@ -1,8 +1,8 @@
 # Ondin — Decided non-goals
 
 What is deliberately not being built. An item here is decided and not open work; do not re-report
-it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplayer) is in
-`roadmap.md`.
+it as a gap. Post-v1 work with a design of its own (MCP, Command Mode) is in `roadmap.md`, and
+multiplayer is one of its considerations.
 
 ## Scope
 
@@ -17,6 +17,9 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 
 ## Canvas and interaction
 
+- **The eyedropper sampling outside the window** — it samples the canvas and the app's own chrome
+  (`tools.md`, *The eyedropper*); off-window would need a capture path per OS and a conversion from
+  the display's colour space.
 - **A compare's Swipe handle following a hovered pointer** — the handle moves only when dragged (`app-compare.md`).
 - **A modifier's badge painted beside the pointer as canvas chrome** — tried and declined; the badge is drawn into the cursor itself (`tools.md`, *Canvas cursors*).
 - **Nudging the transform origin from the keyboard** — the origin pills take typed values (§15 D308).
@@ -87,6 +90,12 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Queueing `Ctrl+S` and document-leaving transitions on the writer thread** — they read the result on the next line (§15 D393).
 - **A "remember last page" dashboard option** — the default page is a Settings preference (§15 D749).
 - **Reading Figma's `.fig` binary** — the format is unpublished, reading it reverse-engineers another company's product, and it breaks when Figma changes it; Figma files come in by link through the documented REST API.
+
+## Components and layout
+
+- **Pairing a state's layer with rest's by hand** — states pair by lineage key, then name path (§15 D982); an unpaired layer is fixed on the layer itself, where the Variants card's *Select it* leads.
+- **A verb that un-makes a component** — delete the main, which detaches its instances, or detach an instance.
+- **CSS block, inline and float layout, `calc`, `order`, and margins other than `auto`** — layout is flexbox and grid; gap and padding stand in for margins, and the layers panel's order for `order`.
 
 ## Styles and variables
 

@@ -432,8 +432,8 @@ any other pass that recomputes a copy's value.
 
 - Relinking a top-level instance to a kit main not yet vendored (the *Main* row offers the
   document's mains, vendored kit mains among them).
-- Pushing an instance's changes to its main, and a verb that un-makes a component (it would owe a
-  detach) — `roadmap.md` *Later*.
+- Pushing an instance's changes to its main — `roadmap.md` *Now · Components and layout*. No verb
+  un-makes a component (`non-goals.md`); one would owe its instances a detach, as a delete does.
 - Unruled, parked in `roadmap.md`: a main-scoped guide not copied into instances; whether a group
   *instance* gets a canvas label.
 - Real-time collaboration — non-goal for now (it is where linked copies cost).
@@ -840,7 +840,8 @@ never raw fields) on every instance of the main.
   and text keep the rewrite's name-path carry.
 - Only a main's author shows nested properties. A nested instance added inside an instance, not in
   its main, has no slot and shows nothing on the outer card; it is edited by selecting it. Promoting
-  it waits on pushing an instance's changes to its main (`roadmap.md`, *Later*).
+  it waits on pushing an instance's changes to its main (`roadmap.md`, *Now · Components and
+  layout*).
 
 ### Traps
 

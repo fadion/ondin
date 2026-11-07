@@ -1143,6 +1143,58 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// `bind_variable` binds a fill's colour and the corners to variables, the layer
+/// drawing their values, then detaches the corners to the radius they drew; a
+/// corner past the fourth is refused.
+///
+/// flip: `bind_field_ops`' `Radius` arm detaching instead of binding → fails at
+/// "the corners are bound".
+#[test]
+fn bind_variable_binds_and_detaches_fields() {
+    let (mut doc, mut ids, _) = blank();
+    let red = serde_json::to_value(ondin_core::Cell::Color(Color::from_rgb8(200, 0, 0))).unwrap();
+    let eight = serde_json::to_value(ondin_core::Cell::Number(8.0)).unwrap();
+    let fill = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(1, 1, 1)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "color", "name": "red", "value": red }, "as": "c" },
+        { "verb": "add_variable", "args": { "kind": "number", "name": "r", "value": eight }, "as": "n" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
+        { "verb": "set_fills", "args": { "node": "@x", "fills": fill } },
+        { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "fill": 0 }, "variable": "@c" } },
+        { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": "radius", "variable": "@n" } },
+    ]);
+    let made =
+        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let x = NodeId::from_wire(&made[2][0]).unwrap();
+    let node = doc.get(x).unwrap();
+    assert!(
+        node.paint().fills[0].brush.var().is_some(),
+        "the fill is bound"
+    );
+    assert!(
+        node.corner_vars().iter().all(Option::is_some),
+        "the corners are bound"
+    );
+
+    let detach =
+        json!([{ "verb": "bind_variable", "args": { "nodes": [x.to_wire()], "field": "radius" } }]);
+    verbs::run_script(&mut doc, &mut ids, None, &detach).unwrap_or_else(|e| panic!("{e}"));
+    let node = doc.get(x).unwrap();
+    assert!(node.corner_vars().iter().all(Option::is_none));
+    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        unreachable!()
+    };
+    assert_eq!(corner_radii.top_left, 8.0, "detached to what it drew");
+
+    let past = json!([{ "verb": "bind_variable", "args": { "nodes": [x.to_wire()], "field": { "corner": 4 } } }]);
+    let err = verbs::run_script(&mut doc, &mut ids, None, &past).expect_err("no fifth corner");
+    assert!(err.why.contains("no such place"), "{err}");
+}
+
 /// The style verbs, as a script: a fill style added from a value and applied, its
 /// value changed and its users following, renamed, detached from a layer that
 /// keeps its look, one made from a layer, and removed. A taken name is refused.

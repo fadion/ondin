@@ -106,6 +106,31 @@ pub(crate) fn spacing_slots(slots: u8) -> impl Iterator<Item = usize> {
 }
 
 impl FieldKey {
+    /// The field as core names it on each layer; `None` for a paint slot that is
+    /// no list item.
+    pub(crate) fn bound(self) -> Option<ondin_core::build::BoundField> {
+        use ondin_core::build::BoundField as B;
+        Some(match self {
+            FieldKey::Paint { slot, .. } => match paint_item(slot)? {
+                (PaintTarget::Fill, i) => B::Fill(i),
+                (PaintTarget::Stroke, i) => B::Stroke(i),
+            },
+            FieldKey::Radius { .. } => B::Radius,
+            FieldKey::Corner { slot, .. } => B::Corner(slot),
+            FieldKey::Spacing { slots, .. } => B::Spacing(slots),
+            FieldKey::Visible { .. } => B::Visible,
+            FieldKey::Size { axis, .. } => B::Size(axis),
+            FieldKey::Content { .. } => B::Content,
+            FieldKey::Family { .. } => B::Family,
+            FieldKey::Type { slot, .. } => B::Type(slot),
+            FieldKey::Limit { slot, .. } => B::Limit(slot),
+            FieldKey::Opacity { .. } => B::Opacity,
+            FieldKey::StrokeWidth { item, .. } => B::StrokeWidth(item),
+            FieldKey::EffectNumber { item, slot, .. } => B::Effect(item, slot),
+            FieldKey::Flow { slot, .. } => B::Flow(slot),
+        })
+    }
+
     /// The node the field belongs to — where its binding resolves, in the mode
     /// in force there.
     pub(crate) fn at(self) -> NodeId {
@@ -841,108 +866,25 @@ impl OndinApp {
 
     /// The transaction that binds `key` to `var`.
     pub(crate) fn bind_tx(&self, key: FieldKey, var: VarId) -> Transaction {
-        let doc = &self.session.doc;
-        let ids = self.field_ids(key);
-        match key {
-            FieldKey::Paint { slot, .. } => match paint_item(slot) {
-                Some((target, index)) => {
-                    ondin_core::bind_brush_at_all(doc, &ids, target, index, var)
-                }
-                None => Transaction::default(),
-            },
-            FieldKey::Radius { id } => {
-                Transaction(ondin_core::bind_corners_ops(doc, id, [Some(var); 4]))
-            }
-            // One corner: `bind_corners_ops` leaves a `None` slot as it is.
-            FieldKey::Corner { id, slot } => {
-                let mut vars = [None; 4];
-                vars[slot] = Some(var);
-                Transaction(ondin_core::bind_corners_ops(doc, id, vars))
-            }
-            FieldKey::Spacing { slots, .. } => {
-                let mut vars = [None; 6];
-                for k in spacing_slots(slots) {
-                    vars[k] = Some(var);
-                }
-                Transaction(
-                    ids.iter()
-                        .flat_map(|id| ondin_core::bind_spacing_ops(doc, *id, vars))
-                        .collect(),
-                )
-            }
-            FieldKey::Visible { id } => Transaction(ondin_core::bind_visible_ops(doc, id, var)),
-            FieldKey::Size { id, axis } => {
-                let mut vars = [None; 2];
-                vars[axis] = Some(var);
-                Transaction(ondin_core::bind_size_ops(doc, id, vars))
-            }
-            FieldKey::Content { id } | FieldKey::Family { id } | FieldKey::Type { id, .. } => {
-                let mut vars = ondin_core::TextVars::default();
-                if let Some(k) = key.text_slot() {
-                    vars[k] = Some(var);
-                }
-                Transaction(ondin_core::bind_text_ops(doc, id, vars))
-            }
-            FieldKey::Limit { id, slot } => {
-                Transaction(ondin_core::build::bind_limit_ops(doc, id, slot, var))
-            }
-            FieldKey::Opacity { id } => Transaction(ondin_core::bind_opacity_ops(doc, id, var)),
-            FieldKey::StrokeWidth { id, item } => {
-                Transaction(ondin_core::bind_stroke_width_ops(doc, id, item, var))
-            }
-            FieldKey::EffectNumber { id, item, slot } => {
-                Transaction(ondin_core::bind_effect_ops(doc, id, item, slot, var))
-            }
-            FieldKey::Flow { id, slot } => {
-                Transaction(ondin_core::build::bind_flow_ops(doc, id, slot, Some(var)))
-            }
-        }
+        self.field_tx(key, Some(var))
     }
 
     /// The transaction that detaches `key` to the value it draws.
     pub(crate) fn detach_tx(&self, key: FieldKey) -> Transaction {
-        let doc = &self.session.doc;
-        let ids = self.field_ids(key);
-        match key {
-            FieldKey::Paint { slot, .. } => match paint_item(slot) {
-                Some((target, index)) => ondin_core::detach_brush_at_all(doc, &ids, target, index),
-                None => Transaction::default(),
-            },
-            FieldKey::Radius { id } => Transaction(ondin_core::detach_corners_ops(doc, id)),
-            FieldKey::Corner { id, slot } => {
-                Transaction(ondin_core::detach_corner_ops(doc, id, slot))
-            }
-            FieldKey::Spacing { slots, .. } => {
-                let which = std::array::from_fn(|k| slots & (1 << k) != 0);
-                Transaction(
-                    ids.iter()
-                        .flat_map(|id| ondin_core::detach_spacing_ops(doc, *id, which))
-                        .collect(),
-                )
-            }
-            FieldKey::Visible { id } => Transaction(ondin_core::detach_visible_ops(doc, id)),
-            FieldKey::Size { id, axis } => {
-                let mut which = [false; 2];
-                which[axis] = true;
-                Transaction(ondin_core::detach_size_ops(doc, id, which))
-            }
-            FieldKey::Content { id } | FieldKey::Family { id } | FieldKey::Type { id, .. } => {
-                let which = std::array::from_fn(|k| key.text_slot() == Some(k));
-                Transaction(ondin_core::detach_text_ops(doc, id, which))
-            }
-            FieldKey::Limit { id, slot } => {
-                Transaction(ondin_core::build::detach_limit_ops(doc, id, slot))
-            }
-            FieldKey::Opacity { id } => Transaction(ondin_core::detach_opacity_ops(doc, id)),
-            FieldKey::StrokeWidth { id, item } => {
-                Transaction(ondin_core::detach_stroke_width_ops(doc, id, item))
-            }
-            FieldKey::EffectNumber { id, item, slot } => {
-                Transaction(ondin_core::detach_effect_ops(doc, id, item, slot))
-            }
-            FieldKey::Flow { id, slot } => {
-                Transaction(ondin_core::build::bind_flow_ops(doc, id, slot, None))
-            }
+        self.field_tx(key, None)
+    }
+
+    /// `key` bound to `var`, or detached for `None`, on every layer its card edits
+    /// (`build::bind_field_ops`).
+    fn field_tx(&self, key: FieldKey, var: Option<VarId>) -> Transaction {
+        match key.bound() {
+            Some(field) => ondin_core::build::bind_field_ops(
+                &self.session.doc,
+                &self.field_ids(key),
+                field,
+                var,
+            ),
+            None => Transaction::default(),
         }
     }
 

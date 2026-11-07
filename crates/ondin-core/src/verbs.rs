@@ -375,6 +375,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "[ParaAttr]" => reads::<Vec<ParaAttr>>(v),
         "Cell" => reads::<Cell>(v),
         "StyleValue" => reads::<StyleInput>(v),
+        "BoundField" => reads::<build::BoundField>(v),
         "Tree" => reads::<Tree>(v),
         "[Effect]" => reads::<Vec<Effect>>(v),
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
@@ -448,6 +449,7 @@ pub fn example(model: &str) -> Option<Value> {
         ]),
         "Cell" => json(&Cell::Color(Color::from_rgb8(0x33, 0x66, 0xcc))),
         "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
+        "BoundField" => json(&build::BoundField::Fill(0)),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::IndentStart(Length::Px(24.0)),
@@ -1360,6 +1362,39 @@ pub static VERBS: &[Verb] = &[
             crate::variable::frame_mode_ops(ctx.doc, a.node("node")?, c, mode)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("node", why))
+        },
+    },
+    Verb {
+        name: "bind_variable",
+        doc: "Bind a field of layers to a variable, or detach it to the value it draws",
+        params: &[
+            req("nodes", NODES, "the layers"),
+            req(
+                "field",
+                ParamKind::Model("BoundField"),
+                "the field, with its place: a fill's index, a corner, a gap",
+            ),
+            opt(
+                "variable",
+                ParamKind::Id("variable"),
+                "the variable, of the field's kind; absent detaches",
+            ),
+        ],
+        run: |ctx, a| {
+            let field = a.model::<build::BoundField>("field")?;
+            if !field.in_range() {
+                return Err(a.invalid("field", "no such place in that field"));
+            }
+            let var = a.id_opt::<VarId>("variable")?;
+            if var.is_some_and(|v| ctx.doc.variables().get(v).is_none()) {
+                return Err(a.invalid("variable", "no variable has that id"));
+            }
+            Ok(Done::edit(build::bind_field_ops(
+                ctx.doc,
+                &a.nodes("nodes")?,
+                field,
+                var,
+            )))
         },
     },
     // --- styles -----------------------------------------------------------------

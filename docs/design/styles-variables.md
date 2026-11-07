@@ -128,6 +128,11 @@ Deletion: a bare `RemoveStyle` of a style in use is refused; `style::remove_ops`
 ### Chrome
 
 **Binding chrome rules**
+- **Every binding and detach goes through `build::bind_field_ops`** over a `build::BoundField`
+  (the field and its place on a layer: a fill's index, a corner, a spacing bit mask, an axis, a
+  text slot, a limit, a stroke's or effect's item). The panel's `FieldKey` adds which layers the card
+  edits (`field_ids`: a selection's shared paint row, every container a spacing field writes) and
+  maps to it (`FieldKey::bound`); `bind_variable` calls it directly.
 - A fully rounded **capsule means a reference** (a bound field's chip, a collapsed styled card, an alias); nothing else in the inspector is round. No hue; the accent still means selected.
 - A bound field is a **chip** at the field's own width showing the variable name (elided by whole groups from the left), tooltip *name · value · Mode*, the mode its own collection reads there, *Collection: Mode* once the document has two collections (`binding::chip_tip(doc, at, var)`); a typed literal, `Backspace`, or the chip's hover × detaches; it does not scrub (a bound number draws the unbound field's own prefix, `ui::prefix_strip`/`paint_prefix`).
 - *Mixed* is a capsule only when every target is bound to different variables (`field_mixed_vars`; tooltip lists names, no hover × or field menu); some bound, some not stays the plain grey *Mixed*. Sits beside §5.3d's override dot.

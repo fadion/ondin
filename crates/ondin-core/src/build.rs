@@ -3556,6 +3556,136 @@ pub fn replace_image_fill(
     Some(Transaction(ops))
 }
 
+// --- binding a field to a variable --------------------------------------------
+
+/// A field of a layer a variable can bind, with the place within it: which fill,
+/// corner, gap or padding side, axis, type number, limit, stroke or effect number.
+/// Each answers to its own bind and detach builder; [`bind_field_ops`] is the one
+/// door over them.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundField {
+    /// A fill's colour, by its index in the list, 0 the bottom.
+    Fill(usize),
+    /// A stroke's colour, by its index.
+    Stroke(usize),
+    /// A rectangle's or frame's four corners together.
+    Radius,
+    /// One corner: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left.
+    Corner(usize),
+    /// A container's gaps and padding: bit `k` is `SpacingVars` place `k` —
+    /// column gap, row gap, padding top, right, bottom, left.
+    Spacing(u8),
+    Visible,
+    /// Width (0) or height (1).
+    Size(usize),
+    Content,
+    Family,
+    /// A text's type number by its `TextVars` place: size, weight, line height,
+    /// letter spacing, paragraph spacing.
+    Type(usize),
+    /// A layout item's limit by its `LimitVars` place: min width, max width, min
+    /// height, max height.
+    Limit(usize),
+    Opacity,
+    /// A stroke's width, by the stroke's item id.
+    StrokeWidth(crate::ItemId),
+    /// An effect's number, by the effect's item id and its `EffectVars` place: X,
+    /// Y, blur, spread.
+    Effect(crate::ItemId, usize),
+    /// A flex container's direction (0) or wrap (1).
+    Flow(usize),
+}
+
+impl BoundField {
+    /// Whether the place it names exists, so no builder indexes past an array.
+    pub fn in_range(self) -> bool {
+        use crate::variable::{TEXT_CONTENT, TEXT_FAMILY};
+        match self {
+            BoundField::Corner(k) | BoundField::Limit(k) | BoundField::Effect(_, k) => k < 4,
+            BoundField::Spacing(bits) => bits != 0 && bits < 1 << 6,
+            BoundField::Size(k) | BoundField::Flow(k) => k < 2,
+            BoundField::Type(k) => k < 7 && k != TEXT_CONTENT && k != TEXT_FAMILY,
+            _ => true,
+        }
+    }
+}
+
+/// Bind `field` of every layer of `ids` to `var`, or detach it to the value it
+/// draws for `None`. Nothing for a field whose place does not exist
+/// ([`BoundField::in_range`]).
+pub fn bind_field_ops(
+    doc: &Document,
+    ids: &[NodeId],
+    field: BoundField,
+    var: Option<crate::VarId>,
+) -> Transaction {
+    use crate::variable::{TEXT_CONTENT, TEXT_FAMILY};
+    if !field.in_range() {
+        return Transaction::default();
+    }
+    let paint = |target, index| match var {
+        Some(v) => bind_brush_at_all(doc, ids, target, index, v),
+        None => detach_brush_at_all(doc, ids, target, index),
+    };
+    match field {
+        BoundField::Fill(i) => return paint(PaintTarget::Fill, i),
+        BoundField::Stroke(i) => return paint(PaintTarget::Stroke, i),
+        _ => {}
+    }
+    let text = |k: usize, id: NodeId| match var {
+        Some(v) => {
+            let mut vars = crate::TextVars::default();
+            vars[k] = Some(v);
+            bind_text_ops(doc, id, vars)
+        }
+        None => detach_text_ops(doc, id, std::array::from_fn(|j| j == k)),
+    };
+    let one = |id: NodeId| -> Vec<Operation> {
+        match (field, var) {
+            (BoundField::Radius, Some(v)) => bind_corners_ops(doc, id, [Some(v); 4]),
+            (BoundField::Radius, None) => detach_corners_ops(doc, id),
+            (BoundField::Corner(k), Some(v)) => {
+                let mut vars = [None; 4];
+                vars[k] = Some(v);
+                bind_corners_ops(doc, id, vars)
+            }
+            (BoundField::Corner(k), None) => detach_corner_ops(doc, id, k),
+            (BoundField::Spacing(bits), v) => {
+                let which: [bool; 6] = std::array::from_fn(|k| bits & (1 << k) != 0);
+                match v {
+                    Some(v) => bind_spacing_ops(doc, id, which.map(|on| on.then_some(v))),
+                    None => detach_spacing_ops(doc, id, which),
+                }
+            }
+            (BoundField::Visible, Some(v)) => bind_visible_ops(doc, id, v),
+            (BoundField::Visible, None) => detach_visible_ops(doc, id),
+            (BoundField::Size(k), Some(v)) => {
+                let mut vars = [None; 2];
+                vars[k] = Some(v);
+                bind_size_ops(doc, id, vars)
+            }
+            (BoundField::Size(k), None) => {
+                detach_size_ops(doc, id, std::array::from_fn(|j| j == k))
+            }
+            (BoundField::Content, _) => text(TEXT_CONTENT, id),
+            (BoundField::Family, _) => text(TEXT_FAMILY, id),
+            (BoundField::Type(k), _) => text(k, id),
+            (BoundField::Limit(k), Some(v)) => bind_limit_ops(doc, id, k, v),
+            (BoundField::Limit(k), None) => detach_limit_ops(doc, id, k),
+            (BoundField::Opacity, Some(v)) => bind_opacity_ops(doc, id, v),
+            (BoundField::Opacity, None) => detach_opacity_ops(doc, id),
+            (BoundField::StrokeWidth(item), Some(v)) => bind_stroke_width_ops(doc, id, item, v),
+            (BoundField::StrokeWidth(item), None) => detach_stroke_width_ops(doc, id, item),
+            (BoundField::Effect(item, k), Some(v)) => bind_effect_ops(doc, id, item, k, v),
+            (BoundField::Effect(item, k), None) => detach_effect_ops(doc, id, item, k),
+            (BoundField::Flow(k), v) => bind_flow_ops(doc, id, k, v),
+            (BoundField::Fill(_) | BoundField::Stroke(_), _) => Vec::new(),
+        }
+    };
+    Transaction(ids.iter().flat_map(|id| one(*id)).collect())
+}
+
 // --- text styling -----------------------------------------------------------
 
 /// A text layer's styling as an edit of it reads it: the character and paragraph

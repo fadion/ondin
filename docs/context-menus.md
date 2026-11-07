@@ -78,7 +78,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 |---|---|---|
 | 1 | Head | the kind's own verbs (§5) |
 | 2 | Clipboard | Cut · Copy · Paste here · Copy/Paste as ▸ · Duplicate · Delete |
-| 3 | Structure | Group · Frame · Slice · component rows · Ungroup · mask · even-odd · Boolean ▸ · Flatten · conversions · Join paths · Warp… · Align ▸ · Arrange ▸ · Move to page ▸ |
+| 3 | Structure | Group · Frame · Slice · component rows · Ungroup · mask · even-odd · Boolean ▸ · Flatten · conversions · Pixel-fit · Join paths · Warp… · Align ▸ · Arrange ▸ · Move to page ▸ |
 | 4 | State | Hide/Show · Lock/Unlock · Rename *or* Batch rename… · Reset origin |
 | 5 | View | the canvas menu's view switches (§6.1, §6.3 only) |
 
@@ -94,9 +94,9 @@ function, not bucketed by `build`.
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 20 rows in three groups, text 23, a boolean 23, railed text 25, a main
-  frame 18, an instance frame 19; the long end is a bound text child on a rail at 27
-  (`a_primitives_menu_is_twenty_rows_in_three_groups`, `the_menus_the_two_ends_do_not_count`).
+- **Length**: a primitive is 21 rows in three groups, text 23, a boolean 24, railed text 25, a main
+  frame 19, an instance frame 20; the long end is a bound text child on a rail at 27
+  (`a_primitives_menu_is_twenty_one_rows_in_three_groups`, `the_menus_the_two_ends_do_not_count`).
   The ceiling is "needs neither a scrollbar nor a large monitor", which is why the alternate
   clipboards, the boolean operations, the aligns and the restacks sit behind submenus and Flip H/V
   and *Zoom to selection* are left to their other doors (§7).
@@ -152,6 +152,7 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Detach from path | — | one text layer on a rail; dims on lock |
 | Outline shape | — | one primitive or `Path`; on a path dims *"This path is already an outline"* when it has no radii to bake; dims on lock |
 | Outline stroke | — | one primitive, `Path` or boolean; dims *"This layer has no stroke"* without a visible stroke (`build::can_outline_stroke`); dims on lock. Each visible stroke becomes a filled path (`app-booleans.md`) |
+| Pixel-fit | — | any selection holding a layer that is not text, frames and groups included; dims on lock only. Puts the selection's edges on the pixel grid, skipping text and turned layers (`app-pen-and-nodes.md`, *Pixel-fit*) |
 | Join paths | — | exactly two `Path` layers (not line-tool lines); dims *"Both paths need an open end"* unless each has an open subpath of two or more anchors, and *"One of these paths is locked"* when either is (`join_layers_subject`); the target's own lock dims with the lock sentence. The nearest pair of open ends splices into one layer (`app-pen-and-nodes.md`) |
 | Warp… | — | the last conversion; any selection but frames alone. Dims with `warp::subjects`' refusal (*"Select layers to warp"*, *"Pictures can't be warped; trace it first"*, *"Frames can't be warped; warp the layers inside"*, *"A layer to warp is locked"*, *"Warp can't work inside a component or an instance"*); dims on lock. Opens the envelope round the selection (`tools.md`, *Warp*) |
 | Align ▸ | — | always; `Item::AlignMenu`, `ALIGN_LEFT` glyph; a submenu of the six aligns (below). Dims *"Select two or more layers, or a layer inside a frame"* when `OndinApp::align_target` has none (a lone top-level layer; `Context::can_align`); dims on lock |
@@ -247,11 +248,11 @@ The four operations stay in Structure's *Boolean ▸*, checkable (§4).
 |---|---|
 | Edit points | one `Path`; dims on lock (the mode refuses a locked path too) |
 
-*Outline shape*, *Outline stroke*, *Even-odd fill* and *Join paths* reach a path from Structure (§4).
+*Outline shape*, *Outline stroke*, *Pixel-fit*, *Even-odd fill* and *Join paths* reach a path from Structure (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line · Spiral · Arc)
 
-No head. The baseline menu, 20 rows.
+No head. The baseline menu, 21 rows.
 
 ### 5.6 Text
 

@@ -1038,6 +1038,9 @@ pub mod icon {
     /// The Knife tool and its step: a disc cut across, its halves slid apart along
     /// the cut. Not [`KNIFE`], which means *Slice*.
     pub const KNIFE_CUT: &str = "\u{f055}";
+    /// *Pixel-fit*: an arrow pushing a square's corner onto the grid. Not
+    /// [`GRID_FOUR`], which means the View menu's grid.
+    pub const PIXEL_FIT: &str = "\u{f056}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1368,6 +1371,7 @@ pub mod icon {
         ("trace", TRACE),
         ("split-point", SPLIT_POINT),
         ("knife-cut", KNIFE_CUT),
+        ("pixel-fit", PIXEL_FIT),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

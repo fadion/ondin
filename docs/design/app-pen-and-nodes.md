@@ -1,7 +1,7 @@
 # Pen and node tools
 
 Drawing paths with the pen and the pencil, mirrored or not, resuming them, editing their points with
-the node tool (`A`), joining two path layers, and per-anchor corner radii. Part of §9.4.
+the node tool (`A`), joining two path layers, per-anchor corner radii, and *Pixel-fit*. Part of §9.4.
 
 ## 9.4 The pen
 
@@ -231,15 +231,16 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
 
 A short rail floats beside the tool rail, centred on its Pen slot (`OndinApp::pen_button`, whichever
 of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; every bar is drawn by
-`show_bar`). It shows nothing the canvas does not already offer except *Clean up*, *Offset* and
-the mirror.
+`show_bar`). It shows nothing the canvas does not already offer except *Clean up*, *Offset*,
+*Pixel-fit* on selected points and the mirror.
 
 - **While a path's points are edited** (`canvas::edited_path`) it holds the node tool's verbs: select
   points (`A`), the pen bias (`P`) and Mirror, the edit's own switch with the drawing bar's flyout,
   dimmed until the pen bias is picked (*Pick the pen to mirror what it draws*) and on a mirrored
   path, whose runs follow its own axes; *Make corner*, *Make smooth* and *Join*, dimmed until the
   point selection allows them; *Reverse* (`Shift+D`); *Split at point*; *Clean up* (the wand);
-  *Offset*; and *Done* (`Enter`).
+  *Offset*; *Pixel-fit* (`pixel_fit_points`: the selected points, or the whole path with none
+  selected; *Pixel-fit*, below); and *Done* (`Enter`).
 - **Split at point** (`canvas::split_points`, `tools::split_at_points`) cuts the edited path at its
   selected anchors: a closed run opens there and an open run becomes two subpaths of the same layer.
   The anchor stays on both new ends, which coincide until one is dragged away; the finishing end
@@ -339,6 +340,32 @@ the mirror.
 `NodeKind::Path` carries a radius per anchor, resolved by `geometry::local_path` like a `Rect`'s four —
 never baked, except by *Simplify* and *Offset*, which replace the anchors. The Appearance field writes the selected corner points, or every corner when the path is
 selected without the node tool. Every corner rounds; a radius on a smooth anchor draws nothing.
+
+## Pixel-fit
+
+A command, not a mode (`crate::pixel_fit`): it moves a layer's edges onto the pixel grid once, so a
+16–24px icon renders crisp at 1×. The grid is world units. Its doors are the layer menu's Structure
+row (`OndinApp::pixel_fit`, over the selection; `context-menus.md` §4), the palette, and the path
+bar's button (`pixel_fit_points`, above); no chord. Its glyph is `icon::PIXEL_FIT`, an arrow
+pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
+
+- **Anchors** (`fit_anchors`): a corner moves to the nearest grid line on both axes; a smooth anchor
+  moves only across a level or upright tangent, and one with a diagonal tangent stays. Handles ride
+  along, so curves keep their shape.
+- **Box shapes** (rectangle, ellipse, polygon, star, spiral) keep their kind: their world box is
+  rounded (`fit_rect`), a tie growing outward, and a side at least one unit long stays so. A line or
+  an arc snaps both ends.
+- **The grid** (`grid_offset`) sits on the half unit when the layer's first visible stroke is centred
+  and an odd whole number of units wide, so both of the stroke's edges land on whole pixels; on the
+  whole unit otherwise. An anchor's tie goes down, so a whole shape moves as one and keeps its size.
+- **What it walks**: groups, frames and booleans are walked into (a frame's own box is not moved);
+  hidden layers are passed over. Text, and any layer not square to the page (turned other than by a
+  quarter turn, or sheared, `square_to_the_page`), is skipped and counted, since no move of its points
+  lines it up with the pixels. A slice, which draws nothing, is left alone uncounted. An auto-layout child
+  gets no special case.
+- One undo step, *Pixel-fit*. The status line (`Fitted::message`) says what moved and what was
+  skipped: *Moved 7 points onto the pixel grid; skipped 1 text layer and 1 rotated layer*, *Already on
+  the pixel grid*, *Pixel-fit skipped 2 text layers*.
 
 ## Traps
 

@@ -296,6 +296,9 @@ pub enum Item {
     OutlineShape,
     /// Each visible stroke becomes a filled `Path` (`build::outline_stroke`).
     OutlineStroke,
+    /// Corners and level or upright anchors moved onto the pixel grid
+    /// (`OndinApp::pixel_fit`).
+    PixelFit,
     /// Two path layers become one, their nearest open ends spliced
     /// (`OndinApp::join_layers`). The point menu's [`Self::Join`] fuses ends within one.
     JoinPaths,
@@ -639,6 +642,7 @@ impl Item {
         Item::Warp,
         Item::OutlineShape,
         Item::OutlineStroke,
+        Item::PixelFit,
         Item::JoinPaths,
         Item::OutlineText,
         Item::DetachTextPath,
@@ -911,6 +915,7 @@ impl Item {
             Item::Warp => s("Warp…", icon::WARP, None, Group::Structure),
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
             Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
+            Item::PixelFit => s("Pixel-fit", icon::PIXEL_FIT, None, Group::Structure),
             Item::JoinPaths => s("Join paths", icon::PLUGS_CONNECTED, None, Group::Structure),
             // A verb whose whole result is a kind wears that kind's picture (§8):
             // `POLYGON` for the two that make a `Path`, `TEXT_T` for the two that keep text.
@@ -2380,6 +2385,10 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
+    // Anything with points to fit; text alone has none.
+    if cx.kinds.iter().any(|k| *k != Kind::Text) {
+        rows.push(Row::new(Item::PixelFit).dim_if(locked, why));
+    }
     if cx.kinds == [Kind::Path, Kind::Path] {
         rows.push(
             Row::new(Item::JoinPaths)
@@ -2642,6 +2651,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::Warp, "Select layers to warp"),
     (Item::OutlineShape, "Needs one shape"),
     (Item::OutlineStroke, "Needs one stroked shape"),
+    (Item::PixelFit, "Needs a shape or a path"),
     (Item::JoinPaths, "Needs two path layers"),
     (Item::OutlineText, "Needs one text layer"),
     (Item::DetachTextPath, "Needs text on a path"),
@@ -3580,6 +3590,7 @@ impl OndinApp {
                     self.outline_stroke(id);
                 }
             }
+            Item::PixelFit => self.pixel_fit(),
             Item::JoinPaths => self.join_layers(),
             Item::Restack(mv) => self.dispatch(ctx, Action::Restack(mv)),
             Item::Flip(axis) => self.dispatch(ctx, Action::Flip(axis)),
@@ -4161,12 +4172,12 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 20 rows in three groups, the empty head collapsed, with
+    /// A primitive's menu is 21 rows in three groups, the empty head collapsed, with
     /// the clipboard's rest, the aligns and the order in *Copy/Paste as ▸*, *Align ▸*
     /// and *Arrange ▸*. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_rows_in_three_groups() {
+    fn a_primitives_menu_is_twenty_one_rows_in_three_groups() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let mut cx = open(
@@ -4179,7 +4190,7 @@ mod tests {
         );
         cx.other_pages = vec![(id(7), "Page 2".into())];
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 20, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 21, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 3, "the head is empty and must collapse");
 
         assert_eq!(
@@ -4198,6 +4209,7 @@ mod tests {
                 "Use as mask",
                 "Outline shape",
                 "Outline stroke",
+                "Pixel-fit",
                 "Warp…",
                 "Align",
                 "Arrange",
@@ -4384,9 +4396,9 @@ mod tests {
         assert_eq!(ticked, ["Subtract"]);
     }
 
-    /// A plain boolean's menu: head 3 · Clipboard 6 · Structure 11 · State 3.
+    /// A plain boolean's menu: head 3 · Clipboard 6 · Structure 12 · State 3.
     #[test]
-    fn a_booleans_menu_is_twenty_three_rows() {
+    fn a_booleans_menu_is_twenty_four_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Boolean(BoolOp::Subtract)];
         let groups = build(&open(
@@ -4397,7 +4409,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
@@ -4428,23 +4440,23 @@ mod tests {
                 }),
             ),
             (
-                "a main frame: head 1 · Clipboard 6 · Structure 8 (*Group \
+                "a main frame: head 1 · Clipboard 6 · Structure 9 (*Group \
                  selection*, *Frame selection*, *Slice selection*, *Duplicate as \
-                 component*, *Select all instances*, *Align*, *Arrange*, *Move to \
-                 page*) · State 3",
-                18,
+                 component*, *Select all instances*, *Pixel-fit*, *Align*, \
+                 *Arrange*, *Move to page*) · State 3",
+                19,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                19,
+                20,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 20, with *Go to \
+                "a linked shape in an instance: the primitive's 21, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                21,
+                22,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -4475,8 +4487,8 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 23, with the bound child's three rows for *Create component*",
-                25,
+                 24, with the bound child's three rows for *Create component*",
+                26,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -4648,7 +4660,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 20, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 21, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             deep(&groups)
@@ -5216,7 +5228,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 20, "{:?}", labels(&groups));
+        assert_eq!(all, 21, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

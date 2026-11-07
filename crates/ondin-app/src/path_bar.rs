@@ -1,7 +1,7 @@
 //! The path bar: a short rail beside the tool rail while a path's points are being
 //! edited, holding the node tool's verbs — select or add points, corner and smooth,
-//! join, reverse, split, clean up, offset — and the way out. While the pen or the
-//! pencil draws new paths it holds the mirror switch instead (`crate::mirror`).
+//! join, reverse, split, clean up, offset, pixel-fit — and the way out. While the pen
+//! or the pencil draws new paths it holds the mirror switch instead (`crate::mirror`).
 //!
 //! It floats over the canvas, the ruler included, centred on the rail's Pen button,
 //! so it reads as that button's drawer. *Clean up* opens its card (`crate::cleanup`)
@@ -184,6 +184,7 @@ enum Verb {
     Split,
     CleanUp,
     Offset,
+    PixelFit,
     /// The pen's and the pencil's mirror switch, which opens its flyout.
     Mirror,
     /// The warp bar's envelopes: *Free distort*, or a preset.
@@ -553,6 +554,17 @@ impl OndinApp {
                 enabled: true,
                 verb: Verb::Offset,
             },
+            E::Btn {
+                glyph: icon::PIXEL_FIT,
+                tip: match has_points {
+                    true => "Pixel-fit — move the selected points onto whole pixels",
+                    false => "Pixel-fit — move edges onto whole pixels",
+                },
+                dimmed: "",
+                active: false,
+                enabled: true,
+                verb: Verb::PixelFit,
+            },
             E::Sep,
             E::Btn {
                 glyph: icon::CHECK,
@@ -576,6 +588,7 @@ impl OndinApp {
             Some(Verb::Split) => self.split_points(None),
             Some(Verb::CleanUp) => self.toggle_cleanup(id),
             Some(Verb::Offset) => self.toggle_offset_card(id),
+            Some(Verb::PixelFit) => self.pixel_fit_points(),
             Some(Verb::Done) => {
                 self.choose_tool(Tool::Select);
                 return;

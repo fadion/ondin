@@ -2,8 +2,7 @@
 
 Open work only. **Now** is the editor's remaining work — its gaps, what other design tools have
 and Ondin lacks, and what Ondin can offer that they do not — roughly smallest first; it lands before
-MCP and Command Mode. **Illustrations** is vector editing for icons, logos and simple
-illustrations. The **Later** sections are deferred with a stated reason or trigger;
+MCP and Command Mode. The **Later** sections are deferred with a stated reason or trigger;
 **Considerations** are ideas not yet decided. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
@@ -24,15 +23,6 @@ reads true.
     none on mid-tone colours. It reads the drawn pixels, so it is a GPU pass over the rendered
     canvas like `vision::VisionPass`, run only while the grid shows. Off, a picker with alpha
     starts at `grid::INK`, and reset returns to it.
-
-## Illustrations
-
-Vector editing enough for icons, logos and simple illustrations without leaving Ondin.
-
-### Highest value
-
-- **Pixel-fit.** A command moving anchors and stroke edges onto whole or half pixels, so 16–24px
-  icons render crisp.
 
 ## Later · Components and layout
 

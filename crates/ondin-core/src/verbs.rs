@@ -14,6 +14,7 @@ use crate::document::Document;
 use crate::effect::Effect;
 use crate::export::ExportSpec;
 use crate::id::{IdSource, NodeId};
+use crate::image::ImageId;
 use crate::item::{Keyed, PastTheEnd, rekey_by_position};
 use crate::node::{
     BlendMode, BlockStyle, BoolOp, CharSpans, Fill, NodeKind, ParagraphStyle, Pivot, Stroke,
@@ -21,6 +22,7 @@ use crate::node::{
 };
 use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::resolve::Resolved;
+use crate::svg_in::ImageSink;
 use kurbo::Affine;
 use serde_json::{Map, Value};
 
@@ -77,25 +79,38 @@ pub struct Ctx<'a> {
     pub doc: &'a Document,
     pub res: &'a Resolved,
     pub ids: &'a mut IdSource,
+    /// What hashes and sizes a picture's bytes, which core cannot do; `None`
+    /// refuses `add_image`.
+    pub images: Option<&'a mut dyn ImageSink>,
 }
 
-/// A verb's answer: the edit to commit, and the nodes it creates, in order.
+/// A verb's answer: the edit to commit, the nodes it creates, in order, and the
+/// picture it adds to the image table.
 #[derive(Debug, Default)]
 pub struct Done {
     pub tx: Transaction,
     pub created: Vec<NodeId>,
+    pub image: Option<ImageId>,
 }
 
 impl Done {
     fn edit(tx: Transaction) -> Self {
         Self {
             tx,
-            created: Vec::new(),
+            ..Self::default()
         }
     }
 
     fn ops(ops: Vec<Operation>) -> Self {
         Self::edit(Transaction(ops))
+    }
+
+    fn made(tx: Transaction, created: Vec<NodeId>) -> Self {
+        Self {
+            tx,
+            created,
+            image: None,
+        }
     }
 }
 
@@ -407,10 +422,7 @@ pub static VERBS: &[Verb] = &[
                 transform: a.model_opt::<Affine>("transform")?,
                 name: a.text("name").map(str::to_owned),
             }]);
-            Ok(Done {
-                tx,
-                created: vec![id],
-            })
+            Ok(Done::made(tx, vec![id]))
         },
     },
     Verb {
@@ -442,7 +454,7 @@ pub static VERBS: &[Verb] = &[
             if created.is_empty() {
                 return Err(VerbError::Nothing("none of the layers can be copied"));
             }
-            Ok(Done { tx, created })
+            Ok(Done::made(tx, created))
         },
     },
     Verb {
@@ -529,10 +541,7 @@ pub static VERBS: &[Verb] = &[
         params: &[req("nodes", NODES, "the layers to group")],
         run: |ctx, a| {
             let (tx, group) = build::group(ctx.doc, ctx.res, ctx.ids, &a.nodes("nodes")?)?;
-            Ok(Done {
-                tx,
-                created: vec![group],
-            })
+            Ok(Done::made(tx, vec![group]))
         },
     },
     Verb {
@@ -562,10 +571,7 @@ pub static VERBS: &[Verb] = &[
                 _ => BoolOp::Union,
             };
             let (tx, id) = build::boolean(ctx.doc, ctx.res, ctx.ids, &a.nodes("nodes")?, op, None)?;
-            Ok(Done {
-                tx,
-                created: vec![id],
-            })
+            Ok(Done::made(tx, vec![id]))
         },
     },
     Verb {
@@ -574,10 +580,7 @@ pub static VERBS: &[Verb] = &[
         params: &[req("nodes", NODES, "the layers to flatten")],
         run: |ctx, a| {
             let (tx, id) = build::flatten(ctx.doc, ctx.res, ctx.ids, &a.nodes("nodes")?)?;
-            Ok(Done {
-                tx,
-                created: vec![id],
-            })
+            Ok(Done::made(tx, vec![id]))
         },
     },
     Verb {
@@ -906,6 +909,43 @@ pub static VERBS: &[Verb] = &[
             Ok(Done::ops(vec![Operation::SetExports { id, exports }]))
         },
     },
+    Verb {
+        name: "add_image",
+        doc: "Add a picture to the document for a fill to show; answers its image id",
+        params: &[req(
+            "bytes",
+            TEXT,
+            "the PNG, JPEG, WebP or GIF file, in base64",
+        )],
+        run: |ctx, a| {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(a.text("bytes").unwrap_or_default())
+                .map_err(|e| a.invalid("bytes", e))?;
+            let format = crate::foreign::sniff(&bytes)
+                .ok_or_else(|| a.invalid("bytes", "not a PNG, JPEG, WebP or GIF file"))?;
+            let sink = ctx
+                .images
+                .as_mut()
+                .ok_or(VerbError::Nothing("this caller cannot read pictures"))?;
+            let (id, entry) = sink
+                .place(bytes, format)
+                .ok_or_else(|| a.invalid("bytes", "the picture does not decode"))?;
+            // A picture already in the table is the same bytes: one entry, two users.
+            let ops = if ctx.doc.has_image(&id) {
+                Vec::new()
+            } else {
+                vec![Operation::AddImage {
+                    id: id.clone(),
+                    entry,
+                }]
+            };
+            Ok(Done {
+                image: Some(id),
+                ..Done::ops(ops)
+            })
+        },
+    },
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",
@@ -1103,20 +1143,21 @@ pub struct ScriptError {
 
 /// Run `script` against `doc`, each step committed before the next reads it: a list
 /// of `{ "verb": name, "args": { … }, "as": label }`. A string argument `"@label"`
-/// names the first node an earlier step labelled `label` created, and `"@page"` the
-/// first page. Answers each step's created nodes; on a refusal `doc` keeps the steps
-/// before it.
+/// stands for the first thing an earlier step labelled `label` made, a node's wire
+/// form or a picture's image id, and `"@page"` for the first page. Answers what each
+/// step made, in those forms; on a refusal `doc` keeps the steps before it.
 pub fn run_script(
     doc: &mut Document,
     ids: &mut IdSource,
+    mut images: Option<&mut dyn ImageSink>,
     script: &Value,
-) -> Result<Vec<Vec<NodeId>>, ScriptError> {
+) -> Result<Vec<Vec<String>>, ScriptError> {
     let fail = |step: usize, why: String| ScriptError { step, why };
     let Value::Array(steps) = script else {
         return Err(fail(0, "a script is a list of steps".into()));
     };
-    let mut labels: rustc_hash::FxHashMap<String, NodeId> = rustc_hash::FxHashMap::default();
-    labels.insert("page".into(), doc.first_page());
+    let mut labels: rustc_hash::FxHashMap<String, String> = rustc_hash::FxHashMap::default();
+    labels.insert("page".into(), doc.first_page().to_wire());
     let mut out = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         let n = i + 1;
@@ -1132,32 +1173,40 @@ pub fn run_script(
                 doc,
                 res: &res,
                 ids,
+                // A cast, not `as_deref_mut`: it shortens the sink's object lifetime
+                // to this step's borrow, which `&mut`'s invariance otherwise forbids.
+                images: images.as_mut().map(|s| &mut **s as &mut dyn ImageSink),
             },
             verb,
             &args,
         )
         .map_err(|e| fail(n, e.to_string()))?;
         doc.apply(&done.tx).map_err(|e| fail(n, e.to_string()))?;
+        let made: Vec<String> = done
+            .created
+            .iter()
+            .map(|id| id.to_wire())
+            .chain(done.image.map(|id| id.0))
+            .collect();
         if let Some(label) = step.get("as").and_then(Value::as_str) {
-            let first =
-                done.created.first().copied().ok_or_else(|| {
-                    fail(n, format!("`{verb}` creates nothing to call `{label}`"))
-                })?;
-            labels.insert(label.to_owned(), first);
+            let first = made
+                .first()
+                .ok_or_else(|| fail(n, format!("`{verb}` makes nothing to call `{label}`")))?;
+            labels.insert(label.to_owned(), first.clone());
         }
-        out.push(done.created);
+        out.push(made);
     }
     Ok(out)
 }
 
-/// Every `"@label"` string in `v` replaced by its node's wire form.
-fn substitute(v: &mut Value, labels: &rustc_hash::FxHashMap<String, NodeId>) -> Result<(), String> {
+/// Every `"@label"` string in `v` replaced by what its label stands for.
+fn substitute(v: &mut Value, labels: &rustc_hash::FxHashMap<String, String>) -> Result<(), String> {
     match v {
         Value::String(s) if s.starts_with('@') => {
-            let id = labels
+            let made = labels
                 .get(&s[1..])
                 .ok_or_else(|| format!("no earlier step is called `{}`", &s[1..]))?;
-            *s = id.to_wire();
+            *s = made.clone();
         }
         Value::Array(list) => list.iter_mut().try_for_each(|v| substitute(v, labels))?,
         Value::Object(map) => map.values_mut().try_for_each(|v| substitute(v, labels))?,

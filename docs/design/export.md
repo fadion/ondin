@@ -254,8 +254,9 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
   - **Conflicts:** where both sides changed one value differently, or both reordered one list differently, ours wins and the place is listed on stderr. A record removed by one side and changed by the other is kept. The result must load; if it does not (a layer moved under two different parents, or deleted on one side and edited on the other), ours is kept whole and the reason is listed. The output is re-saved canonically.
 - `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` commits a script of registry verbs
   (`verbs::run_script`, `core-ops.md` *The verb registry*) against `--in`, or a new document, and
-  writes the result atomically. It prints a line per step that created nodes (`step 1: <id>`), and
-  exits 1 naming the step and the parameter when one is refused.
+  writes the result atomically. It prints a line per step that made something (`step 1: <id>`, a
+  node's wire form or `add_image`'s image id), and exits 1 naming the step and the parameter when
+  one is refused. Its pictures are hashed and sized as an import's are (`import_files::Pictures`).
 - `ondin tokens export <file> [--mode <name>] [-o tokens.json]` writes `dtcg::tokens` to `-o`, or to stdout without one, with each note on stderr. A `--mode` the document does not have is refused, naming the modes it has; one it has sets `$value` for its own collection only.
 
 ### In the app

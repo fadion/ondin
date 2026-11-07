@@ -640,7 +640,7 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
 }
 
 /// [`Command::Run`]: the script's steps committed one by one, the result saved
-/// atomically. Answers a line per step that created something.
+/// atomically. Answers a line per step that made something.
 fn run_script(script: &str, input: Option<&str>, out: &str) -> Result<Vec<String>, String> {
     let text = std::fs::read_to_string(script).map_err(|e| format!("cannot read {script}: {e}"))?;
     let steps: serde_json::Value =
@@ -653,7 +653,8 @@ fn run_script(script: &str, input: Option<&str>, out: &str) -> Result<Vec<String
         }
         None => ondin_core::Document::new(ids.mint()),
     };
-    let made = ondin_core::verbs::run_script(&mut doc, &mut ids, &steps)
+    let mut pictures = panels::import_files::Pictures;
+    let made = ondin_core::verbs::run_script(&mut doc, &mut ids, Some(&mut pictures), &steps)
         .map_err(|e| format!("{script}: {e}"))?;
     let bytes = ondin_core::io::save(&doc).map_err(|e| format!("cannot save: {e}"))?;
     atomic::write(std::path::Path::new(out), &bytes)
@@ -661,11 +662,8 @@ fn run_script(script: &str, input: Option<&str>, out: &str) -> Result<Vec<String
     Ok(made
         .iter()
         .enumerate()
-        .filter(|(_, ids)| !ids.is_empty())
-        .map(|(i, ids)| {
-            let wire: Vec<String> = ids.iter().map(|id| id.to_wire()).collect();
-            format!("step {}: {}", i + 1, wire.join(" "))
-        })
+        .filter(|(_, made)| !made.is_empty())
+        .map(|(i, made)| format!("step {}: {}", i + 1, made.join(" ")))
         .collect())
 }
 

@@ -203,11 +203,14 @@ it created. A verb never commits; its caller does, as every edit is committed.
 - **A paint list written whole keeps its item ids by position** (`item::rekey_by_position`), so an
   instance reads the write as overrides of its main's items.
 - **Phase 2's tool list is held to the registry** (`ondin-mcp`'s `every_write_tool_is_a_registry_verb`):
-  every write tool is a verb of the same name, a session tool (`undo`, `redo`, `set_selection`), or
-  named as unbound with what it waits on (`add_image`).
+  every write tool is a verb of the same name or a session tool (`undo`, `redo`, `set_selection`).
+- **`add_image` takes the file's bytes in base64** and answers the picture's image id for a fill to
+  name; it adds no layer. Core can neither hash nor decode, so the caller lends `Ctx::images`
+  (`svg_in::ImageSink`, as an import does); a caller without one is refused. Bytes the table
+  already holds add nothing and answer the same id.
 - **`run_script`** commits a list of `{ verb, args, as }` steps one by one. A string argument
-  `"@label"` names the first node an earlier step labelled `label` created, and `"@page"` the first
-  page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps
+  `"@label"` stands for the first thing an earlier step labelled `label` made (a node's wire form,
+  or `add_image`'s id), and `"@page"` for the first page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps
   before it. `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
 
 ### 5.7b Layer names (`naming.rs`)

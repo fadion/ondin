@@ -4,10 +4,11 @@
 
 use ondin_core::kurbo::{Affine, Size};
 use ondin_core::peniko::Color;
+use ondin_core::svg_in::ImageSink;
 use ondin_core::verbs::{self, Ctx, Done, ParamKind, VerbError};
 use ondin_core::{
-    Brush, Document, Fill, Guide, GuideAxis, GuideId, IdSource, NodeId, NodeKind, Operation,
-    Resolved, Transaction,
+    Brush, Document, Fill, Guide, GuideAxis, GuideId, IdSource, ImageEntry, ImageFormat, ImageId,
+    ImageSource, NodeId, NodeKind, Operation, Resolved, Transaction, image_brush,
 };
 use serde_json::{Value, json};
 
@@ -21,11 +22,12 @@ fn blank() -> (Document, IdSource, NodeId) {
 /// Run `name` with `args` on `doc` and commit its edit; answers what it created.
 fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<NodeId> {
     let res = Resolved::rebuild(doc);
-    let Done { tx, created } = verbs::call(
+    let Done { tx, created, .. } = verbs::call(
         &mut Ctx {
             doc,
             res: &res,
             ids,
+            images: None,
         },
         name,
         &args,
@@ -149,6 +151,7 @@ fn arguments_are_checked_against_the_parameters() {
         doc: &doc,
         res: &res,
         ids: &mut ids,
+        images: None,
     };
     let p = page.to_wire();
     let mut refused = |name: &str, args: Value| match verbs::call(&mut ctx, name, &args) {
@@ -282,6 +285,7 @@ fn deleting_a_frame_takes_its_guides_and_undoes() {
             doc: &doc,
             res: &res,
             ids: &mut ids,
+            images: None,
         },
         "delete_node",
         &json!({ "nodes": [frame.to_wire()] }),
@@ -382,11 +386,12 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
         ],
     });
     let res = Resolved::rebuild(&doc);
-    let Done { tx, created } = verbs::call(
+    let Done { tx, created, .. } = verbs::call(
         &mut Ctx {
             doc: &doc,
             res: &res,
             ids: &mut ids,
+            images: None,
         },
         "insert_subtree",
         &json!({ "parent": page.to_wire(), "tree": tree }),
@@ -418,6 +423,7 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
             doc: &doc,
             res: &res,
             ids: &mut ids,
+            images: None,
         },
         "insert_subtree",
         &json!({ "parent": page.to_wire(), "tree": { "kind": rect(1.0, 1.0), "colour": "red" } }),
@@ -426,6 +432,74 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
         matches!(refused, Err(VerbError::Invalid { param: "tree", .. })),
         "{refused:?}"
     );
+}
+
+/// A sink that takes any picture; its id is the byte length.
+struct Pictures;
+
+impl ImageSink for Pictures {
+    fn place(&mut self, bytes: Vec<u8>, format: ImageFormat) -> Option<(ImageId, ImageEntry)> {
+        Some((
+            ImageId(format!("test:{}", bytes.len())),
+            ImageEntry {
+                source: ImageSource::Embedded(bytes.into()),
+                format,
+                width: 4,
+                height: 4,
+            },
+        ))
+    }
+}
+
+/// `add_image` puts a picture in the table and answers its id, which a script's
+/// label carries into a fill; the same bytes again add nothing. A caller with no
+/// sink, or bytes no picture format starts with, is refused.
+///
+/// flip: `add_image` emitting `AddImage` when the table already holds the id →
+/// fails at the second script's commit, with `DuplicateImage`.
+#[test]
+fn add_image_answers_an_id_a_fill_can_show() {
+    use base64::Engine as _;
+    let (mut doc, mut ids, page) = blank();
+    let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n-pixels-");
+    let fill = serde_json::to_value(Fill {
+        brush: image_brush(ImageId("@logo".into())).into(),
+        visible: true,
+    })
+    .unwrap();
+    let script = json!([
+        { "verb": "add_image", "args": { "bytes": png }, "as": "logo" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "r" },
+        { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let id = ImageId(made[0][0].clone());
+    assert!(doc.has_image(&id), "{made:?}");
+    let r = doc.get(page).unwrap().children()[0];
+    assert!(
+        matches!(doc.get(r).unwrap().paint().fills[0].brush.literal(),
+            Some(Brush::Image(b)) if b.image.id == id),
+        "the fill shows the picture"
+    );
+
+    let again = json!([{ "verb": "add_image", "args": { "bytes": png } }]);
+    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &again)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(made[0], std::slice::from_ref(&id.0));
+    assert_eq!(doc.images().count(), 1);
+
+    let err = verbs::run_script(&mut doc, &mut ids, None, &again).expect_err("no sink");
+    assert!(err.why.contains("cannot read pictures"), "{err}");
+    let text = base64::engine::general_purpose::STANDARD.encode(b"hello");
+    let err = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Some(&mut Pictures),
+        &json!([{ "verb": "add_image", "args": { "bytes": text } }]),
+    )
+    .expect_err("not a picture");
+    assert!(err.why.contains("not a PNG"), "{err}");
 }
 
 /// A script's later steps name an earlier step's node by its label, and `@page` is
@@ -442,8 +516,9 @@ fn a_script_refers_to_what_its_earlier_steps_made() {
         { "verb": "group", "args": { "nodes": ["@a", "@b"] }, "as": "pair" },
         { "verb": "set_name", "args": { "node": "@pair", "name": "Pair" } },
     ]);
-    let made = verbs::run_script(&mut doc, &mut ids, &script).unwrap_or_else(|e| panic!("{e}"));
-    let pair = made[2][0];
+    let made =
+        verbs::run_script(&mut doc, &mut ids, None, &script).unwrap_or_else(|e| panic!("{e}"));
+    let pair = NodeId::from_wire(&made[2][0]).expect("a node's wire form");
     assert_eq!(doc.get(pair).unwrap().name(), "Pair");
     assert_eq!(doc.get(page).unwrap().children(), [pair]);
 
@@ -452,7 +527,7 @@ fn a_script_refers_to_what_its_earlier_steps_made() {
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(1.0, 1.0) }, "as": "c" },
         { "verb": "set_name", "args": { "node": "@pair", "name": "x" } },
     ]);
-    let err = verbs::run_script(&mut doc, &mut ids, &broken).expect_err("an unknown label");
+    let err = verbs::run_script(&mut doc, &mut ids, None, &broken).expect_err("an unknown label");
     assert_eq!(err.step, 2, "{err}");
     assert!(err.why.contains("pair"), "{err}");
     assert_eq!(

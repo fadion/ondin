@@ -618,8 +618,9 @@ impl ondin_core::foreign::Archive for Zip<'_> {
     }
 }
 
-/// Pictures inside another tool's file, hashed and sized as a placed one is.
-struct Pictures;
+/// Pictures inside another tool's file, or a script's `add_image`, hashed and sized
+/// as a placed one is.
+pub(crate) struct Pictures;
 
 impl ondin_core::svg_in::ImageSink for Pictures {
     fn place(

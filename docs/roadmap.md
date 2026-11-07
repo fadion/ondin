@@ -9,27 +9,22 @@ item's premise can go stale while its ask still reads true.
 
 ## Now
 
-- **One command registry.** Every editing verb as a named command with typed parameters, in one
-  list that the app, a headless CLI, MCP and Command Mode all call, so "an agent can do whatever a
-  click can" holds by construction. Today there are two levels, joined by hand:
-  - *UI commands* act on the selection, a menu's target and the pointer. `menu::Item` is already
-    their registry for the menus, the palette and the cheatsheet (label, glyph, chord spelling,
-    aliases), and `input::Action` is what keys produce. `Item::action`, `Item::step_name` and
-    `perform_menu_item`'s forwards to `dispatch` bridge the two.
-  - *Document verbs* take explicit parameters. MCP's list (`ondin-mcp`, `tools.rs`) is names with no
-    parameters and no link to either app list, the CLI (`main.rs`, `parse`) is its own parser, and
-    `vm.md` assumes a verb list built from `build.rs` that still needs its public naming pass.
-
-  The registry belongs at the second level, in core, in this order:
-  1. Move the headless half of `tools/mod.rs` and `preview.rs` into core (§15 D786). Neither uses
-     egui, so the move is a sweep the compiler enumerates; after the first MCP handler it would be
-     two implementations to reconcile.
-  2. A verb table in `ondin-core`: name, typed parameters, a one-line doc, and a function from the
-     document and its parameters to a `Transaction`. MCP's Phase 2 tools, Command Mode and a
-     headless `ondin run script.json --out card.ondin` bind it, and a test checks `tools.rs`'
-     names against it.
-  3. The app's editing `Item`s call the same verbs with the selection filled in. What needs the
-     menu's target or the pointer stays an `Item` of the app's own.
+- **The rest of the command registry.** The verb table is built (`ondin_core::verbs`, `core-ops.md`
+  *The verb registry*), over the headless editing code now in `ondin_core::edit`, and `ondin run`
+  drives it. Left:
+  - **The three unbound Phase 2 tools** (`ondin-mcp`'s `UNBOUND`): `duplicate`, whose edit the app
+    builds itself, keeping a clone chain for *Repeat*; `insert_subtree`, which needs a node list's
+    wire form for callers outside the save format; and `add_image`, which needs image bytes as an
+    argument.
+  - **Edits the app still builds itself.** A verb is a builder's door, so an edit built in
+    `OndinApp` (duplicate, paste, the point edits that commit through `rewrite_edit`) moves into a
+    core builder before its verb exists, as delete did (`build::delete`). Find them by walking
+    `perform_menu_item` and `dispatch` for arms that build ops in place rather than calling
+    `build::` or `edit::`.
+  - **The model values' wire form for callers.** A model parameter takes the serde form (a solid
+    brush is `{ "Solid": { "components": [r, g, b, a] } }`), which an agent cannot guess. MCP's
+    schema needs a description of each `ParamKind::Model` type, or friendlier forms for the common
+    ones (a colour as `#rrggbb`).
 
 ## Now · Components and layout
 
@@ -76,7 +71,7 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
   disclosure, schema place, kit scripts.
 - **MCP and headless (M6)** — `architecture.md` §8, §10; `ondin-mcp` is a stub. Its Phase 2 tools
-  bind the registry (*Now*), whose first step moves the headless editing code into core. Also owed:
+  are the registry's verbs (`ondin_core::verbs`), held to them by a test. Also owed:
   the commit pass sequence out of `EditorSession::commit_inner`; kits and library code out of the app
   for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and

@@ -597,17 +597,32 @@ pub(crate) fn card_foot(
     buttons: &[(&str, FieldButton)],
     why_not: Option<&str>,
 ) -> Option<usize> {
+    card_foot_with(ui, w, buttons, why_not, |ui, row| {
+        ui.painter().text(
+            row.left_center(),
+            egui::Align2::LEFT_CENTER,
+            note,
+            egui::FontId::proportional(ui::CAPTION_PT),
+            theme::text::faint(),
+        );
+    })
+}
+
+/// [`card_foot`] with its own left side: `lead` draws into the row's content
+/// rect, inside [`CANVAS_CARD_PAD`], before the buttons are laid.
+pub(crate) fn card_foot_with(
+    ui: &mut egui::Ui,
+    w: f32,
+    buttons: &[(&str, FieldButton)],
+    why_not: Option<&str>,
+    lead: impl FnOnce(&mut egui::Ui, egui::Rect),
+) -> Option<usize> {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, CANVAS_CARD_FOOT_H), egui::Sense::hover());
-    ui.painter().text(
-        egui::pos2(rect.left() + CANVAS_CARD_PAD, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        note,
-        egui::FontId::proportional(ui::CAPTION_PT),
-        theme::text::faint(),
-    );
+    let row = rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 10.0));
+    lead(ui, row);
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 10.0)))
+            .max_rect(row)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     footer_row_noted(&mut child, buttons, why_not)

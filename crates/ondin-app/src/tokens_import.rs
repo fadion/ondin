@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 
 /// The box's width: a value column per mode needs more than batch rename's.
 const W: f32 = 620.0;
-const PAD: f32 = 16.0;
+/// The card's inset, every canvas card's.
+const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
 /// The list scrolls past this height.
 const LIST_H: f32 = 380.0;
 const ROW_H: f32 = 26.0;
@@ -1085,22 +1086,10 @@ fn note_row(ui: &mut egui::Ui, note: &str) {
         });
 }
 
-/// *Keep this file linked* on the left, then the dialogs' footer row
-/// (`settings::footer_row_noted`): *Cancel* (or *Later*) and *Apply N changes*,
-/// a refusal written to the row's left and worn as Apply's tooltip.
+/// The canvas card's footer (`settings::card_foot_with`): *Keep this file linked*
+/// on the left, then *Cancel* (or *Later*) and *Apply N changes*, a refusal
+/// written to the buttons' left and worn as Apply's tooltip.
 fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 50.0), egui::Sense::hover());
-    if t.linkable {
-        let mut child = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + PAD, rect.top()),
-                    egui::pos2(rect.center().x, rect.bottom()),
-                ))
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        ui::tick_box(&mut child, "Keep this file linked", "", &mut t.link);
-    }
     let n = ticked_count(t);
     let go = match n {
         0 => "Done".to_string(),
@@ -1112,29 +1101,34 @@ fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
     };
     let back = if t.from_link { "Later" } else { "Cancel" };
     let buttons = [(back, FieldButton::Off), (go.as_str(), state)];
-    let row = rect.shrink2(egui::vec2(PAD, 11.0));
-    if let Some(why) = &t.why_not {
-        let right = row.right() - crate::settings::footer_row_w(ui, &buttons) - 8.0;
-        let mut job = egui::text::LayoutJob::simple_singleline(
-            why.clone(),
-            egui::FontId::proportional(ui::CAPTION_PT),
-            color::warn(),
-        );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(right - rect.center().x);
-        let g = ui.fonts_mut(|f| f.layout_job(job));
-        ui.painter().galley(
-            egui::pos2(right - g.size().x, rect.center().y - g.size().y / 2.0),
-            g,
-            color::warn(),
-        );
-    }
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(row)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
     let why_not = t.why_not.as_deref();
-    match crate::settings::footer_row_noted(&mut child, &buttons, why_not) {
+    let (linkable, link) = (t.linkable, &mut t.link);
+    let lead = |ui: &mut egui::Ui, row: egui::Rect| {
+        if linkable {
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(row.with_max_x(row.center().x))
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            ui::tick_box(&mut child, "Keep this file linked", "", link);
+        }
+        if let Some(why) = why_not {
+            let right = row.right() - crate::settings::footer_row_w(ui, &buttons) - 8.0;
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                why.to_owned(),
+                egui::FontId::proportional(ui::CAPTION_PT),
+                color::warn(),
+            );
+            job.wrap = egui::text::TextWrapping::truncate_at_width(right - row.center().x);
+            let g = ui.fonts_mut(|f| f.layout_job(job));
+            ui.painter().galley(
+                egui::pos2(right - g.size().x, row.center().y - g.size().y / 2.0),
+                g,
+                color::warn(),
+            );
+        }
+    };
+    match crate::settings::card_foot_with(ui, W, &buttons, why_not, lead) {
         Some(0) => Some(if t.from_link { Act::Later } else { Act::Cancel }),
         Some(_) => Some(Act::Apply),
         None => None,

@@ -25,6 +25,11 @@ const W: f32 = crate::app::POPOVER_W;
 /// The most pieces *Add points* cuts a segment into.
 const MAX_PIECES: f64 = 16.0;
 
+/// How long, in seconds, Simplify's accuracy may wait on its refit before the
+/// caption says *Fitting…*; until then it keeps the last count, so a fit of a few
+/// milliseconds never flashes.
+const FIT_PATIENCE: f64 = 0.25;
+
 /// The card's numbers, kept while it is closed so it reopens on the last ones.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CleanupNumbers {
@@ -79,6 +84,9 @@ pub(crate) struct CleanupCard {
     fitted: Option<(f64, BezPath)>,
     /// The refit on the worker, and its accuracy. One at a time, as the Offset card's.
     fitting: Option<(f64, Job<BezPath>)>,
+    /// Since when, in `egui` input time, the accuracy in the field has had no
+    /// refit landed ([`FIT_PATIENCE`]).
+    unanswered: Option<f64>,
     /// How many anchors *Remove redundant points* would take out.
     redundant: usize,
     /// The row the canvas shows, and what it was built from.
@@ -189,6 +197,7 @@ impl OndinApp {
             drawn: Arc::new(drawn),
             fitted: None,
             fitting: None,
+            unanswered: None,
             redundant,
             shown: None,
             dropping: Vec::new(),
@@ -346,6 +355,7 @@ impl OndinApp {
             .as_ref()
             .filter(|(a, _)| *a == n.accuracy)
             .map(|(_, p)| anchors_in(p));
+        let note = simplify_note(ctx, &mut card, total, simplified);
 
         let mut hot: Option<Row> = None;
         let mut act: Option<Row> = None;
@@ -413,10 +423,6 @@ impl OndinApp {
                         if std::mem::take(&mut card.focus_apply) {
                             b.request_focus();
                         }
-                        let note = match simplified {
-                            Some(after) => format!("{total} points → {after}"),
-                            None => "Fitting…".to_owned(),
-                        };
                         caption(ui, &note);
                         row(Row::Simplify, Some(f), b);
                     });
@@ -457,7 +463,7 @@ impl OndinApp {
                                 let f = ui::value_field(
                                     ui,
                                     field,
-                                    Prefix::Label("Split each segment in"),
+                                    Prefix::Text(""),
                                     &mut n.pieces,
                                     Scrub::whole(0.1).range(2.0..=MAX_PIECES),
                                     |d| d.custom_formatter(ui::number(0)),
@@ -574,6 +580,31 @@ impl OndinApp {
     /// The points the card's shown row would take away, for the canvas to mark.
     pub(crate) fn cleanup_dropping(&self) -> &[Point] {
         self.cleanup.as_ref().map_or(&[], |c| &c.dropping)
+    }
+}
+
+/// Simplify's caption: the count at the field's accuracy once its refit has landed.
+/// Before that it keeps the last count that landed (or the path's own, before any
+/// has), and says *Fitting…* only after [`FIT_PATIENCE`].
+fn simplify_note(
+    ctx: &egui::Context,
+    card: &mut CleanupCard,
+    total: usize,
+    simplified: Option<usize>,
+) -> String {
+    if let Some(after) = simplified {
+        card.unanswered = None;
+        return format!("{total} points → {after}");
+    }
+    let now = ctx.input(|i| i.time);
+    let left = FIT_PATIENCE - (now - *card.unanswered.get_or_insert(now));
+    if left <= 0.0 {
+        return "Fitting…".to_owned();
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+    match &card.fitted {
+        Some((_, path)) => format!("{total} points → {}", anchors_in(path)),
+        None => format!("{total} points"),
     }
 }
 
@@ -734,5 +765,41 @@ mod tests {
         app.show_cleanup_row(&mut card, None);
         assert!(!app.session.has_gesture_preview(), "taken off");
         assert!(card.dropping.is_empty());
+    }
+
+    /// A new accuracy keeps the last count under Simplify while its refit is in
+    /// flight, rather than flashing *Fitting…* for a frame.
+    ///
+    /// flip: `FIT_PATIENCE` at 0 → fails at "no flash".
+    #[test]
+    fn a_new_accuracy_does_not_flash_fitting() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        pass(&ctx, &mut app, Vec::new());
+        app.toggle_cleanup(id);
+        let accuracy = app.cleanup_numbers.accuracy;
+        let mut card = app.cleanup.take().expect("open");
+        card.settle(accuracy);
+        app.cleanup = Some(card);
+        let painted = |out: &egui::FullOutput, f: &dyn Fn(&str) -> bool| {
+            out.shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if f(t.galley.text())))
+        };
+        // The card's first frame is egui's sizing pass, which paints nothing.
+        pass(&ctx, &mut app, Vec::new());
+        let landed = pass(&ctx, &mut app, Vec::new());
+        assert!(
+            painted(&landed, &|s| s.starts_with("64 points → ")),
+            "fixture: the first refit has landed"
+        );
+        app.cleanup_numbers.accuracy = accuracy + 3.0;
+        let out = pass(&ctx, &mut app, Vec::new());
+        assert!(
+            app.cleanup.as_ref().is_some_and(|c| c.fitting.is_some()),
+            "fixture: the new refit is in flight"
+        );
+        assert!(!painted(&out, &|s| s == "Fitting…"), "no flash");
+        assert!(painted(&out, &|s| s.starts_with("64 points → ")));
     }
 }

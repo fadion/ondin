@@ -187,7 +187,11 @@ from a `Ctx` (document, `Resolved`, `IdSource`) to a `Done`: the `Transaction` t
 it created. A verb never commits; its caller does, as every edit is committed.
 
 - **Arguments are checked before a verb runs** (`verbs::call`): a JSON object holding every required
-  parameter, none it does not take, each of its kind. Each refusal names the verb and the parameter.
+  parameter, none it does not take, each of its kind, a model value read as its type
+  (`verbs::check_model`). Each refusal names the verb and the parameter.
+- **Every model type a parameter takes has an example** (`verbs::example`), serialized from a real
+  value, since a serde form cannot be guessed (a rectangle needs its `corner_radii`, an image brush
+  its `sampler`). A test holds each example to `check_model` and commits the `Tree` one.
 - **A verb is a builder's door, never a second copy of the edit.** Where the app and a verb make the
   same edit, both call one builder (`build::delete` serves the Delete key and `delete_node`). An edit
   the app still builds itself has no verb until it moves into core.

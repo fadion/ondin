@@ -73,6 +73,41 @@ fn every_verb_is_well_formed() {
     }
 }
 
+/// Every model type a parameter takes has an example, and the example reads as
+/// that type, so a caller shown it can send it back as it is.
+///
+/// flip: `check_model` reading `NodeKind` as another type → fails at "reads as `NodeKind`".
+#[test]
+fn every_model_parameter_has_an_example_that_reads() {
+    let mut models: Vec<&str> = verbs::VERBS
+        .iter()
+        .flat_map(|v| v.params)
+        .filter_map(|p| match p.kind {
+            ParamKind::Model(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    models.sort_unstable();
+    models.dedup();
+    assert!(models.len() > 10, "{models:?}");
+    for m in models {
+        let example = verbs::example(m).unwrap_or_else(|| panic!("`{m}` has no example"));
+        verbs::check_model(m, &example)
+            .unwrap_or_else(|e| panic!("`{m}`'s example reads as `{m}`: {e}\n{example}"));
+    }
+    assert!(verbs::check_model("Colour", &json!("#fff")).is_err());
+
+    let (mut doc, mut ids, page) = blank();
+    let tree = verbs::example("Tree").unwrap();
+    let made = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": tree }),
+    );
+    assert_eq!(made.len(), 3, "the tree example commits whole");
+}
+
 /// Create two rectangles, fill one, group them, align their left edges, then
 /// delete the group: each verb's edit commits, and the document reads as the
 /// canvas would leave it.

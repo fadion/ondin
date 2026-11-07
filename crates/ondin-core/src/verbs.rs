@@ -319,8 +319,122 @@ fn check_kind(kind: ParamKind, v: &Value) -> Result<(), String> {
             Some(s) if words.contains(&s) => Ok(()),
             _ => Err(format!("expected one of {}", words.join(", "))),
         },
-        ParamKind::Model(_) => Ok(()),
+        ParamKind::Model(model) => check_model(model, v),
     }
+}
+
+/// Whether `v` reads as the model type `model` names (a [`ParamKind::Model`]'s
+/// name), or why not.
+pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
+    fn reads<T: serde::de::DeserializeOwned>(v: &Value) -> Result<(), String> {
+        T::deserialize(v).map(|_| ()).map_err(|e| e.to_string())
+    }
+    match model {
+        "Affine" => reads::<Affine>(v),
+        "BlockStyle" => reads::<BlockStyle>(v),
+        "CharSpans" => reads::<CharSpans>(v),
+        "Display" => reads::<Display>(v),
+        "GeometryPatch" => reads::<GeometryPatch>(v),
+        "Insets" => reads::<Insets>(v),
+        "LayoutItem" => reads::<LayoutItem>(v),
+        "NodeKind" => reads::<NodeKind>(v),
+        "ParagraphStyle" => reads::<ParagraphStyle>(v),
+        "Pivot" => reads::<Pivot>(v),
+        "TextStyle" => reads::<TextStyle>(v),
+        "Tree" => reads::<Tree>(v),
+        "[Effect]" => reads::<Vec<Effect>>(v),
+        "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
+        "[Fill]" => reads::<Vec<Fill>>(v),
+        "[Stroke]" => reads::<Vec<Stroke>>(v),
+        _ => Err(format!("no model type is called `{model}`")),
+    }
+}
+
+/// A value of the model type `model` names, in the form a parameter of it takes:
+/// what a caller is shown, since a serde form cannot be guessed (a rectangle
+/// needs its `corner_radii`, an image brush its `sampler`). `None` for a name no
+/// parameter uses.
+pub fn example(model: &str) -> Option<Value> {
+    use crate::container::Flex;
+    use crate::effect::{EffectKind, Shadow};
+    use crate::export::{ExportFormat, ExportScale};
+    use crate::typography::CharAttr;
+    use kurbo::{Size, Vec2};
+    use peniko::Color;
+
+    fn json<T: serde::Serialize>(v: &T) -> Value {
+        serde_json::to_value(v).unwrap_or_default()
+    }
+    let rect = NodeKind::Rect {
+        size: Size::new(120.0, 80.0),
+        corner_radii: kurbo::RoundedRectRadii::from_single_radius(8.0),
+        corner_smoothing: 0.0,
+    };
+    let text = NodeKind::Text {
+        content: "Hello".into(),
+        style: Box::default(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: crate::node::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    let fill = Fill {
+        brush: peniko::Brush::Solid(Color::from_rgb8(0x33, 0x66, 0xcc)).into(),
+        visible: true,
+    };
+    let image_fill = Fill {
+        brush: crate::image::image_brush(crate::image::ImageId("<add_image's id>".into())).into(),
+        visible: true,
+    };
+    let flex = Display::Flex(Flex::default());
+    Some(match model {
+        "Affine" => json(&Affine::translate((40.0, 24.0))),
+        "BlockStyle" => json(&BlockStyle::default()),
+        "CharSpans" => {
+            let mut spans = CharSpans::default();
+            spans.set(0..5, CharAttr::Weight(700), &TextStyle::default());
+            json(&spans)
+        }
+        "Display" => json(&flex),
+        "GeometryPatch" => json(&GeometryPatch::Size(Size::new(200.0, 100.0))),
+        "Insets" => json(&Insets::default()),
+        "LayoutItem" => json(&LayoutItem::default()),
+        "NodeKind" => json(&rect),
+        "ParagraphStyle" => json(&ParagraphStyle::default()),
+        "Pivot" => json(&Pivot::Normalized(Vec2::new(0.5, 0.5))),
+        "TextStyle" => json(&TextStyle::default()),
+        "Tree" => serde_json::json!({
+            "kind": json(&NodeKind::Artboard {
+                size: Size::new(320.0, 200.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            }),
+            "name": "Card",
+            "fills": [json(&fill)],
+            "display": json(&flex),
+            "children": [
+                { "kind": json(&rect), "name": "Picture", "fills": [json(&image_fill)] },
+                {
+                    "kind": json(&text),
+                    "transform": json(&Affine::translate((16.0, 96.0))),
+                },
+            ],
+        }),
+        "[Effect]" => json(&vec![Effect::new(
+            EffectKind::DropShadow(Shadow::default()),
+        )]),
+        "[ExportSpec]" => json(&vec![ExportSpec::new(
+            ExportFormat::Png,
+            ExportScale::default(),
+        )]),
+        "[Fill]" => json(&vec![fill, image_fill]),
+        "[Stroke]" => json(&vec![Stroke::default()]),
+        _ => return None,
+    })
 }
 
 /// The verb called `name`.

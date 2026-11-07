@@ -17,10 +17,6 @@ item's premise can go stale while its ask still reads true.
     core builder before its verb exists, as delete did (`build::delete`). Find them by walking
     `perform_menu_item` and `dispatch` for arms that build ops in place rather than calling
     `build::` or `edit::`.
-  - **The model values' wire form for callers.** A model parameter takes the serde form (a solid
-    brush is `{ "Solid": { "components": [r, g, b, a] } }`), which an agent cannot guess. MCP's
-    schema needs a description of each `ParamKind::Model` type, or friendlier forms for the common
-    ones (a colour as `#rrggbb`).
 
 ## Now · Components and layout
 
@@ -67,7 +63,8 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
   disclosure, schema place, kit scripts.
 - **MCP and headless (M6)** — `architecture.md` §8, §10; `ondin-mcp` is a stub. Its Phase 2 tools
-  are the registry's verbs (`ondin_core::verbs`), held to them by a test. Also owed:
+  are the registry's verbs (`ondin_core::verbs`), held to them by a test; each tool's schema shows
+  `verbs::example` for its model parameters. Also owed:
   the commit pass sequence out of `EditorSession::commit_inner`; kits and library code out of the app
   for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and

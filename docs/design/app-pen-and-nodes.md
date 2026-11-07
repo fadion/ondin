@@ -347,10 +347,11 @@ selected without the node tool. Every corner rounds; a radius on a smooth anchor
 
 ## Pixel-fit
 
-A command, not a mode (`crate::pixel_fit`): it moves a layer's edges onto the pixel grid once, so a
-16–24px icon renders crisp at 1×. The grid is world units. Its doors are the layer menu's Structure
-row (`OndinApp::pixel_fit`, over the selection; `context-menus.md` §4), the palette, and the path
-bar's button (`pixel_fit_points`, above); no chord. Its glyph is `icon::PIXEL_FIT`, an arrow
+A command, not a mode (`ondin_core::pixel_fit`, its status line in the app's `pixel_fit`): it
+moves a layer's edges onto the pixel grid once, so a 16–24px icon renders crisp at 1×. The grid is
+world units. Its doors are the layer menu's Structure row (`OndinApp::pixel_fit`, over the
+selection; `context-menus.md` §4), the palette, the path bar's button (`pixel_fit_points`, above)
+and the `pixel_fit` verb; no chord. Its glyph is `icon::PIXEL_FIT`, an arrow
 pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
 
 - **Anchors** (`fit_anchors`): a corner moves to the nearest grid line on both axes; a smooth anchor

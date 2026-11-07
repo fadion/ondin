@@ -924,6 +924,19 @@ pub static VERBS: &[Verb] = &[
             }]))
         },
     },
+    Verb {
+        name: "pixel_fit",
+        doc: "Put layers' edges and points on whole units, so they render crisp; text and turned layers are left",
+        params: &[req(
+            "nodes",
+            NODES,
+            "the layers, groups and frames taken whole",
+        )],
+        run: |ctx, a| {
+            let (tx, _) = crate::pixel_fit::fit(ctx.doc, ctx.res, &a.nodes("nodes")?);
+            Ok(Done::edit(tx))
+        },
+    },
     // --- layer state --------------------------------------------------------
     Verb {
         name: "set_name",

@@ -577,6 +577,56 @@ fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
     );
 }
 
+/// `pixel_fit` puts a rectangle's box on whole units, through the group it is in,
+/// and leaves a layer that is already there as it is.
+///
+/// flip: `pixel_fit::fit_layer` not descending into a group → fails at "the box
+/// lands on whole units".
+#[test]
+fn pixel_fit_puts_a_box_on_whole_units() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let at = serde_json::to_value(Affine::translate((10.3, 4.6))).unwrap();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(20.4, 9.7), "transform": at }),
+    )[0];
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [r.to_wire()] }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "pixel_fit",
+        json!({ "nodes": [g.to_wire()] }),
+    );
+    let res = Resolved::rebuild(&doc);
+    let b = res.world_bounds(r).unwrap();
+    assert_eq!(
+        (b.x0, b.y0, b.x1, b.y1),
+        (10.0, 5.0, 31.0, 14.0),
+        "the box lands on whole units"
+    );
+    let again = Resolved::rebuild(&doc);
+    let Done { tx, .. } = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &again,
+            ids: &mut ids,
+            images: None,
+        },
+        "pixel_fit",
+        &json!({ "nodes": [g.to_wire()] }),
+    )
+    .unwrap();
+    assert!(tx.0.is_empty(), "already on the grid: {tx:?}");
+}
+
 /// `set_blend` takes the modes as the snapshot labels them and writes as the panel
 /// does: the outermost layers only, and Pass through as Normal on a layer that is
 /// not a frame or group, in a tree's layers too.

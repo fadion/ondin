@@ -401,6 +401,9 @@ pub enum Item {
     /// `PointSet` holds anchors or segments, never both, so a pair would leave one
     /// row dim on every open.
     DeletePoints,
+    /// Cut the path at the selected anchors, leaving two ends on each
+    /// (`tools::split_at_points`) — the opposite of [`Self::Join`].
+    SplitAtPoint,
     /// *Make corner* / *Make smooth* over the point selection (`context-menus.md` §6.5).
     ///
     /// Two rows, unlike [`Self::DeletePoints`]: a selection can hold a corner and a
@@ -688,6 +691,7 @@ impl Item {
         Item::ClearGuides,
         Item::AddPointHere,
         Item::DeletePoints,
+        Item::SplitAtPoint,
         Item::SetSmooth(false),
         Item::SetSmooth(true),
         Item::ReverseSubpaths,
@@ -1104,6 +1108,8 @@ impl Item {
                 danger: true,
                 ..s("Delete points", icon::TRASH, Some("Del"), Group::Clipboard)
             },
+            // Under the delete row: the other verb that takes a path apart.
+            Item::SplitAtPoint => s("Split at point", icon::SPLIT_POINT, None, Group::Clipboard),
             // Structure, not Clipboard: these change what the path is rather than removing part of it.
             Item::SetSmooth(true) => s("Make smooth", icon::NODE_SMOOTH, None, Group::Structure),
             Item::SetSmooth(false) => s("Make corner", icon::NODE_CORNER, None, Group::Structure),
@@ -1731,6 +1737,9 @@ pub struct Context<'a> {
     /// `tools::joinable_ends` said yes — the point selection is exactly two open
     /// ends. The builder's own predicate, so the row cannot offer what `join_ends` declines.
     pub can_join: bool,
+    /// Why `OndinApp::split_subject` refused the point selection, if it did — what
+    /// dims *Split at point*, in its words.
+    pub split_refused: Option<&'static str>,
     /// Why `OndinApp::join_layers_subject` refused the two selected paths, if it did
     /// (a lock on either, no open end) — what dims *Join paths*, in its words.
     pub join_paths_refused: Option<&'static str>,
@@ -2068,6 +2077,10 @@ fn points_menu(cx: &Context<'_>) -> Vec<Row> {
         } else {
             "Delete points"
         }),
+        Row::new(Item::SplitAtPoint).dim_if(
+            cx.split_refused.is_some(),
+            cx.split_refused.unwrap_or_default(),
+        ),
         Row::new(Item::SetSmooth(false)),
         Row::new(Item::SetSmooth(true)),
         Row::new(Item::ReverseSubpaths),
@@ -3242,6 +3255,7 @@ impl OndinApp {
             // row go dark as the hand travels down the menu.
             on_segment: open.world.is_some_and(|p| self.segment_at(p).is_some()),
             can_join: self.join_subject().is_some(),
+            split_refused: self.split_subject().err(),
             join_paths_refused: self.join_layers_subject().err(),
             can_copy_props: self.properties_source().is_some(),
             has_key: self.session.selection.key().is_some(),
@@ -3588,6 +3602,8 @@ impl OndinApp {
             }
             // No chord; the verb re-asks its own subject.
             Item::Join => self.join_points(),
+            // The open position picks which of the two new ends stays selected.
+            Item::SplitAtPoint => self.split_points(world),
             Item::CopyProperties => self.dispatch(ctx, Action::CopyProperties),
             Item::PasteProperties => self.dispatch(ctx, Action::PasteProperties),
             Item::ExportAll => self.dispatch(ctx, Action::ExportAll),
@@ -3868,6 +3884,7 @@ mod tests {
             segment_selected: false,
             on_segment: false,
             can_join: false,
+            split_refused: None,
             join_paths_refused: None,
             text_outlineable: true,
             on_a_rail: false,

@@ -1,6 +1,6 @@
 //! The path bar: a short rail beside the tool rail while a path's points are being
 //! edited, holding the node tool's verbs — select or add points, corner and smooth,
-//! join, reverse, simplify, offset — and the way out. While the pen or the pencil
+//! join, reverse, split, simplify, offset — and the way out. While the pen or the pencil
 //! draws new paths it holds the mirror switch instead (`crate::mirror`).
 //!
 //! It floats over the canvas, the ruler included, centred on the rail's Pen button,
@@ -188,6 +188,7 @@ enum Verb {
     Smooth(bool),
     Join,
     Reverse,
+    Split,
     Simplify,
     Offset,
     /// The pen's and the pencil's mirror switch, which opens its flyout.
@@ -463,6 +464,7 @@ impl OndinApp {
             self.drop_offset_card();
         }
         let has_points = !self.subject_points(id).is_empty();
+        let split_refused = self.split_subject().err();
         // The edit's own switch, for the runs its pen draws; a mirrored path's
         // runs follow its own axes instead.
         let own_axes = self.path_mirror(id).is_some();
@@ -528,6 +530,14 @@ impl OndinApp {
                 enabled: true,
                 verb: Verb::Reverse,
             },
+            E::Btn {
+                glyph: icon::SPLIT_POINT,
+                tip: "Split at point — cut the path at the selected points",
+                dimmed: split_refused.unwrap_or_default(),
+                active: false,
+                enabled: split_refused.is_none(),
+                verb: Verb::Split,
+            },
             E::Sep,
             E::Btn {
                 glyph: icon::MAGIC_WAND,
@@ -565,6 +575,7 @@ impl OndinApp {
             Some(Verb::Smooth(smooth)) => self.set_point_smoothness(smooth),
             Some(Verb::Join) => self.join_points(),
             Some(Verb::Reverse) => self.reverse_subpaths(),
+            Some(Verb::Split) => self.split_points(None),
             Some(Verb::Simplify) => self.simplify_edited_path(ctx),
             Some(Verb::Offset) => self.toggle_offset_card(id),
             Some(Verb::Done) => {
@@ -995,6 +1006,46 @@ mod tests {
         assert!(radii.is_empty(), "the radius is baked into the curves");
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
         assert!(app.points.is_empty(), "the old anchors are gone");
+    }
+
+    /// *Split at point* opens the ring at the selected anchor in one step, and keeps
+    /// one of the two new ends selected, the one whose run leaves toward the pointer.
+    /// flip: `split_points` comparing the neighbours the other way round → fails at
+    /// "the end toward the pointer".
+    #[test]
+    fn split_at_point_opens_the_ring_and_keeps_an_end_selected() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        assert_eq!(
+            app.split_subject().err(),
+            Some("Select a point to split at"),
+            "nothing selected"
+        );
+        app.points.set_one(id, (0, 3));
+        let depth = app.session.history.undo_depth();
+        let anchors = |app: &OndinApp| {
+            let (path, radii) = stored(app, id);
+            crate::tools::pen_anchors(&path, &radii)
+        };
+        let before = anchors(&app);
+        // Just past anchor 2, the one before the split anchor.
+        let toward = before[0].anchors[2].at;
+        app.split_points(Some(toward));
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        let after = anchors(&app);
+        assert_eq!(after.len(), 1);
+        assert!(!after[0].closed, "opened");
+        assert_eq!(
+            after[0].anchors.len(),
+            65,
+            "the split anchor is on both ends"
+        );
+        let kept: Vec<_> = app.points.on(id).collect();
+        assert_eq!(kept, vec![(0, 64)], "the end toward the pointer");
+        assert_eq!(
+            app.split_subject().err(),
+            Some("An open end has nothing to split"),
+        );
     }
 
     /// A *Simplify* that lands after the path changed writes nothing. flip:

@@ -234,7 +234,18 @@ mirror.
   points (`A`), the pen bias (`P`) and Mirror, the edit's own switch with the drawing bar's flyout,
   dimmed until the pen bias is picked (*Pick the pen to mirror what it draws*) and on a mirrored
   path, whose runs follow its own axes; *Make corner*, *Make smooth* and *Join*, dimmed until the
-  point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`).
+  point selection allows them; *Reverse* (`Shift+D`); *Split at point*; *Simplify*; *Offset*; and
+  *Done* (`Enter`).
+- **Split at point** (`canvas::split_points`, `tools::split_at_points`) cuts the edited path at its
+  selected anchors: a closed run opens there and an open run becomes two subpaths of the same layer.
+  The anchor stays on both new ends, which coincide until one is dragged away; the finishing end
+  keeps the arriving handle and the starting end the leaving one, so the outline draws as before. Of
+  the two ends, the one whose run leaves toward the pointer stays selected (the menu's open position;
+  the bar has none and keeps the starting end), so the next drag pulls them apart. A mirrored path is
+  split at each point's image too. It dims with *Select a point to split at* and, when every
+  selected anchor is an open end, *An open end has nothing to split* (`canvas::split_subject`). Its
+  glyph is `icon::SPLIT_POINT`; `SCISSORS` means *Cut*. One undo step. *Delete segment* already opens
+  a path at a segment, and *Delete points* heals.
 - **While the pen or the pencil is armed** (`path_bar::drawing_bar`) it holds Mirror, a rule, and
   *Done*, which finishes a pen run and drops to Select. Mirror
   (`icon::FLIP_HORIZONTAL`, lit while mirroring or while its flyout is open) opens a `ui::flyout` in

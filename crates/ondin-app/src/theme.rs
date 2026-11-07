@@ -1032,6 +1032,9 @@ pub mod icon {
     /// *Trace image…* and its undo step: a curve with its two anchors inside a
     /// picture's corner marks.
     pub const TRACE: &str = "\u{f053}";
+    /// *Split at point*: a path broken at a point, its two new ends pulled apart.
+    /// Not [`SCISSORS`], which means *Cut*.
+    pub const SPLIT_POINT: &str = "\u{f054}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1360,6 +1363,7 @@ pub mod icon {
         ("warp-flag", WARP_FLAG),
         ("warp-bulge", WARP_BULGE),
         ("trace", TRACE),
+        ("split-point", SPLIT_POINT),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

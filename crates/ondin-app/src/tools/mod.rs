@@ -2664,6 +2664,94 @@ pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSub
     out
 }
 
+/// Whether a run can be split at the anchor `at`: anywhere on a closed run, and
+/// between the ends of an open one. An open end has nothing to split.
+pub fn splittable(subpaths: &[PenSubpath], (s, a): PointRef) -> bool {
+    subpaths.get(s).is_some_and(|sub| {
+        let n = sub.anchors.len();
+        a < n && (sub.closed || (a > 0 && a + 1 < n))
+    })
+}
+
+/// Cut each run at the anchors of `points` that [`splittable`] admits — *Split at
+/// point*. A closed run opens there and an open one becomes two. The anchor is kept
+/// on both sides, its arriving handle on the end that finishes a run and its leaving
+/// one on the end that starts the next, so the outline draws as before.
+///
+/// Also answers, per anchor split, the two ends it left as `(finishing, starting)`
+/// in the new numbering.
+pub fn split_at_points(
+    subpaths: &[PenSubpath],
+    points: &[PointRef],
+) -> (Vec<PenSubpath>, Vec<(PointRef, PointRef)>) {
+    let mut out: Vec<PenSubpath> = Vec::with_capacity(subpaths.len() + points.len());
+    let mut pairs = Vec::new();
+    for (i, sub) in subpaths.iter().enumerate() {
+        let mut cut: Vec<usize> = points
+            .iter()
+            .filter(|p| p.0 == i && splittable(subpaths, **p))
+            .map(|p| p.1)
+            .collect();
+        cut.sort_unstable();
+        cut.dedup();
+        if cut.is_empty() {
+            out.push(sub.clone());
+            continue;
+        }
+        let n = sub.anchors.len();
+        // A closed run is walked from its first cut round to that cut again.
+        let order: Vec<usize> = match sub.closed {
+            true => (cut[0]..n).chain(0..=cut[0]).collect(),
+            false => (0..n).collect(),
+        };
+        let last = order.len() - 1;
+        let mut run: Vec<PenAnchor> = Vec::new();
+        // The starting end of the closed run's first cut, paired when the walk
+        // comes back round to it.
+        let mut opened: Option<PointRef> = None;
+        for (k, &j) in order.iter().enumerate() {
+            let anchor = sub.anchors[j];
+            if !cut.contains(&j) {
+                run.push(anchor);
+                continue;
+            }
+            let starting = PenAnchor {
+                back: Vec2::ZERO,
+                radius: 0.0,
+                ..anchor
+            };
+            if run.is_empty() {
+                opened = Some((out.len(), 0));
+                run.push(starting);
+                continue;
+            }
+            run.push(PenAnchor {
+                out: Vec2::ZERO,
+                radius: 0.0,
+                ..anchor
+            });
+            let finishing = (out.len(), run.len() - 1);
+            out.push(PenSubpath {
+                anchors: std::mem::take(&mut run),
+                closed: false,
+            });
+            if k == last {
+                pairs.extend(opened.take().map(|s| (finishing, s)));
+            } else {
+                pairs.push((finishing, (out.len(), 0)));
+                run.push(starting);
+            }
+        }
+        if !run.is_empty() {
+            out.push(PenSubpath {
+                anchors: run,
+                closed: false,
+            });
+        }
+    }
+    (out, pairs)
+}
+
 /// Bend a segment: pull the point at parameter `t` by `delta`, leaving both
 /// anchors where they are.
 ///
@@ -7885,6 +7973,52 @@ mod tests {
             closed: false,
         }];
         assert!(remove_segments(&pair, &[(0, 0)]).is_empty());
+    }
+
+    /// Splitting a closed run at an anchor opens it there with both ends on that
+    /// anchor, each keeping the handle on its side, and draws the same outline.
+    /// flip: `split_at_points` zeroing neither handle → fails at "the closing end
+    /// keeps no leaving handle".
+    #[test]
+    fn splitting_a_closed_run_opens_it_at_the_anchor() {
+        use ondin_core::kurbo::Vec2;
+        let subs = quad_with_a_curve();
+        let (split, pairs) = split_at_points(&subs, &[(0, 2)]);
+        assert_eq!(split.len(), 1);
+        assert!(!split[0].closed, "opened");
+        let got: Vec<Point> = split[0].anchors.iter().map(|a| a.at).collect();
+        let at = subs[0].anchors[2].at;
+        assert_eq!(got.first(), Some(&at));
+        assert_eq!(got.last(), Some(&at), "both ends on the split anchor");
+        assert_eq!(got.len(), 5);
+        assert_eq!(pairs, vec![((0, 4), (0, 0))]);
+        assert_eq!(split[0].anchors[0].out, Vec2::new(-40.0, 20.0));
+        assert_eq!(
+            split[0].anchors[4].out,
+            Vec2::ZERO,
+            "the closing end keeps no leaving handle"
+        );
+        let whole = pen_outline(&subs[0].anchors, true);
+        let opened = pen_outline(&split[0].anchors, false);
+        assert_same_shape(&whole, &opened);
+    }
+
+    /// An open run splits in two at an inner anchor, and its ends refuse.
+    #[test]
+    fn splitting_an_open_run_makes_two_and_its_ends_refuse() {
+        let mut subs = quad_with_a_curve();
+        subs[0].closed = false;
+        assert!(!splittable(&subs, (0, 0)) && !splittable(&subs, (0, 3)));
+        let (unchanged, none) = split_at_points(&subs, &[(0, 0), (0, 3)]);
+        assert_eq!(unchanged.len(), 1, "an open end has nothing to split");
+        assert_eq!(unchanged[0].anchors.len(), 4);
+        assert!(none.is_empty());
+
+        let (two, pairs) = split_at_points(&subs, &[(0, 1), (0, 2)]);
+        let lens: Vec<usize> = two.iter().map(|s| s.anchors.len()).collect();
+        assert_eq!(lens, vec![2, 2, 2], "three runs from two cuts");
+        assert_eq!(pairs, vec![((0, 1), (1, 0)), ((1, 1), (2, 0))]);
+        assert_eq!(two[1].anchors[0].at, subs[0].anchors[1].at);
     }
 
     /// A segment drag is `move_points` over the ends `segment_ends` names: both anchors

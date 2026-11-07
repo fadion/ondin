@@ -6097,6 +6097,68 @@ impl OndinApp {
         Some((id, a, b))
     }
 
+    /// The path and the selected anchors *Split at point* cuts at
+    /// (`tools::splittable`), or the sentence its row and button dim with.
+    pub(crate) fn split_subject(&self) -> Result<(NodeId, Vec<PointRef>), &'static str> {
+        const NO_POINT: &str = "Select a point to split at";
+        let id = self.edited_path().ok_or(NO_POINT)?;
+        let (_, subpaths) = self.edited_subpaths(id).ok_or(NO_POINT)?;
+        let points: Vec<PointRef> = self.points.on(id).collect();
+        if points.is_empty() {
+            return Err(NO_POINT);
+        }
+        let points = self.with_mirrored_points(id, &points);
+        match points.iter().any(|p| tools::splittable(&subpaths, *p)) {
+            true => Ok((id, points)),
+            false => Err("An open end has nothing to split"),
+        }
+    }
+
+    /// Cut the edited path at its selected anchors (`tools::split_at_points`). Of
+    /// the two ends each split leaves, the one whose run leaves toward `pointer`
+    /// stays selected, so the next drag pulls the ends apart; with no pointer, the
+    /// starting end. One undo step.
+    pub(crate) fn split_points(&mut self, pointer: Option<Point>) {
+        let Ok((id, points)) = self.split_subject() else {
+            return;
+        };
+        let Some((world, subpaths)) = self.edited_subpaths(id) else {
+            return;
+        };
+        let (list, pairs) = tools::split_at_points(&subpaths, &points);
+        let tx = tools::rewrite_path(id, world, &list, self.stored_path(id));
+        self.name_step_as(crate::menu::Item::SplitAtPoint);
+        if tx.0.is_empty() || !self.session.commit(tx) {
+            return;
+        }
+        // The neighbour each end's run leads to.
+        let toward = |(s, a): PointRef, step: isize| -> Option<Point> {
+            Some(list.get(s)?.anchors.get(a.checked_add_signed(step)?)?.at)
+        };
+        let kept: Vec<PointRef> = pairs
+            .iter()
+            .map(|&(finishing, starting)| {
+                let near = |end, step| {
+                    pointer
+                        .zip(toward(end, step))
+                        .map_or(f64::INFINITY, |(p, n)| p.distance(n))
+                };
+                match near(finishing, -1) < near(starting, 1) {
+                    true => finishing,
+                    false => starting,
+                }
+            })
+            .collect();
+        self.points.clear();
+        for at in kept {
+            self.points.toggle(id, at);
+        }
+        self.session.info(match pairs.len() {
+            1 => "Split the path at the point".to_owned(),
+            n => format!("Split the path at {n} points"),
+        });
+    }
+
     /// What *Join paths* would fuse: two selected, unlocked path layers, the one kept
     /// (the key layer, else the first selected) and the one folded into it, with the
     /// nearest pair of open ends between them in world space. Else the sentence the

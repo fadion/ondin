@@ -361,6 +361,7 @@ the word the menu opened on (`ContextMenu::spelling`).
 | Add point here | — | inserts an anchor at the menu's open position; dims unless that position is on the path's outline (an existing anchor refuses) |
 | *—* | | |
 | Delete points / Delete segment | `Del` | one row, named for what the selection holds |
+| Split at point | — | dims *"Select a point to split at"*, or *"An open end has nothing to split"* when every selected anchor is an open end; the end toward the open position stays selected |
 | *—* | | |
 | Make corner | — | always offered |
 | Make smooth | — | always offered |

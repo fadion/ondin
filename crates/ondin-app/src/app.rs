@@ -586,6 +586,8 @@ pub struct OndinApp {
     pub(crate) pencil_last: Option<(NodeId, ondin_core::Stroke)>,
     /// The shape builder's drag in flight, or `None` (`crate::shape_builder`).
     pub(crate) builder: Option<crate::shape_builder::BuilderDrag>,
+    /// The knife's cut while it is drawn (`crate::knife`).
+    pub(crate) knife: Option<crate::knife::KnifeDrag>,
     /// The faces the shape builder last found, and for which selection and revision.
     pub(crate) builder_cache: Option<crate::shape_builder::Faces>,
     /// Images picked but not yet placed: what a loaded cursor holds (`Tool::Image`).
@@ -1548,6 +1550,7 @@ impl OndinApp {
             pencil: None,
             pencil_last: None,
             builder: None,
+            knife: None,
             builder_cache: None,
             pending_images: Vec::new(),
             dropper_return: Tool::Select,
@@ -1696,6 +1699,7 @@ impl OndinApp {
                 slice: view.rail_slice,
                 line: view.rail_line,
                 pencil: view.rail_pencil,
+                knife: view.rail_knife,
                 flyout: None,
             },
             clones: None,
@@ -2749,8 +2753,8 @@ impl OndinApp {
         if self.pencil.take().is_some() {
             return true;
         }
-        // So is a shape builder drag.
-        if self.builder.take().is_some() {
+        // So is a shape builder drag, and a knife's cut.
+        if self.builder.take().is_some() || self.knife.take().is_some() {
             return true;
         }
         // The compare's Swipe handle goes back to where its drag began.
@@ -3102,10 +3106,13 @@ impl OndinApp {
             self.session.selection.clear();
         }
         self.builder = None;
-        let arming = tool == Tool::ShapeBuilder && self.tool != tool;
+        self.knife = None;
+        let arming = self.tool != tool;
         self.tool = tool;
-        if arming {
-            self.builder_armed();
+        match tool {
+            Tool::ShapeBuilder if arming => self.builder_armed(),
+            Tool::Knife if arming => self.knife_armed(),
+            _ => {}
         }
     }
 
@@ -7879,6 +7886,7 @@ impl OndinApp {
             rail_slice: self.rail.slice,
             rail_line: self.rail.line,
             rail_pencil: self.rail.pencil,
+            rail_knife: self.rail.knife,
         };
         if now != self.prefs.view {
             self.prefs.view = now;
@@ -8298,11 +8306,7 @@ impl OndinApp {
             E::Sep,
             // The tools that act on the selection rather than draw, used less than
             // the ones above.
-            E::Btn(
-                icon::SHAPE_BUILDER,
-                Tool::ShapeBuilder,
-                "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)",
-            ),
+            E::Group(Group::Builder),
             E::Btn(
                 icon::EYEDROPPER,
                 Tool::Eyedropper,
@@ -8321,17 +8325,8 @@ impl OndinApp {
                             E::Sep => crate::path_bar::separator(ui),
                             E::Btn(glyph, tool, tip) => {
                                 let active = *tool == self.tool;
-                                let usable =
-                                    *tool != Tool::ShapeBuilder || self.builder_slot_usable();
-                                let resp = crate::ui::disable_unless(ui, usable, |ui| {
-                                    icon_button(ui, glyph, 30.0, 20.0, active, usable)
-                                })
-                                .inner
-                                .on_hover_text(crate::input::keys(tip))
-                                .on_disabled_hover_text(crate::input::keys(&format!(
-                                    "{} (Shift+M)",
-                                    crate::shape_builder::UNAVAILABLE
-                                )));
+                                let resp = icon_button(ui, glyph, 30.0, 20.0, active, true)
+                                    .on_hover_text(crate::input::keys(tip));
                                 if resp.clicked() {
                                     match tool {
                                         // Arming the image tool is picking files.

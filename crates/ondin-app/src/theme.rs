@@ -1035,6 +1035,9 @@ pub mod icon {
     /// *Split at point*: a path broken at a point, its two new ends pulled apart.
     /// Not [`SCISSORS`], which means *Cut*.
     pub const SPLIT_POINT: &str = "\u{f054}";
+    /// The Knife tool and its step: a disc cut across, its halves slid apart along
+    /// the cut. Not [`KNIFE`], which means *Slice*.
+    pub const KNIFE_CUT: &str = "\u{f055}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1364,6 +1367,7 @@ pub mod icon {
         ("warp-bulge", WARP_BULGE),
         ("trace", TRACE),
         ("split-point", SPLIT_POINT),
+        ("knife-cut", KNIFE_CUT),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

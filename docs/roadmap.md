@@ -34,8 +34,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **Open paths and lines in the shape builder.** An open path or line in the selection should cut
   the faces it crosses without filling one of its own. Today `shape_builder::sources_of` leaves them
   out of the arrangement, and the status line says so (`left_out_note`).
-- **Cutting paths.** Split a path at an anchor into two subpaths, delete a segment to open a closed
-  path, and a knife that cuts along a drawn line. *Delete* on points always heals.
 - **Icon-ready SVG export.** Options for `currentColor`, a viewBox from the frame, number precision,
   and outlined versus stroked output; and one action that writes every main of a component set as a
   folder of SVGs.

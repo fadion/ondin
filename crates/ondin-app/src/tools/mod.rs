@@ -37,6 +37,11 @@ pub enum Tool {
     /// is drawn rather than drawing, so it sits with Select, Hand and Scale, and
     /// stays armed after each edit.
     ShapeBuilder,
+    /// Drag a line through closed shapes to cut them into the pieces it parts
+    /// (`crate::knife`): the selection, or every unlocked shape under the line
+    /// when nothing is selected. Shares the shape builder's rail slot, since both
+    /// reshape what is drawn, and stays armed after each cut.
+    Knife,
     Frame,
     /// Cuts a slice: a box dragged out as a rect's is, on whole pixels always, that
     /// exports whatever lies under it. Stays armed after a cut, so several slices
@@ -124,6 +129,7 @@ impl Tool {
             Tool::Select
             | Tool::Scale
             | Tool::ShapeBuilder
+            | Tool::Knife
             | Tool::Pen
             | Tool::Pencil
             | Tool::Node
@@ -5608,6 +5614,7 @@ mod tests {
             Tool::Select,
             Tool::Scale,
             Tool::ShapeBuilder,
+            Tool::Knife,
             Tool::Hand,
         ] {
             assert!(!tool.drags_a_box(), "{tool:?}");
@@ -5635,6 +5642,7 @@ mod tests {
             (Tool::Select, None),
             (Tool::Scale, None),
             (Tool::ShapeBuilder, None),
+            (Tool::Knife, None),
             (Tool::Pen, None),
             (Tool::Node, None),
             (Tool::ImageEdit, None),

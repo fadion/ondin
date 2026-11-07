@@ -72,6 +72,8 @@ pub struct ViewPrefs {
     pub(crate) rail_line: crate::rail::Member,
     /// The tool rail's pen slot shows the pencil, last picked there.
     pub rail_pencil: bool,
+    /// The tool rail's builder slot shows the knife, last picked there.
+    pub rail_knife: bool,
 }
 
 impl Default for ViewPrefs {
@@ -97,6 +99,7 @@ impl Default for ViewPrefs {
             rail_slice: false,
             rail_line: crate::rail::Member::Line,
             rail_pencil: false,
+            rail_knife: false,
         }
     }
 }

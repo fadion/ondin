@@ -2,7 +2,7 @@
 
 Non-destructive boolean containers (`core::boolean`, `NodeKind::Boolean`), the destructive verbs
 beside them (flatten, outline shape, outline stroke, convert text to path), the shape builder and
-*Divide*, *Blend shapes*, the identity card's boolean row with its Mask/Group/Ungroup buttons, the
+*Divide*, the knife, *Blend shapes*, the identity card's boolean row with its Mask/Group/Ungroup buttons, the
 Mask card, and how a failed boolean draws. Part of §9.4.
 
 ## 9.4 Booleans
@@ -220,12 +220,12 @@ plain `Path` layers.
 
 ### The tool (`shape_builder.rs`)
 
-`Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) sits on the rail above the eyedropper,
-the two tools that act on the selection rather than draw; it stays armed after each edit.
+`Tool::ShapeBuilder` (`Shift+M`, glyph `shape-builder`) is the first member of the rail's
+Builder slot, with the knife, above the eyedropper; it stays armed after each edit.
 
 - **Arming needs two closed shapes** the arrangement would cut (`OndinApp::builder_slot_usable`
-  on `shape_builder::can_arrange`, the test *Divide* dims on). Until then the rail button is
-  disabled, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
+  on `shape_builder::can_arrange`, the test *Divide* dims on). Until then its rail member is
+  dimmed and a click on it arms nothing, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
   give *Shape builder needs two or more overlapping shapes* (`shape_builder::UNAVAILABLE`), the
   key on the status line. Once armed, the button stays lit whatever the selection becomes.
 - **Selection chrome** while armed is the selection's box alone, dim: no member outlines, which
@@ -260,6 +260,39 @@ boolean, split, cut, pieces). It dims with *Divide needs two or more overlapping
 (`menu::DIVIDE_NEEDS`) where `can_arrange` refuses, and is never checked: it leaves no live
 operation. The *Divided* group is selected afterwards and the status line says *Divided into N
 paths*.
+
+## The knife
+
+`Tool::Knife` (glyph `knife-cut`, a disc cut across; `knife` already means Slice) shares the
+Builder slot with the shape builder, since both reshape what is drawn and neither draws. It has no
+letter, `C` being held for comments, and is reached from the slot's row or the palette. It stays
+armed after each cut.
+
+- **What it cuts** (`core::knife::cut`): the selection's closed shapes, groups opened, or with
+  nothing selected every unlocked visible closed shape on the page under the line — the
+  shape builder's `takes_part`, so text, pictures, frames and open paths are left alone. A shape
+  inside an instance is not cut either: cutting it would break the link without saying so.
+- **How** (`knife::pieces`): the outline is read as the boolean union reads it (holes wound
+  against their ring), and the line's *chords*, the stretches between two crossings of the outline
+  that run inside it, are cut along exactly by surgery on the rings rather than by a boolean
+  (flo_curves mishandles operands sharing an edge, which every piece and the cut side would). A
+  chord from a ring back to it splits it in two, each loop taking the holes inside it; a chord to
+  a hole first joins the hole to the ring along it both ways (a keyhole), so a ring cut through
+  both sides comes apart. A line that stops inside a shape cuts nothing there; a chord between two
+  points of one hole is left alone.
+- **What lands**: each shape the line parts keeps its id, look, name and slot for its first piece,
+  as a path (a primitive becomes one, `reshaped`); the other pieces land just above it, looking
+  like it and named as it is (`placed_path` with its name). One undo step, *Knife*. With a
+  selection, the selection becomes the uncut layers and every piece; with none, nothing is selected.
+- **Drawing** (`crate::knife`): a press starts the line and the drag draws it, a point every 2
+  screen pt; Shift makes it straight from the press, read live. It shows dashed in the measure red,
+  each crossing it will cut at wears an anchor's marker (`paint_anchor`), and a pill beside its end
+  counts *Cut N shapes* (`knife::preview`, worked out again when the line changes). The cursor is
+  the crosshair.
+- **Status line**: on arming *Drag through shapes to cut them · Shift for a straight cut*; after
+  a cut *Cut 2 shapes into 4*; a line that parts nothing says *Nothing to cut here*, or *Detach the
+  instance to cut it* when it crossed an instance's shape. Escape or a right-click drops the line
+  (`cancel_gesture`).
 
 ## Blend shapes
 

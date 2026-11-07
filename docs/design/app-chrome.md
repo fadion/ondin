@@ -147,6 +147,7 @@ ondin-app/src/
 ├─ mirror.rs        mirror while drawing: the axes, the joining rule, the canvas axes and the flyout; a mirrored path kept symmetric under point editing (app-pen-and-nodes.md)
 ├─ rail.rs          the tool rail's grouped slots and their members' row (tools.md)
 ├─ pencil.rs        the pencil: the freehand trail, its fit on release, extending and closing (app-pen-and-nodes.md)
+├─ knife.rs         the knife: the cut line, its preview and the cut on release (app-booleans.md)
 ├─ slice.rs         slices on the canvas: the Slice tool's pick and the dashed outlines (tools.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)

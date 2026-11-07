@@ -41,7 +41,7 @@ pub enum Refusal {
 
 /// Whether `id` gives the arrangement an outline: a visible, unlocked closed shape,
 /// path or boolean outside any boolean and any instance.
-fn takes_part(doc: &Document, id: NodeId) -> bool {
+pub(crate) fn takes_part(doc: &Document, id: NodeId) -> bool {
     let Some(node) = doc.get(id) else {
         return false;
     };
@@ -101,7 +101,7 @@ fn sources_of(doc: &Document, selection: &[NodeId]) -> (Vec<NodeId>, bool) {
 }
 
 /// `id`'s outline in world space, as drawn.
-fn world_outline(doc: &Document, res: &Resolved, id: NodeId) -> Option<BezPath> {
+pub(crate) fn world_outline(doc: &Document, res: &Resolved, id: NodeId) -> Option<BezPath> {
     Some(res.world_transform(id)? * res.local_path(doc, id)?)
 }
 
@@ -219,7 +219,7 @@ impl Arrangement {
         };
         let mut built = Built::default();
         if merge {
-            let (tx, made) = placed_path(doc, res, ids, anchor, painter, &set)?;
+            let (tx, made) = placed_path(doc, res, ids, anchor, painter, &set, None)?;
             step(tx, &mut advanced)?;
             built.merged = Some(made);
         }
@@ -264,7 +264,7 @@ fn evaluated(op: BoolOp, operands: &[BezPath]) -> Result<BezPath, OpError> {
 
 /// Source `id` holding `local` in its own space: a path's geometry rewritten in
 /// place, any other kind replaced by a path in its slot.
-fn reshaped(
+pub(crate) fn reshaped(
     doc: &Document,
     ids: &mut IdSource,
     id: NodeId,
@@ -297,14 +297,15 @@ fn parent_world(doc: &Document, res: &Resolved, anchor: NodeId) -> Result<Affine
 }
 
 /// A new path holding the world outline `world`, looking like `painter`, just above
-/// `anchor` in its parent.
-fn placed_path(
+/// `anchor` in its parent, named `name` or else a free *Path* name.
+pub(crate) fn placed_path(
     doc: &Document,
     res: &Resolved,
     ids: &mut IdSource,
     anchor: NodeId,
     painter: NodeId,
     world: &BezPath,
+    name: Option<String>,
 ) -> Result<(Transaction, NodeId), OpError> {
     let node = doc.get(anchor).ok_or(OpError::NoSuchNode(anchor))?;
     let parent = node.parent().ok_or(OpError::CannotModifyRoot)?;
@@ -323,7 +324,9 @@ fn placed_path(
         corner_smoothing: 0.0,
         mirror: crate::symmetry::PathMirror::NONE,
     };
-    let name = crate::naming::free_name(&doc.child_names(parent, &[]), kind.default_name(), 1);
+    let name = name.unwrap_or_else(|| {
+        crate::naming::free_name(&doc.child_names(parent, &[]), kind.default_name(), 1)
+    });
     let new = ids.mint();
     let mut ops = vec![Operation::CreateNode {
         id: new,

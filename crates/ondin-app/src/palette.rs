@@ -308,11 +308,12 @@ fn substring_hit(name: &str, needle: &str) -> Vec<Range<usize>> {
         .unwrap_or_default()
 }
 
-const TOOLS: [Tool; 18] = [
+const TOOLS: [Tool; 19] = [
     Tool::Select,
     Tool::Hand,
     Tool::Scale,
     Tool::ShapeBuilder,
+    Tool::Knife,
     Tool::Frame,
     Tool::Slice,
     Tool::Rect,

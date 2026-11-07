@@ -17,6 +17,7 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 - **Spiral** (`Shift+L`) and **Arc** (no key) draw a `Spiral` and an `Arc` node (`core-model.md`) with the line's stroke and no fill. A spiral is dragged from its centre: the drag's length is the outer radius and its angle is where the spiral ends, and it starts at 3.5 turns. `tools::create_spiral` gives the node the true spiral's box at that radius, so the stretch that fills the box is uniform, and turns the node so the end lands on the drag. An arc is dragged from end to end, bulging to the left of the drag, and starts at 90°; `tools::create_arc` places it as `create_line` places a line, the sweep negated under a mirroring parent so the bulge stays where it was drawn. `↑`/`↓` step the turns by halves (½ to 20) or walk the arc's signed ladder (`tools::arc_sweep`): 15° steps up to 345° either way, and below 15° to 5°, then across to −5° and on down the other side, so one drag reaches both bulges. The pill beside the pointer gives the value (`tools::drawn_count_label`: `3.5 turns`, `90°`, `-5°`), placed by `spacing::paint_label` as every pointer readout is. Shift steps the direction by 45° as Line does; Alt mirrors an arc's chord through the press, and a spiral ignores it. An arc is its own kind rather than an ellipse with its sweep set, because an ellipse's stroke follows the wedge's radii too.
 - **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
 - **Shape builder** (`Shift+M`): drag across the faces overlapping shapes cut each other into to merge them, Alt-drag to remove them (`app-booleans.md`).
+- **Knife** (no key; `C` is held for comments): drag a line through closed shapes to cut each into the pieces it parts (`app-booleans.md`, *The knife*).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
   - **Rows and columns** are clusters of box centres. A box joins a band while its centre is within half the band's largest box, or half its own when it is larger, of the band's mean centre.
@@ -36,21 +37,23 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 ### The tool rail (`rail.rs`)
 
 `OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot, four
-shapes and the Line slot · the Pen slot, Text, Place image · Shape builder and the eyedropper,
-which act on the selection and are used less; at its foot the styles-and-variables
+shapes and the Line slot · the Pen slot, Text, Place image · the Builder slot and the eyedropper,
+which act on what is drawn and are used less; at its foot the styles-and-variables
 and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
 subject. The four filled shape tools keep a slot each while the rail has room for them.
 
-- **Grouped slots.** Four slots stand for several tools each (`rail::Group::members`): Select is
+- **Grouped slots.** Five slots stand for several tools each (`rail::Group::members`): Select is
   Pointer and Lasso, Frame is Frame and Slice, Line is Line, Spiral and Arc, Pen is Pen and
-  Pencil. A slot shows the armed tool when it is a member, else the member last picked
+  Pencil, Builder is Shape builder and Knife. A member that cannot be armed now (the Shape
+  builder with nothing to build, `rail_usable`) draws dimmed, in the slot and the row, and a
+  click on it says why instead of arming; the slot still opens its row. A slot shows the armed tool when it is a member, else the member last picked
   (`rail_shown`), and carries a small `text::dim()` triangle in its bottom-right corner
   (`paint_more_mark`).
 - **Memory.** The Select slot's memory is the lasso switch itself (`app-selection.md`); Pointer
   and Lasso arm Select with the switch off and on. The others remember through `Rail::slice`,
-  `Rail::line` and `Rail::pencil`, set in `choose_tool` (`remember_rail_pick`) however the tool
-  was armed — slot, letter or palette — and kept in `prefs.view` (`rail_slice`, `rail_line`,
-  `rail_pencil`). The pen bias inside a node edit shows Pen.
+  `Rail::line`, `Rail::pencil` and `Rail::knife`, set in `choose_tool` (`remember_rail_pick`)
+  however the tool was armed — slot, letter or palette — and kept in `prefs.view` (`rail_slice`,
+  `rail_line`, `rail_pencil`, `rail_knife`). The pen bias inside a node edit shows Pen.
 - **Gestures** (`rail_group`, `rail_flyout`). A click arms what the slot shows. A press held
   `HOLD_S` (0.45 s) or a right-click opens the members as a row of icon buttons beside the slot
   (`ui::flyout_place`, a `ui::menu_frame` card, area `"rail-flyout"`), the shown member lit, each
@@ -117,6 +120,7 @@ image, and the `CursorIcon` set beside it is the stock fallback when the bitmap 
 | Select at rest | arrow; `Shift` → Plus; `Alt` over a layer → Duplicate, over empty canvas → Minus; `Ctrl`/`Cmd` over a layer → Deep; over a locked selected layer → No |
 | Scale tool at rest | arrow with Scale, replaced by a modifier's badge |
 | Shape builder | arrow with Plus; `Alt` → Minus |
+| Knife | the crosshair, as the pencil's |
 | A move | the rest arrow; Duplicate once the Alt copy exists |
 | A marquee | the mode fixed at its press: Toggle → Plus, Subtract → Minus |
 | Pivot, and its drag | arrow with Pivot |

@@ -701,7 +701,7 @@ fn flo_bounds(flo: &[SimpleBezierPath]) -> kurbo::Rect {
 /// `path`, a result [`from_flo`] wound, split into its connected pieces: each solid
 /// subpath with the holes directly inside it. An island inside a hole is a piece of
 /// its own.
-fn pieces(path: &BezPath) -> Vec<BezPath> {
+pub(crate) fn pieces(path: &BezPath) -> Vec<BezPath> {
     use kurbo::Shape;
     let subs = crate::geometry::subpaths(path);
     let areas: Vec<f64> = subs.iter().map(|s| s.area()).collect();

@@ -45,6 +45,7 @@ pub mod io;
 pub mod item;
 mod keyed_archive;
 pub mod kit;
+pub mod knife;
 pub mod layout;
 pub mod matching;
 pub mod merge;

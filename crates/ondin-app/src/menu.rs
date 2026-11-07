@@ -1184,6 +1184,8 @@ impl Item {
                     Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
                     Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
                     Tool::ShapeBuilder => ("Tool: Shape builder", icon::SHAPE_BUILDER, "Shift+M"),
+                    // No letter: C is held for comments.
+                    Tool::Knife => ("Tool: Knife", icon::KNIFE_CUT, ""),
                     Tool::Frame => ("Tool: Frame", icon::FRAME, "F"),
                     Tool::Slice => ("Tool: Slice", icon::KNIFE, "Shift+F"),
                     Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),

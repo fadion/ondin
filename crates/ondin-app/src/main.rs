@@ -83,6 +83,7 @@ mod blend;
 mod canvas;
 mod cheatsheet;
 mod chrome;
+mod cleanup;
 mod colour_review;
 mod colour_text;
 mod compare;
@@ -104,12 +105,12 @@ mod instances;
 mod job;
 mod keychain;
 mod kits;
+mod knife;
 mod lasso;
 mod loose_spacing;
 mod shape_handles;
 // No blanket `dead_code` allow here: the plain build is the gate that catches an
 // unwired item. `store::versions` (test-only callers) carries its own allow.
-mod cleanup;
 mod library;
 mod logging;
 mod machine_dir;

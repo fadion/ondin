@@ -104,7 +104,7 @@ shape builder's `Shift+M` and the slice's `Shift+F`, are read after the letters 
 | `V` | Select with a box marquee — turns the lasso off, being the pointer member of the rail's Select slot | ✅ Figma, Sketch, Illustrator |
 | `H` | Hand | ✅ Figma |
 | `K` | Scale | ✅ Figma |
-| `Shift+M` | Shape builder | ✅ |
+| `Shift+M` | Shape builder | ✅; the Knife, the slot's second member, has no key (`C` is held for comments) |
 | `F` | Frame | ✅ Figma (also `A`; taken here) |
 | `Shift+F` | Slice | ✅ on the frame's letter, as it shares the frame's slot on the rail |
 | `R` | Rect | ✅ Figma, Sketch |

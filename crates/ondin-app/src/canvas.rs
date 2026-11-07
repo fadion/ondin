@@ -1867,6 +1867,8 @@ impl OndinApp {
                 | Tool::Line
                 | Tool::Spiral
                 | Tool::Arc => create_cursor(mods.alt),
+                // A line drawn through shapes, as the pencil's is: the crosshair.
+                Tool::Knife => create_cursor(false),
                 // The same crosshair, badged with how many images are left to place.
                 Tool::Image => match Remaining::of(self.pending_images.len()) {
                     Some(n) => (egui::CursorIcon::Crosshair, Some(Bitmap::Loaded(n))),
@@ -2327,6 +2329,13 @@ impl OndinApp {
             && (self.builder.is_some() || !panning_armed && !matches!(self.drag, Drag::Pan))
         {
             self.builder_input(ui, resp, rect, ppp);
+            return;
+        }
+        // And the knife's.
+        if self.tool == Tool::Knife
+            && (self.knife.is_some() || !panning_armed && !matches!(self.drag, Drag::Pan))
+        {
+            self.knife_input(ui, resp, rect, ppp);
             return;
         }
 
@@ -4432,6 +4441,7 @@ impl OndinApp {
             | Tool::Select
             | Tool::Scale
             | Tool::ShapeBuilder
+            | Tool::Knife
             | Tool::Hand
             | Tool::Eyedropper => {
                 return None;
@@ -10022,6 +10032,7 @@ impl OndinApp {
         if self.tool == Tool::ShapeBuilder {
             self.draw_builder(painter, rect, ppp, resp);
         }
+        self.draw_knife(painter, rect, ppp);
 
         self.draw_points(painter, rect, ppp, resp);
 

@@ -28,6 +28,8 @@ pub(crate) enum Group {
     Frame,
     Line,
     Pen,
+    /// The tools that reshape what is drawn rather than draw.
+    Builder,
 }
 
 /// One tool a grouped slot can stand for. Stored lowercase in the view prefs, for
@@ -44,6 +46,8 @@ pub(crate) enum Member {
     Arc,
     Pen,
     Pencil,
+    ShapeBuilder,
+    Knife,
 }
 
 impl Group {
@@ -55,6 +59,7 @@ impl Group {
             Self::Frame => &[Member::Frame, Member::Slice],
             Self::Line => &[Member::Line, Member::Spiral, Member::Arc],
             Self::Pen => &[Member::Pen, Member::Pencil],
+            Self::Builder => &[Member::ShapeBuilder, Member::Knife],
         }
     }
 }
@@ -71,6 +76,8 @@ impl Member {
             Self::Arc => icon::ARC,
             Self::Pen => icon::PEN_NIB,
             Self::Pencil => icon::PENCIL_SIMPLE,
+            Self::ShapeBuilder => icon::SHAPE_BUILDER,
+            Self::Knife => icon::KNIFE_CUT,
         }
     }
 
@@ -85,6 +92,10 @@ impl Member {
             Self::Arc => "Arc",
             Self::Pen => "Pen (P)",
             Self::Pencil => "Pencil (Shift+P)",
+            Self::ShapeBuilder => {
+                "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)"
+            }
+            Self::Knife => "Knife — drag through shapes to cut them",
         }
     }
 
@@ -100,6 +111,8 @@ impl Member {
             Self::Arc => Tool::Arc,
             Self::Pen => Tool::Pen,
             Self::Pencil => Tool::Pencil,
+            Self::ShapeBuilder => Tool::ShapeBuilder,
+            Self::Knife => Tool::Knife,
         })
     }
 }
@@ -123,6 +136,8 @@ pub(crate) struct Rail {
     pub(crate) line: Member,
     /// The pen slot shows the pencil when neither is armed.
     pub(crate) pencil: bool,
+    /// The builder slot shows the knife when neither is armed.
+    pub(crate) knife: bool,
     pub(crate) flyout: Option<Flyout>,
 }
 
@@ -148,7 +163,19 @@ impl OndinApp {
             Group::Pen if self.pen_bias || self.tool == Tool::Pen => Member::Pen,
             Group::Pen if self.tool == Tool::Pencil || self.rail.pencil => Member::Pencil,
             Group::Pen => Member::Pen,
+            Group::Builder => match self.tool {
+                Tool::ShapeBuilder => Member::ShapeBuilder,
+                Tool::Knife => Member::Knife,
+                _ if self.rail.knife => Member::Knife,
+                _ => Member::ShapeBuilder,
+            },
         }
+    }
+
+    /// Whether `member` can be armed now: the shape builder needs shapes to build
+    /// with ([`OndinApp::builder_slot_usable`]); the rest always can.
+    fn rail_usable(&self, member: Member) -> bool {
+        member != Member::ShapeBuilder || self.builder_slot_usable()
     }
 
     /// Whether the canvas is armed with `member`.
@@ -163,6 +190,10 @@ impl OndinApp {
 
     /// Arm `member`: its tool, and for the pointer's two the marquee's shape.
     pub(crate) fn rail_pick(&mut self, member: Member) {
+        // Refused as `Shift+M` is, with the same reason.
+        if !self.rail_usable(member) {
+            return self.session.info(crate::shape_builder::UNAVAILABLE);
+        }
         let Some(tool) = member.tool() else {
             self.choose_tool(Tool::Select);
             let lasso = member == Member::Lasso;
@@ -185,6 +216,8 @@ impl OndinApp {
             Tool::Arc => self.rail.line = Member::Arc,
             Tool::Pen => self.rail.pencil = false,
             Tool::Pencil => self.rail.pencil = true,
+            Tool::ShapeBuilder => self.rail.knife = false,
+            Tool::Knife => self.rail.knife = true,
             _ => {}
         }
     }
@@ -193,13 +226,16 @@ impl OndinApp {
     /// right-click or `Alt+↓` opens its members beside it.
     pub(crate) fn rail_group(&mut self, ui: &mut egui::Ui, group: Group) -> egui::Response {
         let shown = self.rail_shown(group);
+        // Dimmed, not disabled: a dimmed slot still opens its members, one of
+        // which may be usable.
+        let usable = self.rail_usable(shown);
         let mut resp = ui::icon_button(
             ui,
             shown.glyph(),
             BUTTON,
             20.0,
             self.rail_armed(shown),
-            true,
+            usable,
         );
         paint_more_mark(ui, resp.rect);
 
@@ -236,7 +272,13 @@ impl OndinApp {
         }
         // A tooltip under the open row, or over a press about to open it, would fight it.
         if !held && !open {
-            resp = resp.on_hover_text(crate::input::keys(shown.tip()));
+            resp = match usable {
+                true => resp.on_hover_text(crate::input::keys(shown.tip())),
+                false => resp.on_hover_text(crate::input::keys(&format!(
+                    "{} (Shift+M)",
+                    crate::shape_builder::UNAVAILABLE
+                ))),
+            };
         }
         resp
     }
@@ -275,7 +317,8 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing.x = GAP;
                         for &m in members {
                             let lit = dragged_over.map_or(m == shown, |d| d == m);
-                            let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, true)
+                            let usable = self.rail_usable(m);
+                            let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, usable)
                                 .on_hover_text(crate::input::keys(m.tip()));
                             if resp.clicked() {
                                 picked = Some(m);
@@ -729,5 +772,34 @@ mod tests {
         app.focus = false;
         app_frame(&ctx, &mut app, Vec::new());
         assert!(app.rail.flyout.is_none());
+    }
+
+    /// The builder slot with nothing to build: its Shape builder is dimmed and a
+    /// click says why, while a right-click still opens the row, whose Knife arms;
+    /// the slot then shows the Knife.
+    ///
+    /// flip: `rail_pick` without its `rail_usable` refusal → fails at "refused".
+    #[test]
+    fn the_builder_slot_refuses_the_shape_builder_but_offers_the_knife() {
+        let mut rig = Rig::new(Group::Builder);
+        let at = rig.slot.center();
+        rig.frame(1.0, vec![egui::Event::PointerMoved(at), press(at, true)]);
+        rig.frame(1.1, vec![press(at, false)]);
+        assert_eq!(rig.app.tool, Tool::Select, "refused");
+        assert_eq!(
+            rig.app.session.status().text,
+            crate::shape_builder::UNAVAILABLE
+        );
+
+        let right = |pressed| button(at, egui::PointerButton::Secondary, pressed);
+        rig.frame(2.0, vec![right(true)]);
+        rig.frame(2.1, vec![right(false)]);
+        assert!(rig.app.rail.flyout.is_some(), "the row opens");
+        let knife = rig.member(1);
+        rig.frame(3.0, vec![egui::Event::PointerMoved(knife)]);
+        rig.frame(3.1, vec![press(knife, true)]);
+        rig.frame(3.2, vec![press(knife, false)]);
+        assert_eq!(rig.app.tool, Tool::Knife);
+        assert_eq!(rig.app.rail_shown(Group::Builder), Member::Knife);
     }
 }

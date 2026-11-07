@@ -355,9 +355,10 @@ pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
 - **Box shapes** (rectangle, ellipse, polygon, star, spiral) keep their kind: their world box is
   rounded (`fit_rect`), a tie growing outward, and a side at least one unit long stays so. A line or
   an arc snaps both ends.
-- **The grid** (`grid_offset`) sits on the half unit when the layer's first visible stroke is centred
-  and an odd whole number of units wide, so both of the stroke's edges land on whole pixels; on the
-  whole unit otherwise. An anchor's tie goes down, so a whole shape moves as one and keeps its size.
+- **The grid** is whole units for every layer, so a box's X, Y, W and H all land on integers. A stroke
+  one unit wide and centred then straddles two pixel rows; aligned inside or outside it is crisp.
+  No half-unit grid centres such a stroke on a pixel, since that would leave X and Y on halves. An
+  anchor's tie goes down, so a whole shape moves as one and keeps its size.
 - **What it walks**: groups, frames and booleans are walked into (a frame's own box is not moved);
   hidden layers are passed over. Text, and any layer not square to the page (turned other than by a
   quarter turn, or sheared, `square_to_the_page`), is skipped and counted, since no move of its points

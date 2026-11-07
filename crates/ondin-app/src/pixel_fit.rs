@@ -5,10 +5,10 @@
 //! upright, moves to the nearest grid line on each axis that matters; its handles
 //! move with it, so a curve keeps its shape. A box shape (a rectangle, an ellipse,
 //! a polygon, a star, a spiral) keeps its kind and has its box rounded instead; a
-//! line or an arc has its two ends fitted. A layer whose
-//! stroke is centred and an odd number of units wide is fitted to the half unit,
-//! so both of the stroke's edges land on whole units. No point moves more than half
-//! a unit.
+//! line or an arc has its two ends fitted. The grid is whole units for every layer,
+//! so a box's X, Y, W and H all land on integers; a stroke one unit wide and centred
+//! then straddles two pixel rows, and is crisp aligned inside or outside. No point
+//! moves more than half a unit.
 //!
 //! A layer turned by anything but a quarter turn is skipped, since no move of its
 //! points lines it up with the page's pixels; so is text. Both are counted and
@@ -18,7 +18,7 @@ use crate::app::OndinApp;
 use crate::preview::{PenSubpath, PointRef};
 use crate::theme::icon;
 use ondin_core::kurbo::{Affine, Point, Rect, Vec2};
-use ondin_core::{GeometryPatch, NodeId, NodeKind, Operation, StrokeAlign, Transaction, build};
+use ondin_core::{GeometryPatch, NodeId, NodeKind, Operation, Transaction, build};
 
 /// Below this a coordinate has not moved, and a coefficient is zero.
 const EPS: f64 = 1e-6;
@@ -54,16 +54,15 @@ impl Fitted {
     }
 }
 
-/// `v` on the nearest line of the grid `off` from the whole units (`off` is 0 or
-/// 0.5), a tie going down: a whole shape fitted this way moves as one and keeps
-/// its size.
-fn snap(v: f64, off: f64) -> f64 {
-    (v - off - 0.5).ceil() + off
+/// `v` on the nearest whole unit, a tie going down: a whole shape fitted this way
+/// moves as one and keeps its size.
+fn snap(v: f64) -> f64 {
+    (v - 0.5).ceil()
 }
 
 /// [`snap`] with a tie going up: a box's far edge, so a tied box grows outward.
-fn snap_up(v: f64, off: f64) -> f64 {
-    (v - off + 0.5).floor() + off
+fn snap_up(v: f64) -> f64 {
+    (v + 0.5).floor()
 }
 
 /// Whether `world` lines a layer's axes up with the page's: a scale, a flip or a
@@ -73,32 +72,9 @@ fn square_to_the_page(world: Affine) -> bool {
     (b.abs() < EPS && c.abs() < EPS) || (a.abs() < EPS && d.abs() < EPS)
 }
 
-/// Where a layer's edges go so its stroke covers whole pixels: the half unit for a
-/// centred stroke an odd number of units wide, the whole unit otherwise. The first
-/// visible stroke decides; a stroke inside or outside starts at the edge itself.
-fn grid_offset(app: &OndinApp, id: NodeId) -> f64 {
-    let Some(node) = app.session.doc.get(id) else {
-        return 0.0;
-    };
-    let paint = app.session.doc.resolved_paint(id, node.paint());
-    let Some(s) = paint.strokes.iter().find(|s| s.visible) else {
-        return 0.0;
-    };
-    let w = s.value.width;
-    let odd = (w - w.round()).abs() < EPS && (w.round() as i64) % 2 == 1;
-    match (s.value.align, odd) {
-        (StrokeAlign::Center, true) => 0.5,
-        _ => 0.0,
-    }
-}
-
 /// Fit the anchors of world-space `subpaths` (only those in `only`, when given) to
-/// the grid `off` from the whole units. Answers how many moved.
-pub(crate) fn fit_anchors(
-    subpaths: &mut [PenSubpath],
-    only: Option<&[PointRef]>,
-    off: f64,
-) -> usize {
+/// whole units. Answers how many moved.
+pub(crate) fn fit_anchors(subpaths: &mut [PenSubpath], only: Option<&[PointRef]>) -> usize {
     let mut moved = 0;
     for (s, sub) in subpaths.iter_mut().enumerate() {
         for (a, anchor) in sub.anchors.iter_mut().enumerate() {
@@ -121,8 +97,8 @@ pub(crate) fn fit_anchors(
             };
             let at = anchor.at;
             let to = Point::new(
-                if fit_x { snap(at.x, off) } else { at.x },
-                if fit_y { snap(at.y, off) } else { at.y },
+                if fit_x { snap(at.x) } else { at.x },
+                if fit_y { snap(at.y) } else { at.y },
             );
             if (to - at).hypot() > EPS {
                 anchor.at = to;
@@ -133,11 +109,11 @@ pub(crate) fn fit_anchors(
     moved
 }
 
-/// `r` with each edge on the grid `off` from the whole units, a tied box grown
-/// outward, and no side shorter than one unit unless it was already.
-fn fit_rect(r: Rect, off: f64) -> Rect {
+/// `r` with each edge on a whole unit, a tied box grown outward, and no side
+/// shorter than one unit unless it was already.
+fn fit_rect(r: Rect) -> Rect {
     let axis = |lo: f64, hi: f64| {
-        let (a, mut b) = (snap(lo, off), snap_up(hi, off));
+        let (a, mut b) = (snap(lo), snap_up(hi));
         if b - a < 1.0 && hi - lo >= 1.0 - EPS {
             b = a + 1.0;
         }
@@ -221,11 +197,10 @@ impl OndinApp {
             }
             // An arc's ends are a line's: the origin and its one point.
             NodeKind::Line { end } | NodeKind::Arc { end, .. } => {
-                let off = grid_offset(self, id);
                 let (from, to) = (world * Point::ZERO, world * *end);
                 let (a, b) = (
-                    Point::new(snap(from.x, off), snap(from.y, off)),
-                    Point::new(snap(to.x, off), snap(to.y, off)),
+                    Point::new(snap(from.x), snap(from.y)),
+                    Point::new(snap(to.x), snap(to.y)),
                 );
                 let moved = [(from, a), (to, b)]
                     .iter()
@@ -253,9 +228,8 @@ impl OndinApp {
                 let Some(local) = ondin_core::local_box(doc, res, id) else {
                     return;
                 };
-                let off = grid_offset(self, id);
                 let was = world.transform_rect_bbox(local);
-                let now = fit_rect(was, off);
+                let now = fit_rect(was);
                 // Each corner of the box that moved counts as a point.
                 let corners = |r: Rect| {
                     [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)].map(Point::from)
@@ -288,7 +262,7 @@ impl OndinApp {
             fitted.turned += 1;
             return None;
         }
-        let moved = fit_anchors(&mut subpaths, only, grid_offset(self, id));
+        let moved = fit_anchors(&mut subpaths, only);
         if moved == 0 {
             return None;
         }
@@ -338,20 +312,19 @@ mod tests {
     use super::*;
     use crate::preview::PenAnchor;
 
-    /// A corner moves on both axes to the nearest whole unit; with an odd centred
-    /// stroke, to the half unit.
+    /// A corner moves on both axes to the nearest whole unit, a tie going down.
     #[test]
     fn a_corner_lands_on_the_grid() {
         let mut subs = vec![PenSubpath {
             anchors: vec![PenAnchor::corner(Point::new(3.3, 4.6))],
             closed: false,
         }];
-        assert_eq!(fit_anchors(&mut subs, None, 0.0), 1);
+        assert_eq!(fit_anchors(&mut subs, None), 1);
         assert_eq!(subs[0].anchors[0].at, Point::new(3.0, 5.0));
-        // Both coordinates tie at the half unit, and both go down.
-        assert_eq!(fit_anchors(&mut subs, None, 0.5), 1);
-        assert_eq!(subs[0].anchors[0].at, Point::new(2.5, 4.5));
-        assert_eq!(fit_anchors(&mut subs, None, 0.5), 0, "already there");
+        assert_eq!(fit_anchors(&mut subs, None), 0, "already there");
+        subs[0].anchors[0].at = Point::new(2.5, 4.5);
+        assert_eq!(fit_anchors(&mut subs, None), 1);
+        assert_eq!(subs[0].anchors[0].at, Point::new(2.0, 4.0));
     }
 
     /// A smooth anchor whose tangent is level moves only up or down, a diagonal one
@@ -371,7 +344,7 @@ mod tests {
             ],
             closed: false,
         }];
-        assert_eq!(fit_anchors(&mut subs, None, 0.0), 1);
+        assert_eq!(fit_anchors(&mut subs, None), 1);
         assert_eq!(subs[0].anchors[0].at, Point::new(8.3, 2.0), "level: y only");
         assert_eq!(subs[0].anchors[0].out, Vec2::new(3.0, 0.0), "handle kept");
         assert_eq!(
@@ -391,29 +364,27 @@ mod tests {
             ],
             closed: false,
         }];
-        assert_eq!(fit_anchors(&mut subs, Some(&[(0, 1)]), 0.0), 1);
+        assert_eq!(fit_anchors(&mut subs, Some(&[(0, 1)])), 1);
         assert_eq!(subs[0].anchors[0].at, Point::new(0.4, 0.4));
         assert_eq!(subs[0].anchors[1].at, Point::new(5.0, 0.0));
     }
 
-    /// A box's edges round, never more than half a unit, and a box at least one
-    /// unit wide stays at least one unit wide.
+    /// A box's edges round, never more than half a unit, a tie growing the box
+    /// outward, and a box at least one unit wide stays at least one unit wide.
     #[test]
     fn a_box_rounds_its_edges_and_keeps_a_unit() {
-        let r = fit_rect(Rect::new(3.2, 4.0, 20.7, 4.9), 0.0);
+        let r = fit_rect(Rect::new(3.2, 4.0, 20.7, 4.9));
         assert_eq!(r, Rect::new(3.0, 4.0, 21.0, 5.0));
-        let thin = fit_rect(Rect::new(3.4, 0.0, 4.45, 1.0), 0.0);
+        let thin = fit_rect(Rect::new(3.4, 0.0, 4.45, 1.0));
         assert_eq!(thin.width(), 1.0, "{thin:?}");
-        // A 1-wide centred stroke on whole edges: each edge ties and goes outward,
-        // so the stroke's two edges land on 3 and 4, and on 20 and 21.
-        let half = fit_rect(Rect::new(4.0, 4.0, 20.0, 20.0), 0.5);
-        assert_eq!(half, Rect::new(3.5, 3.5, 20.5, 20.5));
+        let tied = fit_rect(Rect::new(3.5, 3.5, 20.5, 20.5));
+        assert_eq!(tied, Rect::new(3.0, 3.0, 21.0, 21.0));
     }
 
     /// Over a selection of a stroked rect, a path, a turned rect and a text layer,
-    /// one *Pixel-fit* step fits the rect's box to the half unit (its stroke is 1
-    /// wide and centred), the path's corners to whole units, and skips and names
-    /// the other two.
+    /// one *Pixel-fit* step puts the rect's X, Y, W and H on whole units (its 1-wide
+    /// centred stroke changes nothing) and the path's corners too, and skips and
+    /// names the other two.
     /// flip: `fit_layer` without its `square_to_the_page` gate → fails at "the
     /// turned rect is left alone".
     #[test]
@@ -430,7 +401,7 @@ mod tests {
             parent: page,
             index,
             kind: NodeKind::Rect {
-                size: Size::new(10.4, 9.7),
+                size: Size::new(300.5, 9.7),
                 corner_radii: Default::default(),
                 corner_smoothing: 0.0,
             },
@@ -442,7 +413,7 @@ mod tests {
         line.line_to((6.6, 0.4));
         line.line_to((6.6, 5.2));
         let tx = Transaction(vec![
-            shape(rect, 0, (3.3, 4.6), 0.0),
+            shape(rect, 0, (663.0, 4.6), 0.0),
             Operation::SetStrokes {
                 id: rect,
                 strokes: keyed_by_position([Stroke {
@@ -500,8 +471,8 @@ mod tests {
         };
         assert_eq!(
             world(rect),
-            Rect::new(3.5, 4.5, 13.5, 14.5),
-            "the half unit"
+            Rect::new(663.0, 5.0, 964.0, 14.0),
+            "X stays on 663, W 300.5 becomes 301, Y and H land whole"
         );
         let (_, subs) = app.edited_subpaths(path).expect("a path");
         let at: Vec<Point> = subs[0].anchors.iter().map(|a| a.at).collect();

@@ -42,9 +42,26 @@ marks the original that stays. Toggles live with the key.
   up: grid, frame name tags, gesture chrome, ruler bars with guides.
 - Appears at `grid::VISIBLE_AT_ZOOM` = 8.0 (800% on the readout; `camera.zoom` is device px per world
   unit). That also bounds the line count by construction.
-- Ink is neutral mid-grey at low alpha (works over white frames and dark grounds alike).
+- **Adaptive ink** (`prefs.canvas.grid_adaptive`, on by default). Each grid pixel is the canvas
+  pixel under it moved 10 in CIE L* (`grid_ink::STEP`) with its hue kept: above L* 45
+  (`grid_ink::DARKEN_ABOVE`) it darkens, by scaling its linear channels by `Y(L*−10)/Y`; at or
+  below it lightens, mixing toward white in linear light by `(Y(L*+10) − Y)/(1 − Y)`. A fixed ink
+  vanishes over a mid-tone fill; this one reads over every fill. `ondin_render::grid_ink`
+  holds the rule (`adapt_rgba8`) and its compute pass, which `CanvasRenderer::shade_grid` runs
+  every frame the grid shows, after the colour-blind simulation (the grid is chrome over what is
+  seen), into a third texture, `gridded`; `target` and `seen` are never written, so pans, patches
+  and the eyedropper read true pixels. The egui overlays paint over that texture, so the grid
+  still sits under every other overlay.
+- **Fixed ink** (*Adaptive* off): one-device-pixel egui lines in `prefs.canvas.grid_ink`,
+  straight alpha, default `CanvasPrefs::GRID_INK` (mid-grey at alpha 60). Where the pass cannot
+  run, adaptive falls back to these lines: headless (no GPU) and under pixel preview, whose
+  texture is one texel a unit.
 - Not drawn under the ruler bars.
-- Every line lands via `rulers::snap_across_axis`, the guides' own snap.
+- Both inks place a line by one rule, `grid_ink::on_line` over `OndinApp::grid_placed`'s
+  `Lattice` (world 0's texel modulo the pitch, the zoom as pitch, the artwork area as the region):
+  a line takes the device pixel holding its position, a half rounding up, so switching *Adaptive*
+  never moves a line. It picks the pixels `rulers::snap_across_axis` gave a one-device-pixel line
+  (`the_lattice_picks_the_pixels_the_snapped_lines_did`).
 - Showing the grid and snapping to it are separate switches.
 
 ## The minimap (`minimap.rs`)
@@ -872,7 +889,7 @@ runs (`pages` names each frame's page, index for index).
 - `seen_through` writes the simulation into its own `seen` texture, never into `target`. Simulating
   in place would save a texture and corrupt the next pan or patch, which copy kept pixels out of
   `target`, and the eyedropper, which reads it. No test pins it: headless, `seen_through` hands
-  back the drawn texture.
+  back the drawn texture. `shade_grid` writes `gridded` for the same reason.
 - The *Panels ▸* flyout is its own `egui::Area`, so the dropdown's `contains_pointer` is false over
   it; only `dropdown`'s `on_flyout` test keeps a click in it from closing the View menu.
   `the_view_menu_s_panels_row_opens_the_panes_beside_it` pins it.

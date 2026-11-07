@@ -18,6 +18,7 @@ pub mod effects;
 /// The effect passes as compute shaders — `effects` ported, not reinvented.
 pub mod fx_gpu;
 pub mod gpu;
+pub mod grid_ink;
 pub mod images;
 mod outline_only;
 pub mod renderer;

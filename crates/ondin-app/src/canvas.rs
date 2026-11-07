@@ -128,6 +128,11 @@ struct Gpu {
     seen: Option<CanvasTexture>,
     /// The simulation's compute pass, built on first use.
     vision: Option<ondin_render::vision::VisionPass>,
+    /// What is shown with the adaptive pixel grid shaded in: `target` or `seen`
+    /// copied with its lines inked, so neither of those is touched.
+    gridded: Option<CanvasTexture>,
+    /// The grid's compute pass, built on first use.
+    grid_ink: Option<ondin_render::grid_ink::GridInkPass>,
 }
 
 /// How many device pixels the eyedropper's loupe shows on a side; odd, so one
@@ -332,6 +337,8 @@ impl CanvasRenderer {
                 readback: None,
                 seen: None,
                 vision: None,
+                gridded: None,
+                grid_ink: None,
             }),
             shown: None,
             shown_preview: None,
@@ -585,6 +592,36 @@ impl CanvasRenderer {
         seen.id
     }
 
+    /// `shown`, what [`Self::seen_through`] returned, with the pixel grid's lines
+    /// in the adaptive ink (`ondin_render::grid_ink`), as a copy: the grid is
+    /// chrome over what is seen. Run every frame the grid is on. `None` headless
+    /// or when `shown` is no canvas texture; the caller then draws egui lines.
+    pub(crate) fn shade_grid(
+        &mut self,
+        shown: egui::TextureId,
+        lattice: &ondin_render::grid_ink::Lattice,
+    ) -> Option<egui::TextureId> {
+        let gpu = self.gpu.as_mut()?;
+        let size = gpu.target.as_ref()?.size;
+        if gpu.gridded.as_ref().is_none_or(|g| g.size != size) {
+            if let Some(old) = gpu.gridded.take() {
+                gpu.render_state.renderer.write().free_texture(&old.id);
+            }
+            gpu.gridded = Some(gpu.texture(size));
+        }
+        let rs = &gpu.render_state;
+        let pass = gpu
+            .grid_ink
+            .get_or_insert_with(|| ondin_render::grid_ink::GridInkPass::new(&rs.device));
+        let src = [gpu.target.as_ref(), gpu.seen.as_ref()]
+            .into_iter()
+            .flatten()
+            .find(|t| t.id == shown && t.size == size)?;
+        let dst = gpu.gridded.as_ref()?;
+        pass.run(&rs.device, &rs.queue, &src.view, &dst.view, size, lattice);
+        Some(dst.id)
+    }
+
     /// The eyedropper's latest sample, whatever it was read against.
     pub(crate) fn sample(&self) -> Option<&Sample> {
         self.sample.as_ref()
@@ -750,9 +787,14 @@ impl Gpu {
         if self.target.as_ref().is_some_and(|c| c.size == pixel_size) {
             return;
         }
-        for old in [self.target.take(), self.spare.take(), self.seen.take()]
-            .into_iter()
-            .flatten()
+        for old in [
+            self.target.take(),
+            self.spare.take(),
+            self.seen.take(),
+            self.gridded.take(),
+        ]
+        .into_iter()
+        .flatten()
         {
             self.render_state.renderer.write().free_texture(&old.id);
         }
@@ -9620,12 +9662,24 @@ impl OndinApp {
             self.session.shaped(),
         );
         let vision = self.vision_region(&camera, px);
+        // The adaptive grid is shaded at device pixels, so never into pixel
+        // preview's enlarged texture; a compare shows no grid.
+        let lattice = (self.prefs.canvas.grid_adaptive
+            && preview.is_none()
+            && self.session.compare.is_none())
+        .then(|| self.grid_placed(rect, ppp))
+        .flatten()
+        .map(|p| p.lattice);
+        let mut grid_shaded = false;
         let (doc, res, overrides) = self.session.render_inputs();
         let ink = self.session.ink();
         let drawn = self.canvas.render(
             doc, res, overrides, stamps, ink, &camera, px, backdrop, page,
         );
         if let Some(tex) = drawn.map(|t| self.canvas.seen_through(t, vision)) {
+            let shaded = lattice.and_then(|l| self.canvas.shade_grid(tex, &l));
+            grid_shaded = shaded.is_some();
+            let tex = shaded.unwrap_or(tex);
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             match preview {
                 // Enlarged over the canvas and cut to it; the texture is registered
@@ -9661,10 +9715,12 @@ impl OndinApp {
             return;
         }
 
-        // Overlays in paint order: the pixel grid over the artwork, then labels
-        // and tracks under everything that answers the pointer, then hover under
-        // the selection chrome.
-        self.draw_pixel_grid(painter, rect, ppp);
+        // Overlays in paint order: the pixel grid over the artwork (already in the
+        // texture when shaded), then labels and tracks under everything that
+        // answers the pointer, then hover under the selection chrome.
+        if !grid_shaded {
+            self.draw_pixel_grid(painter, rect, ppp);
+        }
 
         self.draw_layout_grids(painter, rect, ppp);
 

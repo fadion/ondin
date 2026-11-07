@@ -15,6 +15,7 @@ ondin-render/src/
 ├─ fx_gpu.rs       # the same passes as compute shaders (fx.wgsl) for the GPU backend
 ├─ images.rs       # the decode cache: encoded bytes to peniko::ImageData, once per image
 ├─ vision.rs       # colour-vision simulation: Deficiency, the CPU spec, VisionPass (vision.wgsl)
+├─ grid_ink.rs     # the pixel grid's adaptive ink: adapt_rgba8, on_line, GridInkPass (grid_ink.wgsl)
 └─ color.rs        # the ONLY color conversion point
 ```
 
@@ -152,6 +153,7 @@ Every setter looks in the ghost forest *before* the node map (a transaction that
 - **A missing picture is a drawing**: `scene::fill_or_placeholder` is the one place a fill becomes ink (shape fills and artboard backgrounds); where `has_image` says no pixels it calls `scene::paint_missing` (`ondin_core::missing_placeholder` ground, then a layer clipped to the shape's own path with the cross and rim). Strokes and text with a missing picture draw nothing, as a `return`; the CPU backend must also return (it once drew text in the previous node's colour because `vello_cpu` paint is context state).
 - **Colour (`color.rs`)** is the single conversion point from document colours (sRGB straight alpha) to each backend's contract, verified by a pixel test.
 - **Colour-vision simulation (`vision.rs`)** is a view of a rendered canvas, never of the document. `Deficiency` (Protanopia, Deuteranopia — the default —, Tritanopia, Achromatopsia) gives a 3×3 matrix in linear light: Machado, Oliveira and Fernandes (2009) at full severity for the three dichromacies, Rec. 709 luminance for achromatopsia; every row sums to one, so greys stay grey. `simulate_rgba8` is the specification: straight-alpha sRGB in, decode, matrix, clamp, encode, alpha passed through; the transfer functions are `color::srgb_to_linear` and `linear_to_srgb`, so the conversion stays in `color.rs` (invariant 7), and a default-gate test holds `vision.wgsl`'s copy of their constants to them. `VisionPass` runs it as a compute shader (`vision.wgsl`) from one `Rgba8Unorm` texture into another, inside a device region and copying everything outside; it is built once, since building compiles the shader. `tests/vision.rs` holds the pass to the specification within one level (on-device, `#[ignore]`). The app's use is in `app-canvas-chrome.md`.
+- **The pixel grid's adaptive ink (`grid_ink.rs`)** is built the same way, on the same terms. `adapt_rgba8` moves a pixel `STEP` (10) in CIE L*, darkening above `DARKEN_ABOVE` (45) and lightening toward white at or below, in linear light with Rec. 709 luminance; `on_line` picks a lattice's texels; `GridInkPass` (`grid_ink.wgsl`) runs both, its uniform a `Lattice` (per axis a line's texel and the pitch, then the region). A default-gate test holds the shader's transfer and L* constants to the Rust; `tests/grid_ink.rs` holds the pass to `adapt_rgba8` on the texels `on_line` picks (on-device, `#[ignore]`). The rule itself is in `app-canvas-chrome.md`.
 
 ## Traps
 

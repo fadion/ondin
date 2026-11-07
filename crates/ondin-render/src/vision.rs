@@ -286,18 +286,8 @@ mod tests {
     /// flip: `color::SRGB_KNEE` set to 0.04 → fails at "vision.wgsl lacks".
     #[test]
     fn the_shader_transfers_as_color_rs_does() {
-        use crate::color::{
-            LINEAR_KNEE, SRGB_GAMMA, SRGB_KNEE, SRGB_OFFSET, SRGB_SCALE, SRGB_SLOPE,
-        };
         let wgsl = include_str!("vision.wgsl");
-        for line in [
-            format!("if c <= {SRGB_KNEE} {{"),
-            format!("return c / {SRGB_SLOPE};"),
-            format!("return pow((c + {SRGB_OFFSET}) / {SRGB_SCALE}, {SRGB_GAMMA});"),
-            format!("if c <= {LINEAR_KNEE} {{"),
-            format!("return c * {SRGB_SLOPE};"),
-            format!("return {SRGB_SCALE} * pow(c, 1.0 / {SRGB_GAMMA}) - {SRGB_OFFSET};"),
-        ] {
+        for line in crate::color::wgsl_transfer_lines() {
             assert!(wgsl.contains(&line), "vision.wgsl lacks `{line}`");
         }
         let mid = crate::color::srgb_to_linear(0.5);

@@ -21,7 +21,7 @@ pub fn to_backend(color: Color) -> Color {
 
 /// The sRGB transfer function's constants: the encoded and the linear knee, the
 /// linear segment's slope, the curve's offset, scale and exponent. `vision.wgsl`
-/// carries a copy, held to these by a test there.
+/// and `grid_ink.wgsl` carry a copy, held to these by `wgsl_transfer_lines`.
 pub(crate) const SRGB_KNEE: f32 = 0.04045;
 pub(crate) const LINEAR_KNEE: f32 = 0.003_130_8;
 pub(crate) const SRGB_SLOPE: f32 = 12.92;
@@ -47,6 +47,20 @@ pub fn linear_to_srgb(c: f32) -> f32 {
     } else {
         SRGB_SCALE * c.powf(1.0 / SRGB_GAMMA) - SRGB_OFFSET
     }
+}
+
+/// The lines a WGSL copy of [`srgb_to_linear`] and [`linear_to_srgb`] must hold,
+/// spelled from the constants, for a shader's test to look for.
+#[cfg(test)]
+pub(crate) fn wgsl_transfer_lines() -> [String; 6] {
+    [
+        format!("if c <= {SRGB_KNEE} {{"),
+        format!("return c / {SRGB_SLOPE};"),
+        format!("return pow((c + {SRGB_OFFSET}) / {SRGB_SCALE}, {SRGB_GAMMA});"),
+        format!("if c <= {LINEAR_KNEE} {{"),
+        format!("return c * {SRGB_SLOPE};"),
+        format!("return {SRGB_SCALE} * pow(c, 1.0 / {SRGB_GAMMA}) - {SRGB_OFFSET};"),
+    ]
 }
 
 /// Which resolution a backend wants a picture at.

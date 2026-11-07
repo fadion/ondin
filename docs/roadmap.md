@@ -13,10 +13,23 @@ item's premise can go stale while its ask still reads true.
   *The verb registry*), over the headless editing code now in `ondin_core::edit`, and `ondin run`
   drives it. Left:
   - **Edits the app still builds itself.** A verb is a builder's door, so an edit built in
-    `OndinApp` (paste, the point edits that commit through `rewrite_edit`) moves into a
-    core builder before its verb exists, as delete did (`build::delete`). Find them by walking
-    `perform_menu_item` and `dispatch` for arms that build ops in place rather than calling
-    `build::` or `edit::`.
+    `ondin-app` moves into a core builder before its verb exists, as delete and duplicate did
+    (`build::delete`, `build::duplicate_placements`). The discrete commands that build their ops in
+    place:
+    - Pages (`pages.rs`): `add_page`, `commit_page_name`, `toggle_page_draft`, the page drag's
+      `MovePage`, `duplicate_page`, `delete_page_now`. MCP's tools owe pages too (*Later*).
+    - Text (`typography.rs`): `set_text_sizing`, and `text_chord`'s character and paragraph
+      attributes (`one_char_attrs_tx`, `para_attrs_tx`), which a range-aware verb would take.
+    - Guides: `paste_guides`, `duplicate_guides`, `remove_selected_guides`, `rulers::remove_guide`
+      and `remove_all_guides`, the menu's *Clear guides*.
+    - Layer commands: `toggle_hidden`/`toggle_locked` (outermost layers), `create_component`,
+      `repeat::linked_ring`, `pixel_fit`, `resize_to_original`, `flip_text_path`, the menu's fill
+      rule and *Reset origin*, `designate_key`, `join_layers`, `commit_batch_rename`.
+    - Pictures and paste: `replace_image_fill`/`replace_image_with`, `paste_text`, the PDF import's
+      `place_pdf`, `replace_with_clipboard`'s delete.
+    - The contrast checker's `fix_transaction`.
+    The canvas gestures and the inspector's field writers (`slot_transaction`, `transform_marks`,
+    `layout.rs`) build ops too; they become builders only when a verb needs the same edit.
 
 ## Now · Components and layout
 

@@ -1370,6 +1370,36 @@ pub static VERBS: &[Verb] = &[
             })
         },
     },
+    Verb {
+        name: "replace_image",
+        doc: "Show another picture in a layer's fill, keeping how the old one was framed",
+        params: &[
+            req("node", NODE, "the layer"),
+            req("image", TEXT, "the picture, by the id `add_image` answered"),
+            opt(
+                "index",
+                INDEX,
+                "the fill, 0 the bottom; its first picture fill unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let id = a.node("node")?;
+            let image = crate::image::ImageId(a.text("image").unwrap_or_default().to_owned());
+            if !ctx.doc.has_image(&image) {
+                return Err(a.invalid("image", "the document holds no such picture; add it first"));
+            }
+            let fills = &node(ctx, id)?.paint().fills;
+            let index = a.index("index").unwrap_or_else(|| {
+                fills
+                    .iter()
+                    .position(|f| matches!(f.brush.literal(), Some(crate::Brush::Image(_))))
+                    .unwrap_or(0)
+            });
+            build::replace_image_fill(ctx.doc, id, index, &image, None)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("index", "the layer has no fill there"))
+        },
+    },
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",

@@ -6705,35 +6705,21 @@ impl OndinApp {
         image: &LoadedImage,
     ) -> Option<String> {
         let (id, index) = target;
-        let node = self.session.doc.get(id)?;
-        let mut fills = node.paint().fills.clone();
-        let fill = fills.get_mut(index)?;
-        let known = self.session.doc.has_image(&image.id);
-        let cut_var = fill
+        let doc = &self.session.doc;
+        let cut_var = doc
+            .get(id)?
+            .paint()
+            .fills
+            .get(index)?
             .brush
             .var()
-            .and_then(|v| self.session.doc.variables().get(v))
+            .and_then(|v| doc.variables().get(v))
             .map(|v| v.name.clone());
-        fill.brush = match fill.brush.literal() {
-            Some(b @ ondin_core::Brush::Image(_)) => crate::panels::map_image(b, |r| {
-                r.id = image.id.clone();
-            }),
-            // Not a picture yet (a bound one is detached): the defaults.
-            _ => ondin_core::image_brush(image.id.clone()),
-        }
-        .into();
-        let mut ops = Vec::new();
-        if !known {
-            ops.push(Operation::AddImage {
-                id: image.id.clone(),
-                entry: image.entry.clone(),
-            });
-        }
-        ops.push(Operation::SetFills { id, fills });
+        let tx = build::replace_image_fill(doc, id, index, &image.id, Some(image.entry.clone()))?;
         if !self.session.has_step_name() {
             self.session.name_step("Replace image", icon::IMAGE);
         }
-        if !self.commit_edit(Transaction(ops)) {
+        if !self.commit_edit(tx) {
             return None;
         }
         Some(self.replaced_status(image.label(), cut_var))

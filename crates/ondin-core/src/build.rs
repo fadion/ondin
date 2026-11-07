@@ -3425,6 +3425,40 @@ pub fn delete(doc: &Document, ids: &[NodeId]) -> Transaction {
     Transaction(ops)
 }
 
+/// The picture `image` put into fill `index` of `id`: a picture fill keeps how it was
+/// framed and changes only which picture it shows, any other fill (a bound one
+/// detached) becomes a picture at the defaults. `entry` is the table entry to add
+/// first, for a picture the document does not hold yet. `None` when the fill is
+/// not there.
+pub fn replace_image_fill(
+    doc: &Document,
+    id: NodeId,
+    index: usize,
+    image: &crate::ImageId,
+    entry: Option<crate::ImageEntry>,
+) -> Option<Transaction> {
+    let mut fills = doc.get(id)?.paint().fills.clone();
+    let fill = fills.get_mut(index)?;
+    fill.brush = match fill.brush.literal() {
+        Some(Brush::Image(b)) => {
+            let mut b = b.clone();
+            b.image.id = image.clone();
+            Brush::Image(b)
+        }
+        _ => crate::image_brush(image.clone()),
+    }
+    .into();
+    let mut ops = Vec::new();
+    if let Some(entry) = entry.filter(|_| !doc.has_image(image)) {
+        ops.push(Operation::AddImage {
+            id: image.clone(),
+            entry,
+        });
+    }
+    ops.push(Operation::SetFills { id, fills });
+    Some(Transaction(ops))
+}
+
 // --- text styling -----------------------------------------------------------
 
 /// A text layer's styling as an edit of it reads it: the character and paragraph

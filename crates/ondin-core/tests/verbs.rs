@@ -971,6 +971,52 @@ fn add_image_answers_an_id_a_fill_can_show() {
     assert!(err.why.contains("not a PNG"), "{err}");
 }
 
+/// `replace_image` swaps the picture a fill shows and keeps its framing; a picture
+/// the document does not hold is refused.
+///
+/// flip: `build::replace_image_fill` rebuilding every brush from `image_brush` →
+/// fails at "the framing stays".
+#[test]
+fn replace_image_keeps_the_framing() {
+    use base64::Engine as _;
+    let (mut doc, mut ids, page) = blank();
+    let enc = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let first = enc(b"\x89PNG\r\n\x1a\n-one-");
+    let second = enc(b"\x89PNG\r\n\x1a\n-second-");
+    let mut brush = image_brush(ImageId("@a".into()));
+    if let Brush::Image(b) = &mut brush {
+        b.image.fit = ondin_core::ImageFit::Tile;
+    }
+    let fill = serde_json::to_value(Fill {
+        brush: brush.into(),
+        visible: true,
+    })
+    .unwrap();
+    let script = json!([
+        { "verb": "add_image", "args": { "bytes": first }, "as": "a" },
+        { "verb": "add_image", "args": { "bytes": second }, "as": "b" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "r" },
+        { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
+        { "verb": "replace_image", "args": { "node": "@r", "image": "@b" } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Some(&mut Pictures), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let r = doc.get(page).unwrap().children()[0];
+    let Some(Brush::Image(b)) = doc.get(r).unwrap().paint().fills[0]
+        .brush
+        .literal()
+        .cloned()
+    else {
+        panic!("a picture fill");
+    };
+    assert_eq!(b.image.id.0, made[1][0], "the second picture shows");
+    assert_eq!(b.image.fit, ondin_core::ImageFit::Tile, "the framing stays");
+
+    let missing = json!([{ "verb": "replace_image", "args": { "node": r.to_wire(), "image": "sha256:none" } }]);
+    let err = verbs::run_script(&mut doc, &mut ids, None, &missing).expect_err("no such picture");
+    assert!(err.why.contains("no such picture"), "{err}");
+}
+
 /// A script's later steps name an earlier step's node by its label, and `@page` is
 /// the page; a refusal names its step, counted from 1, and keeps the steps before it.
 ///

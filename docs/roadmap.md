@@ -12,12 +12,11 @@ item's premise can go stale while its ask still reads true.
 - **The rest of the command registry.** The verb table is built (`ondin_core::verbs`, `core-ops.md`
   *The verb registry*), over the headless editing code now in `ondin_core::edit`, and `ondin run`
   drives it. Left:
-  - **The three unbound Phase 2 tools** (`ondin-mcp`'s `UNBOUND`): `duplicate`, whose edit the app
-    builds itself, keeping a clone chain for *Repeat*; `insert_subtree`, which needs a node list's
-    wire form for callers outside the save format; and `add_image`, which needs image bytes as an
-    argument.
+  - **The two unbound Phase 2 tools** (`ondin-mcp`'s `UNBOUND`): `insert_subtree`, which needs a
+    node list's wire form for callers outside the save format; and `add_image`, which needs image
+    bytes as an argument.
   - **Edits the app still builds itself.** A verb is a builder's door, so an edit built in
-    `OndinApp` (duplicate, paste, the point edits that commit through `rewrite_edit`) moves into a
+    `OndinApp` (paste, the point edits that commit through `rewrite_edit`) moves into a
     core builder before its verb exists, as delete did (`build::delete`). Find them by walking
     `perform_menu_item` and `dispatch` for arms that build ops in place rather than calling
     `build::` or `edit::`.

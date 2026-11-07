@@ -420,6 +420,32 @@ pub static VERBS: &[Verb] = &[
         run: |ctx, a| Ok(Done::edit(build::delete(ctx.doc, &a.nodes("nodes")?))),
     },
     Verb {
+        name: "duplicate",
+        doc: "Copy layers, each copy one step above its original; answers the copies",
+        params: &[
+            req("nodes", NODES, "the layers to copy"),
+            opt(
+                "dx",
+                ParamKind::Number,
+                "how far right to move the copies, 0 unless given",
+            ),
+            opt(
+                "dy",
+                ParamKind::Number,
+                "how far down to move the copies, 0 unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let offset =
+                kurbo::Vec2::new(a.number("dx").unwrap_or(0.0), a.number("dy").unwrap_or(0.0));
+            let (tx, created) = build::duplicate(ctx.doc, ctx.ids, &a.nodes("nodes")?, offset);
+            if created.is_empty() {
+                return Err(VerbError::Nothing("none of the layers can be copied"));
+            }
+            Ok(Done { tx, created })
+        },
+    },
+    Verb {
         name: "reparent",
         doc: "Move a layer into another parent, keeping where it is drawn",
         params: &[

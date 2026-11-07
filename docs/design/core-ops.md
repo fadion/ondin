@@ -191,11 +191,14 @@ it created. A verb never commits; its caller does, as every edit is committed.
 - **A verb is a builder's door, never a second copy of the edit.** Where the app and a verb make the
   same edit, both call one builder (`build::delete` serves the Delete key and `delete_node`). An edit
   the app still builds itself has no verb until it moves into core.
+- **`duplicate` places as `Ctrl+D` does** (`build::duplicate_placements`: the outermost layers, each
+  copy one step above its original) and takes its offset as `dx`/`dy`. The clone chain that repeats
+  a moved duplicate's step is the app's session state, so the verb has none.
 - **A paint list written whole keeps its item ids by position** (`item::rekey_by_position`), so an
   instance reads the write as overrides of its main's items.
 - **Phase 2's tool list is held to the registry** (`ondin-mcp`'s `every_write_tool_is_a_registry_verb`):
   every write tool is a verb of the same name, a session tool (`undo`, `redo`, `set_selection`), or
-  named as unbound with what it waits on (`insert_subtree`, `duplicate`, `add_image`).
+  named as unbound with what it waits on (`insert_subtree`, `add_image`).
 - **`run_script`** commits a list of `{ verb, args, as }` steps one by one. A string argument
   `"@label"` names the first node an earlier step labelled `label` created, and `"@page"` the first
   page; labels belong to one script. A refusal names its step, counted from 1, and keeps the steps

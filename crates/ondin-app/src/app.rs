@@ -5243,27 +5243,7 @@ impl OndinApp {
         }
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let step = self.clone_step(&ids);
-
-        let mut placements = Vec::new();
-        for id in &ids {
-            let Some(template) = self.session.doc.capture_subtree(*id) else {
-                continue;
-            };
-            let Some(parent) = self.session.doc.get(*id).and_then(|n| n.parent()) else {
-                continue;
-            };
-            let after = self
-                .session
-                .doc
-                .get(parent)
-                .and_then(|p| p.children().iter().position(|c| *c == *id))
-                .map(|i| i + 1);
-            placements.push(build::Placement {
-                nodes: template,
-                parent,
-                index: after,
-            });
-        }
+        let placements = build::duplicate_placements(&self.session.doc, &ids);
         // A duplicate lands in its own document: no pictures or kits to carry.
         self.insert_all(
             placements,

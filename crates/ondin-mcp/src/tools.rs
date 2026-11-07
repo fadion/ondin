@@ -202,14 +202,10 @@ mod tests {
     const SESSION: [&str; 3] = ["undo", "redo", "set_selection"];
 
     /// Phase 2 tools with no registry verb yet, each with what it waits on.
-    const UNBOUND: [(&str, &str); 3] = [
+    const UNBOUND: [(&str, &str); 2] = [
         (
             "insert_subtree",
             "a node list's wire form for callers outside the save format",
-        ),
-        (
-            "duplicate",
-            "the app's duplicate keeps a clone chain for repeats; the verb must too",
         ),
         ("add_image", "image bytes as an argument"),
     ];

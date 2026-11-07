@@ -3139,6 +3139,41 @@ pub fn insert_subtrees_as(
     (Transaction(ops), created)
 }
 
+/// Where a duplicate of each outermost layer of `ids` lands: a copy of its subtree,
+/// one step above it in its own parent. Pages and missing ids place nothing.
+pub fn duplicate_placements(doc: &Document, ids: &[NodeId]) -> Vec<Placement> {
+    outermost(doc, ids)
+        .into_iter()
+        .filter_map(|id| {
+            let nodes = doc.capture_subtree(id)?;
+            let parent = doc.get(id)?.parent()?;
+            let index = doc
+                .get(parent)?
+                .children()
+                .iter()
+                .position(|c| *c == id)
+                .map(|i| i + 1);
+            Some(Placement {
+                nodes,
+                parent,
+                index,
+            })
+        })
+        .collect()
+}
+
+/// Duplicate the outermost layers of `ids` as one transaction, each copy one step
+/// above its original and offset by `offset` in its parent's space. Answers the
+/// copies in order, as [`insert_subtrees`] does.
+pub fn duplicate(
+    doc: &Document,
+    ids: &mut IdSource,
+    nodes: &[NodeId],
+    offset: Vec2,
+) -> (Transaction, Vec<NodeId>) {
+    insert_subtrees(doc, ids, &duplicate_placements(doc, nodes), offset)
+}
+
 /// The names a paste or duplicate has already handed out, per destination parent.
 ///
 /// Several copies in one transaction have to remember each other: the document

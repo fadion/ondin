@@ -293,6 +293,64 @@ fn deleting_a_frame_takes_its_guides_and_undoes() {
     assert!(doc.get(frame).is_some() && doc.guide(guide).is_some());
 }
 
+/// `duplicate` copies the outermost layers given, each copy one step above its
+/// original with a copy's name, moved by the offset; a child named beside its group
+/// is copied once, inside the group's copy.
+///
+/// flip: `duplicate_placements` skipping `outermost` → fails at "one copy per outermost layer".
+#[test]
+fn duplicate_copies_each_outermost_layer_above_it() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let a = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let b = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(10.0, 10.0) }),
+    )[0];
+    let group = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [b.to_wire(), c.to_wire()] }),
+    )[0];
+    let copies = run(
+        &mut doc,
+        &mut ids,
+        "duplicate",
+        json!({ "nodes": [a.to_wire(), group.to_wire(), b.to_wire()], "dx": 30, "dy": -5 }),
+    );
+    assert_eq!(copies.len(), 2, "one copy per outermost layer");
+    assert_eq!(
+        doc.get(page).unwrap().children(),
+        [a, copies[0], group, copies[1]],
+        "each copy one step above its original"
+    );
+    assert_eq!(doc.get(copies[1]).unwrap().children().len(), 2);
+    assert_ne!(
+        doc.get(copies[0]).unwrap().name(),
+        doc.get(a).unwrap().name()
+    );
+    let res = Resolved::rebuild(&doc);
+    let (from, to) = (
+        res.world_bounds(a).unwrap(),
+        res.world_bounds(copies[0]).unwrap(),
+    );
+    assert_eq!((to.x0 - from.x0, to.y0 - from.y0), (30.0, -5.0));
+}
+
 /// A script's later steps name an earlier step's node by its label, and `@page` is
 /// the page; a refusal names its step, counted from 1, and keeps the steps before it.
 ///

@@ -123,7 +123,7 @@ struct Gpu {
     pinned: bool,
     /// The eyedropper's copy of the pixels round its hotspot, in flight.
     readback: Option<Readback>,
-    /// What the colour-vision simulation shows: `target` seen through it, so the
+    /// What the vision simulation shows: `target` seen through it, so the
     /// texture panning and patching keep and the eyedropper reads stays true.
     seen: Option<CanvasTexture>,
     /// The simulation's compute pass, built on first use.
@@ -552,16 +552,16 @@ impl CanvasRenderer {
     }
 
     /// The texture to show for what [`Self::render`] just drew: itself, or with
-    /// `vision` a copy seen through its deficiency inside its device region
-    /// (`OndinApp::vision_region`). Run every frame the mode is on: one pass over
-    /// the canvas, and `target` itself is never touched. Headless, the drawn
+    /// `vision` a copy seen through its effect inside its device region, at its
+    /// device px to the design px (`OndinApp::vision_region`). Run every frame the
+    /// mode is on, and `target` itself is never touched. Headless, the drawn
     /// texture as it is.
     pub(crate) fn seen_through(
         &mut self,
         drawn: egui::TextureId,
-        vision: Option<(ondin_render::vision::Deficiency, [u32; 4])>,
+        vision: Option<crate::vision::Seen>,
     ) -> egui::TextureId {
-        let (Some((deficiency, region)), Some(gpu)) = (vision, self.gpu.as_mut()) else {
+        let (Some(seen_as), Some(gpu)) = (vision, self.gpu.as_mut()) else {
             return drawn;
         };
         let Some(size) = gpu.target.as_ref().map(|t| t.size) else {
@@ -586,8 +586,9 @@ impl CanvasRenderer {
             &target.view,
             &seen.view,
             size,
-            deficiency,
-            region,
+            &seen_as.effect,
+            seen_as.scale,
+            seen_as.region,
         );
         seen.id
     }

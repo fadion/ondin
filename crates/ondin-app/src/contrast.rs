@@ -216,7 +216,7 @@ impl crate::prefs::ContrastPrefs {
 
 impl OndinApp {
     /// *Tools ▸ Check contrast*: start the mode over the selection, or the page when
-    /// nothing is selected, ending a colour-vision simulation; or end it.
+    /// nothing is selected, ending a vision simulation; or end it.
     pub(crate) fn toggle_contrast(&mut self) {
         if self.contrast.is_some() {
             self.end_contrast();

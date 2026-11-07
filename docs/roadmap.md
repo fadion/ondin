@@ -8,11 +8,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Editor additions
 
-- **Simulate vision** replaces *Simulate colour blindness*: the bar's chip picks one condition —
-  the four colour deficiencies (`vision.rs`), blurred vision, loss of contrast, ghosting and
-  yellowing — with a severity slider for each. Contrast loss and yellowing are matrices like the
-  deficiencies; blur and ghosting sample neighbours, so `VisionPass` gains a second kind of pass.
-  The deficiencies are Machado at full severity today; the slider needs their interpolated matrices.
 - **Four more image adjustments** — duotone, grayscale, invert and hue rotate, beside the seven in
   `Adjustment::ALL`. Each fits `AdjustPipeline`'s matrix and tone table, so all three writers draw
   it, SVG through `feColorMatrix`/`feComponentTransfer`.

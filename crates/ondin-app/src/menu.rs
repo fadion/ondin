@@ -441,8 +441,8 @@ pub enum Item {
     Present,
     /// `Action::CheckContrast`: the contrast check mode, on or off.
     CheckContrast,
-    /// `Action::SimulateColourBlindness`: the colour-vision simulation, on or off.
-    SimulateColourBlindness,
+    /// `Action::SimulateVision`: the vision simulation, on or off.
+    SimulateVision,
     Tool(Tool),
     PlaceImage,
     ZoomIn,
@@ -1266,9 +1266,7 @@ impl Item {
             ),
             Item::Present => s("Present mode", icon::PLAY, None, Group::View),
             Item::CheckContrast => s("Check contrast", icon::CIRCLE_HALF, None, Group::View),
-            Item::SimulateColourBlindness => {
-                s("Simulate colour blindness", icon::EYE, None, Group::View)
-            }
+            Item::SimulateVision => s("Simulate vision", icon::EYE, None, Group::View),
         }
     }
 
@@ -1331,11 +1329,18 @@ impl Item {
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
             Item::CheckContrast => &["accessibility", "a11y", "wcag", "apca", "legibility"],
-            Item::SimulateColourBlindness => &[
+            // The old name's words stay, so muscle memory still finds it.
+            Item::SimulateVision => &[
                 "accessibility",
                 "a11y",
+                "colour blind",
                 "color blind",
+                "colour blindness",
                 "colour vision",
+                "blur",
+                "contrast loss",
+                "ghosting",
+                "yellowing",
                 "daltonism",
                 "protanopia",
                 "deuteranopia",
@@ -1449,7 +1454,7 @@ impl Item {
             Item::Cheatsheet => Action::Cheatsheet,
             Item::Present => Action::Present,
             Item::CheckContrast => Action::CheckContrast,
-            Item::SimulateColourBlindness => Action::SimulateColourBlindness,
+            Item::SimulateVision => Action::SimulateVision,
             Item::ViewSwitch(sw) => Action::ToggleView(sw),
             Item::ZoomFit => Action::ZoomFit,
             Item::ZoomSelection => Action::ZoomSelection,
@@ -3610,7 +3615,7 @@ impl OndinApp {
             | Item::ExportEditable(_)
             | Item::Present
             | Item::CheckContrast
-            | Item::SimulateColourBlindness
+            | Item::SimulateVision
             | Item::Tool(_)
             | Item::PlaceImage
             | Item::ZoomIn

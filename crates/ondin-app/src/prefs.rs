@@ -129,6 +129,66 @@ impl Default for ContrastPrefs {
     }
 }
 
+/// The vision simulation's condition as last chosen and each condition's own
+/// severity (`crate::vision`). The mode itself is view state and never stored.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "VisionStored")]
+pub struct VisionPrefs {
+    /// By `Condition::key`; anything unknown reads as the default condition.
+    pub condition: String,
+    /// The severity last set, by `Condition::key`; a condition not in it opens
+    /// at `Condition::default_severity`.
+    pub severity: std::collections::BTreeMap<String, f32>,
+}
+
+/// [`VisionPrefs`] as a file may hold it: a lone key from before the sight
+/// conditions, which reads as that deficiency at 100%, or the whole record.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum VisionStored {
+    Key(String),
+    Full {
+        #[serde(default)]
+        condition: String,
+        #[serde(default)]
+        severity: std::collections::BTreeMap<String, f32>,
+    },
+}
+
+impl From<VisionStored> for VisionPrefs {
+    fn from(stored: VisionStored) -> Self {
+        match stored {
+            VisionStored::Key(condition) => VisionPrefs {
+                severity: [(condition.clone(), 1.0)].into(),
+                condition,
+            },
+            VisionStored::Full {
+                condition,
+                severity,
+            } => VisionPrefs {
+                condition,
+                severity,
+            },
+        }
+    }
+}
+
+impl VisionPrefs {
+    /// The condition last chosen.
+    pub fn condition(&self) -> ondin_render::vision::Condition {
+        ondin_render::vision::Condition::from_key(&self.condition).unwrap_or_default()
+    }
+
+    /// `c`'s severity as last set, held to `MIN_SEVERITY..=1`.
+    pub fn severity(&self, c: ondin_render::vision::Condition) -> f32 {
+        self.severity
+            .get(c.key())
+            .copied()
+            .unwrap_or_else(|| c.default_severity())
+            .clamp(ondin_render::vision::MIN_SEVERITY, 1.0)
+    }
+}
+
 /// What the batch rename box last renamed with (`crate::batch_rename`), for the
 /// next time it opens.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -426,9 +486,8 @@ pub struct Prefs {
     pub recent_colours: Vec<[f32; 3]>,
     /// The contrast check's level and switches.
     pub contrast: ContrastPrefs,
-    /// The colour-vision simulation's deficiency as last chosen
-    /// (`crate::vision`), by `Deficiency::key`; the mode itself is never stored.
-    pub vision: String,
+    /// The vision simulation's condition and severities.
+    pub vision: VisionPrefs,
     /// The batch rename box's last Find, template and numbering.
     pub batch_rename: BatchRenamePrefs,
     /// Colour review's threshold (`crate::colour_review`), kept across documents:
@@ -490,7 +549,7 @@ impl Default for Prefs {
             colour_format: "hex".into(),
             recent_colours: Vec::new(),
             contrast: ContrastPrefs::default(),
-            vision: ondin_render::vision::Deficiency::default().key().into(),
+            vision: VisionPrefs::default(),
             batch_rename: BatchRenamePrefs::default(),
             colour_review: Default::default(),
         }
@@ -627,6 +686,33 @@ fn path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file from before the sight conditions, which stored a lone deficiency
+    /// key, opens on that deficiency at 100%; the whole record round-trips; and
+    /// a condition never set opens at its own default.
+    /// flip: `VisionStored` without its `Key` arm → fails at the lone key.
+    #[test]
+    fn a_stored_deficiency_key_still_reads() {
+        use ondin_render::vision::Condition;
+        let old: Prefs = serde_json::from_str(r#"{"vision":"tritanopia"}"#).expect("the lone key");
+        assert_eq!(old.vision.condition(), Condition::Tritanopia);
+        assert_eq!(old.vision.severity(Condition::Tritanopia), 1.0);
+        assert_eq!(
+            old.vision.severity(Condition::Blur),
+            0.5,
+            "a sight condition at half"
+        );
+        let mut new = old.clone();
+        new.vision.condition = Condition::Ghosting.key().into();
+        new.vision
+            .severity
+            .insert(Condition::Ghosting.key().into(), 0.3);
+        let back: Prefs =
+            serde_json::from_str(&serde_json::to_string(&new).unwrap()).expect("round trip");
+        assert_eq!(back.vision, new.vision);
+        let none: Prefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(none.vision.condition(), Condition::Deuteranopia);
+    }
 
     /// A file from before the view switches were kept opens with all of them on, and
     /// one that names a single switch keeps the rest on.

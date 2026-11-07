@@ -4665,7 +4665,7 @@ pub fn segment_mixed(painter: &egui::Painter, rect: egui::Rect) {
 /// `panels::picker`'s track, travel is clamped so the knob stays on the rail.
 pub const SLIDER_H: f32 = 11.0;
 /// The rail's thickness: a hairline track with a bead riding on it.
-const SLIDER_RAIL_H: f32 = 3.0;
+pub(crate) const SLIDER_RAIL_H: f32 = 3.0;
 
 /// A value between two bounds: a hairline rail, filled in accent to the knob.
 /// Hand-painted: this rail and knob are out of reach of `Spacing` and

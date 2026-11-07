@@ -1,7 +1,7 @@
 # Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap/Tools menus and Settings button,
+pixel grid, the minimap, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
 the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
@@ -48,7 +48,7 @@ marks the original that stays. Toggles live with the key.
   below it lightens, mixing toward white in linear light by `(Y(L*+10) − Y)/(1 − Y)`. A fixed ink
   vanishes over a mid-tone fill; this one reads over every fill. `ondin_render::grid_ink`
   holds the rule (`adapt_rgba8`) and its compute pass, which `CanvasRenderer::shade_grid` runs
-  every frame the grid shows, after the colour-blind simulation (the grid is chrome over what is
+  every frame the grid shows, after the vision simulation (the grid is chrome over what is
   seen), into a third texture, `gridded`; `target` and `seen` are never written, so pans, patches
   and the eyedropper read true pixels. The egui overlays paint over that texture, so the grid
   still sits under every other overlay.
@@ -110,7 +110,7 @@ It measures the shown text layers, and with *Non-text* small shapes, against wha
 them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
 document opens, it is never saved or exported, and present mode's own branch never draws it.
-Starting it ends the colour-blind simulation, and starting that ends it, so the two bars never
+Starting it ends the vision simulation, and starting that ends it, so the two bars never
 stack.
 
 - **Scope: one frame at most** (`contrast_target`), since measuring renders every layer's box
@@ -190,16 +190,17 @@ stack.
   strokes the measured ink came from are replaced or bound: a white box with a failing border is
   fixed on its border.
 
-## The colour-blind simulation (`vision.rs`)
+## The vision simulation (`vision.rs`)
 
-*Tools ▸ Simulate colour blindness* (`Action::SimulateColourBlindness`,
-`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the Tools menu's row after
-*Check contrast*, ticked while on, and a palette row reading *Stop simulating colour blindness*
-while on. One frame of the canvas is shown as someone with a colour-vision deficiency sees it
+*Tools ▸ Simulate vision* (`Action::SimulateVision`, `menu::Item::SimulateVision`, `Group::View`,
+no chord): the Tools menu's row after *Check contrast*, ticked while on, and a palette row reading
+*Stop simulating vision* while on. Its search words keep the old name's (*colour blind*, *color
+blind*, *colour blindness*) so muscle memory still finds it. One frame of the canvas is shown as
+someone sees it with a condition of colour vision or of sight, at a severity
 (`ondin_render::vision`, `render.md`). `OndinApp::vision` is view state, as the contrast check is:
 off when a document opens (`reset_transient_state`), never saved or exported, never drawn in
 present mode. It is not a switch inside the contrast check: WCAG contrast is luminance, which the
-simulations barely move.
+colour deficiencies barely move.
 
 - **Scope: one frame** (`vision_target`): the top-level frame of the first selected layer, else
   `OndinApp::frame_in_view`, the frame-in-view rule `contrast_target` uses; a page with no frame
@@ -207,17 +208,33 @@ simulations barely move.
   re-targets, and switching pages, or the frame going away (deleted or undone), re-targets to the
   frame in view.
 - **The bar**, in the contrast bar's style and place (`contrast::{bar_frame, separator,
-  scope_chip, BAR_H}`): eye glyph, the frame's scope chip (named through `private::layer`) or
-  *Whole canvas*, the deficiency head, then × to end the mode.
-- **The deficiency menu**, from the head: Protanopia, Deuteranopia, Tritanopia, Achromatopsia,
-  each as *Label · gloss* (*Deuteranopia · Green-blind*). The choice is a preference,
-  `prefs.vision` (`Deficiency::key`; deuteranopia by default), written on the spot. Escape or a
-  click away closes the menu, Escape before it reaches the canvas (`vision_owns_escape`).
-- **Drawing** (`CanvasRenderer::seen_through`). Every frame the mode is on, the pass writes the
-  canvas texture (`target`) into a second texture, `seen`, simulated inside the frame's box
-  (`vision_region`: its world bounds mapped to texels through the camera and size that drew
-  `target`, rounded out and clamped to the texture) and copied outside it, and egui is handed
-  `seen`. Under pixel preview that is the 1x texture, simulated before it is enlarged. `target` is never written, so pans
+  scope_chip, cell, BAR_H}`): eye glyph, the frame's scope chip (named through `private::layer`) or
+  *Whole canvas*, a hairline, the condition head (`ui::menu_head_min`, its lead as wide as the
+  widest condition label), the severity slider (`ui::slider`, `SLIDER_W` 88pt, *How strong the
+  simulation is*), the percentage in a cell as wide as *100%* (`contrast::cell`), a hairline, then
+  × (*Stop simulating vision*). The fixed head and cell keep the bar one width whichever condition
+  it names, so nothing moves under the pointer
+  (`the_slider_sets_the_shown_condition_s_severity`).
+- **The condition menu**, from the head, 240pt (`MENU_W`): Protanopia, Deuteranopia, Tritanopia,
+  Achromatopsia, a hairline, then Blurred vision, Contrast loss, Ghosting, Yellowing, each a
+  ticked row *Label · gloss* (*Blurred vision · Out of focus*). A pick switches at once and closes
+  the menu. Escape or a click away closes it, Escape before it reaches the canvas
+  (`vision_owns_escape`).
+- **Preferences** (`prefs.vision`, `VisionPrefs`): the condition last chosen (`Condition::key`;
+  deuteranopia by default) and each condition's own severity, so the slider shows the picked
+  condition's. A condition never set opens at `Condition::default_severity`: 100% for a
+  deficiency (the dichromacy), 50% for a loss of sight. The slider writes the shown condition's
+  severity live and saves when a drag ends or on a click or key, not on every drag frame. A file
+  holding a lone deficiency key reads as that deficiency at 100% (`VisionStored`, untagged;
+  `a_stored_deficiency_key_still_reads`).
+- **Drawing** (`CanvasRenderer::seen_through`, given `vision::Seen`). Every frame the mode is on,
+  the pass writes the canvas texture (`target`) into a second texture, `seen`, through the
+  condition's effect inside the frame's box (`vision_region`: its world bounds mapped to texels
+  through the camera and size that drew `target`, rounded out and clamped to the texture) and
+  copied outside it, and egui is handed `seen`. The scale is `camera.zoom`, device px to the
+  design px, so a blur or ghost reads the same at any zoom; a blur or ghost reads neighbours only
+  inside the region, so nothing outside bleeds in. Under pixel preview that is the 1x texture,
+  simulated before it is enlarged. `target` is never written, so pans
   and patches keep working from true pixels and the eyedropper reads true colours. The edit
   chrome is painted after the canvas texture and is never simulated. The region is the frame's
   axis-aligned box, so a rounded or turned frame's corners take in a little of what lies outside
@@ -274,7 +291,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - **Tools** (`OndinApp::tools_menu`, rows from `ToolsRow::ALL`) holds what works across the
   document. Verbs on the selection stay in the context menu, document-level rows in the Document
   menu, view modes in View, inserting in the insert picker.
-  - the checks, which change nothing: *Check contrast* and *Simulate colour blindness*, ticked while
+  - the checks, which change nothing: *Check contrast* and *Simulate vision*, ticked while
     on and never remembered, then *Colour review…*, never ticked, opening its card;
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
     `Action::FindText { replace: false }`) and *Batch rename…* (`Ctrl+Shift+R`; dimmed with
@@ -364,7 +381,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
-  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, *Colour review…*, tools, place image, zoom, align,
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate vision*, *Colour review…*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -647,7 +664,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document with no modes, a variable valued
   the target's colour in every mode, and binds every raw member's users, the target's included;
   with every use on a locked layer it writes nothing, the variable included.
-- **Doors and place.** *Tools ▸ Colour review…*, after *Simulate colour blindness* and never ticked,
+- **Doors and place.** *Tools ▸ Colour review…*, after *Simulate vision* and never ticked,
   and the palette (`Item::ColourReview`, unbound). It hangs at the palette's place
   (`ui::canvas_popup_area`), 420 wide, on the settings card's ground (`settings::card_frame`), but is
   no modal: nothing blocks the canvas and a click there leaves it open. It is at most
@@ -823,7 +840,7 @@ the first segment of a component's. It hides names, not content.
   `binding::kit_label`, `kit_heading`).
 - **What is masked:** layer, frame, component, page, document, project and version names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
-  colour-blind simulation's bar, the minimap, find and replace's list, a compare's bar, card and mark tags, the version card's summaries and opened rows (trails dropped, and what belongs to no page by kind alone, so variable and style names hide there too), present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
+  vision simulation's bar, the minimap, find and replace's list, a compare's bar, card and mark tags, the version card's summaries and opened rows (trails dropped, and what belongs to no page by kind alone, so variable and style names hide there too), present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. A main's or set's description and documentation link
   are masked with the names: the description field is disabled and empty (*Description hidden in
   private mode*), the link field reads *Link hidden in private mode*, an instance shows no description
@@ -952,7 +969,7 @@ runs (`pages` names each frame's page, index for index).
   selected, the swap property's picker open, the palette empty and typed, find and replace over
   every page, a layer's
   menu with its *Move to page* list open, the variables browser, the Export card, the contrast check,
-  the colour-blind simulation, version history, the recovery and close cards and present mode;
+  the vision simulation, version history, the recovery and close cards and present mode;
   `no_kit_surface_draws_a_name_in_private_mode` an instance's kit card, the insert picker, *Kits
   used*, *Make local*, the kit update popover (shut: its components are a count until a row opens)
   and *Publish*; `the_library_draws_no_name_in_private_mode` the library with its delete, move and

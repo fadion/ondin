@@ -30,7 +30,7 @@ matched by id, so a renamed or moved layer is one change.
   the compare buttons lit (`OndinApp::versions_compare`). A document unchanged since the version
   opens no compare and says *Nothing has changed since this version* (two the same: *These
   versions are the same*). Opening leaves a compare already open, closes the find box, Colour
-  review and a tokens review, ends a contrast check and a colour-vision simulation, clears any
+  review and a tokens review, ends a contrast check and a vision simulation, clears any
   gesture preview, and takes the selection aside; leaving gives it back when the compare ends on
   the page it opened on.
 - **Read-only, in three layers**: the session refuses behind the doors the app closes itself.

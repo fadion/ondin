@@ -1,36 +1,53 @@
-//! Colour-vision simulation mode: one frame of the canvas shown as someone with
-//! a colour-vision deficiency sees it (`ondin_render::vision`), the rest of the
-//! canvas and every piece of edit chrome as they are.
+//! Vision simulation mode: one frame of the canvas shown as someone sees it
+//! with a condition of colour vision or of sight, at a severity
+//! (`ondin_render::vision`), the rest of the canvas and every piece of edit
+//! chrome as they are.
 //!
-//! *Tools ▸ Simulate colour blindness* or the palette, no chord. View state, as
-//! the contrast check is: off when a document opens, never saved, never
-//! exported, never drawn in present mode. The two modes do not run together,
-//! so their bars never stack: starting one ends the other. The deficiency last
-//! chosen is a preference (`prefs.vision`).
+//! *Tools ▸ Simulate vision* or the palette, no chord. View state, as the
+//! contrast check is: off when a document opens, never saved, never exported,
+//! never drawn in present mode. The two modes do not run together, so their
+//! bars never stack: starting one ends the other. The condition last chosen and
+//! each condition's severity are preferences (`prefs.vision`).
 
 use ondin_core::NodeId;
 use ondin_core::kurbo::Rect;
-use ondin_render::vision::Deficiency;
+use ondin_render::vision::{Condition, Effect, MIN_SEVERITY};
 
 use crate::app::OndinApp;
-use crate::contrast::{BAR_H, bar_frame, scope_chip, separator, top_level};
+use crate::contrast::{BAR_H, bar_frame, cell, scope_chip, separator, top_level};
 use crate::theme::{self, color, icon};
+
+/// The severity slider's width in the bar.
+const SLIDER_W: f32 = 88.0;
+/// The condition menu's width: room for *Blurred vision · Out of focus*.
+const MENU_W: f32 = 240.0;
 
 /// The mode while it is on (`OndinApp::vision`).
 pub(crate) struct Vision {
     /// The page it started on; another page takes the frame in view there.
     page: NodeId,
-    /// The frame recoloured, or `None` for the whole canvas on a page with none.
+    /// The frame simulated, or `None` for the whole canvas on a page with none.
     frame: Option<NodeId>,
     menu: bool,
-    /// The deficiency head's bottom left, which the menu hangs from.
+    /// The condition head's bottom left, which the menu hangs from.
     menu_at: egui::Pos2,
     /// Set on the frame the head is clicked, whose click is not a click away.
     menu_opening: bool,
 }
 
+/// What the canvas is seen through this frame (`OndinApp::vision_region`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Seen {
+    pub effect: Effect,
+    /// Device px to the design px: a blur's or a ghost's lengths scale with the
+    /// zoom, so they read the same at any zoom.
+    pub scale: f32,
+    /// The texels covered, `x0, y0, x1, y1`, the far edges exclusive.
+    pub region: [u32; 4],
+}
+
 impl OndinApp {
-    /// *Tools ▸ Simulate colour blindness*: start the mode on the selection's
+    /// *Tools ▸ Simulate vision*: start the mode on the selection's
     /// frame, or the frame in view, ending the contrast check; or end it.
     pub(crate) fn toggle_vision(&mut self) {
         if self.vision.is_some() {
@@ -65,15 +82,15 @@ impl OndinApp {
             .or_else(|| self.frame_in_view())
     }
 
-    /// The deficiency the canvas is seen through and the texels it covers
-    /// (`x0, y0, x1, y1`) of the texture `camera` draws at `px`, or `None` while
-    /// the mode is off. Runs before the canvas; a page switch, or its frame going
-    /// away, moves the mode to the frame in view.
+    /// What the canvas is seen through, at the scale and over the texels of the
+    /// texture `camera` draws at `px`, or `None` while the mode is off. Runs
+    /// before the canvas; a page switch, or its frame going away, moves the mode
+    /// to the frame in view.
     pub(crate) fn vision_region(
         &mut self,
         camera: &crate::view::Camera,
         px: (u32, u32),
-    ) -> Option<(Deficiency, [u32; 4])> {
+    ) -> Option<Seen> {
         let page = self.session.page;
         let doc = &self.session.doc;
         // A frame deleted or undone away is retargeted as a page switch is.
@@ -86,19 +103,26 @@ impl OndinApp {
             }
         }
         let v = self.vision.as_ref()?;
-        let deficiency = Deficiency::from_key(&self.prefs.vision);
+        let condition = self.prefs.vision.condition();
+        let effect = condition.effect(self.prefs.vision.severity(condition));
+        // `zoom` is device px to the world unit, which is the design px.
+        let scale = camera.zoom as f32;
         let (w, h) = px;
-        let all = [0, 0, w, h];
-        let Some(frame) = v.frame else {
-            return Some((deficiency, all));
+        let region = match v.frame {
+            None => [0, 0, w, h],
+            Some(frame) => {
+                let vp = camera.viewport(px);
+                self.session
+                    .resolved
+                    .world_bounds(frame)
+                    .map_or([0, 0, 0, 0], |b| device_region(b, vp.view, (w, h)))
+            }
         };
-        let vp = camera.viewport(px);
-        let region = self
-            .session
-            .resolved
-            .world_bounds(frame)
-            .map_or([0, 0, 0, 0], |b| device_region(b, vp.view, (w, h)));
-        Some((deficiency, region))
+        Some(Seen {
+            effect,
+            scale,
+            region,
+        })
     }
 
     /// The bar and its menu: floating chrome over the canvas, drawn after it.
@@ -115,7 +139,8 @@ impl OndinApp {
 
     fn vision_bar(&mut self, ctx: &egui::Context) {
         let Some(v) = &self.vision else { return };
-        let deficiency = Deficiency::from_key(&self.prefs.vision);
+        let condition = self.prefs.vision.condition();
+        let mut severity = f64::from(self.prefs.vision.severity(condition));
         // Named as drawn now, so private mode turned on during it masks it.
         let name = v
             .frame
@@ -159,11 +184,19 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing.x = 10.0 - crate::ui::HEAD_LEAD;
                         separator(ui);
                         ui.spacing_mut().item_spacing.x = 10.0 - crate::ui::HEAD_PAD;
-                        let head = crate::ui::menu_head(
+                        let pt = crate::ui::Scale::Toolbar.text_pt();
+                        // As wide as the longest label, so the slider never moves
+                        // under the pointer when the condition changes.
+                        let widest = Condition::ALL
+                            .iter()
+                            .map(|c| text_w(ui, c.label(), pt))
+                            .fold(0.0, f32::max);
+                        let head = crate::ui::menu_head_min(
                             ui,
-                            egui::RichText::new(deficiency.label())
-                                .size(crate::ui::Scale::Toolbar.text_pt())
+                            egui::RichText::new(condition.label())
+                                .size(pt)
                                 .color(theme::text::muted()),
+                            widest.ceil(),
                             4.0,
                             open,
                         );
@@ -171,9 +204,33 @@ impl OndinApp {
                             act = Some(Act::Menu(head.rect.left_bottom()));
                         }
                         ui.spacing_mut().item_spacing.x = 10.0;
+                        let slider = crate::ui::slider(
+                            ui,
+                            SLIDER_W,
+                            &mut severity,
+                            f64::from(MIN_SEVERITY)..=1.0,
+                        )
+                        .on_hover_text("How strong the simulation is");
+                        if slider.changed() {
+                            act = Some(Act::Severity {
+                                save: !slider.dragged(),
+                            });
+                        } else if slider.drag_stopped() {
+                            act = Some(Act::Severity { save: true });
+                        }
+                        // A cell as wide as the widest reading, so the × holds still.
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        cell(ui, text_w(ui, "100%", pt).ceil() + 2.0, |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{:.0}%", severity * 100.0))
+                                    .size(pt)
+                                    .color(theme::text::dim()),
+                            );
+                        });
+                        ui.spacing_mut().item_spacing.x = 10.0;
                         separator(ui);
                         if crate::ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
-                            .on_hover_text("Stop simulating colour blindness")
+                            .on_hover_text("Stop simulating vision")
                             .clicked()
                         {
                             act = Some(Act::Close);
@@ -184,6 +241,17 @@ impl OndinApp {
         match act {
             None => {}
             Some(Act::Close) => self.vision = None,
+            Some(Act::Severity { save }) => {
+                self.prefs
+                    .vision
+                    .severity
+                    .insert(condition.key().into(), severity as f32);
+                // Written when a drag ends, not on every frame of it.
+                if save {
+                    self.prefs.save();
+                }
+                ctx.request_repaint();
+            }
             Some(Act::Menu(at)) => {
                 if let Some(v) = &mut self.vision {
                     v.menu = !v.menu;
@@ -205,26 +273,30 @@ impl OndinApp {
             return;
         };
         let at = head + egui::vec2(0.0, crate::ui::MENU_GAP);
-        let current = Deficiency::from_key(&self.prefs.vision);
+        let current = self.prefs.vision.condition();
         let mut chosen = None;
         let menu = egui::Area::new(egui::Id::new("vision-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(ctx, |ui| {
                 crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(220.0, crate::ui::MENU_PAD));
+                    ui.set_width(crate::ui::menu_inner_w(MENU_W, crate::ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    for d in Deficiency::ALL {
-                        let label = format!("{}  ·  {}", d.label(), d.gloss());
-                        if crate::ui::menu_check(ui, &label, d == current, crate::ui::MENU_ROW_H) {
-                            chosen = Some(d);
+                    for c in Condition::ALL {
+                        // A hairline parts colour vision from sight.
+                        if c == Condition::Blur {
+                            crate::ui::menu_sep(ui);
+                        }
+                        let label = format!("{}  ·  {}", c.label(), c.gloss());
+                        if crate::ui::menu_check(ui, &label, c == current, crate::ui::MENU_ROW_H) {
+                            chosen = Some(c);
                         }
                     }
                 });
             })
             .response;
-        if let Some(d) = chosen {
-            self.prefs.vision = d.key().into();
+        if let Some(c) = chosen {
+            self.prefs.vision.condition = c.key().into();
             self.prefs.save();
         }
         let away = ctx.input(|i| i.pointer.any_click()) && !menu.contains_pointer();
@@ -237,7 +309,7 @@ impl OndinApp {
         }
     }
 
-    /// Whether the deficiency menu is open, which an Escape closes before it
+    /// Whether the condition menu is open, which an Escape closes before it
     /// reaches the canvas.
     pub(crate) fn vision_owns_escape(&self) -> bool {
         self.vision.as_ref().is_some_and(|v| v.menu)
@@ -255,6 +327,22 @@ enum Act {
     Close,
     Menu(egui::Pos2),
     Retarget,
+    /// The slider moved; `save` unless a drag is still under way.
+    Severity {
+        save: bool,
+    },
+}
+
+/// The width `text` lays out at in the bar's type.
+fn text_w(ui: &egui::Ui, text: &str, pt: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(pt),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
 }
 
 /// The device pixels `world`, a box on the page, covers on a canvas of `size`
@@ -321,7 +409,7 @@ mod tests {
     }
 
     /// `vision_region` for the canvas as the session's camera draws it.
-    fn region(app: &mut OndinApp) -> Option<(Deficiency, [u32; 4])> {
+    fn region(app: &mut OndinApp) -> Option<Seen> {
         let (camera, px) = (app.session.camera, app.canvas_px);
         app.vision_region(&camera, px)
     }
@@ -356,17 +444,24 @@ mod tests {
     }
 
     /// The region is the frame's device pixels; on a page with no frame it is
-    /// the whole canvas; and the deficiency is the one last chosen.
+    /// the whole canvas; the condition is the one last chosen at its own
+    /// severity; and the scale is the zoom's.
     #[test]
     fn the_region_is_the_frame_or_the_whole_canvas() {
         let ctx = egui::Context::default();
         let (mut app, near, _, _) = fixture(&ctx);
-        app.prefs.vision = Deficiency::Tritanopia.key().into();
+        app.prefs.vision.condition = Condition::Blur.key().into();
+        app.prefs
+            .vision
+            .severity
+            .insert(Condition::Blur.key().into(), 0.25);
         app.zoom_to(Some(Rect::new(-50.0, -50.0, 350.0, 250.0)));
         app.toggle_vision();
         assert_eq!(app.vision_frame(), Some(Some(near)));
-        let (d, [x0, y0, x1, y1]) = region(&mut app).expect("on");
-        assert_eq!(d, Deficiency::Tritanopia);
+        let seen = region(&mut app).expect("on");
+        assert_eq!(seen.effect, Condition::Blur.effect(0.25));
+        assert_eq!(seen.scale, app.session.camera.zoom as f32);
+        let [x0, y0, x1, y1] = seen.region;
         assert!(
             x0 > 0 && y0 > 0 && x1 < 800 && y1 < 600,
             "inside the canvas"
@@ -375,7 +470,7 @@ mod tests {
         if let Some(v) = &mut app.vision {
             v.frame = None;
         }
-        assert_eq!(region(&mut app).map(|r| r.1), Some([0, 0, 800, 600]));
+        assert_eq!(region(&mut app).map(|s| s.region), Some([0, 0, 800, 600]));
     }
 
     /// Deleting the frame shown moves the simulation to the frame in view,
@@ -393,7 +488,7 @@ mod tests {
             app.session
                 .commit(Transaction(vec![Operation::DeleteNode { id: near }]))
         );
-        let (_, [x0, _, x1, _]) = region(&mut app).expect("on");
+        let [x0, _, x1, _] = region(&mut app).expect("on").region;
         assert_eq!(app.vision_frame(), Some(Some(far)), "retargeted");
         assert!(x1 >= x0);
     }
@@ -417,7 +512,7 @@ mod tests {
         );
     }
 
-    /// The deficiency menu hangs `MENU_GAP` under its head, as every dropdown
+    /// The condition menu hangs `MENU_GAP` under its head, as every dropdown
     /// hangs under its control.
     ///
     /// flip: `vision_menu` placing it 6 lower again → fails at the menu's top.
@@ -429,7 +524,7 @@ mod tests {
         app.canvas_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.toggle_vision();
         let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
-            let _ = ctx.run_ui(
+            ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -439,16 +534,22 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| app.vision_chrome(ui.ctx()),
-            );
+            )
+            .shapes
         };
         run(&mut app, Vec::new());
-        run(&mut app, Vec::new());
-        let bar = ctx
-            .memory(|m| m.area_rect(egui::Id::new("vision-bar")))
-            .expect("the bar is drawn");
-        // The head sits right of the bar's centre: the eye, the scope and a
-        // separator come before it.
-        let p = egui::pos2(bar.center().x + 40.0, bar.center().y);
+        let shapes = run(&mut app, Vec::new());
+        // The head, found by the condition it names.
+        let label = app.prefs.vision.condition().label();
+        let p = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("the head's label");
         let press = |pressed| egui::Event::PointerButton {
             pos: p,
             button: egui::PointerButton::Primary,
@@ -472,6 +573,89 @@ mod tests {
         assert!(
             (menu.min - want).length() <= 0.5,
             "{menu:?} against {want:?}"
+        );
+    }
+
+    /// The bar is as wide whichever condition it names, and its slider sets the
+    /// shown condition's own severity, leaving the others'.
+    ///
+    /// flip: the head drawn with `menu_head` (no `min_lead`) → fails at "as wide".
+    #[test]
+    fn the_slider_sets_the_shown_condition_s_severity() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _n, _f, _d) = fixture(&ctx);
+        app.canvas_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        app.toggle_vision();
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.vision_chrome(ui.ctx()),
+            )
+            .shapes
+        };
+        let bar_w = |app: &mut OndinApp, c: Condition| {
+            app.prefs.vision.condition = c.key().into();
+            run(app, Vec::new());
+            run(app, Vec::new());
+            ctx.memory(|m| m.area_rect(egui::Id::new("vision-bar")))
+                .expect("the bar")
+                .width()
+        };
+        let widths: Vec<f32> = [
+            Condition::Tritanopia,
+            Condition::Achromatopsia,
+            Condition::Blur,
+            Condition::Ghosting,
+        ]
+        .into_iter()
+        .map(|c| bar_w(&mut app, c))
+        .collect();
+        assert!(
+            widths.iter().all(|w| (w - widths[0]).abs() < 0.5),
+            "as wide: {widths:?}"
+        );
+
+        // Blur at its default half; the cell reads it, and the slider ends 6pt
+        // before the cell.
+        app.prefs.vision.condition = Condition::Blur.key().into();
+        run(&mut app, Vec::new());
+        let shapes = run(&mut app, Vec::new());
+        let cell = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "50%" => Some(t.pos),
+                _ => None,
+            })
+            .expect("the severity reads 50%");
+        let p = egui::pos2(cell.x - 6.0 - SLIDER_W + 1.0, cell.y + 6.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(&mut app, vec![egui::Event::PointerMoved(p)]);
+        run(&mut app, vec![press(true)]);
+        run(&mut app, vec![press(false)]);
+        let blur = app.prefs.vision.severity(Condition::Blur);
+        assert!(blur < 0.2, "pressed at its start: {blur}");
+        assert_eq!(
+            app.prefs.vision.severity(Condition::Ghosting),
+            0.5,
+            "others kept"
+        );
+        assert_eq!(
+            app.prefs.vision.severity(Condition::Tritanopia),
+            1.0,
+            "others kept"
         );
     }
 }

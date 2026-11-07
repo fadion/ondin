@@ -1025,7 +1025,7 @@ pub struct OndinApp {
     /// *Tools ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
     /// document opens with it off.
     pub(crate) contrast: Option<crate::contrast::Contrast>,
-    /// *Tools ▸ Simulate colour blindness*, while it is on (`vision.rs`). View
+    /// *Tools ▸ Simulate vision*, while it is on (`vision.rs`). View
     /// state, as the contrast check is.
     pub(crate) vision: Option<crate::vision::Vision>,
     /// The batch rename box, while it is open (`batch_rename.rs`).
@@ -1118,7 +1118,7 @@ impl ToolsRow {
         use crate::menu::Item;
         match self {
             ToolsRow::CheckContrast => Item::CheckContrast.spec().label,
-            ToolsRow::SimulateVision => Item::SimulateColourBlindness.spec().label,
+            ToolsRow::SimulateVision => Item::SimulateVision.spec().label,
             ToolsRow::ColourReview => Item::ColourReview.spec().label,
             ToolsRow::FindReplace => "Find and replace…",
             ToolsRow::BatchRename => Item::BatchRename.spec().label,
@@ -2429,7 +2429,7 @@ impl OndinApp {
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::Present => self.start_presenting(ctx),
             Action::CheckContrast => self.toggle_contrast(),
-            Action::SimulateColourBlindness => self.toggle_vision(),
+            Action::SimulateVision => self.toggle_vision(),
             Action::ExportCode(target) => self.export_code(target),
             Action::ExportEditable(format) => self.export_editable(format),
             Action::PlaceImage => self.place_image_action(),

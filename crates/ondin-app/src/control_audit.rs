@@ -387,7 +387,18 @@ fn active_icon_button(g: &Ground) -> bool {
         && g.stroke.color == color::accent()
 }
 
+/// A `ui::slider`'s rail or its filled part: a rounded hairline track.
+fn slider_rail(g: &Ground) -> bool {
+    (g.rect.height() - ui::SLIDER_RAIL_H).abs() <= SLOP && g.stroke == Stroke::NONE
+}
+
 const EXEMPT: &[Exempt] = &[
+    Exempt {
+        what: "slider rail",
+        why: "`ui::slider` draws a hairline track with a knob riding on it, a value \
+              shown rather than a control's ground",
+        is: slider_rail,
+    },
     Exempt {
         what: "swatch chip",
         why: "shows the paint itself (a checker under the colour, a ring round it), \
@@ -1302,8 +1313,9 @@ fn sweep_on(theme: Theme) {
         "tokens pill: the fixture is not in the state it is about — it painted \
          {at_rest} control grounds and hovered {hovered}"
     );
-    // The colour-blind simulation's bar on a selected frame: the scope chip at
-    // rest, and the deficiency head and ✕, which paint a ground only hovered.
+    // The vision simulation's bar on a selected frame: the scope chip at rest,
+    // and the condition head and ✕, which paint a ground only hovered; the
+    // severity slider's rail is exempt.
     let mut app = with_a_rect(&ctx);
     let (resting, lit) = swept(&ctx, &mut app, |_, a| {
         let frame = a.session.ids.mint();

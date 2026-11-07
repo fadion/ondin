@@ -1,10 +1,11 @@
-//! The GPU colour-vision pass (`vision::VisionPass`) held to its CPU
-//! specification (`vision::simulate_rgba8`), byte for byte within one level.
+//! The GPU vision pass (`vision::VisionPass`) held to its CPU specification
+//! (`vision::apply`), within a level for a tint or a ghost and two for a blur,
+//! whose first pass rounds to 8 bits on both sides.
 //!
 //! `#[ignore]` like the rest of the on-device suite: CI has no adapter. Run with
 //! `cargo test -p ondin-render --test vision -- --ignored`.
 
-use ondin_render::vision::{Deficiency, VisionPass, simulate_rgba8};
+use ondin_render::vision::{Condition, Effect, VisionPass, apply};
 
 const W: u32 = 64;
 const H: u32 = 48;
@@ -90,8 +91,8 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> 
     out
 }
 
-/// Inside the region every pixel is the CPU's within a level; outside, every
-/// pixel is the source's exactly; under every deficiency.
+/// Inside the region every pixel is the CPU's; outside, every pixel is the
+/// source's; under every condition at two severities and two zooms.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_gpu_pass_matches_its_specification() {
@@ -132,36 +133,34 @@ fn the_gpu_pass_matches_its_specification() {
         &device,
         wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
     );
-    let pass = VisionPass::new(&device);
+    let mut pass = VisionPass::new(&device);
     let region = [10, 5, 50, 40];
-    for d in Deficiency::ALL {
-        pass.run(
-            &device,
-            &queue,
-            &src.create_view(&Default::default()),
-            &dst.create_view(&Default::default()),
-            (W, H),
-            d,
-            region,
-        );
-        let out = readback(&device, &queue, &dst);
-        for y in 0..H {
-            for x in 0..W {
-                let i = ((y * W + x) * 4) as usize;
-                let seen = [px[i], px[i + 1], px[i + 2], px[i + 3]];
-                let got = [out[i], out[i + 1], out[i + 2], out[i + 3]];
-                let inside = x >= region[0] && y >= region[1] && x < region[2] && y < region[3];
-                let want = if inside {
-                    simulate_rgba8(d, seen)
-                } else {
-                    seen
-                };
-                for c in 0..4 {
-                    assert!(
-                        got[c].abs_diff(want[c]) <= 1,
-                        "{d:?} at ({x}, {y}): {got:?}, the specification says {want:?}"
-                    );
-                }
+    for c in Condition::ALL {
+        for (severity, scale) in [(0.35, 1.0), (1.0, 2.5)] {
+            let effect = c.effect(severity);
+            pass.run(
+                &device,
+                &queue,
+                &src.create_view(&Default::default()),
+                &dst.create_view(&Default::default()),
+                (W, H),
+                &effect,
+                scale,
+                region,
+            );
+            let got = readback(&device, &queue, &dst);
+            let want = apply(&effect, scale, &px, (W, H), region);
+            let slack = match effect {
+                Effect::Blur { .. } => 2,
+                _ => 1,
+            };
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                let (x, y) = ((i / 4) as u32 % W, (i / 4) as u32 / W);
+                assert!(
+                    g.abs_diff(*w) <= slack,
+                    "{c:?} {severity} at ({x}, {y}) channel {}: {g}, the specification says {w}",
+                    i % 4
+                );
             }
         }
     }

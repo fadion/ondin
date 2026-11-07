@@ -626,8 +626,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 - **Outline stroke**, **Pixel-fit**, **Join paths**, **Warp…** and **Trace image…** — layer-menu rows (and so palette rows), no
   chord, as *Outline shape*.
 - **Check contrast** — a Tools menu row and a palette verb (`Action::CheckContrast`), no chord.
-- **Simulate colour blindness** — a Tools menu row and a palette verb
-  (`Action::SimulateColourBlindness`), no chord.
+- **Simulate vision** — a Tools menu row and a palette verb (`Action::SimulateVision`), no chord.
 - **Numeric distribute spacing** — a panel affordance.
 - **`Tab` to hide panels** (Adobe) — `Tab` steps the point selection and `Ctrl+\` covers the intent.
   `Tab` is egui's focus key and costs a frame to claim (§15 D123): the last key worth a second

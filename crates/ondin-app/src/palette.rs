@@ -743,9 +743,9 @@ impl OndinApp {
             contrast.label = "Stop checking contrast".into();
         }
         push(&mut out, contrast);
-        let mut vision = Cmd::verb(Item::SimulateColourBlindness, None);
+        let mut vision = Cmd::verb(Item::SimulateVision, None);
         if self.vision.is_some() {
-            vision.label = "Stop simulating colour blindness".into();
+            vision.label = "Stop simulating vision".into();
         }
         push(&mut out, vision);
         push(&mut out, Cmd::verb(Item::ColourReview, None));

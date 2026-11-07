@@ -91,9 +91,9 @@ pub enum Action {
     /// *Tools ▸ Check contrast*: start or end the contrast check (`contrast.rs`). No
     /// chord.
     CheckContrast,
-    /// *Tools ▸ Simulate colour blindness*: start or end the colour-vision
-    /// simulation (`vision.rs`). No chord.
-    SimulateColourBlindness,
+    /// *Tools ▸ Simulate vision*: start or end the vision simulation
+    /// (`vision.rs`). No chord.
+    SimulateVision,
     /// *Export as HTML / React / Vue…*: the selection's code export, one zip
     /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
     /// the command palette is its door.

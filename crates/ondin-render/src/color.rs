@@ -30,8 +30,7 @@ pub(crate) const SRGB_SCALE: f32 = 1.055;
 pub(crate) const SRGB_GAMMA: f32 = 2.4;
 
 /// The sRGB transfer function's inverse: an encoded channel in 0–1 to linear
-/// light. The colour-vision pass's Rust model (`vision::simulate_rgba8`) reads
-/// it.
+/// light. The vision pass's Rust model (`vision::apply`) reads it.
 pub fn srgb_to_linear(c: f32) -> f32 {
     if c <= SRGB_KNEE {
         c / SRGB_SLOPE

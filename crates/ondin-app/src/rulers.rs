@@ -161,7 +161,7 @@ fn guide_stroke_width(base: f32, selected: bool) -> f32 {
 }
 
 /// A coordinate snapped onto the device-pixel grid, so a hairline stays a
-/// hairline. `grid::draw_pixel_grid` calls it too.
+/// hairline.
 ///
 /// A line whose device width is odd wants its centre on a pixel centre and an
 /// even one on a pixel edge; backwards turns a 1px line into a 2px grey smear.

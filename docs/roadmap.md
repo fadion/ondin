@@ -9,19 +9,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now
 
-- **Guide and pixel-grid settings.** A *Canvas* section in Settings (`settings.rs`), per-user prefs:
-  - *Ruler guides colour*: the default for every guide whose own colour is unset, starting at
-    `DEFAULT_GUIDE_COLOR`, with a picker and a reset. A guide recoloured in the inspector keeps its
-    colour, and a selected guide stays the selection blue (`rulers::guide_ink`).
-  - *Ruler guides thickness*: 1–5 points, default 1. A selected guide draws one point thicker, as
-    the 1 and 2 of `draw_guide_inner` do today.
-  - *Pixel grid colour*: an *Adaptive* switch, on by default. Adaptive ink moves each grid pixel's
-    colour by 10 in CIE L*, darker above L* 45 and lighter below, keeping its hue (darken by scaling
-    in linear light, lighten by mixing toward white). Every fill then gets the contrast today's ink
-    gives on white, where today's 50% grey at 24% (`grid::INK`) gives none on mid-grey and almost
-    none on mid-tone colours. It reads the drawn pixels, so it is a GPU pass over the rendered
-    canvas like `vision::VisionPass`, run only while the grid shows. Off, a picker with alpha
-    starts at `grid::INK`, and reset returns to it.
 - **One command registry.** Every editing verb as a named command with typed parameters, in one
   list that the app, a headless CLI, MCP and Command Mode all call, so "an agent can do whatever a
   click can" holds by construction. Today there are two levels, joined by hand:

@@ -3453,7 +3453,10 @@ fn lay_sides<P: ScenePainter>(
     doubled: bool,
 ) {
     match geometry::effective_sides(kind, s).per_side(s.width) {
-        None => lay_dashed(painter, world, shape, s, s.width, framing, doubled),
+        None => {
+            let laid = geometry::stroked_path(kind, shape, s.width);
+            lay_dashed(painter, world, &laid, s, s.width, framing, doubled);
+        }
         Some(sides) => {
             for (side, width) in sides {
                 let Some(edge) = geometry::side_path(kind, side) else {

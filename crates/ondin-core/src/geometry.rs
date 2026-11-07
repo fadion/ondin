@@ -675,6 +675,66 @@ fn spiral_path(size: Size, turns: f64) -> BezPath {
     path
 }
 
+/// The path a stroke `width` wide is laid along: `shape`, except that a spiral's
+/// path starts where it first bends no tighter than half the width.
+///
+/// Inward of there every point within half the width of the curve leaves a cusp
+/// on the stroke's inner edge, a spike any stroker draws. Render, Outline stroke
+/// and SVG export all lay this path, so they agree. A spiral tighter than that
+/// all the way out keeps its whole path.
+pub fn stroked_path<'a>(
+    kind: &NodeKind,
+    shape: &'a BezPath,
+    width: f64,
+) -> std::borrow::Cow<'a, BezPath> {
+    use kurbo::ParamCurveCurvature;
+    use std::borrow::Cow;
+    /// Samples a cubic is searched at before the crossing is bisected.
+    const SAMPLES: u32 = 32;
+    if !matches!(kind, NodeKind::Spiral { .. }) || width.is_nan() || width <= 0.0 {
+        return Cow::Borrowed(shape);
+    }
+    let half = width / 2.0;
+    let open = |seg: &PathSeg, t: f64| {
+        let k = match seg {
+            PathSeg::Line(_) => 0.0,
+            PathSeg::Quad(q) => q.curvature(t),
+            PathSeg::Cubic(c) => c.curvature(t),
+        };
+        k.is_finite() && k.abs() * half <= 1.0
+    };
+    let segs: Vec<PathSeg> = shape.segments().collect();
+    let Some((i, t)) = segs.iter().enumerate().find_map(|(i, seg)| {
+        let hit = (0..=SAMPLES).find(|&j| open(seg, f64::from(j) / f64::from(SAMPLES)))?;
+        if hit == 0 {
+            return Some((i, 0.0));
+        }
+        // Bisect between the last tight sample and the first open one.
+        let (mut lo, mut hi) = (f64::from(hit - 1), f64::from(hit));
+        (lo, hi) = (lo / f64::from(SAMPLES), hi / f64::from(SAMPLES));
+        for _ in 0..30 {
+            let mid = (lo + hi) / 2.0;
+            match open(seg, mid) {
+                true => hi = mid,
+                false => lo = mid,
+            }
+        }
+        Some((i, hi))
+    }) else {
+        return Cow::Borrowed(shape);
+    };
+    if i == 0 && t == 0.0 {
+        return Cow::Borrowed(shape);
+    }
+    let first = segs[i].subsegment(t..1.0);
+    let mut out = BezPath::new();
+    out.move_to(first.start());
+    for seg in std::iter::once(first).chain(segs[i + 1..].iter().copied()) {
+        out.push(seg.as_path_el());
+    }
+    Cow::Owned(out)
+}
+
 /// An arc's outline: from the origin to `end`, `sweep` degrees of a circle,
 /// positive clockwise on screen, so bulging to the left of the way to `end`. A
 /// sweep of 0, or ends that meet, is the straight line.
@@ -3030,6 +3090,67 @@ mod tests {
                 assert!((got - want).abs() < 1e-6, "{turns}: {b:?}");
             }
         }
+    }
+
+    /// A thick stroke on a spiral is laid from where the curve first bends no
+    /// tighter than half the width, out to the same end; a thin one, and any
+    /// other kind, keeps the whole path.
+    /// flip: `stroked_path` cutting at the last tight sample rather than the
+    /// bisected crossing → fails at "bends tighter than half".
+    #[test]
+    fn a_thick_stroke_starts_a_spiral_where_it_opens_out() {
+        use kurbo::ParamCurveCurvature;
+        let kind = NodeKind::Spiral {
+            size: Size::new(300.0, 300.0),
+            turns: 3.5,
+        };
+        let shape = local_path(&kind).unwrap();
+        let laid = stroked_path(&kind, &shape, 21.0);
+        assert!(
+            matches!(laid, std::borrow::Cow::Owned(_)),
+            "a thick stroke cuts"
+        );
+        let (whole, cut): (Vec<_>, Vec<_>) =
+            (shape.segments().collect(), laid.segments().collect());
+        assert!(
+            cut.len() < whole.len(),
+            "the cut drops the innermost cubics"
+        );
+        assert!(
+            cut.last()
+                .unwrap()
+                .end()
+                .distance(whole.last().unwrap().end())
+                < 1e-9
+        );
+        let start = match cut[0] {
+            PathSeg::Cubic(c) => c,
+            _ => panic!("a spiral is cubics"),
+        };
+        let k = start.curvature(0.0).abs();
+        assert!(
+            k * 10.5 <= 1.0 + 1e-6,
+            "bends tighter than half: radius {}",
+            1.0 / k
+        );
+        assert!(
+            k * 10.5 > 0.99,
+            "cut well past the crossing: radius {}",
+            1.0 / k
+        );
+        // A hairline opens out at once, so it keeps the path.
+        assert!(matches!(
+            stroked_path(&kind, &shape, 1.0),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let line = NodeKind::Line {
+            end: Point::new(10.0, 0.0),
+        };
+        let lp = local_path(&line).unwrap();
+        assert!(matches!(
+            stroked_path(&line, &lp, 50.0),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     /// An arc runs from the origin to its end at every sweep either way, its

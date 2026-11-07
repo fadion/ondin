@@ -1510,6 +1510,8 @@ fn emit_shape(
                 align_clip(res.used_kind_of(node), shape.as_ref(), s, node.fill_rule()).is_none()
                     && geometry::effective_sides(res.used_kind_of(node), s).is_all()
                     && dash_pieces(shape.as_ref(), s, s.width).is_none()
+                    && (fills.is_empty()
+                        || trimmed_stroke(res.used_kind_of(node), shape.as_ref(), s).is_none())
             }
             _ => false,
         };
@@ -1534,13 +1536,17 @@ fn emit_shape(
     };
     // `fill-rule` rides with the fill, even when it is `none` (see `with_fill_rule`).
     let fill = with_fill_rule(fill, node);
+    // An unfilled element is all stroke, so it can carry the stroke's cut path.
+    let cut = strokes
+        .first()
+        .and_then(|(_, s)| trimmed_stroke(res.used_kind_of(node), shape.as_ref(), s));
     let stroke = match strokes.first() {
         Some((i, s)) => stroke_attr(
             id,
             *i,
             s,
             s.width,
-            &resolved_dashes(shape.as_ref(), s, s.width),
+            &resolved_dashes(cut.as_ref().or(shape.as_ref()), s, s.width),
             defs,
         ),
         None => String::new(),
@@ -1549,7 +1555,7 @@ fn emit_shape(
         out,
         node,
         res.used_kind_of(node),
-        derived,
+        cut.as_ref().or(derived),
         pad,
         &t,
         &fill,
@@ -1650,6 +1656,16 @@ fn dash_pieces(
     width: f64,
 ) -> Option<Vec<(BezPath, Vec<f64>)>> {
     geometry::dash_fit_pieces(s, width, shape?)
+}
+
+/// The path `s` is laid along when it is not `shape` itself (a thick stroke on a
+/// spiral starts further out, `geometry::stroked_path`); such a stroke is its own
+/// `<path>`, apart from the fills' element.
+fn trimmed_stroke(kind: &NodeKind, shape: Option<&BezPath>, s: &Stroke) -> Option<BezPath> {
+    match geometry::stroked_path(kind, shape?, s.width) {
+        std::borrow::Cow::Owned(path) => Some(path),
+        std::borrow::Cow::Borrowed(_) => None,
+    }
 }
 
 /// The outline the *paints* are built against: a boolean's derived result, a text
@@ -1782,7 +1798,8 @@ fn emit_strokes(
         let sides = geometry::effective_sides(res.used_kind_of(node), s).per_side(s.width);
         // A fitted multi-subpath dash is one `<path>` per subpath: an element has
         // one `stroke-dasharray`.
-        let pieces = dash_pieces(shape.as_ref(), s, s.width);
+        let trimmed = trimmed_stroke(res.used_kind_of(node), shape.as_ref(), s);
+        let pieces = dash_pieces(trimmed.as_ref().or(shape.as_ref()), s, s.width);
         let ink = |out: &mut String, pad: &str, doubled: bool| {
             let scale = if doubled { 2.0 } else { 1.0 };
             let segments = |out: &mut String, parts: &[(BezPath, Vec<f64>)], w: f64| {
@@ -1807,6 +1824,10 @@ fn emit_strokes(
                     }
                 }
                 (None, Some(parts)) => segments(out, parts, s.width),
+                (None, None) if let Some(path) = &trimmed => {
+                    let dashes = geometry::resolved_dashes(s, s.width, path);
+                    segments(out, &[(path.clone(), dashes)], s.width);
+                }
                 (None, None) => write_element(
                     out,
                     node,
@@ -1984,10 +2005,14 @@ fn write_element(
                 .unwrap_or_default();
             let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
         }
+        // An unfilled spiral's `derived` is its stroke's cut path (`trimmed_stroke`).
         NodeKind::Spiral { .. } | NodeKind::Arc { .. } => {
-            let d = geometry::local_path(kind)
-                .map(|p| path_d(&p))
-                .unwrap_or_default();
+            let d = match derived {
+                Some(p) => path_d(p),
+                None => geometry::local_path(kind)
+                    .map(|p| path_d(&p))
+                    .unwrap_or_default(),
+            };
             let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
         }
         NodeKind::Ellipse { size, .. } => {

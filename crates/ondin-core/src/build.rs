@@ -2355,7 +2355,10 @@ pub fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option
         }
     };
     match crate::geometry::effective_sides(kind, s).per_side(s.width) {
-        None => lay(shape, s.width),
+        None => lay(
+            &crate::geometry::stroked_path(kind, shape, s.width),
+            s.width,
+        ),
         Some(sides) => {
             for (side, width) in sides {
                 if let Some(edge) = crate::geometry::side_path(kind, side) {

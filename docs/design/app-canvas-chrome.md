@@ -1161,9 +1161,15 @@ none of the rules below are its.
 Holding bare `\` shows the artwork with the canvas chrome hidden; letting go brings it back. Held,
 not toggled: a live selection that cannot be seen would take a nudge.
 
-- **The key** (`canvas::peek_held`): its held state, so auto-repeat changes nothing; not with
-  `Ctrl`/`Cmd`/`Alt`, while a control holds the keyboard or while the window is unfocused. egui
-  clears held keys when the window loses focus, whose release would never arrive, so that ends it.
+- **The key** (`canvas::peek_key_held`, `peek_held`): held from the key's own press to its own
+  release, kept in `OndinApp::peek_key`, so auto-repeat changes nothing. The press counts without
+  `Ctrl`/`Cmd` (those spell the panel toggles' `\`); `Alt` is allowed, which some Mac layouts type
+  `\` with. The release counts however the held modifiers spell it (`|` under `Shift`) and on the
+  physical key, so a peek never sticks on. Not while a control holds the keyboard; a window that
+  loses focus ends it, whose release would never arrive. Where `\` needs `AltGr` (`Ctrl+Alt` on
+  Windows) the chord is *Show/hide layers* instead, and there is no peek: §12's `AltGr` question.
+- **A press made during the peek** sits out to its release (`gesture_cancelled`), so it does not
+  come back as a click once the peek ends.
 - **Only from rest.** `OndinApp::canvas_ui` sets `OndinApp::peeking` each frame, and only in
   `Mode::Normal` with no drag, no compare (which spends bare `\` on its own toggle) and no armed
   eyedropper: a gesture never loses its release to a peek, and in a text session `\` types.

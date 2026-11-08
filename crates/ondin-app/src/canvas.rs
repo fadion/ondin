@@ -1101,18 +1101,49 @@ fn space_down(ui: &egui::Ui) -> bool {
     !control && ui.input(|i| i.key_down(egui::Key::Space))
 }
 
-/// Whether bare `\` is held for the canvas's peek: the key's held state, so
-/// auto-repeat changes nothing, and never while a control holds the keyboard or
-/// the window is unfocused (whose release would never arrive).
-fn peek_held(ui: &egui::Ui) -> bool {
-    // Two reads, never nested: the context lock is not re-entrant.
-    let control = ui.ctx().memory(|m| m.focused()).is_some();
-    !control
-        && ui.input(|i| {
-            i.focused
-                && i.key_down(egui::Key::Backslash)
-                && !(i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt)
-        })
+/// Whether `\` is held for the canvas's peek, from `was` and this frame's key
+/// events. A press counts with no Ctrl or Cmd (those are the panel toggles' `\`);
+/// Option is allowed, which some Mac layouts type `\` with. The release counts
+/// however the held modifiers spell it (`|` under Shift) and on the physical key,
+/// so a peek never sticks on; an unfocused window drops it, its release lost.
+fn peek_key_held(ui: &egui::Ui, was: bool) -> bool {
+    ui.input(|i| {
+        let mut held = was;
+        for e in &i.events {
+            match e {
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    modifiers,
+                    ..
+                } => {
+                    let physical = *physical_key == Some(egui::Key::Backslash);
+                    match pressed {
+                        true if *key == egui::Key::Backslash || physical => {
+                            held = !(modifiers.command || modifiers.ctrl);
+                        }
+                        false
+                            if matches!(key, egui::Key::Backslash | egui::Key::Pipe)
+                                || physical =>
+                        {
+                            held = false;
+                        }
+                        _ => {}
+                    }
+                }
+                egui::Event::WindowFocused(false) => held = false,
+                _ => {}
+            }
+        }
+        held && i.focused
+    })
+}
+
+/// Whether the peek's key is held for the canvas: never while a control holds
+/// the keyboard, whose `\` it is.
+fn peek_held(ui: &egui::Ui, key: bool) -> bool {
+    key && ui.ctx().memory(|m| m.focused()).is_none()
 }
 
 #[cfg(test)]
@@ -1181,6 +1212,49 @@ mod peek_tests {
         assert!(app.peeking, "fixture: peeking again");
         frame(&mut app, vec![egui::Event::WindowFocused(false)]);
         assert!(!app.peeking, "losing focus ends the peek");
+    }
+
+    /// A release Shift spells as `|` still ends the peek, and a press made during
+    /// it sits out to its release.
+    /// flip: `peek_key_held` clearing only on a `Backslash` release → fails at
+    /// "ended by the `|` release".
+    #[test]
+    fn a_shifted_release_ends_the_peek_and_a_press_in_it_sits_out() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>, m: egui::Modifiers| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    modifiers: m,
+                    ..Default::default()
+                },
+                |ui| app.canvas_ui(ui),
+            );
+        };
+        let shift = egui::Modifiers::SHIFT;
+        frame(&mut app, vec![backslash(true)], egui::Modifiers::NONE);
+        assert!(app.peeking, "the fixture: peeking");
+        let press = egui::Event::PointerButton {
+            pos: egui::pos2(200.0, 150.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: shift,
+        };
+        frame(&mut app, vec![press], shift);
+        assert!(app.gesture_cancelled, "the press sits out");
+        let pipe_up = egui::Event::Key {
+            key: egui::Key::Pipe,
+            physical_key: Some(egui::Key::Backslash),
+            pressed: false,
+            repeat: false,
+            modifiers: shift,
+        };
+        frame(&mut app, vec![pipe_up], shift);
+        frame(&mut app, Vec::new(), egui::Modifiers::NONE);
+        assert!(!app.peeking, "ended by the `|` release");
     }
 }
 
@@ -1814,11 +1888,17 @@ impl OndinApp {
 
         // Only from rest, so a gesture never loses its release to a peek; a compare
         // spends bare `\` on its own toggle, and in text it types.
+        self.peek_key = peek_key_held(ui, self.peek_key);
         self.peeking = self.mode == Mode::Normal
             && matches!(self.drag, Drag::None)
             && self.session.compare.is_none()
             && self.dropper_armed().is_none()
-            && peek_held(ui);
+            && peek_held(ui, self.peek_key);
+        // A press made during the peek sits out to its release, or it would come
+        // back as a click once the peek ends.
+        if self.peeking && ui.input(|i| i.pointer.any_pressed()) {
+            self.gesture_cancelled = true;
+        }
 
         self.canvas_cursor(ui, &resp, rect, ppp);
 

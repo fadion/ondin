@@ -588,7 +588,9 @@ On Windows `Shift+Delete` arrives as `Event::Cut`, never as a key.
 
 ⚠️ **`Ctrl+Alt` is `AltGr` on many European layouts**, which §10 meets from the other side. A
 `Ctrl+Shift` fallback does not work (`Ctrl+Shift+K` is place image), and `Ctrl+Alt` already carries
-mask, booleans, properties clipboard, frame selection, export all and `Ctrl+Alt+P`. This is an
+mask, booleans, properties clipboard, frame selection, export all and `Ctrl+Alt+P`; where `\` is
+`AltGr`-typed (German, French, Polish…) there is no `\` peek, since `Ctrl+Alt+\` shows or hides
+the layers. This is an
 **open question about the whole keymap**; the file has no section for open questions, so it sits
 here.
 

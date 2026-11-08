@@ -1032,6 +1032,9 @@ pub struct OndinApp {
     /// Bare `\` is held over the canvas: the canvas chrome is hidden and presses do
     /// nothing (`canvas::peek_held`). Set by `canvas_ui` each frame.
     pub(crate) peeking: bool,
+    /// The peek's key is down, as its own press and release events say
+    /// (`canvas::peek_key_held`): egui's held state misses a release Shift spells as `|`.
+    pub(crate) peek_key: bool,
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
     pub(crate) pixel_preview: bool,
@@ -1759,6 +1762,7 @@ impl OndinApp {
             show_layout_grids: view.layout_grids,
             outline_view: false,
             peeking: false,
+            peek_key: false,
             pixel_preview: false,
             show_layers: view.layers,
             show_history: view.history,

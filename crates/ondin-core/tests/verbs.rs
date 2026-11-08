@@ -1960,3 +1960,51 @@ fn a_page_of_several_layers_duplicates_in_order() {
         .collect();
     assert_eq!(names, ["a", "b", "c"]);
 }
+
+/// A text made from a kind whose run ends inside a character, or past the
+/// content, is stored with its runs on character boundaries, so it shapes.
+/// flip: drop the clamp in `Document::op_create` → panics in the rebuild.
+#[test]
+fn a_created_text_keeps_its_runs_on_character_boundaries() {
+    let (mut doc, mut ids, page) = blank();
+    let mut kind = serde_json::to_value(NodeKind::Text {
+        content: "héllo".into(),
+        style: Box::new(ondin_core::TextStyle {
+            font_family: "Inter".into(),
+            font_size: 12.0,
+            ..Default::default()
+        }),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    })
+    .unwrap();
+    kind["Text"]["spans"] = json!([
+        { "start": 0, "end": 2, "attr": { "Weight": 700 } },
+        { "start": 4, "end": 999, "attr": { "Weight": 300 } },
+    ]);
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": kind }),
+    )[0];
+    Resolved::rebuild(&doc);
+    let NodeKind::Text { content, spans, .. } = doc.get(t).unwrap().kind() else {
+        unreachable!()
+    };
+    let json = serde_json::to_value(spans).unwrap();
+    let runs = json.as_array().expect("runs are a list");
+    assert!(!runs.is_empty(), "the fixture: runs are stored");
+    for run in runs {
+        for end in ["start", "end"] {
+            let at = run[end].as_u64().unwrap() as usize;
+            assert!(content.is_char_boundary(at), "{run}");
+        }
+    }
+}

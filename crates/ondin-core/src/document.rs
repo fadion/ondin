@@ -2132,6 +2132,20 @@ impl Document {
         {
             *mirror = crate::symmetry::kept(path, corner_radii, *mirror);
         }
+        // Runs end on the content's character boundaries, as every other op that
+        // writes them keeps them: shaping panics on one that splits a character.
+        if let NodeKind::Text {
+            content,
+            style,
+            spans,
+            para_spans,
+            paragraph,
+            ..
+        } = &mut stored
+        {
+            *spans = spans.clamped(content, style);
+            *para_spans = para_spans.clamped(content, paragraph);
+        }
         let node = Node {
             id,
             parent: Some(parent),

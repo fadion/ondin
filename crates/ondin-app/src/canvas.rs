@@ -6514,7 +6514,8 @@ impl OndinApp {
     }
 
     /// The path and the selected anchors *Split at point* cuts at
-    /// (`tools::splittable`), or the sentence its row and button dim with.
+    /// (`edit::splittable`), or the sentence its row and button dim with
+    /// (`edit::split_refusal`).
     pub(crate) fn split_subject(&self) -> Result<(NodeId, Vec<PointRef>), &'static str> {
         const NO_POINT: &str = "Select a point to split at";
         let id = self.edited_path().ok_or(NO_POINT)?;
@@ -6524,9 +6525,9 @@ impl OndinApp {
             return Err(NO_POINT);
         }
         let points = self.with_mirrored_points(id, &points);
-        match points.iter().any(|p| tools::splittable(&subpaths, *p)) {
-            true => Ok((id, points)),
-            false => Err("An open end has nothing to split"),
+        match tools::split_refusal(&subpaths, &points) {
+            None => Ok((id, points)),
+            Some(why) => Err(why),
         }
     }
 

@@ -2528,11 +2528,36 @@ pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSub
 }
 
 /// Whether a run can be split at the anchor `at`: anywhere on a closed run, and
-/// between the ends of an open one. An open end has nothing to split.
+/// between the ends of an open one, but not at a rounded corner. An open end has
+/// nothing to split, and a fillet needs both legs, so an end cannot carry one.
 pub fn splittable(subpaths: &[PenSubpath], (s, a): PointRef) -> bool {
     subpaths.get(s).is_some_and(|sub| {
         let n = sub.anchors.len();
-        a < n && (sub.closed || (a > 0 && a + 1 < n))
+        a < n && (sub.closed || (a > 0 && a + 1 < n)) && !rounded(&sub.anchors[a])
+    })
+}
+
+/// Whether `a` draws a fillet: a radius on a corner or a broken anchor. One on a
+/// smooth anchor draws nothing.
+fn rounded(a: &PenAnchor) -> bool {
+    a.radius > 0.0 && (a.is_corner() || !a.is_smooth())
+}
+
+/// Why *Split at point* cannot cut at `points`, or `None` when one of them is
+/// [`splittable`].
+pub fn split_refusal(subpaths: &[PenSubpath], points: &[PointRef]) -> Option<&'static str> {
+    if points.iter().any(|p| splittable(subpaths, *p)) {
+        return None;
+    }
+    let at_a_fillet = points.iter().any(|&(s, a)| {
+        subpaths
+            .get(s)
+            .and_then(|sub| sub.anchors.get(a))
+            .is_some_and(rounded)
+    });
+    Some(match at_a_fillet {
+        true => "A rounded corner can't be split",
+        false => "An open end has nothing to split",
     })
 }
 

@@ -262,8 +262,11 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   keeps the arriving handle and the starting end the leaving one, so the outline draws as before. Of
   the two ends, the one whose run leaves toward the pointer stays selected (the menu's open position;
   the bar has none and keeps the starting end), so the next drag pulls them apart. A mirrored path is
-  split at each point's image too. It dims with *Select a point to split at* and, when every
-  selected anchor is an open end, *An open end has nothing to split* (`canvas::split_subject`). Its
+  split at each point's image too. A rounded corner is not split (`edit::splittable`): an open end
+  cannot carry a fillet, so the outline would lose its rounding. It dims with *Select a point to
+  split at* and, when no selected anchor can be cut, *A rounded corner can't be split* if one of
+  them is rounded, else *An open end has nothing to split* (`canvas::split_subject`,
+  `edit::split_refusal`). Its
   glyph is `icon::SPLIT_POINT`; `SCISSORS` means *Cut*. One undo step. *Delete segment* already opens
   a path at a segment, and *Delete points* heals.
 - **While the pen or the pencil is armed** (`path_bar::drawing_bar`) it holds Mirror, a rule, and

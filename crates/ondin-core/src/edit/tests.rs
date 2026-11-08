@@ -4717,6 +4717,33 @@ fn smoothing_by_an_amount_moves_handles_part_way() {
     assert_eq!(subs[0].anchors[0].out, Vec2::ZERO, "only the anchor given");
 }
 
+/// A rounded corner is not split, since an open end cannot carry its fillet and
+/// the outline would lose its rounding; a radius on a smooth anchor, which draws
+/// nothing, does not stop a split.
+/// flip: `splittable` without its `rounded` test → fails at "a rounded corner refuses".
+#[test]
+fn a_rounded_corner_is_not_split() {
+    let mut subs = quad_with_a_curve();
+    subs[0].anchors[1].radius = 10.0;
+    assert!(!splittable(&subs, (0, 1)), "a rounded corner refuses");
+    assert_eq!(
+        split_refusal(&subs, &[(0, 1)]),
+        Some("A rounded corner can't be split")
+    );
+    let (unchanged, none) = split_at_points(&subs, &[(0, 1)]);
+    assert_eq!(unchanged, subs);
+    assert!(none.is_empty());
+    assert_eq!(
+        split_refusal(&subs, &[(0, 1), (0, 0)]),
+        None,
+        "another point cuts"
+    );
+    let mut smooth = subs.clone();
+    smooth[0].anchors[1].out = Vec2::new(10.0, 0.0);
+    smooth[0].anchors[1].back = Vec2::new(-10.0, 0.0);
+    assert!(splittable(&smooth, (0, 1)));
+}
+
 /// An open run splits in two at an inner anchor, and its ends refuse.
 #[test]
 fn splitting_an_open_run_makes_two_and_its_ends_refuse() {

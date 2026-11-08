@@ -1067,8 +1067,14 @@ enum Act {
     Cancel,
 }
 
-/// A grid row: the label in its column, then `add` in the rest.
-fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+/// A grid row: the label in its column, then `add` in the rest; the Clean up
+/// box's rows too.
+pub(crate) fn row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    h: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(LABEL_W, h), egui::Sense::hover());

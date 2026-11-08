@@ -7829,12 +7829,19 @@ impl OndinApp {
         self.mode == Mode::Normal && self.drag.is_none() && !self.chrome_hidden()
     }
 
-    /// Outline the layer under the pointer in the Layers panel and those the
-    /// hovered History row's step touched, in the canvas hover's stroke; the
+    /// Outline the layer under the pointer in the Layers panel, those the hovered
+    /// History row's step touched, and those the Clean up box's hovered row names,
+    /// in the canvas hover's stroke (a hairline for a whole group of rows); the
     /// selection keeps its own frame.
     fn draw_panel_hover(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        for &id in self.layers_hover.iter().chain(&self.history_pane.hover) {
-            let stroke = egui::Stroke::new(3.0, chrome_hue(&self.session.doc, id));
+        let boxed = self.clean_up.as_ref().map(|b| b.ringed());
+        let (box_ids, soft) = boxed.unwrap_or((&[], false));
+        let panels = self.layers_hover.iter().chain(&self.history_pane.hover);
+        for (&id, width) in panels
+            .map(|id| (id, 3.0))
+            .chain(box_ids.iter().map(|id| (id, if soft { 1.0 } else { 3.0 })))
+        {
+            let stroke = egui::Stroke::new(width, chrome_hue(&self.session.doc, id));
             self.stroke_outlines(painter, id, rect, ppp, stroke, self.outline_view(stroke));
         }
     }

@@ -331,6 +331,8 @@ pub enum Item {
     Rename,
     /// `Action::BatchRename`: the box that renames many layers at once.
     BatchRename,
+    /// `Action::CleanUp`: the box that takes away what draws nothing.
+    CleanUp,
     /// `Action::FindText`: find, or find and replace, in text layers' text.
     FindText,
     ReplaceText,
@@ -665,6 +667,7 @@ impl Item {
         Item::ToggleLocked,
         Item::Rename,
         Item::BatchRename,
+        Item::CleanUp,
         Item::FindText,
         Item::ReplaceText,
         Item::ZoomSelection,
@@ -937,6 +940,7 @@ impl Item {
             Item::ToggleLocked => s("Lock", icon::LOCK_SIMPLE, None, Group::State),
             Item::Rename => s("Rename", icon::CURSOR_TEXT, None, Group::State),
             Item::BatchRename => s("Batch rename…", icon::CURSOR_TEXT, None, Group::State),
+            Item::CleanUp => s("Clean up…", icon::MAGIC_WAND, None, Group::State),
             Item::FindText => s("Find in text…", icon::MAGNIFYING_GLASS, None, Group::State),
             Item::ReplaceText => s(
                 "Replace text…",
@@ -1347,6 +1351,7 @@ impl Item {
                 "tritanopia",
             ],
             Item::BatchRename => &["find", "replace", "number", "bulk"],
+            Item::CleanUp => &["tidy", "unused", "hidden", "empty"],
             Item::FindText => &["search", "text", "copy"],
             Item::ReplaceText => &["find", "search", "text", "copy", "substitute"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
@@ -1407,6 +1412,7 @@ impl Item {
             Item::ToggleLocked => Action::ToggleLocked,
             Item::Rename => Action::Rename,
             Item::BatchRename => Action::BatchRename,
+            Item::CleanUp => Action::CleanUp,
             Item::FindText => Action::FindText { replace: false },
             Item::ReplaceText => Action::FindText { replace: true },
             Item::Undo => Action::Undo,
@@ -3465,6 +3471,7 @@ impl OndinApp {
             Item::ToggleLocked => self.dispatch(ctx, Action::ToggleLocked),
             Item::Rename => self.dispatch(ctx, Action::Rename),
             Item::BatchRename => self.dispatch(ctx, Action::BatchRename),
+            Item::CleanUp => self.dispatch(ctx, Action::CleanUp),
             Item::FindText => self.dispatch(ctx, Action::FindText { replace: false }),
             Item::ReplaceText => self.dispatch(ctx, Action::FindText { replace: true }),
             Item::ZoomSelection => self.dispatch(ctx, Action::ZoomSelection),

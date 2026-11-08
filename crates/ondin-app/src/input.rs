@@ -209,6 +209,9 @@ pub enum Action {
     /// *Colour review…*, unbound: the card that merges near-identical colours
     /// (`crate::colour_review`).
     ColourReview,
+    /// *Clean up…*, unbound: the box that takes away what draws nothing
+    /// (`crate::clean_up_box`).
+    CleanUp,
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),

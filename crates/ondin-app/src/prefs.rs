@@ -228,6 +228,31 @@ impl Default for BatchRenamePrefs {
     }
 }
 
+/// The Clean up box's switches (`crate::clean_up_box`), kept when a clean-up runs:
+/// which rules to run is a habit, not a fact about one file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CleanUpPrefs {
+    /// The rules switched on, by `ondin_core::clean_up::Rule::key`.
+    pub on: Vec<String>,
+    pub skip_locked: bool,
+}
+
+impl Default for CleanUpPrefs {
+    /// `Rules::default`'s switches.
+    fn default() -> Self {
+        let rules = ondin_core::clean_up::Rules::default();
+        Self {
+            on: ondin_core::clean_up::Rule::ALL
+                .into_iter()
+                .filter(|r| rules.is_on(*r))
+                .map(|r| r.key().to_string())
+                .collect(),
+            skip_locked: rules.skip_locked,
+        }
+    }
+}
+
 /// The Settings modal's *Canvas* section: what the wheel does, and how ruler guides
 /// and the pixel grid draw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -490,6 +515,8 @@ pub struct Prefs {
     pub vision: VisionPrefs,
     /// The batch rename box's last Find, template and numbering.
     pub batch_rename: BatchRenamePrefs,
+    /// The Clean up box's switches.
+    pub clean_up: CleanUpPrefs,
     /// Colour review's threshold (`crate::colour_review`), kept across documents:
     /// how near counts as near is a habit, not a fact about one file.
     pub colour_review: ondin_core::color_review::Threshold,
@@ -551,6 +578,7 @@ impl Default for Prefs {
             contrast: ContrastPrefs::default(),
             vision: VisionPrefs::default(),
             batch_rename: BatchRenamePrefs::default(),
+            clean_up: CleanUpPrefs::default(),
             colour_review: Default::default(),
         }
     }

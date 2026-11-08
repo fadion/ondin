@@ -4808,7 +4808,19 @@ pub fn switch_row_ink(on: bool) -> egui::Color32 {
 /// [`icon_button_padded`]). The label dims when the feature is off, as
 /// [`menu_check`]'s does.
 pub fn switch_row(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> egui::Response {
-    switch_row_inner(ui, label, Some(on), height, false)
+    switch_row_inner(ui, label, Some(on), height, false, None)
+}
+
+/// A [`switch_row`] with a faint `note` after its label — a count of what the
+/// switch would act on, kept while it is off so the reader sees what is left.
+pub fn switch_row_noted(
+    ui: &mut egui::Ui,
+    label: &str,
+    note: &str,
+    on: bool,
+    height: f32,
+) -> egui::Response {
+    switch_row_inner(ui, label, Some(on), height, false, Some(note))
 }
 
 /// A [`switch_row`] whose value an instance overrides: the dot after the label.
@@ -4820,7 +4832,7 @@ pub fn switch_row_marked(
     height: f32,
     marked: bool,
 ) -> egui::Response {
-    switch_row_inner(ui, label, Some(on), height, marked)
+    switch_row_inner(ui, label, Some(on), height, marked, None)
 }
 
 /// A [`switch_row`] over a selection whose runs disagree: the word "Mixed" where
@@ -4830,7 +4842,7 @@ pub fn switch_row_marked(
 /// value would read as a claim the next click makes true. The row stays live:
 /// clicking is how a mixed range is resolved.
 pub fn switch_row_mixed(ui: &mut egui::Ui, label: &str, height: f32) -> egui::Response {
-    switch_row_inner(ui, label, None, height, false)
+    switch_row_inner(ui, label, None, height, false, None)
 }
 
 /// The one implementation behind [`switch_row`] and [`switch_row_mixed`].
@@ -4843,6 +4855,7 @@ fn switch_row_inner(
     on: Option<bool>,
     height: f32,
     marked: bool,
+    note: Option<&str>,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -4868,6 +4881,15 @@ fn switch_row_inner(
     );
     if marked {
         override_dot(ui.painter(), words.right_top() + egui::vec2(4.0, 3.0));
+    }
+    if let Some(note) = note {
+        ui.painter().text(
+            egui::pos2(words.right() + 6.0, inner.center().y),
+            egui::Align2::LEFT_CENTER,
+            note,
+            egui::FontId::proportional(SWITCH_ROW_LABEL_PT),
+            theme::text::faint(),
+        );
     }
     match on {
         Some(on) => paint_switch(

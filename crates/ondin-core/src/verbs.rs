@@ -2392,6 +2392,73 @@ pub static VERBS: &[Verb] = &[
             Ok(Done::ops(ops))
         },
     },
+    Verb {
+        name: "clean_up",
+        doc: "Take away what draws nothing: hidden paint, covered fills, hidden and empty \
+              layers, one-layer groups, guides; what would change a pixel is left",
+        params: &[
+            opt(
+                "nodes",
+                NODES,
+                "the layers to clean, with everything under them; every page but drafts \
+                 unless given",
+            ),
+            opt(
+                "hidden_paint",
+                ParamKind::Bool,
+                "hidden fills, strokes, effects and grids; on unless given",
+            ),
+            opt(
+                "covered_fills",
+                ParamKind::Bool,
+                "fills under an opaque solid fill; on unless given",
+            ),
+            opt(
+                "hidden_layers",
+                ParamKind::Bool,
+                "hidden layers; off unless given",
+            ),
+            opt(
+                "empty_layers",
+                ParamKind::Bool,
+                "empty layers; on unless given",
+            ),
+            opt(
+                "one_layer_groups",
+                ParamKind::Bool,
+                "groups holding one layer; on unless given",
+            ),
+            opt(
+                "guides",
+                ParamKind::Bool,
+                "ruler guides in scope; off unless given",
+            ),
+            opt(
+                "skip_locked",
+                ParamKind::Bool,
+                "leave locked layers alone; on unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::clean_up::{Rule, Rules, Scope};
+            let scope = match a.get("nodes") {
+                Some(_) => Scope::Layers(a.nodes("nodes")?),
+                None => Scope::Pages(ctx.doc.gathered_pages().collect()),
+            };
+            let mut rules = Rules::default();
+            for rule in Rule::ALL {
+                if let Some(on) = a.bool(rule.key()) {
+                    rules.set(rule, on);
+                }
+            }
+            if let Some(skip) = a.bool("skip_locked") {
+                rules.skip_locked = skip;
+            }
+            Ok(Done::edit(
+                crate::clean_up::plan(ctx.doc, ctx.res, &scope, &rules).tx,
+            ))
+        },
+    },
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",

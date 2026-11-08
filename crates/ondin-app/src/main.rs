@@ -83,6 +83,7 @@ mod blend;
 mod canvas;
 mod cheatsheet;
 mod chrome;
+mod clean_up_box;
 mod cleanup;
 mod colour_review;
 mod colour_text;

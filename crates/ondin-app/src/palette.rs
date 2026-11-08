@@ -750,6 +750,7 @@ impl OndinApp {
         push(&mut out, vision);
         push(&mut out, Cmd::verb(Item::ColourReview, None));
         push(&mut out, Cmd::verb(Item::BatchRename, None));
+        push(&mut out, Cmd::verb(Item::CleanUp, None));
         push(&mut out, Cmd::verb(Item::FindText, None));
         push(&mut out, Cmd::verb(Item::ReplaceText, None));
         // The cards the inspector drew last frame, then the ones it can draw for

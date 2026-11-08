@@ -380,6 +380,37 @@ fn deleting_a_frame_takes_its_guides_and_undoes() {
     assert!(doc.get(frame).is_some() && doc.guide(guide).is_some());
 }
 
+/// `clean_up` with no layers named cleans every page with the box's defaults, and
+/// a rule switched off by name is left.
+#[test]
+fn clean_up_takes_what_draws_nothing_and_obeys_its_switches() {
+    let (mut doc, mut ids, page) = blank();
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(100.0, 100.0) }),
+    )[0];
+    let empty = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": f.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "clean_up",
+        json!({ "empty_layers": false }),
+    );
+    assert!(doc.get(empty).is_some(), "switched off by name");
+    run(&mut doc, &mut ids, "clean_up", json!({}));
+    assert!(
+        doc.get(empty).is_none() && doc.get(f).is_none(),
+        "both drew nothing"
+    );
+}
+
 /// `duplicate` copies the outermost layers given, each copy one step above its
 /// original with a copy's name, moved by the offset; a child named beside its group
 /// is copied once, inside the group's copy.

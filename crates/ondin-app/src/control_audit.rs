@@ -1059,6 +1059,9 @@ fn sweep_on(theme: Theme) {
     let found = opened(&ctx, &mut app, |c, a| a.open_batch_rename(c, None));
     check("batch rename", app, found);
     let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| a.open_clean_up());
+    check("clean up", app, found);
+    let mut app = with_a_rect(&ctx);
     // Swept: its rows paint a ground under the pointer only.
     let (found, review_rows) = swept(&ctx, &mut app, |_, a| {
         // A colour a hair from the rect's fill, so a group shows unfolded.

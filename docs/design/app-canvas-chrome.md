@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, colour review, the cheatsheet, focus, private and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
-the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
+the command palette, the batch rename box, the clean up box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
 
@@ -297,8 +297,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   - the checks, which change nothing: *Check contrast* and *Simulate vision*, each toggling its
     mode (never remembered), then *Colour review…*, opening its card;
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
-    `Action::FindText { replace: false }`) and *Batch rename…* (`Ctrl+Shift+R`; dimmed with
-    `private::DECLINE_RENAME` in private mode).
+    `Action::FindText { replace: false }`), *Batch rename…* (`Ctrl+Shift+R`; dimmed with
+    `private::DECLINE_RENAME` in private mode) and *Clean up…* (no chord).
 
   Every row is a bare `ui::menu_row` (an empty glyph, never checked), its label at the row's own
   inset: nothing in the menu ticks, and a check that is on says so in its own bar over the canvas.
@@ -385,7 +385,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
-  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate vision*, *Colour review…*, tools, place image, zoom, align,
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate vision*, *Colour review…*, *Clean up…*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -571,6 +571,86 @@ worded for the scope that plan was made for (`Plan::scope`).
   nothing would change. Find with its *Aa* and *.\** (a pattern means nothing read as literal
   text), template, from, step, pad and order are kept in `prefs.batch_rename` when a rename runs;
   the Layers header's search opens Find as plain text with both switches off.
+
+## Clean up (`clean_up_box.rs`, `ondin_core::clean_up`)
+
+A box that takes away what a design no longer shows, in the selection, the page or every page, as
+one undo step. *Clean up* is also the path bar's card (`cleanup.rs`, `app-pen-and-nodes.md`): the
+same act at the scale of one path's points, so the two share the name and `MAGIC_WAND`. Opening
+the box closes that card, so the two never show together.
+
+### The rule (`clean_up::plan`)
+
+`plan(doc, res, scope, rules) -> Plan` is read-only. The rules run in `Rule::ALL`'s order on a clone
+of the document, each rule's transaction applied to the clone before the next looks, and their
+operations are concatenated into `Plan::tx`, valid against the original as one transaction (the
+simulate-don't-concatenate rule, `core-ops.md` §5.7a). So a shape that loses its last hidden fill
+is then empty, and a group that loses an empty sibling then holds one layer. A transaction the
+clone refuses is dropped with its rows, so the plan never carries one the document would refuse
+(a rule's whole transaction; one pass of empty layers; one group's ungroup). Every rule takes only what draws
+nothing or what draws exactly what replaces it; what it finds but would change a pixel by taking is
+a `Finding` with `kept: Some(Kept)` and its reason.
+
+| Rule | Takes | Lists as kept |
+| --- | --- | --- |
+| Hidden paint | hidden fills, strokes, effects and layout grids | a list a style supplies (*From a style*) |
+| Covered fills | fills under the topmost visible literal solid with alpha 1; a bound brush never covers | a style's list |
+| Hidden layers | a literal eye off with no visibility variable, outermost only, with what they hold | a subtree holding a main (*Main · N instances would detach*); state-paired (*Paired with a state*) |
+| Empty layers | a group or boolean with no children; a frame with no children and no visible fill, stroke or effect; a text with empty content; any other shape with no visible fill, stroke or effect; never a slice | a mask, an export, a main, a layer whose parent lays out (a spacer), state-paired |
+| One-layer groups | a `Group` with one child, literally visible, not a main or variant, ungrouped through `build::ungroup` | opacity ≠ 1 or bound, a blend other than the kind's default, any effects, a mask, an export, its own layout, a layout parent, state-paired |
+| Guides | *Selection*: guides owned by layers in scope; a page: guides owned by the page or a frame on it | all, as *Locked*, while the view's guides are locked and *Skip locked* is on |
+
+- **Skip locked** lists an effectively locked layer under whichever rule finds it, as *Locked ·
+  skipped*.
+- **Empty layers repeat** until nothing new empties; a layer inside a deleted empty one goes with it
+  and has no row of its own.
+- **One-layer groups rebuild `Resolved` from the clone** once an earlier rule took anything:
+  `build::ungroup` places through `Resolved`, and the caller's describes the original.
+- **State-paired** means in a variant of a set with interaction states, where a state may show,
+  hide or restructure the layer.
+- **Instances.** Nothing inside an instance is touched. An instance root's own paint is not edited,
+  and it is neither ungrouped nor deleted as empty; a hidden one goes whole.
+- **Defaults** (`Rules::default`): *Hidden layers* and *Guides* off, since people hide a layer or
+  place a guide on purpose; the rest on; *Skip locked* on.
+- **Items**: one per fill, stroke, effect or grid, one per layer, group or guide; a kept row counts
+  zero. `Plan::layers` counts the distinct layers that lose something; guides are not layers.
+- **The verb** `clean_up(nodes?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?,
+  one_layer_groups?, guides?, skip_locked?)` runs the same plan, over every non-draft page when no
+  nodes are given, each switch at its default unless given. It has no view, so it never keeps a
+  guide as locked. It is an MCP Phase 2 tool (`mcp.md` §8.4).
+
+### The box
+
+- **Built as batch rename's**: `settings::canvas_card`, 520 wide, `CardHold::Modal` (a clear
+  backdrop). Opening it closes the palette, the context menu, the top-bar menu and the colour
+  picker. Enter or the commit button cleans up; Escape, *Cancel*, ✕ or a click outside closes it.
+  It counts in `modal_is_up` and is drawn outside the `!focus` guard.
+- **Head and scope.** `card_head` *Clean up*. The *In* row is batch rename's `scope_segments`,
+  opening on *Selection* (the selection at open) when something is selected, else on *This page*.
+  *All pages* leaves drafts out but keeps the current page.
+- **Remove**: the six rules as `ui::switch_row_noted`, two to a line (left *Hidden paint*, *Covered
+  fills*, *One-layer groups*; right *Hidden layers*, *Empty layers*, *Guides*), each noted with its
+  count from a second plan with every switch on, so an off switch still says what it would take;
+  `Rule::hint` is its tooltip. Then *Skip locked layers*.
+- **Planning** is synchronous, and only when the scope or a switch changes: the document cannot
+  change while the box is up.
+- **Preview**: the eyebrow *Preview* and *N items on M layers*, with *· K kept* when amber rows
+  show. Rows are grouped by rule in `Rule::ALL` order, each under a heading row with the rule's
+  item count; a group lists three rows, then *N more*, which opens the rest in place. Rows are
+  `ui::MENU_ROW_H` and the list scrolls past twelve. A row shows the layer's glyph, *Parent / Name*
+  (masked in private mode) and what it loses, or the kept reason in amber; a guide row reads
+  *Horizontal guide · 120*. Hovering a row rings its layer on the canvas, a heading its group's at
+  a hairline (`canvas::draw_panel_hover`); a row on another page rings nothing and its tooltip
+  names the page (*On ‹page›*).
+- **Empty**: *Nothing to clean up in the selection / on this page / on any page*, then, when a
+  switched-off rule would find something, *Turned off: Hidden layers 3 · Guides 2*.
+- **Foot**: `card_foot` with *Enter clean up · Esc cancel*, *Cancel* and *Clean up N items*; with
+  nothing to take the button reads *Clean up*, dimmed, its tooltip *Nothing to clean up*.
+- **Commit**: one undo step *Clean up* with `MAGIC_WAND`; the status line says *Cleaned up N items ·
+  Ctrl+Z to undo*; the selection keeps only what still exists. The switches are saved to
+  `prefs.clean_up` (`CleanUpPrefs { on: rule keys, skip_locked }`) when it runs.
+- **Doors.** *Tools ▸ Clean up…* (after *Batch rename…*) and the palette (`Item::CleanUp`, aliases
+  *tidy*, *unused*, *hidden*, *empty*); `Action::CleanUp` has no chord.
 
 ## Find and replace (`find.rs`)
 

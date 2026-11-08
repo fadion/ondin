@@ -16,21 +16,10 @@ item's premise can go stale while its ask still reads true.
   text layers, a different value per layer, from tables shipped with the app (works offline, a few
   locales). Avatars are generated (initials, patterns); photos come from the assets browser. Its
   door is a Tools menu bulk-edit row, *Fill with content…*.
-- **Clean up…** — a card over the selection, or the page with none, one switch per rule (kept in
-  prefs), a preview grouped by rule as batch rename's is, and one undo step; a Tools menu bulk-edit
-  row. A core verb, so MCP and Command Mode reach it. Rules:
-  - delete hidden fills, strokes, effects and layout grids, and fills under a visible, fully opaque
-    normal-blend solid; never in a list a style supplies;
-  - delete hidden layers and empty ones (no children, no visible paint), but not a slice, a layer
-    with an Export, an empty layer in a layout parent (a spacer), or a layer a component state
-    pairs with; a hidden main is listed, not deleted, since deleting it detaches its instances;
-  - ungroup one-child groups, skipping one with opacity, a blend mode, effects, a mask or an Export;
-  - remove guides in scope;
-  - skip locked layers (a switch, on by default); nothing inside an instance is touched, only a whole
-    instance goes.
-  Renaming stays in batch rename, which gains a `[Text]` token (a text layer's content) and a
-  default-names-only filter. The styles browser gains an unused filter and *Delete unused* over the
-  document's own styles.
+- **Tidying names and styles** — the renaming and style pruning *Clean up…* leaves to their own
+  surfaces. Batch rename gains a `[Text]` token (a text layer's content) and a filter that takes
+  only layers still wearing a default name. The styles browser gains an unused filter and *Delete
+  unused* over the document's own styles.
 
 ## Now · Components and layout
 

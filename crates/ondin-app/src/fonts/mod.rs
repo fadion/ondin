@@ -336,6 +336,8 @@ enum FaceFailure {
 struct SystemScan {
     db: fontdb::Database,
     families: BTreeSet<String>,
+    /// [`alias_families`]: the faces' other names.
+    aliases: BTreeSet<String>,
 }
 
 /// What the app can honestly say about one family (§15 D227).
@@ -479,6 +481,9 @@ pub struct FontService {
     /// System font database — `None` until the background scan lands.
     db: Option<fontdb::Database>,
     system: BTreeSet<String>,
+    /// Installed faces' other names (a localized `微软雅黑` beside `Microsoft
+    /// YaHei`): never listed, but a document naming one draws in its files.
+    system_aliases: BTreeSet<String>,
     /// Web-font catalog by family name (empty until the catalog lands).
     catalog: HashMap<String, CatalogEntry>,
     /// Sorted, de-duplicated family names for the picker (Inter + system + web).
@@ -640,6 +645,7 @@ impl FontService {
         Self {
             db: None,
             system: BTreeSet::new(),
+            system_aliases: BTreeSet::new(),
             catalog: HashMap::new(),
             families: vec!["Inter".to_string()],
             keys: vec!["inter".to_string()],
@@ -693,6 +699,7 @@ impl FontService {
         Self {
             db: None,
             system: BTreeSet::new(),
+            system_aliases: BTreeSet::new(),
             catalog: HashMap::new(),
             families: vec!["Inter".to_string()],
             keys: vec!["inter".to_string()],
@@ -895,7 +902,7 @@ impl FontService {
     /// it has in its own files.
     fn ensure_subsets(&mut self, family: &str) {
         let family = self.spelled(family);
-        if !self.web_fonts || self.system.contains(&family) || bundled(&family) {
+        if !self.web_fonts || self.installed(&family) || bundled(&family) {
             return;
         }
         let Some(entry) = self.catalog.get(&family).cloned() else {
@@ -925,7 +932,10 @@ impl FontService {
     fn ensure_stand_in(&mut self, family: &str) {
         let family = self.spelled(family);
         let settled = self.system_rx.is_none() && self.catalog_done;
-        if !settled || self.families.binary_search(&family).is_ok() {
+        if !settled
+            || self.families.binary_search(&family).is_ok()
+            || self.system_aliases.contains(&family)
+        {
             return;
         }
         let Some(stand_in) = self.stand_in_for(&family) else {
@@ -980,8 +990,9 @@ impl FontService {
     fn land_rescan(&mut self, scan: SystemScan, out: &mut FontPoll) {
         // The new database either way: a re-installed file may have moved.
         self.db = Some(scan.db);
-        if scan.families != self.system {
+        if scan.families != self.system || scan.aliases != self.system_aliases {
             self.system = scan.families;
+            self.system_aliases = scan.aliases;
             self.rebuild_families();
             out.families_changed = true;
         }
@@ -1057,7 +1068,8 @@ impl FontService {
             // The scan's receiver is taken when it lands, so `None` *is* "landed".
             sources_settled: self.system_rx.is_none() && self.catalog_done,
             // `families` is sorted, so this costs no `fontdb` query per frame.
-            listed: self.families.binary_search(family).is_ok(),
+            listed: self.families.binary_search(family).is_ok()
+                || self.system_aliases.contains(family),
             // A family whose italic failed and whose upright arrived is not missing.
             tried_and_failed: state.is_some_and(|s| s.failed > 0 && s.faces.is_empty()),
         })
@@ -1243,6 +1255,11 @@ impl FontService {
         }
     }
 
+    /// Whether `family` is installed, by its listed name or another of its faces'.
+    fn installed(&self, family: &str) -> bool {
+        self.system.contains(family) || self.system_aliases.contains(family)
+    }
+
     /// The files that make up `family`, **primary face first**.
     fn faces_of(&self, family: &str, want: Want) -> Vec<FaceSpec> {
         // System fonts win over the catalog, matching §5.4a's resolution order:
@@ -1251,6 +1268,21 @@ impl FontService {
             && self.system.contains(family)
         {
             return system_faces(db, family, want);
+        }
+        // Another name of an installed face: its files registered under that name,
+        // which the engine would otherwise not know them by, keyed apart from the
+        // same files under their listed name.
+        if let Some(db) = &self.db
+            && self.system_aliases.contains(family)
+        {
+            return system_faces(db, family, want)
+                .into_iter()
+                .map(|f| FaceSpec {
+                    key: format!("{}#{family}", f.key),
+                    alias: true,
+                    ..f
+                })
+                .collect();
         }
         // The switch is enforced here, not only in the family list: a document saved
         // with web fonts on can name a family without going through the picker.
@@ -1279,6 +1311,7 @@ impl FontService {
             && let Ok(scan) = rx.try_recv()
         {
             self.system = scan.families;
+            self.system_aliases = scan.aliases;
             self.db = Some(scan.db);
             self.system_rx = None;
             self.rebuild_families();
@@ -1516,11 +1549,21 @@ fn families_over_budget(
 
 /// The families the picker lists: one name per face, the first, which `fontdb`
 /// sets to the English one. A face also carries its name in other languages
-/// (macOS's system font has dozens), and each would be a row of its own;
-/// [`system_faces`] still finds a face by any of them.
+/// (macOS's system font has dozens), and each would be a row of its own; those
+/// are [`alias_families`].
 fn listed_families(db: &fontdb::Database) -> BTreeSet<String> {
     db.faces()
         .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect()
+}
+
+/// Every name of a face past its first that no face lists as its first: what a
+/// document may still name a family by (v0.12.0's picker offered them as rows).
+fn alias_families(db: &fontdb::Database, listed: &BTreeSet<String>) -> BTreeSet<String> {
+    db.faces()
+        .flat_map(|face| face.families.iter().skip(1).map(|(name, _)| name))
+        .filter(|name| !listed.contains(*name))
+        .cloned()
         .collect()
 }
 
@@ -1533,7 +1576,15 @@ fn spawn_system_scan(ctx: &egui::Context) -> Receiver<SystemScan> {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
         let families = listed_families(&db);
-        if tx.send(SystemScan { db, families }).is_ok() {
+        let aliases = alias_families(&db, &families);
+        if tx
+            .send(SystemScan {
+                db,
+                families,
+                aliases,
+            })
+            .is_ok()
+        {
             ctx.request_repaint();
         }
     });
@@ -3054,7 +3105,56 @@ mod tests {
         .expect("the bundled icon font is in the tree");
         let name = db.faces().next().expect("one face").families[0].0.clone();
         let families = [name.clone()].into_iter().collect();
-        (SystemScan { db, families }, name)
+        let scan = SystemScan {
+            db,
+            families,
+            aliases: BTreeSet::new(),
+        };
+        (scan, name)
+    }
+
+    /// A document naming an installed face by its other name (a localized one)
+    /// draws in its files, registered under that name, while the picker still
+    /// lists the face once.
+    /// flip: `faces_of` without its alias branch → fails at "the alias's files".
+    #[test]
+    fn a_face_named_by_its_other_name_loads_under_it() {
+        let path = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/OndinIcons.ttf"
+        ));
+        let mut db = fontdb::Database::new();
+        db.push_face_info(fontdb::FaceInfo {
+            id: fontdb::ID::dummy(),
+            source: fontdb::Source::File(path),
+            index: 0,
+            families: vec![
+                ("Ondin Icons".into(), fontdb::Language::English_UnitedStates),
+                ("オンディン".into(), fontdb::Language::Japanese_Japan),
+            ],
+            post_script_name: String::new(),
+            style: fontdb::Style::Normal,
+            weight: fontdb::Weight::NORMAL,
+            stretch: fontdb::Stretch::Normal,
+            monospaced: false,
+        });
+        let mut service = FontService::inert();
+        service.system = listed_families(&db);
+        service.system_aliases = alias_families(&db, &service.system);
+        service.db = Some(db);
+        service.rebuild_families();
+        assert_eq!(service.families, ["Inter", "Ondin Icons"], "one row");
+        let specs = service.faces_of("オンディン", Want::Full);
+        assert_eq!(specs.len(), 1, "the alias's files");
+        assert!(
+            specs[0].alias,
+            "registered under the name the document uses"
+        );
+        assert_ne!(
+            specs[0].key,
+            service.faces_of("Ondin Icons", Want::Full)[0].key,
+            "keyed apart from the listed name's"
+        );
     }
 
     /// A family asked for in another case loads the installed one —

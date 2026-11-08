@@ -1,7 +1,7 @@
 # Inspector cards
 
 The inspector's cards for v1 tools: Transform (single and multi), Position, Item and Container,
-the frame cards, Effects, Export, Appearance, Fill and Stroke with their mixed states, Group
+the frame cards, Effects, Credit, Export, Appearance, Fill and Stroke with their mixed states, Group
 Colors and Missing fonts. The Type card is in `type-panel.md`.
 
 ## 9.4 v1 tools — inspector
@@ -9,7 +9,7 @@ Colors and Missing fonts. The Type card is in `type-panel.md`.
 ### Card order and composition
 
 - **Nothing selected:** the current page — a page card in the identity card's place (`page_header`: the page's name, renamed here as in the Pages section; *Page n of m*; its mode rows (`styles-variables.md`, *Frame mode rows*); the *Draft* switch; no eye or lock, a page not being a layer), then its Appearance card (the page's ground as drawn, the theme's canvas for a page with no colour of its own; picking writes `SetPageGround { ground: Some(..) }`, and the reset clears the page's own colour with `ground: None`, dead while it has none), then *Missing fonts* while the document has any.
-- **Single layer:** identity, *Frame templates* (frames only), Align, Transform, Position, Item, Container, *Layout grid*, Appearance, Type (text), Fill, Stroke, Effects, Export.
+- **Single layer:** identity, *Frame templates* (frames only), Align, Transform, Position, Item, Container, *Layout grid*, Appearance, Type (text), Fill, Stroke, Effects, *Credit* (only on a layer carrying one), Export.
   - A group's or a frame's identity card carries a row under the boolean row: *Resize to fit content* (`build::fit_frame`) at its end, and a dropdown filling the rest. The button moves the frame to its children's union and gives it that size, every child left where it is drawn (a pinned child's insets re-derived by the commit's `keep_insets`; a slice lends no bounds). It is disabled, with the reason, on a group (which always fits), on a frame with a layout (which sizes itself through `fit-content`, so fitting it is a layout edit), on an empty frame and on one that already fits.
   - The dropdown, *Frame* / *Group*, shows the container's kind and turns one into the other (`identity_kind_row`, `OndinApp::convert_container`, `build::convert_container`): the new container takes the old one's slot, name and every layer setting both kinds hold (layout-item settings, insets, pivot, bindings, blend, effects, exports, mask), the children keep their ids and places, a group becomes a frame of its own box (masked runs cut to their mask, slices left out) with no fill and no clip, and a frame's own fills move onto a *Background* rectangle under its children and its strokes onto a *Border* rectangle over them, the order a frame paints in, its clip and layout dropped. A main, a layer in a main, an instance and a component set are refused, since their copies link to the node a conversion replaces; so are an empty group, an empty unpainted frame, a frame that sets a variable mode (only a frame may, and dropping it would recolour what it holds), a mask group and a group inside a boolean or a mask (`build::convert_container_refusal`), the dropdown disabled with the reason.
   - A slice is a box and what it exports, so it shows identity, Transform (position and W/H; `edit::resizable_size` counts it a sized kind) and Export, nothing else.
@@ -178,6 +178,10 @@ comes from the committed document.
 - Opens on a layer with effects and shuts on one without, through its own `synced_selection` *Effects* entry.
 - **Multi-selection.** Export's shape: one agreed stack, or *"These layers have different effects"*, where `+` replaces every stack. The `Effect(i)` write reads each subject's own list rather than cloning the anchor's, because the detached picker can outlive an agreeing state.
 - **Rows drag-reorder** as fills and strokes do (`paint::EffectDrag`). Order changes pixels only between `Filters` and `LayerBlur`, and between two shadows on the same side.
+
+### Credit (§5.3)
+
+- On a single layer carrying a credit (`panels/credit.rs`, `inspector_credit`), read-only: the sentence, the author's and provider's names in it as links where they have an address (hover names the host; a click goes through `open_doc_link`), then a caption, the licence and *inserted 8 Nov 2026*. The head's `⋯` opens *Copy credit* (`Credit::plain`) and *Open photo page*, *Open the set's page* for an icon, disabled without an address.
 
 ### Export (§7)
 

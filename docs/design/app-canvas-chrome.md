@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, fill with content, find and replace, colour review, the cheatsheet, focus, private and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, fill with content, the assets browser, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
-the command palette, the batch rename box, the clean up box, the fill with content box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
+the command palette, the batch rename box, the clean up box, the fill with content box, the assets browser and credits, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
 
@@ -362,8 +362,12 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   `app-rulers-guides.md`, `prefs::CanvasPrefs`), *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
   its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a, and *Check spelling*), the web-font switch and
-  cache row. `Ctrl+,` opens it (and only opens:
+  cache row, then **Assets** (*Assets browser*, below). `Ctrl+,` opens it (and only opens:
   `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
+- The sections scroll between the title and the footer once the card would be taller than the
+  window, with no bar. The scroll area takes the sections' height as last measured, capped by the
+  window, as `min_scrolled_height`: an `Area` hands a scroll area last frame's size, so a
+  `max_height` alone shrinks and never grows back. No test pins it.
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export
   popover, written on the spot).
 - There is no *Share* button (local file editor; nothing to share).
@@ -387,11 +391,11 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
   yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate vision*, *Colour review…*, *Clean up…*, tools, place image, zoom, align,
-  distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
+  distribute, insert, the assets browser, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
   chord are one verb; `Item::aliases` holds the extra words. `palette_commands` chooses which verbs
-  are offered; their words live in the registry. The Document menu's rows (*Make this a kit*,
+  are offered; their words live in the registry. The Document menu's rows (*Credits…*, *Make this a kit*,
   *Kits used…*, *Stop sharing as kit…*, *Show in library*) are registry items the menu draws its
   labels from, offered always and dimmed with a reason where the menu would leave them out (their
   `Action`s re-ask the menu's guards); the Transform card's quarter turns are
@@ -838,6 +842,75 @@ ImageSink>)` is the edit.
   same reason); the text layers' context menu, after the sizing rows. `Action::FillContent` has no
   chord. `DICE` means drawing new values (*Shuffle*, *Draw another*); `FILL_CONTENT`, lines of text
   with a small die, is the act and its undo step.
+
+## Assets browser (`assets/`, `panels/credit.rs`)
+
+Open-source icons and stock photos, inserted with their credit (`Node::credit`, §5.3).
+
+- **Providers.** Icon sets (`sets::SETS`): Phosphor, Lucide, Tabler, Material Symbols, Heroicons
+  and Font Awesome Free, each an Iconify JSON package pinned to one version, fetched whole from
+  jsDelivr the first time it is needed and kept under `machine_dir::root_or_temp()/assets`, so it
+  works offline after (written beside and renamed; a package that will not read is deleted and
+  fetched again). A set's variants are name suffixes inside a package, the longest that fits
+  winning, or a second package (Font Awesome's Solid and Regular). Iconify has no tags, so search
+  ranks the name, then aliases. Photo services (`photos::SERVICES`): Unsplash and Pexels, each with
+  the user's own key, and Openverse with none, searched only for licences allowing commercial use
+  and modification. Every request runs on the module's workers, with the font service's deadlines;
+  thumbnails are kept for the session only. Nothing is on by default, and nothing reaches the
+  network until a set or service is switched on.
+- **Keys** live in the system keychain (`keychain::read_account`, `store_account`,
+  `forget_account`; account `<service>-key`, the Figma token's `figma-token` beside them), read and
+  written on workers, and sent only in their own service's `Authorization` header. Unsplash's links
+  carry its referral `utm_` parameters, and each Unsplash download is reported to its
+  `download_location` when the photo is fetched for an insert, never for a preview.
+- **The panel** (`panel.rs`) floats beside the toolbar in the insert picker's 340-wide frame,
+  bottom-aligned with its rail button (`icon::ASSETS`, between the hexagon and the swatches) and
+  wearing `ui::card_frame`. It is one of three panels in that place, with the insert picker and the
+  styles browser; opening one closes the others. Doors: the rail button and *Assets…* in the
+  palette; no chord. `Escape` closes it, on the insert picker's rung. *Icons* · *Photos* on
+  `ui::segmented`, then `ui::search_box`, which takes the keyboard on opening.
+  - *Icons*: a set dropdown (*All sets* or one) with the set's variant dropdown and a size field
+    defaulting to the set's grid (a grid over 64 units, Phosphor's 256, draws at 24); a grid six
+    tiles across, 44 tall, 120 shown and more as the end scrolls into view; a set still downloading
+    shows its progress row.
+  - *Photos*: service and orientation dropdowns, then two columns at each photo's aspect, the next
+    page asked for when the end scrolls into view. A search goes out once typing rests 0.4 s, or
+    at once on `Enter`.
+  - The foot caption names the set or service and its licence, and the count. A tile resting 0.5 s
+    shows the insert picker's hover card beside the panel: an icon's name, set, variant, size,
+    *Also:* its aliases and licence; a photo's title, credit sentence and the size and licence it
+    comes in at; then what a click and a drag do.
+  - Empty states (`ui::empty_state`) say what to do: no set or service on, a keyed service without
+    its key, a key refused, the hourly limit, an unreachable set or service (`icon::WIFI_SLASH`,
+    *Try again*); the first three offer *Open settings*.
+- **Inserting.** A click places at the view's centre and selects it; a drag drops at the pointer.
+  The parent is the frame under that point (`draw_target`, through `place_svg` for an icon and
+  `image_tx` for a photo); a flex frame's gap is not chosen. An icon is the SVG importer's group
+  named after the icon, `size` points across, its `currentColor` written black, the ink of a new
+  text layer. A photo is fetched at Settings' *Photo size* (Openverse serves only the original) and
+  embedded. With unlocked shapes or frames selected (not text, a line or a spiral), a photo's
+  click fills them instead (the picture fill or top fill replaced, else a new fill), each a
+  different photo in grid order from the one clicked; a strip says
+  *Click fills Hero image*, and `Alt`-click places. Every insert is one undo step carrying its
+  credit: *Insert icon*, *Insert photo*, *Fill with photo*. The status says *Placed Arrow right ·
+  Ctrl+Z to undo*, or *Filled Hero image · Photo by … · Ctrl+Z to undo*. A fetched photo lands
+  when no gesture is live and no modal is up, even with the panel closed.
+- **Settings ▸ Assets**, after the web fonts: a caption, then *Icon sets* and *Photos*, a
+  `ui::switch_row_noted` per set or service noted with its licence or what it needs; under a keyed
+  service that is on, its key in `ui::secret_field` and a caption saying where a key is made and
+  that it goes to that service only; *Photo size* (*Small · 400 px*, *Regular · 1080 px*, *Full
+  size*); and the asset cache row with *Clear*, the web-font row's twin, which empties at once as
+  that one does. The rest is staged until *Save changes*; a key field left empty forgets its key.
+- **Credits…** (`icon::QUOTES`; the Document menu and the palette, offered while any layer carries
+  a credit, else disabled with *This document has no credits*) opens a `settings::canvas_card`
+  listing every page's credits whose licence asks
+  for them (`Credit::required`), photos first: a photo a line, an icon set's one sentence a line
+  for all its layers, each naming its layer (masked in private mode) or counting them. A row's
+  click selects its layers, going to their page when none is on this one. *Copy all* puts one plain line per credit on the
+  clipboard. When any credit is left out, a note says MIT, ISC and Apache icons and public-domain
+  photos ask for no credit and are not listed; with none listed the card reads *Nothing here asks
+  to be credited*. The
+  inspector's *Credit* card is in `inspector.md`.
 
 ## Find and replace (`find.rs`)
 

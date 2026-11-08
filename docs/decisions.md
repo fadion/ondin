@@ -30,6 +30,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D301** Image data is `Arc<[u8]>`, so commits and undo never deep-copy pictures. **D600** Exactly PNG, JPEG, WebP and GIF are accepted, enforced by a magic-byte predicate (`images::signature_is_accepted`), not by Cargo features.
 - **D358** There is one unit, px. Density is the export scale.
 - **D868** Specified and used values are two numbers. Used boxes are derived in `Resolved` and never saved.
+- **An inserted icon or photo carries its credit on its layer** (`Node::credit`): written once by the insert, never edited or drawn, kept by every copy and by an ungroup, dropped when a photo's picture is replaced. Exports write it once per file (SVG metadata, a comment atop code export's page), not per element.
 
 ## Operations and the commit
 
@@ -96,6 +97,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Bold and italic are the family's own faces or axes; nothing is synthesized.** No faux bold or oblique is drawn, so `Ctrl+B`/`Ctrl+I` refuse a family with nothing that way rather than write a flag that would draw unchanged (`text::bold_step`, `italic_step`).
 - **D83** The Google Fonts catalog is fetched online and disk-cached, not shipped with the build.
 - **D330/D720** *Load web fonts* is one switch, and off means no request leaves the machine.
+- **The assets browser's icon sets are pinned Iconify packages, fetched whole once and cached per machine**, so they work offline; photos are searched online with the user's own keys, kept in the system keychain and sent only to their own service. Nothing reaches the network until a set or service is switched on in Settings.
 
 ## Rendering and export
 

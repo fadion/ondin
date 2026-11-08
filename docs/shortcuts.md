@@ -606,7 +606,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 | Key | Action | |
 |---|---|---|
-| `Shift+S` | open the styles and variables browser | ✅ `Action::VariablesBrowser` (`plain && m.shift && S`, §15 D1040), beside `Shift+I`: both panels swap in place at the foot of the vertical toolbar, one at a time; also toggled by the rail's swatches button. Free: §1's `S` is read with no Shift; `Alt+S` and `Ctrl+Alt+S` need Alt; `Ctrl+Shift+S` is inert. `shift_s_opens_the_variables_browser_and_leaves_s_alone`. ⚠️ `Shift+I`'s caveat holds: right after opening, the chord types a capital *S* in the search |
+| `Shift+S` | open the styles and variables browser | ✅ `Action::VariablesBrowser` (`plain && m.shift && S`, §15 D1040), beside `Shift+I`: it, the insert picker and the assets browser (no chord) swap in place at the foot of the vertical toolbar, one at a time; also toggled by the rail's swatches button. Free: §1's `S` is read with no Shift; `Alt+S` and `Ctrl+Alt+S` need Alt; `Ctrl+Shift+S` is inert. `shift_s_opens_the_variables_browser_and_leaves_s_alone`. ⚠️ `Shift+I`'s caveat holds: right after opening, the chord types a capital *S* in the search |
 
 ---
 

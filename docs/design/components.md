@@ -882,3 +882,5 @@ never raw fields) on every instance of the main.
   `open_doc_link` re-checks before the browser. Each looks redundant; `InsertSubtree` does not look at
   `doc_link`, so the last check is what keeps a non-web address that arrives another way from being
   opened. `a_doc_link_is_a_web_address_kept_on_its_main` pins the first two; nothing pins the third.
+  A credit's addresses (§5.3) take the same three: `SetCredit` refuses, the loader empties
+  (`Credit::normalized`), and the Credit card opens them through `open_doc_link`.

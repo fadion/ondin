@@ -41,6 +41,8 @@ Part of §9.4.
   missing picture) and *Replace and reset* (framing fields to defaults, adjustments kept). Both decline
   for a selection slot and run after the `Area` closure (the dialog is modal); the card stays behind
   the dialog. Linked-source entries (*Embed/Link*, *Relink…*) are not built — no linking is authored.
+  A replacement drops the layer's photo credit (`credit::dropped_by_replace`, in `replace_image_with`),
+  since the photo it credited is gone; an icon's credit stays.
 - **Mirror** eyebrow over two `ui::label_button`s, *Horizontal* and *Vertical* — actions, never lit;
   words, since on a symmetric shape the two flips look the same. No quarter turn here.
 - **Scale** (`icon::RESIZE`) and **Tile** (`icon::IMAGE_TILE`) half-width fields, percent of source

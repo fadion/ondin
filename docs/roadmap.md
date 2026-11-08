@@ -1,17 +1,10 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: the editor's remaining
-gaps, components and layout, and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+Open work only. **Now** is the work that lands before Command Mode and MCP: components and
+layout, and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
-
-## Now · Editor additions
-
-- **An assets browser** — open-source icon sets and stock photos in one browser, the providers
-  picked in Settings, an API key where one is needed given there by the user. Icons insert as SVG
-  through the importer; a photo embeds. A provider's licence travels with what it inserted: a
-  CC BY icon set's attribution, a photo's photographer credit and download report.
 
 ## Now · Components and layout
 

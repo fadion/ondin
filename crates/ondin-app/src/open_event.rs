@@ -169,4 +169,35 @@ mod tests {
             [PathBuf::from("/tmp/c.ondin")]
         );
     }
+
+    /// A file the OS asks to open while a modal is up waits in the queue, and
+    /// opens on the first frame without one.
+    ///
+    /// flip: the frame taking the queue before its modal check → fails at "still
+    /// queued".
+    #[test]
+    fn a_finder_open_waits_out_a_modal() {
+        let dir = std::env::temp_dir().join("ondin-open-event-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("held.ondin");
+        let mut ids = ondin_core::IdSource::new(7);
+        let doc = ondin_core::Document::new(ids.mint());
+        crate::library::store::write_document(&path, &doc).unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        app.confirming_close = true;
+        pending().push(path.clone());
+        for _ in 0..3 {
+            let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(*pending(), [path.clone()], "still queued");
+        assert_ne!(app.session.path.as_deref(), Some(path.as_path()));
+
+        app.confirming_close = false;
+        let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        assert!(pending().is_empty(), "taken");
+        assert_eq!(app.session.path.as_deref(), Some(path.as_path()), "and opened");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

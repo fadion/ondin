@@ -605,3 +605,297 @@ fn an_instance_is_left_alone() {
         "the fixture: the main itself has things to take"
     );
 }
+
+impl Fixture {
+    /// The plan applied with everything the components owe it, as the app's
+    /// commit does, so a main's edit reaches its instances.
+    fn run_owed(&mut self, rules: &Rules) -> Plan {
+        let p = self.plan(rules);
+        let mut tx = p.tx.clone();
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
+        self.doc
+            .apply(&tx)
+            .expect("the plan and what it owes apply");
+        p
+    }
+
+    /// A second page, empty.
+    fn page(&mut self) -> NodeId {
+        let id = self.ids.mint();
+        self.commit(vec![Operation::AddPage {
+            id,
+            index: 1,
+            name: "Other".into(),
+            ground: None,
+            draft: false,
+            modes: Vec::new(),
+        }]);
+        id
+    }
+
+    /// The layer each of `script`'s steps made, if one, run in this document.
+    fn script(&mut self, script: serde_json::Value) -> Vec<Option<NodeId>> {
+        ondin_core::verbs::run_script(
+            &mut self.doc,
+            &mut self.ids,
+            ondin_core::verbs::Lent::default(),
+            &script,
+        )
+        .unwrap_or_else(|e| panic!("{e}"))
+        .iter()
+        .map(|made| made.first().and_then(|w| NodeId::from_wire(w)))
+        .collect()
+    }
+}
+
+/// A text draws while it has content or a binding: one bound to a string
+/// variable (its literal empty), one with no fill (drawn black) and one whose
+/// only fill is hidden all stay at the defaults; an empty unbound text goes.
+/// flip: `Run::emptiness` reading only the literal content, or sending a text
+/// with content to the paint test → fails at that text's survival.
+#[test]
+fn a_text_with_content_or_a_binding_is_not_empty() {
+    use serde_json::json;
+    let mut f = Fixture::new();
+    let frame = f.frame.to_wire();
+    let hi = serde_json::to_value(ondin_core::Cell::String("Hi there".into())).unwrap();
+    let made = f.script(json!([
+        { "verb": "add_variable", "args": { "kind": "string", "name": "greeting", "value": hi }, "as": "v" },
+        { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "bound" },
+        { "verb": "bind_variable", "args": { "nodes": ["@bound"], "field": "content", "variable": "@v" } },
+        { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "bare" },
+        { "verb": "set_fills", "args": { "node": "@bare", "fills": [] } },
+        { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "dark" },
+        { "verb": "create_text", "args": { "parent": frame, "text": "Gone" }, "as": "empty" },
+    ]));
+    let [bound, bare, dark, empty] = [1, 3, 5, 6].map(|i| made[i].expect("a text"));
+    let fills = keyed_by_position([Fill {
+        brush: Brush::Solid(BLUE).into(),
+        visible: false,
+    }]);
+    let NodeKind::Text { content, .. } = f.doc.get(bound).unwrap().kind() else {
+        unreachable!()
+    };
+    assert!(content.is_empty(), "the fixture: a bound literal is empty");
+    let NodeKind::Text { content, .. } = f.doc.get(empty).unwrap().kind().clone() else {
+        unreachable!()
+    };
+    f.commit(vec![
+        Operation::SetFills { id: dark, fills },
+        Operation::SetText {
+            id: empty,
+            content: String::new(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        },
+    ]);
+    assert_eq!(content, "Gone");
+
+    let p = f.run(&Rules::default());
+    for id in [bound, bare, dark] {
+        assert!(
+            f.doc.contains(id),
+            "{id:?} draws and stays: {:?}",
+            p.findings
+        );
+    }
+    assert!(!f.doc.contains(empty), "an empty unbound text goes");
+}
+
+/// A boolean's operands draw their outline into it whatever their own paint, so
+/// unpainted operands are not empty and the boolean stays.
+/// flip: drop the boolean-ancestor arm of `Run::emptiness` → fails at "the
+/// operands stay".
+#[test]
+fn a_booleans_unpainted_operands_stay() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let a = f.add(frame, rect());
+    let b = f.add(frame, rect());
+    let (tx, boolean) = build::boolean(
+        &f.doc,
+        &Resolved::rebuild(&f.doc),
+        &mut f.ids,
+        &[a, b],
+        ondin_core::BoolOp::Subtract,
+        None,
+    )
+    .unwrap();
+    f.doc.apply(&tx).unwrap();
+    f.commit(vec![Operation::SetFills {
+        id: boolean,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(RED).into(),
+            visible: true,
+        }]),
+    }]);
+    f.run(&Rules::default());
+    assert!(f.doc.contains(a) && f.doc.contains(b), "the operands stay");
+    assert!(f.doc.contains(boolean));
+}
+
+/// An empty layer in a group in an auto layout is a spacer: the group's box is
+/// its layers', so taking it would move the group's siblings.
+/// flip: `Run::in_layout` asking only the direct parent → fails at the kept
+/// reason.
+#[test]
+fn an_empty_layer_in_a_group_in_an_auto_layout_is_kept() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    f.painted(frame, &[(RED, true)]);
+    let blank = f.add(frame, rect());
+    let g = f.group(&[blank]);
+    let after = f.painted(frame, &[(RED, true)]);
+    f.commit(vec![Operation::SetDisplay {
+        id: frame,
+        display: flex(),
+    }]);
+    let x0 = |f: &Fixture| Resolved::rebuild(&f.doc).world_bounds(after).unwrap().x0;
+    let before = x0(&f);
+    let p = f.run(&Rules::default());
+    assert_eq!(kept(&p, Rule::EmptyLayers, blank), Some(Kept::Spacer));
+    assert!(f.doc.contains(blank) && f.doc.contains(g));
+    assert_eq!(x0(&f), before, "the next sibling stays where it was");
+}
+
+/// A group whose only layer is a mask stays a group: ungrouped, the mask would
+/// clip the layers above the group in its parent.
+/// flip: drop the lone-mask arm of `Run::group_kept` → fails at the kept reason.
+#[test]
+fn a_group_holding_only_a_mask_is_kept() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let mask = f.painted(frame, &[(RED, true)]);
+    let blank = f.add(frame, rect());
+    let g = f.group(&[mask, blank]);
+    let above = f.painted(frame, &[(BLUE, true)]);
+    f.commit(vec![Operation::SetMask {
+        id: mask,
+        mask: true,
+    }]);
+    let p = f.run(&Rules::default());
+    assert!(!f.doc.contains(blank), "the fixture: the empty layer goes");
+    assert_eq!(kept(&p, Rule::OneLayerGroups, g), Some(Kept::Mask));
+    assert_eq!(f.doc.get(frame).unwrap().children(), [g, above]);
+}
+
+/// *Hidden layers* keeps a hidden layer with an export, or one holding such a
+/// layer, since *Export all* still writes it.
+/// flip: drop the export arm of `Run::hidden_layers` → fails at the kept reason.
+#[test]
+fn a_hidden_layer_with_an_export_is_kept() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let own = f.painted(frame, &[(RED, true)]);
+    let inner = f.painted(frame, &[(RED, true)]);
+    let other = f.painted(frame, &[(RED, true)]);
+    let holder = f.group(&[inner, other]);
+    f.commit(vec![
+        Operation::SetExports {
+            id: own,
+            exports: png(),
+        },
+        Operation::SetExports {
+            id: inner,
+            exports: png(),
+        },
+        Operation::SetVisible {
+            id: own,
+            visible: false,
+        },
+        Operation::SetVisible {
+            id: holder,
+            visible: false,
+        },
+    ]);
+    let p = f.run(&only(&[Rule::HiddenLayers]));
+    assert_eq!(kept(&p, Rule::HiddenLayers, own), Some(Kept::Export));
+    assert_eq!(kept(&p, Rule::HiddenLayers, holder), Some(Kept::Export));
+    assert!(f.doc.contains(own) && f.doc.contains(inner));
+}
+
+/// With *Skip locked* on, a hidden group holding a locked layer is kept whole;
+/// off, it goes.
+/// flip: `Run::hidden_layers` asking only the outermost layer's lock → fails at
+/// the kept reason.
+#[test]
+fn a_hidden_group_holding_a_locked_layer_is_kept_while_skipping() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let locked = f.painted(frame, &[(RED, true)]);
+    let other = f.painted(frame, &[(RED, true)]);
+    let g = f.group(&[locked, other]);
+    f.commit(vec![
+        Operation::SetLocked {
+            id: locked,
+            locked: true,
+        },
+        Operation::SetVisible {
+            id: g,
+            visible: false,
+        },
+    ]);
+    let rules = only(&[Rule::HiddenLayers]);
+    let p = f.run(&rules);
+    assert_eq!(kept(&p, Rule::HiddenLayers, g), Some(Kept::Locked));
+    assert!(f.doc.contains(locked));
+    f.run(&Rules {
+        skip_locked: false,
+        ..rules
+    });
+    assert!(!f.doc.contains(g));
+}
+
+/// *Covered fills* in a main leaves a fill an instance on another page still
+/// shows through its own top item, and takes it where every instance draws the
+/// main's list.
+/// flip: `Run::covered_fills` not asking the main's copies → fails at "the
+/// instance keeps the fill it shows".
+#[test]
+fn covered_fills_in_a_main_keep_what_an_instance_shows() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let other = f.page();
+    let white = Color::from_rgb8(255, 255, 255);
+    let mut layers = Vec::new();
+    for _ in 0..2 {
+        let main = f.add(frame, rect_frame());
+        let layer = f.painted(main, &[(RED, true), (white, true)]);
+        f.commit(vec![Operation::SetComponent {
+            id: main,
+            component: true,
+        }]);
+        let (tx, instance) = build::place_instance(&f.doc, &mut f.ids, main, other, None).unwrap();
+        f.doc.apply(&tx).unwrap();
+        let copy = f.doc.get(instance).unwrap().children()[0];
+        layers.push((layer, copy));
+    }
+    let [(shown, shown_copy), (plain, plain_copy)] = layers[..] else {
+        unreachable!()
+    };
+    let mut fills = f.doc.get(shown_copy).unwrap().paint().fills.clone();
+    fills[1].value.brush = Brush::Solid(white.with_alpha(0.5)).into();
+    f.commit(vec![Operation::SetFills {
+        id: shown_copy,
+        fills,
+    }]);
+
+    let p = f.run_owed(&only(&[Rule::CoveredFills]));
+    assert_eq!(
+        kept(&p, Rule::CoveredFills, shown),
+        Some(Kept::Instance),
+        "{:?}",
+        p.findings
+    );
+    assert_eq!(
+        f.fills(shown_copy).len(),
+        2,
+        "the instance keeps the fill it shows"
+    );
+    assert_eq!(
+        f.fills(plain),
+        [white],
+        "an untouched main loses its covered fill"
+    );
+    assert_eq!(f.fills(plain_copy), [white], "and so does its instance");
+}

@@ -163,6 +163,9 @@ pub enum Kept {
     Effects,
     /// A group that lays out its layer.
     Layout,
+    /// A layer in a main whose copy in an instance draws a different list, so
+    /// what the main covers may show there.
+    Instance,
 }
 
 impl Kept {
@@ -182,6 +185,7 @@ impl Kept {
             Kept::Blend => "Has a blend mode · kept".into(),
             Kept::Effects => "Has effects · kept".into(),
             Kept::Layout => "Has a layout · kept".into(),
+            Kept::Instance => "An instance shows it · kept".into(),
         }
     }
 }
@@ -358,11 +362,57 @@ impl Run<'_> {
         })
     }
 
+    /// Whether `id`'s box is part of a laid-out item's: its parent lays out, or a
+    /// group or boolean between it and such a parent takes its box from its
+    /// layers, so taking `id` would move the item's siblings.
     fn in_layout(&self, id: NodeId) -> bool {
-        self.sim
-            .get(id)
-            .and_then(|n| n.parent())
-            .is_some_and(|p| self.sim.resolved_display(p).is_some())
+        let mut at = self.sim.get(id).and_then(|n| n.parent());
+        while let Some(p) = at.and_then(|p| self.sim.get(p)) {
+            if self.sim.resolved_display(p.id()).is_some() {
+                return true;
+            }
+            if !matches!(p.kind(), NodeKind::Group | NodeKind::Boolean { .. }) {
+                return false;
+            }
+            at = p.parent();
+        }
+        false
+    }
+
+    /// Whether `id` is a boolean's operand, or inside one: its outline draws into
+    /// the boolean, whatever its own paint.
+    fn in_boolean(&self, id: NodeId) -> bool {
+        let mut at = self.sim.get(id).and_then(|n| n.parent());
+        while let Some(p) = at.and_then(|p| self.sim.get(p)) {
+            if matches!(p.kind(), NodeKind::Boolean { .. }) {
+                return true;
+            }
+            at = p.parent();
+        }
+        false
+    }
+
+    /// Whether a copy of `id` in an instance, at any depth, draws a fill list
+    /// other than `id`'s, so an item `id` covers may show there.
+    fn copy_differs(&self, id: NodeId) -> bool {
+        let Some(fills) = self.sim.get(id).map(|n| &n.paint().fills) else {
+            return false;
+        };
+        let nodes = self.sim.node_map();
+        let copies = |c: &crate::node::Node| {
+            let mut link = c.link();
+            while let Some(l) = link {
+                if l == id {
+                    return true;
+                }
+                link = nodes.get(&l).and_then(|n| n.link());
+            }
+            false
+        };
+        nodes
+            .values()
+            .filter(|c| copies(c))
+            .any(|c| !crate::same_values(&c.paint().fills, fills))
     }
 
     fn find(&mut self, rule: Rule, id: NodeId, what: String, items: usize, kept: Option<Kept>) {
@@ -524,6 +574,8 @@ impl Run<'_> {
                 self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Style));
             } else if self.locked(id) {
                 self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Locked));
+            } else if self.copy_differs(id) {
+                self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Instance));
             } else {
                 ops.push(Operation::SetFills {
                     id,
@@ -553,10 +605,21 @@ impl Run<'_> {
             if self.in_instance(id) {
                 continue;
             }
-            let kept = if self.locked(id) {
+            let within = build::subtree_nodes(&self.sim, &[id]);
+            let kept = if self.locked(id)
+                || self.rules.skip_locked
+                    && within
+                        .iter()
+                        .any(|n| self.sim.get(*n).is_some_and(|n| n.locked()))
+            {
                 Some(Kept::Locked)
             } else if let Some(instances) = self.mains_within(id) {
                 Some(Kept::Main { instances })
+            } else if within
+                .iter()
+                .any(|n| build::exported_in_bulk(&self.sim, *n))
+            {
+                Some(Kept::Export)
             } else if self.state_paired(id) {
                 Some(Kept::State)
             } else {
@@ -573,7 +636,9 @@ impl Run<'_> {
         }
     }
 
-    /// Whether `id` draws nothing and holds nothing, and the words for it.
+    /// Whether `id` draws nothing and holds nothing, and the words for it. A text
+    /// is empty only with no content and no content binding, since one with
+    /// content draws even unpainted (in black, or its runs' colours).
     fn emptiness(&self, id: NodeId) -> Option<&'static str> {
         let n = self.sim.get(id)?;
         let paints = n.paint().fills.iter().any(|f| f.value.visible)
@@ -587,7 +652,10 @@ impl Run<'_> {
             NodeKind::Artboard { .. } => {
                 (n.children().is_empty() && !paints).then_some("No layers")
             }
-            NodeKind::Text { content, .. } if content.is_empty() => Some("No text"),
+            NodeKind::Text { content, .. } => (content.is_empty()
+                && n.text_vars()[crate::variable::TEXT_CONTENT].is_none())
+            .then_some("No text"),
+            _ if self.in_boolean(id) => None,
             _ => (!paints).then_some("Nothing drawn"),
         }
     }
@@ -660,7 +728,12 @@ impl Run<'_> {
             Some(Kept::Blend)
         } else if !n.effects().is_empty() {
             Some(Kept::Effects)
-        } else if n.mask() {
+        } else if n.mask()
+            || n.children()
+                .iter()
+                .any(|c| self.sim.get(*c).is_some_and(|c| c.mask()))
+        {
+            // A lone mask ungrouped would clip the layers above the group.
             Some(Kept::Mask)
         } else if !n.exports().is_empty() {
             Some(Kept::Export)

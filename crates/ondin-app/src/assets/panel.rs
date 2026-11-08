@@ -40,9 +40,11 @@ const AUTHOR_INSET: f32 = 8.0;
 const STRIP_H: f32 = 24.0;
 /// The foot caption's row, with the hairline above it.
 const FOOT_H: f32 = 22.0;
-/// The variant and orientation dropdowns and the size field.
+/// The variant and orientation dropdowns and the size field. The orientation's
+/// holds *Any orientation* whole: a dropdown grows to fit its words, and the
+/// panel with it.
 const VARIANT_W: f32 = 92.0;
-const ORIENT_W: f32 = 118.0;
+const ORIENT_W: f32 = 124.0;
 const SIZE_W: f32 = 58.0;
 /// The hover card, as the insert picker's.
 const CARD_DELAY: f64 = 0.5;
@@ -1863,8 +1865,10 @@ mod tests {
     }
 
     /// The panel keeps one size whatever it holds — an empty tab, a grid, the
-    /// other tab — as the insert picker does: an egui popup that shrinks never
-    /// grows back. With a set loaded, its grid and foot show.
+    /// other tab, with a service's controls or without — as the insert picker
+    /// does: an egui popup that shrinks never grows back. With a set loaded, its
+    /// grid and foot show.
+    /// flip: `ORIENT_W` back at 118 → fails at "a service's controls fit".
     #[test]
     fn the_panel_keeps_one_size_whatever_it_holds() {
         let ctx = egui::Context::default();
@@ -1887,8 +1891,15 @@ mod tests {
 
         app.prefs.assets.photos_tab = true;
         let (photos, _) = panel_rect(&mut app, &ctx);
+        app.prefs.assets.photo_services = vec!["openverse".into()];
+        let (searchable, texts) = panel_rect(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Search Openverse for photos"),
+            "the fixture: the service's controls show: {texts:?}"
+        );
         assert_eq!(empty.size(), grid.size());
         assert_eq!(grid.size(), photos.size());
+        assert_eq!(photos.size(), searchable.size(), "a service's controls fit");
         // The frame's hairline each side, as the insert picker's.
         assert_eq!(grid.width(), W + 2.0);
     }

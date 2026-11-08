@@ -641,8 +641,8 @@ a `Finding` with `kept: Some(Kept)` and its reason.
   `Rule::hint` is its tooltip. Then *Skip locked layers* on a fourth line at the same pitch. The
   *Remove* label sits level with the first line (`batch_rename::row` puts its label on a tall row's
   first control-height line).
-- **Planning** is synchronous, and only when the scope or a switch changes: the document cannot
-  change while the box is up.
+- **Planning** is synchronous, and only when the scope, a switch or the current page changes: the
+  document cannot change while the box is up, but a row's click can switch the page.
 - **Preview**: the eyebrow *Preview* and *N items on M layers*, with *· K kept* when amber rows
   show. Rows are grouped by rule in `Rule::ALL` order, each under a heading row with the rule's
   item count, every row listed: the list scrolls, so nothing folds. Rows are `ui::MENU_ROW_H` and
@@ -650,7 +650,10 @@ a `Finding` with `kept: Some(Kept)` and its reason.
   (masked in private mode) and what it loses, or the kept reason in amber; a guide row reads
   *Horizontal guide · 120*. Hovering a row rings its layer on the canvas, a heading its group's at
   a hairline (`canvas::draw_panel_hover`); a row on another page rings nothing and its tooltip
-  names the page (*On ‹page›*).
+  names the page (*On ‹page›*). **A click shows the row's subject** (`show_finding`), as Find
+  shows a match: its page made current, the layer selected, and on the next frame, once that page
+  is drawn, brought into view by the least pan with the zoom kept. A guide's row shows the frame
+  that owns it and selects nothing. The box stays open.
 - **Empty**: *Nothing to clean up in the selection / on this page / on any page*, then, when a
   switched-off rule would find something, *Turned off: Hidden layers 3 · Guides 2*.
 - **Foot**: `card_foot` with *Enter clean up · Esc cancel*, *Cancel* and *Clean up N items*; with

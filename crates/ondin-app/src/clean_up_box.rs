@@ -44,10 +44,13 @@ pub(crate) struct CleanUpBox {
     pub(crate) plan: Plan,
     /// The plan with every switch on, for the counts beside the switches.
     every: Plan,
-    /// What `plan` and `every` were made for.
-    asked: Option<(Scope, Rules)>,
+    /// What `plan` and `every` were made for, the page included: a row's click
+    /// can switch it, which changes what *This page* means.
+    asked: Option<(Scope, Rules, NodeId)>,
     /// What the hovered row names, and whether it is a whole group's (a hairline).
     hover: (Vec<NodeId>, bool),
+    /// A clicked row's layer or frame, brought into view once its page is shown.
+    reveal: Option<NodeId>,
 }
 
 /// One line of the preview.
@@ -78,9 +81,10 @@ impl CleanUpBox {
         }
     }
 
-    /// Plan again when the scope or a switch has changed since the last plan.
+    /// Plan again when the scope, a switch or the page has changed since the last
+    /// plan.
     pub(crate) fn replan(&mut self, doc: &Document, res: &Resolved, page: NodeId) {
-        let now = (self.scope, self.rules);
+        let now = (self.scope, self.rules, page);
         if self.asked == Some(now) {
             return;
         }
@@ -185,6 +189,7 @@ impl OndinApp {
             every: Plan::default(),
             asked: None,
             hover: (Vec::new(), false),
+            reveal: None,
         });
     }
 
@@ -221,10 +226,20 @@ impl OndinApp {
             return;
         }
         let enter = ui::card_enter(ctx);
+        // A row clicked last frame on another page: its page is shown now.
+        if let Some(id) = b.reveal
+            && self.session.doc.page_of(id) == Some(self.session.page)
+        {
+            b.reveal = None;
+            if let Some(bounds) = self.session.preview_world_bounds(id) {
+                self.reveal(bounds);
+            }
+        }
         b.replan(&self.session.doc, &self.session.resolved, self.session.page);
         let why_not = b.why_not();
         let mut act = Act::None;
         let mut hover: (Vec<NodeId>, bool) = (Vec::new(), false);
+        let mut clicked: Option<Subject> = None;
         let doc = &self.session.doc;
         let page = self.session.page;
         let hold = crate::settings::CardHold::Modal;
@@ -246,7 +261,7 @@ impl OndinApp {
                 });
             ui.add_space(8.0);
             ui::card_rule(ui);
-            preview(ui, doc, page, &mut b, &mut hover);
+            preview(ui, doc, page, &mut b, &mut hover, &mut clicked);
             ui::card_rule(ui);
             if let Some(a) = foot(ui, b.plan.items(), why_not) {
                 act = a;
@@ -255,6 +270,9 @@ impl OndinApp {
         b.hover = hover;
         if clicked_away {
             return;
+        }
+        if let Some(subject) = clicked {
+            self.show_finding(&mut b, subject);
         }
         if enter && matches!(act, Act::None) {
             act = Act::Run;
@@ -267,6 +285,28 @@ impl OndinApp {
             }
             _ => self.clean_up = Some(b),
         }
+    }
+
+    /// A clicked row: its page made current, its layer selected and brought into
+    /// view by the least pan, as Find shows a match. A guide's row shows the frame
+    /// that owns it, selecting nothing. A row whose layer is gone does nothing.
+    fn show_finding(&mut self, b: &mut CleanUpBox, subject: Subject) {
+        let (target, select) = match subject {
+            Subject::Layer(id) => (id, true),
+            Subject::Guide { owner, .. } => (owner, false),
+        };
+        let Some(page) = self.session.doc.page_of(target) else {
+            return;
+        };
+        if page != self.session.page {
+            self.go_to_page(page);
+        }
+        if select {
+            self.session.selection.set_one(target);
+        }
+        // Revealed next frame, once the page switch has been drawn; a page's own
+        // guide has nothing to bring into view.
+        b.reveal = (!self.session.doc.is_page(target)).then_some(target);
     }
 }
 
@@ -343,13 +383,15 @@ fn switches(ui: &mut egui::Ui, b: &mut CleanUpBox) {
 }
 
 /// The preview: each rule's rows under its heading. Hovering a row rings its layer
-/// on the canvas; hovering a heading rings the group's, softly.
+/// on the canvas; hovering a heading rings the group's, softly. A clicked row's
+/// subject goes to `clicked`.
 fn preview(
     ui: &mut egui::Ui,
     doc: &Document,
     page: NodeId,
     b: &mut CleanUpBox,
     hover: &mut (Vec<NodeId>, bool),
+    clicked: &mut Option<Subject>,
 ) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 30.0), egui::Sense::hover());
     let p = ui.painter();
@@ -411,8 +453,12 @@ fn preview(
                             }
                             Line::Row(i) => {
                                 let f = &b.plan.findings[*i];
-                                if finding_row(ui, doc, page, f).hovered() {
+                                let resp = finding_row(ui, doc, page, f);
+                                if resp.hovered() {
                                     *hover = (ringable(f, doc, page).into_iter().collect(), false);
+                                }
+                                if resp.clicked() {
+                                    *clicked = Some(f.subject);
                                 }
                             }
                         }
@@ -471,7 +517,7 @@ fn layer_name(doc: &Document, id: NodeId) -> String {
 }
 
 fn finding_row(ui: &mut egui::Ui, doc: &Document, page: NodeId, f: &Finding) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::click());
     ui::list_row_ground(ui.painter(), rect, false, resp.hovered());
     let (glyph, tint, name) = match f.subject {
         Subject::Layer(id) => {
@@ -628,6 +674,45 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("`{text}` is not drawn"))
+    }
+
+    /// Clicking a row on another page goes to that page, selects the layer and
+    /// brings it into view, with the box left open over it.
+    /// flip: `show_finding` not switching page → fails at "the row's page is current".
+    #[test]
+    fn clicking_a_row_shows_its_layer_on_its_own_page() {
+        let (ctx, mut app) = app();
+        let first = app.session.page;
+        app.add_page();
+        let empty = rect(&mut app, false);
+        let second = app.session.page;
+        assert_ne!(first, second, "fixture: a second page");
+        app.go_to_page(first);
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        let mut b = app.clean_up.take().expect("the box opened");
+        b.scope = Scope::Document;
+        b.replan(&app.session.doc, &app.session.resolved, app.session.page);
+        let subject = Subject::Layer(empty);
+        assert!(
+            b.plan.findings.iter().any(|f| f.subject == subject),
+            "fixture: the empty rect on the other page is listed"
+        );
+
+        app.show_finding(&mut b, subject);
+        app.clean_up = Some(b);
+        assert_eq!(app.session.page, second, "the row's page is current");
+        assert_eq!(
+            app.session.selection.ids(),
+            [empty],
+            "its layer is selected"
+        );
+        pass(&ctx, &mut app, Vec::new());
+        let b = app.clean_up.as_ref().expect("the box stays open");
+        assert!(
+            b.reveal.is_none(),
+            "brought into view once its page was shown"
+        );
     }
 
     /// *Remove* sits level with the first line of switches, and *Skip locked

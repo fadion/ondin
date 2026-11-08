@@ -107,6 +107,13 @@ pub trait ScenePainter {
     fn stroke_path(&mut self, transform: Affine, path: &BezPath, stroke: &StrokePaint<'_>);
     fn draw_text(&mut self, transform: Affine, run: &TextRun<'_>);
 
+    /// The world-to-device transform a stroke the walk flattens itself is
+    /// flattened through, where the walk's own is `base`. A measure walks on a
+    /// grid far finer than a screen and answers the screen's.
+    fn flatten_base(&self, base: Affine) -> Affine {
+        base
+    }
+
     /// Begin a composited group: everything until [`Self::pop_layer`] is drawn
     /// offscreen, clipped to `clip` (in `transform`'s space) if given, then
     /// composited at `opacity`.
@@ -358,8 +365,9 @@ struct Shared {
     drawn: std::cell::RefCell<rustc_hash::FxHashMap<MeasureKey, Option<Rect>>>,
 }
 
-/// A container, its world transform and the view it is measured over, by bits.
-type MeasureKey = (NodeId, [u64; 6], Vec<[u64; 4]>);
+/// A container, its world transform, the transform strokes are flattened
+/// through and the view it is measured over, by bits.
+type MeasureKey = (NodeId, [[u64; 6]; 2], Vec<[u64; 4]>);
 
 /// A container the walk is inside: the world transform it was painted under,
 /// and whether it draws its children into a layer of its own that composites
@@ -543,6 +551,9 @@ impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
 struct BoundsPainter {
     /// World → device pixels.
     base: Affine,
+    /// What [`ScenePainter::flatten_base`] answers: `base`, or inside a measure
+    /// the transform of the walk that asked for it.
+    flatten: Affine,
     ink: Option<Rect>,
 }
 
@@ -557,6 +568,9 @@ impl ScenePainter for BoundsPainter {
     /// A missing picture's placeholder lies inside the same path.
     fn has_image(&self, _: &ondin_core::ImageId) -> bool {
         true
+    }
+    fn flatten_base(&self, _: Affine) -> Affine {
+        self.flatten
     }
     fn fill_path(&mut self, t: Affine, path: &BezPath, _: &Brush, _: Option<Framing>, _: ClipRule) {
         self.add(t, path.bounding_box());
@@ -832,7 +846,11 @@ fn ink_of(
     }
     let base = device_base(vp);
     let at = (page_world, &[vp.view][..], base);
-    let mut bounds = BoundsPainter { base, ink: None };
+    let mut bounds = BoundsPainter {
+        base,
+        flatten: base,
+        ink: None,
+    };
     match ov.outline() {
         Some(ink) => {
             let mut outline = OutlinePainter {
@@ -1860,7 +1878,8 @@ fn paint_node_pass<P: ScenePainter>(
                     .iter()
                     .map(|v| ondin_core::effect::escaped(*v, back, world))
                     .collect();
-                drawn_children_ink((doc, res, ov), node, id, world, &grown, walk)
+                let at = (world, painter.flatten_base(base));
+                drawn_children_ink((doc, res, ov), node, id, at, &grown, walk)
             })
             .flatten();
             effect_bounds(res, id, &painted, world, stack, drawn)
@@ -2390,19 +2409,22 @@ fn effect_bounds(
 /// Walked on a grid of its own, [`MEASURE_GRID`] device units to a world unit,
 /// not the view's: boxes snap to whole device pixels, and on the view's grid the
 /// measure would be off by up to half a screen pixel from the exact ink the
-/// commit's cache holds. Kept in `walk`'s [`Shared`], since the measure walk
-/// meets every nested container's measure again.
+/// commit's cache holds. Strokes the walk flattens itself are flattened through
+/// `flatten`, the asking walk's own, since on the grid a tight stroke's union
+/// would cost a hundred times what it does on screen. Kept in `walk`'s
+/// [`Shared`], since the measure walk meets every nested container's measure
+/// again.
 fn drawn_children_ink(
     (doc, res, ov): (&Document, &Resolved, &RenderOverrides),
     node: &ondin_core::Node,
     id: NodeId,
-    world: Affine,
+    (world, flatten): (Affine, Affine),
     view: &[Rect],
     walk: &Walk<'_>,
 ) -> Option<Rect> {
     let key: MeasureKey = (
         id,
-        world.as_coeffs().map(f64::to_bits),
+        [world, flatten].map(|a| a.as_coeffs().map(f64::to_bits)),
         view.iter()
             .map(|r| [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits))
             .collect(),
@@ -2413,7 +2435,11 @@ fn drawn_children_ink(
     #[cfg(test)]
     tests::MEASURES.with(|m| m.set(m.get() + 1));
     let base = Affine::scale(MEASURE_GRID);
-    let mut bounds = BoundsPainter { base, ink: None };
+    let mut bounds = BoundsPainter {
+        base,
+        flatten,
+        ink: None,
+    };
     let (edges, measure) = (Edges::none(), walk.measuring());
     for child in ov.children_of(id).unwrap_or(node.children()) {
         if doc.get(*child).is_some_and(|n| n.mask()) {
@@ -3583,8 +3609,9 @@ fn lay_dashed<P: ScenePainter>(
 /// edge there, and next to a cap a notch of ground shows through. Open only: a
 /// closed outline's band covers its own folds, and glyphs and small rounded
 /// corners under thick strokes would leave the backend's stroker for nothing. The
-/// union is flattened through `base * world`, so its facets stay under a tenth of
-/// a device pixel at any zoom.
+/// union is flattened through `world` and the painter's
+/// [`ScenePainter::flatten_base`], so its facets stay under a tenth of a device
+/// pixel at any zoom.
 fn lay_stroke<P: ScenePainter>(
     painter: &mut P,
     (world, base): (Affine, Affine),
@@ -3598,8 +3625,11 @@ fn lay_stroke<P: ScenePainter>(
             && paint.dashes.is_empty()
             && crate::tight_stroke::bends_too_tight(path, paint.width)
         {
-            let tolerance = crate::tight_stroke::tolerance_through(base * world, TOLERANCE);
+            let to_device = painter.flatten_base(base) * world;
+            let tolerance = crate::tight_stroke::tolerance_through(to_device, TOLERANCE);
             let ink = crate::tight_stroke::union_outline(path, paint, tolerance);
+            #[cfg(test)]
+            tests::UNION_ELEMENTS.with(|n| n.set(n.get() + ink.elements().len()));
             painter.fill_path(world, &ink, paint.brush, paint.framing, ClipRule::NonZero);
             return;
         }
@@ -3718,6 +3748,111 @@ mod tests {
     thread_local! {
         /// The measures `drawn_children_ink` has taken on this thread.
         pub(super) static MEASURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// The elements of every tight-stroke union `lay_stroke` has built on this
+        /// thread.
+        pub(super) static UNION_ELEMENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// A tight thick stroke inside a dragged group costs about as much to measure
+    /// as to draw: the measure flattens its union at the screen's tolerance, not
+    /// at its own grid's.
+    /// flip: `lay_stroke` flattening through the walk's `base` alone → fails at
+    /// the ratio (about 95×).
+    #[test]
+    fn a_measure_flattens_a_tight_stroke_as_the_screen_does() {
+        use ondin_core::{IdSource, Operation, Stroke, Transaction, keyed_by_position};
+        let elements = |shadowed: bool| {
+            let mut ids = IdSource::new(0x7157);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let (group, path) = (ids.mint(), ids.mint());
+            // 200 loops of radius 10 along one open path, stroked 30 wide.
+            let mut loops = BezPath::new();
+            loops.move_to((10.0, 50.0));
+            for i in 0..200 {
+                let c = kurbo::Point::new(10.0 + 5.0 * i as f64, 40.0);
+                loops.line_to(c + kurbo::Vec2::new(0.0, 10.0));
+                kurbo::Circle::new(c, 10.0)
+                    .path_elements(0.1)
+                    .filter(|el| !matches!(el, PathEl::MoveTo(_) | PathEl::ClosePath))
+                    .for_each(|el| loops.push(el));
+            }
+            let mut ops = vec![
+                Operation::CreateNode {
+                    id: group,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Group,
+                    transform: None,
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: path,
+                    parent: group,
+                    index: 0,
+                    kind: NodeKind::Path {
+                        path: loops,
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                        mirror: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetStrokes {
+                    id: path,
+                    strokes: keyed_by_position([Stroke {
+                        brush: Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
+                        width: 30.0,
+                        join: kurbo::Join::Round,
+                        cap: kurbo::Cap::Round,
+                        ..Default::default()
+                    }]),
+                },
+            ];
+            if shadowed {
+                ops.push(Operation::SetEffects {
+                    id: group,
+                    effects: keyed_by_position([Effect::new(ondin_core::EffectKind::DropShadow(
+                        ondin_core::Shadow {
+                            offset: kurbo::Vec2::new(0.0, 4.0),
+                            blur: 6.0,
+                            spread: 0.0,
+                            color: ondin_core::peniko::Color::BLACK,
+                            blend: BlendMode::Normal,
+                        },
+                    ))]),
+                });
+            }
+            doc.apply(&Transaction(ops)).unwrap();
+            let res = Resolved::rebuild(&doc);
+            let drag = Transaction(vec![Operation::SetTransform {
+                id: group,
+                transform: Affine::translate((5.0, 3.0)),
+            }]);
+            let ov =
+                crate::RenderOverrides::from_transaction(&doc, &res, &drag).expect("representable");
+            let vp = crate::Viewport {
+                view: Rect::new(0.0, 0.0, 1200.0, 600.0),
+                pixel_size: (1200, 600),
+            };
+            MEASURES.with(|m| m.set(0));
+            UNION_ELEMENTS.with(|m| m.set(0));
+            let mut bounds = BoundsPainter {
+                base: Affine::IDENTITY,
+                flatten: Affine::IDENTITY,
+                ink: None,
+            };
+            build(&doc, &res, &vp, &ov, doc.first_page(), &mut bounds);
+            assert_eq!(MEASURES.with(std::cell::Cell::get), usize::from(shadowed));
+            UNION_ELEMENTS.with(std::cell::Cell::get)
+        };
+        let (plain, shadowed) = (elements(false), elements(true));
+        assert!(plain > 0, "the fixture's stroke is a union");
+        assert!(
+            shadowed <= plain * 5 / 2,
+            "measured {shadowed} elements, drawn {plain}"
+        );
     }
 
     /// Groups nested `depth` deep on a page, each casting a drop shadow blended
@@ -3805,6 +3940,7 @@ mod tests {
                 MEASURES.with(|m| m.set(0));
                 let mut bounds = BoundsPainter {
                     base: Affine::IDENTITY,
+                    flatten: Affine::IDENTITY,
                     ink: None,
                 };
                 build(&doc, &res, &vp, &ov, doc.first_page(), &mut bounds);

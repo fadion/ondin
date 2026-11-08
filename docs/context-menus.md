@@ -95,8 +95,8 @@ function, not bucketed by `build`.
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 21 rows in three groups, text 23, a boolean 24, railed text 25, a main
-  frame 19, an instance frame 20; the long end is a bound text child on a rail at 27
+- **Length**: a primitive is 21 rows in three groups, text 24, a boolean 24, railed text 26, a main
+  frame 19, an instance frame 20; the long end is a bound text child on a rail at 28
   (`a_primitives_menu_is_twenty_one_rows_in_three_groups`, `the_menus_the_two_ends_do_not_count`).
   The ceiling is "needs neither a scrollbar nor a large monitor", which is why the alternate
   clipboards, the boolean operations, the aligns and the restacks sit behind submenus and Flip H/V
@@ -261,6 +261,7 @@ No head. The baseline menu, 21 rows.
 |---|---|
 | Edit text | every member is text; dims on lock (the session refuses too). The panel door selects the whole string |
 | Auto width ✓ / Auto height ✓ / Fixed size ✓ | one text layer only; the current mode ticked; dims on lock |
+| Fill with content… | every member is text; dims on lock. Opens the fill box (`app-canvas-chrome.md`, *Fill with content*), or says on the status line why there is nothing to fill |
 
 *Convert to path*, *Flip to other side* and *Detach from path* are in Structure (§4).
 
@@ -280,8 +281,8 @@ Gated on `edit::croppable_fill`, the predicate image editing uses; composes with
 |---|---|
 | Make this the key layer | two or more selected and the right-clicked layer is not inside a boolean; designates it (align target, base operand, mask) |
 
-Of the kind heads, only *Edit text* applies to several layers (all text); every other head row
-needs a single layer.
+Of the kind heads, only *Edit text* and *Fill with content…* apply to several layers (all text);
+every other head row needs a single layer.
 
 ### 5.9 Locked and hidden layers (panel only, per C4)
 

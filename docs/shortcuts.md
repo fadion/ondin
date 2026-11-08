@@ -538,7 +538,8 @@ focus mode → a bindable field's menu / `--` list / mode menu → a style card'
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
-variables browser (inner rungs first) → a text session → the find box → colour review (its own
+variables browser (inner rungs first) → a text session → the find box → batch rename (its open
+order list first) → the Clean up box → the Fill with content box (an open kind list first) → colour review (its own
 inner rungs first) → the Repeat around origin card → the Blend shapes card → an open warp envelope → the path bar's mirror flyout → a compare →
 the pen →
 **a gesture in flight**
@@ -628,6 +629,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 - **Check contrast** — a Tools menu row and a palette verb (`Action::CheckContrast`), no chord.
 - **Simulate vision** — a Tools menu row and a palette verb (`Action::SimulateVision`), no chord.
 - **Clean up…** — a Tools menu row and a palette verb (`Action::CleanUp`), no chord.
+- **Fill with content…** — a Tools menu row, a palette verb and a text layer's menu row
+  (`Action::FillContent`), no chord.
 - **Numeric distribute spacing** — a panel affordance.
 - **`Tab` to hide panels** (Adobe) — `Tab` steps the point selection and `Ctrl+\` covers the intent.
   `Tab` is egui's focus key and costs a frame to claim (§15 D123): the last key worth a second

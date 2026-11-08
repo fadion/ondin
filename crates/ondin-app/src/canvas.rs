@@ -1645,6 +1645,26 @@ impl ondin_core::svg_in::ImageSink for Decoded {
             },
         ))
     }
+
+    fn draw(
+        &mut self,
+        width: u32,
+        height: u32,
+        art: &[(ondin_core::kurbo::BezPath, ondin_core::peniko::Color)],
+    ) -> Option<(ondin_core::ImageId, ondin_core::ImageEntry)> {
+        self.place(art_png(width, height, art)?, ondin_core::ImageFormat::Png)
+    }
+}
+
+/// Vector art rasterised on the CPU and encoded as a PNG: how an
+/// `ImageSink::draw` makes its picture.
+pub(crate) fn art_png(
+    width: u32,
+    height: u32,
+    art: &[(ondin_core::kurbo::BezPath, ondin_core::peniko::Color)],
+) -> Option<Vec<u8>> {
+    let rgba = ondin_render::rasterize_paths(width, height, art)?;
+    Some(ondin_export::png::encode_rgba8(&rgba, width, height))
 }
 
 /// SVG markup read into layers under `parent`, on any thread: the root group named
@@ -7830,11 +7850,12 @@ impl OndinApp {
     }
 
     /// Outline the layer under the pointer in the Layers panel, those the hovered
-    /// History row's step touched, and those the Clean up box's hovered row names,
-    /// in the canvas hover's stroke (a hairline for a whole group of rows); the
-    /// selection keeps its own frame.
+    /// History row's step touched, and those the Clean up or Fill with content
+    /// box's hovered row names, in the canvas hover's stroke (a hairline for a
+    /// whole group of rows); the selection keeps its own frame.
     fn draw_panel_hover(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        let boxed = self.clean_up.as_ref().map(|b| b.ringed());
+        let boxed = (self.clean_up.as_ref().map(|b| b.ringed()))
+            .or_else(|| self.fill_content.as_ref().map(|b| b.ringed()));
         let (box_ids, soft) = boxed.unwrap_or((&[], false));
         let panels = self.layers_hover.iter().chain(&self.history_pane.hover);
         for (&id, width) in panels

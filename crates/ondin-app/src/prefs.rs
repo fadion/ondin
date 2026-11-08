@@ -253,6 +253,30 @@ impl Default for CleanUpPrefs {
     }
 }
 
+/// The Fill with content box's choices (`crate::fill_box`), kept when a fill runs:
+/// the locale is what a text without a Language of its own opens on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FillContentPrefs {
+    /// The last locale used, by `ondin_core::content_fill::Locale::tag`.
+    pub locale: String,
+    pub records: bool,
+    pub avatars: bool,
+    /// `ondin_core::content_fill::AvatarStyle::key`.
+    pub avatar_style: String,
+}
+
+impl Default for FillContentPrefs {
+    fn default() -> Self {
+        Self {
+            locale: "en-US".into(),
+            records: true,
+            avatars: true,
+            avatar_style: "initials".into(),
+        }
+    }
+}
+
 /// The Settings modal's *Canvas* section: what the wheel does, and how ruler guides
 /// and the pixel grid draw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -517,6 +541,8 @@ pub struct Prefs {
     pub batch_rename: BatchRenamePrefs,
     /// The Clean up box's switches.
     pub clean_up: CleanUpPrefs,
+    /// The Fill with content box's locale, records and avatars.
+    pub fill_content: FillContentPrefs,
     /// Colour review's threshold (`crate::colour_review`), kept across documents:
     /// how near counts as near is a habit, not a fact about one file.
     pub colour_review: ondin_core::color_review::Threshold,
@@ -579,6 +605,7 @@ impl Default for Prefs {
             vision: VisionPrefs::default(),
             batch_rename: BatchRenamePrefs::default(),
             clean_up: CleanUpPrefs::default(),
+            fill_content: FillContentPrefs::default(),
             colour_review: Default::default(),
         }
     }

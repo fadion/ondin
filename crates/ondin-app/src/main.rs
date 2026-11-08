@@ -96,6 +96,7 @@ mod expr;
 mod eyedropper;
 #[cfg(windows)]
 mod file_type;
+mod fill_box;
 mod find;
 mod fonts;
 mod gradient;

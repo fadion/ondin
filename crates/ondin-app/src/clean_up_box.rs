@@ -171,6 +171,7 @@ impl OndinApp {
         self.close_find();
         self.colour_review.open = false;
         self.batch_rename = None;
+        self.fill_content = None;
         let selection = self.selected_layers();
         let remembered = &self.prefs.clean_up;
         let mut rules = Rules {
@@ -518,8 +519,8 @@ fn head(ui: &mut egui::Ui, label: &str, n: usize) -> egui::Response {
 }
 
 /// A layer's name with its parent's before it (*Card / Background*), masked in
-/// private mode.
-fn layer_name(doc: &Document, id: NodeId) -> String {
+/// private mode. Fill with content's rows name their layers the same way.
+pub(crate) fn layer_name(doc: &Document, id: NodeId) -> String {
     let own = crate::private::layer(doc, id).into_owned();
     match doc.get(id).and_then(|n| n.parent()) {
         Some(parent) if !doc.is_page(parent) => {

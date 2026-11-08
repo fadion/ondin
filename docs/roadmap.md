@@ -12,10 +12,6 @@ item's premise can go stale while its ask still reads true.
   picked in Settings, an API key where one is needed given there by the user. Icons insert as SVG
   through the importer; a photo embeds. A provider's licence travels with what it inserted: a
   CC BY icon set's attribution, a photo's photographer credit and download report.
-- **A content generator** — realistic names, addresses, titles, companies and text for selected
-  text layers, a different value per layer, from tables shipped with the app (works offline, a few
-  locales). Avatars are generated (initials, patterns); photos come from the assets browser. Its
-  door is a Tools menu bulk-edit row, *Fill with content…*.
 
 ## Now · Components and layout
 

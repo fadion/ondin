@@ -632,6 +632,16 @@ impl ondin_core::svg_in::ImageSink for Pictures {
             crate::app::read_picture(bytes, Some(format.extension().to_owned()), None).ok()?;
         Some((picture.id, picture.entry))
     }
+
+    fn draw(
+        &mut self,
+        width: u32,
+        height: u32,
+        art: &[(ondin_core::kurbo::BezPath, ondin_core::peniko::Color)],
+    ) -> Option<(ondin_core::ImageId, ondin_core::ImageEntry)> {
+        let png = crate::canvas::art_png(width, height, art)?;
+        self.place(png, ondin_core::ImageFormat::Png)
+    }
 }
 
 /// Another tool's file read into a document, with what did not map, the font

@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, find and replace, colour review, the cheatsheet, focus, private and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, fill with content, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
-the command palette, the batch rename box, the clean up box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
+the command palette, the batch rename box, the clean up box, the fill with content box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
 
@@ -298,7 +298,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
     mode (never remembered), then *Colour review…*, opening its card;
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
     `Action::FindText { replace: false }`), *Batch rename…* (`Ctrl+Shift+R`; dimmed with
-    `private::DECLINE_RENAME` in private mode) and *Clean up…* (no chord).
+    `private::DECLINE_RENAME` in private mode), *Clean up…* (no chord) and *Fill with content…* (no
+    chord; dimmed with its reason when the selection holds nothing to fill).
 
   Every row is a bare `ui::menu_row` (an empty glyph, never checked), its label at the row's own
   inset: nothing in the menu ticks, and a check that is on says so in its own bar over the canvas.
@@ -498,7 +499,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   56pt below the canvas's top: an open card (`CardHold::Open`), not a modal, so the canvas keeps
   its input and the layers can be selected, edited and panned under it, as with Find and Colour
   review. Opening it closes the palette, the context menu, the top-bar menu, the colour picker and
-  the other cards over the canvas's top (Find, Colour review, Clean up); opening any of those
+  the other cards over the canvas's top (Find, Colour review, Clean up, Fill with content); opening any of those
   closes it. Enter renames from Find or *Rename to* (with the order list open it does nothing);
   anywhere else it is the canvas's. The *Rename* button renames; *Cancel* or ✕ closes it, and
   Escape closes it through `OndinApp::escape`'s rung below Find's (the order list, open, takes the
@@ -673,6 +674,124 @@ a `Finding` with `kept: Some(Kept)` and its reason.
 - **Doors.** *Tools ▸ Clean up…* (after *Batch rename…*) and the palette (`Item::CleanUp`, aliases
   *tidy*, *unused*, *hidden*, *empty*); `Action::CleanUp` has no chord.
 
+## Fill with content (`fill_box.rs`, `ondin_core::content_fill`)
+
+A box that fills the selection's text layers with realistic names, addresses, companies, text,
+numbers and dates, and its avatar shapes with a drawn picture, a different value per layer, as one
+undo step. The tables ship inside core, so it works offline.
+
+### The rule (`content_fill::plan`)
+
+`plan(doc, roots, &Options) -> Plan` is read-only; `Plan::transaction(doc, Option<&mut dyn
+ImageSink>)` is the edit.
+
+- **Targets** (`gather`), in pre-order under the roots, children first to last: every text layer
+  whose content is not bound to a variable, and every rect, ellipse, polygon, star or childless
+  frame named as an avatar (`AVATAR_WORDS`, as whole words: *avatar*, *photo*, *picture*, *pic*,
+  *profile*, *portrait*, *headshot*, *pfp*, *foto*, *bild*) or showing an image fill. A hidden layer
+  is passed over with all it holds; an effectively locked target is counted in `Plan::locked` and
+  skipped. With avatars off no shape is listed. `fillable` says whether there is any target,
+  stopping at the first (the doors ask it every frame a menu is open); it shares `is_shape_target`
+  with `gather`.
+- **Kinds**: 24 in the groups *Person*, *Place*, *Company*, *Text*, *Numbers and dates* and *Image*
+  (`Kind::ALL`, the lists' order; `KIND_KEYS`, the verb's and prefs' spelling). A row's kind is the
+  one chosen for it (`Options::kinds`, `None` meaning *Leave as is*); else, for text, the box's
+  *Content* (`Options::content`); else what it reads as. A name is read first (`kind_from_name`:
+  `NAME_RULES`, phrases in every shipped language, most specific first, so *Job title* is a job
+  before *title* is a headline, with the generic *name* last), then the text (`kind_from_text`: an
+  email, price, percent, time, date, a phone number of seven digits or more, a number; text opening
+  *Lorem ipsum* is a paragraph). *Heading* reads as nothing, so a list's heading is left. A shape is
+  *Avatar* only by its name. What reads as nothing is left as is.
+- **Records** (`Options::records`): each selected frame or group is a record, and so is each child
+  of a container under the selection whose container children repeat: two or more sharing a main,
+  or a name stem (*Card 1*, *Card 2*) and kind (`record_roots`). A layer's record is its nearest
+  record ancestor. Loose layers under one parent are one record unless two of them want the same
+  kind, when each is its own. Off, every layer is its own. `Plan::filled_records` is the record
+  frames with a changed row; `Plan::record_noun` their shared name stem (*row*, *card*), else
+  *record*.
+- **Agreement**: a record draws one person (the names, email, username, avatar), one place
+  (street, city, postcode, full address, a phone number's area code) and one company. An email
+  takes the record's company's domain when the record has a *Company* row, else one domain the whole
+  fill shares. A redraw (`Options::redraws`) of a row drawn from one of the three redraws all of it
+  in that record, so the email follows the name; any other kind redraws only its row.
+- **Determinism**: every value comes from `Options::seed` through splitmix64, keyed by record,
+  entity, layer and redraw count, so the same seed and options fill the same values.
+- **Fitting** (`room`): auto width takes the value's natural length. A one-line box (fixed under
+  about 1.8 lines, or auto-height not yet wrapping) takes a value whose max-content width fits:
+  up to `ATTEMPTS` draws (an entity's redrawn whole for its rows), else the first draw kept with
+  `Row::fits` false; a full address there has its lines joined with *, * (`for_room`). A fixed box at least about 1.8 lines tall is an area, where a paragraph adds
+  sentences while they fit; an auto-height box that wraps takes a paragraph grown to about its
+  present length.
+- **Text keeps its style**: one `SetText` per layer, its content replaced whole through
+  `Spans::replaced` and `para_spans.edited`, so the new text takes the first character's
+  attributes. Inside an instance it is an override like any edit.
+- **Avatars** (`Avatar { name, initials, style }`): *Initials*, white Inter 600 at 0.4 of the
+  shorter side, or *Pattern*, three seeded shapes, on one of the eight `GROUNDS` (each at least
+  4.5:1 against white), picked by a hash of the name so the same person gets the same avatar.
+  `Avatar::art(w, h)` answers filled paths, ground first. The transaction draws it at twice the
+  shape's box (clamped to 8–2048 px) through `ImageSink::draw`, adds each image once and replaces the
+  shape's fills with one image fill. `draw` is a default method answering `None`; the app's
+  `canvas::Decoded` and `import_files::Pictures` draw with `ondin_render::rasterize_paths` and a PNG
+  encode (`canvas::art_png`). Without a sink that draws, avatars are left out.
+- **Locales**, one file each in `ondin-core/assets/content/` (en-US, en-GB, de, fr, es, it, pt-BR,
+  nl), `include_str!`'d uncompressed into `SOURCES`, whose order the locale list shows; each is
+  named in English (*German*, *English (UK)*). A file holds `#` comments, `@key value` formats and
+  `[section]` lists, with `\uXXXX` escapes; in a pattern `#` is a digit, `@` a capital and a whole
+  `a..b` a number in that range. `@inherit` takes what a locale leaves out from another, one level
+  (en-GB from en-US). A locale is added as a file and its line in `SOURCES`. US phone numbers are
+  555-01xx and UK ones Ofcom's drama ranges; the rest are plain patterns. `locale_for(tag)` is the
+  exact tag, else the first of its language (*en* → en-US, *pt* → pt-BR). `agreed_locale` is the
+  locale the target texts that set a Language (`TextStyle::locale`) agree on; a text without one
+  says nothing, and `None` when they differ, one names no shipped locale, or none sets one.
+- **The verb** `fill_content(nodes, locale?, kind?, records?, avatars?, seed?)` runs the same plan:
+  `kind` a `KIND_KEYS` word, `avatars` *initials* (the default), *pattern* or *none*, records on and
+  seed 0 unless given; the locale is the agreed one, else en-US, and a tag not shipped is refused.
+  It draws avatars only when the caller lends a sink that draws, and fills the texts either way. It
+  is an MCP Phase 2 tool (`mcp.md` §8.4).
+
+### The box
+
+- **Built as Clean up's**: `settings::canvas_card` *Fill with content*, 520 wide, `CardHold::Open`,
+  replanned when an option, the page, the revision or the selection changes (`FillBox::replan`),
+  and a row's click pins the roots it looked under as Clean up's does. Opening it closes the
+  palette, the context menu, the top-bar menu, the colour picker, the path bar's Clean up card and
+  the other cards over the canvas's top; opening any of those closes it. Enter stays the canvas's.
+  *Cancel* or ✕ closes it, and Escape through `OndinApp::escape`'s rung below Clean up's (an open
+  kind list takes the press first). It is drawn outside the `!focus` guard.
+- **Opening**: with nothing to fill, the status line gives the reason and no box opens. The locale
+  is `agreed_locale`, else the last used; records, avatars and their style come from
+  `prefs.fill_content`; the seed is the clock's, so each opening draws anew.
+- **Rows** (batch rename's `row`): *Locale*, a combo of the locales, the current one lit with a
+  check. *Content*, a combo of *By layer name* and each text kind under its group's eyebrow, its
+  sample in the locale as a faint tail (`MenuRow::note`, `content_fill::sample`); picking a kind
+  there drops the text rows' own choices and keeps the shapes'. *Records*, a `switch_row_noted`
+  *Keep each {noun}'s values together* noted *3 rows*. *Avatars*, a `switch_row_noted` labelled with
+  the shape count, then `ui::segmented_enabled` *Initials · Pattern*, disabled while off. Both counts
+  come from a second plan with records and avatars on, so an off switch still says what it would
+  act on.
+- **Preview**: the eyebrow *Preview*, *13 layers in 3 rows · 1 left as is* and a `DICE` button,
+  *Shuffle* (*Shuffle · Draw new values for every layer*), which takes a new seed and clears the
+  redraws. Rows sit under a dim head naming their record's frame, scrolling past twelve with no
+  bar, as Clean up's. A row: the layer's glyph, *Parent / Name* (masked in private mode), a kind
+  combo `ui::TOOLBAR_H` tall, the toolbar scale's control height, which a 24pt list row holds (a text row: *Leave as is* and every text kind; a shape row: *Leave as is*, *Avatar*,
+  and *Photo* disabled with *Photos come from the assets browser*), then the value: a kept row's
+  current text, faint; an overflow in warn ink with *Longer than its box: no draw fitted*; an avatar
+  as its ground swatch with the initials, then the name. A hovered row with a kind shows a `DICE`
+  *Draw another*. Hovering a row rings its layer, a head its frame at a hairline
+  (`canvas::draw_panel_hover`); a click selects the layer and brings it into view.
+- **Foot**: `card_foot` with *Esc closes*, *Cancel* and *Fill N layers*; dimmed as *Fill* with
+  *Every layer is left as is*, or *Select text layers, or frames that hold them* when nothing is
+  listed.
+- **Commit**: one undo step *Fill with content* with `FILL_CONTENT`; the status line says *Filled N
+  layers · Ctrl+Z to undo*, with *· skipped K locked* before the hint when the plan skipped any.
+  Locale, records, avatars and their style are saved to `prefs.fill_content` (`FillContentPrefs`).
+- **Doors.** *Tools ▸ Fill with content…* (after *Clean up…*), dimmed with *Select text layers, or
+  frames that hold them* while `content_fill::fillable` is false; the palette (`Item::FillContent`
+  in the Text group, aliases *lorem*, *placeholder*, *fake*, *sample*, *dummy*, *names*, *data*, the
+  same reason); the text layers' context menu, after the sizing rows. `Action::FillContent` has no
+  chord. `DICE` means drawing new values (*Shuffle*, *Draw another*); `FILL_CONTENT`, lines of text
+  with a small die, is the act and its undo step.
+
 ## Find and replace (`find.rs`)
 
 Find and replace in what text layers say; layer names are batch rename's. The rule is
@@ -775,7 +894,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   no modal: nothing blocks the canvas and a click there leaves it open. It is at most
   `ui::canvas_popup_room` tall, its list scrolling past `ui::CANVAS_POPUP_LIST_H`; title, controls
   and foot stay put. One card over the canvas's top shows at a time: opening it, Find, batch
-  rename or Clean up closes the others, since centred one would run under Find's corner. The census is taken again when the revision, the scope or the threshold changes.
+  rename, Clean up or Fill with content closes the others, since centred one would run under Find's corner. The census is taken again when the revision, the scope or the threshold changes.
 - **Head.** Batch rename's title row (*Colour review*, ✕). Scope *Selection · Document*, opening on *Selection* when something is selected;
   *Selection* is disabled with *Nothing is selected* when nothing is, and a card left on it says
   *Nothing selected · reviewing the document*. Threshold *Tight · Close · Loose*, *Close* by default,

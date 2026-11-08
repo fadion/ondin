@@ -963,6 +963,7 @@ impl OndinApp {
         self.close_find();
         self.colour_review.open = false;
         self.clean_up = None;
+        self.fill_content = None;
         self.batch_rename = Some(BatchRename {
             s,
             selected: selection.len(),

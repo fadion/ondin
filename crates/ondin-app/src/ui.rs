@@ -348,6 +348,9 @@ pub struct MenuRow<'a> {
     pub label: &'a str,
     /// The chord this row answers to, right-aligned in [`theme::text::faint()`].
     pub accel: Option<&'a str>,
+    /// Words in the accelerator's place and ink, not read as a chord: a kind
+    /// list's sample of what each row gives. Ignored beside an `accel`.
+    pub note: Option<&'a str>,
     /// `Some` makes this a checkable row. The glyph column carries the state (the
     /// glyph turns [`color::accent()`], the label full strength); a row with no
     /// glyph of its own shows [`icon::CHECK`] there when on. No tick column.
@@ -372,6 +375,7 @@ impl<'a> MenuRow<'a> {
             glyph,
             label,
             accel: None,
+            note: None,
             checked: None,
             danger: false,
             enabled: true,
@@ -380,6 +384,10 @@ impl<'a> MenuRow<'a> {
     }
     pub fn accel(mut self, accel: Option<&'a str>) -> Self {
         self.accel = accel;
+        self
+    }
+    pub fn note(mut self, note: &'a str) -> Self {
+        self.note = Some(note);
         self
     }
     pub fn checked(mut self, on: bool) -> Self {
@@ -459,12 +467,16 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         );
     }
     let label_x = if bare { 8.0 } else { MENU_LABEL_X };
-    let accel_w = match row.accel {
-        Some(accel) => {
+    let tail = match (row.accel, row.note) {
+        (Some(accel), _) => Some(crate::input::keys(accel)),
+        (None, note) => note.map(std::borrow::Cow::Borrowed),
+    };
+    let accel_w = match tail {
+        Some(tail) => {
             let r = p.text(
                 egui::pos2(rect.right() - 8.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
-                crate::input::keys(accel),
+                tail,
                 egui::FontId::proportional(CAPTION_PT),
                 accel_col,
             );

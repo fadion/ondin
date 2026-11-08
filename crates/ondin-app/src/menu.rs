@@ -333,6 +333,8 @@ pub enum Item {
     BatchRename,
     /// `Action::CleanUp`: the box that takes away what draws nothing.
     CleanUp,
+    /// `Action::FillContent`: the box that fills text layers with realistic values.
+    FillContent,
     /// `Action::FindText`: find, or find and replace, in text layers' text.
     FindText,
     ReplaceText,
@@ -668,6 +670,7 @@ impl Item {
         Item::Rename,
         Item::BatchRename,
         Item::CleanUp,
+        Item::FillContent,
         Item::FindText,
         Item::ReplaceText,
         Item::ZoomSelection,
@@ -941,6 +944,7 @@ impl Item {
             Item::Rename => s("Rename", icon::CURSOR_TEXT, None, Group::State),
             Item::BatchRename => s("Batch rename…", icon::CURSOR_TEXT, None, Group::State),
             Item::CleanUp => s("Clean up…", icon::MAGIC_WAND, None, Group::State),
+            Item::FillContent => s("Fill with content…", icon::FILL_CONTENT, None, Group::Text),
             Item::FindText => s("Find in text…", icon::MAGNIFYING_GLASS, None, Group::State),
             Item::ReplaceText => s(
                 "Replace text…",
@@ -1352,6 +1356,15 @@ impl Item {
             ],
             Item::BatchRename => &["find", "replace", "number", "bulk"],
             Item::CleanUp => &["tidy", "unused", "hidden", "empty"],
+            Item::FillContent => &[
+                "lorem",
+                "placeholder",
+                "fake",
+                "sample",
+                "dummy",
+                "names",
+                "data",
+            ],
             Item::FindText => &["search", "text", "copy"],
             Item::ReplaceText => &["find", "search", "text", "copy", "substitute"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
@@ -1413,6 +1426,7 @@ impl Item {
             Item::Rename => Action::Rename,
             Item::BatchRename => Action::BatchRename,
             Item::CleanUp => Action::CleanUp,
+            Item::FillContent => Action::FillContent,
             Item::FindText => Action::FindText { replace: false },
             Item::ReplaceText => Action::FindText { replace: true },
             Item::Undo => Action::Undo,
@@ -2424,6 +2438,8 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
                 );
             }
         }
+        // In the text head, with the other acts on what the text says.
+        rows.push(Row::new(Item::FillContent).promote().dim_if(locked, why));
     }
     if one && st.has_picture {
         // Dimmed by the lock because the mode itself refuses
@@ -3472,6 +3488,7 @@ impl OndinApp {
             Item::Rename => self.dispatch(ctx, Action::Rename),
             Item::BatchRename => self.dispatch(ctx, Action::BatchRename),
             Item::CleanUp => self.dispatch(ctx, Action::CleanUp),
+            Item::FillContent => self.dispatch(ctx, Action::FillContent),
             Item::FindText => self.dispatch(ctx, Action::FindText { replace: false }),
             Item::ReplaceText => self.dispatch(ctx, Action::FindText { replace: true }),
             Item::ZoomSelection => self.dispatch(ctx, Action::ZoomSelection),
@@ -3889,6 +3906,7 @@ mod tests {
                                     label: "Row",
                                     glyph: icon::CIRCLE,
                                     accel: None,
+                                    note: None,
                                     checked: None,
                                     enabled: true,
                                     danger: false,
@@ -4288,7 +4306,7 @@ mod tests {
 
     /// Row counts for a text layer on a rail and the component roles, with the
     /// arithmetic in each case's message. The bound text child on a rail is the long
-    /// end, at 27.
+    /// end, at 28.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -4305,9 +4323,9 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 23, plus *Flip to other side* and \
+                "text on a rail: the plain 24, plus *Flip to other side* and \
                  *Detach from path*",
-                25,
+                26,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -4337,9 +4355,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child: text's 23, with *Go to main component*, \
+                "a bound text child: text's 24, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                25,
+                26,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -4348,9 +4366,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 25, with the bound \
+                "a bound text child on a rail: the railed 26, with the bound \
                  child's three rows for *Create component* — the long end",
-                27,
+                28,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -4394,10 +4412,10 @@ mod tests {
         }
     }
 
-    /// A text layer's menu is 23 rows: head 4 · Clipboard 6 · Structure 10 · State 3.
+    /// A text layer's menu is 24 rows: head 5 · Clipboard 6 · Structure 10 · State 3.
     /// The fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_twenty_three_rows() {
+    fn a_text_layers_menu_is_twenty_four_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -4413,7 +4431,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Slice selection*, the

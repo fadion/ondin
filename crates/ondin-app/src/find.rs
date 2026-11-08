@@ -149,11 +149,12 @@ impl OndinApp {
             f.keep_case = true;
         }
         // One card over the canvas's top at a time: centred, Colour review, batch
-        // rename or Clean up would run under Find's corner on any canvas short of
-        // a wide one.
+        // rename, Clean up or Fill with content would run under Find's corner on
+        // any canvas short of a wide one.
         self.colour_review.open = false;
         self.batch_rename = None;
         self.clean_up = None;
+        self.fill_content = None;
         if !f.open {
             f.scope = match self.session.selection.ids().is_empty() {
                 true => In::Page,

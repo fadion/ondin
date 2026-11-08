@@ -212,6 +212,9 @@ pub enum Action {
     /// *Clean up…*, unbound: the box that takes away what draws nothing
     /// (`crate::clean_up_box`).
     CleanUp,
+    /// *Fill with content…*, unbound: the box that fills text layers with
+    /// realistic values (`crate::fill_box`).
+    FillContent,
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),

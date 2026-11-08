@@ -1042,6 +1042,8 @@ pub struct OndinApp {
     pub(crate) batch_rename: Option<crate::batch_rename::BatchRename>,
     /// The Clean up box, while it is open (`clean_up_box.rs`).
     pub(crate) clean_up: Option<crate::clean_up_box::CleanUpBox>,
+    /// The Fill with content box, while it is open (`fill_box.rs`).
+    pub(crate) fill_content: Option<crate::fill_box::FillBox>,
     /// The design tokens review, while it is open (`tokens_import.rs`).
     pub(crate) tokens_import: Option<crate::tokens_import::TokensImport>,
     /// The find and replace box, kept while closed so it reopens as it was left.
@@ -1114,16 +1116,18 @@ enum ToolsRow {
     FindReplace,
     BatchRename,
     CleanUp,
+    FillContent,
 }
 
 impl ToolsRow {
-    const ALL: [ToolsRow; 6] = [
+    const ALL: [ToolsRow; 7] = [
         ToolsRow::CheckContrast,
         ToolsRow::SimulateVision,
         ToolsRow::ColourReview,
         ToolsRow::FindReplace,
         ToolsRow::BatchRename,
         ToolsRow::CleanUp,
+        ToolsRow::FillContent,
     ];
 
     /// The registry's label, except *Find and replace…*: the palette's two rows
@@ -1137,6 +1141,7 @@ impl ToolsRow {
             ToolsRow::FindReplace => "Find and replace…",
             ToolsRow::BatchRename => Item::BatchRename.spec().label,
             ToolsRow::CleanUp => Item::CleanUp.spec().label,
+            ToolsRow::FillContent => Item::FillContent.spec().label,
         }
     }
 
@@ -1744,6 +1749,7 @@ impl OndinApp {
             vision: None,
             batch_rename: None,
             clean_up: None,
+            fill_content: None,
             tokens_import: None,
             find: Default::default(),
             colour_review: Default::default(),
@@ -2243,6 +2249,7 @@ impl OndinApp {
         // Unguarded: it is not in a panel, so it works in focus mode.
         self.batch_rename_ui(&ctx, canvas);
         self.clean_up_ui(&ctx, canvas);
+        self.fill_content_ui(&ctx, canvas);
         self.tokens_import_ui(&ctx, canvas);
         self.trace_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
@@ -2569,6 +2576,7 @@ impl OndinApp {
             Action::Rename => self.rename_selection(ctx),
             Action::BatchRename => self.open_batch_rename(ctx, None),
             Action::CleanUp => self.open_clean_up(),
+            Action::FillContent => self.open_fill_content(),
             Action::FindText { replace } => self.open_find(replace),
             Action::Flip(axis) => self.flip(axis),
             Action::Align(axis, edge) => self.align(axis, edge),
@@ -2981,6 +2989,11 @@ impl OndinApp {
                 self.batch_rename = None;
             }
         } else if self.clean_up.take().is_some() {
+        } else if self.fill_content.is_some() {
+            // A row's open kind list takes this press and closes itself.
+            if !egui::Popup::is_any_open(ctx) {
+                self.fill_content = None;
+            }
         } else if self.colour_review.open {
             // Its open menu or the name being typed goes first, the card next press.
             self.colour_review.escape();
@@ -7861,6 +7874,7 @@ impl OndinApp {
                 ToolsRow::BatchRename => {
                     crate::private::on().then_some(crate::private::DECLINE_RENAME)
                 }
+                ToolsRow::FillContent => self.why_no_fill(),
                 _ => None,
             };
             let style = crate::ui::MenuRow::new("", row.label())
@@ -7884,6 +7898,9 @@ impl OndinApp {
                 }
                 ToolsRow::BatchRename => self.dispatch(&ctx, crate::input::Action::BatchRename),
                 ToolsRow::CleanUp => self.dispatch(&ctx, crate::input::Action::CleanUp),
+                ToolsRow::FillContent => {
+                    self.dispatch(&ctx, crate::input::Action::FillContent);
+                }
             }
         }
     }

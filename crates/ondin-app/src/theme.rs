@@ -1044,6 +1044,12 @@ pub mod icon {
     /// The top bar's Tools menu: a toolbox, its handle up and its lid's band
     /// latched. Not [`MAGIC_WAND`], which means clean-up.
     pub const TOOLBOX: &str = "\u{f057}";
+    /// Drawing new values: *Fill with content*'s *Shuffle* and a row's *Draw
+    /// another*. A die showing three.
+    pub const DICE: &str = "\u{f058}";
+    /// *Fill with content…* and its undo step: lines of text with a small die
+    /// beside the last. Not [`MAGIC_WAND`], which means clean-up.
+    pub const FILL_CONTENT: &str = "\u{f059}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1376,6 +1382,8 @@ pub mod icon {
         ("knife-cut", KNIFE_CUT),
         ("pixel-fit", PIXEL_FIT),
         ("toolbox", TOOLBOX),
+        ("dice", DICE),
+        ("fill-content", FILL_CONTENT),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

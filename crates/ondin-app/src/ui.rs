@@ -1833,8 +1833,10 @@ pub fn text_field(
     })
 }
 
-/// The width of a [`secret_field`]'s eye button.
+/// The width of a [`secret_field`]'s eye button, with the gap before it.
 const SECRET_EYE_W: f32 = 26.0;
+/// The eye button's own box.
+const SECRET_EYE_BOX: f32 = 22.0;
 
 /// A [`text_field`] for a secret — a token or an API key — masked unless `shown`,
 /// with the eye / eye-slash button at its end that flips `shown` (`tips` are its
@@ -1850,6 +1852,9 @@ pub fn secret_field(
 ) -> egui::Response {
     let pt = Scale::of(size.y).text_pt();
     field_row(ui, size, |ui| {
+        // The eye's slot counts this gap: the caller's spacing would push the row
+        // past `size` and widen whatever holds it.
+        ui.spacing_mut().item_spacing.x = SECRET_EYE_W - SECRET_EYE_BOX;
         let font = egui::FontId::proportional(pt);
         let pad = edit_frame(ui, &font, size.y - FIELD_BORDER_H, 0.0);
         let edit = pad.add(
@@ -1861,7 +1866,7 @@ pub fn secret_field(
                 .hint_text(egui::RichText::new(hint).size(pt)),
         );
         let glyph = if *shown { icon::EYE_SLASH } else { icon::EYE };
-        if icon_button(ui, glyph, 22.0, 14.0, false, true)
+        if icon_button(ui, glyph, SECRET_EYE_BOX, 14.0, false, true)
             .on_hover_text(if *shown { tips.1 } else { tips.0 })
             .clicked()
         {
@@ -4891,6 +4896,8 @@ pub const SWITCH_SIZE: egui::Vec2 = egui::vec2(26.0, 16.0);
 const SWITCH_PAD: f32 = 2.0;
 /// How far a [`switch_row`]'s hover ground reaches past the row on each side.
 const SWITCH_ROW_BLEED: f32 = 4.0;
+/// The least air between a [`switch_row_noted`]'s note and its switch.
+const SWITCH_NOTE_GAP: f32 = 12.0;
 
 /// A two-state toggle: a track with a knob at one end.
 ///
@@ -5015,12 +5022,28 @@ fn switch_row_inner(
     if marked {
         override_dot(ui.painter(), words.right_top() + egui::vec2(4.0, 3.0));
     }
+    // Cut with an ellipsis short of the switch; the whole note is the tooltip.
+    let mut note_cut = false;
     if let Some(note) = note {
-        ui.painter().text(
-            egui::pos2(words.right() + 6.0, inner.center().y),
-            egui::Align2::LEFT_CENTER,
-            note,
-            egui::FontId::proportional(SWITCH_ROW_LABEL_PT),
+        let x = words.right() + 6.0;
+        let mut job = egui::text::LayoutJob::single_section(
+            note.to_owned(),
+            egui::TextFormat::simple(
+                egui::FontId::proportional(SWITCH_ROW_LABEL_PT),
+                theme::text::faint(),
+            ),
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: (inner.right() - SWITCH_SIZE.x - SWITCH_NOTE_GAP - x).max(0.0),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        let galley = ui.painter().layout_job(job);
+        note_cut = galley.elided;
+        ui.painter().galley(
+            egui::pos2(x, inner.center().y - galley.size().y / 2.0),
+            galley,
             theme::text::faint(),
         );
     }
@@ -5047,7 +5070,10 @@ fn switch_row_inner(
             );
         }
     }
-    resp
+    match (note_cut, note) {
+        (true, Some(note)) => resp.on_hover_text(note),
+        _ => resp,
+    }
 }
 
 /// What a control says when the selection disagrees with itself, one spelling so

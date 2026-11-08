@@ -2167,4 +2167,58 @@ mod tests {
         frame(&ctx, &mut app, vec![escape()]);
         assert!(app.settings.is_none(), "a second Escape discards the form");
     }
+
+    /// The photo services' key fields, one holding a long key, leave the card as
+    /// wide as it is with every service off.
+    /// flip: drop `secret_field`'s own item spacing → fails at "key fields fit".
+    #[test]
+    fn key_fields_keep_the_cards_width() {
+        let width = |services: &[&str]| {
+            let ctx = egui::Context::default();
+            let mut app = OndinApp::headless(&ctx);
+            let key = ("pexels".to_string(), "k".repeat(80));
+            app.asset_keys = Some([key].into_iter().collect());
+            app.prefs.assets.photo_services = services.iter().map(|s| s.to_string()).collect();
+            app.toggle_settings(&ctx);
+            let runs = galleys(&mut app, &ctx);
+            let fields = runs
+                .iter()
+                .filter(|(_, _, t)| t.starts_with("Made at"))
+                .count();
+            let card = ctx.memory(|m| m.area_rect(egui::Id::new("settings")));
+            (card.expect("the card is drawn").width(), fields)
+        };
+        let (off, none) = width(&[]);
+        let (on, fields) = width(&["unsplash", "pexels", "openverse"]);
+        assert_eq!(
+            (none, fields),
+            (0, 2),
+            "the fixture: both keyed services show a field"
+        );
+        assert_eq!(on, off, "key fields fit");
+    }
+
+    /// An icon set's long note stops short of its switch, cut with an ellipsis.
+    /// flip: paint `switch_row_inner`'s note uncut → fails at "clear of the switch".
+    #[test]
+    fn a_long_switch_note_stops_short_of_the_switch() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx);
+        let runs = galleys(&mut app, &ctx);
+        let left = runs
+            .iter()
+            .map(|(p, _, _)| p.x)
+            .fold(f32::INFINITY, f32::min);
+        let switch = left + ui::menu_inner_w(CARD_W, PAD) - ui::SWITCH_SIZE.x;
+        let (pos, size, _) = runs
+            .iter()
+            .find(|(_, _, t)| t.starts_with("CC BY 4.0 · "))
+            .expect("Font Awesome's note is drawn");
+        assert!(
+            pos.x + size.x < switch,
+            "clear of the switch: ends at {:.1}, switch at {switch:.1}",
+            pos.x + size.x
+        );
+    }
 }

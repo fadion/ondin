@@ -523,6 +523,36 @@ pub fn can_hold(doc: &Document, parent: NodeId, moved: NodeId) -> bool {
     true
 }
 
+/// Whether `parent` may hold a new instance of the main `main`, as an Alt-drag of
+/// a main makes: [`can_hold`]'s main rules are not the copy's, so it is refused
+/// only by `LinkRule::ComponentCycle`, inside `main` itself or a main `main`
+/// reaches through instances.
+pub fn can_hold_instance_of(doc: &Document, parent: NodeId, main: NodeId) -> bool {
+    let nodes = doc.node_map();
+    let mut at = Some(parent);
+    let host = loop {
+        let Some(a) = at.and_then(|a| nodes.get(&a)) else {
+            return true;
+        };
+        if a.component {
+            break a.id;
+        }
+        at = a.parent;
+    };
+    let uses = uses(nodes);
+    let mut seen: FxHashSet<NodeId> = FxHashSet::default();
+    let mut stack = vec![main];
+    while let Some(x) = stack.pop() {
+        if x == host {
+            return false;
+        }
+        if seen.insert(x) {
+            stack.extend(uses.get(&x).into_iter().flatten().copied());
+        }
+    }
+    true
+}
+
 /// The instance root `id` belongs to — itself, if it is one, else the nearest one
 /// above it — or `None` outside every instance. A local addition inside an
 /// instance belongs to it too: this is about where a node sits, not whether it is

@@ -3777,8 +3777,16 @@ impl OndinApp {
 
     /// Whether frame `f` may hold `moved` dropped into it by this move:
     /// `component::can_hold`, and for a main entering a component set, the set
-    /// taking every main moving with it (`variant::takes_together`).
+    /// taking every main moving with it (`variant::takes_together`). An Alt-drag
+    /// of a main lands an instance of it, which is asked as one.
     fn holds(&self, f: NodeId, moved: NodeId) -> bool {
+        let instance_copy = self
+            .alt_clone
+            .as_ref()
+            .is_some_and(|c| c.copies.iter().any(|k| k.source == moved && k.instance));
+        if instance_copy {
+            return ondin_core::component::can_hold_instance_of(&self.session.doc, f, moved);
+        }
         ondin_core::component::can_hold(&self.session.doc, f, moved)
             && self.set_takes_moving(f, moved)
     }
@@ -22811,6 +22819,52 @@ mod flex_canvas_tests {
             "an instance"
         );
         assert_eq!(node.name(), "Chip", "under the main's name");
+    }
+
+    /// An Alt-drag of a main over another main nests the copy there: the copy is
+    /// an instance, which a main may hold, not a second main.
+    /// flip: `holds` asking `can_hold` about the source main → fails at "inside Card".
+    #[test]
+    fn an_alt_dragged_mains_copy_may_land_in_another_main() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, ..) = app_with_a_row(&ctx);
+        let root = app.session.doc.first_page();
+        let (chip, card) = (app.session.ids.mint(), app.session.ids.mint());
+        let frame = |id, at: (f64, f64), side: f64, name: &str| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Artboard {
+                size: Size::new(side, side),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate(at)),
+            name: Some(name.into()),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(chip, (450.0, 50.0), 50.0, "Chip"),
+            frame(card, (420.0, 200.0), 200.0, "Card"),
+        ])));
+        for id in [chip, card] {
+            app.session.selection.set_one(id);
+            app.create_component();
+        }
+        assert!(
+            app.session.doc.get(card).is_some_and(|n| n.component()),
+            "the fixture"
+        );
+        alt_drag(
+            &ctx,
+            &mut app,
+            Point::new(475.0, 75.0),
+            Point::new(510.0, 290.0),
+        );
+        let copy = app.session.selection.single().expect("the copy");
+        assert_ne!(copy, chip);
+        let parent = app.session.doc.get(copy).and_then(|n| n.parent());
+        assert_eq!(parent, Some(card), "inside Card");
     }
 
     /// A click selects a flex item where it is drawn, and nothing at its stored place.

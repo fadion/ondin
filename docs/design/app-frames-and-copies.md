@@ -46,7 +46,9 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
     copy alone on an Alt-drag);
   - frames the component rules refuse (`component::can_hold`, skipped via
     `canvas::covering_that_holds`, asked only where `FrameIndex::components` says the document has
-    components). A main passed over by a set of another kind is told why
+    components). An Alt-drag of a main lands an instance, so its copy is asked as one
+    (`component::can_hold_instance_of`: refused only inside a main it would cycle through), and
+    may nest in another main or in a set. A main passed over by a set of another kind is told why
     (`canvas::SET_OF_ANOTHER_KIND`); mains of two kinds into an empty set are refused together
     (`variant::takes_together`, `canvas::SET_OF_MIXED_KINDS`).
 - **A layer with a group above it hops only between frames inside that group** (`canvas::group_fence`).

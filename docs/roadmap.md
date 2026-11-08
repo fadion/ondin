@@ -16,10 +16,6 @@ item's premise can go stale while its ask still reads true.
   text layers, a different value per layer, from tables shipped with the app (works offline, a few
   locales). Avatars are generated (initials, patterns); photos come from the assets browser. Its
   door is a Tools menu bulk-edit row, *Fill with content…*.
-- **Tidying names and styles** — the renaming and style pruning *Clean up…* leaves to their own
-  surfaces. Batch rename gains a `[Text]` token (a text layer's content) and a filter that takes
-  only layers still wearing a default name. The styles browser gains an unused filter and *Delete
-  unused* over the document's own styles.
 
 ## Now · Components and layout
 

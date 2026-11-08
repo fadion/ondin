@@ -159,6 +159,8 @@ pub(crate) struct Browser {
     focus: bool,
     /// *In selection*, kept pressed across selection changes.
     pub(crate) in_selection: bool,
+    /// The Styles tab's *Unused*: only the document's own styles no layer uses.
+    pub(crate) unused: bool,
     /// Collapsed group paths — a copy of the document's own set
     /// (`OndinApp::var_collapsed`), loaded for [`Self::root`] (§15 D1054).
     collapsed: HashSet<String>,
@@ -475,11 +477,13 @@ impl OndinApp {
             who.retain(|u| !doc.in_vault(*u));
             style_users.insert(s.id, who);
         }
-        let style_picked: Option<HashSet<StyleId>> = b.in_selection.then(|| {
+        let unused = unused_styles(doc, &style_users);
+        let style_picked: Option<HashSet<StyleId>> = (b.in_selection || b.unused).then(|| {
             let ids = ondin_core::subtree_nodes(doc, self.session.selection.ids());
             doc.styles()
                 .iter()
-                .filter(|s| style_users[&s.id].iter().any(|u| ids.contains(u)))
+                .filter(|s| !b.in_selection || style_users[&s.id].iter().any(|u| ids.contains(u)))
+                .filter(|s| !b.unused || unused.contains(&s.id))
                 .map(|s| s.id)
                 .collect()
         });
@@ -545,6 +549,27 @@ impl OndinApp {
                                     .size(ui::CAPTION_PT)
                                     .color(theme::text::dim()),
                             );
+                        }
+                        if b.unused && matches!(b.tab, Tab::Styles) {
+                            // What the list shows, so the button takes no style the
+                            // search or *In selection* hides.
+                            let shown: Vec<StyleId> = unused
+                                .iter()
+                                .copied()
+                                .filter(|id| style_picked.as_ref().is_none_or(|p| p.contains(id)))
+                                .filter(|id| {
+                                    query.is_empty()
+                                        || doc
+                                            .styles()
+                                            .get(*id)
+                                            .is_some_and(|s| s.name.to_lowercase().contains(&query))
+                                })
+                                .collect();
+                            ui.add_space(-6.0);
+                            if unused_line(ui, shown.len()) {
+                                let name = ui::count(shown.len(), "unused style");
+                                acts.push(Act::DeleteStyles(shown, name));
+                            }
                         }
                         if let Some(why) = &b.refusal {
                             ui.add_space(-6.0);
@@ -2799,7 +2824,9 @@ fn search_row(
         if picker {
             collection_picker(ui, doc, shown, b, acts);
         }
-        let w = ui.available_width() - 2.0 * (SEARCH_H + 6.0);
+        let styles = matches!(b.tab, Tab::Styles);
+        let buttons = if styles { 3.0 } else { 2.0 };
+        let w = ui.available_width() - buttons * (SEARCH_H + 6.0);
         let hint = match b.tab {
             Tab::Variables if t.has_collections() => "Search all collections",
             Tab::Variables => "Search variables",
@@ -2829,6 +2856,14 @@ fn search_row(
         if toggle.clicked() {
             b.in_selection = !b.in_selection;
         }
+        if styles {
+            let toggle =
+                ui::field_button(ui, icon::FUNNEL, SEARCH_H, ui::FieldButton::on_if(b.unused))
+                    .on_hover_text("Unused: only this document's styles no layer uses");
+            if toggle.clicked() {
+                b.unused = !b.unused;
+            }
+        }
         // Open, the `+` wears an open dropdown's border.
         let adding = matches!(b.menu, Some((Menu::Add, _)));
         let add_state = match adding {
@@ -2851,6 +2886,46 @@ fn search_row(
             ));
         }
     });
+}
+
+/// The document's own styles no layer uses, by the browser's usage count
+/// (`users`, vault nodes left out); a kit's styles are the kit's to keep.
+fn unused_styles(doc: &Document, users: &BTreeMap<StyleId, Vec<NodeId>>) -> Vec<StyleId> {
+    doc.styles()
+        .iter()
+        .filter(|s| s.kit().is_none() && users.get(&s.id).is_none_or(Vec::is_empty))
+        .map(|s| s.id)
+        .collect()
+}
+
+/// *Unused*'s line under the search row: how many unused styles the list shows,
+/// and *Delete unused*, dim with its reason when there are none. True when *Delete
+/// unused* is clicked.
+fn unused_line(ui: &mut egui::Ui, n: usize) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(match n {
+                0 => "No unused styles here".to_string(),
+                n => ui::count(n, "unused style"),
+            })
+            .size(ui::CAPTION_PT)
+            .color(theme::text::dim()),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let state = match n {
+                0 => ui::FieldButton::Disabled,
+                _ => ui::FieldButton::Off,
+            };
+            let resp = crate::settings::text_button(ui, "Delete unused", state);
+            let resp = match n {
+                0 => resp.on_disabled_hover_text("No style here is unused"),
+                _ => resp.on_hover_text("Delete them in one step; Ctrl+Z brings them back"),
+            };
+            n > 0 && resp.clicked()
+        })
+        .inner
+    })
+    .inner
 }
 
 /// The linked tokens file under the search row: its path, and how many changes
@@ -2980,6 +3055,8 @@ fn styles_tab(
             "No styles match",
             if b.in_selection {
                 "Turn off In selection to see them all."
+            } else if b.unused {
+                "Turn off Unused to see them all."
             } else {
                 "Try another name."
             },
@@ -4866,6 +4943,74 @@ mod tests {
             Some(v.id),
             "one undo restores the binding"
         );
+    }
+
+    /// *Unused* finds the document's own styles no layer uses, and *Delete unused*
+    /// takes exactly those in one undo step.
+    /// flip: `unused_styles` ignoring usage → fails at "only the idle style is unused".
+    #[test]
+    fn delete_unused_takes_only_the_styles_no_layer_uses() {
+        let (ctx, mut app) = app();
+        let rect = app.session.ids.mint();
+        let root = app.session.doc.first_page();
+        let item = app.session.ids.mint_item();
+        let (used, idle) = (app.session.ids.mint_style(), app.session.ids.mint_style());
+        let style = |id, name: &str| Operation::AddStyle {
+            style: Style {
+                id,
+                name: name.into(),
+                value: sty::StyleValue::Fills(vec![ondin_core::item::Keyed::new(
+                    item,
+                    Fill {
+                        brush: Color::WHITE.into(),
+                        visible: true,
+                    },
+                )]),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        };
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            style(used, "surface/raised"),
+            style(idle, "surface/old"),
+            Operation::SetFillStyle {
+                id: rect,
+                style: Some(used),
+            },
+        ])));
+        let doc = &app.session.doc;
+        let users: BTreeMap<StyleId, Vec<NodeId>> = doc
+            .styles()
+            .iter()
+            .map(|s| (s.id, sty::users(doc, s.id)))
+            .collect();
+        let unused = unused_styles(doc, &users);
+        assert_eq!(unused, [idle], "only the idle style is unused");
+
+        app.toggle_var_browser();
+        let b = app.var_browser.as_mut().unwrap();
+        b.tab = Tab::Styles;
+        b.unused = true;
+        pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        let depth = app.session.history.undo_depth();
+        app.var_act(Act::DeleteStyles(unused, "1 unused style".into()));
+        let styles = app.session.doc.styles();
+        assert!(styles.get(idle).is_none(), "the unused style is gone");
+        assert!(styles.get(used).is_some(), "the used style stays");
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
     }
 
     /// **The *Styles* tab lists a style under its card and its path's group, and

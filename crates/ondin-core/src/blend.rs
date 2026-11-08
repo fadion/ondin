@@ -50,6 +50,11 @@ pub enum Refusal {
     /// A shape sits in a boolean, a main or an instance, where a new group would
     /// change what that draws.
     Inside,
+    /// The two sit in different groups or frames: moving one into the other's
+    /// would put it under that one's clip, opacity, mode and layout.
+    Parents,
+    /// A shape is a mask: in the group it would stop clipping what it clips.
+    Mask,
 }
 
 impl Refusal {
@@ -66,6 +71,8 @@ impl Refusal {
             Refusal::Inside => {
                 "Blend shapes can't work inside a boolean, a component or an instance"
             }
+            Refusal::Parents => "Blend shapes needs two shapes in the same group or frame",
+            Refusal::Mask => "Blend shapes can't take a mask",
         }
     }
 }
@@ -96,6 +103,9 @@ pub fn pair(doc: &Document, selection: &[NodeId]) -> Result<(NodeId, NodeId), Re
         if node.paint().image_fill().is_some() {
             return Err(Refusal::Picture);
         }
+        if node.mask() {
+            return Err(Refusal::Mask);
+        }
         match node.kind() {
             NodeKind::Text { .. } => return Err(Refusal::Text),
             NodeKind::Rect { .. }
@@ -110,7 +120,23 @@ pub fn pair(doc: &Document, selection: &[NodeId]) -> Result<(NodeId, NodeId), Re
             _ => return Err(Refusal::Count),
         }
     }
+    // Grouping moves both into the upper one's parent, as `build::group` refuses
+    // to across parents.
+    if doc.get(*a).and_then(|n| n.parent()) != doc.get(*b).and_then(|n| n.parent()) {
+        return Err(Refusal::Parents);
+    }
     Ok((*a, *b))
+}
+
+/// Why `selection` cannot be blended, if it cannot: [`pair`]'s refusals and the
+/// outlines' (open against closed, a different number of parts), so a dimmed row
+/// says what a commit would.
+pub fn refusal(doc: &Document, res: &Resolved, selection: &[NodeId]) -> Option<Refusal> {
+    let (a, b) = match pair(doc, selection) {
+        Ok(pair) => pair,
+        Err(r) => return Some(r),
+    };
+    outlines(doc, res, a, b).err()
 }
 
 /// One subpath as cubic segments, and whether it closes.
@@ -275,16 +301,18 @@ fn between(a: &[Run], b: &[Run], t: f64) -> BezPath {
     out
 }
 
-/// The two outlines, in world space, paired run for run and cut to the same
-/// segments, ready to be stepped between.
-fn matched(
+/// One shape's outline in world space, as runs, and its box.
+type Outline = (Vec<Run>, Rect);
+
+/// The two shapes' outlines in world space, or [`Refusal::Parts`] when their runs
+/// do not pair: a different number, or one closed against one open.
+fn outlines(
     doc: &Document,
     res: &Resolved,
     a: NodeId,
     b: NodeId,
-    blend: Blend,
-) -> Result<(Vec<Run>, Vec<Run>), Refusal> {
-    let outline = |id: NodeId| -> Option<(Vec<Run>, Rect)> {
+) -> Result<(Outline, Outline), Refusal> {
+    let outline = |id: NodeId| -> Option<Outline> {
         let world = res.world_transform(id)? * res.local_path(doc, id)?;
         let bounds = world.bounding_box();
         Some((runs(&world), bounds))
@@ -297,20 +325,39 @@ fn matched(
     {
         return Err(Refusal::Parts);
     }
+    Ok(((ra, box_a), (rb, box_b)))
+}
+
+/// The two outlines' runs, paired, and for each pair whether the second shape's
+/// run now goes against its own direction.
+type Matched = (Vec<Run>, Vec<Run>, Vec<bool>);
+
+/// The two outlines, in world space, paired run for run and cut to the same
+/// segments, ready to be stepped between.
+fn matched(
+    doc: &Document,
+    res: &Resolved,
+    a: NodeId,
+    b: NodeId,
+    blend: Blend,
+) -> Result<Matched, Refusal> {
+    let ((ra, box_a), (rb, box_b)) = outlines(doc, res, a, b)?;
     let corner = |r: Rect| {
         Point::new(
             r.x0 + r.width() * blend.start.x,
             r.y0 + r.height() * blend.start.y,
         )
     };
-    let (mut out_a, mut out_b) = (Vec::new(), Vec::new());
+    let (mut out_a, mut out_b, mut turned) = (Vec::new(), Vec::new(), Vec::new());
     for (x, y) in ra.iter().zip(&rb) {
         let (mut x, mut y) = (x.clone(), y.clone());
+        let mut against = blend.reverse;
         if x.closed {
             // Turned the same way as the first, so the steps do not pass through
             // themselves; *Reverse* still turns it back by hand.
             if turning(&x).signum() != turning(&y).signum() {
                 y = reversed(&y);
+                against = !against;
             }
             if blend.reverse {
                 y = reversed(&y);
@@ -323,8 +370,9 @@ fn matched(
         let (x, y) = paired(&x, &y);
         out_a.push(x);
         out_b.push(y);
+        turned.push(against);
     }
-    Ok((out_a, out_b))
+    Ok((out_a, out_b, turned))
 }
 
 /// `a` and `b` mixed `t` of the way, channel by channel, alpha included.
@@ -333,29 +381,44 @@ fn mix(a: crate::peniko::Color, b: crate::peniko::Color, t: f32) -> crate::penik
     crate::peniko::Color::new(std::array::from_fn(|i| p[i] + (q[i] - p[i]) * t))
 }
 
+/// How one shape's paint is carried into the steps' own space: the factor its
+/// stroke widths grow by, and the map from its local space to the steps'.
+type Carry = (f64, Affine);
+
 /// The look of step `t`: each fill and stroke the two share by position mixed
 /// where both are solid colours, else the nearer shape's; widths and opacity
-/// mixed. Literal throughout, as the steps are unbound. `scale` maps each shape's
-/// stroke widths into the steps' own units, so a stroke draws as wide as it did.
+/// mixed. Literal throughout, as the steps are unbound. Each shape's [`Carry`]
+/// brings its stroke widths and gradients into the steps' units, so a stroke draws
+/// as wide as it did and a gradient lies over the step as it lay over the shape.
 fn look_between(
     doc: &Document,
     (a, b): (NodeId, NodeId),
     t: f64,
     paint: bool,
-    scale: (f64, f64),
+    carry: (Carry, Carry),
 ) -> (crate::Paint, f32) {
     let (na, nb) = (doc.get(a), doc.get(b));
-    let resolved = |n: Option<&crate::Node>, id, k: f64| {
+    let resolved = |n: Option<&crate::Node>, id, (k, by): Carry| {
         let mut p = n
             .map(|n| doc.resolved_paint(id, n.paint()).into_owned())
             .unwrap_or_default();
+        let carried = |src: &mut crate::variable::BrushSource| {
+            if let Some(brush) = src.literal() {
+                *src =
+                    crate::variable::BrushSource::Literal(crate::paint_box::carry_brush(brush, by));
+            }
+        };
+        for f in &mut p.fills {
+            carried(&mut f.value.brush);
+        }
         for s in &mut p.strokes {
             s.value.width *= k;
             s.value.width_var = None;
+            carried(&mut s.value.brush);
         }
         p
     };
-    let (pa, pb) = (resolved(na, a, scale.0), resolved(nb, b, scale.1));
+    let (pa, pb) = (resolved(na, a, carry.0), resolved(nb, b, carry.1));
     let (oa, ob) = (doc.drawn_opacity(a), doc.drawn_opacity(b));
     if !paint {
         return (pa, oa);
@@ -402,7 +465,16 @@ pub fn blend(
     if blend.steps == 0 || blend.steps > MAX_STEPS {
         return Err(Refusal::Count);
     }
-    let (ra, rb) = matched(doc, res, a, b, blend)?;
+    let (ra, rb, turned) = matched(doc, res, a, b, blend)?;
+    // The steps that take the second shape's fill rule run each of its turned runs
+    // its own way again, so the rule meets the windings it was written for.
+    let unturned = |runs: &[Run]| -> Vec<Run> {
+        runs.iter()
+            .zip(&turned)
+            .map(|(r, t)| if *t { reversed(r) } else { r.clone() })
+            .collect()
+    };
+    let (ra_b, rb_b) = (unturned(&ra), unturned(&rb));
     let upper = doc.get(b).ok_or(Refusal::Count)?;
     let parent = upper.parent().ok_or(Refusal::Count)?;
     let at = doc
@@ -413,11 +485,14 @@ pub fn blend(
     let to_parent = parent_world.inverse();
     // How much larger a unit of each shape draws than a unit of the steps.
     let size = |w: Affine| w.determinant().abs().sqrt();
-    let unit = |id: NodeId| {
-        res.world_transform(id)
-            .map_or(1.0, |w| size(w) / size(parent_world).max(1e-12))
+    let carry = |id: NodeId| -> Carry {
+        let world = res.world_transform(id).unwrap_or(Affine::IDENTITY);
+        (
+            size(world) / size(parent_world).max(1e-12),
+            to_parent * world,
+        )
     };
-    let scale = (unit(a), unit(b));
+    let carry = (carry(a), carry(b));
 
     // Built on a scratch document, so each node takes every default a created
     // one has, then carried over whole.
@@ -436,7 +511,12 @@ pub fn blend(
     for k in 1..=blend.steps {
         let t = k as f64 / (blend.steps + 1) as f64;
         let step = ids.mint();
-        let path = to_parent * between(&ra, &rb, t);
+        // The nearer shape's rule, so a shape with holes keeps them.
+        let near = if t < 0.5 || !blend.paint { a } else { b };
+        let path = match near == b {
+            true => to_parent * between(&ra_b, &rb_b, t),
+            false => to_parent * between(&ra, &rb, t),
+        };
         ops.push(Operation::CreateNode {
             id: step,
             parent: group,
@@ -450,9 +530,7 @@ pub fn blend(
             transform: None,
             name: Some(format!("Step {k}")),
         });
-        let (paint, opacity) = look_between(doc, (a, b), t, blend.paint, scale);
-        // The nearer shape's rule, so a shape with holes keeps them.
-        let near = if t < 0.5 || !blend.paint { a } else { b };
+        let (paint, opacity) = look_between(doc, (a, b), t, blend.paint, carry);
         if let Some(rule) = doc.get(near).map(|n| n.fill_rule()) {
             ops.push(Operation::SetFillRule { id: step, rule });
         }

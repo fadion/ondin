@@ -67,11 +67,14 @@ enum Act {
 }
 
 impl OndinApp {
-    /// Why the selection cannot be blended, if it cannot.
+    /// Why the selection cannot be blended, if it cannot: the row's sentence.
     fn blend_refusal(&self) -> Option<&'static str> {
-        blend::pair(&self.session.doc, self.session.selection.ids())
-            .err()
-            .map(|r| r.says())
+        blend::refusal(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.selection.ids(),
+        )
+        .map(|r| r.says())
     }
 
     /// Open the card on the two selected shapes, or say why it cannot.
@@ -406,5 +409,44 @@ mod tests {
             app.session.status().text,
             "Blend shapes needs exactly two shapes"
         );
+    }
+
+    /// A line and a circle, whose outlines do not pair, are refused before the card
+    /// opens, with the sentence a commit would give.
+    /// flip: `blend_refusal` asking `blend::pair` alone → fails at "no card".
+    #[test]
+    fn open_against_closed_is_refused_before_the_card() {
+        let ctx = egui::Context::default();
+        let (mut app, circle, _) = two_shapes(&ctx);
+        let line = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: line,
+            parent: page,
+            index: 2,
+            kind: NodeKind::Line {
+                end: ondin_core::kurbo::Point::new(100.0, 0.0),
+            },
+            transform: Some(Affine::translate((200.0, 300.0))),
+            name: None,
+        }])));
+        app.session.selection.set(vec![circle, line]);
+        app.open_blend();
+        assert!(!app.blend.open, "no card");
+        assert_eq!(app.session.status().text, blend::Refusal::Parts.says());
+    }
+
+    /// The preview is the commit's own edit, minted from a copy of the counter: it
+    /// spends no ids.
+    /// flip: `refresh_blend_preview` minting from `session.ids` → fails at "no ids spent".
+    #[test]
+    fn the_preview_spends_no_ids() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = two_shapes(&ctx);
+        app.open_blend();
+        let before = app.session.ids.next_seq();
+        app.refresh_blend_preview();
+        assert!(app.session.has_gesture_preview());
+        assert_eq!(app.session.ids.next_seq(), before, "no ids spent");
     }
 }

@@ -162,17 +162,13 @@ fn the_group_holds_both_shapes_and_the_steps_between() {
     }
 }
 
-/// A shape from another parent, a moved group, comes into the blend's group and
-/// is still drawn where it was.
-/// flip: `blend` without its `SetTransform`s → fails at "drawn where it was".
+/// A shape in another group is refused, by the row and the commit alike: moved into
+/// the other's group it would leave its own parent's clip, opacity and layout.
+/// flip: `pair` without its common-parent test → fails at the refusal.
 #[test]
-fn a_shape_from_another_parent_keeps_its_place() {
+fn shapes_in_different_parents_are_refused() {
     let mut f = Fixture::new();
     let holder = f.ids.mint();
-    let res = Resolved::rebuild(&f.doc);
-    let circle_world = res.world_transform(f.circle).unwrap();
-    let frame_world = res.world_transform(f.frame).unwrap();
-    let holder_local = Affine::translate((20.0, 10.0));
     f.doc
         .apply(&Transaction(vec![
             Operation::CreateNode {
@@ -180,7 +176,7 @@ fn a_shape_from_another_parent_keeps_its_place() {
                 parent: f.frame,
                 index: 0,
                 kind: NodeKind::Group,
-                transform: Some(holder_local),
+                transform: Some(Affine::translate((20.0, 10.0))),
                 name: None,
             },
             Operation::Reparent {
@@ -188,21 +184,206 @@ fn a_shape_from_another_parent_keeps_its_place() {
                 new_parent: holder,
                 index: 0,
             },
+        ]))
+        .unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Parents)
+    );
+    let res = Resolved::rebuild(&f.doc);
+    let made = blend::blend(&f.doc, &res, &mut f.ids, &[f.circle, f.square], FIVE);
+    assert_eq!(made.err(), Some(Refusal::Parents));
+}
+
+/// A mask is refused: in the group it would stop clipping what it clips.
+/// flip: `pair` without its mask test → fails at the refusal.
+#[test]
+fn a_mask_is_refused() {
+    let mut f = Fixture::new();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMask {
+            id: f.circle,
+            mask: true,
+        }]))
+        .unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Mask)
+    );
+}
+
+/// An open line against a closed circle pairs as far as `pair` goes, and is refused
+/// by `refusal`, which the row asks, with the sentence a commit gives.
+/// flip: `refusal` answering `pair` alone → fails at "the row is dimmed".
+#[test]
+fn open_against_closed_is_refused_before_the_commit() {
+    let mut f = Fixture::new();
+    let line = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: line,
+            parent: f.frame,
+            index: 2,
+            kind: NodeKind::Line {
+                end: Point::new(100.0, 0.0),
+            },
+            transform: Some(Affine::translate((300.0, 50.0))),
+            name: None,
+        }]))
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    assert!(blend::pair(&f.doc, &[f.circle, line]).is_ok());
+    assert_eq!(
+        blend::refusal(&f.doc, &res, &[f.circle, line]),
+        Some(Refusal::Parts),
+        "the row is dimmed"
+    );
+    let made = blend::blend(&f.doc, &res, &mut f.ids, &[f.circle, line], FIVE);
+    assert_eq!(made.err(), Some(Refusal::Parts));
+    assert_eq!(blend::refusal(&f.doc, &res, &[f.circle, f.square]), None);
+}
+
+/// A gradient on the circle, in a frame that scales, lies over each step as it lay
+/// over the circle: its ends land in the world where the circle's did.
+/// flip: `look_between` not carrying brushes → fails at "the ramp's start".
+#[test]
+fn a_gradient_is_carried_into_each_steps_space() {
+    use ondin_core::peniko::{Gradient, GradientKind};
+    let mut f = Fixture::new();
+    f.doc
+        .apply(&Transaction(vec![
             Operation::SetTransform {
+                id: f.frame,
+                transform: Affine::translate((50.0, 30.0)) * Affine::scale(2.0),
+            },
+            Operation::SetFills {
                 id: f.circle,
-                transform: (frame_world * holder_local).inverse() * circle_world,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Gradient(Gradient::new_linear((0.0, 0.0), (60.0, 60.0)).into())
+                        .into(),
+                    visible: true,
+                }]),
+            },
+            // Both gradients, so the steps either side of the middle each carry one.
+            Operation::SetFills {
+                id: f.square,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Gradient(Gradient::new_linear((0.0, 0.0), (166.0, 0.0)).into())
+                        .into(),
+                    visible: true,
+                }]),
             },
         ]))
         .unwrap();
-    f.blend(FIVE);
-    let now = Resolved::rebuild(&f.doc).world_transform(f.circle).unwrap();
-    assert!(
-        now.as_coeffs()
-            .iter()
-            .zip(circle_world.as_coeffs())
-            .all(|(a, b)| (a - b).abs() < 1e-9),
-        "drawn where it was"
+    let before = Resolved::rebuild(&f.doc);
+    let ends = |doc: &Document, res: &Resolved, id: NodeId| {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
+            panic!("a gradient");
+        };
+        let GradientKind::Linear(line) = g.gradient.kind else {
+            panic!("linear");
+        };
+        let to_world = res.world_transform(id).unwrap() * g.transform;
+        (to_world * line.start, to_world * line.end)
+    };
+    let (circle, square) = (
+        ends(&f.doc, &before, f.circle),
+        ends(&f.doc, &before, f.square),
     );
+    let group = f.blend(FIVE);
+    let after = Resolved::rebuild(&f.doc);
+    let steps = steps_of(&f, group);
+    for (step, want) in [(steps[0], circle), (steps[4], square)] {
+        let got = ends(&f.doc, &after, step);
+        assert!(
+            (got.0 - want.0).hypot() < 1e-6,
+            "the ramp's start: {got:?} vs {want:?}"
+        );
+        assert!(
+            (got.1 - want.1).hypot() < 1e-6,
+            "the ramp's end: {got:?} vs {want:?}"
+        );
+    }
+}
+
+/// An even-odd ring wound one way blended with a non-zero ring whose hole is
+/// counter-wound keeps a hole in every step: each step takes the nearer shape's
+/// rule and that shape's windings with it.
+/// flip: `blend` stepping the upper half from the runs as turned → fails at "a hole
+/// in step 3", the first to take the upper shape's rule.
+#[test]
+fn every_step_keeps_the_hole_both_ends_have() {
+    use ondin_core::FillRule;
+    use ondin_core::kurbo::BezPath;
+    let square = |p: &mut BezPath, c: (f64, f64), r: f64, clockwise: bool| {
+        let mut corners = [(-r, -r), (r, -r), (r, r), (-r, r)];
+        if !clockwise {
+            corners.reverse();
+        }
+        p.move_to((c.0 + corners[0].0, c.1 + corners[0].1));
+        for (x, y) in &corners[1..] {
+            p.line_to((c.0 + x, c.1 + y));
+        }
+        p.close_path();
+    };
+    let mut a_path = BezPath::new();
+    square(&mut a_path, (100.0, 100.0), 50.0, true);
+    square(&mut a_path, (100.0, 100.0), 20.0, true);
+    let mut b_path = BezPath::new();
+    square(&mut b_path, (400.0, 100.0), 50.0, true);
+    square(&mut b_path, (400.0, 100.0), 20.0, false);
+    let mut f = Fixture::new();
+    let (a, b) = (f.ids.mint(), f.ids.mint());
+    let path = |id, index, path: BezPath| Operation::CreateNode {
+        id,
+        parent: f.frame,
+        index,
+        kind: NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: Default::default(),
+        },
+        transform: None,
+        name: None,
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            path(a, 2, a_path),
+            path(b, 3, b_path),
+            Operation::SetFills {
+                id: a,
+                fills: filled(BLUE),
+            },
+            Operation::SetFills {
+                id: b,
+                fills: filled(ORANGE),
+            },
+            Operation::SetFillRule {
+                id: a,
+                rule: FillRule::EvenOdd,
+            },
+        ]))
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, group) = blend::blend(&f.doc, &res, &mut f.ids, &[a, b], FIVE).expect("a blend");
+    f.doc.apply(&tx).unwrap();
+    let after = Resolved::rebuild(&f.doc);
+    for (k, step) in steps_of(&f, group).into_iter().enumerate() {
+        let n = f.doc.get(step).unwrap();
+        let NodeKind::Path { path, .. } = n.kind() else {
+            panic!("a path");
+        };
+        let world = after.world_transform(step).unwrap();
+        // The middle of the step, in its own space.
+        let mid = world.inverse() * Point::new(100.0 + 300.0 * (k + 1) as f64 / 6.0 + 50.0, 130.0);
+        let w = path.winding(mid);
+        let filled = match n.fill_rule() {
+            FillRule::NonZero => w != 0,
+            FillRule::EvenOdd => w % 2 != 0,
+        };
+        assert!(!filled, "a hole in step {}: winding {w}", k + 1);
+    }
 }
 
 /// Step k of n sits k / (n + 1) of the way between the two centres, and grows
@@ -352,4 +533,72 @@ fn text_pictures_and_other_counts_are_refused() {
         .unwrap();
     assert_eq!(blend::pair(&f.doc, &[f.circle, text]), Err(Refusal::Text));
     assert_eq!(Refusal::Text.says(), "Blend shapes can't take text");
+
+    let picture = ondin_core::image_brush(ondin_core::ImageId("photo".into()));
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.square,
+            fills: keyed_by_position([Fill {
+                brush: picture.into(),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Picture)
+    );
+}
+
+/// No steps, or more than the most, is refused.
+#[test]
+fn the_step_count_is_bounded() {
+    let mut f = Fixture::new();
+    let res = Resolved::rebuild(&f.doc);
+    for steps in [0, blend::MAX_STEPS + 1] {
+        let made = blend::blend(
+            &f.doc,
+            &res,
+            &mut f.ids,
+            &[f.circle, f.square],
+            Blend { steps, ..FIVE },
+        );
+        assert_eq!(made.err(), Some(Refusal::Count), "{steps}");
+    }
+}
+
+/// Of two shapes that each draw at twice their own units, a step's stroke draws as
+/// wide as theirs did: its width times its world scale is their drawn width.
+/// flip: `blend` carrying widths with a factor of 1 → fails at the width.
+#[test]
+fn a_stroke_draws_as_wide_from_scaled_shapes() {
+    use ondin_core::Stroke;
+    let mut f = Fixture::new();
+    let stroked = |id| Operation::SetStrokes {
+        id,
+        strokes: keyed_by_position([Stroke {
+            brush: Brush::Solid(BLUE).into(),
+            width: 4.0,
+            ..Default::default()
+        }]),
+    };
+    let doubled = |id, at: (f64, f64)| Operation::SetTransform {
+        id,
+        transform: Affine::translate(at) * Affine::scale(2.0),
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            doubled(f.circle, (80.0, 230.0)),
+            doubled(f.square, (430.0, 76.0)),
+            stroked(f.circle),
+            stroked(f.square),
+        ]))
+        .unwrap();
+    let group = f.blend(FIVE);
+    let res = Resolved::rebuild(&f.doc);
+    for step in steps_of(&f, group) {
+        let width = f.doc.get(step).unwrap().paint().strokes[0].width;
+        let scale = res.world_transform(step).unwrap().determinant().sqrt();
+        assert!((width * scale - 8.0).abs() < 1e-9, "{width} × {scale}");
+    }
 }

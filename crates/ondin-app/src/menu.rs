@@ -1817,7 +1817,7 @@ pub struct LayerState {
     /// `shape_builder::can_arrange` said yes of the selection: two or more closed
     /// shapes for *Divide* to cut.
     pub divisible: bool,
-    /// Why *Blend shapes…* cannot take the selection (`blend::pair`), if not.
+    /// Why *Blend shapes…* cannot take the selection (`blend::refusal`), if not.
     pub blend_refusal: Option<&'static str>,
     /// Why *Warp…* cannot take the selection (`OndinApp::warp_refusal`), if not.
     pub warp_refusal: Option<&'static str>,
@@ -3310,9 +3310,12 @@ impl OndinApp {
                 &self.session.doc,
                 self.session.selection.ids(),
             ),
-            blend_refusal: ondin_core::blend::pair(&self.session.doc, self.session.selection.ids())
-                .err()
-                .map(|r| r.says()),
+            blend_refusal: ondin_core::blend::refusal(
+                &self.session.doc,
+                &self.session.resolved,
+                self.session.selection.ids(),
+            )
+            .map(|r| r.says()),
             warp_refusal: self.warp_refusal(),
             trace_refusal: ondin_core::trace::refusal(&self.session.doc, id),
             mirrored: build::is_mirrored_path(&self.session.doc, id),

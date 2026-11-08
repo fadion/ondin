@@ -328,14 +328,20 @@ armed after each cut.
 `core::blend` makes the steps between two shapes as plain paths. It is computed once; nothing
 stays live.
 
-- **The pair** (`blend::pair`): exactly two layers, each a rect, ellipse, polygon, star, line, spiral,
-  arc, path or boolean, answered bottom of the stack first. A `blend::Refusal`'s `says()` is the sentence
-  both the dimmed row and a refused commit give: `Count` *Blend shapes needs exactly two shapes*
-  (also any other kind, a group or a frame), `Picture` *Blend shapes can't take a picture*, `Text`
-  *Blend shapes can't take text*, `Parts` *Blend shapes needs two shapes made of the same number of
-  parts, both closed or both open*, `Locked` *A layer to blend is locked*, `Inside` *Blend shapes
-  can't work inside a boolean, a component or an instance* — the group lands beside the upper
-  shape, and there it would be one more operand, or a layer the main does not have.
+- **The pair** (`blend::pair`): exactly two layers in the same parent, each a rect, ellipse,
+  polygon, star, line, spiral, arc, path or boolean, answered bottom of the stack first.
+  `blend::refusal` adds the outlines' test (`Parts`) to `pair`'s, so the dimmed row and the card
+  ask what a commit would. A `blend::Refusal`'s `says()` is the sentence both the dimmed row and a
+  refused commit give: `Count` *Blend shapes needs exactly two shapes* (also any other kind, a
+  group or a frame), `Picture` *Blend shapes can't take a picture*, `Text` *Blend shapes can't take
+  text*, `Parts` *Blend shapes needs two shapes made of the same number of parts, both closed or
+  both open*, `Locked` *A layer to blend is locked*, `Inside` *Blend shapes can't work inside a
+  boolean, a component or an instance* — the group lands beside the upper shape, and there it
+  would be one more operand, or a layer the main does not have; `Parents` *Blend shapes needs two
+  shapes in the same group or frame* — moved into the other's parent a shape would fall under
+  that parent's clip, opacity, mode and layout, as `build::group` refuses across parents; `Mask`
+  *Blend shapes can't take a mask* — in the group it would stop clipping what it clips, as
+  `build::can_outline_stroke` refuses one.
 - **Outlines** are taken in world space (`world_transform` × `Resolved::local_path`, so a boolean
   gives its result) and split into subpaths, which pair one to one and must agree on closed or
   open; each becomes cubics. A closed second subpath is turned to run the way the first does (by
@@ -352,12 +358,15 @@ stays live.
   position is a solid colour in both, the colour is mixed channel by channel, alpha included;
   stroke widths and drawn opacity are mixed. Off, every step wears the first shape's paint and
   opacity. Stroke widths are first scaled into the steps' own units, so a stroke draws as wide as
-  it did under a scaled shape or parent; each step takes the nearer shape's fill rule, so holes
+  it did under a scaled shape, and a gradient is carried by the shape's map into the steps' space
+  (`paint_box::carry_brush`), so it lies over each step as it lay over the shape. Each step takes
+  the nearer shape's fill rule, and with it that shape's windings: a step taking the upper shape's
+  rule runs each of its runs the way the upper shape's own does, undoing the turn above, so holes
   stay holes. Effects and blend mode are not carried.
 - **The result** (`blend::blend`): an `Operation::InsertSubtree` of a group named *Blend*
   (`GROUP_NAME`) holding `steps` (up to `MAX_STEPS`) `Path` children *Step 1…n*, in the upper
-  shape's parent where the upper shape stood, then the two shapes moved into it (`Reparent` and a
-  `SetTransform` that keeps each where it was drawn): the lower shape at the bottom, the steps from
+  shape's parent where the upper shape stood, then the two shapes moved into it from that same
+  parent (`Reparent` and a `SetTransform` that keeps each where it was drawn): the lower shape at the bottom, the steps from
   it upwards, the upper shape on top. A blend is almost always used with its ends, so the group is
   the whole thing; *Ungroup* gives the parts back. The steps are built on a scratch `Document`, so
   each node takes every default a created node has, then captured whole.
@@ -367,8 +376,8 @@ stays live.
 `menu::Item::BlendShapes`, *Blend shapes…*, glyph `blend-shapes` (a small circle growing into a
 square through a rounded step), group Structure, no chord; palette aliases morph, tween, steps,
 interpolate. *Blend* alone already names the blend mode in the inspector and its undo steps. In the
-layer menu it follows *Flatten* whenever exactly two layers are selected, dimmed with `pair`'s
-refusal (`LayerState::blend_refusal`) or the lock sentence; otherwise the palette's *Not available
+layer menu it follows *Flatten* whenever exactly two layers are selected, dimmed with
+`blend::refusal`'s sentence (`LayerState::blend_refusal`) or the lock sentence; otherwise the palette's *Not available
 here* row says *Blend shapes needs exactly two shapes* (`KIND_VERBS`).
 
 - **The card** is an inspector-lane popover placed as the Repeat card is

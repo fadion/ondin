@@ -15776,7 +15776,8 @@ mod headless_app_tests {
 
     /// A new run drawn into an edited path leaves the path's other runs their
     /// markers; one square per anchor of the stored run.
-    /// flip: `draw_points` returning whenever a pen is in flight → fails at "markers".
+    /// flip: `draw_points` returning whenever a pen is in flight → fails at "markers";
+    /// drawing the held run too → fails at "no squares".
     #[test]
     fn a_new_run_in_a_path_edit_keeps_the_other_runs_markers() {
         let ctx = egui::Context::default();
@@ -15790,8 +15791,8 @@ mod headless_app_tests {
                 .is_some_and(|e| e.minted && e.id == id),
             "the press started a new run in the edited path"
         );
-        let squares = ctx
-            .run_ui(Default::default(), |ui| {
+        let squares = |app: &OndinApp| {
+            ctx.run_ui(Default::default(), |ui| {
                 let rect = ui.max_rect();
                 let resp = ui.allocate_rect(rect, egui::Sense::hover());
                 app.draw_points(ui.painter(), rect, 1.0, &resp);
@@ -15802,9 +15803,22 @@ mod headless_app_tests {
                 matches!(&c.shape, egui::Shape::Rect(r)
                     if (r.rect.width() - POINT_PX).abs() < 0.01)
             })
-            .count();
+            .count()
+        };
         // Each square is a fill and a rim.
-        assert_eq!(squares, 2 * 3, "markers on the stored run's three corners");
+        assert_eq!(
+            squares(&app),
+            2 * 3,
+            "markers on the stored run's three corners"
+        );
+
+        // Resuming the stored run hands it to the pen, whose circles it wears.
+        app.pen = None;
+        let Some(PenVerb::Continue(edit)) = app.pen_verb(at(100.0, 100.0)) else {
+            panic!("the open end continues")
+        };
+        app.pen_verb_press(id, at(100.0, 100.0), false, PenVerb::Continue(edit));
+        assert_eq!(squares(&app), 0, "the held run wears no squares");
     }
 
     /// Auto-scroll moves the view toward the pointer, and `autopan_total` records

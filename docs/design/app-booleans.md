@@ -173,7 +173,9 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
   outside), dotted and thin on the catalogue shrunk, and per side on a rectangle, against an
   independent oracle.
 - **Result shape.** A layer with no visible fill and one stroke is replaced by the path
-  (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). Otherwise the
+  (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). It drops the
+  fill and stroke style links that call carries, since the commit would write a style's lists back
+  over the ink: a stroke style would stroke the outline again. Otherwise the
   layer, its strokes removed, and the stroke paths above it (each named "‹layer› stroke") go into a new
   group in its slot, named as the layer; the group takes the layer's effects, visibility, opacity and a non-Normal blend mode,
   each binding moved with its literal, which composite over both (the group isolates the two parts and blends them as one layer): a hidden layer's strokes stay hidden,

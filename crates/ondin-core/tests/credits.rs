@@ -3,6 +3,7 @@
 
 use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
+use ondin_core::style::{self, StyleId, StyleSlot, StyleValue};
 use ondin_core::{
     Brush, Credit, CreditKind, Document, Fill, History, IdSource, NodeId, NodeKind, OpError,
     Operation, Resolved, Transaction, build, io, keyed_by_position,
@@ -69,12 +70,47 @@ impl F {
         self.hist.commit(&mut self.doc, tx).expect("commit");
     }
 
+    /// `tx` with what it owes, styles settled, as the app commits.
+    fn commit_owed(&mut self, mut tx: Transaction) {
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
+        self.commit(tx);
+    }
+
     fn set_credit(&mut self, id: NodeId, c: Credit) {
         self.commit(Transaction(vec![Operation::SetCredit {
             id,
             credit: Some(Box::new(c)),
         }]));
     }
+}
+
+/// One red fill, shown or hidden.
+fn red_fills(visible: bool) -> Vec<ondin_core::Keyed<Fill>> {
+    keyed_by_position([Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible,
+    }])
+}
+
+/// A style holding `value` applied to `id`, and `id`'s visibility bound to a
+/// new boolean variable that shows it.
+fn style_and_eye(f: &mut F, value: StyleValue, id: NodeId) -> (StyleId, ondin_core::VarId) {
+    let style = f.ids.mint_style();
+    let slot = value.slot();
+    let (mut ops, show) = ondin_core::variable::add_variable_ops(
+        f.doc.variables(),
+        &mut f.ids,
+        ondin_core::variable::CollectionId::FIRST,
+        ondin_core::VarKind::Boolean,
+        Some("show"),
+        Some(ondin_core::Cell::Boolean(true)),
+    )
+    .expect("a boolean variable");
+    ops.push(style::add_op(style, "Look", value));
+    ops.push(style::bind_op(id, slot, Some(style)));
+    f.commit_owed(Transaction(ops));
+    f.commit(Transaction(ondin_core::bind_visible_ops(&f.doc, id, show)));
+    (style, show)
 }
 
 /// A credit survives a save and load byte for byte; a layer without one writes no key.
@@ -362,11 +398,13 @@ fn outlined_strokes_keep_the_credit() {
 
 /// A path replacing a layer keeps its mask mode, style links, exports and
 /// visibility binding with its credit.
-/// flip: drop `carried_mask`'s mode in `build::replace_with_path` → fails at the mode.
+/// flip: drop `carried_mask`'s mode in `build::replace_with_path` → fails at the
+/// mode; drop its `SetFillStyle` push → fails at "the fill style".
 #[test]
 fn a_replaced_layer_keeps_what_is_not_its_geometry() {
     let mut f = F::new();
     let a = f.add(f.root, rect());
+    let (style, show) = style_and_eye(&mut f, StyleValue::Fills(red_fills(true)), a);
     f.commit(Transaction(vec![
         Operation::SetMask { id: a, mask: true },
         Operation::SetMaskMode {
@@ -384,12 +422,90 @@ fn a_replaced_layer_keeps_what_is_not_its_geometry() {
     let icon = credit(CreditKind::Icon);
     f.set_credit(a, icon.clone());
     let (tx, made) = build::outline(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, a).unwrap();
-    f.commit(tx);
+    f.commit_owed(tx);
     let n = f.doc.get(made).unwrap();
     assert!(n.mask());
     assert_eq!(n.mask_mode(), ondin_core::MaskMode::Alpha, "the mode");
     assert_eq!(n.exports().len(), 1, "the exports");
     assert_eq!(n.credit(), Some(&icon));
+    assert_eq!(
+        n.styles().get(StyleSlot::Fills),
+        Some(style),
+        "the fill style"
+    );
+    assert_eq!(n.visible_var(), Some(show), "the visibility binding");
+}
+
+/// Outline stroke of a lone stroke drops the fill and stroke styles the made
+/// path's new paint replaces, so a stroke style does not stroke the outline
+/// again and a fill style whose fills are hidden does not hide it; the
+/// visibility binding still comes across.
+/// flip: `build::outline_stroke` keeping `replace_with_path`'s style links →
+/// fails at "no stroke round the outline".
+#[test]
+fn outline_stroke_drops_the_styles_its_paint_replaces() {
+    let line = |f: &mut F| {
+        let mut path = ondin_core::kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((40.0, 0.0));
+        f.add(
+            f.root,
+            NodeKind::Path {
+                path,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: Default::default(),
+            },
+        )
+    };
+    let border = keyed_by_position([ondin_core::Stroke {
+        width: 4.0,
+        ..Default::default()
+    }]);
+
+    let mut f = F::new();
+    let a = line(&mut f);
+    let (_, show) = style_and_eye(&mut f, StyleValue::Strokes(border.clone()), a);
+    assert_eq!(
+        f.doc.get(a).unwrap().paint().strokes.len(),
+        1,
+        "the fixture"
+    );
+    let (tx, made) =
+        build::outline_stroke(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, a).unwrap();
+    f.commit_owed(tx);
+    let n = f.doc.get(made).unwrap();
+    assert!(n.paint().strokes.is_empty(), "no stroke round the outline");
+    assert_eq!(n.styles().get(StyleSlot::Strokes), None);
+    assert_eq!(n.paint().fills.len(), 1, "the ink is its fill");
+    assert_eq!(n.visible_var(), Some(show), "the visibility binding");
+
+    let mut f = F::new();
+    let r = f.add(f.root, rect());
+    style_and_eye(&mut f, StyleValue::Fills(red_fills(false)), r);
+    f.commit_owed(Transaction(vec![Operation::SetStrokes {
+        id: r,
+        strokes: border,
+    }]));
+    assert!(
+        f.doc
+            .get(r)
+            .unwrap()
+            .paint()
+            .fills
+            .iter()
+            .all(|x| !x.visible),
+        "the fixture: the style's one fill is hidden"
+    );
+    let (tx, made) =
+        build::outline_stroke(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, r).unwrap();
+    f.commit_owed(tx);
+    let n = f.doc.get(made).unwrap();
+    assert_eq!(n.styles().get(StyleSlot::Fills), None);
+    assert!(
+        n.paint().fills.len() == 1 && n.paint().fills[0].visible,
+        "the outline draws its ink"
+    );
 }
 
 /// Tracing a credited picture without keeping it hands the *Trace* group its

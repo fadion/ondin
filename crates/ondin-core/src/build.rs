@@ -2318,6 +2318,12 @@ pub fn outline_stroke(
     if !has_fill && inks.len() == 1 {
         let (ink, brush) = inks.into_iter().next().expect("one ink");
         let (mut tx, made) = replace_with_path(doc, ids, id, ink)?;
+        // The fills and strokes are repainted below, so their style links go: the
+        // commit would otherwise write the styles' lists back over the ink.
+        tx.0.retain(|op| {
+            !matches!(op, Operation::SetFillStyle { id, .. }
+                | Operation::SetStrokeStyle { id, .. } if *id == made)
+        });
         tx.0.push(Operation::SetFills {
             id: made,
             fills: filled(brush),

@@ -37,16 +37,22 @@ const GRID: [[Rule; 2]; 3] = [
 /// The open box.
 pub(crate) struct CleanUpBox {
     pub(crate) scope: Scope,
-    /// The selection at open, which *Selection* means.
+    /// What *Selection* means this frame: the live selection, or [`Self::pin`]'s
+    /// roots while the selection a row's click made stands.
     selection: Vec<NodeId>,
+    /// The roots *Selection* looked under before a row's click selected its
+    /// layer, and that selection: kept until the selection changes again, so
+    /// showing a row does not narrow the scope to it (Find's own rule).
+    pin: Option<(Vec<NodeId>, Vec<NodeId>)>,
     pub(crate) rules: Rules,
     /// The plan for the scope and switches shown.
     pub(crate) plan: Plan,
     /// The plan with every switch on, for the counts beside the switches.
     every: Plan,
-    /// What `plan` and `every` were made for, the page included: a row's click
-    /// can switch it, which changes what *This page* means.
-    asked: Option<(Scope, Rules, NodeId)>,
+    /// What `plan` and `every` were made for: the scope, the switches, and the
+    /// page, document revision and selection, since the canvas stays live under
+    /// the box and any of them can move.
+    asked: Option<(Scope, Rules, NodeId, u64, Vec<NodeId>)>,
     /// What the hovered row names, and whether it is a whole group's (a hairline).
     hover: (Vec<NodeId>, bool),
     /// A clicked row's layer or frame, brought into view once its page is shown.
@@ -81,11 +87,12 @@ impl CleanUpBox {
         }
     }
 
-    /// Plan again when the scope, a switch or the page has changed since the last
-    /// plan.
-    pub(crate) fn replan(&mut self, doc: &Document, res: &Resolved, page: NodeId) {
-        let now = (self.scope, self.rules, page);
-        if self.asked == Some(now) {
+    /// Plan again when the scope, a switch, the page, the document or the
+    /// selection has changed since the last plan, as Find searches again. A drag
+    /// commits once, at its end, so a gesture replans once.
+    pub(crate) fn replan(&mut self, doc: &Document, res: &Resolved, page: NodeId, rev: u64) {
+        let now = (self.scope, self.rules, page, rev, self.selection.clone());
+        if self.asked.as_ref() == Some(&now) {
             return;
         }
         let scope = self.core_scope(doc, page);
@@ -160,15 +167,11 @@ impl OndinApp {
         // The path bar's card is the same act on one path's points; the two
         // never show together.
         self.cleanup = None;
-        let doc = &self.session.doc;
-        let selection: Vec<NodeId> = self
-            .session
-            .selection
-            .ids()
-            .iter()
-            .copied()
-            .filter(|id| !doc.is_page(*id) && doc.get(*id).is_some())
-            .collect();
+        // One card over the canvas's top at a time.
+        self.close_find();
+        self.colour_review.open = false;
+        self.batch_rename = None;
+        let selection = self.selected_layers();
         let remembered = &self.prefs.clean_up;
         let mut rules = Rules {
             skip_locked: remembered.skip_locked,
@@ -184,6 +187,7 @@ impl OndinApp {
                 false => Scope::Selection,
             },
             selection,
+            pin: None,
             rules,
             plan: Plan::default(),
             every: Plan::default(),
@@ -216,16 +220,24 @@ impl OndinApp {
         }
     }
 
-    /// Draw the open box and answer this frame's keys and clicks: a modal with a
-    /// clear backdrop, as batch rename's, so the canvas stays live behind it.
+    /// Draw the open box and answer this frame's clicks. An open card, as Find's:
+    /// the canvas stays live under it, its plan follows the document, and Escape
+    /// reaches it through [`OndinApp::escape`]. Enter stays the canvas's.
     pub(crate) fn clean_up_ui(&mut self, ctx: &egui::Context, canvas: egui::Rect) {
         let Some(mut b) = self.clean_up.take() else {
             return;
         };
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            return;
+        let live = self.selected_layers();
+        b.selection = match &b.pin {
+            Some((roots, made)) if *made == live => roots.clone(),
+            _ => {
+                b.pin = None;
+                live
+            }
+        };
+        if b.selection.is_empty() && b.scope == Scope::Selection {
+            b.scope = Scope::Page;
         }
-        let enter = ui::card_enter(ctx);
         // A row clicked last frame on another page: its page is shown now.
         if let Some(id) = b.reveal
             && self.session.doc.page_of(id) == Some(self.session.page)
@@ -235,15 +247,21 @@ impl OndinApp {
                 self.reveal(bounds);
             }
         }
-        b.replan(&self.session.doc, &self.session.resolved, self.session.page);
+        let rev = self.session.revision();
+        b.replan(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.page,
+            rev,
+        );
         let why_not = b.why_not();
         let mut act = Act::None;
         let mut hover: (Vec<NodeId>, bool) = (Vec::new(), false);
         let mut clicked: Option<Subject> = None;
         let doc = &self.session.doc;
         let page = self.session.page;
-        let hold = crate::settings::CardHold::Modal;
-        let clicked_away = crate::settings::canvas_card(ctx, "clean-up", canvas, W, hold, |ui| {
+        let hold = crate::settings::CardHold::Open;
+        crate::settings::canvas_card(ctx, "clean-up", canvas, W, hold, |ui| {
             if crate::settings::card_head(ui, W, "Clean up") {
                 act = Act::Cancel;
             }
@@ -268,14 +286,8 @@ impl OndinApp {
             }
         });
         b.hover = hover;
-        if clicked_away {
-            return;
-        }
         if let Some(subject) = clicked {
             self.show_finding(&mut b, subject);
-        }
-        if enter && matches!(act, Act::None) {
-            act = Act::Run;
         }
         match act {
             Act::Cancel => {}
@@ -302,6 +314,7 @@ impl OndinApp {
             self.go_to_page(page);
         }
         if select {
+            b.pin = Some((b.selection.clone(), vec![target]));
             self.session.selection.set_one(target);
         }
         // Revealed next frame, once the page switch has been drawn; a page's own
@@ -598,7 +611,7 @@ fn foot(ui: &mut egui::Ui, items: usize, why_not: Option<&str>) -> Option<Act> {
         Some(_) => FieldButton::Disabled,
     };
     let buttons = [("Cancel", FieldButton::Off), (go.as_str(), state)];
-    match crate::settings::card_foot(ui, W, "Enter clean up · Esc cancel", &buttons, why_not) {
+    match crate::settings::card_foot(ui, W, "Esc closes", &buttons, why_not) {
         Some(0) => Some(Act::Cancel),
         Some(_) => Some(Act::Run),
         None => None,
@@ -692,7 +705,14 @@ mod tests {
         app.open_clean_up();
         let mut b = app.clean_up.take().expect("the box opened");
         b.scope = Scope::Document;
-        b.replan(&app.session.doc, &app.session.resolved, app.session.page);
+        b.selection = app.selected_layers();
+        let rev = app.session.revision();
+        b.replan(
+            &app.session.doc,
+            &app.session.resolved,
+            app.session.page,
+            rev,
+        );
         let subject = Subject::Layer(empty);
         assert!(
             b.plan.findings.iter().any(|f| f.subject == subject),
@@ -766,11 +786,11 @@ mod tests {
         }
     }
 
-    /// With nothing selected the box opens on the page; Enter takes what it found
-    /// as one undo step and keeps the switches for next time.
+    /// With nothing selected the box opens on the page; *Clean up* takes what it
+    /// found as one undo step and keeps the switches for next time.
     /// flip: `commit_clean_up` not saving `on` → fails at "the switch is kept".
     #[test]
-    fn enter_cleans_up_in_one_step_and_keeps_the_switches() {
+    fn clean_up_runs_in_one_step_and_keeps_the_switches() {
         let (ctx, mut app) = app();
         let empty = rect(&mut app, false);
         let kept = rect(&mut app, true);
@@ -790,8 +810,8 @@ mod tests {
         );
 
         let depth = app.session.history.undo_depth();
-        pass(&ctx, &mut app, vec![enter()]);
-        assert!(app.clean_up.is_none(), "Enter closes the box");
+        let b = app.clean_up.take().unwrap();
+        app.commit_clean_up(&b);
         assert!(!app.session.doc.contains(empty));
         assert!(app.session.doc.contains(kept));
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
@@ -803,9 +823,10 @@ mod tests {
         assert!(app.session.doc.contains(empty), "undo puts it back");
     }
 
-    /// Over a selection with nothing to take, the box stays on the selection,
-    /// Clean up dims with its reason and Enter leaves the box up; a switched-off
-    /// rule that would find something is named in the empty preview.
+    /// Over a selection with nothing to take, the box stays on the selection and
+    /// Clean up dims with its reason; a switched-off rule that would find
+    /// something is named in the empty preview. Enter is the canvas's, and Escape
+    /// closes the box through the app's ladder.
     #[test]
     fn nothing_to_take_dims_clean_up_and_names_what_is_off() {
         let (ctx, mut app) = app();
@@ -827,7 +848,40 @@ mod tests {
             "hidden layers start off"
         );
         pass(&ctx, &mut app, vec![enter()]);
-        assert!(app.clean_up.is_some(), "a dim Clean up runs nothing");
+        assert!(
+            app.clean_up.is_some(),
+            "Enter does not run or close the box"
+        );
         assert!(app.session.doc.contains(painted));
+        app.escape(&ctx);
+        assert!(app.clean_up.is_none(), "Escape closes it");
+    }
+
+    /// The canvas stays live under the box: no modal is up, and an edit made
+    /// with the box open is in its next plan, as a new match is in Find's.
+    /// flip: `CleanUpBox::replan` leaving the revision out of its key → fails at
+    /// "found once it is drawn".
+    #[test]
+    fn the_box_leaves_the_canvas_live_and_follows_its_edits() {
+        let (ctx, mut app) = app();
+        rect(&mut app, true);
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        pass(&ctx, &mut app, Vec::new());
+        assert!(!app.modal_is_up(), "the canvas keeps its input");
+        let found = |app: &OndinApp, id| {
+            app.clean_up.as_ref().is_some_and(|b| {
+                b.plan
+                    .findings
+                    .iter()
+                    .any(|f| f.subject == Subject::Layer(id))
+            })
+        };
+        let empty = rect(&mut app, false);
+        pass(&ctx, &mut app, Vec::new());
+        assert!(
+            found(&app, empty),
+            "a layer made under the box is found once it is drawn"
+        );
     }
 }

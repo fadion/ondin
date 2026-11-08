@@ -474,12 +474,13 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 A box that renames many layers at once: the selection, the page or every page. The text rule is
 `ondin_core::rename`'s; `batch_rename::plan_into` picks, orders and numbers the layers.
 
-The document cannot change while the box is up, so what the plan reads of it — the layers of every
+What the plan reads of the document — the layers of every
 page it can reach, in tree order, with name, bounds, glyph, a text layer's content (its words
 joined by single spaces, so line breaks and whitespace runs become one space), and whether each
-has a default name, is a variant, inside an instance, selected or under the selection — is taken
-once at open (`Snapshot`). A worker thread plans from that copy
-whenever a setting changes, taking only the newest request and abandoning a plan once a newer one is
+has a default name, is a variant, inside an instance, selected or under the selection — is a copy
+(`Snapshot`), taken at open and again whenever the document's revision, the page or the selection
+moves (`refresh_batch_rename`), as Find searches again: the canvas stays live under the box. A
+worker thread plans from the copy each request carries, whenever a setting or the copy changes, taking only the newest request and abandoning a plan once a newer one is
 asked for, and sends the rows back in parts of 500 layers, so typing never waits on a large
 document. The preview keeps the previous plan until the new one's first part lands, its count
 worded for the scope that plan was made for (`Plan::scope`).
@@ -493,18 +494,20 @@ worded for the scope that plan was made for (`Plan::scope`).
   and *Rename* with one, as `Ctrl+R` does; a `CURSOR_TEXT` button in the
   Layers header between collapse-all and search (*Batch rename (Ctrl+Shift+R)*); the cheatsheet's
   Layer section.
-- **Placement and keys.** The palette's place: an `egui::Modal` with a transparent backdrop, 520
-  wide, centred over the canvas column, its top 56pt below the canvas's top, so selection outlines
-  stay visible. Opening it closes the palette, the context menu, the top-bar menu and the colour
-  picker. Enter or the *Rename* button renames; Escape, *Cancel*, ✕ or a click outside closes it
-  and renames nothing (with the order list open, Escape and the click close the list first, and
-  Enter does nothing). It counts in `modal_is_up`, so editor
-  chords are off, and is drawn outside the `!focus` guard, so it works in focus mode.
+- **Placement and keys.** The palette's place, 520 wide, centred over the canvas column, its top
+  56pt below the canvas's top: an open card (`CardHold::Open`), not a modal, so the canvas keeps
+  its input and the layers can be selected, edited and panned under it, as with Find and Colour
+  review. Opening it closes the palette, the context menu, the top-bar menu, the colour picker and
+  the other cards over the canvas's top (Find, Colour review, Clean up); opening any of those
+  closes it. Enter renames from Find or *Rename to* (with the order list open it does nothing);
+  anywhere else it is the canvas's. The *Rename* button renames; *Cancel* or ✕ closes it, and
+  Escape closes it through `OndinApp::escape`'s rung below Find's (the order list, open, takes the
+  press first). It is drawn outside the `!focus` guard, so it works in focus mode.
 - **Scope**, the *In* row: *Selection · This page · All pages*, a `ui::segmented` of equal cells
   (`scope_segments`, which Find shares) with the selection's count after *Selection*. The box's
   fields are `ui::CONTROL_H` tall, as every field is. It opens on *Selection* when
-  something is selected, else on *This page*. *Selection* is the selection at open, and is disabled
-  with nothing selected. One selected layer with children opens with *Include layers inside*
+  something is selected, else on *This page*. *Selection* is the live selection, and is disabled
+  with nothing selected; a selection emptied under the box moves it to *This page*. One selected layer with children opens with *Include layers inside*
   ticked. The Layers header button, with text in the tree's search, opens on *This page* with Find
   holding that text. *All pages* leaves draft pages out, as everything gathered from every page
   does (`core-model.md` §5.5), but keeps the current page when it is a draft, since the box was
@@ -628,21 +631,27 @@ a `Finding` with `kept: Some(Kept)` and its reason.
 
 ### The box
 
-- **Built as batch rename's**: `settings::canvas_card`, 520 wide, `CardHold::Modal` (a clear
-  backdrop). Opening it closes the palette, the context menu, the top-bar menu and the colour
-  picker. Enter or the commit button cleans up; Escape, *Cancel*, ✕ or a click outside closes it.
-  It counts in `modal_is_up` and is drawn outside the `!focus` guard.
+- **Built as batch rename's**: `settings::canvas_card`, 520 wide, `CardHold::Open`, so the canvas
+  stays live under it as under Find. Opening it closes the palette, the context menu, the top-bar
+  menu, the colour picker and the other cards over the canvas's top. The commit button cleans up;
+  Enter stays the canvas's (the box has no field to type in). *Cancel* or ✕ closes it, and Escape
+  through `OndinApp::escape`'s rung below batch rename's. The foot's note reads *Esc closes*. It is
+  drawn outside the `!focus` guard.
 - **Head and scope.** `card_head` *Clean up*. The *In* row is batch rename's `scope_segments`,
-  opening on *Selection* (the selection at open) when something is selected, else on *This page*.
-  *All pages* leaves drafts out but keeps the current page.
+  opening on *Selection* when something is selected, else on *This page*. *Selection* is the live
+  selection (`OndinApp::selected_layers`), except that a row's click, which selects that row's
+  layer, pins the roots it looked under until the selection changes again, as Find's double-click
+  does; a selection emptied under the box moves it to *This page*. *All pages* leaves drafts out
+  but keeps the current page.
 - **Remove**: the six rules as `ui::switch_row_noted`, two to a line (left *Hidden paint*, *Covered
   fills*, *One-layer groups*; right *Hidden layers*, *Empty layers*, *Guides*), each noted with its
   count from a second plan with every switch on, so an off switch still says what it would take;
   `Rule::hint` is its tooltip. Then *Skip locked layers* on a fourth line at the same pitch. The
   *Remove* label sits level with the first line (`batch_rename::row` puts its label on a tall row's
   first control-height line).
-- **Planning** is synchronous, and only when the scope, a switch or the current page changes: the
-  document cannot change while the box is up, but a row's click can switch the page.
+- **Planning** is synchronous, and only when the scope, a switch, the page, the document's revision
+  or the selection *Selection* reads changes (`CleanUpBox::replan`), as Find searches again. A drag
+  previews without committing, so a gesture replans once, at its end.
 - **Preview**: the eyebrow *Preview* and *N items on M layers*, with *· K kept* when amber rows
   show. Rows are grouped by rule in `Rule::ALL` order, each under a heading row with the rule's
   item count, every row listed: the list scrolls, so nothing folds. Rows are `ui::MENU_ROW_H` and
@@ -765,8 +774,8 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   (`ui::canvas_popup_area`), 420 wide, on the settings card's ground (`settings::card_frame`), but is
   no modal: nothing blocks the canvas and a click there leaves it open. It is at most
   `ui::canvas_popup_room` tall, its list scrolling past `ui::CANVAS_POPUP_LIST_H`; title, controls
-  and foot stay put. Opening it or Find closes the other, since centred it would run under Find's
-  corner. The census is taken again when the revision, the scope or the threshold changes.
+  and foot stay put. One card over the canvas's top shows at a time: opening it, Find, batch
+  rename or Clean up closes the others, since centred one would run under Find's corner. The census is taken again when the revision, the scope or the threshold changes.
 - **Head.** Batch rename's title row (*Colour review*, ✕). Scope *Selection · Document*, opening on *Selection* when something is selected;
   *Selection* is disabled with *Nothing is selected* when nothing is, and a card left on it says
   *Nothing selected · reviewing the document*. Threshold *Tight · Close · Loose*, *Close* by default,

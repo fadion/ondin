@@ -2975,6 +2975,12 @@ impl OndinApp {
         } else if self.find.open {
             // Below a text edit, which a row's double-click opens from the box.
             self.close_find();
+        } else if self.batch_rename.is_some() {
+            // Its order list, open, takes this press and closes itself.
+            if !egui::Popup::is_any_open(ctx) {
+                self.batch_rename = None;
+            }
+        } else if self.clean_up.take().is_some() {
         } else if self.colour_review.open {
             // Its open menu or the name being typed goes first, the card next press.
             self.colour_review.escape();
@@ -7926,8 +7932,6 @@ impl OndinApp {
             || self.making_all_local.is_some()
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()
-            || self.batch_rename.is_some()
-            || self.clean_up.is_some()
             || self.tokens_import.is_some()
             || self.trace.is_some()
     }

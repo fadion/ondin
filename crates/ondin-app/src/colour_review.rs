@@ -234,7 +234,10 @@ impl OndinApp {
     /// Open the card, on the selection when there is one. Find closes: centred, the
     /// card would run under Find's corner on any canvas short of a wide one.
     pub(crate) fn open_colour_review(&mut self) {
+        // One card over the canvas's top at a time.
         self.close_find();
+        self.batch_rename = None;
+        self.clean_up = None;
         let r = &mut self.colour_review;
         if !r.open {
             r.selection = !self.session.selection.ids().is_empty();

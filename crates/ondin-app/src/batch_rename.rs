@@ -246,10 +246,15 @@ enum Caret {
 /// The open box.
 pub(crate) struct BatchRename {
     pub(crate) s: Settings,
-    /// How many layers were selected at open; zero leaves *Selection* off.
+    /// How many layers are selected; zero leaves *Selection* off.
     selected: usize,
     matcher: Matcher,
-    /// The settings last handed to the worker.
+    /// What the worker plans from, taken again whenever [`Self::seen`] moves.
+    snap: Arc<Snapshot>,
+    /// The document revision, page and selection [`Self::snap`] was taken at.
+    seen: (u64, NodeId, Vec<NodeId>),
+    /// The settings last handed to the worker, `None` once a new snapshot needs
+    /// a plan of its own.
     asked: Option<Settings>,
     /// What the preview draws: the newest plan, as far as its parts have come.
     plan: Plan,
@@ -644,24 +649,28 @@ enum Sent {
     Done(u64),
 }
 
+/// One request to the worker: its number, the settings, and the snapshot to plan
+/// from, which is retaken whenever the document moves under the box.
+type Request = (u64, Settings, Arc<Snapshot>);
+
 /// The thread that plans while the box is open. It takes the newest request,
 /// skipping any it was sent while busy, and abandons a plan as soon as a newer
 /// request is made. It ends when the box drops its sender.
 struct Matcher {
-    tx: Sender<(u64, Settings)>,
+    tx: Sender<Request>,
     rx: Receiver<Sent>,
     /// The newest request, which the thread reads between parts.
     latest: Arc<AtomicU64>,
     /// No thread could start: plans run on the UI thread.
-    inline: Option<Arc<Snapshot>>,
+    inline: bool,
 }
 
 impl Matcher {
-    fn start(ctx: &egui::Context, snap: Arc<Snapshot>) -> Self {
-        let (tx, requests) = channel::<(u64, Settings)>();
+    fn start(ctx: &egui::Context) -> Self {
+        let (tx, requests) = channel::<Request>();
         let (sent, rx) = channel();
         let latest = Arc::new(AtomicU64::new(0));
-        let (ctx, newest, thread_snap) = (ctx.clone(), latest.clone(), snap.clone());
+        let (ctx, newest) = (ctx.clone(), latest.clone());
         let spawned = std::thread::Builder::new()
             .name("batch-rename".into())
             .spawn(move || {
@@ -669,9 +678,9 @@ impl Matcher {
                     while let Ok(newer) = requests.try_recv() {
                         req = newer;
                     }
-                    let (n, s) = req;
+                    let (n, s, snap) = req;
                     let current = || newest.load(Ordering::Relaxed) == n;
-                    plan_into(&thread_snap, &s, &mut |part| {
+                    plan_into(&snap, &s, &mut |part| {
                         let ok = current() && sent.send(Sent::Part(n, part)).is_ok();
                         ctx.request_repaint();
                         ok
@@ -683,10 +692,10 @@ impl Matcher {
                 }
             });
         let inline = match spawned {
-            Ok(_) => None,
+            Ok(_) => false,
             Err(e) => {
                 log::warn!(target: "ondin", "no thread for batch rename: {e}");
-                Some(snap)
+                true
             }
         };
         Self {
@@ -697,33 +706,31 @@ impl Matcher {
         }
     }
 
-    /// Ask for the plan of `s`; its parts come back through [`Self::rx`] under the
-    /// returned number.
-    fn ask(&mut self, s: Settings) -> u64 {
+    /// Ask for the plan of `s` over `snap`; its parts come back through
+    /// [`Self::rx`] under the returned number.
+    fn ask(&mut self, s: Settings, snap: Arc<Snapshot>) -> u64 {
         let n = self.latest.load(Ordering::Relaxed) + 1;
         self.latest.store(n, Ordering::Relaxed);
-        match &self.inline {
-            Some(snap) => {
-                let whole = plan(snap, &s);
-                // Sent to ourselves, so the frame reads it as it would the thread's.
-                let (tx, rx) = channel();
-                let _ = tx.send(Sent::Part(n, whole));
-                let _ = tx.send(Sent::Done(n));
-                self.rx = rx;
-            }
-            None => {
-                let _ = self.tx.send((n, s));
-            }
+        if self.inline {
+            let whole = plan(&snap, &s);
+            // Sent to ourselves, so the frame reads it as it would the thread's.
+            let (tx, rx) = channel();
+            let _ = tx.send(Sent::Part(n, whole));
+            let _ = tx.send(Sent::Done(n));
+            self.rx = rx;
+        } else {
+            let _ = self.tx.send((n, s, snap));
         }
         n
     }
 }
 
 impl BatchRename {
-    /// Ask for a plan when the settings changed, and take in what the worker sent.
+    /// Ask for a plan when the settings or the snapshot changed, and take in what
+    /// the worker sent.
     fn take_parts(&mut self) {
         if self.asked.as_ref() != Some(&self.s) {
-            self.matcher.ask(self.s.clone());
+            self.matcher.ask(self.s.clone(), self.snap.clone());
             self.asked = Some(self.s.clone());
             self.fresh = false;
             self.done = false;
@@ -903,15 +910,8 @@ impl OndinApp {
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;
         self.picker = None;
+        let selection = self.selected_layers();
         let doc = &self.session.doc;
-        let selection: Vec<NodeId> = self
-            .session
-            .selection
-            .ids()
-            .iter()
-            .copied()
-            .filter(|id| !doc.is_page(*id) && doc.get(*id).is_some())
-            .collect();
         let remembered = self.prefs.batch_rename.clone();
         // One layer with children: renaming the layer alone is Rename's job.
         let inside = matches!(selection.as_slice(), [id]
@@ -954,10 +954,21 @@ impl OndinApp {
             self.session.page,
             &selection,
         ));
+        let seen = (
+            self.session.revision(),
+            self.session.page,
+            selection.clone(),
+        );
+        // One card over the canvas's top at a time.
+        self.close_find();
+        self.colour_review.open = false;
+        self.clean_up = None;
         self.batch_rename = Some(BatchRename {
             s,
             selected: selection.len(),
-            matcher: Matcher::start(ctx, snap),
+            matcher: Matcher::start(ctx),
+            snap,
+            seen,
             asked: None,
             plan: Plan::default(),
             fresh: false,
@@ -1001,21 +1012,54 @@ impl OndinApp {
         }
     }
 
-    /// Draw the open box and answer this frame's keys and clicks. A modal with a
-    /// clear backdrop, so the selection stays outlined: a click outside closes it
-    /// and renames nothing.
+    /// The selected layers, pages left out: what *Selection* means, live, here
+    /// and in the Clean up box.
+    pub(crate) fn selected_layers(&self) -> Vec<NodeId> {
+        let doc = &self.session.doc;
+        self.session
+            .selection
+            .ids()
+            .iter()
+            .copied()
+            .filter(|id| !doc.is_page(*id) && doc.get(*id).is_some())
+            .collect()
+    }
+
+    /// Take the snapshot again when the document, the page or the selection has
+    /// moved since it was taken, as Find searches again: the canvas stays live
+    /// under the box. *Selection* with nothing left selected falls to the page.
+    fn refresh_batch_rename(&self, b: &mut BatchRename) {
+        let selection = self.selected_layers();
+        let seen = (self.session.revision(), self.session.page, selection);
+        if b.seen == seen {
+            return;
+        }
+        let s = &self.session;
+        b.snap = Arc::new(Snapshot::take(&s.doc, &s.resolved, s.page, &seen.2));
+        b.selected = seen.2.len();
+        b.s.page = s.page;
+        if b.selected == 0 && b.s.scope == Scope::Selection {
+            b.s.set_scope(Scope::Page);
+        }
+        b.seen = seen;
+        b.asked = None;
+    }
+
+    /// Draw the open box and answer this frame's keys and clicks. An open card:
+    /// the canvas stays live under it, and Escape reaches it through
+    /// [`OndinApp::escape`] as Find's does.
     pub(crate) fn batch_rename_ui(&mut self, ctx: &egui::Context, canvas: egui::Rect) {
         let Some(mut b) = self.batch_rename.take() else {
             return;
         };
-        // The order list, open last frame, takes Escape, Enter and the click
-        // outside that closes it.
+        // The order list, open last frame, takes Enter. Enter renames only from
+        // the box's own text fields; anywhere else it is the canvas's.
         let popup = egui::Popup::is_any_open(ctx);
-        let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        if escape && !popup {
-            return;
-        }
-        let enter = !popup && ui::card_enter(ctx);
+        let in_fields = ctx.memory(|m| {
+            m.has_focus(egui::Id::new(FIND_ID)) || m.has_focus(egui::Id::new(TEMPLATE_ID))
+        });
+        let enter = !popup && in_fields && ui::card_enter(ctx);
+        self.refresh_batch_rename(&mut b);
         b.take_parts();
 
         let why_not = match b.done {
@@ -1027,47 +1071,43 @@ impl OndinApp {
         // call that reports it.
         let numbering = b.s.numbering;
         let mut scrubbing = false;
-        let hold = crate::settings::CardHold::Modal;
-        let clicked_away =
-            crate::settings::canvas_card(ctx, "batch-rename", canvas, W, hold, |ui| {
-                if crate::settings::card_head(ui, W, "Batch rename") {
-                    act = Act::Cancel;
-                }
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: PAD as i8,
-                        right: PAD as i8,
-                        top: PAD as i8,
-                        bottom: 4,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = GAP;
-                        scope_row(ui, &mut b.s, b.selected);
-                        find_row(ui, &mut b.s, b.plan.error.as_deref());
-                        template_row(ui, &mut b);
-                        if Template::parse(&b.s.template).has_number() {
-                            scrubbing = number_row(ui, &mut b.s.numbering);
-                            order_row(ui, &mut b.s.order);
-                        }
-                        checks(ui, &mut b.s, b.plan.skipped);
-                    });
-                ui.add_space(8.0);
-                ui::card_rule(ui);
-                // Labelled by the scope it was made for: until the new plan's first
-                // part lands, the shown plan is the previous scope's.
-                preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
-                ui::card_rule(ui);
-                if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
-                    act = a;
-                }
-            });
+        let hold = crate::settings::CardHold::Open;
+        crate::settings::canvas_card(ctx, "batch-rename", canvas, W, hold, |ui| {
+            if crate::settings::card_head(ui, W, "Batch rename") {
+                act = Act::Cancel;
+            }
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: PAD as i8,
+                    right: PAD as i8,
+                    top: PAD as i8,
+                    bottom: 4,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = GAP;
+                    scope_row(ui, &mut b.s, b.selected);
+                    find_row(ui, &mut b.s, b.plan.error.as_deref());
+                    template_row(ui, &mut b);
+                    if Template::parse(&b.s.template).has_number() {
+                        scrubbing = number_row(ui, &mut b.s.numbering);
+                        order_row(ui, &mut b.s.order);
+                    }
+                    checks(ui, &mut b.s, b.plan.skipped);
+                });
+            ui.add_space(8.0);
+            ui::card_rule(ui);
+            // Labelled by the scope it was made for: until the new plan's first
+            // part lands, the shown plan is the previous scope's.
+            preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
+            ui::card_rule(ui);
+            if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
+                act = a;
+            }
+        });
         // Armed after a right-click's cancel is answered, so the frame it lands on
         // cannot re-arm it.
         if scrubbing && !self.gesture_cancelled && self.in_flight.rename_scrub.is_none() {
             self.in_flight.rename_scrub = Some(numbering);
-        }
-        if clicked_away && !popup {
-            return;
         }
         if enter && matches!(act, Act::None) {
             act = Act::Rename;
@@ -2615,6 +2655,28 @@ mod tests {
             app.session.doc.get(a).unwrap().name(),
             "Rectangle 1",
             "renames nothing"
+        );
+    }
+
+    /// The canvas stays live under the box: no modal is up, and a layer made
+    /// with the box open is in its next plan, as a new match is in Find's.
+    /// flip: `refresh_batch_rename` never retaking the snapshot → fails at
+    /// "listed once it is drawn".
+    #[test]
+    fn the_box_leaves_the_canvas_live_and_follows_its_edits() {
+        let (ctx, mut app) = app();
+        named(&mut app, "Rect a");
+        pass(&ctx, &mut app, Vec::new(), egui::Modifiers::NONE);
+        app.open_batch_rename(&ctx, None);
+        app.batch_rename.as_mut().unwrap().s.find = "Rect".into();
+        settle(&ctx, &mut app);
+        assert!(!app.modal_is_up(), "the canvas keeps its input");
+        let b = named(&mut app, "Rect b");
+        settle(&ctx, &mut app);
+        let rows = &app.batch_rename.as_ref().expect("still open").plan.rows;
+        assert!(
+            rows.iter().any(|r| matches!(r, Row::Layer(l) if l.id == b)),
+            "a layer made under the box is listed once it is drawn"
         );
     }
 

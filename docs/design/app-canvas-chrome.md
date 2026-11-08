@@ -697,9 +697,7 @@ ImageSink>)` is the edit.
   *member*, *person*, *account*, *image*, *img*): *Profile picture* is an avatar, *Profile header bg*
   and *Product photo* are not. A hidden layer
   is passed over with all it holds; an effectively locked target is counted in `Plan::locked` and
-  skipped. With avatars off no shape is listed. `fillable` says whether there is any target,
-  stopping at the first (the doors ask it every frame a menu is open); it shares `is_shape_target`
-  with `gather`.
+  skipped. With avatars off no shape is listed.
 - **Kinds**, in the groups *Person*, *Place*, *Company*, *Text*, *Numbers and dates* and *Image*
   (`Kind::ALL`, the lists' order; `KIND_KEYS`, the verb's and prefs' spelling). *Text* holds
   *Bio*, a third-person bio using the person's first name, and *Quote*, a first-person
@@ -762,7 +760,8 @@ ImageSink>)` is the edit.
   attributes. Inside an instance it is an override like any edit.
 - **Avatars** (`Avatar { name, initials, style }`): *Initials*, white Inter 600 at 0.4 of the
   shorter side, or *Pattern*, three seeded shapes, on one of the eight `GROUNDS` (each at least
-  4.5:1 against white), picked by a hash of the name so the same person gets the same avatar.
+  4.5:1 against white), picked by a hash of the name so the same person gets the same avatar. A
+  shape's style is the one picked for it (`Options::styles`), else `Options::avatars`'.
   `Avatar::art(w, h)` answers filled paths, ground first. The transaction draws it at twice the
   shape's box (clamped to 8–2048 px) through `ImageSink::draw`, adds each image once and replaces the
   shape's fills with one image fill. `draw` is a default method answering `None`; the app's
@@ -807,24 +806,29 @@ ImageSink>)` is the edit.
   the other cards over the canvas's top; opening any of those closes it. Enter stays the canvas's.
   *Cancel* or ✕ closes it, and Escape through `OndinApp::escape`'s rung below Clean up's (an open
   kind list takes the press first). It is drawn outside the `!focus` guard.
-- **Opening**: with nothing to fill, the status line gives the reason and no box opens. The locale
-  is `agreed_locale`, else the last used; records, example emails, avatars and their style come
-  from `prefs.fill_content`; the seed is the clock's, so each opening draws anew.
+- **Opening**: the box opens on any selection, none included, and follows the selection made
+  after; while nothing is fillable the preview says *Select text layers, or frames that hold them*.
+  The locale is `agreed_locale`, else the last used; records, example emails, avatars and the
+  default avatar style come from `prefs.fill_content`; the seed is the clock's, so each opening
+  draws anew.
 - **Rows** (batch rename's `row`): *Locale*, a combo of the locales, the current one lit with a
   check. *Content*, a combo of *By layer name* and each text kind under its group's eyebrow, its
   sample in the locale as a faint tail (`MenuRow::note`, `content_fill::sample`); picking a kind
   there drops the text rows' own choices and keeps the shapes'. *Records*, a `switch_row_noted`
   *Keep each {noun}'s values together* noted *3 rows*. *Emails*, a switch *Use example.com
-  addresses*. *Avatars*, a `switch_row_noted` labelled with the shape count, then
-  `ui::segmented_enabled` *Initials · Pattern*, disabled while off. While records or avatars is
+  addresses*. *Avatars*, a `switch_row_noted` labelled with the shape count; each shape's style is
+  picked on its preview row. Locale and Content stand 10pt apart; the three switch rows 2pt, Clean
+  up's `SWITCH_GAP`. While records or avatars is
   off, both counts come from `content_fill::outline` with both on (the rows and records, no value
   drawn), so an off switch still says what it would act on without a second full plan.
 - **Preview**: the eyebrow *Preview*, *13 layers in 3 rows · 1 left as is* and a `DICE` button,
   *Shuffle* (*Shuffle · Draw new values for every layer*), which takes a new seed and clears the
   redraws. Rows sit under a dim head naming their record's frame, scrolling past twelve with no
-  bar, as Clean up's. A row: the layer's glyph, *Parent / Name* (masked in private mode), a kind
-  combo `ui::TOOLBAR_H` tall, the toolbar scale's control height, which a 24pt list row holds (a text row: *Leave as is* and every text kind; a shape row: *Leave as is*, *Avatar*,
-  and *Photo* disabled with *Photos come from the assets browser*), then the value: a kept row's
+  bar, as Clean up's. A row is 32pt tall, the kind combo's `ui::TOOLBAR_H` and 8pt, so stacked
+  combos do not read as one column of fields. A row: the layer's glyph, *Parent / Name* (masked in
+  private mode), a kind combo (a text row: *Leave as is* and every text kind; a shape row: *Leave
+  as is*, *Avatar · Initials* and *Avatar · Pattern*, the face naming the pick the same way; a
+  shape with no pick of its own shows the box's style), then the value: a kept row's
   current text, faint; an overflow in warn ink with *Longer than its box: no draw fitted*; an avatar
   as its ground swatch with the initials, then the name. A hovered row with a kind shows a `DICE`
   *Draw another*, but for a *Country* row: the locale has one country. Hovering a row rings its layer, a head its frame at a hairline
@@ -834,12 +838,13 @@ ImageSink>)` is the edit.
   listed.
 - **Commit**: one undo step *Fill with content* with `FILL_CONTENT`; the status line says *Filled N
   layers · Ctrl+Z to undo*, with *· skipped K locked* before the hint when the plan skipped any.
-  Locale, records, example emails, avatars and their style are saved to `prefs.fill_content`
-  (`FillContentPrefs`).
-- **Doors.** *Tools ▸ Fill with content…* (after *Clean up…*), dimmed with *Select text layers, or
-  frames that hold them* while `content_fill::fillable` is false; the palette (`Item::FillContent`
-  in the Text group, aliases *lorem*, *placeholder*, *fake*, *sample*, *dummy*, *names*, *data*, the
-  same reason); the text layers' context menu, after the sizing rows. `Action::FillContent` has no
+  Locale, records, example emails and avatars are saved to `prefs.fill_content`
+  (`FillContentPrefs`); the styles picked on rows become the next box's default style only when
+  they all agree.
+- **Doors.** *Tools ▸ Fill with content…* (after *Clean up…*); the palette (`Item::FillContent` in
+  the Text group, aliases *lorem*, *placeholder*, *fake*, *sample*, *dummy*, *names*, *data*); the
+  text layers' context menu, after the sizing rows. None is dimmed for an empty or unfillable
+  selection: the box opens and says what to select. `Action::FillContent` has no
   chord. `DICE` means drawing new values (*Shuffle*, *Draw another*); `FILL_CONTENT`, lines of text
   with a small die, is the act and its undo step.
 
@@ -866,10 +871,10 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   in the status line. Unsplash's links carry its referral `utm_` parameters, and each Unsplash
   download is reported to its `download_location` when the photo is fetched for an insert, never
   for a preview — with the key only when that address is Unsplash's API, over https.
-- **The panel** (`panel.rs`) floats beside the toolbar in the insert picker's 340-wide frame,
-  bottom-aligned with its rail button (`icon::ASSETS`, between the hexagon and the swatches) and
-  wearing `ui::card_frame`. It is one of three panels in that place, with the insert picker and the
-  styles browser; opening one closes the others. Doors: the rail button and *Assets…* in the
+- **The panel** (`panel.rs`) is a `ui::rail_popup` 340 wide, bottom-aligned with its rail button
+  (`icon::ASSETS`, the top of the rail's foot: *Assets*, *Styles and variables*, *Insert
+  components*). It is one of three panels in that place, with the insert picker and the styles
+  browser, each beside its own button; opening one closes the others. Doors: the rail button and *Assets…* in the
   palette; no chord. `Escape` closes it, on the insert picker's rung. *Icons* · *Photos* on
   `ui::segmented`, then `ui::search_box`, which takes the keyboard on opening.
   - *Icons*: a set dropdown (*All sets* or one) with the set's variant dropdown and a size field
@@ -887,7 +892,8 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
     comes in at; then what a click and a drag do.
   - Empty states (`ui::empty_state`) say what to do: no set or service on, a keyed service without
     its key, a key refused, the hourly limit, an unreachable set or service (`icon::WIFI_SLASH`,
-    *Try again*); the first three offer *Open settings*.
+    *Try again*); the first three offer *Open settings*. They sit 40pt under the tabs, the styles
+    and variables browser's air.
 - **Inserting.** A click places at the view's centre and selects it; a drag drops at the pointer.
   The parent is the frame under that point (`draw_target`, through `place_svg` for an icon and
   `image_tx` for a photo); a flex frame's gap is not chosen. An icon is the SVG importer's group
@@ -910,15 +916,18 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   that it goes to that service only; *Photo size* (*Small · 400 px*, *Regular · 1080 px*, *Full
   size*); and the asset cache row with *Clear*, the web-font row's twin, which empties at once as
   that one does. The rest is staged until *Save changes*; a key field left empty forgets its key.
-- **Credits…** (`icon::QUOTES`; the Document menu and the palette, offered while any layer carries
-  a credit, else disabled with *This document has no credits*) opens a `settings::canvas_card`
-  listing every page's credits whose licence asks
-  for them (`Credit::required`), photos first: a photo a line, an icon set's one sentence a line
-  for all its layers, each naming its layer (masked in private mode) or counting them. A row's
-  click selects its layers, going to their page when none is on this one. *Copy all* puts one plain line per credit on the
-  clipboard. When any credit is left out, a note says MIT, ISC and Apache icons and public-domain
-  photos ask for no credit and are not listed; with none listed the card reads *Nothing here asks
-  to be credited*. The
+- **Credits…** (`icon::QUOTES`) is offered while the card would list something
+  (`OndinApp::has_credits`: a layer carries a credit whose licence asks to be shown). The Document
+  menu hides it otherwise, since most documents never carry a credit; the palette lists it disabled
+  with *This document has no credits*. It opens a `settings::canvas_card` listing every page's
+  credits whose licence asks for them (`Credit::required`), photos first: a photo a line, an icon
+  set's one sentence a line for all its layers, each naming its layer (masked in private mode) or
+  counting them as a `MenuRow::note`. A row's click selects its layers, going to their page when
+  none is on this one; the foot's *Click a row to select its layers* shows only while rows are
+  listed. *Copy all* puts one plain line per credit on the clipboard. When any credit is left out,
+  a note says MIT, ISC and Apache icons and public-domain photos ask for no credit and are not
+  listed; with none listed the card reads *Nothing here asks to be credited*, at the eyebrows' 6pt
+  inset, level with the head. The
   inspector's *Credit* card is in `inspector.md`.
 
 ## Find and replace (`find.rs`)

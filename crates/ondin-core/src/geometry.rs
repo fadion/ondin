@@ -679,8 +679,8 @@ fn spiral_path(size: Size, turns: f64) -> BezPath {
 /// path starts where it first bends no tighter than half the width.
 ///
 /// Inward of there every point within half the width of the curve leaves a cusp
-/// on the stroke's inner edge, a spike any stroker draws. Render, Outline stroke
-/// and SVG export all lay this path, so they agree. A spiral tighter than that
+/// on the stroke's inner edge, a spike any stroker draws. Render, Outline stroke,
+/// SVG, Penpot and Sketch export all lay this path, so they agree. A spiral tighter than that
 /// all the way out keeps its whole path.
 pub fn stroked_path<'a>(
     kind: &NodeKind,

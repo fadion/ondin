@@ -382,7 +382,12 @@ impl Writer<'_> {
             | NodeKind::Spiral { .. }
             | NodeKind::Arc { .. }
             | NodeKind::Path { .. } => {
-                let mut path = res.local_path(doc, id)?;
+                let path = res.local_path(doc, id)?;
+                let kind = res.used_kind_of(node);
+                let (mut path, spike) = crate::svg::spiral_for_one_path(doc, res, id, kind, path);
+                if spike {
+                    self.approximate("Spiral strokes, drawn from the centre");
+                }
                 path.apply_affine(world);
                 let extent = path.bounding_box();
                 let mut s = page_shape(&sid, name, "path", parent_id, frame, page, Some(extent));
@@ -696,7 +701,7 @@ impl Writer<'_> {
                         true
                     }
                 };
-                if !img.image.adjust.is_default() {
+                if img.image.adjust.pipeline().is_some() {
                     self.approximate("Picture adjustments, left out");
                 }
                 if !img.image.orient.is_default() {

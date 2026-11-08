@@ -425,6 +425,8 @@ pub fn subjects(doc: &Document, res: &Resolved, page: NodeId, non_text: bool) ->
             | NodeKind::Polygon { .. }
             | NodeKind::Star { .. }
             | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
             | NodeKind::Path { .. }
             | NodeKind::Boolean { .. } => {
                 let small = res

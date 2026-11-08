@@ -27,7 +27,8 @@ pub(crate) fn layer(doc: &Document, brush: &ImageBrush, size: Size) -> Result<La
     if entry.is_linked() {
         return Err("a linked picture".into());
     }
-    if !r.adjust.is_default() {
+    // What draws, not what the file keeps: picked duotone ends at amount 0 draw nothing.
+    if r.adjust.pipeline().is_some() {
         return Err("a picture with colour adjustments".into());
     }
     // CSS has no opacity for one background layer.
@@ -129,4 +130,46 @@ pub(crate) fn file(doc: &Document, r: &ImageRef) -> Option<Vec<u8>> {
         img.width(),
         img.height(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::{ImageEntry, ImageId, ImageSource, Operation, Transaction};
+
+    /// Picked duotone ends at amount 0 draw nothing, so the picture is a plain
+    /// background; a raised amount is refused with its reason.
+    /// flip: `layer` testing `is_default` → fails at "unadjusted".
+    #[test]
+    fn duotone_colours_at_zero_are_no_adjustment() {
+        let id = ImageId("p".into());
+        let mut doc = Document::new(ondin_core::IdSource::new(1).mint());
+        doc.apply(&Transaction(vec![Operation::AddImage {
+            id: id.clone(),
+            entry: ImageEntry {
+                source: ImageSource::Embedded(vec![0u8; 4].into()),
+                format: ImageFormat::Png,
+                width: 2,
+                height: 2,
+            },
+        }]))
+        .unwrap();
+        let mut image = ImageRef::new(id);
+        image.adjust.duotone_light = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        let mut brush = ImageBrush {
+            image,
+            sampler: Default::default(),
+        };
+        let size = Size::new(10.0, 10.0);
+        assert!(
+            !brush.image.adjust.is_default(),
+            "the fixture: a picked end"
+        );
+        assert!(layer(&doc, &brush, size).is_ok(), "unadjusted");
+        brush.image.adjust.duotone = 0.5;
+        assert_eq!(
+            layer(&doc, &brush, size).err().as_deref(),
+            Some("a picture with colour adjustments")
+        );
+    }
 }

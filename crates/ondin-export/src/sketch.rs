@@ -453,7 +453,12 @@ impl Writer<'_> {
             | NodeKind::Spiral { .. }
             | NodeKind::Arc { .. }
             | NodeKind::Path { .. } => {
-                let mut path = res.local_path(doc, id)?;
+                let path = res.local_path(doc, id)?;
+                let kind = res.used_kind_of(node);
+                let (mut path, spike) = crate::svg::spiral_for_one_path(doc, res, id, kind, path);
+                if spike {
+                    self.approximate("Spiral strokes, drawn from the centre");
+                }
                 path.apply_affine(world);
                 path_layer(&lid, node.name(), &path, node.fill_rule())?
             }
@@ -1112,7 +1117,7 @@ impl Writer<'_> {
                 });
                 v["patternTileScale"] = json!(img.image.tile_scale);
                 v["contextSettings"] = context(img.sampler.alpha);
-                if !img.image.adjust.is_default() {
+                if img.image.adjust.pipeline().is_some() {
                     self.approximate("Picture adjustments, left out");
                 }
                 if !img.image.orient.is_default() {

@@ -412,6 +412,60 @@ fn non_text_measures_marks_not_surfaces() {
     );
 }
 
+/// A small spiral and arc are marks as a line is, measured by their stroke.
+/// flip: `subjects` without its Spiral and Arc arms → fails at "measured".
+#[test]
+fn a_spiral_and_an_arc_are_marks() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (spiral, arc) = (d.ids.mint(), d.ids.mint());
+    let grey = |id| Operation::SetStrokes {
+        id,
+        strokes: keyed_by_position([ondin_core::Stroke {
+            brush: Brush::Solid(Color::from_rgba8(204, 204, 204, 255)).into(),
+            width: 2.0,
+            ..Default::default()
+        }]),
+    };
+    d.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: spiral,
+                parent: d.frame,
+                index: 0,
+                kind: NodeKind::Spiral {
+                    size: Size::new(16.0, 16.0),
+                    turns: 2.0,
+                },
+                transform: Some(Affine::translate((200.0, 100.0))),
+                name: Some("Spiral".into()),
+            },
+            grey(spiral),
+            Operation::CreateNode {
+                id: arc,
+                parent: d.frame,
+                index: 0,
+                kind: NodeKind::Arc {
+                    end: ondin_core::kurbo::Point::new(16.0, 0.0),
+                    sweep: 60.0,
+                },
+                transform: Some(Affine::translate((300.0, 100.0))),
+                name: Some("Arc".into()),
+            },
+            grey(arc),
+        ]))
+        .unwrap();
+    let options = contrast::Options {
+        level: Level::Aa,
+        non_text: true,
+        default_ground: None,
+    };
+    let r = contrast::check_with(&d.doc, d.page, options, None);
+    for id in [spiral, arc] {
+        let f = r.findings.iter().find(|f| f.id == id).expect("measured");
+        assert!(f.non_text && !f.passes(), "{f:?}");
+    }
+}
+
 /// `only` limits the measuring to the layers named.
 #[test]
 fn only_measures_the_layers_named() {

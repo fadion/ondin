@@ -1781,6 +1781,41 @@ fn trimmed_stroke(kind: &NodeKind, shape: Option<&BezPath>, s: &Stroke) -> Optio
     }
 }
 
+/// A spiral's path for a writer that lays every stroke along one path (Penpot,
+/// Sketch): cut where the curve opens to half the stroke's width, as render and
+/// SVG lay it, when one stroke and no shown fill paint it. `true` beside it when a
+/// cut was needed and could not be taken (several strokes, or a fill the cut would
+/// change), for the writer to report. Any other kind's path comes back as it was.
+pub(crate) fn spiral_for_one_path(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+    kind: &NodeKind,
+    path: BezPath,
+) -> (BezPath, bool) {
+    if !matches!(kind, NodeKind::Spiral { .. }) {
+        return (path, false);
+    }
+    let Some(paint) = ondin_core::paint_box::node_paint(doc, res, id) else {
+        return (path, false);
+    };
+    let cut = |s: &Stroke| match geometry::stroked_path(kind, &path, s.width) {
+        std::borrow::Cow::Owned(p) => Some(p),
+        std::borrow::Cow::Borrowed(_) => None,
+    };
+    let filled = paint.fills.iter().any(|f| f.visible);
+    match paint.strokes.as_slice() {
+        [s] if !filled => match cut(s) {
+            Some(p) => (p, false),
+            None => (path, false),
+        },
+        strokes => {
+            let needed = strokes.iter().any(|s| cut(s).is_some());
+            (path, needed)
+        }
+    }
+}
+
 /// The outline the *paints* are built against: a boolean's derived result, a text
 /// node's glyph outlines, or the one the kind describes.
 ///
@@ -2907,6 +2942,81 @@ mod credit_tests {
         assert_eq!(escape_xml("a\tb\nc\r"), "a\tb\nc\r");
         let xml = format!("<credit>{}</credit>", escape_xml("“Sunset\u{1b}” by Ana"));
         assert!(roxmltree::Document::parse(&xml).is_ok(), "{xml}");
+    }
+}
+
+#[cfg(test)]
+mod spiral_tests {
+    use super::*;
+    use ondin_core::kurbo::{PathEl, Size};
+    use ondin_core::{IdSource, Operation, Transaction, keyed_by_position};
+
+    /// A spiral and its id, stroked `width` wide, filled when `filled`.
+    fn spiral(width: f64, filled: bool) -> (Document, Resolved, NodeId) {
+        let mut ids = IdSource::new(0x5917);
+        let mut doc = Document::new(ids.mint());
+        let page = doc.first_page();
+        let id = ids.mint();
+        let mut ops = vec![
+            Operation::CreateNode {
+                id,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Spiral {
+                    size: Size::new(100.0, 100.0),
+                    turns: 3.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetStrokes {
+                id,
+                strokes: keyed_by_position([Stroke {
+                    brush: Brush::Solid(Color::BLACK).into(),
+                    width,
+                    ..Default::default()
+                }]),
+            },
+        ];
+        if filled {
+            ops.push(Operation::SetFills {
+                id,
+                fills: keyed_by_position([ondin_core::Fill {
+                    brush: Brush::Solid(Color::WHITE).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        let res = Resolved::rebuild(&doc);
+        (doc, res, id)
+    }
+
+    fn first_point(p: &BezPath) -> ondin_core::kurbo::Point {
+        match p.elements()[0] {
+            PathEl::MoveTo(p) => p,
+            _ => panic!("a path starts with a move"),
+        }
+    }
+
+    /// Stroked thicker than its innermost bend, an unfilled spiral is written from
+    /// the cut, as render and SVG lay it; filled, it keeps its path and says the
+    /// stroke runs from the centre.
+    /// flip: `spiral_for_one_path` answering the path unchanged → fails at "cut".
+    #[test]
+    fn a_thick_spiral_is_written_from_its_cut() {
+        let (doc, res, id) = spiral(12.0, false);
+        let kind = doc.get(id).unwrap().kind().clone();
+        let whole = res.local_path(&doc, id).unwrap();
+        let (path, spike) = spiral_for_one_path(&doc, &res, id, &kind, whole.clone());
+        assert!(!spike);
+        assert_ne!(first_point(&path), first_point(&whole), "cut");
+
+        let (doc, res, id) = spiral(12.0, true);
+        let whole = res.local_path(&doc, id).unwrap();
+        let (path, spike) = spiral_for_one_path(&doc, &res, id, &kind, whole.clone());
+        assert!(spike, "reported");
+        assert_eq!(first_point(&path), first_point(&whole));
     }
 }
 

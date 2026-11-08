@@ -317,6 +317,15 @@ pub struct CanvasRenderer {
     /// The regions the last draw patched, `None` for a whole one or a pan.
     #[cfg(test)]
     patched: Option<Vec<Region>>,
+    /// Bumped by every draw into the texture, whole, panned or patched.
+    frame: u64,
+    /// The frame and the simulation `seen` holds, so a repaint that changed
+    /// neither (a caret blink, a hover) does not run the pass again.
+    seen_from: Option<(u64, crate::vision::Seen)>,
+    /// How many times [`Self::seen_through`] has run the pass, or would have
+    /// headless.
+    #[cfg(test)]
+    vision_runs: u64,
     /// Decoded images (§5.5a), kept across frames. Lives on the canvas because
     /// it is renderer state derived from the document, never edited.
     images: ondin_render::ImageStore,
@@ -347,6 +356,10 @@ impl CanvasRenderer {
             draws: 0,
             #[cfg(test)]
             patched: None,
+            frame: 0,
+            seen_from: None,
+            #[cfg(test)]
+            vision_runs: 0,
             // The one store that may answer a moving adjustment with a reduced
             // picture; export takes `ImageStore::new`, which never previews.
             images: ondin_render::ImageStore::interactive(),
@@ -374,6 +387,9 @@ impl CanvasRenderer {
             shown_ink: None,
             draws: 0,
             patched: None,
+            frame: 0,
+            seen_from: None,
+            vision_runs: 0,
             images: ondin_render::ImageStore::interactive(),
             sample: None,
         }
@@ -383,6 +399,12 @@ impl CanvasRenderer {
     #[cfg(test)]
     pub(crate) fn draws(&self) -> u64 {
         self.draws
+    }
+
+    /// How many times the vision pass has run — see the field.
+    #[cfg(test)]
+    pub(crate) fn vision_runs(&self) -> u64 {
+        self.vision_runs
     }
 
     /// The regions the last draw patched — see the field.
@@ -514,6 +536,7 @@ impl CanvasRenderer {
             self.draws += 1;
             self.patched.clone_from(&regions);
         }
+        self.frame += 1;
         // Headless, the draw it would have made counts as made.
         let Some(gpu) = self.gpu.as_mut() else {
             self.shown = Some(key);
@@ -553,18 +576,50 @@ impl CanvasRenderer {
 
     /// The texture to show for what [`Self::render`] just drew: itself, or with
     /// `vision` a copy seen through its effect inside its device region, at its
-    /// device px to the design px (`OndinApp::vision_region`). Run every frame the
-    /// mode is on, and `target` itself is never touched. Headless, the drawn
-    /// texture as it is.
+    /// device px to the design px (`OndinApp::vision_region`). Asked every frame
+    /// the mode is on, it runs the pass only when the texture was drawn into or
+    /// the simulation changed since the last run, and `target` itself is never
+    /// touched. With the mode off it lets go of the copy and the blur's scratch.
+    /// Headless, the drawn texture as it is.
     pub(crate) fn seen_through(
         &mut self,
         drawn: egui::TextureId,
         vision: Option<crate::vision::Seen>,
     ) -> egui::TextureId {
-        let (Some(seen_as), Some(gpu)) = (vision, self.gpu.as_mut()) else {
+        let Some(seen_as) = vision else {
+            self.seen_from = None;
+            if let Some(gpu) = self.gpu.as_mut() {
+                if let Some(old) = gpu.seen.take() {
+                    gpu.render_state.renderer.write().free_texture(&old.id);
+                }
+                if let Some(pass) = gpu.vision.as_mut() {
+                    pass.release();
+                }
+            }
+            return drawn;
+        };
+        let fresh = self.seen_from == Some((self.frame, seen_as));
+        let seen_id = self
+            .gpu
+            .as_ref()
+            .and_then(|gpu| gpu.seen.as_ref())
+            .map(|s| s.id);
+        if fresh && let Some(id) = seen_id {
+            return id;
+        }
+        if fresh && self.gpu.is_none() {
+            return drawn;
+        }
+        self.seen_from = Some((self.frame, seen_as));
+        #[cfg(test)]
+        {
+            self.vision_runs += 1;
+        }
+        let Some(gpu) = self.gpu.as_mut() else {
             return drawn;
         };
         let Some(size) = gpu.target.as_ref().map(|t| t.size) else {
+            self.seen_from = None;
             return drawn;
         };
         if gpu.seen.as_ref().is_none_or(|s| s.size != size) {
@@ -24923,6 +24978,69 @@ mod redraw_tests {
             px,
             Color::WHITE,
             session.page,
+        );
+    }
+
+    /// The vision pass runs once for each frame drawn into the texture or change
+    /// of simulation, not on every repaint, and ending the mode forgets the copy.
+    /// flip: `seen_through` ignoring `seen_from` → fails at "idle repaints".
+    #[test]
+    fn the_vision_pass_runs_only_when_what_it_reads_changed() {
+        let (mut session, [a, ..]) = edit_fixture();
+        let mut canvas = CanvasRenderer::headless();
+        let camera = Camera {
+            center: Point::new(220.0, 170.0),
+            zoom: 1.0,
+        };
+        let px = (400, 300);
+        let blur = crate::vision::Seen {
+            effect: ondin_render::vision::Effect::Blur { sigma: 1.0 },
+            scale: 1.0,
+            region: [0, 0, 400, 300],
+        };
+        let stronger = crate::vision::Seen {
+            effect: ondin_render::vision::Effect::Blur { sigma: 2.0 },
+            ..blur
+        };
+        let shown = |canvas: &mut CanvasRenderer, session: &EditorSession, seen| {
+            draw(canvas, session, &camera, px);
+            canvas.seen_through(egui::TextureId::Managed(0), seen);
+            canvas.vision_runs()
+        };
+        assert_eq!(
+            shown(&mut canvas, &session, Some(blur)),
+            1,
+            "the first frame"
+        );
+        for _ in 0..5 {
+            assert_eq!(shown(&mut canvas, &session, Some(blur)), 1, "idle repaints");
+        }
+        assert_eq!(
+            shown(&mut canvas, &session, Some(stronger)),
+            2,
+            "a new severity"
+        );
+        session
+            .try_commit(Transaction(vec![Operation::SetTransform {
+                id: a,
+                transform: Affine::translate((15.0, 0.0)),
+            }]))
+            .expect("moves");
+        assert_eq!(
+            shown(&mut canvas, &session, Some(stronger)),
+            3,
+            "a redrawn page"
+        );
+        assert_eq!(
+            shown(&mut canvas, &session, Some(stronger)),
+            3,
+            "idle again"
+        );
+        assert_eq!(shown(&mut canvas, &session, None), 3, "the mode off");
+        assert_eq!(
+            shown(&mut canvas, &session, Some(stronger)),
+            4,
+            "the mode back on"
         );
     }
 

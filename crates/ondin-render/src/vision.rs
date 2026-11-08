@@ -370,7 +370,8 @@ pub fn apply(
 
 /// [`apply`] as compute passes from one canvas texture into another, inside a
 /// region of it. Building it compiles the shader, so it is made once; it keeps
-/// the scratch texture a blur's first pass writes, sized to the last canvas.
+/// the scratch texture a blur's first pass writes, sized to the last canvas, only
+/// while it blurs.
 pub struct VisionPass {
     layout: wgpu::BindGroupLayout,
     tint: wgpu::ComputePipeline,
@@ -482,6 +483,9 @@ impl VisionPass {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("ondin-vision"),
         });
+        if !matches!(effect, Effect::Blur { .. }) {
+            self.release();
+        }
         match effect {
             Effect::Tint(t) => {
                 self.write(queue, 0, &Params::tint(t, region));
@@ -512,6 +516,17 @@ impl VisionPass {
             }
         }
         queue.submit([encoder.finish()]);
+    }
+
+    /// Drop the blur's scratch texture, a whole canvas of VRAM; the next blur
+    /// makes it again.
+    pub fn release(&mut self) {
+        self.scratch = None;
+    }
+
+    /// Whether the blur's scratch texture is held.
+    pub fn holds_scratch(&self) -> bool {
+        self.scratch.is_some()
     }
 
     fn write(&self, queue: &Queue, slot: usize, params: &Params) {

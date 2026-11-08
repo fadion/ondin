@@ -230,7 +230,7 @@ colour deficiencies barely move.
   severity live and saves when a drag ends or on a click or key, not on every drag frame. A file
   holding a lone deficiency key reads as that deficiency at 100% (`VisionStored`, untagged;
   `a_stored_deficiency_key_still_reads`).
-- **Drawing** (`CanvasRenderer::seen_through`, given `vision::Seen`). Every frame the mode is on,
+- **Drawing** (`CanvasRenderer::seen_through`, given `vision::Seen`). While the mode is on,
   the pass writes the canvas texture (`target`) into a second texture, `seen`, through the
   condition's effect inside the frame's box (`vision_region`: its world bounds mapped to texels
   through the camera and size that drew `target`, rounded out and clamped to the texture) and
@@ -241,7 +241,10 @@ colour deficiencies barely move.
   and patches keep working from true pixels and the eyedropper reads true colours. The edit
   chrome is painted after the canvas texture and is never simulated. The region is the frame's
   axis-aligned box, so a rounded or turned frame's corners take in a little of what lies outside
-  it.
+  it. The pass runs only when `target` was drawn into or the `Seen` changed since its last run,
+  so a repaint that changed neither (a caret blink, a hover) shows `seen` as it stands: a blur is
+  tens of times a tint's cost. With the mode off, `seen` and the blur's scratch texture are let
+  go, and the scratch is also let go while a condition other than a blur is shown.
 
 ## The top bar's right cluster
 

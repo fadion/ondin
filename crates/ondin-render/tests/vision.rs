@@ -92,7 +92,8 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> 
 }
 
 /// Inside the region every pixel is the CPU's; outside, every pixel is the
-/// source's; under every condition at two severities and two zooms.
+/// source's; under every condition at two severities and two zooms. The blur's
+/// scratch texture is let go by the condition after it.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_gpu_pass_matches_its_specification() {
@@ -147,6 +148,10 @@ fn the_gpu_pass_matches_its_specification() {
                 &effect,
                 scale,
                 region,
+            );
+            assert!(
+                matches!(effect, Effect::Blur { .. }) || !pass.holds_scratch(),
+                "{c:?}: the blur's scratch is let go once nothing blurs"
             );
             let got = readback(&device, &queue, &dst);
             let want = apply(&effect, scale, &px, (W, H), region);

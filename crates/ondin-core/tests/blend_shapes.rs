@@ -550,6 +550,24 @@ fn text_pictures_and_other_counts_are_refused() {
     );
 }
 
+/// Two shapes inside a main are refused: the group would be a layer its instances
+/// do not have.
+/// flip: `pair` without its `component()` test → fails at the refusal.
+#[test]
+fn shapes_inside_a_main_are_refused() {
+    let mut f = Fixture::new();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetComponent {
+            id: f.frame,
+            component: true,
+        }]))
+        .unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Inside)
+    );
+}
+
 /// No steps, or more than the most, is refused.
 #[test]
 fn the_step_count_is_bounded() {

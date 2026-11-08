@@ -565,7 +565,8 @@ pub fn warp(
 }
 
 /// What the canvas shows while the envelope is open: a path's own outline
-/// warped, and every other leaf hidden under a stand-in path that wears its look.
+/// warped, and every other leaf hidden, with a stand-in path just above it that
+/// wears its look.
 /// A preview cannot delete, so it draws what [`warp`] will leave rather than
 /// performing it.
 pub fn preview(
@@ -576,8 +577,8 @@ pub fn preview(
     warp: &Warp,
 ) -> Result<Transaction, Refusal> {
     let mut ops = Vec::new();
-    // Each stand-in placed so far, by its parent and the index it was put at in
-    // `doc`: every one at or below a leaf's index has moved that leaf up by one.
+    // Each stand-in placed so far, by its parent and its leaf's index in `doc`:
+    // every one over a leaf below this one has moved this one up by one.
     let mut placed: Vec<(NodeId, usize)> = Vec::new();
     for Warped { leaf, path } in warped(doc, res, selection, warp)? {
         let node = doc.get(leaf).ok_or(Refusal::Nothing)?;
@@ -594,10 +595,13 @@ pub fn preview(
             .get(parent)
             .and_then(|p| p.children().iter().position(|c| *c == leaf))
             .ok_or(Refusal::Nothing)?;
+        // Just above the hidden leaf: a hidden mask ends the run below it, so a
+        // stand-in mask under it would mask nothing.
         let index = at
+            + 1
             + placed
                 .iter()
-                .filter(|(p, j)| *p == parent && *j <= at)
+                .filter(|(p, j)| *p == parent && *j < at)
                 .count();
         placed.push((parent, at));
         let ghost = ids.mint();
@@ -1069,8 +1073,8 @@ mod tests {
         );
     }
 
-    /// While the envelope is open, a mask's stand-in is a mask with its mode, and a
-    /// later stand-in sits directly under its own layer, over the path below it.
+    /// While the envelope is open, a mask's stand-in is a mask with its mode, and
+    /// each stand-in sits directly over its own layer, over the path below it.
     ///
     /// flip: `preview` without `carried_mask` → fails at "a mask"; reading the
     /// index from `doc` alone → fails at "above the path".
@@ -1120,7 +1124,7 @@ mod tests {
         let mut shown = doc.clone();
         shown.apply(&tx).unwrap();
         let kids = shown.get(group).unwrap().children().to_vec();
-        let ghost_of = |leaf: NodeId| kids[kids.iter().position(|k| *k == leaf).unwrap() - 1];
+        let ghost_of = |leaf: NodeId| kids[kids.iter().position(|k| *k == leaf).unwrap() + 1];
         let ghost = shown.get(ghost_of(mask)).unwrap();
         assert!(ghost.mask(), "a mask");
         assert_eq!(ghost.mask_mode(), crate::node::MaskMode::Alpha);

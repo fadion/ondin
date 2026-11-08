@@ -89,7 +89,7 @@ pub trait ScenePainter {
 
 ### Ghosts
 
-A ghost is a subtree: `Ghost { parent, index, node }`, with `GhostNode` carrying everything the walk reads off a `Node` (transform, kind, paint, effects, text, opacity, blend, visibility, clip, mask, mask mode, `children`, and `path` for a boolean ghost's combined outline evaluated once at build). `scene::paint_ghost` handles a ghost's clip, opacity and stops at a `Boolean` like `paint_node`. `InsertSubtree`'s `index` is honoured: `paint_node` interleaves ghosts among their parent's real children by index.
+A ghost is a subtree: `Ghost { parent, index, node }`, with `GhostNode` carrying everything the walk reads off a `Node` (transform, kind, paint, effects, text, opacity, blend, visibility, clip, mask, mask mode, `children`, and `path` for a boolean ghost's combined outline evaluated once at build). `scene::paint_ghost` handles a ghost's clip, opacity and stops at a `Boolean` like `paint_node`. `InsertSubtree`'s `index` is honoured as the commit applies it: `RenderOverrides::merged_children` inserts each ghost at its index into the children with the earlier ghosts already in, in the order they were added (indices need not ascend: copies picked top first), and `paint_node` walks that one list. A mask ghost (`SetMask` and `SetMaskMode` are absorbed on a ghost, refused on a document node) masks the run above it as a mask child does.
 
 Every setter looks in the ghost forest *before* the node map (a transaction that adds artwork and then places it names a node the document has never seen). Readers owe the same order (`transform_of` for a ghost id).
 

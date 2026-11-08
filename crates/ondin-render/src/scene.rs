@@ -15,7 +15,7 @@
 //!   only when the node isolates (`BlendMode::isolates`) or is a top-level frame
 //!   holding a blended layer.
 
-use crate::renderer::{GhostNode, RenderOverrides, Viewport};
+use crate::renderer::{GhostNode, RenderOverrides, Slot, Viewport};
 use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape};
 use ondin_core::Brush;
 use ondin_core::text::{Glyph as TextGlyph, TextLayout};
@@ -629,7 +629,10 @@ pub fn top_level_ink(
 ) -> Option<Vec<Rect>> {
     let node = doc.get(page)?;
     let masked = |c: &NodeId| doc.get(*c).is_some_and(|n| n.mask());
-    if overrides.children_of(page).is_some() || node.children().iter().any(masked) {
+    if overrides.children_of(page).is_some()
+        || node.children().iter().any(masked)
+        || overrides.ghosts_of(page).any(|g| g.node.mask)
+    {
         return None;
     }
     let world = res.world_transform(page).unwrap_or(Affine::IDENTITY);
@@ -2004,7 +2007,10 @@ fn paint_node_pass<P: ScenePainter>(
         if let Some((id, luminance)) = mask.ink_to_composite() {
             push_ink_mask(painter, luminance);
             walk.in_mask.set(walk.in_mask.get() + 1);
-            paint_node(doc, res, ov, id, world, view, base, edges, painter, walk);
+            match ov.ghost(id) {
+                Some(g) => paint_ghost(doc, ov, g, false, world, base, edges, painter, None),
+                None => paint_node(doc, res, ov, id, world, view, base, edges, painter, walk),
+            }
             walk.in_mask.set(walk.in_mask.get() - 1);
             painter.pop_layer();
         }
@@ -2046,52 +2052,55 @@ fn paint_node_pass<P: ScenePainter>(
             || outer_opacity
             || inner_opacity < 1.0,
     });
-    // Children and ghosts in one z-order: a ghost draws at its `InsertSubtree`
-    // index.
-    let mut ghosts: Vec<&crate::renderer::Ghost> = ov.ghosts_of(id).collect();
-    ghosts.sort_by_key(|g| g.index);
-    let mut next_ghost = 0usize;
-    // The preview's order where it reorders this parent.
-    let children = ov.children_of(id).unwrap_or(node.children());
-    // `..=len` so anything indexed at or past the end still gets drawn.
-    for pos in 0..=children.len() {
-        while let Some(ghost) = ghosts.get(next_ghost).filter(|g| g.index <= pos) {
-            if ov.ghosts_escape_clip() {
-                close(painter, &mut open, &mut mask);
-            } else {
-                reopen(painter, &mut open, &mut mask);
+    // Children and ghosts in one z-order, as the commit will stack them.
+    for slot in ov.merged_children(doc, id) {
+        let child = match slot {
+            Slot::Child(child) => child,
+            // A mask ghost, a warp's stand-in for a mask, masks as the node will.
+            Slot::Ghost(ghost) if ghost.node.mask => {
+                end_run(painter, &mut mask);
+                let g = &ghost.node;
+                mask.kind = match g.mask_mode {
+                    MaskMode::Shape => ghost_mask_geometry(g).map(RunKind::Clip),
+                    mode @ (MaskMode::Alpha | MaskMode::Luminance) => g
+                        .visible
+                        .then_some(RunKind::Ink(g.id, mode == MaskMode::Luminance)),
+                };
+                continue;
             }
-            let top = matches!(node.kind(), NodeKind::Root);
-            paint_ghost(doc, ov, &ghost.node, top, world, base, edges, painter, None);
-            next_ghost += 1;
-        }
-        let Some(child) = children.get(pos) else {
-            break;
+            Slot::Ghost(ghost) => {
+                if ov.ghosts_escape_clip() {
+                    close(painter, &mut open, &mut mask);
+                } else {
+                    reopen(painter, &mut open, &mut mask);
+                }
+                let top = matches!(node.kind(), NodeKind::Root);
+                paint_ghost(doc, ov, &ghost.node, top, world, base, edges, painter, None);
+                continue;
+            }
         };
         // A mask is not artwork: it is not descended into and contributes the clip
         // every later sibling draws under.
-        if let Some(node) = doc.get(*child)
+        if let Some(node) = doc.get(child)
             && node.mask()
         {
             end_run(painter, &mut mask);
             mask.kind = match node.mask_mode() {
                 // No geometry means no clip: the run draws unmasked.
-                MaskMode::Shape => mask_geometry(doc, res, ov, *child).map(RunKind::Clip),
+                MaskMode::Shape => mask_geometry(doc, res, ov, child).map(RunKind::Clip),
                 // An empty ink mask legitimately erases everything above it; a
                 // hidden one masks nothing.
-                mode @ (MaskMode::Alpha | MaskMode::Luminance) => visible(ov, doc, *child)
-                    .then_some(RunKind::Ink(*child, mode == MaskMode::Luminance)),
+                mode @ (MaskMode::Alpha | MaskMode::Luminance) => visible(ov, doc, child)
+                    .then_some(RunKind::Ink(child, mode == MaskMode::Luminance)),
             };
             continue;
         }
-        if ov.escapes_clip(*child) {
+        if ov.escapes_clip(child) {
             close(painter, &mut open, &mut mask);
         } else {
             reopen(painter, &mut open, &mut mask);
         }
-        paint_node(
-            doc, res, ov, *child, world, view, base, edges, painter, walk,
-        );
+        paint_node(doc, res, ov, child, world, view, base, edges, painter, walk);
         if walk.stopped() {
             break;
         }
@@ -2458,7 +2467,7 @@ fn drawn_children_ink(
             &measure,
         );
     }
-    for ghost in ov.ghosts_of(id) {
+    for ghost in ov.ghosts_of(id).filter(|g| !g.node.mask) {
         paint_ghost(
             doc,
             ov,

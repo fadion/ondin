@@ -72,6 +72,15 @@ pub struct Ghost {
     pub node: GhostNode,
 }
 
+/// One place in a parent's drawn order ([`RenderOverrides::merged_children`]).
+#[derive(Clone, Copy)]
+pub(crate) enum Slot<'a> {
+    /// A child the document has.
+    Child(NodeId),
+    /// A ghost the preview adds there.
+    Ghost(&'a Ghost),
+}
+
 /// One node of a ghost subtree: everything the scene walk reads off a `Node`,
 /// for artwork there is no `Node` for yet. It carries children so a gesture can
 /// preview a copy of a group or a frame.
@@ -353,6 +362,27 @@ impl RenderOverrides {
             .filter(move |g| g.parent == parent)
     }
 
+    /// `parent`'s children as the preview draws them, bottom first: the preview's
+    /// order where it reorders them, and each ghost inserted at its
+    /// [`Ghost::index`] in the order the ghosts were added, which is how the
+    /// commit applies them. The indices need not ascend (copies picked top first);
+    /// one past the end appends.
+    pub(crate) fn merged_children<'a>(
+        &'a self,
+        doc: &'a Document,
+        parent: NodeId,
+    ) -> Vec<Slot<'a>> {
+        let children = self
+            .children_of(parent)
+            .or_else(|| doc.get(parent).map(ondin_core::Node::children))
+            .unwrap_or_default();
+        let mut out: Vec<Slot<'a>> = children.iter().copied().map(Slot::Child).collect();
+        for ghost in self.ghosts_of(parent) {
+            out.insert(ghost.index.min(out.len()), Slot::Ghost(ghost));
+        }
+        out
+    }
+
     /// Install (or clear) the mode's explanatory artwork — see [`Self::chrome`].
     /// `glued` is the layer the ghost is a continuation of, and the ghost itself;
     /// `None` clears it.
@@ -422,29 +452,21 @@ impl RenderOverrides {
     /// The ghost is a real operand: an Alt-dragged copy of an operand inside a
     /// boolean joins the operation on release, so the preview combines it too.
     ///
-    /// Inserted at [`Ghost::index`], ascending, which is the commit's order
-    /// (`insert_subtrees`). The fold order must match: `Exclude` over many operands
-    /// changes its result measurably when one operand moves to the end of the fold.
+    /// In the order the walk draws them ([`Self::merged_children`]), which is the
+    /// commit's. The fold order must match: `Exclude` over many operands changes
+    /// its result measurably when one operand moves to the end of the fold, and a
+    /// `Subtract` reads its base off the first operand.
     fn operand_children(&self, doc: &Document, id: NodeId) -> Vec<NodeId> {
         if let Some(g) = self.ghost(id) {
             return g.children.iter().map(|c| c.id).collect();
         }
-        // A `Subtract` reads its base off the first operand, so the preview's order counts.
-        let mut out = match self.children_of(id) {
-            Some(order) => order.to_vec(),
-            None => doc
-                .get(id)
-                .map(|n| n.children().to_vec())
-                .unwrap_or_default(),
-        };
-        let mut ghosts: Vec<(usize, NodeId)> =
-            self.ghosts_of(id).map(|g| (g.index, g.node.id)).collect();
-        ghosts.sort_by_key(|(i, _)| *i);
-        for (index, gid) in ghosts {
-            // Clamped: an index past the end appends.
-            out.insert(index.min(out.len()), gid);
-        }
-        out
+        self.merged_children(doc, id)
+            .into_iter()
+            .map(|slot| match slot {
+                Slot::Child(c) => c,
+                Slot::Ghost(g) => g.node.id,
+            })
+            .collect()
     }
 
     /// Whether `id` is visible, ghosts included.
@@ -1371,8 +1393,8 @@ impl RenderOverrides {
             }
             // A whole subtree being added: the copy an Alt-drag carries. The same
             // checks as `CreateNode`. `index` must be honoured: the copy lands just
-            // above its original, and the walk interleaves ghosts among the real
-            // children by it ([`crate::scene`]).
+            // above its original, and the walk inserts ghosts among the real
+            // children by it ([`Self::merged_children`]).
             Operation::InsertSubtree {
                 nodes,
                 parent,
@@ -1525,8 +1547,16 @@ impl RenderOverrides {
             // the document and `Resolved`, which no override patches; so do the
             // widths that pick them.
             Operation::SetModes { .. } | Operation::SetBreakpoints { .. } => return None,
+            // A ghost carries its own: a warp's stand-in for a mask stays a mask,
+            // and the walk reads it off the ghost.
+            Operation::SetMask { id, mask } if self.ghost(*id).is_some() => {
+                self.ghost_mut(*id)?.mask = *mask;
+            }
+            Operation::SetMaskMode { id, mode } if self.ghost(*id).is_some() => {
+                self.ghost_mut(*id)?.mask_mode = *mode;
+            }
             // A mask changes which *other* nodes the walk clips, and an override
-            // patches one node. Nothing sets these mid-gesture.
+            // patches one node. Nothing sets these on a document node mid-gesture.
             Operation::SetClip { .. }
             | Operation::SetMask { .. }
             | Operation::SetMaskMode { .. }
@@ -1568,7 +1598,7 @@ impl RenderOverrides {
     }
 
     /// The ghost with `id`, at any depth in any of the forests.
-    fn ghost(&self, id: NodeId) -> Option<&GhostNode> {
+    pub(crate) fn ghost(&self, id: NodeId) -> Option<&GhostNode> {
         self.ghosts.iter().find_map(|g| g.node.find(id))
     }
 

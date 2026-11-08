@@ -610,6 +610,161 @@ fn a_shape_being_drawn_matches_the_shape_that_lands() {
     assert_preview_matches_commit(&f.doc, &tx, "drawing a new shape");
 }
 
+/// Several new layers in one parent stack where they land: each index is read as
+/// the commit applies it, into the children with the earlier ones already in, in
+/// the transaction's order whether or not the indices ascend.
+///
+/// flip: `RenderOverrides::merged_children` inserting the ghosts sorted by index →
+/// fails at "picked top first"; the walk comparing a ghost's index with real child
+/// positions → fails at "under each of three" (the top one missing).
+#[test]
+fn new_layers_among_siblings_stack_where_they_land() {
+    let mut f = fixture();
+    let group = f.ids.mint();
+    let mut ops = vec![Operation::CreateNode {
+        id: group,
+        parent: f.artboard,
+        index: 0,
+        kind: NodeKind::Group,
+        transform: None,
+        name: None,
+    }];
+    let solid = |n: u8| {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(n, 255 - n, 0, 255)).into(),
+            visible: true,
+        }])
+    };
+    for i in 0..3u8 {
+        let id = f.ids.mint();
+        ops.push(Operation::CreateNode {
+            id,
+            parent: group,
+            index: usize::from(i),
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((20.0 * f64::from(i), 0.0))),
+            name: None,
+        });
+        ops.push(Operation::SetFills {
+            id,
+            fills: solid(40 * i),
+        });
+    }
+    f.doc.apply(&Transaction(ops)).unwrap();
+    // A warp's stand-ins, one under each leaf; then an Alt-drag of the top and the
+    // bottom leaf, picked top first, each copy just above its original.
+    for (what, indices) in [
+        ("under each of three", vec![0, 2, 4]),
+        ("picked top first", vec![3, 1]),
+    ] {
+        let mut ops = Vec::new();
+        for (k, index) in indices.into_iter().enumerate() {
+            let id = f.ids.mint();
+            ops.push(Operation::CreateNode {
+                id,
+                parent: group,
+                index,
+                kind: NodeKind::Ellipse {
+                    size: Size::new(30.0, 30.0),
+                    arc: ondin_core::EllipseArc::default(),
+                },
+                transform: Some(Affine::translate((15.0 * k as f64, 50.0))),
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: solid(200 + 20 * k as u8),
+            });
+        }
+        assert_preview_matches_commit(&f.doc, &Transaction(ops), what);
+    }
+}
+
+/// A warp's preview of a group led by a mask draws: the mask's stand-in is a mask
+/// ghost, and it clips the run above it as the stand-in will once it is real.
+///
+/// flip: `absorb` refusing `SetMask` on a ghost → fails "not representable";
+/// the walk drawing a mask ghost as artwork → fails at the shape mask's stream;
+/// `warp::preview` putting the stand-in under its hidden leaf → fails at "masked".
+#[test]
+fn a_warp_preview_keeps_a_mask_masking() {
+    use ondin_core::warp;
+    for mode in [ondin_core::MaskMode::Shape, ondin_core::MaskMode::Alpha] {
+        let mut f = fixture();
+        let group = f.ids.mint();
+        let mut ops = vec![Operation::CreateNode {
+            id: group,
+            parent: f.artboard,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::translate((10.0, 10.0))),
+            name: None,
+        }];
+        let mut leaves = Vec::new();
+        for i in 0..3u8 {
+            let id = f.ids.mint();
+            leaves.push(id);
+            ops.push(Operation::CreateNode {
+                id,
+                parent: group,
+                index: usize::from(i),
+                kind: NodeKind::Rect {
+                    size: Size::new(60.0, 40.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((25.0 * f64::from(i), 0.0))),
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(60 * i, 90, 200, 255)).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        ops.push(Operation::SetMask {
+            id: leaves[0],
+            mask: true,
+        });
+        ops.push(Operation::SetMaskMode {
+            id: leaves[0],
+            mode,
+        });
+        f.doc.apply(&Transaction(ops)).unwrap();
+        let res = Resolved::rebuild(&f.doc);
+        let w = warp::Warp {
+            bounds: warp::bounds(&f.doc, &res, &[group]).expect("a box"),
+            envelope: warp::Envelope::Preset {
+                preset: warp::Preset::Bulge,
+                bend: 0.3,
+                vertical: false,
+            },
+        };
+        let tx = warp::preview(&f.doc, &res, &mut f.ids, &[group], &w).expect("a preview");
+        assert_preview_matches_commit(&f.doc, &tx, &format!("{mode:?}"));
+        let ov = RenderOverrides::from_transaction(&f.doc, &res, &tx).expect("representable");
+        let calls = record(&f.doc, &res, &ov);
+        // The artboard's clip is one push with a path; a shape mask's run another.
+        let masked = match mode {
+            ondin_core::MaskMode::Shape => {
+                calls
+                    .iter()
+                    .filter(|c| matches!(c, Call::Push(Some(_), _)))
+                    .count()
+                    >= 2
+            }
+            _ => calls.contains(&Call::MaskPush),
+        };
+        assert!(masked, "{mode:?}: the leaves above the mask are masked");
+    }
+}
+
 /// A whole subtree being dropped in previews as the artwork, not as a stand-in.
 ///
 /// This is what an Alt-drag carries, and the reason it is worth a differential

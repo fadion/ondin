@@ -95,8 +95,9 @@ Mask card, and how a failed boolean draws. Part of §9.4.
   override, then the **used** kind).
 - `RenderOverrides::reevaluate_booleans` seeds from: a moved node's parent chain; a ghost's parent
   itself (an Alt-drag copy inside a boolean joins it); and a parent the preview reorders.
-  `operand_children` inserts ghosts **at their `Ghost::index`** (the fold is order-sensitive beyond the
-  first operand), starting from `RenderOverrides::children_of` where the preview reorders.
+  `operand_children` reads the walk's own order, `RenderOverrides::merged_children`: ghosts **at their
+  `Ghost::index`** as the commit inserts them (the fold is order-sensitive beyond the first operand),
+  starting from `RenderOverrides::children_of` where the preview reorders.
 - `render::GhostNode::path` is evaluated once when the ghost subtree is built (`build_ghost`,
   children-first), never in the scene walk.
 - **Everything that measures a boolean measures its result**: `query::local_box` and

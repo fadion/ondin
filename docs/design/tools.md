@@ -665,9 +665,11 @@ centre.
   status says *Warped*. An envelope left square commits nothing.
 - **The preview** (`warp::preview`) cannot be the commit, since a render preview refuses
   `DeleteNode`: a path takes its warped outline, and every other shown leaf is hidden
-  (`SetVisible false`) under a stand-in path directly beneath it, wearing its look
+  (`SetVisible false`) under a stand-in path directly above it, wearing its look
   (`build::carried_look`) and, for a mask, its mask flag and mode (`build::carried_mask`); a hidden
-  leaf gets none. Stand-ins are minted from a copy of the id counter, so the preview spends
+  leaf gets none. Above, not beneath: a hidden mask ends the run under it, so a stand-in mask below
+  it would mask nothing. The render preview takes a stand-in's mask flag and mode onto its ghost,
+  which masks the run above it as the node will. Stand-ins are minted from a copy of the id counter, so the preview spends
   no ids. It is rebuilt when the envelope changes and put back when another preview cleared it.
 
 **The session** (`WarpSession` on `OndinApp::warp`).

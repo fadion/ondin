@@ -899,9 +899,15 @@ impl AdjustLut {
                 &c[2][rgb[2] as usize],
             );
             v = [0, 1, 2].map(|out| {
-                let sum = cr[out] + cg[out] + cb[out] + off[out];
+                // Summed wide: a duotone colour far outside 0..1 (any finite one
+                // loads) puts terms in the matrix whose `i32` sum would wrap.
+                let sum = [cr[out], cg[out], cb[out], off[out]]
+                    .iter()
+                    .map(|t| i64::from(*t))
+                    .sum::<i64>();
                 // Clamped to `0..=1` before rounding, as `apply` does.
-                ((sum.clamp(0, FIXED_ONE) * 255 + FIXED_ONE / 2) >> 16) as u8
+                let sum = sum.clamp(0, i64::from(FIXED_ONE)) as i32;
+                ((sum * 255 + FIXED_ONE / 2) >> 16) as u8
             });
         }
         if let Some(lut) = &self.curve {
@@ -1795,6 +1801,23 @@ mod tests {
                 }
             }
             assert!(worst <= 1, "worst channel difference was {worst}");
+        }
+
+        /// A duotone colour far outside 0..1, which any finite value in a file
+        /// can be, clamps in the table as the function and SVG clamp it, rather
+        /// than wrapping (or panicking with overflow checks on).
+        /// flip: `AdjustLut::apply` summing in `i32` → fails (overflow panic).
+        #[test]
+        fn an_extreme_duotone_clamps_and_never_wraps() {
+            let adj = ImageAdjust {
+                duotone: 1.0,
+                duotone_light: ondin_core::peniko::Color::new([40_000.0, 0.0, 0.0, 1.0]),
+                ..ImageAdjust::NEUTRAL
+            };
+            let p = adj.pipeline().expect("finite, so drawn");
+            let want = p.apply([1.0; 3]).map(|c| (c * 255.0 + 0.5) as u8);
+            assert_eq!(AdjustLut::build(&p).apply([255; 3]), want);
+            assert_eq!(want[0], 255, "red clamps high");
         }
 
         /// A reduction maps back onto the source's box corner to corner, at sizes

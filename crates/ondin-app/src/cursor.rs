@@ -347,6 +347,27 @@ impl Recipe {
             false => 1.0,
         }
     }
+
+    /// The drawing moved onto the texel grid at `unit` texels a unit, in texels.
+    /// One aimed from its middle has its one-unit lines centred there: where a
+    /// unit holds an odd number of whole texels, that centre goes on a texel's
+    /// middle, or a line a texel wide smears into two grey ones, and an even
+    /// number keeps it on a texel edge. One aimed from a tip has the tip on a
+    /// texel corner, so the arrow's upright edge is one crisp column.
+    fn nudge(&self, unit: f32) -> (f32, f32) {
+        match self.hot == Hot::MIDDLE {
+            true => {
+                let centre = 16.0 * unit;
+                let odd = (unit.floor() as i32) % 2 == 1;
+                let d = centre.floor() + if odd { 0.5 } else { 0.0 } - centre;
+                (d, d)
+            }
+            false => {
+                let (x, y) = (self.hot.0 * unit, self.hot.1 * unit);
+                (x.round() - x, y.round() - y)
+            }
+        }
+    }
 }
 
 /// One drawing placed in the box: turned about the box's middle, then shifted.
@@ -631,7 +652,9 @@ impl Glyph {
         }
     }
 
-    /// The drawing, flattened once and kept.
+    /// The drawing, flattened once and kept. [`Self::ALL`] is in declaration
+    /// order, so a drawing missing from it panics here rather than drawing
+    /// another's.
     fn shapes(self) -> &'static [Shape] {
         static ALL: std::sync::OnceLock<Vec<Vec<Shape>>> = std::sync::OnceLock::new();
         let all = ALL.get_or_init(|| {
@@ -640,8 +663,7 @@ impl Glyph {
                 .map(|g| g.parts().into_iter().map(Part::flatten).collect())
                 .collect()
         });
-        let i = Self::ALL.iter().position(|g| *g == self).unwrap_or(0);
-        &all[i]
+        &all[self as usize]
     }
 }
 
@@ -1250,25 +1272,7 @@ fn draw(
     // Samples per texel per axis: large bitmaps have texels small next to the
     // drawing's features, so fewer suffice.
     let ss = if unit <= 2.0 { 4 } else { 2 };
-
-    // The drawing moved onto the texel grid, in texels. One aimed from its middle
-    // has its one-unit lines centred there: where a unit holds an odd number of
-    // whole texels, that centre goes on a texel's middle, or a line a texel wide
-    // smears into two grey ones, and an even number keeps it on a texel edge. One
-    // aimed from a tip has the tip on a texel corner, so the arrow's upright edge
-    // is one crisp column.
-    let nudge = match recipe.hot == Hot::MIDDLE {
-        true => {
-            let centre = 16.0 * unit;
-            let odd = (unit.floor() as i32) % 2 == 1;
-            let d = centre.floor() + if odd { 0.5 } else { 0.0 } - centre;
-            (d, d)
-        }
-        false => {
-            let (x, y) = (recipe.hot.0 * unit, recipe.hot.1 * unit);
-            (x.round() - x, y.round() - y)
-        }
-    };
+    let nudge = recipe.nudge(unit);
 
     // The loaded badge: a chip in the set's core, the count in its ink.
     let chip = match which {
@@ -1776,7 +1780,9 @@ mod tests {
         }
     }
 
-    /// A screen direction picks the 15° step facing it, y down.
+    /// A screen direction picks the 15° step facing it, y down, the nearer step
+    /// winning on either side of zero.
+    /// flip: `Turn::toward` truncating → fails at "13.75°".
     #[test]
     fn a_screen_direction_picks_the_step_facing_it() {
         assert_eq!(Turn::toward(egui::vec2(1.0, 0.0)), Turn(0));
@@ -1785,6 +1791,10 @@ mod tests {
         assert_eq!(Turn::toward(egui::vec2(0.0, -1.0)), Turn(18));
         assert_eq!(Turn::toward(egui::vec2(1.0, -1.0)), Turn(21));
         assert_eq!(Turn::toward(egui::Vec2::ZERO), Turn(0));
+        assert_eq!(Turn::toward(egui::Vec2::angled(0.24)), Turn(1), "13.75°");
+        assert_eq!(Turn::toward(egui::Vec2::angled(-0.24)), Turn(23), "−13.75°");
+        assert_eq!(Turn::toward(egui::Vec2::angled(0.02)), Turn(0), "1.1°");
+        assert_eq!(Turn::toward(egui::Vec2::angled(-0.02)), Turn(0), "−1.1°");
         assert_eq!(Turn(15).axis(), Turn(3));
     }
 
@@ -1831,6 +1841,236 @@ mod tests {
         assert!(edge < 128, "the chip is clipped at the box's edge");
         assert_eq!(Remaining::of(0), None);
         assert_eq!(Remaining(100).label(), "99+");
+    }
+
+    /// The count is clamped at 100: every larger drop reads `99+` and shares one
+    /// bitmap, which bounds the cache, while 99 still reads exactly.
+    /// flip: `Remaining::of` without its clamp → fails at "300 files".
+    #[test]
+    fn the_count_stops_at_ninety_nine_plus() {
+        assert_eq!(
+            Remaining::of(300).map(Remaining::label).as_deref(),
+            Some("99+"),
+            "300 files"
+        );
+        assert_eq!(Remaining::of(4000), Remaining::of(100), "one bitmap");
+        assert_ne!(Remaining::of(99), Remaining::of(100));
+        assert_eq!(
+            Remaining::of(99).map(Remaining::label).as_deref(),
+            Some("99")
+        );
+    }
+
+    /// A context drawing at `ppp` pixels per point, with the theme's fonts.
+    fn scaled(ppp: f32) -> egui::Context {
+        let ctx = context();
+        ctx.set_pixels_per_point(ppp);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        assert_eq!(ctx.pixels_per_point(), ppp, "fixture: the display scale");
+        ctx
+    }
+
+    /// The pointing drawings aim from their tip at every display scale: the
+    /// hotspot texel is ink, and the ink's top-left extreme (its mitred rim) is
+    /// within a couple of texels of it. Each also takes the pointing unit.
+    /// flip: `Bitmap::recipe` aiming the pen from `Hot::MIDDLE` → fails at the
+    /// pen's unit, and without that assertion at its tip (22 texels past at 1x).
+    #[test]
+    fn the_pointing_cursors_aim_from_their_tip() {
+        let ctx = context();
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for which in [
+                Bitmap::Pen(None),
+                Bitmap::Pen(Some(Badge::Close)),
+                Bitmap::Pencil(None),
+                Bitmap::Eyedropper,
+                Bitmap::Arrow(None),
+                Bitmap::Arrow(Some(Badge::Duplicate)),
+                Bitmap::Node(None),
+            ] {
+                assert_eq!(which.recipe().unit_pt(), POINTING_UNIT_PT, "{which:?}");
+                let img = draw(&ctx, which, scale, false).expect("drawn");
+                let (hx, hy) = (usize::from(img.hotspot[0]), usize::from(img.hotspot[1]));
+                assert!(
+                    texel(&img, hx, hy).1 > 128,
+                    "{which:?} at {scale}: on the ink"
+                );
+                let n = usize::from(img.size[0]);
+                let reach = (0..n)
+                    .flat_map(|y| (0..n).map(move |x| (x, y)))
+                    .filter(|&(x, y)| texel(&img, x, y).1 > 128)
+                    .map(|(x, y)| x + y)
+                    .min()
+                    .expect("ink");
+                let past = (hx + hy).saturating_sub(reach) as f32;
+                assert!(
+                    reach <= hx + hy && past <= 3.0 * scale + 1.0,
+                    "{which:?} at {scale}: the tip is {past} texels past the hotspot"
+                );
+            }
+        }
+    }
+
+    /// The drawings aimed from their middle centre their ink on the hotspot,
+    /// at every heading and display scale, within a texel.
+    #[test]
+    fn the_middle_cursors_centre_on_their_hotspot() {
+        let ctx = context();
+        for scale in [1.0, 1.5, 2.0] {
+            for t in [0, 2, 3, 6, 9] {
+                for which in [Bitmap::Resize(Turn(t)), Bitmap::Skew(Turn(t))] {
+                    let img = draw(&ctx, which, scale, false).expect("drawn");
+                    let c = centroid(&img);
+                    assert!(c.length() <= 1.0, "{which:?} at {scale}: centroid {c:?}");
+                }
+            }
+        }
+    }
+
+    /// Every two cursors draw differently, so no state wears another's drawing,
+    /// and `Glyph::ALL` is in declaration order, which `Glyph::shapes` indexes by.
+    /// flip: `Bitmap::recipe` drawing `Panning` with the open hand → fails at
+    /// "Pan and Panning".
+    #[test]
+    fn every_cursor_is_its_own_drawing() {
+        let ctx = context();
+        let mut seen: std::collections::HashMap<Vec<u8>, Bitmap> = Default::default();
+        for which in every_cursor() {
+            let img = draw(&ctx, which, 1.0, false).expect("drawn");
+            if let Some(was) = seen.insert(img.rgba.to_vec(), which) {
+                panic!("{was:?} and {which:?} draw alike");
+            }
+        }
+        for (i, g) in Glyph::ALL.iter().enumerate() {
+            assert_eq!(*g as usize, i, "{g:?} out of place in `Glyph::ALL`");
+        }
+    }
+
+    /// The loaded badge's count is laid out in texels at every display scale,
+    /// macOS's one texel a point at 2x included: two digits are as wide as two
+    /// of one, the count lies inside its chip, and it is the set's ink over the
+    /// chip's fill, dark on light in the light set.
+    /// flip: `digits` placing glyphs in points, not texels → fails at "88" at 1.5.
+    #[test]
+    fn the_count_is_laid_out_in_texels_at_every_scale() {
+        for (ppp, scale) in [(1.25, 1.25), (1.5, 1.5), (2.0, 2.0), (2.0, 1.0)] {
+            let ctx = scaled(ppp);
+            let width = |s: &str| digits(&ctx, scale, s).expect("drawn").0;
+            assert!(
+                width("88") >= 2 * width("8") - 1,
+                "\"88\" at {ppp} and {scale}: {} against {}",
+                width("88"),
+                width("8")
+            );
+            for count in [1, 8, 88, 100] {
+                let which = Bitmap::Loaded(Remaining(count));
+                let label = Remaining(count).label();
+                let unit = scale * which.recipe().unit_pt();
+                let nudge = which.recipe().nudge(unit);
+                let chip = Chip::new(&ctx, unit, nudge.0, &label).expect("a chip");
+                for light in [false, true] {
+                    let img = draw(&ctx, which, scale, light).expect("drawn");
+                    let n = usize::from(img.size[0]);
+                    let mut inked = 0;
+                    for (x, y) in (0..n).flat_map(|y| (0..n).map(move |x| (x, y))) {
+                        if chip.digit(x, y) < 0.75 {
+                            continue;
+                        }
+                        let p = [
+                            (x as f32 + 0.5 - nudge.0) / unit,
+                            (y as f32 + 0.5 - nudge.1) / unit,
+                        ];
+                        assert!(
+                            chip.covers(p, 0.0),
+                            "{label} at {ppp}: ({x}, {y}) off the chip"
+                        );
+                        let (v, a) = texel(&img, x, y);
+                        assert!(a > 200, "{label} at {ppp}: opaque");
+                        match light {
+                            true => assert!(v < 80, "{label} at {ppp}: dark on light, {v}"),
+                            false => assert!(v > 175, "{label} at {ppp}: light on dark, {v}"),
+                        }
+                        inked += 1;
+                    }
+                    assert!(inked > 0, "{label} at {ppp}: the count is drawn");
+                }
+            }
+        }
+    }
+
+    /// The crosshair and the loaded cursor aim at the same texel, which holds no
+    /// ink, only the shadow's haze, so the target shows through it, at every
+    /// display scale.
+    #[test]
+    fn the_crosshair_aims_through_a_clear_middle() {
+        let ctx = context();
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let cross = draw(&ctx, Bitmap::Crosshair, scale, false).expect("drawn");
+            let loaded = draw(&ctx, Bitmap::Loaded(Remaining(7)), scale, false).expect("drawn");
+            assert_eq!(
+                cross.hotspot, loaded.hotspot,
+                "at {scale}: the badge moves the aim"
+            );
+            for img in [&cross, &loaded] {
+                let (x, y) = (usize::from(img.hotspot[0]), usize::from(img.hotspot[1]));
+                let a = texel(img, x, y).1;
+                assert!(
+                    f32::from(a) <= SHADOW_ALPHA * 255.0,
+                    "at {scale}: the aim holds ink, {a}"
+                );
+            }
+        }
+    }
+
+    /// No heading clips a turned cursor at the bitmap's edge, and the rotate
+    /// arc keeps its weight at every step.
+    #[test]
+    fn no_heading_clips_a_turned_cursor() {
+        let ctx = context();
+        for scale in [1.0, 1.5, 2.0] {
+            let mut masses = Vec::new();
+            for t in 0..Turn::STEPS {
+                for which in [
+                    Bitmap::Rotate(Turn(t)),
+                    Bitmap::Resize(Turn(t)),
+                    Bitmap::Skew(Turn(t)),
+                ] {
+                    let img = draw(&ctx, which, scale, false).expect("drawn");
+                    let n = usize::from(img.size[0]);
+                    let edge = (0..n)
+                        .flat_map(|i| [(i, 0), (i, n - 1), (0, i), (n - 1, i)])
+                        .map(|(x, y)| texel(&img, x, y).1)
+                        .max()
+                        .unwrap_or(0);
+                    assert!(edge < 64, "{which:?} at {scale}: {edge} on the edge");
+                    if let Bitmap::Rotate(_) = which {
+                        masses.push(
+                            img.rgba
+                                .iter()
+                                .skip(3)
+                                .step_by(4)
+                                .map(|&a| f32::from(a))
+                                .sum::<f32>(),
+                        );
+                    }
+                }
+            }
+            let (lo, hi) = masses
+                .iter()
+                .fold((f32::MAX, 0.0f32), |(l, h), &m| (l.min(m), h.max(m)));
+            assert!(
+                hi / lo < 1.04,
+                "at {scale}: the arc's ink varies {lo}..{hi}"
+            );
+        }
+    }
+
+    /// A label that lays out nothing is refused before the extents' fold, whose
+    /// seeds would overflow the width.
+    /// flip: `digits` without its empty guard → fails here (an overflow panic).
+    #[test]
+    fn an_empty_label_draws_no_count() {
+        assert!(digits(&context(), 2.0, "").is_none());
     }
 
     /// Every drawing parses into ink; a relative command, which the parser does

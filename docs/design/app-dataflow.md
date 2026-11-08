@@ -97,7 +97,8 @@ counts a focused control as still being edited and would never see the drag end.
 does not take the selection back from a stop the pointer chose.
 
 **The value row** (`hex_row`): the pick button, the format chooser, the colour in that format, the
-opacity.
+opacity. On a gradient the opacity is the selected stop's alpha, the only door to it (the face has
+no alpha strip); the ramp's own opacity is the inspector's fill row.
 
 - **Formats** (`picker::Format`): Hex, RGB, HSL, HSB, one choice for the whole app
   (`Prefs::colour_format`, a string key; an unknown key reads as Hex). The chooser

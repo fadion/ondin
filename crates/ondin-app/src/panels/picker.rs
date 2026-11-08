@@ -1185,7 +1185,6 @@ impl OndinApp {
         width: f32,
     ) {
         let stops = paint::stops_of(brush);
-        let single = stops.len() == 1;
         let format = Format::from_key(&self.prefs.colour_format);
         // Over layers that disagree there is no one channel to show, so a field
         // format falls back to the text field, reading *Mixed*.
@@ -1230,15 +1229,13 @@ impl OndinApp {
             if !slot.takes_alpha() {
                 return;
             }
-            // A gradient's stops each have their own alpha, so there is no one
-            // alpha slider for them; this field scales the whole ramp, which is
-            // the same number the fill row shows.
+            // The selected stop's own alpha, as the rest of the row is its colour:
+            // a stop made transparent is made visible here. The ramp's opacity is
+            // the fill row's number in the inspector.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut pct = if single {
-                    current.components[3] * 100.0
-                } else {
-                    paint::alpha_of(brush) * 100.0
-                };
+                // Clamped on read too: the range would otherwise clamp an
+                // out-of-range alpha from a file into a write on a bare click.
+                let mut pct = current.components[3].clamp(0.0, 1.0) * 100.0;
                 // Held to its budget, which `channel_fields` leaves it: the theme's
                 // minimum width would push it over the last channel.
                 ui.spacing_mut().interact_size.x = PCT_W;
@@ -1255,22 +1252,13 @@ impl OndinApp {
                         .max_decimals(0)
                         .range(0.0..=100.0),
                 );
-                // 🚨 **This out-clamp stays.** `alpha_of` returns
-                // `GradientBrush::opacity` for a gradient — a `#[serde(default)]`
-                // field that any `.ondin` file can set — so the value is not 0..1 by
-                // construction. It is guarded at the op boundary
-                // (`build::brush_is_finite`'s `valid_opacity`), in `alpha_of`, and
-                // here, which would catch a producer nobody has thought of.
-                let pct = pct.clamp(0.0, 100.0);
+                // 🚨 **This out-clamp stays.** A stop's alpha is clamped on import
+                // and on read, but nothing clamps it on load, so the value is not
+                // 0..1 by construction.
                 let a = (pct / 100.0).clamp(0.0, 1.0);
-                let next = if single {
-                    let mut s = stops.clone();
-                    s[index].1 = current.with_alpha(a);
-                    paint::with_stops(brush, s)
-                } else {
-                    paint::with_alpha(brush, a)
-                };
-                self.valve_slot(&r, node, slot, next);
+                let mut s = stops.clone();
+                s[index].1 = current.with_alpha(a);
+                self.valve_slot(&r, node, slot, paint::with_stops(brush, s));
             });
         });
     }
@@ -2787,6 +2775,64 @@ mod mixed_hex_tests {
         at.sort_by(|a, b| a.x.total_cmp(&b.x));
         *at.get(nth)
             .unwrap_or_else(|| panic!("the row draws {text:?} at least {} times", nth + 1))
+    }
+
+    /// On a gradient the opacity field is the selected stop's alpha: a stop made
+    /// transparent reads 0% and is made visible there, the ramp's opacity untouched.
+    /// flip: `hex_row`'s field reading and writing `paint::alpha_of`/`with_alpha`
+    /// → fails at "the transparent stop made opaque".
+    #[test]
+    fn a_gradients_opacity_field_is_the_selected_stops_alpha() {
+        use ondin_core::peniko::Gradient;
+        let ctx = egui::Context::default();
+        let (mut app, _a, b) = two_rects(&ctx, (1.0, 1.0));
+        let blue = Color::from_rgba8(0, 0, 255, 255);
+        let ramp = Gradient::new_linear((0.0, 0.0), (20.0, 0.0))
+            .with_stops([(0.0, blue), (1.0, blue.with_alpha(0.0))].as_slice());
+        app.session
+            .try_commit(Transaction(vec![Operation::SetFills {
+                id: b,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Gradient(ramp.into()).into(),
+                    visible: true,
+                }]),
+            }]))
+            .expect("a ramp");
+        app.session.selection.set(vec![b]);
+        let mut picker = Picker::new(b, PaintSlot::Fill(0), egui::pos2(400.0, 300.0));
+        picker.stop = 1;
+        app.picker = Some(picker);
+
+        // The number is its own galley, the `%` another; the lowest `0` drawn, as
+        // the angle field above reads `0` too.
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        let at = texts(&ctx, &mut app)
+            .into_iter()
+            .filter(|(t, _)| t == "0")
+            .map(|(_, p)| p)
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+            .expect("the opacity field reads the stop's 0");
+        type_at(&ctx, &mut app, at, "100");
+        let Some(Brush::Gradient(g)) = app.session.doc.get(b).expect("b").paint().fills[0]
+            .brush
+            .literal()
+        else {
+            panic!("still a gradient")
+        };
+        let alphas: Vec<f32> = g
+            .gradient
+            .stops
+            .iter()
+            .map(|s| {
+                s.color
+                    .to_alpha_color::<ondin_core::peniko::color::Srgb>()
+                    .components[3]
+            })
+            .collect();
+        assert_eq!(alphas, vec![1.0, 1.0], "the transparent stop made opaque");
+        assert_eq!(g.opacity, 1.0, "the ramp's own opacity untouched");
     }
 
     /// Any CSS colour typed into the hex lands, its alpha with it; without one the

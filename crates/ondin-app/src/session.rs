@@ -1473,7 +1473,7 @@ impl EditorSession {
         if tx.0.is_empty() {
             return Ok(());
         }
-        let watch = crate::again::Watch::of(&note, &tx, &self.doc, &self.resolved);
+        let watch = crate::again::Watch::of(&note, &self.doc, &self.resolved);
         if self.compare.is_some() {
             self.fail(crate::compare::READ_ONLY);
             return Err(CommitError::ReadOnly);

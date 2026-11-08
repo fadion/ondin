@@ -544,9 +544,8 @@ delta. Each application is one undo step, *Transform again*; the status says *Ro
 - **Learnt at the commit, not at the doors.** `Session::commit_inner` starts an `again::Watch` when
   the step's name is a transform's (`Move`, `Nudge`, `Rotate`, `Rotate 90° …`, `Scale`, `Skew`):
   the first subject's world transform, and for a scale its size along its own axes (`again::own_size`:
-  the local box times its transform's scale), before the commit, compared after. A *Move* whose
-  transaction only restacks (a `Reorder` or `Reparent` and no `SetTransform` on the subject, such as
-  the layers panel's drop, which a layout turns into a shift) teaches nothing. So the canvas drags, the arrow keys, the Transform card's fields and quarter turns, the
+  the local box times its transform's scale), before the commit, compared after. The layers panel's drop is named *Reorder* or *Move layer*,
+  not *Move*, so the shift a layout gives a dropped layer teaches nothing. So the canvas drags, the arrow keys, the Transform card's fields and quarter turns, the
   Scale row and the Scale tool's handle drags (named *Scale*, not *Resize*) teach it without each
   door saying so. A step named otherwise teaches nothing: `Resize` (a handle drag under any other
   tool, W/H, `Ctrl`+arrows) and *Transform again* itself, so repeating leaves the step what it was.

@@ -139,29 +139,10 @@ fn own_size(doc: &Document, res: &Resolved, id: NodeId) -> Option<Vec2> {
 }
 
 impl Watch {
-    /// Start watching `tx`, a commit noted `note`, when its name is a
-    /// transform's. A *Move* that only changes a layer's slot (a layers-panel
-    /// reorder, which a layout turns into a shift) teaches nothing.
-    pub(crate) fn of(
-        note: &ondin_core::StepNote,
-        tx: &ondin_core::Transaction,
-        doc: &Document,
-        res: &Resolved,
-    ) -> Option<Self> {
+    /// Start watching a commit noted `note` when its name is a transform's.
+    pub(crate) fn of(note: &ondin_core::StepNote, doc: &Document, res: &Resolved) -> Option<Self> {
         let kind = kind_of(&note.label)?;
         let id = *note.subjects.first()?;
-        let restacked = tx.0.iter().any(|op| {
-            matches!(
-                op,
-                ondin_core::Operation::Reorder { .. } | ondin_core::Operation::Reparent { .. }
-            )
-        });
-        let placed = tx.0.iter().any(|op| {
-            matches!(op, ondin_core::Operation::SetTransform { id: t, .. } if note.subjects.contains(t))
-        });
-        if kind == Kind::Move && restacked && !placed {
-            return None;
-        }
         Some(Self {
             kind,
             id,
@@ -416,58 +397,6 @@ mod tests {
             "leant again: {}",
             lean(&app)
         );
-    }
-
-    /// A reorder committed as *Move*, which a layout turns into a shift, teaches
-    /// nothing: no `SetTransform` placed the layer.
-    /// flip: `Watch::of` without its restack check → fails at "kept".
-    #[test]
-    fn a_reorder_named_move_teaches_nothing() {
-        use ondin_core::kurbo::Size;
-        use ondin_core::{NodeKind, Operation};
-        let ctx = eframe::egui::Context::default();
-        let (mut app, ..) = crate::repeat::tests::tick_app(&ctx);
-        let page = app.session.page;
-        let (frame, dot) = (app.session.ids.mint(), app.session.ids.mint());
-        let make = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
-            id,
-            parent,
-            index: 0,
-            kind,
-            transform: Some(Affine::translate(at)),
-            name: None,
-        };
-        let artboard = NodeKind::Artboard {
-            size: Size::new(200.0, 200.0),
-            corner_radii: Default::default(),
-            corner_smoothing: 0.0,
-        };
-        let rect = NodeKind::Rect {
-            size: Size::new(10.0, 10.0),
-            corner_radii: Default::default(),
-            corner_smoothing: 0.0,
-        };
-        assert!(app.session.commit(Transaction(vec![
-            make(frame, page, artboard, (500.0, 500.0)),
-            make(dot, frame, rect, (10.0, 10.0)),
-        ])));
-        let learnt = Again::Rotate(15f64.to_radians());
-        app.session.last_transform = Some(learnt);
-        let was = app.session.resolved.world_bounds(dot).unwrap();
-        let tx = Transaction(vec![Operation::Reparent {
-            id: dot,
-            new_parent: page,
-            index: 0,
-        }]);
-        app.session.name_step("Move", "");
-        assert!(app.session.commit(tx));
-        let now = app.session.resolved.world_bounds(dot).unwrap();
-        assert_ne!(
-            was.origin(),
-            now.origin(),
-            "the fixture: the slot change moved it"
-        );
-        assert_eq!(app.session.last_transform, Some(learnt), "kept");
     }
 
     /// With nothing learnt the verb only says what it needs.

@@ -2713,7 +2713,13 @@ impl OndinApp {
         match plan_layer_move(&self.session.doc, &self.session.resolved, &moving, target) {
             Ok(plan) if plan.ops.is_empty() => {}
             Ok(plan) => {
-                self.session.name_step("Move", icon::ARROWS_OUT_CARDINAL);
+                // Not *Move*: a drop changes a slot, and a layout's shift for it
+                // is not a move *Transform again* should learn.
+                let step = match plan.reparented {
+                    true => "Move layer",
+                    false => "Reorder",
+                };
+                self.session.name_step(step, icon::ARROWS_OUT_CARDINAL);
                 if self.session.commit(Transaction(plan.ops)) {
                     self.session.info(match (plan.reparented, n) {
                         (true, 1) => "Moved layer".to_string(),
@@ -4776,6 +4782,80 @@ mod drop_indent_tests {
             "the release says why"
         );
         assert_eq!(app.session.doc.get(g).unwrap().parent(), Some(root));
+    }
+
+    /// A drop into a row layout, which the layout turns into a shift, does not
+    /// teach *Transform again* a move: the panel's step is not named *Move*.
+    /// flip: `finish_layer_drag` naming its step *Move* → fails at "kept".
+    #[test]
+    fn a_drop_into_a_layout_teaches_transform_again_nothing() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xD7);
+        let root = ids.mint();
+        let (row, dot) = (ids.mint(), ids.mint());
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: row,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 100.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: dot,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(ondin_core::kurbo::Affine::translate((500.0, 500.0))),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: row,
+                display: Some(ondin_core::container::Display::Flex(
+                    ondin_core::container::Flex {
+                        padding: [20.0; 4],
+                        ..Default::default()
+                    },
+                )),
+            },
+        ]))
+        .expect("a row and a free layer");
+        app.session.adopt_document(doc, None);
+        let learnt = crate::again::Again::Rotate(15f64.to_radians());
+        app.session.last_transform = Some(learnt);
+        let was = app.session.resolved.world_bounds(dot).unwrap();
+        app.layer_drag = Some(LayerDrag {
+            ids: vec![dot],
+            target: Some(DropTarget {
+                parent: row,
+                index: 0,
+            }),
+            grab: (0.0, 1),
+            level: 1,
+            lit: None,
+            spring: None,
+            refused: None,
+        });
+        app.finish_layer_drag();
+        assert_eq!(app.session.doc.get(dot).unwrap().parent(), Some(row));
+        let now = app.session.resolved.world_bounds(dot).unwrap();
+        assert_ne!(
+            was.origin(),
+            now.origin(),
+            "the fixture: the layout moved it"
+        );
+        assert_eq!(app.session.last_transform, Some(learnt), "kept");
     }
 
     /// Five passes, as `tree_guide_tests::dashes` takes.

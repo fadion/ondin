@@ -538,7 +538,7 @@ fn effect_def(name: &str, effects: &[Keyed<Effect>], region: Rect) -> String {
             EffectKind::Filters(f) if !f.is_neutral() => {
                 let values = ondin_render::effects::filter_matrix(f)
                     .iter()
-                    .map(|v| fmt(*v as f64))
+                    .map(|v| fmt_unit(*v as f64))
                     .collect::<Vec<_>>()
                     .join(" ");
                 let _ = writeln!(
@@ -663,7 +663,7 @@ fn shadow_graph(out: &mut String, graphic: &str, s: &Shadow, n: usize, inner: bo
         out,
         "      <feFlood flood-color=\"{}\" flood-opacity=\"{}\" result=\"{f}\"/>",
         hex(s.color),
-        fmt(s.color.components[3] as f64),
+        fmt_unit(s.color.components[3] as f64),
     );
     let _ = writeln!(
         out,
@@ -1128,12 +1128,12 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
         let [a, b, c, d, e, f] = brush.transform.as_coeffs();
         format!(
             r#" gradientTransform="matrix({} {} {} {} {} {})""#,
-            fmt(a),
-            fmt(b),
-            fmt(c),
-            fmt(d),
-            fmt(e),
-            fmt(f)
+            fmt_unit(a),
+            fmt_unit(b),
+            fmt_unit(c),
+            fmt_unit(d),
+            fmt_unit(e),
+            fmt_unit(f)
         )
     };
     // Nothing clamps a descending ramp on load; the canvas clamps via
@@ -1147,7 +1147,7 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
             let rgba = c.to_rgba8();
             format!(
                 "      <stop offset=\"{}\" stop-color=\"#{:02x}{:02x}{:02x}\"{}/>\n",
-                fmt(s.offset as f64),
+                fmt_unit(s.offset as f64),
                 rgba.r,
                 rgba.g,
                 rgba.b,
@@ -2486,7 +2486,7 @@ fn name_attr(node: &Node) -> String {
 /// says nothing. Identity is judged on the printed form: a rounded rect's box top
 /// is `-8.88e-16` (see [`fmt`]), a hair from identity yet printing as one.
 fn matrix_attr(name: &str, a: Affine) -> String {
-    let [m0, m1, m2, m3, m4, m5] = a.as_coeffs().map(fmt);
+    let [m0, m1, m2, m3, m4, m5] = a.as_coeffs().map(fmt_unit);
     if [&m0, &m1, &m2, &m3, &m4, &m5] == ["1", "0", "0", "1", "0", "0"] {
         return String::new();
     }
@@ -2646,7 +2646,7 @@ fn alpha_attr(name: &str, alpha: u8) -> String {
     if alpha == 255 {
         String::new()
     } else {
-        format!(r#" {name}="{}""#, fmt(alpha as f64 / 255.0))
+        format!(r#" {name}="{}""#, fmt_unit(alpha as f64 / 255.0))
     }
 }
 
@@ -2699,7 +2699,7 @@ fn opacity_attr(opacity: f32) -> String {
     if opacity >= 1.0 {
         String::new()
     } else {
-        format!(r#" opacity="{}""#, fmt(opacity as f64))
+        format!(r#" opacity="{}""#, fmt_unit(opacity as f64))
     }
 }
 
@@ -2739,9 +2739,31 @@ pub(crate) fn fmt(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 {
         return format!("{}", v as i64);
     }
-    let places = PRECISION.with(|p| p.get()) as usize;
+    fmt_places(v, PRECISION.with(|p| p.get()) as usize)
+}
+
+/// [`fmt`] at [`MAX_PRECISION`](ondin_core::export::MAX_PRECISION) whatever the
+/// spec's precision: for unitless numbers (matrix coefficients, opacities, stop
+/// offsets, colour matrices), where a rounding error scales with what they multiply.
+fn fmt_unit(v: f64) -> String {
+    if !v.is_finite() {
+        return "0".to_string();
+    }
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        return format!("{}", v as i64);
+    }
+    fmt_places(v, ondin_core::export::MAX_PRECISION as usize)
+}
+
+/// `v` at `places` decimals, trailing zeros trimmed only after a decimal point:
+/// at 0 places there is none, and trimming would eat the integer's own zeros.
+fn fmt_places(v: f64, places: usize) -> String {
     let s = format!("{v:.places$}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
+    let s = if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        &s
+    };
     // `-0` is dust (a rounded rect's box top is `-8.88e-16`), never worth writing.
     match s {
         "-0" => "0".to_string(),
@@ -2789,6 +2811,9 @@ fn credits_metadata(out: &mut String, doc: &Document, origins: &[NodeId]) {
     out.push_str("  </metadata>\n");
 }
 
+/// `s` as XML text or attribute content. A char outside XML 1.0's `Char`
+/// production (C0 controls but tab, LF and CR; U+FFFE/U+FFFF) is dropped: one
+/// would make the whole file unparseable, and credit text comes from the network.
 fn escape_xml(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -2798,6 +2823,8 @@ fn escape_xml(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            '\t' | '\n' | '\r' => out.push(ch),
+            '\u{0}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => {}
             _ => out.push(ch),
         }
     }
@@ -2869,6 +2896,46 @@ mod credit_tests {
             ondin_core::ExportScale::Times(1.0),
         );
         assert!(svg_spec(&doc, &res, id, &spec).svg.contains("<credits"));
+    }
+
+    /// A control character in network credit text is dropped, so the file parses;
+    /// tab, LF and CR are legal XML and stay.
+    /// flip: `escape_xml` without its control arm → fails at the parse.
+    #[test]
+    fn control_characters_never_reach_the_file() {
+        assert_eq!(escape_xml("a\u{1}b\u{b}c\u{fffe}"), "abc");
+        assert_eq!(escape_xml("a\tb\nc\r"), "a\tb\nc\r");
+        let xml = format!("<credit>{}</credit>", escape_xml("“Sunset\u{1b}” by Ana"));
+        assert!(roxmltree::Document::parse(&xml).is_ok(), "{xml}");
+    }
+}
+
+#[cfg(test)]
+mod fmt_tests {
+    use super::*;
+
+    /// At no places a number rounds to its whole number with its zeros kept, and
+    /// a fraction under one half is `0`, never empty.
+    /// flip: `fmt_places` trimming without a decimal point → fails at `19.7`.
+    #[test]
+    fn no_places_keeps_whole_numbers_whole() {
+        let _places = PrecisionScope::set(0);
+        assert_eq!(fmt(19.7), "20");
+        assert_eq!(fmt(100.3), "100");
+        assert_eq!(fmt(0.4), "0");
+        assert_eq!(fmt(-0.4), "0");
+        assert_eq!(fmt(9.6), "10");
+        assert_eq!(fmt_unit(0.4), "0.4");
+    }
+
+    /// At two places the trim still stops at the point.
+    #[test]
+    fn two_places_trims_trailing_zeros() {
+        let _places = PrecisionScope::set(2);
+        assert_eq!(fmt(25.333_333), "25.33");
+        assert_eq!(fmt(10.004), "10");
+        assert_eq!(fmt(0.5), "0.5");
+        assert_eq!(fmt_unit(0.222_222), "0.2222");
     }
 }
 

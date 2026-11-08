@@ -158,6 +158,32 @@ fn numbers_round_to_the_specs_places() {
     );
 }
 
+/// At no places, unitless numbers keep four places: the 40% fill and a 30° turn's
+/// matrix, whose translation is no length to round.
+/// flip: `alpha_attr` through `fmt` → fails at "the opacity".
+#[test]
+fn no_places_keeps_whole_numbers_and_unitless_numbers_keep_four() {
+    let (mut doc, _, frame) = icon();
+    let dot = doc.get(frame).unwrap().children()[1];
+    doc.apply(&Transaction(vec![Operation::SetTransform {
+        id: dot,
+        transform: Affine::translate((19.7, 0.0)) * Affine::rotate(30f64.to_radians()),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let spec = ExportSpec {
+        precision: 0,
+        ..svg()
+    };
+    let out = svg_spec(&doc, &res, frame, &spec).svg;
+    assert!(out.contains(r#"fill-opacity="0.4""#), "the opacity: {out}");
+    assert!(
+        out.contains("matrix(0.866 0.5 -0.5 0.866 19.7 0)"),
+        "the turn: {out}"
+    );
+    assert!(!out.contains(r#"="""#), "no empty attribute: {out}");
+}
+
 /// `currentColor` replaces both solids, the rect's 40% kept as `fill-opacity`,
 /// and the export counts the two colours it merged.
 /// flip: `solid_attr` ignoring `Style::current_color` → fails at "no hex colour left".

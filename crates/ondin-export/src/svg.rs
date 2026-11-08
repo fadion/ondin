@@ -244,6 +244,7 @@ fn svg_framed(
         h = fmt(view.height()),
     );
     out.push('\n');
+    credits_metadata(&mut out, doc, origins);
     defs.emit(&mut out);
 
     let mut report = Report::default();
@@ -2734,6 +2735,45 @@ pub(crate) fn fmt(v: f64) -> String {
         "-0" => "0".to_string(),
         s => s.to_string(),
     }
+}
+
+/// The credits of the layers under `origins` (`ondin_core::credit`), as one
+/// `<metadata>` block at the top of the file: one `<credit>` per line the Credits
+/// card would list, naming its layers. Nothing when no layer carries one. At the
+/// top rather than inside each element, since a shape is written as several
+/// elements and a wrapper `<g>` would come back as a group.
+fn credits_metadata(out: &mut String, doc: &Document, origins: &[NodeId]) {
+    let listed = ondin_core::credit::credits_in(doc, origins);
+    if listed.is_empty() {
+        return;
+    }
+    out.push_str("  <metadata>\n");
+    out.push_str("    <credits xmlns=\"https://github.com/fadion/ondin/credits\">\n");
+    for l in &listed {
+        let c = &l.credit;
+        let layers: Vec<&str> = l
+            .layers
+            .iter()
+            .filter_map(|id| doc.get(*id).map(Node::name))
+            .collect();
+        let mut attrs = format!(
+            r#" layers="{}" licence="{}""#,
+            escape_xml(&layers.join(", ")),
+            escape_xml(&c.licence),
+        );
+        for (name, url) in [
+            ("source", &c.source_url),
+            ("author", &c.author_url),
+            ("licence-url", &c.licence_url),
+        ] {
+            if !url.is_empty() {
+                let _ = write!(attrs, r#" {name}="{}""#, escape_xml(url));
+            }
+        }
+        let _ = writeln!(out, "      <credit{attrs}>{}</credit>", escape_xml(&c.text));
+    }
+    out.push_str("    </credits>\n");
+    out.push_str("  </metadata>\n");
 }
 
 fn escape_xml(s: &str) -> String {

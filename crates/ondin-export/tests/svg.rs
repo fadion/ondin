@@ -4743,3 +4743,45 @@ fn outlined_type_on_a_path_needs_no_rail_and_is_not_approximated() {
     }
     assert!(out.svg.contains("<path d="), "{}", out.svg);
 }
+
+/// A credited layer's credit is written once in the SVG's `<metadata>` and as a
+/// comment under the doctype of the HTML page; a file with none writes neither.
+#[test]
+fn credits_are_written_into_svg_metadata_and_the_code_page() {
+    let mut f = common::fixture();
+    let plain = svg_of(&f.doc, &f.res, &[f.artboard]);
+    assert!(!plain.contains("<metadata"), "{plain}");
+    let credit = ondin_core::Credit {
+        kind: ondin_core::CreditKind::Photo,
+        text: "Photo by Ana <Ruiz> on Unsplash".into(),
+        author: "Ana <Ruiz>".into(),
+        author_url: String::new(),
+        provider: "Unsplash".into(),
+        provider_url: String::new(),
+        source_url: "https://unsplash.com/photos/abc".into(),
+        licence: "Unsplash License".into(),
+        licence_url: String::new(),
+        required: true,
+        inserted: "2026-11-08".into(),
+    };
+    f.doc
+        .apply(&Transaction(vec![Operation::SetCredit {
+            id: f.rect,
+            credit: Some(Box::new(credit)),
+        }]))
+        .unwrap();
+    f.res = Resolved::rebuild(&f.doc);
+    let out = svg_of(&f.doc, &f.res, &[f.artboard]);
+    assert_eq!(out.matches("<credit ").count(), 1, "{out}");
+    assert!(
+        out.contains("Photo by Ana &lt;Ruiz&gt; on Unsplash</credit>"),
+        "{out}"
+    );
+    assert!(out.contains(r#"source="https://unsplash.com/photos/abc""#));
+
+    let code = ondin_export::code::Target::Html.export(&f.doc, &f.res, &[f.artboard]);
+    let page = String::from_utf8(code.file("index.html").unwrap().to_vec()).unwrap();
+    let block = "<!doctype html>\n<!--\n  Credits\n  Photo by Ana <Ruiz> on Unsplash \
+                 (Unsplash License) — https://unsplash.com/photos/abc\n-->\n";
+    assert!(page.starts_with(block), "{page}");
+}

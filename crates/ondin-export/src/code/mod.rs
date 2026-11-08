@@ -51,11 +51,67 @@ impl Target {
 
     /// `origins` written as this target, in the order given (later on top).
     pub fn export(self, doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport {
-        match self {
+        let mut out = match self {
             Target::Html => html::html_of(doc, res, origins),
             Target::React => react::react_of(doc, res, origins),
             Target::Vue => vue::vue_of(doc, res, origins),
+        };
+        self.write_credits(&mut out, doc, origins);
+        out
+    }
+
+    /// The credits of the layers exported (`ondin_core::credit`) as a comment
+    /// block at the top of the page's file, one per line, under the doctype in
+    /// HTML. Nothing when no layer carries one.
+    fn write_credits(self, out: &mut CodeExport, doc: &Document, origins: &[NodeId]) {
+        let lines: Vec<String> = ondin_core::credit::credits_in(doc, origins)
+            .iter()
+            .map(|l| {
+                let c = &l.credit;
+                match c.source_url.is_empty() {
+                    true => c.plain(),
+                    false => format!("{} — {}", c.plain(), c.source_url),
+                }
+            })
+            .collect();
+        if lines.is_empty() {
+            return;
         }
+        let (path, block) = match self {
+            Target::React => {
+                let body: String = lines
+                    .iter()
+                    .map(|l| format!(" * {}\n", l.replace("*/", "* /")))
+                    .collect();
+                ("App.tsx", format!("/*\n * Credits\n{body} */\n"))
+            }
+            Target::Html | Target::Vue => {
+                let body: String = lines
+                    .iter()
+                    .map(|l| {
+                        // `--` may not appear in a comment; `---` needs two passes.
+                        let mut l = l.clone();
+                        while l.contains("--") {
+                            l = l.replace("--", "- -");
+                        }
+                        format!("  {l}\n")
+                    })
+                    .collect();
+                let path = match self {
+                    Target::Html => "index.html",
+                    _ => "App.vue",
+                };
+                (path, format!("<!--\n  Credits\n{body}-->\n"))
+            }
+        };
+        let Some(file) = out.files.iter_mut().find(|f| f.path == path) else {
+            return;
+        };
+        let at = match file.bytes.starts_with(b"<!doctype html>\n") {
+            true => "<!doctype html>\n".len(),
+            false => 0,
+        };
+        file.bytes.splice(at..at, block.into_bytes());
     }
 }
 

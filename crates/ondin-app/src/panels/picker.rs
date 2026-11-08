@@ -421,6 +421,12 @@ impl OndinApp {
                 !self.session.selection.contains(node)
                     || self.shared_grids(&self.frame_subjects()).is_none()
             }
+            // A duotone end's row lives on the image card's Adjustments tab, so the
+            // picker goes with the card or the tab.
+            PaintSlot::Duotone(i, _) => {
+                self.edited_image() != Some((node, i))
+                    || self.image_tab != super::ImageCard::Adjustments
+            }
             // A variable's cell belongs to the browser, not to the selection: it
             // goes when the browser, the variable or its mode does.
             PaintSlot::VarCell(var, mode) => {

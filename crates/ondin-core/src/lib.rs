@@ -122,10 +122,10 @@ pub use guide::{
 pub use history::{History, Origin, SavedHistory, SavedStep, StepNote, StepView};
 pub use id::{IdSource, NodeId};
 pub use image::{
-    AdjustPipeline, Adjustment, Brush, Framing, GradientBrush, ImageAdjust, ImageBrush, ImageEntry,
-    ImageFit, ImageFormat, ImageId, ImageOrient, ImageRef, ImageSource, Missing, OrientOp,
-    TONE_STEPS, crop_clamped, crop_panned, crop_reframed, crop_scaled, image_brush,
-    missing_placeholder, transfer, whole_crop,
+    AdjustPipeline, Adjustment, Brush, DUOTONE_DARK, DUOTONE_LIGHT, DuotoneEnd, Framing,
+    GradientBrush, ImageAdjust, ImageBrush, ImageEntry, ImageFit, ImageFormat, ImageId,
+    ImageOrient, ImageRef, ImageSource, Missing, OrientOp, TONE_STEPS, crop_clamped, crop_panned,
+    crop_reframed, crop_scaled, image_brush, missing_placeholder, transfer, whole_crop,
 };
 pub use item::{ItemId, Keyed, keyed_by_position, same_values};
 pub use layout::{

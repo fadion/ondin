@@ -207,7 +207,7 @@ struct CpuPainter<'a> {
     /// Decoded images, keyed by the id a fill refers to.
     images: &'a ImageStore,
     /// `ImageSource`s built this render — see [`CpuPainter::image_source`].
-    image_memo: FxHashMap<(ImageId, [u32; 7]), (ImageSource, Affine)>,
+    image_memo: FxHashMap<(ImageId, [u32; 19]), (ImageSource, Affine)>,
     /// The page. Drawing goes here whenever no effect layer is open.
     root: &'a mut RenderContext,
     /// One frame per open effect layer, innermost last — see
@@ -381,10 +381,7 @@ impl CpuPainter<'_> {
     /// Keyed by the picture and its adjustment (as bits, per `images::AdjustKey`),
     /// since two fills of one photograph at two exposures are two buffers.
     fn image_source(&mut self, r: &ondin_core::ImageRef) -> Option<(ImageSource, Affine)> {
-        let key = (
-            r.id.clone(),
-            ondin_core::Adjustment::ALL.map(|k| k.of(&r.adjust).to_bits()),
-        );
+        let key = (r.id.clone(), r.adjust.key_bits());
         if let Some((source, to_source)) = self.image_memo.get(&key) {
             return Some((source.clone(), *to_source));
         }

@@ -9,6 +9,7 @@
 //! **The id is opaque here**: a content hash core neither computes nor checks
 //! (hashing is a dependency core's rules do not permit, §3).
 
+use peniko::Color;
 use serde::{Deserialize, Serialize};
 
 /// A key into the document's image table. Ordered, because the table is written
@@ -467,14 +468,15 @@ impl Framing {
 /// list an SVG export writes, which the pixel path evaluates identically.
 pub const TONE_STEPS: usize = 33;
 
-/// The seven per-pixel adjustments an image fill carries, each `0.0` at rest and
-/// running `-1.0..=1.0`.
+/// The per-pixel adjustments an image fill carries: eleven amounts, each `0.0` at
+/// rest and running over [`Adjustment::range`], and duotone's two colours.
 ///
-/// **Per fill, not per image** (on [`ImageRef`], not [`ImageEntry`]). **Every field
-/// is a symmetric offset from zero**, so the default is the identity (§5.11).
-/// They are one pipeline ([`ImageAdjust::pipeline`]) shared by the three writers;
-/// nothing else should reimplement what a slider does.
-#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+/// **Per fill, not per image** (on [`ImageRef`], not [`ImageEntry`]). **Every amount
+/// is zero at rest**, so the default is the identity (§5.11); the duotone colours
+/// draw nothing while [`Self::duotone`] is zero. They are one pipeline
+/// ([`ImageAdjust::pipeline`]) shared by the three writers; nothing else should
+/// reimplement what a slider does.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageAdjust {
     /// Stops of exposure: the picture is multiplied by `2^exposure`, so `-1` is
     /// half the light and `+1` is twice it.
@@ -498,10 +500,56 @@ pub struct ImageAdjust {
     /// Lifts (`+`) or deepens (`-`) the dark end, leaving the bright end alone.
     #[serde(default, skip_serializing_if = "is_neutral")]
     pub shadows: f32,
+    /// Turns every colour round the wheel: `±1` is half a turn either way.
+    #[serde(default, skip_serializing_if = "is_neutral")]
+    pub hue: f32,
+    /// Drains the colour, `0..=1`: `1` is grey.
+    #[serde(default, skip_serializing_if = "is_neutral")]
+    pub greyscale: f32,
+    /// Swaps light for dark, `0..=1`: `1` is the negative and `0.5` flat grey.
+    #[serde(default, skip_serializing_if = "is_neutral")]
+    pub invert: f32,
+    /// How far the picture is remapped onto [`Self::duotone_dark`] →
+    /// [`Self::duotone_light`] by its luminance, `0..=1`.
+    #[serde(default, skip_serializing_if = "is_neutral")]
+    pub duotone: f32,
+    /// What black maps to under [`Self::duotone`]. Its alpha is not read.
+    #[serde(default = "duotone_dark", skip_serializing_if = "is_duotone_dark")]
+    pub duotone_dark: Color,
+    /// What white maps to under [`Self::duotone`]. Its alpha is not read.
+    #[serde(default = "duotone_light", skip_serializing_if = "is_duotone_light")]
+    pub duotone_light: Color,
 }
 
 fn is_neutral(v: &f32) -> bool {
     *v == 0.0
+}
+
+/// Duotone's dark end before anyone picks one: a deep indigo.
+pub const DUOTONE_DARK: Color = Color::from_rgba8(0x23, 0x21, 0x5c, 0xff);
+/// Duotone's light end before anyone picks one: a warm apricot.
+pub const DUOTONE_LIGHT: Color = Color::from_rgba8(0xf7, 0xb2, 0x67, 0xff);
+
+fn duotone_dark() -> Color {
+    DUOTONE_DARK
+}
+
+fn duotone_light() -> Color {
+    DUOTONE_LIGHT
+}
+
+fn is_duotone_dark(c: &Color) -> bool {
+    *c == DUOTONE_DARK
+}
+
+fn is_duotone_light(c: &Color) -> bool {
+    *c == DUOTONE_LIGHT
+}
+
+impl Default for ImageAdjust {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
 }
 
 impl ImageAdjust {
@@ -514,38 +562,72 @@ impl ImageAdjust {
         tint: 0.0,
         highlights: 0.0,
         shadows: 0.0,
+        hue: 0.0,
+        greyscale: 0.0,
+        invert: 0.0,
+        duotone: 0.0,
+        duotone_dark: DUOTONE_DARK,
+        duotone_light: DUOTONE_LIGHT,
     };
 
     /// Whether this is the value a missing key means (§5.11). **Compared exactly,
     /// and a non-finite value is not neutral**: a `NaN` must reach
-    /// [`Self::pipeline`], which refuses it.
+    /// [`Self::pipeline`], which refuses it. Picked duotone colours are kept in the
+    /// file while the amount is zero, as a crop is while the mode is not Crop.
     pub fn is_default(&self) -> bool {
         Adjustment::ALL.iter().all(|k| k.of(self) == 0.0)
+            && self.duotone_dark == DUOTONE_DARK
+            && self.duotone_light == DUOTONE_LIGHT
     }
 
-    /// Every slider back to zero.
+    /// Every slider back to zero and duotone back to its own colours.
     pub fn reset(&mut self) {
         *self = Self::NEUTRAL;
     }
 
-    /// The per-pixel function these seven numbers describe, or [`None`] when
-    /// they describe the identity.
+    /// Every number this draws with, as bits, for a cache key: the eleven amounts
+    /// in [`Adjustment::ALL`]'s order, then the two duotone colours.
+    pub fn key_bits(&self) -> [u32; 19] {
+        let mut out = [0u32; 19];
+        for (o, k) in out.iter_mut().zip(Adjustment::ALL) {
+            *o = k.of(self).to_bits();
+        }
+        let colours = self.duotone_dark.components.iter();
+        for (o, c) in out[11..]
+            .iter_mut()
+            .zip(colours.chain(self.duotone_light.components.iter()))
+        {
+            *o = c.to_bits();
+        }
+        out
+    }
+
+    /// The per-pixel function these numbers describe, or [`None`] when they
+    /// describe the identity.
     ///
     /// **Two stages, the two SVG filter primitives that can say this exactly**: a
     /// 4×5 colour matrix and a per-channel transfer table. The SVG writer cannot
     /// invent arithmetic, so the pixel backends evaluate the same numbers.
     ///
-    /// [`None`] for the neutral value **and for any value outside `-1..=1`**,
-    /// including non-finite ones (§15 D538): `"exposure": 1000.0` makes every
-    /// matrix coefficient `NaN`, and `"shadows": 2.0` makes [`Self::curve`]
-    /// non-monotonic. **Refused rather than clamped**, since clamping would make the
-    /// file *draw* what it does not *say*; `an_impossible_value_is_refused_at_both_doors`
-    /// asserts on `pipeline().is_none()` to tell the two apart.
+    /// [`None`] for the neutral value **and for any amount outside its
+    /// [`Adjustment::range`]**, including non-finite ones, or a non-finite duotone
+    /// colour (§15 D538): `"exposure": 1000.0` makes every matrix coefficient
+    /// `NaN`, and `"shadows": 2.0` makes [`Self::curve`] non-monotonic. **Refused
+    /// rather than clamped**, since clamping would make the file *draw* what it does
+    /// not *say*; `an_impossible_value_is_refused_at_both_doors` asserts on
+    /// `pipeline().is_none()` to tell the two apart.
     pub fn pipeline(&self) -> Option<AdjustPipeline> {
         if Adjustment::ALL.iter().any(|k| {
             let v = k.of(self);
-            !v.is_finite() || !(-1.0..=1.0).contains(&v)
+            !v.is_finite() || !k.range().contains(&v)
         }) {
+            return None;
+        }
+        let colours = [self.duotone_dark, self.duotone_light];
+        if colours
+            .iter()
+            .any(|c| c.components.iter().any(|v| !v.is_finite()))
+        {
             return None;
         }
         let matrix = self.matrix();
@@ -553,15 +635,19 @@ impl ImageAdjust {
         (matrix.is_some() || curve.is_some()).then_some(AdjustPipeline { matrix, curve })
     }
 
-    /// The colour matrix for the five adjustments that are linear in the
-    /// channels, or [`None`] when all five are neutral.
+    /// The colour matrix for the nine adjustments that are linear in the
+    /// channels, or [`None`] when all nine are neutral.
     ///
-    /// Composed light first (exposure and white balance), then colourfulness, then
-    /// the tone spread, collapsing to one matrix and one filter primitive.
+    /// Composed light first (exposure and white balance), then colour (hue,
+    /// saturation, greyscale), then the tone spread, then the two that replace
+    /// colours outright (duotone, then invert), collapsing to one matrix and one
+    /// filter primitive. Nothing is clamped between stages, as one SVG
+    /// `feColorMatrix` cannot.
     fn matrix(&self) -> Option<[f32; 20]> {
         let (e, c, s) = (self.exposure, self.contrast, self.saturation);
         let (t, n) = (self.temperature, self.tint);
-        if e == 0.0 && c == 0.0 && s == 0.0 && t == 0.0 && n == 0.0 {
+        let (h, g, inv, duo) = (self.hue, self.greyscale, self.invert, self.duotone);
+        if [e, c, s, t, n, h, g, inv, duo].iter().all(|v| *v == 0.0) {
             return None;
         }
         // Exposure is stops, so a power of two; the white-balance axes are gentle
@@ -573,39 +659,35 @@ impl ImageAdjust {
             light * (1.0 - 0.3 * n),
             light * (1.0 - 0.3 * t) * (1.0 + 0.15 * n),
         );
-        // SVG's own luminance coefficients, not Rec.601's: the ones
-        // `feColorMatrix type="saturate"` is written with.
-        let k = 1.0 + s;
-        let (lr, lg, lb) = (0.213, 0.715, 0.072);
-        let sat = [
-            lr + k * (1.0 - lr),
-            lg - k * lg,
-            lb - k * lb,
-            0.0,
-            0.0,
-            lr - k * lr,
-            lg + k * (1.0 - lg),
-            lb - k * lb,
-            0.0,
-            0.0,
-            lr - k * lr,
-            lg - k * lg,
-            lb + k * (1.0 - lb),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-        ];
+        // Greyscale is saturation's own matrix run toward zero, so the two
+        // multiply: full saturation at full greyscale is still grey.
+        let colour = compose(
+            &saturate((1.0 + s) * (1.0 - g)),
+            &hue_rotate(h * std::f32::consts::PI),
+        );
         // Contrast pivots on mid-grey: a scale plus the offset that holds 0.5 still.
         let kc = 1.0 + c;
         let mut contrast = diagonal(kc, kc, kc);
         for row in 0..3 {
             contrast[row * 5 + 4] = 0.5 * (1.0 - kc);
         }
-        Some(compose(&contrast, &compose(&sat, &gain)))
+        // Duotone blends each channel toward `dark + (light − dark)·luminance`.
+        let mut duotone = diagonal(1.0 - duo, 1.0 - duo, 1.0 - duo);
+        let (lo, hi) = (self.duotone_dark.components, self.duotone_light.components);
+        for row in 0..3 {
+            let span = duo * (hi[row] - lo[row]);
+            for (col, l) in LUMINANCE.into_iter().enumerate() {
+                duotone[row * 5 + col] += span * l;
+            }
+            duotone[row * 5 + 4] = duo * lo[row];
+        }
+        // Invert is `x ↦ i + (1 − 2i)·x`, so half way is flat grey.
+        let mut invert = diagonal(1.0 - 2.0 * inv, 1.0 - 2.0 * inv, 1.0 - 2.0 * inv);
+        for row in 0..3 {
+            invert[row * 5 + 4] = inv;
+        }
+        let tone = compose(&contrast, &compose(&colour, &gain));
+        Some(compose(&invert, &compose(&duotone, &tone)))
     }
 
     /// The tone curve for highlights and shadows, sampled at [`TONE_STEPS`]
@@ -635,6 +717,53 @@ fn diagonal(r: f32, g: f32, b: f32) -> [f32; 20] {
     let mut m = [0.0f32; 20];
     for (i, k) in [r, g, b, 1.0].into_iter().enumerate() {
         m[i * 5 + i] = k;
+    }
+    m
+}
+
+/// SVG's own luminance coefficients, not Rec.601's: the ones `feColorMatrix`'s
+/// `saturate` and `hueRotate` are written with.
+const LUMINANCE: [f32; 3] = [0.213, 0.715, 0.072];
+
+/// `feColorMatrix type="saturate"` at `k`: `0` is grey, `1` the identity.
+fn saturate(k: f32) -> [f32; 20] {
+    let mut m = diagonal(1.0, 1.0, 1.0);
+    for row in 0..3 {
+        for (col, l) in LUMINANCE.into_iter().enumerate() {
+            let own = if row == col { 1.0 } else { 0.0 };
+            m[row * 5 + col] = l + k * (own - l);
+        }
+    }
+    m
+}
+
+/// `feColorMatrix type="hueRotate"` by `turn` radians, to the spec's coefficients.
+fn hue_rotate(turn: f32) -> [f32; 20] {
+    if turn == 0.0 {
+        return diagonal(1.0, 1.0, 1.0);
+    }
+    let (sin, cos) = turn.sin_cos();
+    let [lr, lg, lb] = LUMINANCE;
+    let mut m = diagonal(1.0, 1.0, 1.0);
+    let rows = [
+        [
+            lr + cos * (1.0 - lr) - sin * lr,
+            lg - cos * lg - sin * lg,
+            lb - cos * lb + sin * (1.0 - lb),
+        ],
+        [
+            lr - cos * lr + sin * 0.143,
+            lg + cos * (1.0 - lg) + sin * 0.140,
+            lb - cos * lb - sin * 0.283,
+        ],
+        [
+            lr - cos * lr - sin * (1.0 - lr),
+            lg - cos * lg + sin * lg,
+            lb + cos * (1.0 - lb) + sin * lb,
+        ],
+    ];
+    for (row, coeffs) in rows.into_iter().enumerate() {
+        m[row * 5..row * 5 + 3].copy_from_slice(&coeffs);
     }
     m
 }
@@ -706,7 +835,7 @@ pub fn transfer(table: &[f32], v: f32) -> f32 {
     table[k] + t * (table[k + 1] - table[k])
 }
 
-/// One of the seven, named, so the panel draws them from one list.
+/// One of the eleven amounts, named, so the panel draws them from one list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Adjustment {
     Exposure,
@@ -716,11 +845,15 @@ pub enum Adjustment {
     Tint,
     Highlights,
     Shadows,
+    Hue,
+    Greyscale,
+    Invert,
+    Duotone,
 }
 
 impl Adjustment {
-    /// The seven, in the order the panel lists them.
-    pub const ALL: [Adjustment; 7] = [
+    /// The eleven, in the order the panel lists them.
+    pub const ALL: [Adjustment; 11] = [
         Self::Exposure,
         Self::Contrast,
         Self::Saturation,
@@ -728,9 +861,13 @@ impl Adjustment {
         Self::Tint,
         Self::Highlights,
         Self::Shadows,
+        Self::Hue,
+        Self::Greyscale,
+        Self::Invert,
+        Self::Duotone,
     ];
 
-    /// The word the control carries (no icon set has seven distinguishable glyphs).
+    /// The word the control carries (no icon set has eleven distinguishable glyphs).
     pub fn label(self) -> &'static str {
         match self {
             Self::Exposure => "Exposure",
@@ -740,6 +877,10 @@ impl Adjustment {
             Self::Tint => "Tint",
             Self::Highlights => "Highlights",
             Self::Shadows => "Shadows",
+            Self::Hue => "Hue",
+            Self::Greyscale => "Greyscale",
+            Self::Invert => "Invert",
+            Self::Duotone => "Duotone",
         }
     }
 
@@ -753,6 +894,28 @@ impl Adjustment {
             Self::Tint => "Magenta to the right, green to the left",
             Self::Highlights => "Lift or recover the bright end, leaving the dark end",
             Self::Shadows => "Lift or deepen the dark end, leaving the bright end",
+            Self::Hue => "Turn every colour round the wheel, up to half a turn either way",
+            Self::Greyscale => "Drain the colour; 100 is grey",
+            Self::Invert => "Swap light for dark; 50 is flat grey, 100 the negative",
+            Self::Duotone => "Map the tones onto two colours, dark to light",
+        }
+    }
+
+    /// The values the model holds: `-1..=1` for the offsets either way, `0..=1`
+    /// for the three with no opposite (greyscale, invert, duotone).
+    pub fn range(self) -> std::ops::RangeInclusive<f32> {
+        match self {
+            Self::Greyscale | Self::Invert | Self::Duotone => 0.0..=1.0,
+            _ => -1.0..=1.0,
+        }
+    }
+
+    /// What the panel shows at the model's `1.0`: a percentage, except hue's
+    /// half turn, which reads in degrees.
+    pub fn shown_scale(self) -> f64 {
+        match self {
+            Self::Hue => 180.0,
+            _ => 100.0,
         }
     }
 
@@ -765,17 +928,22 @@ impl Adjustment {
             Self::Tint => a.tint,
             Self::Highlights => a.highlights,
             Self::Shadows => a.shadows,
+            Self::Hue => a.hue,
+            Self::Greyscale => a.greyscale,
+            Self::Invert => a.invert,
+            Self::Duotone => a.duotone,
         }
     }
 
-    /// Write one of the seven, held inside `-1..=1`.
+    /// Write one amount, held inside [`Self::range`].
     ///
     /// **Clamped here rather than at the control**: a range the model does not
     /// enforce is a range a hand-edited file ignores, and the tone curve's
     /// monotonicity argument only holds inside it.
     pub fn set(self, a: &mut ImageAdjust, v: f32) {
+        let r = self.range();
         let v = if v.is_finite() {
-            v.clamp(-1.0, 1.0)
+            v.clamp(*r.start(), *r.end())
         } else {
             0.0
         };
@@ -787,6 +955,35 @@ impl Adjustment {
             Self::Tint => a.tint = v,
             Self::Highlights => a.highlights = v,
             Self::Shadows => a.shadows = v,
+            Self::Hue => a.hue = v,
+            Self::Greyscale => a.greyscale = v,
+            Self::Invert => a.invert = v,
+            Self::Duotone => a.duotone = v,
+        }
+    }
+}
+
+/// Which of duotone's two colours a control edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DuotoneEnd {
+    Dark,
+    Light,
+}
+
+impl DuotoneEnd {
+    pub const BOTH: [DuotoneEnd; 2] = [Self::Dark, Self::Light];
+
+    pub fn of(self, a: &ImageAdjust) -> Color {
+        match self {
+            Self::Dark => a.duotone_dark,
+            Self::Light => a.duotone_light,
+        }
+    }
+
+    pub fn set(self, a: &mut ImageAdjust, c: Color) {
+        match self {
+            Self::Dark => a.duotone_dark = c,
+            Self::Light => a.duotone_light = c,
         }
     }
 }
@@ -2392,6 +2589,91 @@ mod adjust_tests {
         );
     }
 
+    /// Hue, greyscale, invert and duotone each do what their word says, on pixels.
+    /// Duotone's ends are probed at black and white, the two points its colours
+    /// must land on exactly.
+    #[test]
+    fn the_colour_replacing_sliders_do_what_their_words_say() {
+        let red = [200u8, 40, 40];
+        let turned = through(&adjusted(|a| a.hue = 1.0), red);
+        assert!(
+            turned[0] < turned[1] && turned[0] < turned[2],
+            "half a turn takes red to cyan: {turned:?}"
+        );
+        let back = through(&adjusted(|a| a.hue = -1.0), red);
+        assert_eq!(turned, back, "half a turn either way is the same place");
+        // A third of a turn tells the directions apart: red goes to green forward.
+        let third = through(&adjusted(|a| a.hue = 2.0 / 3.0), red);
+        assert!(
+            third[1] > third[0] && third[1] > third[2],
+            "+120° takes red toward green, as CSS's hue-rotate does: {third:?}"
+        );
+
+        let grey = through(&adjusted(|a| a.greyscale = 1.0), [60, 120, 200]);
+        assert!(
+            grey[0] == grey[1] && grey[1] == grey[2],
+            "full greyscale is grey, got {grey:?}"
+        );
+        // Greyscale multiplies saturation rather than adding to it.
+        let still_grey = through(
+            &adjusted(|a| {
+                a.greyscale = 1.0;
+                a.saturation = 1.0;
+            }),
+            [60, 120, 200],
+        );
+        assert_eq!(still_grey, grey, "saturation cannot bring colour back");
+
+        let negative = through(&adjusted(|a| a.invert = 1.0), [10, 100, 250]);
+        assert_eq!(negative, [245, 155, 5], "full invert is the negative");
+        let flat = through(&adjusted(|a| a.invert = 0.5), [10, 100, 250]);
+        assert!(
+            flat.iter().all(|c| c.abs_diff(128) <= 1),
+            "half way is flat grey, got {flat:?}"
+        );
+
+        let duo = adjusted(|a| {
+            a.duotone = 1.0;
+            a.duotone_dark = Color::from_rgb8(20, 30, 90);
+            a.duotone_light = Color::from_rgb8(250, 200, 100);
+        });
+        assert_eq!(
+            through(&duo, [0, 0, 0]),
+            [20, 30, 90],
+            "black is the dark end"
+        );
+        assert_eq!(
+            through(&duo, [255, 255, 255]),
+            [250, 200, 100],
+            "white is the light end"
+        );
+        // A red and a green of one luminance land on one colour.
+        let a = through(&duo, [255, 0, 0]);
+        let b = through(&duo, [0, 0, 255]);
+        assert!(
+            a[0] > b[0],
+            "duotone orders by luminance: {a:?} against {b:?}"
+        );
+    }
+
+    /// Picked duotone colours are kept in the file at amount zero, and a missing
+    /// key reads back as the default colour.
+    #[test]
+    fn duotone_colours_round_trip_without_the_amount() {
+        let mut a = ImageAdjust::NEUTRAL;
+        assert_eq!(serde_json::to_string(&a).unwrap(), "{}");
+        a.duotone_light = Color::from_rgb8(1, 2, 3);
+        assert!(!a.is_default(), "a picked colour is something to keep");
+        assert!(
+            a.pipeline().is_none(),
+            "but it draws nothing at amount zero"
+        );
+        let back: ImageAdjust = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+        assert_eq!(back, a);
+        let old: ImageAdjust = serde_json::from_str(r#"{"exposure":0.5}"#).unwrap();
+        assert_eq!(old.duotone_dark, DUOTONE_DARK);
+    }
+
     /// Highlights and shadows each leave the other end of the range alone; the
     /// far end is the probe that fails a version lifting the whole curve. Black and
     /// white are fixed points to the byte (weights `(1−v)²` and `v²`).
@@ -2577,6 +2859,13 @@ mod adjust_tests {
                     ..ImageAdjust::NEUTRAL
                 },
             ),
+            (
+                "invert -1.0: one-sided, so a negative would brighten past white",
+                ImageAdjust {
+                    invert: -1.0,
+                    ..ImageAdjust::NEUTRAL
+                },
+            ),
         ] {
             assert!(a.pipeline().is_none(), "{label}");
             assert!(
@@ -2610,7 +2899,7 @@ mod adjust_tests {
             assert!(k.of(&a) != 0.0, "{} is not in ALL", k.label());
         }
         a.reset();
-        assert_eq!(a, ImageAdjust::NEUTRAL, "reset puts all seven back");
+        assert_eq!(a, ImageAdjust::NEUTRAL, "reset puts every amount back");
         assert!(a.is_default());
     }
 }

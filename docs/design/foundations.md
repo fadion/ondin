@@ -24,7 +24,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 - Bulk property edits over a selection (transform, opacity, blend mode, corner radius, paint), and recolouring by colour rather than by layer (§9.4).
 - Container layout: CSS flexbox, CSS grid and absolute insets (§5.3c). Fixed layout algorithms re-run from specified values.
 - Components and instances as linked copies, variants and component properties, instance swap (§5.3d); shared component libraries ("kits", §5.3e); variables and styles (§5.3f).
-- Images: fills, raster import (dialog, drag-and-drop, paste), framing, image editing (crop, orientation, tile scale, seven per-pixel adjustments), export in all three writers, missing-image placeholder with *Replace…* (§5.5a, §7.1, §9.2).
+- Images: fills, raster import (dialog, drag-and-drop, paste), framing, image editing (crop, orientation, tile scale, per-pixel adjustments), export in all three writers, missing-image placeholder with *Replace…* (§5.5a, §7.1, §9.2).
 - Pan/zoom viewport; R-tree culling for many artboards.
 - Rulers and ruler guides, global or scoped to one frame; guides are document state (§5.5, §9.4).
 - Focus mode: hides the panels, keeps the canvas and its rulers, Escape returns (§9.4).

@@ -8,9 +8,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Editor additions
 
-- **Four more image adjustments** — duotone, grayscale, invert and hue rotate, beside the seven in
-  `Adjustment::ALL`. Each fits `AdjustPipeline`'s matrix and tone table, so all three writers draw
-  it, SVG through `feColorMatrix`/`feComponentTransfer`.
 - **An assets browser** — open-source icon sets and stock photos in one browser, the providers
   picked in Settings, an API key where one is needed given there by the user. Icons insert as SVG
   through the importer; a photo embeds. A provider's licence travels with what it inserted: a

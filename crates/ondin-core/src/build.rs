@@ -137,8 +137,14 @@ fn image_ref_is_finite(r: &crate::ImageRef) -> bool {
             a.tint,
             a.highlights,
             a.shadows,
+            a.hue,
+            a.greyscale,
+            a.invert,
+            a.duotone,
         ]
         .iter()
+        .chain(a.duotone_dark.components.iter())
+        .chain(a.duotone_light.components.iter())
         .all(|f| f.is_finite())
 }
 

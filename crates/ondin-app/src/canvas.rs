@@ -18847,7 +18847,7 @@ mod locked_picture_tests {
     use ondin_core::{Fill, image_brush};
 
     /// A 100×100 rect carrying one picture fill, selected, not yet locked.
-    fn app_with_a_picture(ctx: &egui::Context) -> (OndinApp, NodeId) {
+    pub(super) fn app_with_a_picture(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(1);
         let root = ids.mint();
@@ -18936,6 +18936,57 @@ mod locked_picture_tests {
             app.image_drop_target(None),
             None,
             "nor the paste chord, which is the same funnel by a different arm"
+        );
+    }
+}
+
+#[cfg(test)]
+mod duotone_slot_tests {
+    //! The image card's duotone ends are colours of the picture's own fill.
+
+    use super::locked_picture_tests::app_with_a_picture;
+    use super::*;
+    use crate::panels::PaintSlot;
+    use ondin_core::{Brush, DuotoneEnd, peniko::Color};
+
+    /// A duotone end writes the image fill's adjustment, opaque, and reads back
+    /// from it; the other end and the picture are left as they were.
+    /// flip: route `slot_transaction`'s `Duotone` arm through `DuotoneEnd::Dark`
+    /// → fails at "the light end took the colour".
+    #[test]
+    fn a_duotone_end_is_the_image_fills_own_colour() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, rect) = app_with_a_picture(&ctx);
+        app.tool = Tool::ImageEdit;
+        assert_eq!(
+            app.edited_image(),
+            Some((rect, 0)),
+            "fixture: editing the picture"
+        );
+
+        let slot = PaintSlot::Duotone(0, DuotoneEnd::Light);
+        let red = Color::from_rgb8(200, 10, 10);
+        app.write_slot(rect, slot, Brush::Solid(red.with_alpha(0.5)));
+
+        let fill = app.slot_brush(rect, PaintSlot::Fill(0)).expect("the fill");
+        let img = crate::panels::paint::image_of(&fill).expect("still a picture");
+        assert_eq!(
+            img.adjust.duotone_light, red,
+            "the light end took the colour"
+        );
+        assert_eq!(
+            img.adjust.duotone_dark,
+            ondin_core::DUOTONE_DARK,
+            "the dark end is untouched"
+        );
+        assert_eq!(img.id.0, "a-photo", "the picture is the same picture");
+        assert_eq!(app.slot_brush(rect, slot), Some(Brush::Solid(red)));
+        assert!(
+            app.slot_brush(rect, PaintSlot::Duotone(1, DuotoneEnd::Dark))
+                .is_none(),
+            "a fill that is not there has no duotone"
         );
     }
 }

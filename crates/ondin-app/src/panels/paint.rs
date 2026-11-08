@@ -295,6 +295,11 @@ pub enum PaintSlot {
     /// translucency, as [`PaintSlot::Effect`]'s is a shadow's opacity. A stale index
     /// reads back `None` from `slot_brush` and closes the picker.
     Grid(usize),
+    /// One end of the duotone on the image in fill `usize`, the fill the image card
+    /// edits ([`ondin_core::ImageAdjust::duotone_dark`] / `duotone_light`). Its
+    /// write is the image fill's own, through [`PaintSlot::Fill`]; solid and
+    /// opaque, since the alpha is not read.
+    Duotone(usize, ondin_core::DuotoneEnd),
     /// A colour variable's value in one mode (a cell of the styles and variables
     /// browser). Solid only, alpha kept; the picker's *Variables* face makes the
     /// cell an alias where a layer's makes a binding.
@@ -470,18 +475,22 @@ impl PaintSlot {
                 | PaintSlot::TextColor
                 | PaintSlot::Effect(_)
                 | PaintSlot::Grid(_)
+                | PaintSlot::Duotone(..)
                 | PaintSlot::VarCell(..)
                 | PaintSlot::Pref(_)
         )
     }
 
     /// Whether this slot has an opacity worth showing. The canvas ground has nothing
-    /// behind it to be transparent against, and a guide faded to nothing is a deleted
-    /// guide.
+    /// behind it to be transparent against, a guide faded to nothing is a deleted
+    /// guide, and a duotone end's alpha is never read.
     pub fn takes_alpha(self) -> bool {
         !matches!(
             self,
-            PaintSlot::Canvas | PaintSlot::Guide | PaintSlot::Pref(PrefColour::Guide)
+            PaintSlot::Canvas
+                | PaintSlot::Guide
+                | PaintSlot::Pref(PrefColour::Guide)
+                | PaintSlot::Duotone(..)
         )
     }
 }

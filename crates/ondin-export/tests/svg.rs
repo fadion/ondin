@@ -2690,6 +2690,11 @@ fn the_filters_numbers_paint_the_picture_the_canvas_paints() {
         contrast: 0.2,
         highlights: -0.35,
         shadows: 0.25,
+        hue: 0.2,
+        greyscale: 0.1,
+        invert: 0.1,
+        duotone: 0.3,
+        ..ondin_core::ImageAdjust::NEUTRAL
     };
     let f = image_fixture_adjusted(ondin_core::ImageFit::Fill, adjust);
     let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);

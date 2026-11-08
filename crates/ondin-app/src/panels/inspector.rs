@@ -6181,6 +6181,9 @@ impl OndinApp {
         let moved = |slot: PaintSlot| -> Option<PaintSlot> {
             match (slot, list) {
                 (PaintSlot::Fill(i), PaintList::Fill) => map(i).map(PaintSlot::Fill),
+                (PaintSlot::Duotone(i, end), PaintList::Fill) => {
+                    map(i).map(|i| PaintSlot::Duotone(i, end))
+                }
                 (PaintSlot::Stroke(i), PaintList::Stroke) => map(i).map(PaintSlot::Stroke),
                 (PaintSlot::Selection(t, i), l) if t == l.target() => {
                     map(i).map(|i| PaintSlot::Selection(t, i))
@@ -7815,6 +7818,7 @@ impl OndinApp {
                 PaintSlot::Grid(index),
                 egui::vec2(full, GRID_CELL),
                 shown,
+                true,
                 "Edit this grid's colour",
             );
             ui.horizontal(|ui| {
@@ -8669,23 +8673,35 @@ impl OndinApp {
 
                     if card == ImageCard::Adjustments {
                         // Rows built from `Adjustment::ALL`, so order and words are the
-                        // model's. Percent under the hand, `-1..=1` in the file.
+                        // model's. Percent (hue in degrees) under the hand, the model's
+                        // `Adjustment::range` in the file.
                         let adjusted = !img.adjust.is_default();
+                        let field_w = inner - CELL - ui::CARD_COL_GAP;
                         ui.scope(|ui| {
                             for k in Adjustment::ALL {
                                 let at_rest = k.of(&img.adjust) == 0.0;
-                                let mut pct = f64::from(k.of(&img.adjust)) * 100.0;
+                                let scale = k.shown_scale();
+                                let mut shown = f64::from(k.of(&img.adjust)) * scale;
+                                let (lo, hi) = (*k.range().start(), *k.range().end());
+                                let one_sided = lo == 0.0;
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                                     let resp = ui::value_field_metered(
                                         ui,
-                                        egui::vec2(inner - CELL - ui::CARD_COL_GAP, CELL),
+                                        egui::vec2(field_w, CELL),
                                         Prefix::Text(k.label()),
                                         // The signed fraction of the reachable range.
-                                        (pct / 100.0) as f32,
-                                        &mut pct,
-                                        Scrub::whole(0.25).range(-100.0..=100.0),
-                                        |d| d.custom_formatter(signed_number),
+                                        (shown / scale) as f32,
+                                        &mut shown,
+                                        Scrub::whole(0.25)
+                                            .range(f64::from(lo) * scale..=f64::from(hi) * scale),
+                                        |d| match (k, one_sided) {
+                                            (Adjustment::Hue, _) => {
+                                                d.suffix("°").custom_formatter(signed_number)
+                                            }
+                                            (_, true) => d.custom_formatter(ui::number(0)),
+                                            (_, false) => d.custom_formatter(signed_number),
+                                        },
                                     )
                                     .on_hover_text(k.hint());
                                     self.valve_slot(
@@ -8693,7 +8709,7 @@ impl OndinApp {
                                         id,
                                         slot,
                                         paint::map_image(brush, |r| {
-                                            k.set(&mut r.adjust, (pct / 100.0) as f32)
+                                            k.set(&mut r.adjust, (shown / scale) as f32)
                                         }),
                                     );
                                     // Dimmed at rest; re-asked after the click because a dim
@@ -8721,6 +8737,31 @@ impl OndinApp {
                                     }
                                 });
                             }
+                            // Duotone's two ends under its slider, always drawn so the
+                            // card keeps one height; picking one before raising the
+                            // amount is allowed.
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+                                let half = (field_w - ui::CARD_COL_GAP) / 2.0;
+                                for end in ondin_core::DuotoneEnd::BOTH {
+                                    self.slot_color_row(
+                                        ui,
+                                        id,
+                                        PaintSlot::Duotone(index, end),
+                                        egui::vec2(half, CELL),
+                                        end.of(&img.adjust),
+                                        false,
+                                        match end {
+                                            ondin_core::DuotoneEnd::Dark => {
+                                                "Duotone's dark end: what black becomes"
+                                            }
+                                            ondin_core::DuotoneEnd::Light => {
+                                                "Duotone's light end: what white becomes"
+                                            }
+                                        },
+                                    );
+                                }
+                            });
                         });
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
@@ -8730,7 +8771,7 @@ impl OndinApp {
                                 icon::ARROW_COUNTER_CLOCKWISE,
                                 "Reset adjustments",
                                 &|on| match on {
-                                    true => "Put all seven back to zero".into(),
+                                    true => "Put every adjustment back to rest".into(),
                                     false => "Nothing on this picture is adjusted".into(),
                                 },
                             ) {
@@ -9647,6 +9688,7 @@ impl OndinApp {
                                 PaintSlot::Effect(index),
                                 egui::vec2(inner, CELL),
                                 s.color,
+                                true,
                                 "Edit this shadow's colour",
                             );
                             // --- how it mixes with what is beneath it ---------
@@ -9861,8 +9903,10 @@ impl OndinApp {
         }
     }
     /// A single colour on the Fill row's pattern (chip, hex, opacity) for a shadow
-    /// ([`PaintSlot::Effect`]) or a layout grid ([`PaintSlot::Grid`]). `tip` names
-    /// what the chip edits.
+    /// ([`PaintSlot::Effect`]), a layout grid ([`PaintSlot::Grid`]) or a duotone end
+    /// ([`PaintSlot::Duotone`], which passes `alpha` false: its alpha is not read).
+    /// `tip` names what the chip edits.
+    #[allow(clippy::too_many_arguments)]
     fn slot_color_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -9870,6 +9914,7 @@ impl OndinApp {
         slot: PaintSlot,
         size: egui::Vec2,
         color: ondin_core::peniko::Color,
+        alpha: bool,
         tip: &'static str,
     ) {
         let targeted = self
@@ -9897,6 +9942,9 @@ impl OndinApp {
             }
             let brush = Brush::Solid(color);
             self.paint_hex_field(ui, id, slot, &brush, false);
+            if !alpha {
+                return;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut pct = f64::from(color.components[3]) * 100.0;
                 #[expect(
@@ -9983,6 +10031,11 @@ impl OndinApp {
                 return mixed.then(|| self.mixed_row(target).0);
             }
             PaintSlot::GroupColor(key) => return self.group_color_shown(key),
+            // Read off the image fill as drawn, so the picker tracks a live drag.
+            PaintSlot::Duotone(i, end) => {
+                let img = self.slot_brush(id, PaintSlot::Fill(i))?;
+                return paint::image_of(&img).map(|r| Brush::Solid(end.of(&r.adjust)));
+            }
             // A location key: the place stays the place when its paint changes.
             PaintSlot::GroupGradient(at) => {
                 return self.shown_paint_at(at);
@@ -10025,6 +10078,7 @@ impl OndinApp {
             | PaintSlot::GroupGradient(_)
             | PaintSlot::TextDecoration(_)
             | PaintSlot::TextColor
+            | PaintSlot::Duotone(..)
             | PaintSlot::VarCell(..)
             | PaintSlot::Pref(_) => unreachable!("answered above"),
         }
@@ -10162,6 +10216,22 @@ impl OndinApp {
         // only its `%` moved and detaches it otherwise.
         let doc = &self.session.doc;
         match slot {
+            // The image fill's own write, with one end of its duotone replaced.
+            PaintSlot::Duotone(i, end) => {
+                let Some((_, colour)) = paint::stops_of(&brush).first().copied() else {
+                    return Transaction(Vec::new());
+                };
+                let Some(img) = self
+                    .slot_brush(id, PaintSlot::Fill(i))
+                    .filter(|b| paint::image_of(b).is_some())
+                else {
+                    return Transaction(Vec::new());
+                };
+                let next = paint::map_image(&img, |r| {
+                    end.set(&mut r.adjust, colour.with_alpha(1.0));
+                });
+                self.slot_transaction(id, PaintSlot::Fill(i), next)
+            }
             // `brush` is on the drawn box (`slot_brush`), stored back on the stored one.
             PaintSlot::Fill(i) => {
                 let mut fills = node.paint().fills.clone();
@@ -10451,7 +10521,9 @@ impl OndinApp {
             return;
         }
         let (label, glyph) = match slot {
+            // A duotone end is the image fill's own edit, as its sliders are.
             PaintSlot::Fill(_)
+            | PaintSlot::Duotone(..)
             | PaintSlot::Selection(PaintTarget::Fill, _)
             | PaintSlot::SelectionAll(PaintTarget::Fill) => ("Fill", icon::PAINT_BUCKET),
             PaintSlot::Stroke(_)

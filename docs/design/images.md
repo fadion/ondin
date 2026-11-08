@@ -4,7 +4,7 @@ How pictures live in a document (`ondin_core::image`, §5.5a): the image table, 
 
 ## 5.5a Images (`image.rs`)
 
-Built: table, reference, brush, decode cache, framing, image editing (`Tool::ImageEdit`: crop gesture and mode strip), orientation, tile scale, reset crop, drop and paste, SVG export (an image fill becomes a `<pattern>` over the encoded original, written once per picture), the missing-image placeholder with *Replace...*, seven per-pixel adjustments in all three writers, and thumbnails. Not built: fetching a linked image. `ImageStore::prepare` skips linked entries (reading files is not `ondin-render`'s job); whoever has the bytes calls `ImageStore::insert`, or decodes them and calls `ImageStore::adopt`. A link therefore behaves exactly like a missing picture.
+Built: table, reference, brush, decode cache, framing, image editing (`Tool::ImageEdit`: crop gesture and mode strip), orientation, tile scale, reset crop, drop and paste, SVG export (an image fill becomes a `<pattern>` over the encoded original, written once per picture), the missing-image placeholder with *Replace...*, the per-pixel adjustments of `Adjustment::ALL` in all three writers, and thumbnails. Not built: fetching a linked image. `ImageStore::prepare` skips linked entries (reading files is not `ondin-render`'s job); whoever has the bytes calls `ImageStore::insert`, or decodes them and calls `ImageStore::adopt`. A link therefore behaves exactly like a missing picture.
 
 ### Model
 
@@ -49,13 +49,27 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 
 ### Adjustments
 
-`ImageAdjust` on `ImageRef`: seven `f32` (exposure, contrast, saturation, temperature, tint, highlights, shadows), all 0.0 at rest, held in `-1..=1`.
+`ImageAdjust` on `ImageRef`: one `f32` amount per `Adjustment`, all 0.0 at rest, and duotone's two colours.
 
+| Amounts | Range (`Adjustment::range`) | Shown as |
+| --- | --- | --- |
+| exposure, contrast, saturation, temperature, tint, highlights, shadows | `-1..=1` | signed percent |
+| hue (±1 is half a turn) | `-1..=1` | degrees, ±180 |
+| greyscale, invert, duotone (no opposite) | `0..=1` | percent, 0..100 |
+
+- **Duotone's colours** are `duotone_dark` and `duotone_light`, defaulting to `DUOTONE_DARK` (deep indigo `#23215C`) and `DUOTONE_LIGHT` (apricot `#F7B267`). Their alpha is not read. They draw nothing while `duotone` is 0 but stay in the file, as a crop stays while the mode is not Crop.
 - **Per fill, not per entry**: two layers showing one photograph adjust independently. It is the only `ImageRef` field that is not geometry: it produces a second buffer.
-- **`ImageAdjust::pipeline()`** is the one resolution all three writers read. `None` for neutral and for non-finite or out-of-range values (refused, not clamped, so the file draws what it says). Out-of-range matters: `exposure: 1000` made `inf*0 = NaN` coefficients and a black rect, and the SVG writer would emit `NaN` in `feColorMatrix`.
-- **`AdjustPipeline`**: an optional 4x5 colour matrix and a per-channel transfer table of `TONE_STEPS = 33` samples, exactly `feColorMatrix type="matrix"` and `feComponentTransfer type="table"`. Pixel backends evaluate the same numbers with `ondin_core::transfer` (SVG's table interpolation). Exposure, contrast, saturation, temperature, tint collapse into the matrix (saturation uses 0.213/0.715/0.072; contrast pivots on mid-grey via column five); highlights and shadows are the curve (strength +-0.4, the largest monotonic). The matrix runs before the curve.
-- **`Adjustment`** is the list (`Adjustment::ALL`): panel rows, cache key and snapshot all read it. `Adjustment::set` clamps (non-finite -> 0); `pipeline` refuses; `op_set_fills` checks finiteness through `build::image_ref_is_finite`.
-- `adjust` is `#[serde(default, skip_serializing_if)]` and each slider carries its own predicate.
+- **`ImageAdjust::pipeline()`** is the one resolution all three writers read. `None` for neutral, for any amount non-finite or outside its range, and for a non-finite duotone colour (refused, not clamped, so the file draws what it says). Out-of-range matters: `exposure: 1000` made `inf*0 = NaN` coefficients and a black rect, and the SVG writer would emit `NaN` in `feColorMatrix`.
+- **`AdjustPipeline`**: an optional 4x5 colour matrix and a per-channel transfer table of `TONE_STEPS = 33` samples, exactly `feColorMatrix type="matrix"` and `feComponentTransfer type="table"`. Pixel backends evaluate the same numbers with `ondin_core::transfer` (SVG's table interpolation). Every amount but highlights and shadows is linear, so all collapse into the one matrix, composed in this order:
+  1. gain: exposure (`2^e`) and white balance;
+  2. colour: hue rotate (SVG's `hueRotate` coefficients), then `saturate((1+saturation)(1−greyscale))`, so greyscale multiplies saturation and full greyscale stays grey at any saturation;
+  3. contrast, pivoting on mid-grey via column five;
+  4. duotone: each channel blends toward `dark + (light−dark)·luminance`;
+  5. invert: `x ↦ i + (1−2i)x`, so half way is flat grey.
+
+  Luminance is SVG's 0.213/0.715/0.072 throughout. Nothing is clamped between stages, as one `feColorMatrix` cannot. Highlights and shadows are the curve (strength ±0.4, the largest monotonic), run after the matrix. The SVG writer therefore needs no primitive beyond those two.
+- **`Adjustment`** is the list (`Adjustment::ALL`): panel rows, cache key and the snapshot's `adjust` map all read it (the snapshot lists non-rest amounts by name and does not carry the duotone colours). `Adjustment::set` clamps to the range (non-finite -> 0); `pipeline` refuses; `op_set_fills` checks finiteness, colours included, through `build::image_ref_is_finite`.
+- `adjust` is `#[serde(default, skip_serializing_if = "ImageAdjust::is_default")]`, and `is_default` weighs the two colours as well as the amounts. Each amount skips at zero and each colour at its default, the colours listed in `diff.rs`'s `SKIPPED_AT`.
 
 ## The decode cache (`ondin_render::images::ImageStore`)
 
@@ -66,7 +80,7 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 - **Pixels decoded elsewhere are adopted**: `images::decode` is public, so the app decodes where it reads (off the frame for an import), and `ImageStore::adopt(id, ImageData)` holds the pixels unless the id is held already and forgets a refusal remembered for it, since these pixels drew.
 - **A refused decode is remembered.** Edges above 65535 are refused (`MAX_EDGE`). `MAX_DECODED_BYTES` weighs `width * height * 4` before `into_rgba8` (a small grayscale PNG can expand hugely and abort); error variant `TooMuchPixelData` is separate from `TooLarge`.
 - **Every failure ends at the placeholder** (fills only). Strokes and text with a missing picture draw nothing.
-- **Derived pixels** keyed by `(ImageId, AdjustKey)` (the seven values' bit patterns; neutral never reaches a key), behind a `Mutex`, filled where read. `ImageStore::pixels(&ImageRef)` is what backends paint with; `get(&ImageId)` is the decode and the right question for `has_image`.
+- **Derived pixels** keyed by `(ImageId, AdjustKey)` (`ImageAdjust::key_bits`: every amount, then both duotone colours' components, as bits; the CPU painter's memo keys on the same bits; neutral never reaches a key), behind a `Mutex`, filled where read. `ImageStore::pixels(&ImageRef)` is what backends paint with; `get(&ImageId)` is the decode and the right question for `has_image`.
 - **Preview then promote**: a miss is answered with a picture reduced by a whole factor toward `PREVIEW_EDGE = 1024` (a floor: reduced long edge lands in [1024, 2048)), box-averaged premultiplied, rebuilt at full resolution after the same value is asked for `SETTLED_FRAMES = 2` consecutive frames.
 - **`Pixels` carries `to_source`**, the map from the buffer grid to source pixels; `color::framed_transform` composes it with the framing and both backends use it.
 - **Atlas budget**: vello keeps all a scene's pictures in one 8192-pixel atlas (`ATLAS_EDGE`) and silently drops a picture that does not fit. `prepare` computes one integer factor for the whole page (`images::atlas_downscale`, searching upward from 1) from the store's decoded population, not from what a frame draws, using shelf packing (shelf fitting implies guillotine fitting). Past `MAX_ATLAS_DOWNSCALE` = 64 the silent drop returns; `has_image` does not see atlas failures. Canvas uses `color::Resolution::Atlas`, export uses `Source`.

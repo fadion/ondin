@@ -58,13 +58,22 @@ Part of §9.4.
 
 ### Adjustments tab
 
-- Seven rows from `Adjustment::ALL` at `ui::CARD_ROW_GAP`. Each is a `ui::value_field_metered` with the
-  **word** as prefix, scrubbing percent over the file's `-1..=1`, written through `valve_slot` (one
-  undo step per scrub).
+- One row per `Adjustment::ALL` entry, in its order, at `ui::CARD_ROW_GAP`. Each is a
+  `ui::value_field_metered` with the **word** as prefix, scrubbing `Adjustment::shown_scale` (percent,
+  hue in degrees) over the model's `Adjustment::range`, written through `valve_slot` (one undo step
+  per scrub).
 - The meter is an accent wash across the field's ink **growing from the middle** (negative left,
-  positive right, ±1 reaching an edge). A 1pt centre tick (`ui::METER_TICK_W`, from `ui::meter_wash()`)
-  is always drawn. The number is right-aligned, signed via `inspector::signed_number`.
-- A per-row reset is **dimmed, not absent**, at zero; *Reset adjustments* is a `menu_action`.
+  positive right, ±1 reaching an edge; a `0..=1` amount only ever grows right). A 1pt centre tick
+  (`ui::METER_TICK_W`, from `ui::meter_wash()`) is always drawn. The number is right-aligned: signed
+  via `inspector::signed_number` for a two-sided amount (hue with a `°` suffix), unsigned for a
+  `0..=1` one.
+- A per-row reset is **dimmed, not absent**, at zero; *Reset adjustments* is a `menu_action` that puts
+  every amount back and the duotone colours to their defaults.
+- **Duotone's ends** sit under its row, always drawn so the card keeps one height (picking one before
+  raising the amount is allowed): two half-width `slot_color_row`s (chip and hex, no opacity, its
+  `alpha` switch off) on `PaintSlot::Duotone(fill_index, DuotoneEnd)`. That slot's read and write go
+  through the image fill's own `PaintSlot::Fill` slot. Its picker closes when the card closes or
+  leaves the Adjustments tab.
 
 ## Image editing mode (`Tool::ImageEdit`)
 

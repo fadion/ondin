@@ -891,7 +891,7 @@ fn image_payload_def(name: &str, entry: &ondin_core::ImageEntry, link: Option<St
     )
 }
 
-/// The seven adjustments as a `<filter>`: a colour matrix, then a tone curve.
+/// A picture's adjustments as a `<filter>`: a colour matrix, then a tone curve.
 ///
 /// Writes what `ImageAdjust::pipeline` says (§5.5a). Load-bearing: `sRGB`
 /// interpolation (the linear default mismatches the canvas) and a region of the

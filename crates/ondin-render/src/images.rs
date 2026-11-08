@@ -17,7 +17,7 @@
 //! [`ImageAdjust`]: ondin_core::ImageAdjust
 
 use ondin_core::{
-    AdjustPipeline, Adjustment, Document, ImageAdjust, ImageFormat, ImageId, ImageRef,
+    AdjustPipeline, Document, ImageAdjust, ImageFormat, ImageId, ImageRef,
     ImageSource as CoreSource, kurbo::Affine,
 };
 use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat as PenikoFormat};
@@ -202,17 +202,18 @@ impl Derived {
     }
 }
 
-/// The seven adjustment values as bits — an [`ImageAdjust`] is `f32`s and so is
-/// neither `Eq` nor `Hash`, and a cache key has to be both.
+/// The adjustment's numbers as bits ([`ImageAdjust::key_bits`]) — an
+/// [`ImageAdjust`] is `f32`s and so is neither `Eq` nor `Hash`, and a cache key has
+/// to be both.
 ///
 /// Bitwise comparison is safe because the neutral value never reaches this:
 /// [`ImageAdjust::pipeline`] answers `None` for it, resolving `-0.0` vs `0.0`.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-struct AdjustKey([u32; 7]);
+struct AdjustKey([u32; 19]);
 
 impl AdjustKey {
     fn of(a: &ImageAdjust) -> Self {
-        Self(Adjustment::ALL.map(|k| k.of(a).to_bits()))
+        Self(a.key_bits())
     }
 }
 
@@ -245,7 +246,7 @@ impl ThumbKey {
             // drawing two textures that never hit.
             adjust: match r.adjust.pipeline() {
                 Some(_) => AdjustKey::of(&r.adjust),
-                None => AdjustKey([0; 7]),
+                None => AdjustKey([0; 19]),
             },
             orient: (r.orient.quarters(), r.orient.mirrored),
             crop: [r.crop.x0, r.crop.y0, r.crop.x1, r.crop.y1].map(f64::to_bits),
@@ -1753,6 +1754,17 @@ mod tests {
                     tint: 0.6,
                     highlights: -0.9,
                     shadows: 0.4,
+                    ..ImageAdjust::NEUTRAL
+                },
+                ImageAdjust {
+                    hue: 0.6,
+                    greyscale: 0.3,
+                    ..ImageAdjust::NEUTRAL
+                },
+                ImageAdjust {
+                    invert: 0.8,
+                    duotone: 0.7,
+                    ..ImageAdjust::NEUTRAL
                 },
             ];
             let mut worst = 0i32;

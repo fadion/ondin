@@ -343,7 +343,7 @@ fn resizing_a_stretched_grid_item_holds_the_size_it_was_dragged_to() {
     assert_eq!(item.grid_column, GridLines::default(), "its cells kept");
 
     // A left-handle drag: the tool writes the size and the slot shifted to hold
-    // the right edge, as `tools::resize_box_to` does.
+    // the right edge, as `edit::resize_box_to` does.
     s.commit(vec![
         Operation::SetGeometry {
             id: b,

@@ -36,7 +36,7 @@ const EPS: f64 = 1e-9;
 ///
 /// This is the canonical anchor numbering: a `Path` carries a radius per anchor
 /// (`NodeKind::Path::corner_radii`), so the order is part of the saved model.
-/// `tools::pen_anchors` produces the same order, and
+/// `edit::pen_anchors` produces the same order, and
 /// `the_app_and_core_number_a_paths_anchors_alike` keeps the two from drifting.
 ///
 /// The real `PathSeg`s are carried, not just endpoints, so rounding re-emits an
@@ -53,7 +53,7 @@ pub struct AnchorRun {
 
 /// Split `path` into the anchor runs a per-anchor value is indexed by.
 ///
-/// Mirrors `tools::pen_anchors`' rule exactly, including the one subtlety: a
+/// Mirrors `edit::pen_anchors`' rule exactly, including the one subtlety: a
 /// `ClosePath` whose last point is already the first **folds**, because that is
 /// what the pen's own writer emits and counting it would give every closed path
 /// one anchor more than it has. A `ClosePath` that does *not* land on the start
@@ -1430,7 +1430,7 @@ pub fn pivot_point(pivot: Option<Pivot>, local: Rect) -> Point {
 ///
 /// The one place [`Pivot`]'s variants are chosen between: authored box → fraction,
 /// emergent box → absolute point. The test matches the resize gesture's
-/// (`tools::resizable_size` is its app-side twin): is the extent a typed field or a
+/// (`edit::resizable_size` is its twin): is the extent a typed field or a
 /// consequence of what is inside? Auto-sized text lands in the emergent half, so a
 /// content edit cannot drag the pivot around with the wrapping.
 pub fn pivot_for(kind: &NodeKind, local: Rect, at: Point) -> Pivot {

@@ -2170,7 +2170,7 @@ fn a_collapsed_basis_decomposes_to_numbers_not_nan() {
 /// ⚠️ **This heading read "for every matrix" until 2026-09-09** (§15 D714), and
 /// every case below is invertible, so nothing here could ever have disagreed
 /// with it. §5.6's own wording is the narrower and correct one; the copies in
-/// this file and in `tools::split_geometry_scale`'s doc had both dropped the
+/// this file and in `edit::split_geometry_scale`'s doc had both dropped the
 /// word. `an_unrepresentable_basis_is_refused_rather_than_approximated` below
 /// drives the cases this one cannot, and `a_collapsed_basis_decomposes_to_
 /// numbers_not_nan` above was already saying so in as many words.

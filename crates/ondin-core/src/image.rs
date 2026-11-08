@@ -323,7 +323,7 @@ fn is_whole_crop(r: &kurbo::Rect) -> bool {
 /// (§15 D452): positive **and finite**. A bare `> 0.0` passes `inf`, and a crop of
 /// `±1e308` is four finite numbers whose `width()` overflows, yielding an
 /// all-`NaN` rectangle, a singular `Affine`, and a `Some(NaN…)` `picture_box`
-/// that panics `tools::crop_resized`. Asked at every span test in the module.
+/// that panics `edit::crop_resized`. Asked at every span test in the module.
 fn usable_span(x: f64) -> bool {
     x > 0.0 && x.is_finite()
 }
@@ -371,7 +371,7 @@ pub fn crop_scaled(crop: kurbo::Rect, k: f64) -> kurbo::Rect {
 /// scale per source pixel is unchanged on both axes.
 ///
 /// **Not clamped, deliberately**: the caller holds the limit
-/// ([`ImageRef::picture_box`], applied by `tools::crop_resized`), and clamping
+/// ([`ImageRef::picture_box`], applied by `edit::crop_resized`), and clamping
 /// here would slide the rectangle out from under a frame this function cannot see.
 /// A degenerate `from` gives `crop` back.
 pub fn crop_reframed(crop: kurbo::Rect, from: kurbo::Rect, to: kurbo::Rect) -> kurbo::Rect {
@@ -2489,7 +2489,7 @@ mod tests {
             r.picture_box(frame, 4000, 3000),
             Some(kurbo::Rect::new(0.0, 0.0, 4000.0, 3000.0)),
             "and picture_box reads off framing, so it answers the source box \
-             rather than the four NaNs tools::crop_resized clamps against"
+             rather than the four NaNs edit::crop_resized clamps against"
         );
     }
 }

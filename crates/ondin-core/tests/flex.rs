@@ -227,7 +227,7 @@ fn resizing_a_growing_item_holds_the_size_it_was_dragged_to() {
 /// start as before; a laid group resized by its top does the same as a shape
 /// (`build::sized_flex_item`'s `to`). The top-handle resize is written as the tool
 /// writes it — the size, and the slot's transform shifted down by what the height
-/// lost (`tools::resize_geometry`).
+/// lost (`edit::resize_geometry`).
 ///
 /// **Flip run**, `resized_from_cross_start` answering `false`: fails on *"the
 /// bottom held"*, the rect at y 20..90 — the predicted site.

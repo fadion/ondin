@@ -1447,8 +1447,8 @@ impl Paint {
     /// The index of the first **visible image fill**, i.e. "is this layer a
     /// picture" and, if so, which fill is the picture.
     ///
-    /// In core because `build::mask_target` asks it too; the app's
-    /// `tools::croppable_fill` is one line onto this. Visible, and the first: a
+    /// `build::mask_target` asks it too, and `edit::croppable_fill` is one line
+    /// onto this. Visible, and the first: a
     /// hidden image fill is not a picture the user is looking at, and the crop
     /// mode edits the first.
     pub fn image_fill(&self) -> Option<usize> {

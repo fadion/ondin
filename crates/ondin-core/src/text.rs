@@ -879,7 +879,7 @@ const RAIL_STEP: f64 = 2.0;
 
 /// How far inside the true swept ribbon [`bend`]'s box may fall, in document units.
 /// Small because the box feeds `resize_to_handle`'s solver, which turns box noise
-/// into artwork movement (`tools::tests::dragging_railed_text_scales_its_rail`).
+/// into artwork movement (`edit::tests::dragging_railed_text_scales_its_rail`).
 const BOX_SAG: f64 = 0.005;
 
 /// Selects `bend`'s curvature-aware box sweep; `false` restores the uniform sweep.

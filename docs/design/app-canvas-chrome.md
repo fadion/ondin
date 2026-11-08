@@ -860,9 +860,12 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   network until a set or service is switched on.
 - **Keys** live in the system keychain (`keychain::read_account`, `store_account`,
   `forget_account`; account `<service>-key`, the Figma token's `figma-token` beside them), read and
-  written on workers, and sent only in their own service's `Authorization` header. Unsplash's links
-  carry its referral `utm_` parameters, and each Unsplash download is reported to its
-  `download_location` when the photo is fetched for an insert, never for a preview.
+  written on workers, and sent only in their own service's `Authorization` header. They are read
+  once a session, and only once a keyed service is on (a Linux store may ask to unlock); a write
+  is read back, so the panel and the form believe what the store kept, and a refused write is said
+  in the status line. Unsplash's links carry its referral `utm_` parameters, and each Unsplash
+  download is reported to its `download_location` when the photo is fetched for an insert, never
+  for a preview — with the key only when that address is Unsplash's API, over https.
 - **The panel** (`panel.rs`) floats beside the toolbar in the insert picker's 340-wide frame,
   bottom-aligned with its rail button (`icon::ASSETS`, between the hexagon and the swatches) and
   wearing `ui::card_frame`. It is one of three panels in that place, with the insert picker and the
@@ -874,10 +877,12 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
     tiles across, 44 tall, 120 shown and more as the end scrolls into view; a set still downloading
     shows its progress row.
   - *Photos*: service and orientation dropdowns, then two columns at each photo's aspect, the next
-    page asked for when the end scrolls into view. A search goes out once typing rests 0.4 s, or
-    at once on `Enter`.
+    page asked for when the end scrolls into view, one at a time. A later page joins the shown one
+    less any photo already shown; one that fails or comes back empty ends the paging and leaves
+    the grid. A search goes out once typing rests 0.4 s, or at once on `Enter`.
   - The foot caption names the set or service and its licence, and the count. A tile resting 0.5 s
-    shows the insert picker's hover card beside the panel: an icon's name, set, variant, size,
+    shows a hover card beside the panel on the insert picker's ground (`ui::hover_card_frame`):
+    an icon's name, set, variant, size,
     *Also:* its aliases and licence; a photo's title, credit sentence and the size and licence it
     comes in at; then what a click and a drag do.
   - Empty states (`ui::empty_state`) say what to do: no set or service on, a keyed service without
@@ -888,13 +893,17 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   `image_tx` for a photo); a flex frame's gap is not chosen. An icon is the SVG importer's group
   named after the icon, `size` points across, its `currentColor` written black, the ink of a new
   text layer. A photo is fetched at Settings' *Photo size* (Openverse serves only the original) and
-  embedded. With unlocked shapes or frames selected (not text, a line or a spiral), a photo's
+  embedded. With unlocked shapes or frames selected (not text, a line or a spiral, nor a part of
+  an inserted icon, whose one credit is the icon's), a photo's
   click fills them instead (the picture fill or top fill replaced, else a new fill), each a
   different photo in grid order from the one clicked; a strip says
   *Click fills Hero image*, and `Alt`-click places. Every insert is one undo step carrying its
   credit: *Insert icon*, *Insert photo*, *Fill with photo*. The status says *Placed Arrow right ·
-  Ctrl+Z to undo*, or *Filled Hero image · Photo by … · Ctrl+Z to undo*. A fetched photo lands
-  when no gesture is live and no modal is up, even with the panel closed.
+  Ctrl+Z to undo*, or *Filled Hero image · Photo by … · Ctrl+Z to undo* (names through private
+  mode). A fetched photo lands when no gesture is live and no modal is up, even with the panel
+  closed or in focus mode (`assets_pass` runs outside the panels' guard); one asked for in a
+  document left behind is dropped. The panel's choices are written to the preferences once no
+  button is down, not on each frame of a scrubbed size.
 - **Settings ▸ Assets**, after the web fonts: a caption, then *Icon sets* and *Photos*, a
   `ui::switch_row_noted` per set or service noted with its licence or what it needs; under a keyed
   service that is on, its key in `ui::secret_field` and a caption saying where a key is made and

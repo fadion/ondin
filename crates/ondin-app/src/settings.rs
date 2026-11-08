@@ -218,7 +218,8 @@ impl OndinApp {
             Some(_) => None,
             None => {
                 self.fonts.measure_cache(ctx);
-                self.read_asset_keys(ctx);
+                let on = self.prefs.assets.photo_services.clone();
+                self.read_asset_keys(ctx, &on);
                 let mut s = Settings::from_prefs(&self.prefs);
                 s.keys = self.asset_keys.clone().unwrap_or_default();
                 Some(s)
@@ -235,19 +236,6 @@ impl OndinApp {
         let Some(mut draft) = self.settings.clone() else {
             return;
         };
-        // The keychain's keys, once its read lands: the form starts from them.
-        let landed = match self.asset_keys_job.as_ref().map(crate::job::Job::poll) {
-            Some(Ok(Some(keys))) => Some(keys),
-            Some(Err(())) => Some(Default::default()),
-            _ => None,
-        };
-        if let Some(keys) = landed {
-            self.asset_keys_job = None;
-            if draft.keys.is_empty() {
-                draft.keys = keys.clone();
-            }
-            self.asset_keys = Some(keys);
-        }
         let mut saved = Settings::from_prefs(&self.prefs);
         saved.keys = self.asset_keys.clone().unwrap_or_default();
         // A picker open on one of the form's colours takes Escape first, so the press
@@ -650,6 +638,9 @@ impl OndinApp {
         }
         ui.add_space(ROW_GAP * 2.0);
         sub_heading(ui, "Photos");
+        // A keyed service just switched on shows its field: the keys are read now.
+        let ctx = ui.ctx().clone();
+        self.read_asset_keys(&ctx, &draft.photo_services);
         let keys_read = self.asset_keys.is_some();
         for svc in SERVICES {
             ui.add_space(ROW_GAP);
@@ -751,25 +742,47 @@ impl OndinApp {
     }
 
     /// Read every photo service's key from the keychain on a worker, once a
-    /// session: each read can block on the store.
-    pub(crate) fn read_asset_keys(&mut self, ctx: &egui::Context) {
-        if self.asset_keys.is_some() || self.asset_keys_job.is_some() {
+    /// session and only once a keyed service is on (`on`, its keys): each read
+    /// can block on the store, and on Linux may ask to unlock it.
+    pub(crate) fn read_asset_keys(&mut self, ctx: &egui::Context, on: &[String]) {
+        let keyed = crate::assets::photos::SERVICES
+            .iter()
+            .any(|s| s.key_label.is_some() && on.iter().any(|k| k == s.key));
+        if !keyed || self.asset_keys.is_some() || self.asset_keys_job.is_some() {
             return;
         }
-        self.asset_keys_job = Some(crate::job::Job::spawn("ondin-keys", ctx, || {
-            crate::assets::photos::SERVICES
-                .iter()
-                .filter(|s| s.key_label.is_some())
-                .filter_map(|s| {
-                    crate::keychain::read_account(&s.account()).map(|k| (s.key.to_string(), k))
-                })
-                .collect()
+        self.asset_keys_job = Some(crate::job::Job::spawn("ondin-keys", ctx, || KeysRead {
+            keys: stored_keys(),
+            failed: None,
         }));
     }
 
+    /// Take the keychain's answer once it lands: the keys as stored, and what a
+    /// write could not keep, said. A Settings form still showing no keys starts
+    /// from them. Called every frame, Settings open or not.
+    pub(crate) fn poll_asset_keys(&mut self) {
+        let landed = match self.asset_keys_job.as_ref().map(crate::job::Job::poll) {
+            Some(Ok(Some(read))) => read,
+            Some(Err(())) => KeysRead::default(),
+            _ => return,
+        };
+        self.asset_keys_job = None;
+        if let Some(why) = landed.failed {
+            self.session.fail(why);
+        }
+        if let Some(s) = self.settings.as_mut()
+            && s.keys.is_empty()
+        {
+            s.keys = landed.keys.clone();
+        }
+        self.asset_keys = Some(landed.keys);
+    }
+
     /// Write the keys that *Save changes* changed to the keychain, on a worker; a
-    /// cleared field forgets its key. Nothing before the keychain's read landed,
-    /// whose answer this compares against.
+    /// cleared field forgets its key. The keys are then read back, so what the
+    /// panel and the next form believe is what the store kept, and a store that
+    /// refused says so. Nothing before the keychain's read landed, whose answer
+    /// this compares against.
     fn write_asset_keys(
         &mut self,
         ctx: &egui::Context,
@@ -784,22 +797,28 @@ impl OndinApp {
             .filter(|s| stored.get(s.key) != keys.get(s.key))
             .map(|s| (s.account(), keys.get(s.key).map(|k| k.trim().to_string())))
             .collect();
-        if changed.is_empty() {
+        if changed.is_empty() || self.asset_keys_job.is_some() {
             return;
         }
-        self.asset_keys = Some(keys.clone());
-        let _ = crate::job::Job::spawn("ondin-keys", ctx, move || {
+        self.asset_keys = None;
+        self.asset_keys_job = Some(crate::job::Job::spawn("ondin-keys", ctx, move || {
+            let mut failed = None;
             for (account, key) in changed {
                 match key.filter(|k| !k.is_empty()) {
                     Some(k) => {
                         if let Err(e) = crate::keychain::store_account(&account, &k) {
                             log::warn!(target: "ondin", "keeping {account}: {e}");
+                            failed = Some(format!("The key was not kept: {e}"));
                         }
                     }
                     None => crate::keychain::forget_account(&account),
                 }
             }
-        });
+            KeysRead {
+                keys: stored_keys(),
+                failed,
+            }
+        }));
     }
 
     /// *Default font* and the family dropdown, the typography panel's list in it.
@@ -1239,6 +1258,24 @@ fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut eg
         .inner
     })
     .inner
+}
+
+/// The keychain's answer about the photo services' keys.
+#[derive(Default)]
+pub(crate) struct KeysRead {
+    /// Each keyed service's key, as the store holds it.
+    keys: std::collections::BTreeMap<String, String>,
+    /// What a write could not keep, in the status line's words.
+    failed: Option<String>,
+}
+
+/// Every keyed photo service's key as the keychain holds it, on a worker.
+fn stored_keys() -> std::collections::BTreeMap<String, String> {
+    crate::assets::photos::SERVICES
+        .iter()
+        .filter(|s| s.key_label.is_some())
+        .filter_map(|s| crate::keychain::read_account(&s.account()).map(|k| (s.key.to_string(), k)))
+        .collect()
 }
 
 /// A group's name inside a section (*Icon sets*, *Photos*): a row's label size,

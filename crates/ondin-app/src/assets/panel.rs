@@ -296,7 +296,9 @@ fn photo_error_words(err: &PhotoError, service: &str) -> (String, String) {
     }
 }
 
-/// Whether a layer can take a photo as its fill: a shape or a frame, unlocked.
+/// Whether a layer can take a photo as its fill: a shape or a frame, unlocked,
+/// and not part of an inserted icon — a layer holds one credit, and the photo's
+/// would take the place of the icon's (a CC BY set's attribution).
 fn fillable(doc: &ondin_core::Document, id: NodeId) -> bool {
     doc.get(id).is_some_and(|n| {
         n.kind().takes_paint()
@@ -304,6 +306,8 @@ fn fillable(doc: &ondin_core::Document, id: NodeId) -> bool {
                 n.kind(),
                 NodeKind::Text { .. } | NodeKind::Line { .. } | NodeKind::Spiral { .. }
             )
+            && n.credit()
+                .is_none_or(|c| c.kind != ondin_core::CreditKind::Icon)
     }) && !ondin_core::is_effectively_locked(doc, id)
 }
 
@@ -318,7 +322,8 @@ impl OndinApp {
                 self.var_browser = None;
                 // Whether a keyed service has its key, for the panel's empty state.
                 let ctx = self.egui_ctx.clone();
-                self.read_asset_keys(&ctx);
+                let on = self.prefs.assets.photo_services.clone();
+                self.read_asset_keys(&ctx, &on);
                 Some(Panel {
                     focus: true,
                     shown: PAGE,
@@ -338,12 +343,22 @@ impl OndinApp {
         }
     }
 
-    /// Draw the panel, when it is open, and do what it asked. The providers'
-    /// workers are read first, so a photo fetched for an insert lands even with the
-    /// panel closed.
-    pub(crate) fn assets_ui(&mut self, ctx: &egui::Context) {
+    /// The providers' frame work, whether or not the panel shows (focus mode
+    /// hides it): what the workers handed back, a fetched photo's landing, the
+    /// keychain's answer, and the panel's choices written once no button is down
+    /// (a scrubbed size field changes them every frame).
+    pub(crate) fn assets_pass(&mut self, ctx: &egui::Context) {
         self.assets.pass(ctx);
         self.land_asset_photos();
+        self.poll_asset_keys();
+        if self.assets.prefs_dirty && !ctx.input(|i| i.pointer.any_down()) {
+            self.assets.prefs_dirty = false;
+            self.prefs.save();
+        }
+    }
+
+    /// Draw the panel, when it is open, and do what it asked.
+    pub(crate) fn assets_ui(&mut self, ctx: &egui::Context) {
         if self.asset_panel.is_none() {
             return;
         }
@@ -354,7 +369,7 @@ impl OndinApp {
         let targets = self.photo_targets();
         let fill_names: Vec<String> = targets
             .iter()
-            .filter_map(|id| self.session.doc.get(*id).map(|n| n.name().to_string()))
+            .map(|id| crate::private::layer(&self.session.doc, *id).into_owned())
             .collect();
         let keys = self.asset_keys.clone();
         let now = ctx.input(|i| i.time);
@@ -515,7 +530,7 @@ impl OndinApp {
         }
         if new_prefs != self.prefs.assets {
             self.prefs.assets = new_prefs;
-            self.prefs.save();
+            self.assets.prefs_dirty = true;
         }
 
         // The carried tile follows the pointer; over the canvas the drop adds.
@@ -561,7 +576,7 @@ impl OndinApp {
             None => {}
             Some(Act::Tab(photos)) => {
                 self.prefs.assets.photos_tab = photos;
-                self.prefs.save();
+                self.assets.prefs_dirty = true;
                 if let Some(p) = self.asset_panel.as_mut() {
                     p.focus = true;
                 }
@@ -772,11 +787,7 @@ impl OndinApp {
                     .name_step("Fill with photo", icon::PAINT_BUCKET);
                 if self.commit_edit(Transaction(ops)) {
                     let what = match filled.as_slice() {
-                        [one] => self
-                            .session
-                            .doc
-                            .get(*one)
-                            .map_or_else(String::new, |n| n.name().to_string()),
+                        [one] => crate::private::layer(&self.session.doc, *one).into_owned(),
                         many => ui::count(many.len(), "layer"),
                     };
                     let said = match filled.len() {
@@ -1463,70 +1474,65 @@ fn hover_card(
         .interactable(false)
         .fixed_pos(egui::pos2(panel.right() + CARD_GAP, row.top()))
         .show(ctx, |ui| {
-            egui::Frame::NONE
-                .fill(color::raised())
-                .corner_radius(6)
-                .stroke(egui::Stroke::new(1.0, color::text_a(20)))
-                .inner_margin(PAD)
-                .show(ui, |ui| {
-                    ui.set_width(CARD_W - 2.0 * PAD);
-                    ui.spacing_mut().item_spacing.y = 5.0;
-                    let line = |ui: &mut egui::Ui, text: &str| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(text)
-                                    .size(ui::SMALL_PT)
-                                    .color(theme::text::dim()),
-                            )
-                            .wrap(),
+            ui::hover_card_frame().inner_margin(PAD).show(ui, |ui| {
+                ui.set_width(CARD_W - 2.0 * PAD);
+                ui.spacing_mut().item_spacing.y = 5.0;
+                let line = |ui: &mut egui::Ui, text: &str| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .size(ui::SMALL_PT)
+                                .color(theme::text::dim()),
+                        )
+                        .wrap(),
+                    );
+                };
+                match item {
+                    Item::Icon(h) => {
+                        let icon = h.icon();
+                        ui.label(
+                            egui::RichText::new(&icon.name)
+                                .size(ui::CONTROL_PT)
+                                .color(theme::text::strong()),
                         );
-                    };
-                    match item {
-                        Item::Icon(h) => {
-                            let icon = h.icon();
+                        line(
+                            ui,
+                            &format!(
+                                "{} · {} · {icon_size:.0} px",
+                                h.spec.name, h.spec.variants[icon.variant].label
+                            ),
+                        );
+                        if !icon.aliases.is_empty() {
+                            line(ui, &format!("Also: {}", icon.aliases.join(", ")));
+                        }
+                        line(ui, &format!("Licence: {}", h.spec.licence));
+                        line(ui, "Click to place · drag to drop");
+                    }
+                    Item::Photo(p) => {
+                        if !p.title.is_empty() {
                             ui.label(
-                                egui::RichText::new(&icon.name)
+                                egui::RichText::new(&p.title)
                                     .size(ui::CONTROL_PT)
                                     .color(theme::text::strong()),
                             );
-                            line(
-                                ui,
-                                &format!(
-                                    "{} · {} · {icon_size:.0} px",
-                                    h.spec.name, h.spec.variants[icon.variant].label
-                                ),
-                            );
-                            if !icon.aliases.is_empty() {
-                                line(ui, &format!("Also: {}", icon.aliases.join(", ")));
-                            }
-                            line(ui, &format!("Licence: {}", h.spec.licence));
-                            line(ui, "Click to place · drag to drop");
                         }
-                        Item::Photo(p) => {
-                            if !p.title.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(&p.title)
-                                        .size(ui::CONTROL_PT)
-                                        .color(theme::text::strong()),
-                                );
-                            }
-                            line(ui, &p.credit("").text);
-                            let at = match (photo_size, p.service) {
-                                (_, "openverse") | (PhotoSize::Full, _) => "full size".to_string(),
-                                (PhotoSize::Small, _) => "400 px wide".to_string(),
-                                (PhotoSize::Regular, _) => "1080 px wide".to_string(),
-                            };
-                            line(ui, &format!("Comes in at {at} · {}", p.licence));
-                            line(
-                                ui,
-                                match fills {
-                                    true => "Click to fill · Alt-click to place · drag to drop",
-                                    false => "Click to place · drag to drop",
-                                },
-                            );
-                        }
+                        line(ui, &p.credit("").text);
+                        let at = match (photo_size, p.service) {
+                            (_, "openverse") | (PhotoSize::Full, _) => "full size".to_string(),
+                            (PhotoSize::Small, _) => "400 px wide".to_string(),
+                            (PhotoSize::Regular, _) => "1080 px wide".to_string(),
+                        };
+                        line(ui, &format!("Comes in at {at} · {}", p.licence));
+                        line(
+                            ui,
+                            match fills {
+                                true => "Click to fill · Alt-click to place · drag to drop",
+                                false => "Click to place · drag to drop",
+                            },
+                        );
                     }
-                });
+                }
+            });
         });
 }
 
@@ -1757,6 +1763,38 @@ mod tests {
             locked: true,
         }]));
         assert!(app.photo_targets().is_empty());
+    }
+
+    /// A part of an inserted icon is no photo target: its one credit is the icon's.
+    /// flip: drop the credit test in `fillable` → fails here.
+    #[test]
+    fn an_icons_part_takes_no_photo() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let target = rect(&mut app);
+        app.session.commit(Transaction(vec![Operation::SetCredit {
+            id: target,
+            credit: Some(Box::new(icon_credit(
+                SetSpec::by_key("font-awesome").unwrap(),
+                "2026-11-08",
+            ))),
+        }]));
+        app.session.selection.set_one(target);
+        assert!(app.photo_targets().is_empty());
+    }
+
+    /// A photo asked for in one document is not placed in the next.
+    #[test]
+    fn a_fetch_does_not_follow_a_document_switch() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.assets.fetch = Some(super::super::Fetch {
+            token: 1,
+            photos: vec![photo()],
+            intent: PhotoIntent::Place { at: None },
+        });
+        app.reset_transient_state();
+        assert!(app.assets.fetch.is_none() && app.assets.landed.is_none());
     }
 
     /// The panel shares its place: opening it closes the insert picker and the

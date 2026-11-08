@@ -115,6 +115,15 @@ pub const POPOVER_PAD: f32 = 11.0;
 /// How far a floating card keeps from the screen's edge when it is placed.
 pub const SCREEN_MARGIN: f32 = 12.0;
 
+/// The ground of a hover card beside a browsing panel — the insert picker's and
+/// the assets browser's — raised, a faint hairline, a 6pt corner. No margin.
+pub fn hover_card_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(color::raised())
+        .corner_radius(6)
+        .stroke(egui::Stroke::new(1.0, color::text_a(20)))
+}
+
 /// The ground of a card floating over everything (a popup over the canvas, a
 /// modal, Find, the variables browser and the insert picker): the card's fill,
 /// a `color::divider()` hairline, a 10pt corner and a shadow deeper than a

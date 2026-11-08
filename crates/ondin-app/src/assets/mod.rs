@@ -19,6 +19,9 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 
+/// Where an Unsplash download is reported: the one address its key goes to
+/// besides the search.
+const UNSPLASH_API: &str = "https://api.unsplash.com/";
 /// How many requests run at once.
 const WORKERS: usize = 4;
 /// The most a set's package or a photo may be, in bytes.
@@ -79,6 +82,16 @@ enum Done {
 
 type Work = Box<dyn FnOnce() -> Done + Send>;
 
+/// The frame's context as the workers reach it ([`Assets::pass`] fills it).
+type Waker = Arc<Mutex<Option<egui::Context>>>;
+
+/// Ask for a frame, once there is a context to ask.
+fn wake(ctx: &Waker) {
+    if let Some(c) = ctx.lock().ok().and_then(|g| g.clone()) {
+        c.request_repaint();
+    }
+}
+
 /// One photo fetched for an insert: the picture and its pixels, or why not.
 pub(crate) type Fetched = Result<(crate::app::LoadedImage, ondin_core::peniko::ImageData), String>;
 
@@ -105,7 +118,9 @@ pub(crate) struct Assets {
     jobs: Option<mpsc::Sender<Work>>,
     done: mpsc::Receiver<Done>,
     done_tx: mpsc::Sender<Done>,
-    ctx: Option<egui::Context>,
+    /// What a worker wakes the frame through: filled by the first `pass`, read
+    /// at each wake, so a worker started before any frame still wakes one.
+    ctx: Waker,
     pub(crate) sets: HashMap<&'static str, SetState>,
     tiles: HashMap<String, Tile>,
     thumbs: HashMap<String, Tile>,
@@ -122,6 +137,8 @@ pub(crate) struct Assets {
     /// Fetched photos waiting for the app to place them, one read per photo.
     pub(crate) landed: Option<(Fetch, Vec<Fetched>)>,
     cache_bytes: Option<u64>,
+    /// The panel's choices changed and are not yet written to the preferences.
+    pub(crate) prefs_dirty: bool,
     /// Off the network, for tests: nothing is spawned.
     offline: bool,
 }
@@ -133,7 +150,7 @@ impl Default for Assets {
             jobs: None,
             done,
             done_tx,
-            ctx: None,
+            ctx: Waker::default(),
             sets: HashMap::new(),
             tiles: HashMap::new(),
             thumbs: HashMap::new(),
@@ -144,6 +161,7 @@ impl Default for Assets {
             fetch_seq: 0,
             landed: None,
             cache_bytes: None,
+            prefs_dirty: false,
             offline: cfg!(test),
         }
     }
@@ -220,7 +238,7 @@ fn load_set(
     dir: &Path,
     spec: &'static SetSpec,
     tx: &mpsc::Sender<Done>,
-    ctx: Option<&egui::Context>,
+    ctx: &Waker,
 ) -> Result<Arc<IconSet>, String> {
     let mut jsons = Vec::new();
     let mut before = 0;
@@ -235,9 +253,7 @@ fn load_set(
                         done: before + done,
                         total: total.map(|t| before + t),
                     });
-                    if let Some(ctx) = ctx {
-                        ctx.request_repaint();
-                    }
+                    wake(ctx);
                 })
                 .map_err(|_| format!("Can't reach {}", spec.name))?;
                 // Written beside and renamed, so a quit mid-write leaves no
@@ -324,7 +340,7 @@ impl Assets {
             for i in 0..WORKERS {
                 let rx = Arc::clone(&rx);
                 let done = self.done_tx.clone();
-                let ctx = self.ctx.clone();
+                let ctx = Arc::clone(&self.ctx);
                 let _ = std::thread::Builder::new()
                     .name(format!("ondin-assets-{i}"))
                     .spawn(move || {
@@ -332,9 +348,7 @@ impl Assets {
                             let next = rx.lock().ok().and_then(|r| r.recv().ok());
                             let Some(work) = next else { break };
                             let _ = done.send(work());
-                            if let Some(ctx) = &ctx {
-                                ctx.request_repaint();
-                            }
+                            wake(&ctx);
                         }
                     });
             }
@@ -345,8 +359,10 @@ impl Assets {
 
     /// Take what the workers handed back. Called once a frame.
     pub(crate) fn pass(&mut self, ctx: &egui::Context) {
-        if self.ctx.is_none() {
-            self.ctx = Some(ctx.clone());
+        if let Ok(mut slot) = self.ctx.lock()
+            && slot.is_none()
+        {
+            *slot = Some(ctx.clone());
         }
         while let Ok(done) = self.done.try_recv() {
             match done {
@@ -384,14 +400,12 @@ impl Assets {
                 }
                 Done::Photos { token, page } => {
                     if token == self.token {
-                        self.more_asked = false;
+                        let later = std::mem::take(&mut self.more_asked);
                         self.photos = Some(match (self.photos.take(), page) {
-                            // A later page joins the one shown.
-                            (Some(Ok(mut shown)), Ok(next)) if next_page_of(&shown, &next) => {
-                                shown.photos.extend(next.photos);
-                                shown.more = next.more;
-                                Ok(shown)
-                            }
+                            // A later page joins the one shown, less any photo the
+                            // provider's drift repeats; one that failed or came back
+                            // empty ends the paging and leaves the grid as it was.
+                            (Some(Ok(shown)), next) if later => Ok(joined(shown, next)),
                             (_, page) => page,
                         });
                     }
@@ -418,10 +432,10 @@ impl Assets {
                 },
             );
             let tx = self.done_tx.clone();
-            let ctx = self.ctx.clone();
+            let ctx = Arc::clone(&self.ctx);
             self.run(Box::new(move || Done::Set {
                 set: spec.key,
-                read: load_set(&agent(), &cache_dir(), spec, &tx, ctx.as_ref()),
+                read: load_set(&agent(), &cache_dir(), spec, &tx, &ctx),
             }));
         }
         &self.sets[spec.key]
@@ -554,8 +568,12 @@ impl Assets {
                             crate::app::read_picture(bytes, None, Some(name))
                                 .map_err(|_| "The photo could not be read".to_string())
                         });
+                    // The address comes from the API's answer: the key goes with
+                    // it only to the service's own API, over https.
                     if read.is_ok()
                         && let (Some(report), Some(service)) = (report, service)
+                        && service.key == "unsplash"
+                        && report.starts_with(UNSPLASH_API)
                     {
                         let key = crate::keychain::read_account(&service.account());
                         let auth = key.map(|k| format!("Client-ID {}", k.trim()));
@@ -595,13 +613,23 @@ impl Assets {
     }
 }
 
-/// Whether `next` continues `shown` rather than starting over.
-fn next_page_of(shown: &Page, next: &Page) -> bool {
-    !next.photos.is_empty()
-        && next
-            .photos
-            .first()
-            .is_some_and(|p| shown.photos.iter().all(|s| s.id != p.id))
+/// `shown` with a later page's answer joined on: its new photos appended (one
+/// already shown is not shown twice, which would also give two tiles one id),
+/// paging on while it brought something; an error or an empty page stops it.
+fn joined(mut shown: Page, next: Result<Page, PhotoError>) -> Page {
+    match next {
+        Ok(next) => {
+            let fresh: Vec<Photo> = next
+                .photos
+                .into_iter()
+                .filter(|p| shown.photos.iter().all(|s| s.id != p.id))
+                .collect();
+            shown.more = next.more && !fresh.is_empty();
+            shown.photos.extend(fresh);
+        }
+        Err(_) => shown.more = false,
+    }
+    shown
 }
 
 #[cfg(test)]
@@ -646,10 +674,11 @@ mod tests {
         assert!(!a.searching(), "the fixture: the first page landed");
         a.search_photos(svc, "coffee", 2, photos::Orientation::Any);
         assert!(a.searching(), "a later page in flight is a search");
+        // The provider's drift repeats "a": it is not shown twice.
         let next = Page {
-            photos: vec![photo("b")],
-            total: 2,
-            more: false,
+            photos: vec![photo("a"), photo("b")],
+            total: 3,
+            more: true,
         };
         let _ = a.done_tx.send(Done::Photos {
             token: a.token,
@@ -660,7 +689,21 @@ mod tests {
         let Some(Ok(shown)) = &a.photos else {
             panic!("a page is shown");
         };
-        assert_eq!(shown.photos.len(), 2, "the later page joined");
+        let ids: Vec<&str> = shown.photos.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"], "the later page joined, its repeat dropped");
+        assert!(shown.more);
+
+        // A later page refused (an hourly limit) keeps the grid and stops paging.
+        a.search_photos(svc, "coffee", 3, photos::Orientation::Any);
+        let _ = a.done_tx.send(Done::Photos {
+            token: a.token,
+            page: Err(PhotoError::Limited),
+        });
+        a.pass(&ctx);
+        let Some(Ok(shown)) = &a.photos else {
+            panic!("the grid survives a failed later page");
+        };
+        assert_eq!(shown.photos.len(), 2);
         assert!(!shown.more);
     }
 

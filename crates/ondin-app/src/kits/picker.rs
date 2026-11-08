@@ -1743,90 +1743,79 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
         .interactable(false)
         .fixed_pos(egui::pos2(panel.right() + CARD_GAP, row.top()))
         .show(ctx, |ui| {
-            egui::Frame::NONE
-                .fill(color::raised())
-                .corner_radius(6)
-                .stroke(egui::Stroke::new(1.0, color::text_a(20)))
-                .inner_margin(PAD)
-                .show(ui, |ui| {
-                    ui.set_width(CARD_W - 2.0 * PAD);
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 7.0;
-                        let glyph = if item.set {
-                            icon::VARIANT_SET
-                        } else {
-                            icon::HEXAGON_FILL
-                        };
-                        ui.label(
-                            egui::RichText::new(glyph)
-                                .font(theme::icon_font(14.0))
-                                .color(color::accent_300()),
-                        );
-                        ui.label(
-                            egui::RichText::new(&item.name)
-                                .size(ui::CONTROL_PT)
-                                .color(theme::text::strong()),
-                        );
-                        if item.variants > 0 {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let n = match item.variants {
-                                        1 => "1 variant".to_string(),
-                                        n => format!("{n} variants"),
-                                    };
-                                    ui.label(
-                                        egui::RichText::new(n)
-                                            .size(ui::CAPTION_PT)
-                                            .color(theme::text::faint()),
-                                    );
-                                },
-                            );
-                        }
-                    });
-                    if private {
-                        return;
-                    }
-                    if !item.about.is_empty() {
-                        let mut job = egui::text::LayoutJob::simple(
-                            item.about.clone(),
-                            egui::FontId::proportional(ui::SMALL_PT),
-                            theme::text::muted(),
-                            ui.available_width(),
-                        );
-                        job.wrap.max_rows = CARD_LINES;
-                        ui.label(job);
-                    }
-                    if !item.docs.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
+            ui::hover_card_frame().inner_margin(PAD).show(ui, |ui| {
+                ui.set_width(CARD_W - 2.0 * PAD);
+                ui.spacing_mut().item_spacing.y = 8.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 7.0;
+                    let glyph = if item.set {
+                        icon::VARIANT_SET
+                    } else {
+                        icon::HEXAGON_FILL
+                    };
+                    ui.label(
+                        egui::RichText::new(glyph)
+                            .font(theme::icon_font(14.0))
+                            .color(color::accent_300()),
+                    );
+                    ui.label(
+                        egui::RichText::new(&item.name)
+                            .size(ui::CONTROL_PT)
+                            .color(theme::text::strong()),
+                    );
+                    if item.variants > 0 {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let n = match item.variants {
+                                1 => "1 variant".to_string(),
+                                n => format!("{n} variants"),
+                            };
                             ui.label(
-                                egui::RichText::new(icon::GLOBE)
-                                    .font(theme::icon_font(13.0))
+                                egui::RichText::new(n)
+                                    .size(ui::CAPTION_PT)
                                     .color(theme::text::faint()),
-                            );
-                            let host = ui.label(
-                                egui::RichText::new(ondin_core::link_host(&item.docs))
-                                    .size(ui::SMALL_PT)
-                                    .color(theme::text::dim()),
-                            );
-                            // Painted against the host rather than laid out: the
-                            // card's width is fixed, and centred the smaller
-                            // hint's baseline sits above the host's.
-                            ui.painter().text(
-                                egui::pos2(
-                                    ui.max_rect().right(),
-                                    host.rect.center().y + HINT_NUDGE,
-                                ),
-                                egui::Align2::RIGHT_CENTER,
-                                crate::input::keys("Alt+click to open"),
-                                egui::FontId::proportional(ui::CAPTION_PT),
-                                theme::text::faint(),
                             );
                         });
                     }
                 });
+                if private {
+                    return;
+                }
+                if !item.about.is_empty() {
+                    let mut job = egui::text::LayoutJob::simple(
+                        item.about.clone(),
+                        egui::FontId::proportional(ui::SMALL_PT),
+                        theme::text::muted(),
+                        ui.available_width(),
+                    );
+                    job.wrap.max_rows = CARD_LINES;
+                    ui.label(job);
+                }
+                if !item.docs.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.label(
+                            egui::RichText::new(icon::GLOBE)
+                                .font(theme::icon_font(13.0))
+                                .color(theme::text::faint()),
+                        );
+                        let host = ui.label(
+                            egui::RichText::new(ondin_core::link_host(&item.docs))
+                                .size(ui::SMALL_PT)
+                                .color(theme::text::dim()),
+                        );
+                        // Painted against the host rather than laid out: the
+                        // card's width is fixed, and centred the smaller
+                        // hint's baseline sits above the host's.
+                        ui.painter().text(
+                            egui::pos2(ui.max_rect().right(), host.rect.center().y + HINT_NUDGE),
+                            egui::Align2::RIGHT_CENTER,
+                            crate::input::keys("Alt+click to open"),
+                            egui::FontId::proportional(ui::CAPTION_PT),
+                            theme::text::faint(),
+                        );
+                    });
+                }
+            });
         });
 }
 

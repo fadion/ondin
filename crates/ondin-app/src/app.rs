@@ -877,7 +877,7 @@ pub struct OndinApp {
     /// session (`OndinApp::read_asset_keys`); what Settings' key fields start from.
     pub(crate) asset_keys: Option<std::collections::BTreeMap<String, String>>,
     /// The keychain read in flight.
-    pub(crate) asset_keys_job: Option<crate::job::Job<std::collections::BTreeMap<String, String>>>,
+    pub(crate) asset_keys_job: Option<crate::job::Job<crate::settings::KeysRead>>,
     /// The revision the bound families and the text's scripts were last loaded at: a
     /// bind, a string cell, a new variable or a paste can name a family not yet
     /// requested, and an edit can add a script.
@@ -2276,6 +2276,8 @@ impl OndinApp {
         self.find_ui(&ctx);
         self.colour_review_ui(&ctx);
         self.credits_ui(&ctx);
+        // Unguarded: a photo asked for before focus mode lands in it.
+        self.assets_pass(&ctx);
         self.repeat_ui(&ctx);
         self.blend_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
@@ -6399,6 +6401,9 @@ impl OndinApp {
         self.kit_picker = None;
         self.asset_panel = None;
         self.credits_open = false;
+        // A photo asked for in the document left behind is not placed in this one.
+        self.assets.fetch = None;
+        self.assets.landed = None;
         self.kit_placing = None;
         self.var_browser = None;
         self.var_complete = None;

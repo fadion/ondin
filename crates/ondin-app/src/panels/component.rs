@@ -300,13 +300,16 @@ impl OndinApp {
             let overrides = ondin_core::reset::overrides(doc, *id);
             fields.push((*id, overrides.iter().map(|o| o.reset.clone()).collect()));
             for o in overrides {
-                // A photo credit goes with the fill that shows its picture: reset
-                // apart, it would list a photo the layer no longer draws.
+                // A photo credit goes with the fill that shows its picture, whether
+                // the copy holds it or the reset brings the main's back: reset
+                // apart, it would list a photo the layer no longer draws, or draw
+                // a photo with no credit.
+                let is_photo = |c: &ondin_core::Credit| c.kind == ondin_core::CreditKind::Photo;
                 let photo_credit = match &o.reset {
-                    Operation::SetCredit { id, .. } => doc
-                        .get(*id)
-                        .and_then(|n| n.credit())
-                        .is_some_and(|c| c.kind == ondin_core::CreditKind::Photo),
+                    Operation::SetCredit { id, credit } => {
+                        doc.get(*id).and_then(|n| n.credit()).is_some_and(is_photo)
+                            || credit.as_deref().is_some_and(is_photo)
+                    }
                     _ => false,
                 };
                 let title = match photo_credit {
@@ -3009,6 +3012,71 @@ mod tests {
             f.app.session.doc.get(f.ir).unwrap().credit().cloned(),
             main_credit,
             "the credit goes with it"
+        );
+    }
+
+    /// A copy whose photo was replaced by a local picture, dropping its credit:
+    /// its Fill card's reset brings the main's photo back with the main's credit.
+    /// flip: `gather_card_overrides` reading only the copy's own credit → fails at
+    /// "the main's credit comes back with its photo".
+    #[test]
+    fn resetting_a_replaced_copy_fill_brings_the_mains_credit_back() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let credit = ondin_core::Credit {
+            kind: ondin_core::CreditKind::Photo,
+            text: "Photo by Ana Ruiz on Unsplash".into(),
+            author: "Ana Ruiz".into(),
+            author_url: String::new(),
+            provider: "Unsplash".into(),
+            provider_url: String::new(),
+            source_url: String::new(),
+            licence: "Unsplash License".into(),
+            licence_url: String::new(),
+            required: true,
+            inserted: "2026-11-08".into(),
+        };
+        let image = |sha: &str| {
+            ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::image_brush(ondin_core::ImageId(sha.into())).into(),
+                visible: true,
+            }])
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: r,
+                fills: image("sha:photo"),
+            },
+            Operation::SetCredit {
+                id: r,
+                credit: Some(Box::new(credit.clone())),
+            },
+        ])));
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().credit(),
+            Some(&credit),
+            "the fixture: the copy carries the main's credit"
+        );
+        // Replace… on the copy: a local picture, the credit dropped.
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: f.ir,
+                fills: image("sha:local"),
+            },
+            Operation::SetCredit {
+                id: f.ir,
+                credit: None,
+            },
+        ])));
+        f.app.session.selection.set_one(f.ir);
+        f.app.gather_card_overrides();
+        let (_, ops) = f.app.card_override("Fill").expect("the fill is overridden");
+        assert!(f.app.session.commit(Transaction(ops.to_vec())));
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().credit(),
+            Some(&credit),
+            "the main's credit comes back with its photo"
         );
     }
 

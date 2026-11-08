@@ -14,7 +14,6 @@ use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::clean_up::{self, Finding, Plan, Rule, Rules, Subject};
 use ondin_core::{Document, GuideAxis, NodeId, Resolved};
-use std::collections::HashSet;
 
 /// The box's width, batch rename's.
 const W: f32 = 520.0;
@@ -26,8 +25,8 @@ const COL_GAP: f32 = 16.0;
 const ROW_H: f32 = ui::MENU_ROW_H;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 12.0;
-/// A group lists this many rows before its *N more* row.
-const FOLDED: usize = 3;
+/// The space between two lines of switches.
+const SWITCH_GAP: f32 = 2.0;
 /// The switches two to a line, paint rules on the left and layer rules on the right.
 const GRID: [[Rule; 2]; 3] = [
     [Rule::HiddenPaint, Rule::HiddenLayers],
@@ -47,8 +46,6 @@ pub(crate) struct CleanUpBox {
     every: Plan,
     /// What `plan` and `every` were made for.
     asked: Option<(Scope, Rules)>,
-    /// Groups opened past their first rows.
-    open: HashSet<Rule>,
     /// What the hovered row names, and whether it is a whole group's (a hairline).
     hover: (Vec<NodeId>, bool),
 }
@@ -57,7 +54,6 @@ pub(crate) struct CleanUpBox {
 enum Line {
     Head(Rule, usize),
     Row(usize),
-    More(Rule, usize),
 }
 
 impl CleanUpBox {
@@ -94,8 +90,8 @@ impl CleanUpBox {
         self.asked = Some(now);
     }
 
-    /// The preview's lines: each rule's heading, its first rows, and a *N more*
-    /// row unless opened.
+    /// The preview's lines: each rule's heading, then every row it found; the
+    /// list scrolls, so nothing folds.
     fn lines(&self) -> Vec<Line> {
         let mut out = Vec::new();
         for rule in Rule::ALL {
@@ -106,15 +102,7 @@ impl CleanUpBox {
                 continue;
             }
             out.push(Line::Head(rule, self.plan.items_of(rule)));
-            let shown = if self.open.contains(&rule) {
-                rows.len()
-            } else {
-                rows.len().min(FOLDED)
-            };
-            out.extend(rows[..shown].iter().map(|i| Line::Row(*i)));
-            if shown < rows.len() {
-                out.push(Line::More(rule, rows.len() - shown));
-            }
+            out.extend(rows.into_iter().map(Line::Row));
         }
         out
     }
@@ -196,7 +184,6 @@ impl OndinApp {
             plan: Plan::default(),
             every: Plan::default(),
             asked: None,
-            open: HashSet::new(),
             hover: (Vec::new(), false),
         });
     }
@@ -313,14 +300,17 @@ fn switch(ui: &mut egui::Ui, label: &str, count: Option<usize>, on: &mut bool, h
     }
 }
 
-/// *Remove*: the rules two to a line, then *Skip locked layers*.
+/// *Remove*: the rules two to a line, then *Skip locked layers* on a line of its
+/// own at the same pitch.
 fn switches(ui: &mut egui::Ui, b: &mut CleanUpBox) {
     let every = &b.every;
     let rules = &mut b.rules;
-    row(ui, "Remove", ui::CONTROL_H * 3.0 + 4.0, |ui| {
+    let lines = GRID.len() as f32 + 1.0;
+    let h = ui::CONTROL_H * lines + SWITCH_GAP * (lines - 1.0);
+    row(ui, "Remove", h, |ui| {
         let col = (ui.available_width() - COL_GAP) / 2.0;
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.spacing_mut().item_spacing.y = SWITCH_GAP;
             for pair in GRID {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -339,18 +329,15 @@ fn switches(ui: &mut egui::Ui, b: &mut CleanUpBox) {
                     }
                 });
             }
-        });
-    });
-    row(ui, "", ui::CONTROL_H, |ui| {
-        let col = (ui.available_width() - COL_GAP) / 2.0;
-        ui.allocate_ui(egui::vec2(col, ui::CONTROL_H), |ui| {
-            switch(
-                ui,
-                "Skip locked layers",
-                None,
-                &mut rules.skip_locked,
-                "List locked layers and leave them as they are",
-            );
+            ui.allocate_ui(egui::vec2(col, ui::CONTROL_H), |ui| {
+                switch(
+                    ui,
+                    "Skip locked layers",
+                    None,
+                    &mut rules.skip_locked,
+                    "List locked layers and leave them as they are",
+                );
+            });
         });
     });
 }
@@ -381,7 +368,6 @@ fn preview(
         theme::text::dim(),
     );
     let lines = b.lines();
-    let mut opened = None;
     egui::Frame::NONE
         .inner_margin(egui::Margin {
             left: 6,
@@ -408,10 +394,12 @@ fn preview(
                 });
                 return;
             }
+            // Scrolls by wheel and drag with no bar, as batch rename's preview.
             egui::ScrollArea::vertical()
                 .id_salt("clean-up-preview")
                 .max_height(ROW_H * ROWS_SHOWN)
                 .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show_rows(ui, ROW_H, lines.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for line in &lines[range] {
@@ -427,18 +415,10 @@ fn preview(
                                     *hover = (ringable(f, doc, page).into_iter().collect(), false);
                                 }
                             }
-                            Line::More(rule, n) => {
-                                if more_row(ui, *n).clicked() {
-                                    opened = Some(*rule);
-                                }
-                            }
                         }
                     }
                 });
         });
-    if let Some(rule) = opened {
-        b.open.insert(rule);
-    }
 }
 
 /// The layer a row rings: one on this page, still there.
@@ -561,24 +541,6 @@ fn finding_row(ui: &mut egui::Ui, doc: &Document, page: NodeId, f: &Finding) -> 
     }
 }
 
-fn more_row(ui: &mut egui::Ui, n: usize) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::click());
-    ui::list_row_ground(ui.painter(), rect, false, resp.hovered());
-    let ink = if resp.hovered() {
-        theme::text::strong()
-    } else {
-        theme::text::dim()
-    };
-    ui.painter().text(
-        egui::pos2(rect.left() + 32.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        format!("{n} more"),
-        egui::FontId::proportional(ui::CONTROL_PT),
-        ink,
-    );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
 /// The footer: the hint, then *Cancel* and *Clean up N items*.
 fn foot(ui: &mut egui::Ui, items: usize, why_not: Option<&str>) -> Option<Act> {
     let go = match items {
@@ -653,6 +615,60 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+    }
+
+    /// The vertical centre of the first painted text reading exactly `text`.
+    fn text_y(out: &egui::FullOutput, text: &str) -> f32 {
+        out.shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == text => {
+                    Some(t.pos.y + t.galley.size().y / 2.0)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("`{text}` is not drawn"))
+    }
+
+    /// *Remove* sits level with the first line of switches, and *Skip locked
+    /// layers* follows the rules at the same pitch they keep among themselves.
+    /// flip: `batch_rename::row` centring its label on the whole row → fails at
+    /// "level with Hidden paint".
+    #[test]
+    fn the_switches_keep_one_pitch_under_a_top_label() {
+        let (ctx, mut app) = app();
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        pass(&ctx, &mut app, Vec::new());
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+        let remove = text_y(&out, "Remove");
+        let first = text_y(&out, "Hidden paint");
+        assert!(
+            (remove - first).abs() < 1.0,
+            "Remove at {remove} is level with Hidden paint at {first}"
+        );
+        let lines = [
+            "Hidden paint",
+            "Covered fills",
+            "One-layer groups",
+            "Skip locked layers",
+        ]
+        .map(|t| text_y(&out, t));
+        let pitch = lines[1] - lines[0];
+        for pair in lines.windows(2) {
+            assert!(
+                ((pair[1] - pair[0]) - pitch).abs() < 0.5,
+                "every line of switches is {pitch} apart: {lines:?}"
+            );
+        }
     }
 
     fn enter() -> egui::Event {

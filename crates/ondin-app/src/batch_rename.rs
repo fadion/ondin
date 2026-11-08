@@ -1100,8 +1100,9 @@ pub(crate) fn row<R>(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(LABEL_W, h), egui::Sense::hover());
+        // Level with the first line of a row taller than one control.
         ui.painter().text(
-            rect.left_center(),
+            egui::pos2(rect.left(), rect.top() + h.min(ui::CONTROL_H) / 2.0),
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(ui::CONTROL_PT),
@@ -1563,10 +1564,12 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
                 );
                 return;
             }
+            // Scrolls by wheel and drag with no bar: the list is the card's body.
             egui::ScrollArea::vertical()
                 .id_salt("batch-rename-preview")
                 .max_height(ROW_H * ROWS_SHOWN)
                 .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show_rows(ui, ROW_H, plan.rows.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for r in &plan.rows[range] {

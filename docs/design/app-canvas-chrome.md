@@ -560,7 +560,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   skipped one leaves no gap; a matched layer whose name already is its result keeps that number, so
   no two layers are given the same one.
 - **Preview**, in run order: glyph, old name with its matches underlined, arrow, new name with its
-  new runs in `accent_300()`; it scrolls past eight rows, and only the rows in view are laid out
+  new runs in `accent_300()`; it scrolls past eight rows with no bar shown, and only the rows in view are laid out
   (`ScrollArea::show_rows`), page headings at a row's height. At *Selection* every layer is listed and the
   unchanged ones dim; elsewhere only matches, and *All pages* heads each page's rows with its name
   and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K
@@ -638,13 +638,15 @@ a `Finding` with `kept: Some(Kept)` and its reason.
 - **Remove**: the six rules as `ui::switch_row_noted`, two to a line (left *Hidden paint*, *Covered
   fills*, *One-layer groups*; right *Hidden layers*, *Empty layers*, *Guides*), each noted with its
   count from a second plan with every switch on, so an off switch still says what it would take;
-  `Rule::hint` is its tooltip. Then *Skip locked layers*.
+  `Rule::hint` is its tooltip. Then *Skip locked layers* on a fourth line at the same pitch. The
+  *Remove* label sits level with the first line (`batch_rename::row` puts its label on a tall row's
+  first control-height line).
 - **Planning** is synchronous, and only when the scope or a switch changes: the document cannot
   change while the box is up.
 - **Preview**: the eyebrow *Preview* and *N items on M layers*, with *· K kept* when amber rows
   show. Rows are grouped by rule in `Rule::ALL` order, each under a heading row with the rule's
-  item count; a group lists three rows, then *N more*, which opens the rest in place. Rows are
-  `ui::MENU_ROW_H` and the list scrolls past twelve. A row shows the layer's glyph, *Parent / Name*
+  item count, every row listed: the list scrolls, so nothing folds. Rows are `ui::MENU_ROW_H` and
+  the list scrolls past twelve with no bar shown, as batch rename's preview does. A row shows the layer's glyph, *Parent / Name*
   (masked in private mode) and what it loses, or the kept reason in amber; a guide row reads
   *Horizontal guide · 120*. Hovering a row rings its layer on the canvas, a heading its group's at
   a hairline (`canvas::draw_panel_hover`); a row on another page rings nothing and its tooltip

@@ -197,7 +197,11 @@ mod tests {
         app.confirming_close = false;
         let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
         assert!(pending().is_empty(), "taken");
-        assert_eq!(app.session.path.as_deref(), Some(path.as_path()), "and opened");
+        assert_eq!(
+            app.session.path.as_deref(),
+            Some(path.as_path()),
+            "and opened"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -159,6 +159,9 @@ pub(crate) struct Assets {
     pub(crate) prefs_dirty: bool,
     /// Off the network, for tests: nothing is spawned.
     offline: bool,
+    /// The download reports `Assets::report_download` passed its guard, in order.
+    #[cfg(test)]
+    pub(crate) reported: Vec<String>,
 }
 
 impl Default for Assets {
@@ -182,6 +185,8 @@ impl Default for Assets {
             cache_bytes: None,
             prefs_dirty: false,
             offline: cfg!(test),
+            #[cfg(test)]
+            reported: Vec::new(),
         }
     }
 }
@@ -654,6 +659,8 @@ impl Assets {
             return;
         }
         let report = report.clone();
+        #[cfg(test)]
+        self.reported.push(report.clone());
         let known = session_key(service, keys);
         self.run(Box::new(move || {
             let key = known.unwrap_or_else(|| crate::keychain::read_account(&service.account()));

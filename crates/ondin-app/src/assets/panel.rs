@@ -726,13 +726,12 @@ impl OndinApp {
             }
         }
         let missed = loaded.iter().filter(|l| l.is_none()).count();
-        let Some(first) = fetch.photos.iter().zip(&loaded).find(|(_, l)| l.is_some()) else {
+        if missed == loaded.len() {
             if let Some(why) = failed {
                 self.session.fail(why);
             }
             return;
-        };
-        let credit_line = first.0.credit(&today).text;
+        }
         let keys = self.asset_keys.clone();
         match fetch.intent {
             PhotoIntent::Place { at } => {
@@ -751,8 +750,9 @@ impl OndinApp {
                     self.assets.report_download(photo, keys.as_ref());
                     self.session.selection.set_one(node);
                     self.session.info(format!(
-                        "Placed {} · {credit_line} · Ctrl+Z to undo",
-                        image.label()
+                        "Placed {} · {} · Ctrl+Z to undo",
+                        image.label(),
+                        photo.credit(&today).text
                     ));
                 }
             }
@@ -791,15 +791,20 @@ impl OndinApp {
                 self.session
                     .name_step("Fill with photo", icon::PAINT_BUCKET);
                 if self.commit_edit(Transaction(ops)) {
-                    for photo in used {
+                    for photo in &used {
                         self.assets.report_download(photo, keys.as_ref());
                     }
                     let what = match filled.as_slice() {
                         [one] => crate::private::layer(&self.session.doc, *one).into_owned(),
                         many => ui::count(many.len(), "layer"),
                     };
-                    let said = match (filled.len(), missed) {
-                        (1, 0) => format!("Filled {what} · {credit_line} · Ctrl+Z to undo"),
+                    let said = match (used.as_slice(), missed) {
+                        // The credit of the photo written, not of the first fetched:
+                        // a skipped target's photo is not used.
+                        ([photo], 0) => format!(
+                            "Filled {what} · {} · Ctrl+Z to undo",
+                            photo.credit(&today).text
+                        ),
                         (_, 0) => format!("Filled {what} · Ctrl+Z to undo"),
                         (_, n) => format!(
                             "Filled {what} · {} could not be downloaded · Ctrl+Z to undo",
@@ -1892,6 +1897,65 @@ mod tests {
         assert!(!imaged(d), "the locked target keeps its fill");
         let said = &app.session.status().text;
         assert!(said.contains("1 photo could not be downloaded"), "{said}");
+    }
+
+    /// A Fill whose first target was locked while the photos downloaded names
+    /// the photographer of the photo written, and reports to Unsplash only that
+    /// photo, after the commit; a report address off Unsplash's API is never
+    /// called, and nothing is reported when nothing is filled.
+    /// flip: the status taking the first loaded photo's credit → fails at "the
+    /// used photo's author"; `report_download` called for every fetched photo →
+    /// fails at "only the photo used"; its `UNSPLASH_API` guard dropped → fails at
+    /// "never off the API".
+    #[test]
+    fn a_skipped_target_neither_names_nor_reports_its_photo() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let [a, b] = [0; 2].map(|_| rect(&mut app));
+        app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: a,
+            locked: true,
+        }]));
+        let by = |author: &str, report: &str| Photo {
+            author: author.into(),
+            report_url: Some(report.into()),
+            ..photo()
+        };
+        let p1 = by("Ana Ruiz", "https://api.unsplash.com/photos/p1/download");
+        let p2 = by("Bo Lin", "https://api.unsplash.com/photos/p2/download");
+        land(
+            &mut app,
+            vec![p1, p2],
+            PhotoIntent::Fill {
+                targets: vec![a, b],
+            },
+        );
+        let said = &app.session.status().text;
+        assert!(
+            said.contains("Bo Lin") && !said.contains("Ana Ruiz"),
+            "the used photo's author: {said}"
+        );
+        assert_eq!(
+            app.assets.reported,
+            ["https://api.unsplash.com/photos/p2/download"],
+            "only the photo used"
+        );
+
+        app.assets.reported.clear();
+        let elsewhere = by("Cy", "https://example.com/photos/p3/download");
+        land(
+            &mut app,
+            vec![elsewhere],
+            PhotoIntent::Fill { targets: vec![b] },
+        );
+        assert!(app.assets.reported.is_empty(), "never off the API");
+
+        let p4 = by("Di", "https://api.unsplash.com/photos/p4/download");
+        land(&mut app, vec![p4], PhotoIntent::Fill { targets: vec![a] });
+        assert!(
+            app.assets.reported.is_empty(),
+            "nothing filled, nothing reported"
+        );
     }
 
     /// The panel shares its place: opening it closes the insert picker and the

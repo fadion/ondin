@@ -225,10 +225,12 @@ impl OndinApp {
                 );
                 // Saved mirrored, so point editing keeps it so.
                 if let Some(frame) = self.mirror_frame(near) {
-                    crate::mirror::mark_mirrored(
-                        &mut tx,
-                        crate::mirror::path_mirror_of(frame.axes),
-                    );
+                    let (mirror, dropped) =
+                        crate::mirror::local_mirror(frame.axes, stroke.parent_world);
+                    crate::mirror::mark_mirrored(&mut tx, mirror);
+                    if dropped {
+                        self.session.info(crate::mirror::SAVED_PLAIN);
+                    }
                 }
                 self.pencil_last = Some((id, style));
                 (id, tx)

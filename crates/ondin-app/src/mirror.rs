@@ -89,14 +89,6 @@ pub(crate) struct Grips {
     pub(crate) from: Option<Option<Point>>,
 }
 
-/// The path axes a run drawn across `axes` lands mirrored across.
-pub(crate) fn path_mirror_of(axes: Axes) -> PathMirror {
-    PathMirror {
-        vertical: axes.vertical(),
-        horizontal: axes.horizontal(),
-    }
-}
-
 /// Mark the path `tx` creates as mirrored across `mirror`; the model keeps only
 /// the axes that hold.
 pub(crate) fn mark_mirrored(tx: &mut Transaction, mirror: PathMirror) {
@@ -109,6 +101,40 @@ pub(crate) fn mark_mirrored(tx: &mut Transaction, mirror: PathMirror) {
             *m = mirror;
         }
     }
+}
+
+/// What a run drawn mirrored says when its frame's turn leaves the path no axis
+/// to be saved mirrored by.
+pub(crate) const SAVED_PLAIN: &str =
+    "Mirrored, saved as a plain path: the frame is turned, so point edits will not mirror";
+
+/// The switch's world `axes` as the path's own, in a parent placed by
+/// `parent_world`: a world axis that lies along a local one (the parent turned by
+/// a quarter turn or none) is kept as that axis. `true` beside it when an axis
+/// could not be kept, a parent turned some other way, for the status to say.
+pub(crate) fn local_mirror(axes: Axes, parent_world: Affine) -> (PathMirror, bool) {
+    let inv = parent_world.inverse();
+    let mut out = PathMirror::NONE;
+    let mut dropped = false;
+    // The world line's direction in the parent: along local y keeps it vertical.
+    let mut keep = |dir: ondin_core::kurbo::Vec2| {
+        let d = inv * dir.to_point() - inv * Point::ZERO;
+        let tilt = 1e-6 * d.hypot();
+        if d.x.abs() <= tilt {
+            out.vertical = true;
+        } else if d.y.abs() <= tilt {
+            out.horizontal = true;
+        } else {
+            dropped = true;
+        }
+    };
+    if axes.vertical() {
+        keep(ondin_core::kurbo::Vec2::new(0.0, 1.0));
+    }
+    if axes.horizontal() {
+        keep(ondin_core::kurbo::Vec2::new(1.0, 0.0));
+    }
+    (out, dropped)
 }
 
 /// The reflection across the vertical line `x = c` or the horizontal `y = c`.
@@ -148,7 +174,23 @@ fn across(mut s: PenSubpath, vertical: bool, c: f64, tol: f64) -> Vec<PenSubpath
         m
     };
     let n = s.anchors.len();
-    if s.closed || n < 2 {
+    // A reflection turns the winding, so a closed image runs backwards to wind
+    // with the run: opposite windings cancel a fill where the two overlap. One
+    // already its own image (Both axes after the vertical rule closed it) adds
+    // nothing but a coincident twin.
+    if s.closed {
+        let mut m = image(&s);
+        let own = m.anchors.len() == n
+            && m.anchors
+                .iter()
+                .all(|a| s.anchors.iter().any(|b| (a.at - b.at).hypot() <= tol));
+        if own {
+            return vec![s];
+        }
+        m.reverse();
+        return vec![s, m];
+    }
+    if n < 2 {
         let m = image(&s);
         return vec![s, m];
     }
@@ -172,10 +214,8 @@ fn across(mut s: PenSubpath, vertical: bool, c: f64, tol: f64) -> Vec<PenSubpath
     let mut back = image(&s);
     back.reverse();
     match (start_on, end_on) {
-        (false, false) => {
-            let m = image(&s);
-            vec![s, m]
-        }
+        // Wound with the run as a closed image is, for a fill added later.
+        (false, false) => vec![s, back],
         (_, true) => {
             let mut anchors = s.anchors;
             let b = back.anchors;
@@ -251,10 +291,9 @@ impl OndinApp {
         if m.axes == Axes::Off {
             return None;
         }
-        let near = self.drawing_from().or(near);
         let at =
             m.at.or_else(|| {
-                let (frame, _) = self.draw_target(near?);
+                let frame = self.run_frame(near)?;
                 (frame != self.session.page)
                     .then(|| self.session.resolved.world_bounds(frame))
                     .flatten()
@@ -279,7 +318,7 @@ impl OndinApp {
     /// `None` draws them down the whole view: on open canvas, or once they were
     /// dragged out of that frame.
     fn axis_frame(&self, near: Option<Point>, at: Point) -> Option<ondin_core::kurbo::Rect> {
-        let (frame, _) = self.draw_target(self.drawing_from().or(near)?);
+        let frame = self.run_frame(near)?;
         if frame == self.session.page {
             return None;
         }
@@ -300,6 +339,16 @@ impl OndinApp {
                 .find(|(_, r)| r.contains(p))
                 .map(|(vertical, _)| *vertical)
         })
+    }
+
+    /// The frame the run in flight lands in, else the one under `near`. A pen
+    /// run's is the parent fixed at its first press, not the frame under its first
+    /// anchor, which Ctrl can move into another frame.
+    fn run_frame(&self, near: Option<Point>) -> Option<NodeId> {
+        match &self.pen {
+            Some(p) if p.editing.as_ref().is_none_or(|e| e.minted) => Some(p.parent),
+            _ => Some(self.draw_target(self.drawing_from().or(near)?).0),
+        }
     }
 
     /// Where the run being drawn began, pen or pencil.
@@ -801,12 +850,17 @@ impl OndinApp {
             }
         }
         // Where the next point would land on an axis: a ring there and *On axis*,
-        // in the snaps' red. The node tool places points only with its pen, and
-        // nothing places one on a pill, which moves the axis instead.
+        // in the snaps' red. The node tool places points only with its pen, nothing
+        // places one on a pill, which moves the axis instead, and no press places one
+        // while Ctrl holds the run's points.
+        let (shift, ctrl) =
+            ui.input(|i| (i.modifiers.shift, i.modifiers.ctrl || i.modifiers.command));
         let placing =
             (self.tool != crate::tools::Tool::Node || self.pen.is_some() || self.pen_bias)
-                && self.mirror_grip(ui.ctx().pointer_hover_pos()).is_none();
-        let shift = ui.input(|i| i.modifiers.shift);
+                && self.mirror_grip(ui.ctx().pointer_hover_pos()).is_none()
+                && !((self.tool == crate::tools::Tool::Pen || self.pen.is_some())
+                    && self.pen_holds_points(ctrl))
+                && !(self.pen_bias && ctrl);
         if placing && let Some(on) = hover.and_then(|w| self.lands_on_axis(w, shift)) {
             let at = self.to_screen(on, rect, ppp);
             crate::canvas::draw_snap_target(painter, at, "On axis", false);
@@ -943,7 +997,36 @@ mod tests {
             1.0,
         );
         assert_eq!(got.len(), 2);
-        assert_eq!(ats(&got[1]), [(140.0, 10.0), (120.0, 50.0)]);
+        assert_eq!(
+            ats(&got[1]),
+            [(120.0, 50.0), (140.0, 10.0)],
+            "run backwards"
+        );
+    }
+
+    /// A closed run crossing the axis gets an image wound its way, so a fill
+    /// covers the overlap; under Both axes a half the vertical rule already closed
+    /// is its own image and comes back once.
+    /// flip: `across` pushing the closed image unreversed → fails at "the overlap".
+    #[test]
+    fn a_closed_run_and_its_image_wind_alike() {
+        use ondin_core::kurbo::Shape as _;
+        let mut square = run(&[(80.0, 0.0), (130.0, 0.0), (130.0, 40.0), (80.0, 40.0)]);
+        square.closed = true;
+        let got = mirrored(square, Axes::Vertical, Point::new(100.0, 0.0), 1.0);
+        let path = ondin_core::edit::pen_path(&got);
+        assert_eq!(path.winding(Point::new(125.0, 20.0)).abs(), 1, "once");
+        assert_eq!(
+            path.winding(Point::new(100.0, 20.0)).abs(),
+            2,
+            "the overlap"
+        );
+
+        let half = run(&[(100.0, 60.0), (70.0, 100.0), (100.0, 140.0)]);
+        let got = mirrored(half, Axes::Both, Point::new(100.0, 100.0), 1.0);
+        assert_eq!(got.len(), 1, "no coincident twin");
+        let path = ondin_core::edit::pen_path(&got);
+        assert_ne!(path.winding(Point::new(100.0, 100.0)), 0);
     }
 
     /// Both axes: a quarter drawn from one axis to the other closes into a whole.
@@ -1363,6 +1446,98 @@ mod tests {
         assert!(has(&app, id, Point::new(130.0, 40.0)));
         assert!(has(&app, id, Point::new(120.0, 60.0)));
         assert!(mirror_of(&app, id).vertical, "and stays mirrored");
+    }
+
+    /// A pen anchor pressed near a mirrored path's own axis, in a new run inside
+    /// it, lands on the axis as the *On axis* ring promises, past the snap
+    /// distance (7 pt off, the snaps reach 6).
+    /// flip: `pen_point_except` gating the axis on a run outside any path → fails
+    /// at "on the axis".
+    #[test]
+    fn a_run_inside_a_mirrored_path_lands_on_its_axis() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = mirrored_diamond(&ctx);
+        let world = app.session.resolved.world_transform(id).unwrap();
+        app.pen = Some(crate::preview::PenState {
+            parent: app.session.page,
+            parent_world: Affine::IDENTITY,
+            anchors: vec![PenAnchor::corner(Point::new(80.0, 30.0))],
+            shaping: false,
+            editing: Some(crate::preview::PenEdit {
+                id,
+                world,
+                subpaths: vec![PenSubpath {
+                    anchors: Vec::new(),
+                    closed: false,
+                }],
+                active: 0,
+                from_start: false,
+                minted: true,
+            }),
+        });
+        let (at, _) = app.pen_point(Point::new(107.0, 33.0), false);
+        assert_eq!(at.x, 100.0, "on the axis: {at:?}");
+    }
+
+    /// World axes become the path's own in a parent turned a quarter turn (the
+    /// vertical lands horizontal), and are dropped, said, in one turned 30°.
+    /// flip: `local_mirror` keeping the world axes as they are → fails at "a
+    /// quarter turn".
+    #[test]
+    fn world_axes_are_saved_as_the_parents_own() {
+        let quarter = Affine::rotate(std::f64::consts::FRAC_PI_2);
+        let (m, dropped) = local_mirror(Axes::Vertical, quarter);
+        assert!(
+            m.horizontal && !m.vertical && !dropped,
+            "a quarter turn: {m:?}"
+        );
+        let (m, dropped) = local_mirror(Axes::Vertical, Affine::rotate(30f64.to_radians()));
+        assert!(m.is_none() && dropped);
+        let (m, dropped) = local_mirror(Axes::Both, Affine::translate((5.0, 5.0)));
+        assert!(m.vertical && m.horizontal && !dropped);
+    }
+
+    /// The axes cross in the frame the run landed in at its first press, though
+    /// Ctrl moved the first anchor into another frame.
+    /// flip: `run_frame` reading the frame under the first anchor → fails at "A's
+    /// middle".
+    #[test]
+    fn the_axes_stay_with_the_frame_the_run_began_in() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let page = app.session.page;
+        let frame = |id, x: f64| ondin_core::Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, 0.0))),
+            name: None,
+        };
+        let (a, b) = (app.session.ids.mint(), app.session.ids.mint());
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            frame(a, 0.0),
+            frame(b, 300.0)
+        ])));
+        app.session.mirror = Mirror {
+            axes: Axes::Vertical,
+            at: None,
+        };
+        app.pen = Some(crate::preview::PenState {
+            parent: a,
+            parent_world: Affine::IDENTITY,
+            anchors: [(350.0, 50.0), (60.0, 80.0)]
+                .map(|(x, y)| PenAnchor::corner(Point::new(x, y)))
+                .to_vec(),
+            shaping: false,
+            editing: None,
+        });
+        let (_, at) = app.mirror_axes(None).expect("mirroring");
+        assert_eq!(at.x, 100.0, "A's middle");
     }
 
     const RECT: egui::Rect = egui::Rect {

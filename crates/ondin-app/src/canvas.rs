@@ -4746,6 +4746,7 @@ impl OndinApp {
                 index,
                 side: Some(side),
                 grab: Vec2::ZERO,
+                from: pen.anchors.clone(),
             });
         }
         let (index, a) = pen
@@ -4758,6 +4759,7 @@ impl OndinApp {
             index,
             side: None,
             grab: a.at - world,
+            from: pen.anchors.clone(),
         })
     }
 
@@ -4765,12 +4767,15 @@ impl OndinApp {
     /// there would, its handles with it; a handle is pulled as the node tool pulls
     /// one, mirrored unless `alt`.
     fn pen_point_drag(&mut self, world: Point, alt: bool) {
-        let Drag::PenPoint { index, side, grab } = self.drag else {
+        let Drag::PenPoint {
+            index, side, grab, ..
+        } = self.drag
+        else {
             return;
         };
         let zoom = self.points_per_world();
         let to = match side {
-            None => Some(self.pen_point(world + grab, false).0),
+            None => Some(self.pen_point_except(world + grab, false, Some(index)).0),
             Some(_) => None,
         };
         let Some(pen) = self.pen.as_mut() else {
@@ -4811,6 +4816,17 @@ impl OndinApp {
     /// segment to an eighth of a turn from the previous anchor
     /// ([`Self::axial_corner`]); the first has nothing to constrain.
     pub(crate) fn pen_point(&self, world: Point, shift: bool) -> (Point, snap::Marks) {
+        self.pen_point_except(world, shift, None)
+    }
+
+    /// [`Self::pen_point`] with the run's anchor at `except` left out of the
+    /// targets: a Ctrl-moved anchor would otherwise snap back onto its own spot.
+    fn pen_point_except(
+        &self,
+        world: Point,
+        shift: bool,
+        except: Option<usize>,
+    ) -> (Point, snap::Marks) {
         if shift && let Some(from) = self.pen.as_ref().and_then(|p| p.anchors.last()) {
             return (self.axial_corner(from.at, world), snap::Marks::default());
         }
@@ -4830,12 +4846,14 @@ impl OndinApp {
         if self.snap_shapes
             && let Some(pen) = &self.pen
         {
-            s.outlines.anchors.extend(pen.anchors.iter().map(|a| a.at));
+            let others = pen.anchors.iter().enumerate();
+            let others = others.filter(|(i, _)| Some(*i) != except);
+            s.outlines.anchors.extend(others.map(|(_, a)| a.at));
         }
         let snapped = snap::snap_point(world, (true, true), &s);
-        // A new run's anchor near a mirror axis lands on it, where the halves join,
-        // unless it already sits on geometry.
-        if moving.is_empty() && snapped.mark.is_none() {
+        // An anchor near a mirror axis lands on it, where the halves join, unless
+        // it already sits on geometry: in a new run and in a mirrored path's own.
+        if snapped.mark.is_none() {
             let (on, hit) = self.snap_to_axis(snapped.at);
             if hit {
                 return (on, snap::Marks::default());
@@ -5089,6 +5107,8 @@ impl OndinApp {
                     from_start: false,
                     minted: true,
                 });
+                // As a standalone run does: a pan mid-run must not move the axes.
+                self.pin_mirror_axes(world);
                 // Snapped only once `editing` is set, so `pen_point` reads the host
                 // as the path being extended for the first anchor too.
                 let at = self.pen_point(world, shift).0;
@@ -6743,6 +6763,7 @@ impl OndinApp {
     pub(crate) fn finish_pen(&mut self, close: bool) {
         let Some(pen) = self.pen.take() else { return };
         let resumed = pen.editing.is_some();
+        let mut saved_plain = false;
         let (id, tx, done) = match pen.editing {
             Some(mut edit) => {
                 let mut sub = crate::preview::PenSubpath {
@@ -6784,14 +6805,15 @@ impl OndinApp {
                     &run,
                     tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
                 );
-                // Saved mirrored, so point editing keeps it so.
+                // Saved mirrored, so point editing keeps it so, as the parent's own
+                // axes; a frame turned off a quarter turn has none to keep it by.
                 if let Some(frame) =
                     self.mirror_frame(run.first().and_then(|s| s.anchors.first()).map(|a| a.at))
                 {
-                    crate::mirror::mark_mirrored(
-                        &mut tx,
-                        crate::mirror::path_mirror_of(frame.axes),
-                    );
+                    let (mirror, dropped) =
+                        crate::mirror::local_mirror(frame.axes, pen.parent_world);
+                    crate::mirror::mark_mirrored(&mut tx, mirror);
+                    saved_plain = dropped;
                 }
                 (id, tx, "Created path")
             }
@@ -6806,7 +6828,10 @@ impl OndinApp {
         let label = if resumed { "Edit path" } else { "Add path" };
         if self.session.commit_aside(tx, label, icon::PEN_NIB) {
             self.end_pen_gesture(id);
-            self.session.info(done);
+            match saved_plain {
+                true => self.session.info(crate::mirror::SAVED_PLAIN),
+                false => self.session.info(done),
+            }
         }
     }
 
@@ -22577,6 +22602,31 @@ mod flex_canvas_tests {
             "moved: {at:?}"
         );
         assert!(app.drag.is_none(), "the drag ended with the release");
+    }
+
+    /// A Ctrl-moved anchor follows a step smaller than the snap distance, rather
+    /// than snapping back onto its own last spot; a right-click puts it back.
+    /// flip: `pen_point_drag` through `pen_point` (its own anchor a target) →
+    /// fails at "follows".
+    #[test]
+    fn a_ctrl_moved_anchor_follows_a_small_step_and_cancels() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = pen_with_a_run(&ctx);
+        let start = app.pen.as_ref().unwrap().anchors.clone();
+        assert_eq!(start[0].at, Point::new(450.0, 50.0), "the fixture");
+        app.drag = Drag::PenPoint {
+            index: 0,
+            side: None,
+            grab: Vec2::ZERO,
+            from: start.clone(),
+        };
+        app.pen_point_drag(Point::new(452.0, 60.0), false);
+        let at = app.pen.as_ref().unwrap().anchors[0].at;
+        assert_eq!(at, Point::new(452.0, 60.0), "follows");
+        assert!(app.cancel_gesture(&ctx));
+        let back = app.pen.as_ref().unwrap().anchors[0].at;
+        assert_eq!(back, start[0].at, "put back");
     }
 
     /// With Ctrl held the pen pulls a handle of its run, its pair mirrored.

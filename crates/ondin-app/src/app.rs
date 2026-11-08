@@ -2894,11 +2894,20 @@ impl OndinApp {
             return false;
         }
         // A live marquee has been selecting as it went; put back what it started from.
-        if let Drag::Marquee { base, points, .. } = std::mem::replace(&mut self.drag, Drag::None) {
-            self.session.selection = *base;
-            if let Some(points) = points {
-                self.points = *points;
+        // A Ctrl-moved pen point has been moving the run; put back the run.
+        match std::mem::replace(&mut self.drag, Drag::None) {
+            Drag::Marquee { base, points, .. } => {
+                self.session.selection = *base;
+                if let Some(points) = points {
+                    self.points = *points;
+                }
             }
+            Drag::PenPoint { from, .. } => {
+                if let Some(pen) = self.pen.as_mut() {
+                    pen.anchors = from;
+                }
+            }
+            _ => {}
         }
         // Guide and variable-cell previews live outside `RenderOverrides`.
         self.guide_previews.clear();

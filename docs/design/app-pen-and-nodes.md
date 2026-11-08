@@ -19,8 +19,9 @@ the node tool (`A`), joining two path layers, per-anchor corner radii, and *Pixe
   (`canvas::pen_segment`). It is the gradient handles' label (`spacing::paint_label`).
 - **`Ctrl` held moves points instead of placing them** (`canvas::pen_holds_points`). With a run in
   flight a press takes one of its anchors or drawn handles within `PEN_PICK_PX`, handles first
-  (`pen_run_grab`), as `Drag::PenPoint`: an anchor lands where a pen press would snap and carries its
-  handles, a handle pulls as the node tool's does, mirrored unless `Alt` (`pen_point_drag`). While
+  (`pen_run_grab`), as `Drag::PenPoint`: an anchor lands where a pen press would snap, itself not a
+  target (`pen_point_except`), and carries its handles, a handle pulls as the node tool's does,
+  mirrored unless `Alt` (`pen_point_drag`). A right-click puts the run back as the press found it. While
   held every anchor shows its handles, and the pending segment, its readout and the close and join
   rings go; the cursor is the node tool's arrow. A press on nothing does nothing, and the drag runs
   to its release whatever `Ctrl` does meanwhile; nothing is committed, as with the rest of the run.
@@ -96,10 +97,11 @@ axis, a horizontal one or both (`crate::mirror`).
 
 - **State.** `EditorSession::mirror` (`mirror::Mirror { axes, at }`), per document, in memory only.
   `at` is where the axes cross once one has been dragged. `None` is the default: the middle of the
-  frame the run lands in (`draw_target` under the run's first point; under the pointer while nothing
-  is drawn), on open canvas the middle of the canvas past the rulers (`view_middle`).
+  frame the run lands in (`run_frame`: a pen run's parent fixed at its first press, which a Ctrl-moved
+  first anchor does not change; under the pointer while nothing is drawn), on open canvas the middle
+  of the canvas past the rulers (`view_middle`).
   `OndinApp::mirror_axes` resolves it. A new run on open canvas fixes `at` there as it starts
-  (`pin_mirror_axes`), so a pan or zoom mid-run does not move the axes under anchors already placed;
+  (`pin_mirror_axes`, a run minted in a path edit included), so a pan or zoom mid-run does not move the axes under anchors already placed;
   *Reset axis* lets them follow the view again. Leaving the pen and the pencil for another tool
   puts `at` back to `None`, so a placed axis does not carry into the next
   spell of drawing; the eyedropper's round trip keeps it, and the axes choice itself stays.
@@ -112,24 +114,28 @@ axis, a horizontal one or both (`crate::mirror`).
   | one | one open path, joined there |
   | neither | two subpaths in the one layer |
 
-  An already-closed run gets its image as a second subpath. At a join the anchor keeps the drawn
+  An already-closed run gets its image as a second subpath, run backwards so the two wind alike and
+  a fill covers their overlap (an open run's image with neither end on the axis too); a closed run
+  that is already its own image (*Both axes* after the vertical rule closed it) gets none. At a join the anchor keeps the drawn
   handle on one side and takes its mirror on the other, so the path is as smooth across the axis as
   it was drawn. *Both axes* applies the vertical rule, then the horizontal one over what that made,
   so a quarter drawn from axis to axis closes into a whole.
 - **New runs mirror; extending an end does not.** The pen's and the pencil's new-path finishes go
   through `OndinApp::mirror_run` and `edit::create_paths` (several subpaths in one `Path` node), one
   undo step under its usual name, *Add path* or *Draw path*, and mark the path with the axes they
-  mirrored across (`mirror::mark_mirrored`, `path_mirror_of`), so it is saved mirrored (*Mirrored
-  paths*, below). The model keeps only the axes that hold, so a path drawn in a turned frame lands
-  plain. A new run inside the edited path (the node tool's pen on bare canvas, `PenEdit::minted`)
+  mirrored across, as the parent's own axes (`mirror::local_mirror`, `mark_mirrored`), so it is
+  saved mirrored (*Mirrored paths*, below). In a frame turned a quarter turn the world vertical is
+  saved as the path's horizontal; in one turned any other way no axis holds, the path lands plain,
+  and the status says so (`mirror::SAVED_PLAIN`). A new run inside the edited path (the node tool's pen on bare canvas, `PenEdit::minted`)
   mirrors too: across that path's own axes when it is mirrored, otherwise across the edit's own
   switch when it is on, which leaves a plain path plain. The edit's switch (`OndinApp::edit_mirror`,
   read and written through `OndinApp::mirror` / `mirror_mut`, as the drawing switch is outside an
   edit) starts off in every edit, whatever the drawing switch says, and ends with the edit. `OndinApp::mirror_frame` makes that choice for the commit,
   the snapping and the chrome. Extending an open end (pen resume, a pencil stroke carried on) does
   not mirror.
-- **Pen snapping.** A new run's anchor within `ON_AXIS_PT` of an axis lands on it, over the other
-  snaps (`snap_to_axis`, in `canvas::pen_point`), so a run can start and end exactly on it. It is
+- **Pen snapping.** An anchor within `ON_AXIS_PT` of an axis lands on it unless it already sits on
+  geometry (`snap_to_axis`, in `canvas::pen_point`), in a new run and in a run inside a mirrored path
+  alike, so a run can start and end exactly on it and lands where the *On axis* ring shows. It is
   measured in the space the axes are straight in: a mirrored path's own, the world for the switch.
 - **On the canvas** (`mirror_chrome`). While the pen or the pencil is armed and mirroring, or the
   node tool's pen is, and the run in flight is not extending a path, each axis
@@ -144,7 +150,8 @@ axis, a horizontal one or both (`crate::mirror`).
   shows as it goes, the trail's own line at 45%, joined where the commit will join it. Where the next point would land on an
   axis (`lands_on_axis`: the pen's next anchor as its press would snap it, or the pencil's pointer,
   whose end the commit pulls on) a snap ring and an *On axis* `ui::canvas_pill` show, both in
-  `color::MEASURE`, the snaps' red. The pen's opening status reads
+  `color::MEASURE`, the snaps' red; not while `Ctrl` holds the run's points, when no press places
+  one. The pen's opening status reads
   *Mirroring across the vertical axis · start and end on the axis to close the shape* (the
   horizontal axis likewise; under both axes, *draw from one axis to the other to close the shape*)
   instead of its usual hint.

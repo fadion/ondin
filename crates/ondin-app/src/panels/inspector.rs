@@ -5846,7 +5846,6 @@ impl OndinApp {
             let combo = egui::ComboBox::from_id_salt(salt)
                 .icon(ui::combo_chevron)
                 .width(combo_w)
-                .height(140.0)
                 .selected_text(ui::glyph_and_text(icon::SQUARE_HALF, label));
             if aligns {
                 combo.show_ui(ui, |ui| {

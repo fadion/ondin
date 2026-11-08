@@ -1837,7 +1837,9 @@ fn typing_inside(ctx: &egui::Context, rect: egui::Rect) -> bool {
     let Some(w) = widget_rect(ctx, id) else {
         return false;
     };
-    rect.expand(0.5).contains_rect(w.rect) && egui::TextEdit::load_state(ctx, id).is_some()
+    // By its left end: a value field's number may run past the row while typed.
+    let grown = egui::Rect::from_min_max(w.rect.min, egui::pos2(w.rect.min.x, w.rect.max.y));
+    rect.expand(0.5).contains_rect(grown) && egui::TextEdit::load_state(ctx, id).is_some()
 }
 
 /// Whether this frame's `Enter` is a card's own *Apply*: pressed with nothing
@@ -2747,9 +2749,10 @@ pub fn menu_rows(ui: &mut egui::Ui) {
 pub const DROPDOWN_GAP: f32 = 2.0;
 
 /// The tallest a dropdown's open list grows before it scrolls: twelve rows and
-/// the list's padding (the theme's `combo_height`). egui's own 200 scrolled a
-/// ten-row list; a list that wants another cap sets `ComboBox::height`.
-pub const DROPDOWN_MAX_H: f32 = 12.0 * MENU_ROW_H + 2.0 * (MENU_PAD + MENU_BORDER);
+/// the theme's 6pt item spacing between them (the theme's `combo_height`, which
+/// egui gives the list's scroll area, inside its padding). egui's own 200
+/// scrolled a ten-row list; a list that wants another cap sets `ComboBox::height`.
+pub const DROPDOWN_MAX_H: f32 = 12.0 * MENU_ROW_H + 11.0 * 6.0;
 
 /// [`menu_rows`]' row setup alone, for a popup that sets its own `.gap`.
 ///
@@ -3373,14 +3376,20 @@ fn value_field_f64_marked(
             ui.add_space(inset);
             // A number longer than its box never widens the field: egui grows a
             // `DragValue` to its text, which pushed the inspector's columns off
-            // screen. It is cut at the box, its press too (egui senses a widget
-            // only inside its clip rect), and the row advances by the box alone.
+            // screen. At rest it is cut at the box, its press too (egui senses a
+            // widget only inside its clip rect); while typed into it may run past,
+            // so the caret stays in sight. Either way the row advances by the box.
             let digits = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(digits_w, inner_h));
             let mut boxed =
                 ui.new_child(egui::UiBuilder::new().max_rect(digits).layout(
                     egui::Layout::left_to_right(egui::Align::Center).with_main_align(main),
                 ));
-            boxed.shrink_clip_rect(digits);
+            let number_id = boxed.next_auto_id();
+            let typing = boxed.memory(|m| m.has_focus(number_id))
+                && egui::TextEdit::load_state(boxed.ctx(), number_id).is_some();
+            if !typing {
+                boxed.shrink_clip_rect(digits);
+            }
             let mut resp = boxed.add(dv);
             ui.advance_cursor_after_rect(digits);
             if resp.dragged() {
@@ -3405,7 +3414,8 @@ fn value_field_f64_marked(
                 None => {
                     ui.painter().galley(at, lead, theme::text::faint());
                 }
-                Some(_) if reset_focused || ui.rect_contains_pointer(strip.union(resp.rect)) => {
+                // The box, not the number's rect, which a long number runs past.
+                Some(_) if reset_focused || ui.rect_contains_pointer(strip.union(digits)) => {
                     ui.painter().text(
                         strip.left_center() + egui::vec2(lead.size().x / 2.0, 0.0),
                         egui::Align2::CENTER_CENTER,
@@ -6600,13 +6610,24 @@ mod tests {
         prefix: Prefix,
         focus: Option<egui::Id>,
     ) -> (Vec<egui::Shape>, egui::Id) {
+        let (shapes, id) = paint_value_field_holding(ctx, prefix, focus, 101.548);
+        (shapes.into_iter().map(|c| c.shape).collect(), id)
+    }
+
+    /// `paint_value_field` holding `value`, its shapes with their clip rects.
+    fn paint_value_field_holding(
+        ctx: &egui::Context,
+        prefix: Prefix,
+        focus: Option<egui::Id>,
+        value: f64,
+    ) -> (Vec<egui::epaint::ClippedShape>, egui::Id) {
         let mut id = egui::Id::NULL;
         let out = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(284.0);
             card(ui, |ui| {
                 let w = ui.available_width();
                 ui.horizontal(|ui| {
-                    let mut v = 101.548_f64;
+                    let mut v = value;
                     if let Some(f) = focus {
                         ui.ctx().memory_mut(|m| m.request_focus(f));
                     }
@@ -6622,18 +6643,64 @@ mod tests {
                 });
             });
         });
-        (out.shapes.into_iter().map(|c| c.shape).collect(), id)
+        (out.shapes, id)
     }
 
-    /// A field keeps the width it was given at the largest value it accepts; the resting `DragValue` button grows rather than clips.
+    /// A field typed into while it holds a number longer than its box keeps the
+    /// typing edge, and shows the whole number, caret end included.
+    /// flip: `value_field_f64_marked` clipping the number while it is typed into
+    /// → fails at "unclipped"; `typing_inside` asking for the whole widget rect →
+    /// fails at "edge".
     #[test]
-    fn a_value_field_holds_its_width_up_to_the_largest_value_it_accepts() {
+    fn a_long_number_typed_into_keeps_its_edge_and_its_caret_in_sight() {
+        let strokes = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .filter(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.stroke.width > 0.0))
+                .count()
+        };
+        // A context each: the edit's text buffer outlives a frame.
+        let focused = |value: f64| {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let (_, id) = paint_value_field_holding(&ctx, Prefix::Text("W"), None, value);
+            paint_value_field_holding(&ctx, Prefix::Text("W"), Some(id), value);
+            paint_value_field_holding(&ctx, Prefix::Text("W"), Some(id), value).0
+        };
+        let short = focused(101.548);
+        let long = focused(1e50);
+        assert_eq!(strokes(&long), strokes(&short), "edge");
+        let text = long
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text().starts_with("1000") => {
+                    Some((c.clip_rect, t.galley.rect.translate(t.pos.to_vec2())))
+                }
+                _ => None,
+            })
+            .expect("the long number is painted");
+        assert!(text.0.contains_rect(text.1), "unclipped: {text:?}");
+    }
+
+    /// A field keeps the width it was given whatever it holds, a stored `1e50` included.
+    /// flip: `value_field_f64_marked` adding the number with `allocate_ui_with_layout`
+    /// → fails at "it grew" for `1e50`.
+    #[test]
+    fn a_value_field_holds_its_width_whatever_it_holds() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         for width in [88.0_f32, 131.0] {
-            for value in [1.0_f64, 100.0, 1000.0, 9999.0, MAX_STROKE_WIDTH] {
+            for value in [
+                1.0_f64,
+                100.0,
+                1000.0,
+                9999.0,
+                MAX_STROKE_WIDTH,
+                -FIELD_LIMIT,
+                1e50,
+            ] {
                 let out = ctx.run_ui(Default::default(), |ui| {
                     ui.set_max_width(300.0);
                     let mut v = value;
@@ -9010,36 +9077,6 @@ mod scrub_tests {
             "the caller's floor kept"
         );
     }
-
-    /// A number longer than its field is cut at the field, which keeps its width.
-    /// flip: `value_field_f64_marked` adding the number with `allocate_ui_with_layout`
-    /// → fails at "keeps its width".
-    #[test]
-    fn a_long_number_does_not_widen_its_field() {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        let _ = ctx.run_ui(Default::default(), |_| {});
-        let mut v = 1e50_f64;
-        let mut width = 0.0;
-        for _ in 0..2 {
-            let _ = ctx.run_ui(Default::default(), |ui| {
-                ui.horizontal(|ui| {
-                    let before = ui.cursor().min.x;
-                    value_field(
-                        ui,
-                        egui::vec2(120.0, 28.0),
-                        Prefix::Text("W"),
-                        &mut v,
-                        Scrub::whole(0.5),
-                        |d| d.custom_formatter(number(2)),
-                    );
-                    width = ui.min_rect().right() - before;
-                });
-            });
-        }
-        assert!(width <= 120.0 + 0.5, "keeps its width: {width}");
-        assert_eq!(v, 1e50, "the stored value is shown, not rewritten");
-    }
 }
 
 #[cfg(test)]
@@ -9197,19 +9234,45 @@ mod combo_height_tests {
         );
     }
 
-    /// Every dropdown's list grows to `DROPDOWN_MAX_H`, room for the assets
-    /// panel's ten icon-set rows, before it scrolls.
-    /// flip: `install_style_into` without its `combo_height` → fails at "theme".
+    /// An open dropdown shows twelve rows whole, the last one included, and
+    /// scrolls only a thirteenth.
+    /// flip: `DROPDOWN_MAX_H` without its row gaps → fails at "twelve rows".
     #[test]
-    fn a_dropdown_list_fits_ten_rows_before_it_scrolls() {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        assert_eq!(
-            ctx.global_style().spacing.combo_height,
-            DROPDOWN_MAX_H,
-            "theme"
-        );
-        const { assert!(DROPDOWN_MAX_H >= 10.0 * MENU_ROW_H + 2.0 * (MENU_PAD + MENU_BORDER)) };
+    fn a_dropdown_list_shows_twelve_rows_before_it_scrolls() {
+        // The lowest row's bottom against the list's clip, after a few frames.
+        let open = |rows: usize| {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 900.0),
+                )),
+                ..Default::default()
+            };
+            let mut last = (egui::Rect::NOTHING, egui::Rect::NOTHING);
+            for frame in 0..6 {
+                let _ = ctx.run_ui(input(), |ui| {
+                    let r = egui::ComboBox::from_id_salt("probe")
+                        .selected_text("Value")
+                        .show_ui(ui, |ui| {
+                            menu_rows(ui);
+                            for i in 0..rows {
+                                let row = ui.selectable_label(false, format!("Row {i}"));
+                                last = (row.rect, ui.clip_rect());
+                            }
+                        });
+                    if frame == 0 {
+                        egui::Popup::open_id(ui.ctx(), r.response.id.with("popup"));
+                    }
+                });
+            }
+            last
+        };
+        let (row, clip) = open(12);
+        assert!(clip.contains_rect(row), "twelve rows: {row:?} in {clip:?}");
+        let (row, clip) = open(13);
+        assert!(!clip.contains_rect(row), "a thirteenth scrolls");
     }
 }
 

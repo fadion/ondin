@@ -2528,9 +2528,10 @@ fn parse_cell(
         VarKind::Color => parse_colour(text)
             .map(Cell::Color)
             .ok_or_else(|| "A colour is a hex or CSS colour, like 8BA5E0, or --name.".to_string()),
+        // Held to the fields' limit: a number variable binds those fields.
         VarKind::Number => crate::expr::eval(text)
             .filter(|x| x.is_finite())
-            .map(Cell::Number)
+            .map(|x| Cell::Number(x.clamp(-crate::ui::FIELD_LIMIT, crate::ui::FIELD_LIMIT)))
             .ok_or_else(|| "A number, or --name.".to_string()),
         VarKind::Boolean => parse_bool(text)
             .map(Cell::Boolean)
@@ -5177,6 +5178,30 @@ mod tests {
         assert_eq!(
             parse_cell(app.session.doc.variables(), &v, mode, "7"),
             Err("True or false, or --name.".to_string())
+        );
+    }
+
+    /// A number cell stops at the fields' limit, as the fields it binds do.
+    /// flip: `parse_cell`'s number arm without its clamp → fails at "capped".
+    #[test]
+    fn a_number_cell_stops_at_the_field_limit() {
+        let (_ctx, mut app) = app();
+        app.var_act(Act::NewVar(VarKind::Number));
+        let table = app.session.doc.variables();
+        let v = table
+            .iter()
+            .find(|v| v.kind == VarKind::Number)
+            .expect("a number variable")
+            .clone();
+        let mode = table.modes().next().unwrap().id;
+        assert_eq!(
+            parse_cell(table, &v, mode, "1e50"),
+            Ok(Cell::Number(crate::ui::FIELD_LIMIT)),
+            "capped"
+        );
+        assert_eq!(
+            parse_cell(table, &v, mode, "-12.5"),
+            Ok(Cell::Number(-12.5))
         );
     }
 

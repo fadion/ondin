@@ -1797,9 +1797,9 @@ impl OndinApp {
                         false => Vec::new(),
                     };
                 // An effect's offset and spread may be negative (§15 D1074); every
-                // other field here floors at 0.
-                let raw = r;
-                let r = r.max(0.0);
+                // other field here floors at 0. Both stop at the fields' limit.
+                let raw = r.clamp(-ui::FIELD_LIMIT, ui::FIELD_LIMIT);
+                let r = raw.max(0.0);
                 let doc = &self.session.doc;
                 match key {
                     // One corner: the other three keep their literals, the same

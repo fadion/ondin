@@ -388,7 +388,8 @@ pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
   what is written.
 - **Box shapes** (rectangle, ellipse, polygon, star, spiral) keep their kind: their world box is
   rounded (`fit_rect`), a tie growing outward, and no side with any length ends shorter than one
-  unit: a sub-unit side takes the unit its middle is in. A line or an arc snaps both ends.
+  unit: a sub-unit side takes the unit its middle is in. A line or an arc snaps both ends; one
+  that would collapse to a point keeps a unit's length along its longer side.
 - **The grid** is whole units for every layer, so a box's X, Y, W and H all land on integers. A stroke
   one unit wide and centred then straddles two pixel rows; aligned inside or outside it is crisp.
   No half-unit grid centres such a stroke on a pixel, since that would leave X and Y on halves. An

@@ -212,10 +212,19 @@ fn fit_layer(
         // An arc's ends are a line's: the origin and its one point.
         NodeKind::Line { end } | NodeKind::Arc { end, .. } => {
             let (from, to) = (world * Point::ZERO, world * *end);
-            let (a, b) = (
+            let (a, mut b) = (
                 Point::new(snap(from.x), snap(from.y)),
                 Point::new(snap(to.x), snap(to.y)),
             );
+            // A sub-unit line that snaps to one point keeps a unit along its
+            // longer side, as `fit_rect` keeps a thin bar, rather than vanishing.
+            let along = to - from;
+            if a == b && along.hypot() > EPS {
+                b += match along.x.abs() >= along.y.abs() {
+                    true => kurbo::Vec2::new(along.x.signum(), 0.0),
+                    false => kurbo::Vec2::new(0.0, along.y.signum()),
+                };
+            }
             let moved = [(from, a), (to, b)]
                 .iter()
                 .filter(|(p, q)| (*q - *p).hypot() > EPS)
@@ -653,6 +662,59 @@ mod tests {
         );
         let (again, _) = fit(&after, &ra, &[turned]);
         assert!(again.0.is_empty(), "a second fit does nothing: {again:?}");
+    }
+
+    /// A line or arc shorter than a unit keeps a unit's length along its longer
+    /// side rather than collapsing to a point.
+    /// flip: the line arm without its collapse test → fails at "keeps a length".
+    #[test]
+    fn a_sub_unit_line_or_arc_keeps_a_unit() {
+        let (doc, [line, arc]) = doc_of(|root, [line, arc]| {
+            vec![
+                Operation::CreateNode {
+                    id: line,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Line {
+                        end: Point::new(0.3, 0.0),
+                    },
+                    transform: Some(Affine::translate((10.1, 10.1))),
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: arc,
+                    parent: root,
+                    index: 1,
+                    kind: NodeKind::Arc {
+                        end: Point::new(-0.1, -0.4),
+                        sweep: 90.0,
+                    },
+                    transform: Some(Affine::translate((20.2, 20.3))),
+                    name: None,
+                },
+            ]
+        });
+        let res = Resolved::rebuild(&doc);
+        let (tx, _) = fit(&doc, &res, &[line, arc]);
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the fit applies");
+        let ra = Resolved::rebuild(&after);
+        for (id, want) in [
+            (line, (Point::new(10.0, 10.0), Point::new(11.0, 10.0))),
+            (arc, (Point::new(20.0, 20.0), Point::new(20.0, 19.0))),
+        ] {
+            let world = ra.world_transform(id).unwrap();
+            let (NodeKind::Line { end } | NodeKind::Arc { end, .. }) =
+                after.get(id).unwrap().kind()
+            else {
+                panic!("a line or an arc");
+            };
+            let got = (world * Point::ZERO, world * *end);
+            assert!(
+                (got.0 - want.0).hypot() < 1e-9 && (got.1 - want.1).hypot() < 1e-9,
+                "keeps a length: {got:?} vs {want:?}"
+            );
+        }
     }
 
     /// A path mirrored about an axis off the half-unit grid has its axis moved to

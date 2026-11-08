@@ -1148,6 +1148,20 @@ impl ToolsRow {
         ToolsRow::FillContent,
     ];
 
+    /// Every label a row can wear, with its chord, for the menu's width: a check
+    /// that is on renames its row (`STOP_CONTRAST`, `STOP_VISION`), and the menu
+    /// must fit that too and keep one width as the checks toggle.
+    fn measured() -> Vec<(&'static str, Option<&'static str>)> {
+        ToolsRow::ALL
+            .iter()
+            .map(|r| (r.label(), r.accel()))
+            .chain([
+                (crate::contrast::STOP_CONTRAST, None),
+                (crate::vision::STOP_VISION, None),
+            ])
+            .collect()
+    }
+
     /// The registry's label, except *Find and replace…*: the palette's two rows
     /// name the box's two doors, and here one row opens it.
     fn label(self) -> &'static str {
@@ -7859,10 +7873,7 @@ impl OndinApp {
                     .chain([crate::menu::Item::Present.spec().label, PANELS_ROW])
                     .map(|l| (l, None))
                     .collect(),
-                TopMenu::Tools => ToolsRow::ALL
-                    .iter()
-                    .map(|r| (r.label(), r.accel()))
-                    .collect(),
+                TopMenu::Tools => ToolsRow::measured(),
                 _ => ViewSwitch::SNAP_MENU
                     .iter()
                     .map(|s| (s.label(), None))
@@ -14598,6 +14609,18 @@ mod library_wiring_tests {
                 "{row} ends at {end}, the card at {}",
                 card.right()
             );
+        }
+    }
+
+    /// The Tools menu's width is measured on the labels a check that is on
+    /// wears, which are wider than any static row in the Mac spelling.
+    /// Gap: on Windows and Linux the static rows are wider, so only the macOS
+    /// run of `the_tools_menu_holds_the_checks_and_bulk_edits` sees the cut.
+    #[test]
+    fn the_tools_menu_is_sized_for_its_stop_labels() {
+        let rows = super::ToolsRow::measured();
+        for stop in [crate::contrast::STOP_CONTRAST, crate::vision::STOP_VISION] {
+            assert!(rows.iter().any(|(l, _)| *l == stop), "{stop} is measured");
         }
     }
 

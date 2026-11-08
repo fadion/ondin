@@ -587,6 +587,17 @@ fn node<'d>(ctx: &Ctx<'d>, id: NodeId) -> Result<&'d crate::node::Node, VerbErro
         .ok_or(VerbError::Refused(OpError::NoSuchNode(id)))
 }
 
+/// The layers a style verb's `nodes` names, each checked to exist: a paint
+/// slot's [`crate::style::targets`] drops a missing id, which would otherwise
+/// answer as done with nothing bound.
+fn style_nodes(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
+    let nodes = a.nodes("nodes")?;
+    for id in &nodes {
+        node(ctx, *id)?;
+    }
+    Ok(nodes)
+}
+
 /// A style's value as a caller writes it: the lists as the single-layer verbs take
 /// them, with no item ids, which the verb keys.
 #[derive(serde::Deserialize, Debug)]
@@ -1683,7 +1694,14 @@ pub static VERBS: &[Verb] = &[
             if var.is_some_and(|v| ctx.doc.variables().get(v).is_none()) {
                 return Err(a.invalid("variable", "no variable has that id"));
             }
-            let nodes = a.nodes("nodes")?;
+            // A page has no eye or opacity control, as `set_visible` and
+            // `set_opacity` refuse it; its paint fields reach its shapes.
+            let nodes = match field {
+                build::BoundField::Visible | build::BoundField::Opacity => {
+                    a.layers(ctx.doc, "nodes")?
+                }
+                _ => a.nodes("nodes")?,
+            };
             for id in &nodes {
                 node(ctx, *id)?;
             }
@@ -1767,7 +1785,7 @@ pub static VERBS: &[Verb] = &[
             let mut ops = vec![crate::style::add_op(id, &name, value)];
             if a.get("nodes").is_some() {
                 ops.extend(
-                    crate::style::targets(ctx.doc, &a.nodes("nodes")?, slot)
+                    crate::style::targets(ctx.doc, &style_nodes(ctx, a)?, slot)
                         .into_iter()
                         .map(|n| crate::style::bind_op(n, slot, Some(id))),
                 );
@@ -1843,7 +1861,7 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let nodes = a.nodes("nodes")?;
+            let nodes = style_nodes(ctx, a)?;
             let (style, slot) = match a.id_opt::<StyleId>("style")? {
                 Some(id) => {
                     let st = ctx

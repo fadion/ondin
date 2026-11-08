@@ -240,10 +240,11 @@ it created. A verb never commits; its caller does, as every edit is committed.
   A string starting `@@` is written with one `@` (`"@@home"` is the text *@home*). A step with a
   key other than `verb`, `args` and `as` is refused, since a misspelled `args` would run the verb
   with none, at its widest. A refusal names its step, counted from 1, and keeps the steps before it.
-- **A layer verb refuses a page** (`Args::layer`, `Args::layers`): placement, pivot, eye, lock,
-  opacity, blend and exports have no control on a page. `set_name` and `add_page` trim a page's
-  name, as the pages list does, and refuse an empty one.
   `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
+- **A layer verb refuses a page** (`Args::layer`, `Args::layers`): placement, pivot, eye, lock,
+  opacity, blend and exports have no control on a page. `bind_variable` refuses one for the eye
+  and the opacity too, while its paint fields pass a page on to its shapes. `set_name` and
+  `add_page` trim a page's name, as the pages list does, and refuse an empty one.
 - **Phase 3's verbs call the builders the app's component doors call**: `build::make_component`
   (*Create component*, in place or wrapped), `build::place_instance` and `build::centred_on` (the
   picker's placement), `component::detach`, `variant::combine`, `variant::switch` and

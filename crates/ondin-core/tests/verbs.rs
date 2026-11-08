@@ -1792,6 +1792,47 @@ fn a_paint_style_given_a_group_styles_its_shapes() {
     }));
 }
 
+/// A fill style given a layer that does not exist is refused by `apply_style`
+/// and `add_style`, as an effects style is, rather than answered as done.
+/// flip: `style_nodes` not checking each layer exists → fails at "a missing
+/// layer is refused".
+#[test]
+fn a_paint_style_given_a_missing_layer_is_refused() {
+    let (mut doc, mut ids, _) = blank();
+    let fills = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(9, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    let script = json!([
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "a" },
+        { "verb": "add_style", "args": { "value": { "fills": fills.clone() } }, "as": "s" },
+        { "verb": "delete_node", "args": { "nodes": ["@a"] } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (gone, style) = (made[0][0].clone(), made[1][0].clone());
+    assert!(
+        doc.get(NodeId::from_wire(&gone).unwrap()).is_none(),
+        "the fixture: a is gone"
+    );
+    let styles = doc.styles().iter().count();
+    let steps = [
+        json!({ "verb": "apply_style", "args": { "nodes": [gone.clone()], "style": style } }),
+        json!({ "verb": "add_style", "args": { "value": { "fills": fills }, "nodes": [gone] } }),
+    ];
+    for step in steps {
+        let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &json!([step]))
+            .expect_err(&format!("{step}: a missing layer is refused"));
+        assert!(err.why.contains("no such node"), "{err}");
+    }
+    assert_eq!(
+        doc.styles().iter().count(),
+        styles,
+        "the refused add_style adds no style"
+    );
+}
+
 /// `define_property` binds a main's text and rectangle to a text and a boolean
 /// property, a named one and one named for its layer, and `set_instance_property`
 /// sets each on an instance by name; a value of the wrong kind is refused.
@@ -2747,6 +2788,35 @@ fn layer_verbs_refuse_a_page_and_a_page_name_is_trimmed() {
         json!({ "node": p, "name": "  Pricing " }),
     );
     assert_eq!(doc.get(page).unwrap().name(), "Pricing");
+}
+
+/// `bind_variable` refuses a page for the eye and the opacity, as `set_visible`
+/// and `set_opacity` do, and the page stays shown and unbound.
+/// flip: `bind_variable` reading `nodes` with `Args::nodes` for every field →
+/// fails at "is refused".
+#[test]
+fn bind_variable_refuses_a_page_for_its_eye_and_opacity() {
+    let (mut doc, mut ids, page) = blank();
+    let no = serde_json::to_value(ondin_core::Cell::Boolean(false)).unwrap();
+    let half = serde_json::to_value(ondin_core::Cell::Number(0.5)).unwrap();
+    let vars = json!([
+        { "verb": "add_variable", "args": { "kind": "boolean", "name": "shown", "value": no } },
+        { "verb": "add_variable", "args": { "kind": "number", "name": "fade", "value": half } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &vars)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (b, n) = (made[0][0].clone(), made[1][0].clone());
+    let p = page.to_wire();
+    for (field, var) in [("visible", b), ("opacity", n)] {
+        let step = json!([{ "verb": "bind_variable",
+            "args": { "nodes": [p.clone()], "field": field, "variable": var } }]);
+        let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &step)
+            .expect_err(&format!("{field} on a page is refused"));
+        assert!(err.why.contains("a page is not a layer"), "{err}");
+    }
+    let root = doc.get(page).unwrap();
+    assert!(doc.shown(page), "the page stays shown");
+    assert!(root.visible_var().is_none() && root.opacity_var().is_none());
 }
 
 /// A step with a key other than `verb`, `args` and `as` is refused before it

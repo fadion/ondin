@@ -686,4 +686,300 @@ mod tests {
         let f = finding(Color::from_rgb8(0x60, 0x60, 0x60), grey, 7.0);
         assert_eq!(nearest(&f, Level::Aa, f.samples[0].ink), None);
     }
+
+    fn solid(c: Color) -> Vec<crate::Keyed<Fill>> {
+        crate::keyed_by_position([Fill {
+            brush: Brush::Solid(c).into(),
+            visible: true,
+        }])
+    }
+
+    /// A page holding a white frame and in it a text `Title`, "Billed yearly",
+    /// filled black: the document, its id source, the frame and the text.
+    fn titled() -> (Document, crate::IdSource, NodeId, NodeId) {
+        use crate::kurbo::{Affine, Size};
+        let mut ids = crate::IdSource::new(0xC0);
+        let page = ids.mint();
+        let mut doc = Document::new(page);
+        let (card, title) = (ids.mint(), ids.mint());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: card,
+                parent: page,
+                index: 0,
+                kind: crate::NodeKind::Artboard {
+                    size: Size::new(300.0, 200.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Card".into()),
+            },
+            Operation::SetFills {
+                id: card,
+                fills: solid(Color::WHITE),
+            },
+            Operation::CreateNode {
+                id: title,
+                parent: card,
+                index: 0,
+                kind: crate::NodeKind::Text {
+                    content: "Billed yearly".into(),
+                    style: Box::default(),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: crate::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: Some(Affine::translate((20.0, 20.0))),
+                name: Some("Title".into()),
+            },
+            Operation::SetFills {
+                id: title,
+                fills: solid(Color::BLACK),
+            },
+        ]))
+        .unwrap();
+        (doc, ids, card, title)
+    }
+
+    /// Modes Light and Dark, and a colour variable `fg` black in Light and white
+    /// in Dark: the modes and the variable.
+    fn light_and_dark(
+        doc: &mut Document,
+        ids: &mut crate::IdSource,
+    ) -> (ModeId, ModeId, crate::VarId) {
+        let (light, dark, fg) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+        let mode = |id, name: &str, index| Operation::AddMode {
+            collection: crate::variable::CollectionId::FIRST,
+            mode: crate::Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        };
+        doc.apply(&Transaction(vec![
+            mode(light, "Light", 0),
+            mode(dark, "Dark", 1),
+            Operation::AddVariable {
+                var: crate::Variable {
+                    id: fg,
+                    name: "fg".into(),
+                    kind: crate::VarKind::Color,
+                    cells: [
+                        (light, crate::Cell::Color(Color::BLACK)),
+                        (dark, crate::Cell::Color(Color::WHITE)),
+                    ]
+                    .into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .unwrap();
+        (light, dark, fg)
+    }
+
+    /// A finding for `id` whose one sample, in no mode, scores `score` with `ink`
+    /// on white.
+    fn on_white(id: NodeId, ink: Color, score: f64, needs: f64, non_text: bool) -> Finding {
+        Finding {
+            id,
+            trail: vec![],
+            ratio: score,
+            needs,
+            large: false,
+            non_text,
+            mode: None,
+            samples: vec![Sample {
+                mode: None,
+                name: None,
+                score,
+                needs,
+                ink,
+                opacity: 1.0,
+                under: Color::WHITE,
+                backdrop: Color::WHITE,
+            }],
+        }
+    }
+
+    /// `doc` with `tx` applied.
+    fn after(doc: &Document, tx: &Transaction) -> Document {
+        let mut after = doc.clone();
+        after.apply(tx).unwrap();
+        after
+    }
+
+    /// A text's runs, each with its colour.
+    fn run_colours(doc: &Document, id: NodeId) -> Vec<Option<Color>> {
+        let t = crate::TextRef::of(doc.get(id).unwrap().kind()).unwrap();
+        t.spans
+            .runs(t.style, t.content.len())
+            .into_iter()
+            .map(|r| r.1.color)
+            .collect()
+    }
+
+    /// A text whose first six bytes run grey.
+    fn grey_run(doc: &mut Document, id: NodeId, grey: Color) {
+        let mut spans = crate::CharSpans::default();
+        spans.set(0..6, CharAttr::Color(Some(grey)), &Default::default());
+        doc.apply(&Transaction(vec![Operation::SetTextSpans { id, spans }]))
+            .unwrap();
+    }
+
+    /// A variable fix on a run with its own colour clears the run onto the fill
+    /// and binds the fill, since a run's colour cannot be bound; a passing run
+    /// that drew in the fill keeps its look.
+    #[test]
+    fn a_variable_fix_binds_through_the_fill() {
+        let (mut doc, mut ids, _, title) = titled();
+        let (_, _, fg) = light_and_dark(&mut doc, &mut ids);
+        let grey = Color::from_rgba8(170, 170, 170, 255);
+        grey_run(&mut doc, title, grey);
+        let finding = on_white(title, grey, 2.3, 4.5, false);
+        let key = ids.mint_item();
+        let tx =
+            fix_transaction(&doc, title, &finding, Level::Aa, Fix::Var(fg), key).expect("a fix");
+        let doc = after(&doc, &tx);
+        let runs = run_colours(&doc, title);
+        assert_eq!(runs[0], None, "the failing run falls onto the fill");
+        assert_eq!(runs[1], Some(Color::BLACK), "the passing run keeps black");
+        assert_eq!(
+            doc.get(title).unwrap().paint().fills[0].brush.var(),
+            Some(fg),
+            "the fill is bound"
+        );
+    }
+
+    /// A fill bound to a variable that passes in every mode stays bound: only
+    /// the run whose own colour fails takes the fix.
+    ///
+    /// flip: `fix_transaction` judging the bound fill by its default mode's
+    /// colour against every mode's backdrop → fails at "the fill stays bound".
+    #[test]
+    fn a_fix_leaves_a_passing_bound_fill_bound() {
+        let (mut doc, mut ids, _, title) = titled();
+        let (light, dark, fg) = light_and_dark(&mut doc, &mut ids);
+        let grey = Color::from_rgba8(0x77, 0x77, 0x77, 255);
+        let fix = Color::from_rgba8(0x60, 0x60, 0x60, 255);
+        grey_run(&mut doc, title, grey);
+        let bind = crate::bind_brush_at_all(&doc, &[title], crate::PaintTarget::Fill, 0, fg);
+        doc.apply(&bind).unwrap();
+        let mut finding = on_white(title, grey, 4.48, 4.5, false);
+        finding.samples[0].mode = Some(light);
+        finding.samples.push(Sample {
+            mode: Some(dark),
+            score: 4.69,
+            under: Color::BLACK,
+            backdrop: Color::BLACK,
+            ..finding.samples[0].clone()
+        });
+        let key = ids.mint_item();
+        let tx = fix_transaction(&doc, title, &finding, Level::Aa, Fix::Colour(fix), key)
+            .expect("a fix");
+        let doc = after(&doc, &tx);
+        assert_eq!(
+            doc.get(title).unwrap().paint().fills[0].brush.var(),
+            Some(fg),
+            "the fill stays bound"
+        );
+        let runs = run_colours(&doc, title);
+        assert_eq!(runs[0], Some(fix), "the grey run takes the fix");
+        assert_eq!(runs[1], None, "the rest still draws in fg");
+    }
+
+    /// A variable fix on text with no visible fill adds one on top: the hidden
+    /// fill stays, and a passing run with no colour of its own keeps the black
+    /// it drew in.
+    ///
+    /// flip: `fix_transaction` replacing the fill list rather than adding to it
+    /// → fails at "the hidden fill stays".
+    #[test]
+    fn a_variable_fix_keeps_hidden_fills() {
+        let (mut doc, mut ids, _, title) = titled();
+        let (_, _, fg) = light_and_dark(&mut doc, &mut ids);
+        let grey = Color::from_rgba8(170, 170, 170, 255);
+        grey_run(&mut doc, title, grey);
+        let hidden = crate::keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
+            visible: false,
+        }]);
+        doc.apply(&Transaction(vec![Operation::SetFills {
+            id: title,
+            fills: hidden.clone(),
+        }]))
+        .unwrap();
+        let finding = on_white(title, grey, 2.3, 4.5, false);
+        let key = ids.mint_item();
+        let tx =
+            fix_transaction(&doc, title, &finding, Level::Aa, Fix::Var(fg), key).expect("a fix");
+        let doc = after(&doc, &tx);
+        let fills = &doc.get(title).unwrap().paint().fills;
+        assert_eq!(fills.first(), hidden.first(), "the hidden fill stays");
+        assert_eq!(fills.len(), 2);
+        assert!(fills[1].visible && fills[1].brush.var() == Some(fg));
+        let runs = run_colours(&doc, title);
+        assert_eq!(runs[0], None, "the failing run falls onto the fill");
+        assert_eq!(runs[1], Some(Color::BLACK), "the passing run keeps black");
+    }
+
+    /// A mark's fix changes the paint its measured ink came from: a white box
+    /// whose faint border fails takes the fix on its border, its fill left white.
+    ///
+    /// flip: `fix_transaction` rewriting every failing paint of a mark → fails at
+    /// "the fill stays white".
+    #[test]
+    fn a_mark_s_fix_changes_the_paint_it_was_measured_by() {
+        let (mut doc, mut ids, card, _) = titled();
+        let check_box = ids.mint();
+        let faint = Color::from_rgba8(0xdd, 0xdd, 0xdd, 255);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: check_box,
+                parent: card,
+                index: 0,
+                kind: crate::NodeKind::Rect {
+                    size: crate::kurbo::Size::new(16.0, 16.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(crate::kurbo::Affine::translate((200.0, 20.0))),
+                name: Some("Box".into()),
+            },
+            Operation::SetFills {
+                id: check_box,
+                fills: solid(Color::WHITE),
+            },
+            Operation::SetStrokes {
+                id: check_box,
+                strokes: crate::keyed_by_position([crate::Stroke {
+                    brush: Brush::Solid(faint).into(),
+                    ..Default::default()
+                }]),
+            },
+        ]))
+        .unwrap();
+        let finding = on_white(check_box, faint, 1.4, 3.0, true);
+        let fix = Color::from_rgba8(0x80, 0x80, 0x80, 255);
+        let key = ids.mint_item();
+        let tx = fix_transaction(&doc, check_box, &finding, Level::Aa, Fix::Colour(fix), key)
+            .expect("a fix");
+        let doc = after(&doc, &tx);
+        let paint = doc.get(check_box).unwrap().paint();
+        assert_eq!(
+            paint.fills[0].brush,
+            Brush::Solid(Color::WHITE).into(),
+            "the fill stays white"
+        );
+        assert_eq!(paint.strokes[0].brush, Brush::Solid(fix).into());
+    }
 }

@@ -960,6 +960,12 @@ fn card_centre_id() -> egui::Id {
 ///
 /// The ✕ is [`ui::close_button`], as on every popover.
 pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
+    modal_title_noted(ui, title, None)
+}
+
+/// [`modal_title`] with `note` after the name, dim and cut to the room the ✕
+/// leaves: what the card is about, such as the file an import reads.
+fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(title)
@@ -967,7 +973,20 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
                 .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui::close_button(ui).clicked()
+            let closed = ui::close_button(ui).clicked();
+            if let Some(note) = note {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(note)
+                                .size(ui::SMALL_PT)
+                                .color(theme::text::dim()),
+                        )
+                        .truncate(),
+                    );
+                });
+            }
+            closed
         })
         .inner
     })
@@ -1036,13 +1055,18 @@ pub(crate) fn canvas_card(
 /// A canvas card's title row, `w` wide: [`modal_title`] inside
 /// [`CANVAS_CARD_PAD`]. Returns whether its ✕ was pressed.
 pub(crate) fn card_head(ui: &mut egui::Ui, w: f32, title: &str) -> bool {
+    card_head_noted(ui, w, title, None)
+}
+
+/// [`card_head`] with a dim `note` after the title ([`modal_title_noted`]).
+pub(crate) fn card_head_noted(ui: &mut egui::Ui, w: f32, title: &str, note: Option<&str>) -> bool {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, CANVAS_CARD_HEAD_H), egui::Sense::hover());
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 0.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    modal_title(&mut child, title)
+    modal_title_noted(&mut child, title, note)
 }
 
 /// A canvas card's footer row, `w` wide: `note` faint on the left, `buttons` on

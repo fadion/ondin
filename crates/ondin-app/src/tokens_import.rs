@@ -30,6 +30,9 @@ const GROUP_H: f32 = 24.0;
 /// The box and tag columns.
 const BOX_W: f32 = 22.0;
 const GAP: f32 = 8.0;
+/// A row's own inset inside the list's [`GAP`] margin, so its box and the *Token*
+/// column line up with the card's [`PAD`], as the chips and the footer's box do.
+const ROW_IN: f32 = PAD - GAP;
 /// The widest a mode's value column grows.
 const COL_W: f32 = 150.0;
 
@@ -579,43 +582,15 @@ fn tag(c: Change) -> (&'static str, egui::Color32, egui::Color32) {
     }
 }
 
-/// The title row: *Import tokens* in the settings card's title type, where the
-/// file is, and the card's close button; true when that is clicked.
+/// The title row: the canvas card's head with where the file is beside
+/// *Import tokens*; true when its close button is clicked.
 fn head(ui: &mut egui::Ui, path: &Path) -> bool {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 40.0), egui::Sense::hover());
-    let p = ui.painter();
-    let y = rect.center().y;
-    let title = p.text(
-        egui::pos2(rect.left() + PAD, y),
-        egui::Align2::LEFT_CENTER,
-        "Import tokens",
-        egui::FontId::proportional(ui::TITLE_PT),
-        theme::text::strong(),
-    );
     let (name, dirs) = where_label(path);
     let place = match dirs.is_empty() {
         true => name,
         false => format!("{name} \u{b7} {dirs}"),
     };
-    let max = rect.right() - 40.0 - (title.right() + 8.0);
-    let mut job = egui::text::LayoutJob::simple_singleline(
-        place,
-        egui::FontId::proportional(ui::SMALL_PT),
-        theme::text::dim(),
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max.max(40.0));
-    let g = ui.fonts_mut(|f| f.layout_job(job));
-    ui.painter().galley(
-        egui::pos2(title.right() + 8.0, y - g.size().y / 2.0),
-        g,
-        theme::text::dim(),
-    );
-    let close = egui::Rect::from_center_size(
-        egui::pos2(rect.right() - PAD - ui::CLOSE_BUTTON_W / 2.0, y),
-        egui::Vec2::splat(ui::CLOSE_BUTTON_W),
-    );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(close));
-    ui::close_button(&mut child).clicked()
+    crate::settings::card_head_noted(ui, W, "Import tokens", Some(&place))
 }
 
 /// The buttons that filter the list and carry the counts, *All* first: each a
@@ -725,9 +700,9 @@ fn list(
     let p = ui.painter();
     let font = egui::FontId::proportional(ui::EYEBROW_PT);
     let y = head.center().y + 2.0;
-    let name_x = head.left() + GAP + 8.0 + BOX_W + GAP;
+    let name_x = head.left() + GAP + ROW_IN + BOX_W + GAP;
     ui::paint_eyebrow(p, egui::pos2(name_x, y), egui::Align2::LEFT_CENTER, "Token");
-    let cols_x = head.right() - GAP - 8.0 - (cw + GAP) * r.columns.len() as f32 + GAP;
+    let cols_x = head.right() - GAP - ROW_IN - (cw + GAP) * r.columns.len() as f32 + GAP;
     for (i, c) in r.columns.iter().enumerate() {
         let mut job = egui::text::LayoutJob::simple_singleline(
             c.to_uppercase(),
@@ -759,7 +734,7 @@ fn list(
                     ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, ROW_H), egui::Sense::hover());
                 ui.scope_builder(
                     egui::UiBuilder::new()
-                        .max_rect(rect.with_min_x(rect.left() + 8.0))
+                        .max_rect(rect.with_min_x(rect.left() + ROW_IN))
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     |ui| {
                         ui::empty_note(
@@ -831,7 +806,7 @@ fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
     ui::list_row_ground(p, rect, false, resp.hovered());
     let y = rect.center().y;
     p.text(
-        egui::pos2(rect.left() + 8.0, y),
+        egui::pos2(rect.left() + ROW_IN, y),
         egui::Align2::LEFT_CENTER,
         if open {
             icon::CARET_DOWN
@@ -842,7 +817,7 @@ fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
         theme::text::faint(),
     );
     let label = p.text(
-        egui::pos2(rect.left() + 8.0 + 18.0, y),
+        egui::pos2(rect.left() + ROW_IN + 18.0, y),
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(ui::SMALL_PT),
@@ -878,7 +853,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
     ui::list_row_ground(p, rect, false, resp.hovered() && !kit);
     let y = rect.center().y;
     // The box; a kit's row has a dead one, which the shared box has no state for.
-    let at = egui::pos2(rect.left() + 8.0 + ui::TICK_BOX / 2.0, y);
+    let at = egui::pos2(rect.left() + ROW_IN + ui::TICK_BOX / 2.0, y);
     if kit {
         p.rect_stroke(
             egui::Rect::from_center_size(at, egui::vec2(ui::TICK_BOX, ui::TICK_BOX)),
@@ -890,7 +865,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
         ui::paint_tick_box(p, at, *on, resp.hovered());
     }
     // The tag, the name and its second line.
-    let x = rect.left() + 8.0 + BOX_W + GAP;
+    let x = rect.left() + ROW_IN + BOX_W + GAP;
     let line_y = if row.sub.is_some() {
         rect.top() + 13.0
     } else {
@@ -1307,6 +1282,42 @@ mod tests {
         frame(&mut app, vec![escape]);
         assert!(app.tokens_import.is_none());
         assert!(app.session.doc.variables().is_empty(), "nothing applied");
+    }
+
+    /// The list's tick boxes stand in one column with the footer's, at the card's
+    /// inset.
+    /// flip: `ROW_IN` at 8 → fails at "one column".
+    #[test]
+    fn the_list_boxes_line_up_with_the_footers() {
+        let (ctx, mut app) = app();
+        let path = temp_file("align", FILE);
+        app.open_tokens_import(path, false);
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(1200.0, 760.0));
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                ..Default::default()
+            };
+            shapes = ctx
+                .run_ui(input, |ui| app.tokens_import_ui(ui.ctx(), canvas))
+                .shapes;
+        }
+        let side = ui::TICK_BOX;
+        let mut lefts: Vec<f32> = shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if (r.rect.width() - side).abs() < 0.01 => Some(r.rect.left()),
+                _ => None,
+            })
+            .collect();
+        assert!(lefts.len() >= 2, "the fixture: rows and the footer's box");
+        lefts.sort_by(f32::total_cmp);
+        lefts.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+        assert!(lefts.len() == 1, "one column: {lefts:?}");
     }
 
     /// Enter applies with nothing focused, but on a focused control it is that

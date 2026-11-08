@@ -82,8 +82,8 @@ pub enum Action {
     OpenSettings,
     /// Re-run every export setting in the document (§7). `Ctrl+Alt+E`.
     ///
-    /// `Ctrl+Shift+E` is deliberately unbound; `Ctrl+E`'s `!m.shift` guard keeps it
-    /// from falling through to *Flatten*.
+    /// `Ctrl+Shift+E` is deliberately unbound; *Flatten*'s row holds Ctrl alone,
+    /// so a stray Shift does not fall through to it.
     ExportAll,
     /// Show the top-level frames one at a time, fullscreen (`present.rs`).
     /// `Ctrl+Alt+Enter`.
@@ -137,8 +137,8 @@ pub enum Action {
     /// `Ctrl`+`Alt`+`V`: give the selection the appearance
     /// [`Self::CopyProperties`] lifted (`build::paste_properties`).
     ///
-    /// `cmd_only` is `command && !alt`, so this chord never reaches
-    /// [`Self::PasteRelease`].
+    /// Read off the V release with Alt down; [`Self::PasteRelease`] needs Alt
+    /// up, so the two never double.
     PasteProperties,
     Duplicate,
     Delete,
@@ -317,8 +317,8 @@ pub enum Action {
     /// Mirror the selection across the centreline of the box it occupies —
     /// `Shift+H` and `Shift+V`, Figma's.
     ///
-    /// Clear of the tool letters because the tool block is gated on Shift being
-    /// *up*.
+    /// Clear of the tool letters because a binding row matches its modifiers
+    /// exactly, and the tool letters' rows hold none.
     Flip(build::Axis),
     /// Align the selection to one edge of the box `OndinApp::align_target`
     /// picks — `Alt`+`A`/`D`/`W`/`S`/`H`/`V`, Figma exact.
@@ -1574,8 +1574,8 @@ mod tests {
     /// `Ctrl+Shift+W` unspent, and `Alt+W` (align top) is not shadowed by
     /// `Ctrl+Alt+W`.
     ///
-    /// flip: `W`'s `cmd_only` → bare `cmd` → fails at "Ctrl+Alt+W belongs to
-    /// neither row" (the `Alt+W` assertion stays green).
+    /// flip: `Mods::held` ignoring Alt → fails at "Ctrl+Alt+W belongs to
+    /// neither row".
     #[test]
     fn ctrl_n_makes_a_document_and_ctrl_w_closes_one() {
         let cmd = egui::Modifiers::COMMAND;
@@ -2118,8 +2118,9 @@ mod tests {
         );
     }
 
-    /// `Ctrl+Shift+S` is unbound (asserts nothing); dropping `!m.shift` would make
-    /// it a second Save.
+    /// `Ctrl+Shift+S` is unbound: `Save`'s row holds Ctrl alone.
+    ///
+    /// flip: `Mods::held` ignoring Shift → fails at "Ctrl+Shift+S is unbound".
     #[test]
     fn save_takes_the_bare_chord_and_the_shifted_one_is_free() {
         let cmd = egui::Modifiers::COMMAND;
@@ -2138,11 +2139,11 @@ mod tests {
         );
     }
 
-    /// `Ctrl+E` flattens and `Ctrl+Shift+E` does nothing: `!m.shift` looks like a
-    /// redundant guard now that the chord it excluded is unbound.
+    /// `Ctrl+E` flattens and `Ctrl+Shift+E` does nothing: *Flatten*'s row holds
+    /// Ctrl alone, though no row claims the shifted chord.
     ///
-    /// flip: delete `!m.shift` from *Flatten*'s arm → fails at the second
-    /// assertion with `[Flatten]`.
+    /// flip: `Mods::held` ignoring Shift → fails at the second assertion with
+    /// `[Flatten]`.
     #[test]
     fn a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening() {
         let cmd = egui::Modifiers::COMMAND;
@@ -3143,7 +3144,10 @@ mod consolidated_chord_tests {
     }
 
     /// `Shift+H` / `Shift+V` flip; plain `H` and `V` still pick their tools (the
-    /// tool block is gated on `!m.shift`).
+    /// tool letters' rows hold no modifier, and a row matches exactly).
+    ///
+    /// flip: `Mods::held` ignoring Shift → fails at `Shift+H` with
+    /// `ChooseTool(Hand)` beside the flip.
     #[test]
     fn the_flip_chords_do_not_steal_the_hand_and_select_tools() {
         let none = egui::Modifiers::NONE;
@@ -3638,7 +3642,7 @@ mod text_insert_tests {
         );
     }
 
-    /// `Ctrl+Alt` is not `Ctrl`: `cmd_only` is stated per binding.
+    /// `Ctrl+Alt` is not `Ctrl`: a binding row's modifiers match exactly.
     #[test]
     fn adding_alt_takes_a_chord_away_rather_than_leaving_it() {
         let cmd_alt = egui::Modifiers {
@@ -3657,13 +3661,12 @@ mod text_insert_tests {
         );
     }
 
-    /// The four document chords resolve in a session too, with `normal_mode`'s
-    /// guards. The Shift sweep is separate because
-    /// `ctrl_shift_is_not_a_second_spelling_of_ctrl` covers only `normal_mode`'s
-    /// arms. Finishing the session happens in `OndinApp::dispatch`, not seen here.
+    /// The four document chords resolve in a session too, as `Both` rows with
+    /// their exact modifiers. Finishing the session happens in
+    /// `OndinApp::dispatch`, not seen here.
     ///
-    /// flip: delete the four-chord loop from `text_insert_mode` → fails at
-    /// `Ctrl+Z`; drop `!m.shift` from the `Save` arm → fails at `Ctrl+Shift+S`.
+    /// flip: `Undo`'s row scoped `Normal` → fails at "Ctrl+Z in a session";
+    /// `Mods::held` ignoring Shift → fails there too, with Redo beside Undo.
     #[test]
     fn the_four_document_chords_resolve_in_a_session() {
         let cmd = egui::Modifiers::COMMAND;

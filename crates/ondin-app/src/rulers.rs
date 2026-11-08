@@ -1621,8 +1621,8 @@ impl OndinApp {
         matches!(&self.drag, Drag::Guide(d) if d.announces_discard())
     }
 
-    /// The cursor over a guide *line*. Select only, matching what a press
-    /// there would do.
+    /// The cursor over a guide *line*, under the selecting tools
+    /// (`Tool::selects`), matching what a press there would do.
     pub(crate) fn guide_cursor(
         &self,
         p: egui::Pos2,

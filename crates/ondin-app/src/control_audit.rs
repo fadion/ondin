@@ -1304,6 +1304,33 @@ fn sweep_on(theme: Theme) {
     let found = opened(&ctx, &mut app, |_, a| a.toggle_assets());
     assert!(app.asset_panel.is_some(), "the assets browser opened");
     check("assets browser", app, found);
+    // The icons tab with a set ready: its set and variant dropdowns and the
+    // size field.
+    let mut app = with_a_rect(&ctx);
+    app.prefs.assets.icon_sets = vec!["material-symbols".into()];
+    app.prefs.assets.set = "material-symbols".into();
+    app.assets.sets.insert(
+        "material-symbols",
+        crate::assets::SetState::Ready(std::sync::Arc::new(crate::assets::sets::IconSet {
+            icons: vec![crate::assets::sets::Icon {
+                name: "home".into(),
+                variant: 0,
+                body: "<path d='M0 0h1v1z'/>".into(),
+                view: [0.0, 0.0, 24.0, 24.0],
+                aliases: Vec::new(),
+            }],
+            grid: 24.0,
+            variant_grids: Vec::new(),
+        })),
+    );
+    let found = opened(&ctx, &mut app, |_, a| a.toggle_assets());
+    check("assets icon controls", app, found);
+    // The photos tab with a service on: its service and orientation dropdowns.
+    let mut app = with_a_rect(&ctx);
+    app.prefs.assets.photos_tab = true;
+    app.prefs.assets.photo_services = vec!["openverse".into()];
+    let found = opened(&ctx, &mut app, |_, a| a.toggle_assets());
+    check("assets photo controls", app, found);
     // The Credits card over a layer carrying a CC BY icon's credit and one
     // carrying a photo's, with its links.
     let mut app = with_a_rect(&ctx);

@@ -188,6 +188,9 @@ pub(crate) struct InFlight {
     pub(crate) cleanup_scrub: Option<crate::cleanup::CleanupNumbers>,
     /// The Offset card's distance as it was when its scrub began, likewise.
     pub(crate) offset_scrub: Option<f64>,
+    /// The vision bar's condition and its severity as it was when the slider was
+    /// pressed, likewise (`crate::vision`).
+    pub(crate) vision_scrub: Option<(ondin_render::vision::Condition, f32)>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
@@ -295,6 +298,13 @@ mod in_flight_tests {
                 "offset_scrub",
                 InFlight {
                     offset_scrub: Some(4.0),
+                    ..Default::default()
+                },
+            ),
+            (
+                "vision_scrub",
+                InFlight {
+                    vision_scrub: Some((ondin_render::vision::Condition::Blur, 0.5)),
                     ..Default::default()
                 },
             ),
@@ -2260,6 +2270,7 @@ impl OndinApp {
             self.in_flight.trace_scrub = None;
             self.in_flight.cleanup_scrub = None;
             self.in_flight.offset_scrub = None;
+            self.in_flight.vision_scrub = None;
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2902,6 +2913,13 @@ impl OndinApp {
         }
         if let Some(d) = self.in_flight.offset_scrub.take() {
             self.restore_offset_scrub(d);
+        }
+        // And the vision bar's severity, never saved while the slider was held.
+        if let Some((condition, from)) = self.in_flight.vision_scrub.take() {
+            self.prefs
+                .vision
+                .severity
+                .insert(condition.key().into(), from);
         }
         // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;
@@ -7748,7 +7766,11 @@ impl OndinApp {
                     .map(|s| (s.label(), None))
                     .collect(),
             };
-            let width = crate::ui::menu_check_accel_width(&ctx, &rows, crate::ui::MENU_PAD, MENU_W);
+            // Tools ticks nothing, so its rows are bare and it sizes to them alone.
+            let tools = which == TopMenu::Tools;
+            let floor = if tools { 0.0 } else { MENU_W };
+            let width =
+                crate::ui::menu_check_accel_width(&ctx, &rows, !tools, crate::ui::MENU_PAD, floor);
             self.dropdown(&ctx, id, anchor, width, &head, |app, ui| {
                 if which == TopMenu::Tools {
                     app.tools_menu(ui);
@@ -7811,10 +7833,10 @@ impl OndinApp {
         }
     }
 
-    /// The **Tools** dropdown's rows: the checks, which change nothing and are
-    /// ticked while on, then a hairline and the bulk edits, each opening its box
-    /// with its chord beside it. Every row keeps the tick column, so the labels
-    /// line up. A pick closes the menu before it acts.
+    /// The **Tools** dropdown's rows: the checks, which change nothing, then a
+    /// hairline and the bulk edits, each opening its box with its chord beside it.
+    /// Bare rows with no tick column: a check that is on says so in its own bar
+    /// over the canvas. A pick closes the menu before it acts.
     fn tools_menu(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         for row in ToolsRow::ALL {
@@ -7827,13 +7849,7 @@ impl OndinApp {
                 }
                 _ => None,
             };
-            let on = match row {
-                ToolsRow::CheckContrast => self.contrast.is_some(),
-                ToolsRow::SimulateVision => self.vision.is_some(),
-                _ => false,
-            };
             let style = crate::ui::MenuRow::new("", row.label())
-                .checked(on)
                 .accel(row.accel())
                 .enabled(dim.is_none());
             let resp = crate::ui::menu_row(ui, style, crate::ui::MENU_ROW_H);
@@ -14451,12 +14467,12 @@ mod library_wiring_tests {
         }
     }
 
-    /// The Tools menu holds its five rows with each chord inside the card, a
+    /// The Tools menu holds its five rows bare, each chord inside the card, a
     /// pick closes it and acts, and View holds none of its rows.
     ///
     /// flip: `tools_menu` not clearing `open_menu` on a pick → fails at "and closes
-    /// the menu". Sizing by the labels alone does not bite: the 160pt floor fits
-    /// every row and chord today.
+    /// the menu"; its rows given `.checked(false)` → fails at "starts at the row's
+    /// inset".
     #[test]
     fn the_tools_menu_holds_the_checks_and_bulk_edits() {
         use super::ToolsRow;
@@ -14500,9 +14516,17 @@ mod library_wiring_tests {
             .memory(|m| m.area_rect(egui::Id::new("tools-menu")))
             .expect("the Tools menu's area");
         let right = card.right() - crate::ui::MENU_PAD - crate::ui::MENU_BORDER;
+        // Bare rows: no tick column before the labels.
+        let inset = card.left() + crate::ui::MENU_BORDER + crate::ui::MENU_PAD + 8.0;
         for row in ToolsRow::ALL {
             let at = text(&shapes, row.label()).unwrap_or_else(|| panic!("{}", row.label()));
             assert!(at.right() <= right, "{} ends inside", row.label());
+            assert!(
+                (at.left() - inset).abs() <= 1.0,
+                "{} starts at the row's inset: {} against {inset}",
+                row.label(),
+                at.left()
+            );
             if let Some(accel) = row.accel() {
                 let chord = text(&shapes, &crate::input::keys(accel)).expect("the chord");
                 assert!(chord.right() <= right + 0.5, "{accel} ends inside the card");

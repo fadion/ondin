@@ -105,7 +105,7 @@ marks the original that stays. Toggles live with the key.
 ## The contrast check mode (`contrast.rs`)
 
 *Tools ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
-chord): the Tools menu's first row, ticked while on, and a palette row reading *Stop checking contrast* while on.
+chord): the Tools menu's first row, and a palette row reading *Stop checking contrast* while on.
 It measures the shown text layers, and with *Non-text* small shapes, against what is drawn behind
 them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
@@ -193,7 +193,7 @@ stack.
 ## The vision simulation (`vision.rs`)
 
 *Tools ▸ Simulate vision* (`Action::SimulateVision`, `menu::Item::SimulateVision`, `Group::View`,
-no chord): the Tools menu's row after *Check contrast*, ticked while on, and a palette row reading
+no chord): the Tools menu's row after *Check contrast*, and a palette row reading
 *Stop simulating vision* while on. Its search words keep the old name's (*colour blind*, *color
 blind*, *colour blindness*) so muscle memory still finds it. One frame of the canvas is shown as
 someone sees it with a condition of colour vision or of sight, at a severity
@@ -209,12 +209,15 @@ colour deficiencies barely move.
   frame in view.
 - **The bar**, in the contrast bar's style and place (`contrast::{bar_frame, separator,
   scope_chip, cell, BAR_H}`): eye glyph, the frame's scope chip (named through `private::layer`) or
-  *Whole canvas*, a hairline, the condition head (`ui::menu_head_min`, its lead as wide as the
-  widest condition label), the severity slider (`ui::slider`, `SLIDER_W` 88pt, *How strong the
-  simulation is*), the percentage in a cell as wide as *100%* (`contrast::cell`), a hairline, then
-  × (*Stop simulating vision*). The fixed head and cell keep the bar one width whichever condition
-  it names, so nothing moves under the pointer
-  (`the_slider_sets_the_shown_condition_s_severity`).
+  *Whole canvas*, a hairline, the condition head (`ui::menu_head`, hugging its label), the severity
+  slider (`ui::slider`, `SLIDER_W` 88pt, *How strong the simulation is*), the percentage in a cell
+  as wide as *100%* (`contrast::cell`), a hairline, then × (*Stop simulating vision*). The bar
+  widens and narrows with the condition's name, so a short one leaves no gap; the cell keeps the ×
+  still as the percentage changes.
+- **The slider** writes the shown condition's severity live and saves it when the press ends. A
+  right-click while it is held puts the severity back and the rest of the press does nothing
+  (`InFlight::vision_scrub`, restored by `OndinApp::cancel_gesture`), as every drag in the app
+  cancels (`the_slider_sets_the_shown_condition_s_severity`).
 - **The condition menu**, from the head, 240pt (`MENU_W`): Protanopia, Deuteranopia, Tritanopia,
   Achromatopsia, a hairline, then Blurred vision, Contrast loss, Ghosting, Yellowing, each a
   ticked row *Label · gloss* (*Blurred vision · Out of focus*). A pick switches at once and closes
@@ -268,9 +271,9 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   disabled while comparing (*‹Name› — not while comparing*); comparing also closes whichever is open.
 - View and Snap rows are `ui::menu_check`, a checkable `ui::menu_row` with no glyph, `ui::MENU_ROW_H`
   (24) tall, in `ui::menu_frame`. The accent tick sits in the glyph column and keeps it when off;
-  "off" also dims the label. Each of the three menus is 160pt or its widest row
-  (`ui::menu_check_accel_width`: the label column `ui::MENU_LABEL_X`, the label and any chord, then
-  8pt).
+  "off" also dims the label. View and Snap are 160pt or their widest row; Tools is its widest row
+  (`ui::menu_check_accel_width`: the label column `ui::MENU_LABEL_X`, or a bare row's 8pt inset
+  for Tools, the label and any chord, then 8pt).
 - **View** reads in three groups between separators, so each kind of row is found in one place:
   - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,
     *Show grid*, *Show layout grid*;
@@ -291,14 +294,15 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - **Tools** (`OndinApp::tools_menu`, rows from `ToolsRow::ALL`) holds what works across the
   document. Verbs on the selection stay in the context menu, document-level rows in the Document
   menu, view modes in View, inserting in the insert picker.
-  - the checks, which change nothing: *Check contrast* and *Simulate vision*, ticked while
-    on and never remembered, then *Colour review…*, never ticked, opening its card;
+  - the checks, which change nothing: *Check contrast* and *Simulate vision*, each toggling its
+    mode (never remembered), then *Colour review…*, opening its card;
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
     `Action::FindText { replace: false }`) and *Batch rename…* (`Ctrl+Shift+R`; dimmed with
     `private::DECLINE_RENAME` in private mode).
 
-  Every row is a `ui::menu_row` with an empty glyph and `.checked(..)`, so the tick column stays and
-  the labels line up. The bulk edits show their chords from the keymap (`Item::spec().accel`).
+  Every row is a bare `ui::menu_row` (an empty glyph, never checked), its label at the row's own
+  inset: nothing in the menu ticks, and a check that is on says so in its own bar over the canvas.
+  The bulk edits show their chords from the keymap (`Item::spec().accel`).
   *Find and replace…* is this menu's own label (`ToolsRow::label`): the palette names the box's two
   doors, *Find in text…* and *Replace text…*. A pick closes the menu, then acts. The palette keeps
   every row.

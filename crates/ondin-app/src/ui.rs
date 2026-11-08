@@ -923,14 +923,17 @@ fn menu_check_held(
 /// label fits — `floor` or more, the row's inset on the right as on the left.
 pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f32) -> f32 {
     let rows: Vec<(&str, Option<&str>)> = labels.iter().map(|l| (*l, None)).collect();
-    menu_check_accel_width(ctx, &rows, pad, floor)
+    menu_check_accel_width(ctx, &rows, true, pad, floor)
 }
 
 /// [`menu_check_width`] for rows that may carry an accelerator, `(label, accel)`,
 /// measured as [`menu_row`] lays the pair: the label, the gap, the spelled chord.
+/// `ticks` keeps the tick column before the labels; without it a row is bare, its
+/// label at the row's own inset, for a menu with nothing to tick.
 pub fn menu_check_accel_width(
     ctx: &egui::Context,
     rows: &[(&str, Option<&str>)],
+    ticks: bool,
     pad: f32,
     floor: f32,
 ) -> f32 {
@@ -950,8 +953,9 @@ pub fn menu_check_accel_width(
             measure((*label).to_string(), SMALL_PT) + chord
         })
         .fold(0.0, f32::max);
-    // `menu_row`'s label column, then its 8pt right inset.
-    let row = MENU_LABEL_X + widest + 8.0;
+    // `menu_row`'s label column (or a bare row's inset), then its 8pt right inset.
+    let label_x = if ticks { MENU_LABEL_X } else { 8.0 };
+    let row = label_x + widest + 8.0;
     (row + 2.0 * pad + 2.0 * MENU_BORDER).ceil().max(floor)
 }
 

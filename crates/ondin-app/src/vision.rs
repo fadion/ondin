@@ -141,6 +141,8 @@ impl OndinApp {
         let Some(v) = &self.vision else { return };
         let condition = self.prefs.vision.condition();
         let mut severity = f64::from(self.prefs.vision.severity(condition));
+        let from = severity as f32;
+        let cancelled = self.gesture_cancelled;
         // Named as drawn now, so private mode turned on during it masks it.
         let name = v
             .frame
@@ -185,18 +187,12 @@ impl OndinApp {
                         separator(ui);
                         ui.spacing_mut().item_spacing.x = 10.0 - crate::ui::HEAD_PAD;
                         let pt = crate::ui::Scale::Toolbar.text_pt();
-                        // As wide as the longest label, so the slider never moves
-                        // under the pointer when the condition changes.
-                        let widest = Condition::ALL
-                            .iter()
-                            .map(|c| text_w(ui, c.label(), pt))
-                            .fold(0.0, f32::max);
-                        let head = crate::ui::menu_head_min(
+                        // Hugs its label: the bar narrows and widens with it.
+                        let head = crate::ui::menu_head(
                             ui,
                             egui::RichText::new(condition.label())
                                 .size(pt)
                                 .color(theme::text::muted()),
-                            widest.ceil(),
                             4.0,
                             open,
                         );
@@ -211,12 +207,17 @@ impl OndinApp {
                             f64::from(MIN_SEVERITY)..=1.0,
                         )
                         .on_hover_text("How strong the simulation is");
-                        if slider.changed() {
+                        // A right-click has called the press off: nothing more
+                        // lands until the button is let go.
+                        let pressed = slider.is_pointer_button_down_on();
+                        if cancelled {
+                        } else if slider.changed() {
+                            act = Some(Act::Severity { from, pressed });
+                        } else if slider.drag_stopped() || slider.clicked() {
                             act = Some(Act::Severity {
-                                save: !slider.dragged(),
+                                from,
+                                pressed: false,
                             });
-                        } else if slider.drag_stopped() {
-                            act = Some(Act::Severity { save: true });
                         }
                         // A cell as wide as the widest reading, so the × holds still.
                         ui.spacing_mut().item_spacing.x = 6.0;
@@ -241,13 +242,20 @@ impl OndinApp {
         match act {
             None => {}
             Some(Act::Close) => self.vision = None,
-            Some(Act::Severity { save }) => {
+            Some(Act::Severity { from, pressed }) => {
+                // What a right-click puts back while the press lasts
+                // (`OndinApp::cancel_gesture`).
+                if !pressed {
+                    self.in_flight.vision_scrub = None;
+                } else if self.in_flight.vision_scrub.is_none() {
+                    self.in_flight.vision_scrub = Some((condition, from));
+                }
                 self.prefs
                     .vision
                     .severity
                     .insert(condition.key().into(), severity as f32);
-                // Written when a drag ends, not on every frame of it.
-                if save {
+                // Written when the press ends, not on every frame of a drag.
+                if !pressed {
                     self.prefs.save();
                 }
                 ctx.request_repaint();
@@ -327,9 +335,11 @@ enum Act {
     Close,
     Menu(egui::Pos2),
     Retarget,
-    /// The slider moved; `save` unless a drag is still under way.
+    /// The slider moved, or was let go: `from` is the severity before this
+    /// frame, and while `pressed` nothing is saved yet.
     Severity {
-        save: bool,
+        from: f32,
+        pressed: bool,
     },
 }
 
@@ -576,10 +586,11 @@ mod tests {
         );
     }
 
-    /// The bar is as wide whichever condition it names, and its slider sets the
-    /// shown condition's own severity, leaving the others'.
+    /// The bar hugs the condition it names, and its slider sets the shown
+    /// condition's own severity, leaving the others'; a right-click while it is
+    /// held puts the severity back and the rest of the press does nothing.
     ///
-    /// flip: the head drawn with `menu_head` (no `min_lead`) → fails at "as wide".
+    /// flip: `cancel_gesture` without its `vision_scrub` arm → fails at "put back".
     #[test]
     fn the_slider_sets_the_shown_condition_s_severity() {
         let ctx = egui::Context::default();
@@ -609,18 +620,11 @@ mod tests {
                 .expect("the bar")
                 .width()
         };
-        let widths: Vec<f32> = [
-            Condition::Tritanopia,
-            Condition::Achromatopsia,
-            Condition::Blur,
-            Condition::Ghosting,
-        ]
-        .into_iter()
-        .map(|c| bar_w(&mut app, c))
-        .collect();
+        let long = bar_w(&mut app, Condition::Achromatopsia);
+        let short = bar_w(&mut app, Condition::Ghosting);
         assert!(
-            widths.iter().all(|w| (w - widths[0]).abs() < 0.5),
-            "as wide: {widths:?}"
+            long > short + 10.0,
+            "hugs its label: {long} against {short}"
         );
 
         // Blur at its default half; the cell reads it, and the slider ends 6pt
@@ -656,6 +660,25 @@ mod tests {
             app.prefs.vision.severity(Condition::Tritanopia),
             1.0,
             "others kept"
+        );
+
+        // Pressed at its start again from 70%, then called off while held.
+        app.prefs
+            .vision
+            .severity
+            .insert(Condition::Blur.key().into(), 0.7);
+        run(&mut app, vec![press(true)]);
+        let pressed = app.prefs.vision.severity(Condition::Blur);
+        assert!(pressed < 0.2, "fixture: the press moved it, to {pressed}");
+        assert!(app.cancel_gesture(&ctx), "a right-click cancels the press");
+        assert_eq!(app.prefs.vision.severity(Condition::Blur), 0.7, "put back");
+        let on = egui::pos2(p.x + 40.0, p.y);
+        run(&mut app, vec![egui::Event::PointerMoved(on)]);
+        run(&mut app, vec![press(false)]);
+        assert_eq!(
+            app.prefs.vision.severity(Condition::Blur),
+            0.7,
+            "the rest of the press does nothing"
         );
     }
 }

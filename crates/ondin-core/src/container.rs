@@ -1611,6 +1611,27 @@ pub fn parent_lays_out(view: &dyn LayoutView, id: crate::NodeId) -> bool {
     })
 }
 
+/// Whether a container that lays its children out sits above `id`: its parent,
+/// or one reached through groups and booleans with no layout of their own. Each
+/// of those is measured from its children, so a change to `id`'s box resizes the
+/// laid-out item and moves its siblings ([`chain_root`]'s climb).
+pub fn lays_out_above(view: &dyn LayoutView, id: crate::NodeId) -> bool {
+    let mut cursor = id;
+    while let Some(parent) = view.parent(cursor) {
+        if parent_lays_out(view, cursor) {
+            return true;
+        }
+        if !matches!(
+            view.kind(parent),
+            Some(NodeKind::Group | NodeKind::Boolean { .. })
+        ) {
+            return false;
+        }
+        cursor = parent;
+    }
+    false
+}
+
 /// Whether `id` roots a layout pass: a container with a layout that is **not**
 /// itself laid out by one — the top of a chain of nested layout containers, which
 /// [`lay_out`] lays out whole.

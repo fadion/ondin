@@ -899,3 +899,176 @@ fn covered_fills_in_a_main_keep_what_an_instance_shows() {
     );
     assert_eq!(f.fills(plain_copy), [white], "and so does its instance");
 }
+
+/// A one-layer group is kept as a flex item (a spacer of its layer's box), in a
+/// state-paired variant, with a bound opacity, and locked while skipping.
+/// flip: drop the spacer, state or locked arm of `Run::group_kept`, or the
+/// `opacity_var` half of its opacity arm → fails at that group's `kept`.
+#[test]
+fn a_group_keeps_its_flow_state_bound_opacity_and_lock() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let mut groups = Vec::new();
+    for _ in 0..3 {
+        let a = f.painted(frame, &[(RED, true)]);
+        groups.push(f.group(&[a]));
+    }
+    let [spacer, faded, locked] = groups[..] else {
+        unreachable!()
+    };
+    let rest = f.state_set();
+    let a = f.painted(rest, &[(RED, true)]);
+    let state = f.group(&[a]);
+    let (mut ops, fade) = ondin_core::variable::add_variable_ops(
+        f.doc.variables(),
+        &mut f.ids,
+        ondin_core::variable::CollectionId::FIRST,
+        ondin_core::VarKind::Number,
+        Some("fade"),
+        Some(ondin_core::Cell::Number(1.0)),
+    )
+    .expect("a number variable");
+    ops.push(Operation::SetDisplay {
+        id: frame,
+        display: flex(),
+    });
+    ops.push(Operation::SetLocked {
+        id: locked,
+        locked: true,
+    });
+    f.commit(ops);
+    // The binding alone, its literal left at 1, so only `opacity_var` keeps it.
+    f.commit(vec![Operation::SetOpacityVar {
+        id: faded,
+        var: Some(fade),
+    }]);
+    let n = f.doc.get(faded).unwrap();
+    assert!(
+        n.opacity_var().is_some() && n.opacity() == 1.0,
+        "the fixture: bound, its literal whole"
+    );
+
+    let rules = only(&[Rule::OneLayerGroups]);
+    let p = f.run(&rules);
+    let r = Rule::OneLayerGroups;
+    assert_eq!(kept(&p, r, spacer), Some(Kept::Spacer));
+    assert_eq!(kept(&p, r, faded), Some(Kept::Opacity));
+    assert_eq!(kept(&p, r, locked), Some(Kept::Locked));
+    assert_eq!(kept(&p, r, state), Some(Kept::State));
+    assert!(
+        [spacer, faded, locked, state]
+            .iter()
+            .all(|g| f.doc.contains(*g))
+    );
+}
+
+/// With *Skip locked* on, a locked layer is listed as kept by *Empty layers*,
+/// *Hidden paint* and *Covered fills*, and keeps what each would take.
+/// flip: drop the `Kept::Locked` arm of `Run::empty_layers`,
+/// `Run::hidden_paint` or `Run::covered_fills` → fails at that rule's `kept`.
+#[test]
+fn each_rule_keeps_a_locked_layer_while_skipping() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let empty = f.add(frame, rect());
+    let hidden = f.painted(frame, &[(RED, true), (BLUE, false)]);
+    let covered = f.painted(frame, &[(BLUE, true), (RED, true)]);
+    f.commit(
+        [empty, hidden, covered]
+            .map(|id| Operation::SetLocked { id, locked: true })
+            .to_vec(),
+    );
+    let rules = only(&[Rule::EmptyLayers, Rule::HiddenPaint, Rule::CoveredFills]);
+    let p = f.run(&rules);
+    assert_eq!(kept(&p, Rule::EmptyLayers, empty), Some(Kept::Locked));
+    assert_eq!(kept(&p, Rule::HiddenPaint, hidden), Some(Kept::Locked));
+    assert_eq!(kept(&p, Rule::CoveredFills, covered), Some(Kept::Locked));
+    assert!(f.doc.contains(empty));
+    assert_eq!(f.fills(hidden), [RED, BLUE]);
+    assert_eq!(f.fills(covered), [BLUE, RED]);
+}
+
+/// *Covered fills* grows linearly with the layers it lists: it asks each layer's
+/// instance copies from one map, not by a scan of the document per layer. Its
+/// cost over a plan with no rule, at eight times the layers, is about eight
+/// times (sixty-four when quadratic).
+/// flip: `Run::covered_fills` building `Run::copies` per covered layer → fails
+/// at the growth bound.
+#[test]
+fn covered_fills_is_linear_in_the_layers() {
+    let white = Color::from_rgb8(255, 255, 255);
+    let cost = |n: usize| {
+        let mut f = Fixture::new();
+        let mut ops = Vec::new();
+        for index in 0..n {
+            let id = f.ids.mint();
+            ops.push(Operation::CreateNode {
+                id,
+                parent: f.frame,
+                index,
+                kind: rect(),
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: keyed_by_position([BLUE, white].map(|c| Fill {
+                    brush: Brush::Solid(c).into(),
+                    visible: true,
+                })),
+            });
+        }
+        f.commit(ops);
+        let best = |rules: &Rules| {
+            (0..3)
+                .map(|_| {
+                    let at = std::time::Instant::now();
+                    let p = f.plan(rules);
+                    (at.elapsed().as_secs_f64(), p.findings.len())
+                })
+                .fold((f64::MAX, 0), |a, b| (a.0.min(b.0), b.1))
+        };
+        let (covered, found) = best(&only(&[Rule::CoveredFills]));
+        let (bare, _) = best(&only(&[]));
+        assert_eq!(found, n, "the fixture: every layer is listed");
+        (covered - bare).max(f64::EPSILON)
+    };
+    let (small, large) = (cost(1000), cost(8000));
+    assert!(
+        large / small < 24.0,
+        "1,000 layers {small:.4}s, 8,000 layers {large:.4}s"
+    );
+}
+
+/// A one-layer group inside a plain group in an auto layout goes: its box is
+/// its layer's, so the outer group's box and the flow stay as they were.
+/// flip: `Run::group_kept` asking the walk through groups
+/// (`container::lays_out_above`) for its spacer arm → fails at "not kept".
+#[test]
+fn a_nested_one_layer_group_in_an_auto_layout_goes() {
+    let mut f = Fixture::new();
+    let frame = f.frame;
+    let a = f.painted(frame, &[(RED, true)]);
+    let x = f.painted(frame, &[(BLUE, true)]);
+    f.commit(vec![Operation::SetTransform {
+        id: x,
+        transform: Affine::translate((30.0, 20.0)),
+    }]);
+    let inner = f.group(&[a]);
+    let outer = f.group(&[inner, x]);
+    let after = f.painted(frame, &[(GREEN, true)]);
+    f.commit(vec![Operation::SetDisplay {
+        id: frame,
+        display: flex(),
+    }]);
+    let boxes = |f: &Fixture| {
+        let res = Resolved::rebuild(&f.doc);
+        [a, x, outer, after].map(|id| res.world_bounds(id).unwrap())
+    };
+    let before = boxes(&f);
+    let p = f.run(&only(&[Rule::OneLayerGroups]));
+    assert_eq!(kept(&p, Rule::OneLayerGroups, inner), None, "not kept");
+    assert!(!f.doc.contains(inner), "ungrouped");
+    assert_eq!(f.doc.get(a).unwrap().parent(), Some(outer));
+    assert_eq!(boxes(&f), before, "nothing moves");
+}

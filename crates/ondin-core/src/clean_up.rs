@@ -15,7 +15,7 @@ use crate::guide::{GuideAxis, GuideId};
 use crate::node::{BlendMode, NodeKind};
 use crate::query::is_effectively_locked;
 use crate::{Brush, Document, NodeId, Operation, Resolved, Transaction};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// One kind of thing the verb takes, in the order it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -366,17 +366,7 @@ impl Run<'_> {
     /// group or boolean between it and such a parent takes its box from its
     /// layers, so taking `id` would move the item's siblings.
     fn in_layout(&self, id: NodeId) -> bool {
-        let mut at = self.sim.get(id).and_then(|n| n.parent());
-        while let Some(p) = at.and_then(|p| self.sim.get(p)) {
-            if self.sim.resolved_display(p.id()).is_some() {
-                return true;
-            }
-            if !matches!(p.kind(), NodeKind::Group | NodeKind::Boolean { .. }) {
-                return false;
-            }
-            at = p.parent();
-        }
-        false
+        crate::container::lays_out_above(&crate::resolve::DocView(&self.sim), id)
     }
 
     /// Whether `id` is a boolean's operand, or inside one: its outline draws into
@@ -392,27 +382,33 @@ impl Run<'_> {
         false
     }
 
+    /// Each node's copies in instances, at any depth: every node a link chain
+    /// reaches, with the nodes whose chains reach it. Built once per rule, so a
+    /// layer's question is a lookup, not a scan of the document.
+    fn copies(&self) -> HashMap<NodeId, Vec<NodeId>> {
+        let nodes = self.sim.node_map();
+        let mut copies: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for c in nodes.values() {
+            let mut link = c.link();
+            while let Some(l) = link {
+                copies.entry(l).or_default().push(c.id());
+                link = nodes.get(&l).and_then(|n| n.link());
+            }
+        }
+        copies
+    }
+
     /// Whether a copy of `id` in an instance, at any depth, draws a fill list
     /// other than `id`'s, so an item `id` covers may show there.
-    fn copy_differs(&self, id: NodeId) -> bool {
+    fn copy_differs(&self, id: NodeId, copies: &HashMap<NodeId, Vec<NodeId>>) -> bool {
         let Some(fills) = self.sim.get(id).map(|n| &n.paint().fills) else {
             return false;
         };
-        let nodes = self.sim.node_map();
-        let copies = |c: &crate::node::Node| {
-            let mut link = c.link();
-            while let Some(l) = link {
-                if l == id {
-                    return true;
-                }
-                link = nodes.get(&l).and_then(|n| n.link());
-            }
-            false
-        };
-        nodes
-            .values()
-            .filter(|c| copies(c))
-            .any(|c| !crate::same_values(&c.paint().fills, fills))
+        copies.get(&id).is_some_and(|cs| {
+            cs.iter()
+                .filter_map(|c| self.sim.get(*c))
+                .any(|c| !crate::same_values(&c.paint().fills, fills))
+        })
     }
 
     fn find(&mut self, rule: Rule, id: NodeId, what: String, items: usize, kept: Option<Kept>) {
@@ -542,6 +538,7 @@ impl Run<'_> {
     fn covered_fills(&mut self) {
         let start = self.plan.findings.len();
         let mut ops = Vec::new();
+        let copies = self.copies();
         for id in self.layers() {
             if self.in_instance(id) || self.instance_root(id) {
                 continue;
@@ -574,7 +571,7 @@ impl Run<'_> {
                 self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Style));
             } else if self.locked(id) {
                 self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Locked));
-            } else if self.copy_differs(id) {
+            } else if self.copy_differs(id, &copies) {
                 self.find(Rule::CoveredFills, id, what, 0, Some(Kept::Instance));
             } else {
                 ops.push(Operation::SetFills {
@@ -739,7 +736,9 @@ impl Run<'_> {
             Some(Kept::Export)
         } else if self.sim.resolved_display(id).is_some() {
             Some(Kept::Layout)
-        } else if self.in_layout(id) {
+        } else if crate::container::parent_lays_out(&crate::resolve::DocView(&self.sim), id) {
+            // The direct parent only: a one-layer group's box is its layer's, so
+            // under a plain group ungrouping it leaves that group's box as it was.
             Some(Kept::Spacer)
         } else if self.state_paired(id) {
             Some(Kept::State)

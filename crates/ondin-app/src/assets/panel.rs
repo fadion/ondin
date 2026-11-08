@@ -40,9 +40,9 @@ const AUTHOR_INSET: f32 = 8.0;
 const STRIP_H: f32 = 24.0;
 /// The foot caption's row, with the hairline above it.
 const FOOT_H: f32 = 22.0;
-/// The variant and orientation dropdowns and the size field. The orientation's
-/// holds *Any orientation* whole: a dropdown grows to fit its words, and the
-/// panel with it.
+/// The variant and orientation dropdowns and the size field. A dropdown grows to
+/// fit its words, and the panel with it: the orientation's holds *Any
+/// orientation* whole, and the variant's cuts a long one (*Outlined rounded*).
 const VARIANT_W: f32 = 92.0;
 const ORIENT_W: f32 = 124.0;
 const SIZE_W: f32 = 58.0;
@@ -416,7 +416,7 @@ impl OndinApp {
             }
         }
         let grid = match set.and_then(|s| ready.iter().find(|(r, _)| r.key == s.key)) {
-            Some((_, s)) => s.grid,
+            Some((_, s)) => s.grid_of(variant.unwrap_or(0)),
             None => 24.0,
         };
         let size = prefs.icon_size.unwrap_or(grid);
@@ -917,16 +917,20 @@ fn icon_controls(
         match (set, variant) {
             (Some(s), Some(v)) if s.variants.len() > 1 => {
                 let mut chosen = v;
-                egui::ComboBox::from_id_salt("assets-variant")
-                    .icon(ui::combo_chevron)
-                    .width(VARIANT_W)
-                    .selected_text(ui::combo_text(s.variants[v].label))
-                    .show_ui(ui, |ui| {
-                        ui::menu_rows(ui);
-                        for (i, var) in s.variants.iter().enumerate() {
-                            ui.selectable_value(&mut chosen, i, var.label);
-                        }
-                    });
+                // In a child no wider than the dropdown, which its truncation reads.
+                ui.allocate_ui(egui::vec2(VARIANT_W, ui::CONTROL_H), |ui| {
+                    egui::ComboBox::from_id_salt("assets-variant")
+                        .icon(ui::combo_chevron)
+                        .width(VARIANT_W)
+                        .truncate()
+                        .selected_text(ui::combo_text(s.variants[v].label))
+                        .show_ui(ui, |ui| {
+                            ui::menu_rows(ui);
+                            for (i, var) in s.variants.iter().enumerate() {
+                                ui.selectable_value(&mut chosen, i, var.label);
+                            }
+                        });
+                });
                 if chosen != v {
                     prefs
                         .variants
@@ -943,6 +947,7 @@ fn icon_controls(
                     egui::ComboBox::from_id_salt("assets-variant-off")
                         .icon(ui::combo_chevron)
                         .width(VARIANT_W)
+                        .truncate()
                         .selected_text(ui::combo_text(label))
                         .show_ui(ui, |_| {});
                 })
@@ -1588,6 +1593,7 @@ mod tests {
                 })
                 .collect(),
             grid: 24.0,
+            variant_grids: Vec::new(),
         })
     }
 
@@ -1716,6 +1722,7 @@ mod tests {
                 aliases: Vec::new(),
             }],
             grid: 32.0,
+            variant_grids: Vec::new(),
         });
         let hit = Hit {
             spec,
@@ -1848,6 +1855,7 @@ mod tests {
                 aliases: Vec::new(),
             }],
             grid: 32.0,
+            variant_grids: Vec::new(),
         });
         let hit = Hit {
             spec: SetSpec::by_key("font-awesome").unwrap(),
@@ -2004,6 +2012,19 @@ mod tests {
         let (grid, texts) = panel_rect(&mut app, &ctx);
         assert!(texts.iter().any(|t| t == "Phosphor · MIT"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "40 icons"), "{texts:?}");
+
+        // The longest variant label there is, cut rather than widening the panel.
+        app.prefs.assets.icon_sets = vec!["material-symbols".into()];
+        app.prefs.assets.set = "material-symbols".into();
+        app.prefs
+            .assets
+            .variants
+            .insert("material-symbols".into(), "Outlined rounded".into());
+        app.assets
+            .sets
+            .insert("material-symbols", SetState::Ready(set_with(&names)));
+        let (long_variant, _) = panel_rect(&mut app, &ctx);
+        assert_eq!(long_variant.size(), grid.size(), "a long variant is cut");
 
         app.prefs.assets.photos_tab = true;
         let (photos, _) = panel_rect(&mut app, &ctx);

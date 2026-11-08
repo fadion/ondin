@@ -887,8 +887,10 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   browser, each beside its own button; opening one closes the others. Doors: the rail button and *Assets…* in the
   palette; no chord. `Escape` closes it, on the insert picker's rung. *Icons* · *Photos* on
   `ui::segmented`, then `ui::search_box`, which takes the keyboard on opening.
-  - *Icons*: a set dropdown (*All sets* or one) with the set's variant dropdown and a size field
-    defaulting to the set's grid (a grid over 64 units, Phosphor's 256, draws at 24); a grid six
+  - *Icons*: a set dropdown (*All sets* or one) with the set's variant dropdown (a long label cut,
+    so the panel keeps its width) and a size field defaulting to the variant's own grid when its
+    icons share one (`IconSet::grid_of`: Heroicons' Mini at 20, Micro at 16), else the set's (a grid
+    over 64 units, Phosphor's 256, draws at 24); a grid six
     tiles across, 44 tall, 120 shown and more as the end scrolls into view; a set still downloading
     shows its progress row.
   - *Photos*: service and orientation dropdowns, then two columns at each photo's aspect, the next

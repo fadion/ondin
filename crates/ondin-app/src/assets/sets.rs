@@ -191,6 +191,20 @@ pub(crate) struct IconSet {
     pub(crate) icons: Vec<Icon>,
     /// The grid its icons are drawn on, the size field's default.
     pub(crate) grid: f64,
+    /// Per variant, the grid its icons share when they all agree (Heroicons'
+    /// Mini at 20, Micro at 16), else `None` for [`Self::grid`].
+    pub(crate) variant_grids: Vec<Option<f64>>,
+}
+
+impl IconSet {
+    /// The size field's default for `variant`: its own grid, else the set's.
+    pub(crate) fn grid_of(&self, variant: usize) -> f64 {
+        self.variant_grids
+            .get(variant)
+            .copied()
+            .flatten()
+            .unwrap_or(self.grid)
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -284,11 +298,21 @@ pub(crate) fn read_set(spec: &'static SetSpec, jsons: &[Vec<u8>]) -> Result<Icon
         }
     }
     icons.sort_by(|a, b| a.name.cmp(&b.name).then(a.variant.cmp(&b.variant)));
+    // Iconify's own sets declare 24 or 32 here; Phosphor's 256 is its path
+    // units, drawn at 24.
+    let grid = grid.map_or(24.0, |g| if g > 64.0 { 24.0 } else { g });
+    let variant_grids = (0..spec.variants.len())
+        .map(|v| {
+            let mut heights = icons.iter().filter(|i| i.variant == v).map(|i| i.view[3]);
+            let first = heights.next()?;
+            let shared = heights.all(|h| h == first);
+            (shared && first != grid && first <= 64.0).then_some(first)
+        })
+        .collect();
     Ok(IconSet {
         icons,
-        // Iconify's own sets declare 24 or 32 here; Phosphor's 256 is its path
-        // units, drawn at 24.
-        grid: grid.map_or(24.0, |g| if g > 64.0 { 24.0 } else { g }),
+        grid,
+        variant_grids,
     })
 }
 
@@ -379,6 +403,22 @@ mod tests {
         assert_eq!(set.icons[0].aliases, ["nut"]);
         assert_eq!(set.icons[2].view, [0.0, 0.0, 256.0, 300.0]);
         assert_eq!(set.grid, 24.0, "256 path units draw at 24");
+    }
+
+    /// A variant whose icons share a smaller grid than the set's defaults to it:
+    /// Heroicons' Mini at 20 and Micro at 16, Outline at the set's 24.
+    /// flip: `read_set` leaving `variant_grids` empty → fails at "Mini".
+    #[test]
+    fn a_variant_on_its_own_grid_defaults_to_it() {
+        let json = br#"{"prefix":"heroicons","width":24,"height":24,
+            "icons":{"bell":{"body":"<path/>"},
+                     "bell-solid":{"body":"<path/>"},
+                     "bell-20-solid":{"body":"<path/>","width":20,"height":20},
+                     "bell-16-solid":{"body":"<path/>","width":16,"height":16}}}"#;
+        let set = read_set(spec("heroicons"), &[json.to_vec()]).unwrap();
+        assert_eq!(set.grid_of(0), 24.0, "Outline");
+        assert_eq!(set.grid_of(2), 20.0, "Mini");
+        assert_eq!(set.grid_of(3), 16.0, "Micro");
     }
 
     /// Search ranks an exact name, then a prefix, then a word start, then a

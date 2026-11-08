@@ -729,9 +729,9 @@ mod tests {
         }
     }
 
-    /// *Add points* doubles the ring's anchors in one *Add points* step, and
-    /// *Remove redundant points* takes exactly those back out in one *Remove points*
-    /// step; the rounded first corner stays throughout.
+    /// *Add points* halves every segment of the ring but the rounded first corner's
+    /// two legs in one *Add points* step, and *Remove redundant points* takes exactly
+    /// those back out in one *Remove points* step; the rounded corner stays throughout.
     #[test]
     fn adding_then_removing_points_comes_back_to_the_ring() {
         let ctx = egui::Context::default();
@@ -739,11 +739,11 @@ mod tests {
         let path = stored(&app, id);
         app.toggle_cleanup(id);
         commit(&mut app, Row::Add);
-        assert_eq!(anchors(&app, id), 128);
+        assert_eq!(anchors(&app, id), 126);
         assert_eq!(last_step(&app), "Add points");
         // The card reads the path again on its next frame.
         pass(&ctx, &mut app, Vec::new());
-        assert_eq!(app.cleanup.as_ref().map(|c| c.redundant), Some(64));
+        assert_eq!(app.cleanup.as_ref().map(|c| c.redundant), Some(62));
         commit(&mut app, Row::Remove);
         assert_eq!(last_step(&app), "Remove points");
         assert_eq!(anchors(&app, id), 64);
@@ -772,7 +772,7 @@ mod tests {
         assert!(app.session.has_gesture_preview(), "shown");
         assert_eq!(
             card.dropping.len(),
-            64,
+            62,
             "the points that would go are marked"
         );
         app.show_cleanup_row(&mut card, None);

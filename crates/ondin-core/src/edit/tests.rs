@@ -4630,6 +4630,50 @@ fn added_points_draw_the_same_and_are_redundant() {
     assert_eq!(none[0].anchors.len(), 4);
 }
 
+/// Next to a rounded corner, whose fillet is clamped to half of each leg, neither
+/// *Remove redundant points* nor *Add points* changes a leg, so the rounded outline
+/// draws as before.
+/// flip: `merged_handles` refusing only a rounded `b` → fails at "the point beside
+/// the fillet stays"; `split_segments` cutting a rounded corner's legs → fails at
+/// "the legs of a rounded corner stay whole".
+#[test]
+fn points_beside_a_rounded_corner_are_neither_removed_nor_added() {
+    let drawn =
+        |subs: &[PenSubpath]| crate::geometry::round_corners(&pen_path(subs), &pen_radii(subs));
+    let corner = |x, y, radius| PenAnchor {
+        radius,
+        ..PenAnchor::corner(Point::new(x, y))
+    };
+    let shelf = vec![PenSubpath {
+        anchors: vec![
+            corner(0.0, 0.0, 40.0),
+            corner(20.0, 0.0, 0.0),
+            corner(100.0, 0.0, 0.0),
+            corner(100.0, 100.0, 0.0),
+            corner(0.0, 100.0, 0.0),
+        ],
+        closed: true,
+    }];
+    let (left, gone) = redundant_points(&shelf);
+    assert!(
+        gone.is_empty(),
+        "the point beside the fillet stays: {gone:?}"
+    );
+    assert_same_shape(&drawn(&shelf), &drawn(&left));
+
+    let mut square = shelf.clone();
+    square[0].anchors.remove(1);
+    let halves = split_segments(&square, 2);
+    assert_eq!(
+        halves[0].anchors.len(),
+        6,
+        "the legs of a rounded corner stay whole"
+    );
+    assert_same_shape(&drawn(&square), &drawn(&halves));
+    let (back, _) = redundant_points(&halves);
+    assert_eq!(back, square, "the two still undo each other");
+}
+
 /// A point twinned on the one before it is redundant, and so is one in the
 /// middle of a straight run; an open run's ends never are.
 #[test]

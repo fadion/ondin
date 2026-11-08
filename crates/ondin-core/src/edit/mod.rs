@@ -2990,41 +2990,70 @@ const REDUNDANT_EPS: f64 = 1e-3;
 /// - one splitting what is one cubic in two, its handles in line and the curves
 ///   either side the two halves of a single cubic.
 ///
-/// A rounded corner draws more than its anchor, so it is kept, and so are a run's
-/// open ends and the last two anchors of a run.
+/// A rounded corner draws more than its anchor, so it is kept, and so are its two
+/// neighbours, since its fillet is clamped to half of each leg and a longer leg
+/// would round it further. A run's open ends and its last two anchors stay too.
 pub fn redundant_points(subpaths: &[PenSubpath]) -> (Vec<PenSubpath>, Vec<Point>) {
-    let mut out = subpaths.to_vec();
+    use std::collections::VecDeque;
+    let mut out = Vec::with_capacity(subpaths.len());
     let mut gone = Vec::new();
-    for sub in &mut out {
-        let mut i = 0;
-        while i < sub.anchors.len() {
-            let n = sub.anchors.len();
-            let inner = sub.closed || (i > 0 && i + 1 < n);
-            if n <= 2 || !inner || sub.anchors[i].radius != 0.0 {
-                i += 1;
-                continue;
+    for sub in subpaths {
+        // The run so far, its last anchor checked against each next one as it
+        // comes: a removal there lets the anchor before meet a new neighbour,
+        // which the loop then looks at in turn. Linear, where removing from the
+        // middle of a `Vec` was quadratic.
+        let mut kept: VecDeque<PenAnchor> = VecDeque::with_capacity(sub.anchors.len());
+        let mut left = sub.anchors.len();
+        for &next in &sub.anchors {
+            let mut c = next;
+            while kept.len() >= 2 && left + kept.len() > 2 {
+                let (a, b) = (kept[kept.len() - 2], kept[kept.len() - 1]);
+                let Some((out_a, back_c)) = merged_handles(a, b, c) else {
+                    break;
+                };
+                kept.pop_back();
+                if let Some(a) = kept.back_mut() {
+                    a.out = out_a;
+                }
+                c.back = back_c;
+                gone.push(b.at);
             }
-            let (p, q) = ((i + n - 1) % n, (i + 1) % n);
-            let (a, b, c) = (sub.anchors[p], sub.anchors[i], sub.anchors[q]);
-            let Some((out_a, back_c)) = merged_handles(a, b, c) else {
-                i += 1;
-                continue;
-            };
-            sub.anchors[p].out = out_a;
-            sub.anchors[q].back = back_c;
-            sub.anchors.remove(i);
-            gone.push(b.at);
-            // The anchor now at `i` meets new neighbours; look at it again, and at
-            // the one before, whose own merge may have just become possible.
-            i = i.saturating_sub(1);
+            kept.push_back(c);
+            left -= 1;
         }
+        // A closed run's seam: its last anchor between the one before and the
+        // first, then its first between the last and the second, until neither goes.
+        while sub.closed && kept.len() > 2 {
+            let n = kept.len();
+            if let Some((out_a, back_c)) = merged_handles(kept[n - 2], kept[n - 1], kept[0]) {
+                gone.push(kept[n - 1].at);
+                kept.pop_back();
+                kept[n - 2].out = out_a;
+                kept[0].back = back_c;
+            } else if let Some((out_a, back_c)) = merged_handles(kept[n - 1], kept[0], kept[1]) {
+                gone.push(kept[0].at);
+                kept.pop_front();
+                kept[n - 2].out = out_a;
+                kept[0].back = back_c;
+            } else {
+                break;
+            }
+        }
+        out.push(PenSubpath {
+            anchors: kept.into(),
+            closed: sub.closed,
+        });
     }
     (out, gone)
 }
 
 /// The handles `a` leaves on and `c` arrives on once `b` between them goes, if `b`
-/// changes nothing ([`redundant_points`]).
+/// changes nothing ([`redundant_points`]): never a rounded `b`, nor one beside a
+/// rounded corner.
 fn merged_handles(a: PenAnchor, b: PenAnchor, c: PenAnchor) -> Option<(Vec2, Vec2)> {
+    if [a.radius, b.radius, c.radius].iter().any(|r| *r != 0.0) {
+        return None;
+    }
     let near = |u: Vec2| u.hypot() <= REDUNDANT_EPS;
     // A twin of the anchor before: `a` takes over `b`'s way out.
     if near(b.at - a.at) && near(a.out) && near(b.back) {
@@ -3060,7 +3089,9 @@ fn merged_handles(a: PenAnchor, b: PenAnchor, c: PenAnchor) -> Option<(Vec2, Vec
 }
 
 /// *Add points*: cut every segment into `pieces` of equal length, the new anchors
-/// smooth where the segment curves, so the outline draws as before.
+/// smooth where the segment curves, so the outline draws as before. The two legs
+/// of a rounded corner stay whole: its fillet is clamped to half of each leg, so a
+/// shorter leg would round it less.
 pub fn split_segments(subpaths: &[PenSubpath], pieces: usize) -> Vec<PenSubpath> {
     use crate::kurbo::ParamCurveArclen;
     let pieces = pieces.max(1);
@@ -3080,10 +3111,11 @@ pub fn split_segments(subpaths: &[PenSubpath], pieces: usize) -> Vec<PenSubpath>
                 continue;
             };
             let length = curve.arclen(1e-6);
-            if pieces < 2 || length <= f64::EPSILON {
+            let j = (i + 1) % n;
+            let rounded = sub.anchors[i].radius != 0.0 || sub.anchors[j].radius != 0.0;
+            if pieces < 2 || length <= f64::EPSILON || rounded {
                 continue;
             }
-            let j = (i + 1) % n;
             let straight = sub.anchors[i].out == Vec2::ZERO && sub.anchors[j].back == Vec2::ZERO;
             let mut cuts = vec![0.0];
             cuts.extend(

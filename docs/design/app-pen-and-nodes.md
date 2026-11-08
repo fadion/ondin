@@ -299,8 +299,11 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   - *Remove redundant points* (`edit::redundant_points`) takes out an anchor twinned on the one
     before it, one in the middle of a straight run, and one splitting what is a single cubic in
     two, its handles in line and the curves either side that cubic's halves to within 0.001 units;
-    never a rounded corner or an open end. *Add points* (`edit::split_segments`) cuts each segment
-    into pieces of equal length, exactly, so the outline draws as before; the two undo each other.
+    never a rounded corner, an anchor beside one, or an open end. *Add points*
+    (`edit::split_segments`) cuts each segment into pieces of equal length, exactly, so the outline
+    draws as before; the two undo each other. Both leave a rounded corner's two legs as they are,
+    since its fillet is clamped to half of each leg and a longer or shorter leg would round it
+    differently.
     *Smooth selected* (`edit::smooth_points`) moves each selected anchor's handles that far toward
     fresh smooth ones, along the line between its neighbours, a third of the shorter leg long.
 - **Simplify** (`build::simplify_outline_within`) flattens the drawn outline and refits it

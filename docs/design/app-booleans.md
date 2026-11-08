@@ -258,7 +258,8 @@ Builder slot, with the knife, above the eyedropper; it stays armed after each ed
 
 - **Arming needs two closed shapes, or one and a cutter** (`OndinApp::builder_slot_usable`
   on `shape_builder::can_arrange`, the test *Divide* dims on). Until then its rail member is
-  dimmed and a click on it arms nothing, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
+  drawn live, as the Knife beside it is, but its tooltip gives the reason and a click on it arms
+  nothing, the palette's *Tool: Shape builder* row is dim, and `Shift+M` arms nothing; all three
   give *Shape builder needs overlapping shapes, or a shape and a line across it* (`shape_builder::UNAVAILABLE`), the
   key on the status line. Once armed, the button stays lit whatever the selection becomes.
 - **Selection chrome** while armed is the selection's box alone, dim: no member outlines, which

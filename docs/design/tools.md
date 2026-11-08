@@ -45,8 +45,8 @@ subject. The four filled shape tools keep a slot each while the rail has room fo
 - **Grouped slots.** Five slots stand for several tools each (`rail::Group::members`): Select is
   Pointer and Lasso, Frame is Frame and Slice, Line is Line, Spiral and Arc, Pen is Pen and
   Pencil, Builder is Shape builder and Knife. A member that cannot be armed now (the Shape
-  builder with nothing to build, `rail_usable`) draws dimmed, in the slot and the row, and a
-  click on it says why instead of arming; the slot still opens its row. A slot shows the armed tool when it is a member, else the member last picked
+  builder with nothing to build, `rail_usable`) still draws live, in the slot and the row, since
+  the slot's other members always arm; its tooltip and a click on it say why instead of arming. A slot shows the armed tool when it is a member, else the member last picked
   (`rail_shown`), and carries a small `text::dim()` triangle in its bottom-right corner
   (`paint_more_mark`).
 - **Memory.** The Select slot's memory is the lasso switch itself (`app-selection.md`); Pointer

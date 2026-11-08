@@ -226,8 +226,8 @@ impl OndinApp {
     /// right-click or `Alt+↓` opens its members beside it.
     pub(crate) fn rail_group(&mut self, ui: &mut egui::Ui, group: Group) -> egui::Response {
         let shown = self.rail_shown(group);
-        // Dimmed, not disabled: a dimmed slot still opens its members, one of
-        // which may be usable.
+        // Never dimmed: the slot also holds members that always arm, so it reads
+        // as live and an unusable member says why on hover and on a click.
         let usable = self.rail_usable(shown);
         let mut resp = ui::icon_button(
             ui,
@@ -235,7 +235,7 @@ impl OndinApp {
             BUTTON,
             20.0,
             self.rail_armed(shown),
-            usable,
+            true,
         );
         paint_more_mark(ui, resp.rect);
 
@@ -272,13 +272,7 @@ impl OndinApp {
         }
         // A tooltip under the open row, or over a press about to open it, would fight it.
         if !held && !open {
-            resp = match usable {
-                true => resp.on_hover_text(crate::input::keys(shown.tip())),
-                false => resp.on_hover_text(crate::input::keys(&format!(
-                    "{} (Shift+M)",
-                    crate::shape_builder::UNAVAILABLE
-                ))),
-            };
+            resp = resp.on_hover_text(crate::input::keys(&rail_tip(shown, usable)));
         }
         resp
     }
@@ -318,8 +312,8 @@ impl OndinApp {
                         for &m in members {
                             let lit = dragged_over.map_or(m == shown, |d| d == m);
                             let usable = self.rail_usable(m);
-                            let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, usable)
-                                .on_hover_text(crate::input::keys(m.tip()));
+                            let resp = ui::icon_button(ui, m.glyph(), BUTTON, 20.0, lit, true)
+                                .on_hover_text(crate::input::keys(&rail_tip(m, usable)));
                             if resp.clicked() {
                                 picked = Some(m);
                             }
@@ -348,6 +342,14 @@ impl OndinApp {
         let elsewhere =
             pressed && !area.contains_pointer() && !pointer.is_some_and(|p| flyout.at.contains(p));
         self.rail.flyout = (!escape && !elsewhere).then_some(flyout);
+    }
+}
+
+/// A member's tooltip: what it does, or, when it cannot be armed now, why not.
+fn rail_tip(member: Member, usable: bool) -> String {
+    match usable {
+        true => member.tip().to_owned(),
+        false => format!("{} (Shift+M)", crate::shape_builder::UNAVAILABLE),
     }
 }
 
@@ -774,8 +776,8 @@ mod tests {
         assert!(app.rail.flyout.is_none());
     }
 
-    /// The builder slot with nothing to build: its Shape builder is dimmed and a
-    /// click says why, while a right-click still opens the row, whose Knife arms;
+    /// The builder slot with nothing to build: a click on its Shape builder says
+    /// why instead of arming, while a right-click opens the row, whose Knife arms;
     /// the slot then shows the Knife.
     ///
     /// flip: `rail_pick` without its `rail_usable` refusal → fails at "refused".

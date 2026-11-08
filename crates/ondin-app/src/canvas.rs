@@ -322,7 +322,7 @@ pub struct CanvasRenderer {
     /// The frame and the simulation `seen` holds, so a repaint that changed
     /// neither (a caret blink, a hover) does not run the pass again.
     seen_from: Option<(u64, crate::vision::Seen)>,
-    /// How many times [`Self::seen_through`] has run the pass, or would have
+    /// How many times `Self::seen_through` has run the pass, or would have
     /// headless.
     #[cfg(test)]
     vision_runs: u64,

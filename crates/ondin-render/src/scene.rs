@@ -3716,7 +3716,7 @@ mod tests {
     use kurbo::{PathEl, Point};
 
     thread_local! {
-        /// The measures [`drawn_children_ink`] has taken on this thread.
+        /// The measures `drawn_children_ink` has taken on this thread.
         pub(super) static MEASURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 

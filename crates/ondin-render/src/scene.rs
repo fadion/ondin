@@ -341,9 +341,25 @@ struct Walk<'a> {
     in_mask: std::cell::Cell<usize>,
     /// Set while the walk repaints a backdrop, which it stops short of.
     backdrop: Option<Backdrop>,
+    /// Shared with every walk this one spawns: a backdrop's repaint and a
+    /// container's measure.
+    shared: std::rc::Rc<Shared>,
+}
+
+/// What every walk of one build shares. Both depend only on the document and the
+/// preview, never on where the walk is.
+#[derive(Default)]
+struct Shared {
     /// What the preview patches and its ancestors ([`Walk::grown`]).
     grown: std::cell::OnceCell<rustc_hash::FxHashSet<NodeId>>,
+    /// Each container's [`drawn_children_ink`] by container, world transform and
+    /// view, so a nested shadowed group is measured once a build rather than once
+    /// for every measure and shadow pass enclosing it, which doubled per level.
+    drawn: std::cell::RefCell<rustc_hash::FxHashMap<MeasureKey, Option<Rect>>>,
 }
+
+/// A container, its world transform and the view it is measured over, by bits.
+type MeasureKey = (NodeId, [u64; 6], Vec<[u64; 4]>);
 
 /// A container the walk is inside: the world transform it was painted under,
 /// and whether it draws its children into a layer of its own that composites
@@ -373,7 +389,19 @@ impl<'a> Walk<'a> {
             in_shadow: Default::default(),
             in_mask: Default::default(),
             backdrop: None,
-            grown: Default::default(),
+            shared: Default::default(),
+        }
+    }
+
+    /// A fresh walk from no origins sharing this one's [`Shared`], for a measure.
+    fn measuring(&self) -> Walk<'static> {
+        Walk {
+            origins: &[],
+            open: Default::default(),
+            in_shadow: Default::default(),
+            in_mask: Default::default(),
+            backdrop: None,
+            shared: self.shared.clone(),
         }
     }
 
@@ -381,7 +409,8 @@ impl<'a> Walk<'a> {
     /// may then be too small: a level-of-detail walk does not skip it as
     /// sub-pixel.
     fn grown(&self, doc: &Document, ov: &RenderOverrides, id: NodeId) -> bool {
-        self.grown
+        self.shared
+            .grown
             .get_or_init(|| {
                 let mut out = rustc_hash::FxHashSet::default();
                 for patched in ov.patched() {
@@ -1831,7 +1860,7 @@ fn paint_node_pass<P: ScenePainter>(
                     .iter()
                     .map(|v| ondin_core::effect::escaped(*v, back, world))
                     .collect();
-                drawn_children_ink(doc, res, ov, node, id, world, &grown)
+                drawn_children_ink((doc, res, ov), node, id, world, &grown, walk)
             })
             .flatten();
             effect_bounds(res, id, &painted, world, stack, drawn)
@@ -1839,8 +1868,12 @@ fn paint_node_pass<P: ScenePainter>(
         .flatten();
     // The layer's effects carry a child's ink past the child's own box, so the
     // children are culled against the view grown back by the stack's escape.
-    let child_view: std::borrow::Cow<'_, [Rect]> = match effect_layer {
-        Some(_) => {
+    // Grown in every pass alike, the one whose effects ink nothing included, so a
+    // nested container is measured over one view whichever pass meets it. A
+    // shadow pass is this node again and grows the view itself.
+    let own_view = view;
+    let child_view: std::borrow::Cow<'_, [Rect]> = match !bare && crate::effects::any_ink(stack) {
+        true => {
             let e = ondin_core::effect::stack_escape(stack);
             let back = kurbo::Insets::new(e.x1, e.y1, e.x0, e.y0);
             let grown = view
@@ -1848,7 +1881,7 @@ fn paint_node_pass<P: ScenePainter>(
                 .map(|v| ondin_core::effect::escaped(*v, back, world));
             std::borrow::Cow::Owned(grown.collect())
         }
-        None => std::borrow::Cow::Borrowed(view),
+        false => std::borrow::Cow::Borrowed(view),
     };
     let view: &[Rect] = &child_view;
     // Behind everything the layer draws, its own shadows and blend included: what
@@ -1906,7 +1939,7 @@ fn paint_node_pass<P: ScenePainter>(
                 ov,
                 id,
                 parent_world,
-                view,
+                own_view,
                 base,
                 edges,
                 painter,
@@ -2357,19 +2390,31 @@ fn effect_bounds(
 /// Walked on a grid of its own, [`MEASURE_GRID`] device units to a world unit,
 /// not the view's: boxes snap to whole device pixels, and on the view's grid the
 /// measure would be off by up to half a screen pixel from the exact ink the
-/// commit's cache holds.
+/// commit's cache holds. Kept in `walk`'s [`Shared`], since the measure walk
+/// meets every nested container's measure again.
 fn drawn_children_ink(
-    doc: &Document,
-    res: &Resolved,
-    ov: &RenderOverrides,
+    (doc, res, ov): (&Document, &Resolved, &RenderOverrides),
     node: &ondin_core::Node,
     id: NodeId,
     world: Affine,
     view: &[Rect],
+    walk: &Walk<'_>,
 ) -> Option<Rect> {
+    let key: MeasureKey = (
+        id,
+        world.as_coeffs().map(f64::to_bits),
+        view.iter()
+            .map(|r| [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits))
+            .collect(),
+    );
+    if let Some(known) = walk.shared.drawn.borrow().get(&key) {
+        return *known;
+    }
+    #[cfg(test)]
+    tests::MEASURES.with(|m| m.set(m.get() + 1));
     let base = Affine::scale(MEASURE_GRID);
     let mut bounds = BoundsPainter { base, ink: None };
-    let (edges, walk) = (Edges::none(), Walk::new(&[]));
+    let (edges, measure) = (Edges::none(), walk.measuring());
     for child in ov.children_of(id).unwrap_or(node.children()) {
         if doc.get(*child).is_some_and(|n| n.mask()) {
             continue;
@@ -2384,7 +2429,7 @@ fn drawn_children_ink(
             base,
             &edges,
             &mut bounds,
-            &walk,
+            &measure,
         );
     }
     for ghost in ov.ghosts_of(id) {
@@ -2400,8 +2445,9 @@ fn drawn_children_ink(
             None,
         );
     }
-    let device = bounds.ink?;
-    Some(base.inverse().transform_rect_bbox(device))
+    let drawn = bounds.ink.map(|d| base.inverse().transform_rect_bbox(d));
+    walk.shared.drawn.borrow_mut().insert(key, drawn);
+    drawn
 }
 
 /// Device units per world unit on [`drawn_children_ink`]'s grid: fine enough
@@ -2528,7 +2574,7 @@ fn paint_backdrop<P: ScenePainter>(
                 bare: root.map(|o| o.id),
                 reached: std::cell::Cell::new(false),
             }),
-            grown: Default::default(),
+            shared: walk.shared.clone(),
         };
         let cull = [cull];
         match root {
@@ -3668,6 +3714,109 @@ fn intersects(a: Rect, b: Rect) -> bool {
 mod tests {
     use super::*;
     use kurbo::{PathEl, Point};
+
+    thread_local! {
+        /// The measures [`drawn_children_ink`] has taken on this thread.
+        pub(super) static MEASURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Groups nested `depth` deep on a page, each casting a drop shadow blended
+    /// by `blend`, with ten filled rects in the innermost; and the outermost.
+    fn shadowed_nest(depth: usize, blend: BlendMode) -> (Document, NodeId) {
+        use ondin_core::{IdSource, Operation, Transaction, keyed_by_position};
+        let mut ids = IdSource::new(0x5EED);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let shadow = Effect::new(ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+            offset: kurbo::Vec2::new(0.0, 4.0),
+            blur: 6.0,
+            spread: 0.0,
+            color: ondin_core::peniko::Color::BLACK,
+            blend,
+        }));
+        let (mut ops, mut parent, mut outer) = (Vec::new(), root, None);
+        for _ in 0..depth {
+            let group = ids.mint();
+            outer.get_or_insert(group);
+            ops.push(Operation::CreateNode {
+                id: group,
+                parent,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::SetEffects {
+                id: group,
+                effects: keyed_by_position([shadow.clone()]),
+            });
+            parent = group;
+        }
+        for i in 0..10 {
+            let rect = ids.mint();
+            ops.push(Operation::CreateNode {
+                id: rect,
+                parent,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: kurbo::Size::new(20.0, 20.0),
+                    corner_radii: kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((30.0 * i as f64, 40.0))),
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id: rect,
+                fills: keyed_by_position([ondin_core::Fill {
+                    brush: Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        (doc, outer.expect("a nest at least one deep"))
+    }
+
+    /// Dragging the outermost of nested shadowed groups measures each group once
+    /// a build, however deep and whether or not its shadow blends, rather than
+    /// once for every measure and shadow pass enclosing it.
+    /// flip: `drawn_children_ink` ignoring `Shared::drawn` → fails at Normal depth
+    /// 4 (15); the shadowless pass culling its children against the bare view →
+    /// fails at Multiply depth 4 (10).
+    #[test]
+    fn a_drag_through_nested_shadowed_groups_measures_each_once() {
+        use ondin_core::{Operation, Transaction};
+        for blend in [BlendMode::Normal, BlendMode::Multiply] {
+            for depth in [1, 4, 8, 12] {
+                let (doc, outer) = shadowed_nest(depth, blend);
+                let res = Resolved::rebuild(&doc);
+                let drag = Transaction(vec![Operation::SetTransform {
+                    id: outer,
+                    transform: Affine::translate((5.0, 3.0)),
+                }]);
+                let ov = crate::RenderOverrides::from_transaction(&doc, &res, &drag)
+                    .expect("representable");
+                assert!(ov.moved(outer), "the fixture drags the nest");
+                let vp = crate::Viewport {
+                    view: Rect::new(-50.0, -50.0, 450.0, 450.0),
+                    pixel_size: (500, 500),
+                };
+                MEASURES.with(|m| m.set(0));
+                let mut bounds = BoundsPainter {
+                    base: Affine::IDENTITY,
+                    ink: None,
+                };
+                build(&doc, &res, &vp, &ov, doc.first_page(), &mut bounds);
+                assert!(bounds.ink.is_some(), "the nest drew");
+                assert_eq!(
+                    MEASURES.with(std::cell::Cell::get),
+                    depth,
+                    "{blend:?} at depth {depth}"
+                );
+            }
+        }
+    }
 
     /// The level-of-detail cut drops a shadow reaching under a device pixel and
     /// keeps a `Filters` row, which recolours every pixel at any zoom.

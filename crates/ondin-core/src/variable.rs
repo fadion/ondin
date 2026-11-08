@@ -3547,8 +3547,12 @@ pub fn add_variable_ops(
     Ok((ops, id))
 }
 
-/// Rename the variable `id`: refused by [`name_refusal`] in its collection,
-/// nothing when the name is the one it has.
+/// Why a kit's variable is refused an edit: an update writes it, and nothing
+/// the user does.
+pub const KIT_READ_ONLY: &str = "A kit's variable is read-only here.";
+
+/// Rename the variable `id`: refused for a kit's and by [`name_refusal`] in its
+/// collection, nothing when the name is the one it has.
 pub fn rename_variable_ops(
     table: &Variables,
     id: VarId,
@@ -3556,6 +3560,9 @@ pub fn rename_variable_ops(
 ) -> Result<Vec<crate::Operation>, String> {
     let name = name.trim();
     let v = table.get(id).ok_or("No variable has that id.")?;
+    if v.origin.is_some() {
+        return Err(KIT_READ_ONLY.into());
+    }
     let c = table
         .collection_of(id)
         .map_or(table.first_collection().id, |c| c.id);
@@ -3604,9 +3611,9 @@ pub fn add_mode_ops(
     Ok((ops, id))
 }
 
-/// Set the variable `id`'s value in `mode`: refused for a value of another kind,
-/// an alias of another kind or one that would loop, and a word a flex variable
-/// does not hold; nothing when it holds that value already.
+/// Set the variable `id`'s value in `mode`: refused for a kit's, a value of
+/// another kind, an alias of another kind or one that would loop, and a word a
+/// flex variable does not hold; nothing when it holds that value already.
 pub fn set_cell_ops(
     table: &Variables,
     id: VarId,
@@ -3614,6 +3621,9 @@ pub fn set_cell_ops(
     cell: Cell,
 ) -> Result<Vec<crate::Operation>, String> {
     let v = table.get(id).ok_or("No variable has that id.")?;
+    if v.origin.is_some() {
+        return Err(KIT_READ_ONLY.into());
+    }
     if table.collection_of_mode(mode).map(|c| c.id) != table.collection_of(id).map(|c| c.id) {
         return Err("That mode is not one of the variable's collection.".into());
     }

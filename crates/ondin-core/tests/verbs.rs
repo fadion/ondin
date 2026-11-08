@@ -1248,6 +1248,189 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// A document holding a kit's number variable `kit/radius` in the kit's mode
+/// `Light`; answers the variable and the mode.
+fn kit_variable(doc: &mut Document, ids: &mut IdSource) -> (ondin_core::VarId, ondin_core::ModeId) {
+    use ondin_core::variable::{KitMode, KitModes, VarKind, VarOrigin, Variable};
+    const KIT: &str = "5eed0000000000000000000000000011";
+    let (light, var) = (ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::SetKitModes {
+            kit: KIT.into(),
+            modes: Some(KitModes {
+                name: None,
+                modes: vec![KitMode {
+                    id: light,
+                    name: "Light".into(),
+                    from: light,
+                    collection: String::new(),
+                }],
+                map: Default::default(),
+            }),
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "kit/radius".into(),
+                kind: VarKind::Number,
+                cells: [(light, ondin_core::Cell::Number(3.0))].into(),
+                scope: None,
+                origin: Some(VarOrigin {
+                    kit: KIT.into(),
+                    var,
+                    version: 1,
+                }),
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]))
+    .unwrap();
+    (var, light)
+}
+
+/// A kit's variable and mode are read-only to the verbs: renaming, rewriting or
+/// removing the variable and renaming the mode are refused under the parameter
+/// that names them, and a variable of the document's own may still alias it.
+///
+/// flip: `own_variable` not refusing a kit's variable → fails at "rename is
+/// refused".
+#[test]
+fn a_kits_variable_is_read_only_to_the_verbs() {
+    let (mut doc, mut ids, _) = blank();
+    let (kit, light) = kit_variable(&mut doc, &mut ids);
+    let res = Resolved::rebuild(&doc);
+    let mut call = |name: &str, args: Value| {
+        verbs::call(
+            &mut Ctx {
+                doc: &doc,
+                res: &res,
+                ids: &mut ids,
+                images: None,
+                contrast: None,
+            },
+            name,
+            &args,
+        )
+    };
+    let read_only = |r: Result<Done, VerbError>, param: &str| match r {
+        Err(VerbError::Invalid { param: p, why, .. }) => p == param && why.contains("read-only"),
+        _ => false,
+    };
+    let number = serde_json::to_value(ondin_core::Cell::Number(42.0)).unwrap();
+    assert!(
+        read_only(
+            call(
+                "rename_variable",
+                json!({ "variable": kit.0.to_wire(), "name": "hacked" })
+            ),
+            "variable"
+        ),
+        "rename is refused"
+    );
+    assert!(
+        read_only(
+            call(
+                "set_variable_value",
+                json!({ "variable": kit.0.to_wire(), "mode": light.0.to_wire(), "value": number })
+            ),
+            "variable"
+        ),
+        "a new value is refused"
+    );
+    assert!(
+        read_only(
+            call("remove_variable", json!({ "variable": kit.0.to_wire() })),
+            "variable"
+        ),
+        "removal is refused"
+    );
+    assert!(
+        read_only(
+            call(
+                "rename_mode",
+                json!({ "mode": light.0.to_wire(), "name": "Day" })
+            ),
+            "mode"
+        ),
+        "the kit's mode keeps its name"
+    );
+
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "number", "name": "radius" }, "as": "v" },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let first = doc.variables().default_mode().expect("a mode");
+    let alias = serde_json::to_value(ondin_core::Cell::Alias(kit)).unwrap();
+    let step = json!([{ "verb": "set_variable_value", "args": { "variable": made[0][0], "mode": first.0.to_wire(), "value": alias } }]);
+    verbs::run_script(&mut doc, &mut ids, Lent::default(), &step)
+        .unwrap_or_else(|e| panic!("an alias of the kit's variable: {e}"));
+    let v = doc.variables().get(kit).unwrap();
+    assert_eq!(
+        (v.name.as_str(), v.cells.get(&light)),
+        ("kit/radius", Some(&ondin_core::Cell::Number(3.0))),
+        "the kit's variable is as it was"
+    );
+}
+
+/// A mode or collection id that names nothing is refused under its own
+/// parameter, never answered as done.
+///
+/// flip: `rename_mode` reading its mode without `own_mode` → fails at "an
+/// unknown mode".
+#[test]
+fn an_unknown_mode_or_collection_is_refused_by_name() {
+    let (mut doc, mut ids, page) = blank();
+    let nothing = ids.mint().to_wire();
+    let frame_id = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(10.0, 10.0) }),
+    )[0]
+    .to_wire();
+    let res = Resolved::rebuild(&doc);
+    let mut refused_at = |name: &str, args: Value| match verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+            contrast: None,
+        },
+        name,
+        &args,
+    ) {
+        Err(VerbError::Invalid { param, .. }) => param,
+        other => panic!("{name}: {other:?}"),
+    };
+    assert_eq!(
+        refused_at("rename_mode", json!({ "mode": nothing, "name": "X" })),
+        "mode",
+        "an unknown mode"
+    );
+    assert_eq!(
+        refused_at(
+            "set_frame_mode",
+            json!({ "node": frame_id, "collection": nothing })
+        ),
+        "collection"
+    );
+    assert_eq!(
+        refused_at(
+            "add_variable",
+            json!({ "kind": "color", "collection": nothing })
+        ),
+        "collection"
+    );
+    assert_eq!(
+        refused_at("add_mode", json!({ "collection": nothing })),
+        "collection"
+    );
+    assert!(doc.get(page).is_some());
+}
+
 /// `bind_variable` binds a fill's colour and the corners to variables, the layer
 /// drawing their values, then detaches the corners to the radius they drew; a
 /// corner past the fourth is refused.

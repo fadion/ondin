@@ -633,6 +633,44 @@ fn own_style<'d>(ctx: &Ctx<'d>, a: &Args<'_>) -> Result<&'d crate::style::Style,
     Ok(st)
 }
 
+/// The variable the `variable` argument names, the document's own: a kit's is
+/// written by an update only.
+fn own_variable(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<VarId, VerbError> {
+    let id: VarId = a.id("variable")?;
+    match ctx.doc.variables().get(id) {
+        None => Err(a.invalid("variable", "no variable has that id")),
+        Some(v) if v.origin.is_some() => {
+            Err(a.invalid("variable", "a kit's variable is read-only here"))
+        }
+        Some(_) => Ok(id),
+    }
+}
+
+/// The mode the `mode` argument names, the document's own: a kit's is written by
+/// an update only.
+fn own_mode(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<ModeId, VerbError> {
+    let mode: ModeId = a.id("mode")?;
+    let table = ctx.doc.variables();
+    if table.kit_mode_of(mode).is_some() {
+        return Err(a.invalid("mode", "a kit's mode is read-only here"));
+    }
+    match table.mode(mode) {
+        None => Err(a.invalid("mode", "no mode has that id")),
+        Some(_) => Ok(mode),
+    }
+}
+
+/// The collection the `collection` argument names, or `None` when it is not
+/// given; refused when no collection has that id.
+fn collection_arg(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Option<CollectionId>, VerbError> {
+    match a.id_opt::<CollectionId>("collection")? {
+        Some(c) if ctx.doc.variables().collection(c).is_none() => {
+            Err(a.invalid("collection", "no collection has that id"))
+        }
+        c => Ok(c),
+    }
+}
+
 /// What `make_component` says for a rule it refused by.
 fn not_main(why: crate::component::NotMain) -> &'static str {
     use crate::component::NotMain;
@@ -1469,9 +1507,7 @@ pub static VERBS: &[Verb] = &[
                 serde_json::from_value(Value::from(a.choice("kind").unwrap_or("color")))
                     .map_err(|e| a.invalid("kind", e))?;
             let table = ctx.doc.variables();
-            let c = a
-                .id_opt::<CollectionId>("collection")?
-                .unwrap_or(table.first_collection().id);
+            let c = collection_arg(ctx, a)?.unwrap_or(table.first_collection().id);
             let value = a.model_opt::<Cell>("value")?;
             let (ops, id) =
                 crate::variable::add_variable_ops(table, ctx.ids, c, kind, a.text("name"), value)
@@ -1484,10 +1520,7 @@ pub static VERBS: &[Verb] = &[
         doc: "Remove a variable; its users keep the value they drew, and aliases of it resolve",
         params: &[req("variable", ParamKind::Id("variable"), "the variable")],
         run: |ctx, a| {
-            let id: VarId = a.id("variable")?;
-            if ctx.doc.variables().get(id).is_none() {
-                return Err(a.invalid("variable", "no variable has that id"));
-            }
+            let id = own_variable(ctx, a)?;
             Ok(Done::ops(crate::variable::remove_ops(ctx.doc, &[id])))
         },
     },
@@ -1499,7 +1532,7 @@ pub static VERBS: &[Verb] = &[
             req("name", TEXT, "its new name, `/` between groups"),
         ],
         run: |ctx, a| {
-            let id: VarId = a.id("variable")?;
+            let id = own_variable(ctx, a)?;
             crate::variable::rename_variable_ops(
                 ctx.doc.variables(),
                 id,
@@ -1526,7 +1559,7 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let (id, mode): (VarId, ModeId) = (a.id("variable")?, a.id("mode")?);
+            let (id, mode): (VarId, ModeId) = (own_variable(ctx, a)?, a.id("mode")?);
             crate::variable::set_cell_ops(ctx.doc.variables(), id, mode, a.model("value")?)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("value", why))
@@ -1548,9 +1581,7 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let c = a
-                .id_opt::<CollectionId>("collection")?
-                .unwrap_or(ctx.doc.variables().first_collection().id);
+            let c = collection_arg(ctx, a)?.unwrap_or(ctx.doc.variables().first_collection().id);
             let (ops, id) = crate::variable::add_mode_ops(ctx.doc, ctx.ids, c, a.text("name"))
                 .map_err(|why| a.invalid("name", why))?;
             Ok(Done::making(ops, id.0.to_wire()))
@@ -1561,10 +1592,7 @@ pub static VERBS: &[Verb] = &[
         doc: "Remove a mode; frames that picked it inherit their collection's again",
         params: &[req("mode", ParamKind::Id("mode"), "the mode")],
         run: |ctx, a| {
-            let mode: ModeId = a.id("mode")?;
-            if ctx.doc.variables().mode(mode).is_none() {
-                return Err(a.invalid("mode", "no mode has that id"));
-            }
+            let mode = own_mode(ctx, a)?;
             Ok(Done::ops(crate::variable::remove_mode_ops(ctx.doc, mode)))
         },
     },
@@ -1576,7 +1604,7 @@ pub static VERBS: &[Verb] = &[
             req("name", TEXT, "its new name, unique in its collection"),
         ],
         run: |ctx, a| {
-            let mode: ModeId = a.id("mode")?;
+            let mode = own_mode(ctx, a)?;
             let name = a.text("name").unwrap_or_default().trim();
             if let Some(why) = crate::variable::mode_name_refusal(ctx.doc.variables(), mode, name) {
                 return Err(a.invalid("name", why));
@@ -1601,7 +1629,7 @@ pub static VERBS: &[Verb] = &[
         run: |ctx, a| {
             let table = ctx.doc.variables();
             let mode = a.id_opt::<ModeId>("mode")?;
-            let c = match (a.id_opt::<CollectionId>("collection")?, mode) {
+            let c = match (collection_arg(ctx, a)?, mode) {
                 (Some(c), _) => c,
                 (None, Some(m)) => {
                     table

@@ -395,6 +395,19 @@ fn an_adjusted_picture_summarises_only_the_sliders_that_moved() {
         moved.contains(r#""adjust":{"exposure":-0.5,"saturation":0.25}"#),
         "the two moved sliders and only those, in the model's own units: {moved}"
     );
+    assert!(
+        !moved.contains("duotone"),
+        "duotone's colours are absent while it draws nothing: {moved}"
+    );
+
+    let duo = picture(ImageAdjust {
+        duotone: 0.5,
+        ..ImageAdjust::NEUTRAL
+    });
+    assert!(
+        duo.contains(r##""duotone":["#23215c","#f7b267"]"##),
+        "a duotone names the two colours it maps onto: {duo}"
+    );
 }
 
 /// **The projection must not describe a shadowed layer as an unshadowed one.**

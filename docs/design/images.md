@@ -68,7 +68,7 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
   5. invert: `x ↦ i + (1−2i)x`, so half way is flat grey.
 
   Luminance is SVG's 0.213/0.715/0.072 throughout. Nothing is clamped between stages, as one `feColorMatrix` cannot. Highlights and shadows are the curve (strength ±0.4, the largest monotonic), run after the matrix. The SVG writer therefore needs no primitive beyond those two.
-- **`Adjustment`** is the list (`Adjustment::ALL`): panel rows, cache key and the snapshot's `adjust` map all read it (the snapshot lists non-rest amounts by name and does not carry the duotone colours). `Adjustment::set` clamps to the range (non-finite -> 0); `pipeline` refuses; `op_set_fills` checks finiteness, colours included, through `build::image_ref_is_finite`.
+- **`Adjustment`** is the list (`Adjustment::ALL`): panel rows, cache key and the snapshot's `adjust` map all read it (the snapshot lists non-rest amounts by name, and the duotone colours as `duotone` while that amount is above zero). `Adjustment::set` clamps to the range (non-finite -> 0); `pipeline` refuses; `op_set_fills` checks finiteness, colours included, through `build::image_ref_is_finite`.
 - `adjust` is `#[serde(default, skip_serializing_if = "ImageAdjust::is_default")]`, and `is_default` weighs the two colours as well as the amounts. Each amount skips at zero and each colour at its default, the colours listed in `diff.rs`'s `SKIPPED_AT`.
 
 ## The decode cache (`ondin_render::images::ImageStore`)

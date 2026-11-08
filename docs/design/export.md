@@ -298,6 +298,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 | 13 | The `"slice"` kind and `Geometry::Slice { width, height }` |
 | 14 | `NodeSnapshot::blend`, the menu label (`"Multiply"`, `"Pass through"`), absent at the kind's default; `EffectSummary::blend`, a shadow's, absent at Normal |
 | 15 | The `"spiral"` and `"arc"` kinds, `Geometry::Spiral { width, height, turns }` and `Geometry::Arc { end_x, end_y, sweep }` |
+| 16 | `PaintSummary::Image::duotone`: the dark and light ends as `#rrggbb`, present while the duotone amount is above zero |
 
 - `local_transform` and `geometry` are **used** values (§5.3 layout), not what the user set; `world_transform`/`world_bounds` come from `Resolved`. A local an agent computes from these and writes back is a used value saved as typed. Whether the snapshot also carries specified values is MCP-work's question.
 - `NodeSnapshot::pivot` is skipped when unset and reports the **resolved local point** (fraction resolved against `local_box`). It is the one derived field: a node with no measurable box falls to `Rect::ZERO`, so its fraction reports `[0, 0]`. Additive, no bump. `pivot` is not rounded.

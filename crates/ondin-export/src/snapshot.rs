@@ -36,7 +36,9 @@ use std::collections::BTreeMap;
 ///   `EffectSummary::blend`, absent at Normal.
 /// - **15** the `"spiral"` and `"arc"` kinds, `Geometry::Spiral` and
 ///   `Geometry::Arc`.
-pub const SNAPSHOT_VERSION: u32 = 15;
+/// - **16** `PaintSummary::Image` gained `duotone`, the two colours a duotone
+///   maps onto, present while its amount is above zero.
+pub const SNAPSHOT_VERSION: u32 = 16;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -304,6 +306,10 @@ pub enum PaintSummary {
         /// panel's percentages.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         adjust: BTreeMap<String, f32>,
+        /// Duotone's dark and light ends as `#rrggbb`, while `adjust` holds a
+        /// `duotone` above zero; absent otherwise, since they then draw nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duotone: Option<[String; 2]>,
     },
 }
 
@@ -733,6 +739,10 @@ fn paint_summary(brush: &Brush) -> PaintSummary {
                 .filter(|k| k.of(&img.image.adjust) != 0.0)
                 .map(|k| (k.label().to_ascii_lowercase(), k.of(&img.image.adjust)))
                 .collect(),
+            duotone: (img.image.adjust.duotone != 0.0).then(|| {
+                let a = &img.image.adjust;
+                [hex(a.duotone_dark).0, hex(a.duotone_light).0]
+            }),
         },
     }
 }

@@ -2318,6 +2318,11 @@ pub fn scrub(base: f64) -> f64 {
     base * SCRUB_SCALE
 }
 
+/// The largest magnitude any [`Scrub`] field reaches, typed or dragged: a million
+/// document units is far past any design, while a number with no ceiling (`1e50`)
+/// can stall every pass that walks the shape's extent.
+pub const FIELD_LIMIT: f64 = 1_000_000.0;
+
 /// How a [`value_field`] behaves under the hand.
 ///
 /// The speed and the rounding rule travel together: [`value_field`] needs the
@@ -2332,7 +2337,8 @@ pub struct Scrub {
 }
 
 impl Scrub {
-    /// Whole units under the hand, any number from the keyboard.
+    /// Whole units under the hand, any number within [`FIELD_LIMIT`] from the
+    /// keyboard.
     ///
     /// The default for anything in the document's own units. Rounding is keyed on
     /// the drag, never on focus, which would round a typed 1.5 away on blur.
@@ -2340,7 +2346,7 @@ impl Scrub {
         Self {
             speed: scrub(base),
             decimals: 0,
-            range: f64::NEG_INFINITY..=f64::INFINITY,
+            range: -FIELD_LIMIT..=FIELD_LIMIT,
         }
     }
 
@@ -2353,17 +2359,19 @@ impl Scrub {
         }
     }
 
-    /// Clamp the value to `range`, both while dragging and when typed.
+    /// Clamp the value to `range`, both while dragging and when typed, and never
+    /// past [`FIELD_LIMIT`] (`0..=f64::MAX` means "not negative").
     ///
     /// An inverted range is swapped, as `DragValue` does, because `f64::clamp`
-    /// panics on `min > max`. A NaN bound drops the range instead, since
+    /// panics on `min > max`. A NaN bound falls back to the field limit, since
     /// `f64::min` would pin the field to one number.
     pub fn range(mut self, range: std::ops::RangeInclusive<f64>) -> Self {
         let (a, b) = (*range.start(), *range.end());
+        let limit = |v: f64| v.clamp(-FIELD_LIMIT, FIELD_LIMIT);
         self.range = if a.is_nan() || b.is_nan() {
-            f64::NEG_INFINITY..=f64::INFINITY
+            -FIELD_LIMIT..=FIELD_LIMIT
         } else {
-            a.min(b)..=a.max(b)
+            limit(a.min(b))..=limit(a.max(b))
         };
         self
     }
@@ -3363,13 +3371,18 @@ fn value_field_f64_marked(
             );
             let dv = scrub_speed_for(ui.ctx(), dv);
             ui.add_space(inset);
-            let mut resp = ui
-                .allocate_ui_with_layout(
-                    egui::vec2(digits_w, inner_h),
+            // A number longer than its box never widens the field: egui grows a
+            // `DragValue` to its text, which pushed the inspector's columns off
+            // screen. It is cut at the box, its press too (egui senses a widget
+            // only inside its clip rect), and the row advances by the box alone.
+            let digits = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(digits_w, inner_h));
+            let mut boxed =
+                ui.new_child(egui::UiBuilder::new().max_rect(digits).layout(
                     egui::Layout::left_to_right(egui::Align::Center).with_main_align(main),
-                    |ui| ui.add(dv),
-                )
-                .inner;
+                ));
+            boxed.shrink_clip_rect(digits);
+            let mut resp = boxed.add(dv);
+            ui.advance_cursor_after_rect(digits);
             if resp.dragged() {
                 wrap_scrub(ui.ctx());
             }
@@ -8932,7 +8945,7 @@ mod scrub_tests {
         assert_ne!(fine, whole, "the two rules are indistinguishable here");
     }
 
-    /// An inverted `Scrub` range is swapped (as egui does) rather than panicking in `f64::clamp`; a NaN bound is dropped.
+    /// An inverted `Scrub` range is swapped (as egui does) rather than panicking in `f64::clamp`; a NaN bound falls back to the field limit.
     ///
     /// A document-derived bound (an image fill's Crop scale) can invert.
     ///
@@ -8960,7 +8973,7 @@ mod scrub_tests {
         assert_eq!(
             nanny.settle(99_999.0),
             99_999.0,
-            "no bound, not a pinned one"
+            "the field limit, not a pinned bound"
         );
 
         assert_eq!(
@@ -8979,6 +8992,53 @@ mod scrub_tests {
             "and so must one started on the prefix strip, which is the other door \
              into `settle`: {on_prefix}"
         );
+    }
+
+    /// Every `Scrub` stops at `FIELD_LIMIT`, an open-ended range included.
+    /// flip: `Scrub::range` without its `limit` → fails at "no ceiling past the limit".
+    #[test]
+    fn a_scrub_never_reaches_past_the_field_limit() {
+        assert_eq!(Scrub::whole(0.5).settle(1e50), FIELD_LIMIT, "the default");
+        assert_eq!(
+            Scrub::whole(0.5).range(0.0..=f64::MAX).settle(1e50),
+            FIELD_LIMIT,
+            "no ceiling past the limit"
+        );
+        assert_eq!(
+            Scrub::whole(0.5).range(0.0..=f64::MAX).settle(-5.0),
+            0.0,
+            "the caller's floor kept"
+        );
+    }
+
+    /// A number longer than its field is cut at the field, which keeps its width.
+    /// flip: `value_field_f64_marked` adding the number with `allocate_ui_with_layout`
+    /// → fails at "keeps its width".
+    #[test]
+    fn a_long_number_does_not_widen_its_field() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut v = 1e50_f64;
+        let mut width = 0.0;
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                ui.horizontal(|ui| {
+                    let before = ui.cursor().min.x;
+                    value_field(
+                        ui,
+                        egui::vec2(120.0, 28.0),
+                        Prefix::Text("W"),
+                        &mut v,
+                        Scrub::whole(0.5),
+                        |d| d.custom_formatter(number(2)),
+                    );
+                    width = ui.min_rect().right() - before;
+                });
+            });
+        }
+        assert!(width <= 120.0 + 0.5, "keeps its width: {width}");
+        assert_eq!(v, 1e50, "the stored value is shown, not rewritten");
     }
 }
 

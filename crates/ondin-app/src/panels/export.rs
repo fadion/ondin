@@ -726,7 +726,6 @@ impl OndinApp {
                     let combo = egui::ComboBox::from_id_salt(("export-scale", index))
                         .icon(ui::combo_chevron)
                         .width(SCALE_W)
-                        .height(260.0)
                         .selected_text(ui::combo_text(&spec.scale.label()));
                     if live {
                         combo.show_ui(ui, |ui| {

@@ -425,7 +425,7 @@ Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16
 
 - **Dropdown**: four ops, then under a hairline two actions, not states: *Divide* (dimmed with
   `DIVIDE_NEEDS` where `can_arrange` refuses) and *Flatten* (`stack-simple` glyph, as in the
-  context menu). `ComboBox::height(BOOL_MENU_H)` = 250 so the six rows never get a scroll bar.
+  context menu). The six rows sit well under `ui::DROPDOWN_MAX_H`, so the list never scrolls.
   `inspector::flatten_selection` gates on the dropdown's own predicate, plus a lone mirrored path,
   so the keyboard path reports a useful sentence. `inspector::popup_rule` draws the hairline via `ui::hairline_in_column`, sized from
   `available_width`, with gaps `ABOVE` 5pt / `BELOW` 4pt and the layout's `item_spacing.y` subtracted

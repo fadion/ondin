@@ -1644,6 +1644,8 @@ fn install_style_into(style: &mut egui::Style) {
     s.icon_width_inner = 10.0;
     s.menu_margin = egui::Margin::same(crate::ui::MENU_PAD as i8);
     s.indent = 16.0;
+    // Every dropdown's list is as tall as its rows up to this, then scrolls.
+    s.combo_height = crate::ui::DROPDOWN_MAX_H;
 }
 
 /// WCAG contrast of the premultiplied `ink` composited over the opaque `ground`.

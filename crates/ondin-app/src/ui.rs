@@ -2738,6 +2738,11 @@ pub fn menu_rows(ui: &mut egui::Ui) {
 /// The air between a dropdown's field and its open list.
 pub const DROPDOWN_GAP: f32 = 2.0;
 
+/// The tallest a dropdown's open list grows before it scrolls: twelve rows and
+/// the list's padding (the theme's `combo_height`). egui's own 200 scrolled a
+/// ten-row list; a list that wants another cap sets `ComboBox::height`.
+pub const DROPDOWN_MAX_H: f32 = 12.0 * MENU_ROW_H + 2.0 * (MENU_PAD + MENU_BORDER);
+
 /// [`menu_rows`]' row setup alone, for a popup that sets its own `.gap`.
 ///
 /// egui 0.35 sizes a `Button`'s margin as `button_padding − bg_stroke.width` and
@@ -9130,6 +9135,21 @@ mod combo_height_tests {
             24.0,
             "and saying nothing is how the family field came out 4px short"
         );
+    }
+
+    /// Every dropdown's list grows to `DROPDOWN_MAX_H`, room for the assets
+    /// panel's ten icon-set rows, before it scrolls.
+    /// flip: `install_style_into` without its `combo_height` → fails at "theme".
+    #[test]
+    fn a_dropdown_list_fits_ten_rows_before_it_scrolls() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        assert_eq!(
+            ctx.global_style().spacing.combo_height,
+            DROPDOWN_MAX_H,
+            "theme"
+        );
+        const { assert!(DROPDOWN_MAX_H >= 10.0 * MENU_ROW_H + 2.0 * (MENU_PAD + MENU_BORDER)) };
     }
 }
 

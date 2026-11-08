@@ -742,10 +742,6 @@ const ACTION_GLYPH: f32 = 16.0;
 /// the hairline clears the heading's glyphs.
 const HEAD_NAME_EDGE: egui::Vec2 = egui::vec2(5.0, 3.0);
 
-/// Outer height of the boolean dropdown's menu: its rows with headroom, so a
-/// retuned row height does not add a scroll area.
-const BOOL_MENU_H: f32 = 250.0;
-
 /// A full-width hairline parting one group of rows in a dropdown from the next.
 ///
 /// [`ui::rule`] transposed, including the device-pixel snap. The gaps subtract
@@ -2017,8 +2013,6 @@ impl OndinApp {
                 egui::ComboBox::from_id_salt("boolean-op")
                     .icon(ui::combo_chevron)
                     .width(BOOL_COMBO_W)
-                    // egui's default `combo_height` made this fixed list scroll.
-                    .height(BOOL_MENU_H)
                     .selected_text(ui::glyph_only(op_glyph(shown)))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);

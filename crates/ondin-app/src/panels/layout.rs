@@ -868,7 +868,6 @@ fn glyph_combo<T: Copy + PartialEq>(
             egui::ComboBox::from_id_salt(salt)
                 .icon(ui::combo_chevron)
                 .width(width)
-                .height(260.0)
                 .selected_text(job)
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);

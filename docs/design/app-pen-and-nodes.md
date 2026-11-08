@@ -371,10 +371,16 @@ pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
 
 - **Anchors** (`fit_anchors`): a corner moves to the nearest grid line on both axes; a smooth anchor
   moves only across a level or upright tangent, and one with a diagonal tangent stays. Handles ride
-  along, so curves keep their shape.
+  along, so curves keep their shape. A subpath fitting would collapse (a closed one losing its area,
+  an open one shrinking to a point) is left as it was.
+- **A mirrored path** keeps its axis: fitting the whole path first moves the axis to the nearest
+  half unit, then fits the anchors and mirrors each pair from its first anchor, so images land on
+  whole units too and a second fit moves nothing. An anchor on an odd-width axis stays on the half
+  unit. Fitting selected points mirrors them about the axis where it is. Points are counted from
+  what is written.
 - **Box shapes** (rectangle, ellipse, polygon, star, spiral) keep their kind: their world box is
-  rounded (`fit_rect`), a tie growing outward, and a side at least one unit long stays so. A line or
-  an arc snaps both ends.
+  rounded (`fit_rect`), a tie growing outward, and no side with any length ends shorter than one
+  unit: a sub-unit side takes the unit its middle is in. A line or an arc snaps both ends.
 - **The grid** is whole units for every layer, so a box's X, Y, W and H all land on integers. A stroke
   one unit wide and centred then straddles two pixel rows; aligned inside or outside it is crisp.
   No half-unit grid centres such a stroke on a pixel, since that would leave X and Y on halves. An
@@ -382,11 +388,13 @@ pushing a square's corner, not `GRID_FOUR`, which is the View menu's grid.
 - **What it walks**: groups, frames and booleans are walked into (a frame's own box is not moved);
   hidden layers are passed over. Text, and any layer not square to the page (turned other than by a
   quarter turn, or sheared, `square_to_the_page`), is skipped and counted, since no move of its points
-  lines it up with the pixels. A slice, which draws nothing, is left alone uncounted. An auto-layout child
-  gets no special case.
-- One undo step, *Pixel-fit*. The status line (`Fitted::message`) says what moved and what was
-  skipped: *Moved 7 points onto the pixel grid; skipped 1 text layer and 1 rotated layer*, *Already on
-  the pixel grid*, *Pixel-fit skipped 2 text layers*.
+  lines it up with the pixels. A locked layer, one inside a selected group included, is skipped and
+  counted (`query::is_effectively_locked`), as *Fill with content* and *Clean up* skip it. A slice,
+  which draws nothing, is left alone uncounted. An auto-layout child gets no special case.
+- One undo step, *Pixel-fit*. The status line (the app's `pixel_fit::message`) says what moved and
+  what was skipped: *Moved 7 points onto the pixel grid; skipped 1 text layer and 1 rotated layer*,
+  *Already on the pixel grid*, *Pixel-fit skipped 2 text layers*, *…skipped 1 text layer, 2 rotated
+  layers and 1 locked layer*.
 
 ## Traps
 

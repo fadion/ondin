@@ -16,7 +16,13 @@ pub(crate) fn message(fitted: &Fitted) -> String {
     if fitted.turned > 0 {
         skipped.push(crate::ui::count(fitted.turned, "rotated layer"));
     }
-    let skipped = skipped.join(" and ");
+    if fitted.locked > 0 {
+        skipped.push(crate::ui::count(fitted.locked, "locked layer"));
+    }
+    let skipped = match skipped.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => skipped.join(""),
+    };
     match (fitted.moved, skipped.is_empty()) {
         (0, true) => "Already on the pixel grid".to_owned(),
         (0, false) => format!("Pixel-fit skipped {skipped}"),
@@ -196,6 +202,7 @@ mod tests {
                 moved,
                 text,
                 turned,
+                locked: 0,
             })
         };
         assert_eq!(say(0, 0, 0), "Already on the pixel grid");
@@ -205,6 +212,16 @@ mod tests {
         assert_eq!(
             say(4, 1, 1),
             "Moved 4 points onto the pixel grid; skipped 1 text layer and 1 rotated layer"
+        );
+        let all = message(&Fitted {
+            moved: 0,
+            text: 1,
+            turned: 2,
+            locked: 1,
+        });
+        assert_eq!(
+            all,
+            "Pixel-fit skipped 1 text layer, 2 rotated layers and 1 locked layer"
         );
     }
 }

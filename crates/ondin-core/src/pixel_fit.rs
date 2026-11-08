@@ -11,15 +11,17 @@
 //! moves more than half a unit.
 //!
 //! A layer turned by anything but a quarter turn is skipped, since no move of its
-//! points lines it up with the page's pixels; so is text. Both are counted.
+//! points lines it up with the page's pixels; so are text and a locked layer. All
+//! three are counted. A slice draws nothing and is passed over uncounted.
 
 use crate::build;
 use crate::document::Document;
-use crate::edit::{PenSubpath, PointRef, path_subpaths, rewrite_points};
+use crate::edit::{PenSubpath, PointRef, map_subpaths, path_subpaths, pen_path, rewrite_path};
 use crate::id::NodeId;
 use crate::node::NodeKind;
 use crate::op::{GeometryPatch, Operation, Transaction};
 use crate::resolve::Resolved;
+use crate::symmetry::PathMirror;
 use kurbo::{Affine, Point, Rect, Vec2};
 
 /// Below this a coordinate has not moved, and a coefficient is zero.
@@ -31,6 +33,7 @@ pub struct Fitted {
     pub moved: usize,
     pub text: usize,
     pub turned: usize,
+    pub locked: usize,
 }
 
 /// `v` on the nearest whole unit, a tie going down: a whole shape fitted this way
@@ -52,10 +55,13 @@ fn square_to_the_page(world: Affine) -> bool {
 }
 
 /// Fit the anchors of world-space `subpaths` (only those in `only`, when given) to
-/// whole units. Answers how many moved.
+/// whole units. Answers how many moved. A subpath that fitting would collapse (a
+/// closed one losing its area, an open one shrinking to a point) is left as it was.
 pub fn fit_anchors(subpaths: &mut [PenSubpath], only: Option<&[PointRef]>) -> usize {
     let mut moved = 0;
     for (s, sub) in subpaths.iter_mut().enumerate() {
+        let was = sub.clone();
+        let mut here = 0;
         for (a, anchor) in sub.anchors.iter_mut().enumerate() {
             if only.is_some_and(|only| !only.contains(&(s, a))) {
                 continue;
@@ -81,22 +87,51 @@ pub fn fit_anchors(subpaths: &mut [PenSubpath], only: Option<&[PointRef]>) -> us
             );
             if (to - at).hypot() > EPS {
                 anchor.at = to;
-                moved += 1;
+                here += 1;
             }
+        }
+        if here > 0 && collapsed(&was, sub) {
+            *sub = was;
+        } else {
+            moved += here;
         }
     }
     moved
 }
 
+/// Whether fitting took `was` to nothing: a closed run with area to none, or an
+/// open one with length to a point.
+fn collapsed(was: &PenSubpath, now: &PenSubpath) -> bool {
+    let path = |s: &PenSubpath| crate::edit::pen_path(std::slice::from_ref(s));
+    match was.closed {
+        true => {
+            use kurbo::Shape;
+            path(was).area().abs() > EPS && path(now).area().abs() <= EPS
+        }
+        false => {
+            let extent = |s: &PenSubpath| {
+                let b = path(s).control_box();
+                b.width().max(b.height())
+            };
+            extent(was) > EPS && extent(now) <= EPS
+        }
+    }
+}
+
 /// `r` with each edge on a whole unit, a tied box grown outward, and no side
-/// shorter than one unit unless it was already.
+/// shorter than one unit unless it had no length at all: a sub-unit side takes
+/// the unit its middle is in, so a thin bar never rounds away.
 fn fit_rect(r: Rect) -> Rect {
     let axis = |lo: f64, hi: f64| {
-        let (a, mut b) = (snap(lo), snap_up(hi));
-        if b - a < 1.0 && hi - lo >= 1.0 - EPS {
-            b = a + 1.0;
+        let (a, b) = (snap(lo), snap_up(hi));
+        match b - a < 1.0 && hi - lo > EPS {
+            true if hi - lo >= 1.0 - EPS => (a, a + 1.0),
+            true => {
+                let a = ((lo + hi) / 2.0).floor();
+                (a, a + 1.0)
+            }
+            false => (a, b),
         }
-        (a, b)
     };
     let (x0, x1) = axis(r.x0, r.x1);
     let (y0, y1) = axis(r.y0, r.y1);
@@ -139,6 +174,15 @@ fn fit_layer(
         return;
     }
     let kind = res.used_kind_of(node);
+    // A slice draws nothing, so it is neither fitted nor counted.
+    if matches!(kind, NodeKind::Slice { .. }) {
+        return;
+    }
+    // A selected group still opens onto a locked layer inside it.
+    if crate::query::is_effectively_locked(doc, id) {
+        fitted.locked += 1;
+        return;
+    }
     match kind {
         NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. } => {
             for child in node.children().to_vec() {
@@ -220,6 +264,11 @@ fn fit_layer(
 
 /// The path `id` with its anchors (those in `only`, when given) fitted, or `None`
 /// when nothing moved.
+///
+/// A mirrored path is fitted about its axis: fitting the whole path first moves the
+/// axis to the nearest half unit, then each anchor's image is mirrored from it, so
+/// images land on whole units too and a second fit moves nothing. Points are counted
+/// from what is written, the mirroring included.
 fn fit_path(
     doc: &Document,
     res: &Resolved,
@@ -232,13 +281,66 @@ fn fit_path(
         fitted.turned += 1;
         return None;
     }
+    let mirror = match doc.get(id)?.kind() {
+        NodeKind::Path { mirror, .. } => *mirror,
+        _ => PathMirror::NONE,
+    };
+    let mut start = base.clone();
     let mut subpaths = base.clone();
-    let moved = fit_anchors(&mut subpaths, only);
+    if !mirror.is_none() {
+        // The path's own axes in world terms: a quarter turn swaps them.
+        let quarter = world.as_coeffs()[1].abs() > EPS;
+        let mirror = PathMirror {
+            vertical: if quarter {
+                mirror.horizontal
+            } else {
+                mirror.vertical
+            },
+            horizontal: if quarter {
+                mirror.vertical
+            } else {
+                mirror.horizontal
+            },
+        };
+        let at = crate::symmetry::centre(&pen_path(&base));
+        let half = |v: f64| (v * 2.0).round() / 2.0;
+        let to = match only {
+            Some(_) => at,
+            None => Point::new(
+                if mirror.vertical { half(at.x) } else { at.x },
+                if mirror.horizontal { half(at.y) } else { at.y },
+            ),
+        };
+        map_subpaths(&mut start, Affine::translate(to - at));
+        subpaths = start.clone();
+        fit_anchors(&mut subpaths, only);
+        crate::symmetry::remirror(&start, &mut subpaths, mirror, to);
+    } else {
+        fit_anchors(&mut subpaths, only);
+    }
+    let moved = base
+        .iter()
+        .flat_map(|s| &s.anchors)
+        .zip(subpaths.iter().flat_map(|s| &s.anchors))
+        .filter(|(a, b)| (a.at - b.at).hypot() > EPS)
+        .count();
     if moved == 0 {
         return None;
     }
     fitted.moved += moved;
-    Some(rewrite_points(doc, id, world, &base, subpaths))
+    let NodeKind::Path {
+        path, corner_radii, ..
+    } = doc.get(id)?.kind()
+    else {
+        return None;
+    };
+    // Already mirrored above: `rewrite_points` would mirror again about the old axis.
+    Some(rewrite_path(
+        id,
+        world,
+        &subpaths,
+        Some((path, corner_radii)),
+    ))
 }
 
 /// The ops that put a box shape's world box at `now`, its axes kept: a new size
@@ -349,5 +451,262 @@ mod tests {
         assert_eq!(thin.width(), 1.0, "{thin:?}");
         let tied = fit_rect(Rect::new(3.5, 3.5, 20.5, 20.5));
         assert_eq!(tied, Rect::new(3.0, 3.0, 21.0, 21.0));
+    }
+
+    /// A side under one unit keeps a unit wherever it sits, so a thin bar never
+    /// rounds to nothing; a side with no length stays so.
+    /// flip: `fit_rect` without its sub-unit arm → fails at "a thin bar keeps a unit".
+    #[test]
+    fn a_sub_unit_side_never_rounds_to_nothing() {
+        let thin = fit_rect(Rect::new(10.1, 0.0, 10.4, 10.0));
+        assert_eq!((thin.x0, thin.x1), (10.0, 11.0), "a thin bar keeps a unit");
+        let flat = fit_rect(Rect::new(10.2, 0.0, 10.2, 10.0));
+        assert_eq!(flat.width(), 0.0, "{flat:?}");
+    }
+
+    /// A sub-unit closed run whose corners would all land on one point is left as
+    /// it was, and counted as unmoved.
+    /// flip: `fit_anchors` without its `collapsed` check → fails at the count.
+    #[test]
+    fn a_speck_is_not_fitted_to_nothing() {
+        let mut subs = vec![PenSubpath {
+            anchors: [(10.1, 10.1), (10.4, 10.1), (10.25, 10.4)]
+                .map(|(x, y)| PenAnchor::corner(Point::new(x, y)))
+                .to_vec(),
+            closed: true,
+        }];
+        let was = subs.clone();
+        assert_eq!(fit_anchors(&mut subs, None), 0);
+        assert_eq!(subs, was, "the speck survives");
+    }
+
+    use crate::id::IdSource;
+    use crate::op::Operation;
+    use kurbo::{BezPath, Size};
+
+    /// `n` fresh ids after the root, and the document holding what `build` makes
+    /// of them under the root.
+    fn doc_of<const N: usize>(
+        build: impl FnOnce(NodeId, [NodeId; N]) -> Vec<Operation>,
+    ) -> (Document, [NodeId; N]) {
+        let mut ids = IdSource::new(0xF17);
+        let root = ids.mint();
+        let made = [(); N].map(|_| ids.mint());
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(build(root, made)))
+            .expect("the fixture applies");
+        (doc, made)
+    }
+
+    fn rect_at(id: NodeId, parent: NodeId, index: usize, at: Affine, size: Size) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size,
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(at),
+            name: None,
+        }
+    }
+
+    fn group(id: NodeId, parent: NodeId, at: Affine) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(at),
+            name: None,
+        }
+    }
+
+    /// The ops of `tx` that name `id`.
+    fn naming(tx: &Transaction, id: NodeId) -> usize {
+        tx.0.iter().filter(|op| op.overwrites() == Some(id)).count()
+    }
+
+    /// A locked layer inside a selected group is neither moved nor resized, and is
+    /// counted; its unlocked sibling still fits.
+    /// flip: `fit_layer` without its lock check → fails at "the locked rect is left alone".
+    #[test]
+    fn a_locked_layer_in_a_selected_group_is_skipped() {
+        let (doc, [g, locked, free]) = doc_of(|root, [g, locked, free]| {
+            let odd = Size::new(20.4, 9.7);
+            vec![
+                group(g, root, Affine::IDENTITY),
+                rect_at(locked, g, 0, Affine::translate((10.3, 4.6)), odd),
+                rect_at(free, g, 1, Affine::translate((50.3, 4.6)), odd),
+                Operation::SetLocked {
+                    id: locked,
+                    locked: true,
+                },
+            ]
+        });
+        let res = Resolved::rebuild(&doc);
+        let (tx, fitted) = fit(&doc, &res, &[g]);
+        assert_eq!(naming(&tx, locked), 0, "the locked rect is left alone");
+        assert!(naming(&tx, free) > 0, "its sibling fits");
+        assert_eq!(fitted.locked, 1);
+    }
+
+    /// A slice under a turned frame is neither fitted nor counted as turned.
+    /// flip: `fit_layer` without its slice arm → fails at "a slice is not counted".
+    #[test]
+    fn a_slice_is_left_alone_uncounted() {
+        let (doc, [g, slice]) = doc_of(|root, [g, slice]| {
+            vec![
+                group(g, root, Affine::rotate(0.17)),
+                Operation::CreateNode {
+                    id: slice,
+                    parent: g,
+                    index: 0,
+                    kind: NodeKind::Slice {
+                        size: Size::new(10.3, 10.3),
+                    },
+                    transform: Some(Affine::translate((0.4, 0.4))),
+                    name: None,
+                },
+            ]
+        });
+        let res = Resolved::rebuild(&doc);
+        let (tx, fitted) = fit(&doc, &res, &[g, slice]);
+        assert!(tx.0.is_empty());
+        assert_eq!(fitted, Fitted::default(), "a slice is not counted");
+    }
+
+    /// A line in a scaled group lands both world ends on whole units; a rect under
+    /// a flip and a quarter turn lands its world box on whole units and a second fit
+    /// does nothing; a sheared rect is counted as turned; a hidden rect is passed over.
+    /// flip: the line arm's end written as `world.inverse() * b` → fails at "the far
+    /// end lands whole"; `box_ops` reading the quarter turn as unturned → fails at
+    /// "the quarter-turned box lands whole".
+    #[test]
+    fn lines_quarter_turns_shears_and_hidden_layers() {
+        let (doc, [g, line, turned, sheared, hidden]) =
+            doc_of(|root, [g, line, turned, sheared, hidden]| {
+                let flip_turn = Affine::translate((40.3, 4.6))
+                    * Affine::FLIP_X
+                    * Affine::rotate(std::f64::consts::FRAC_PI_2);
+                vec![
+                    group(g, root, Affine::translate((3.3, 1.2)) * Affine::scale(2.0)),
+                    Operation::CreateNode {
+                        id: line,
+                        parent: g,
+                        index: 0,
+                        kind: NodeKind::Line {
+                            end: Point::new(10.2, 3.1),
+                        },
+                        transform: Some(Affine::translate((1.1, 2.2))),
+                        name: None,
+                    },
+                    rect_at(turned, root, 1, flip_turn, Size::new(20.4, 9.7)),
+                    rect_at(
+                        sheared,
+                        root,
+                        2,
+                        Affine::translate((80.3, 0.0)) * Affine::skew(0.3, 0.0),
+                        Size::new(10.0, 10.0),
+                    ),
+                    rect_at(
+                        hidden,
+                        root,
+                        3,
+                        Affine::translate((120.3, 0.4)),
+                        Size::new(10.0, 10.0),
+                    ),
+                    Operation::SetVisible {
+                        id: hidden,
+                        visible: false,
+                    },
+                ]
+            });
+        let res = Resolved::rebuild(&doc);
+        let (tx, fitted) = fit(&doc, &res, &[g, turned, sheared, hidden]);
+        assert_eq!(naming(&tx, sheared), 0);
+        assert_eq!(naming(&tx, hidden), 0);
+        assert_eq!(fitted.turned, 1, "the sheared rect is counted");
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the fit applies");
+        let ra = Resolved::rebuild(&after);
+        let whole = |p: Point| p.x.fract() == 0.0 && p.y.fract() == 0.0;
+        let world = ra.world_transform(line).unwrap();
+        let NodeKind::Line { end } = after.get(line).unwrap().kind() else {
+            panic!("a line");
+        };
+        assert!(whole(world * Point::ZERO), "{:?}", world * Point::ZERO);
+        let far = world * *end;
+        assert!(
+            (far.x - far.x.round()).abs() < 1e-9 && (far.y - far.y.round()).abs() < 1e-9,
+            "the far end lands whole: {far:?}"
+        );
+        // Drawn at x 40.3–50, y 4.6–25.
+        let b = ra.world_bounds(turned).unwrap();
+        assert!(
+            [b.x0 - 40.0, b.y0 - 5.0, b.x1 - 50.0, b.y1 - 25.0]
+                .iter()
+                .all(|v| v.abs() < 1e-9),
+            "the quarter-turned box lands whole: {b:?}"
+        );
+        let (again, _) = fit(&after, &ra, &[turned]);
+        assert!(again.0.is_empty(), "a second fit does nothing: {again:?}");
+    }
+
+    /// A path mirrored about an axis off the half-unit grid has its axis moved to
+    /// the nearest half unit and every anchor on whole units, the axis kept, and a
+    /// second fit moves nothing.
+    /// flip: `fit_path` leaving the axis where it is → fails at "every anchor is
+    /// whole or half".
+    #[test]
+    fn a_mirrored_path_fits_about_its_axis() {
+        let (doc, [made]) = doc_of(|root, [made]| {
+            let mut p = BezPath::new();
+            p.move_to((10.3, -10.0));
+            p.line_to((20.0, 0.0));
+            p.line_to((10.3, 10.0));
+            p.line_to((0.6, 0.0));
+            p.close_path();
+            vec![Operation::CreateNode {
+                id: made,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Path {
+                    path: p,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                    mirror: PathMirror {
+                        vertical: true,
+                        horizontal: false,
+                    },
+                },
+                transform: None,
+                name: None,
+            }]
+        });
+        let res = Resolved::rebuild(&doc);
+        let (tx, fitted) = fit(&doc, &res, &[made]);
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the fit applies");
+        let ra = Resolved::rebuild(&after);
+        let (_, subs) = path_subpaths(&after, &ra, made).unwrap();
+        for a in &subs[0].anchors {
+            for v in [a.at.x, a.at.y] {
+                assert!(
+                    (v * 2.0).fract() == 0.0,
+                    "every anchor is whole or half: {subs:?}"
+                );
+            }
+        }
+        let NodeKind::Path { mirror, .. } = after.get(made).unwrap().kind() else {
+            panic!("a path");
+        };
+        assert!(mirror.vertical, "the axis is kept");
+        assert_eq!(fitted.moved, 3, "the right anchor was already whole");
+        let (again, twice) = fit(&after, &ra, &[made]);
+        assert!(again.0.is_empty(), "a second fit moves nothing: {again:?}");
+        assert_eq!(twice.moved, 0);
     }
 }

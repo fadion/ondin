@@ -614,6 +614,7 @@ impl Operation {
             | Operation::SetStrokes { id, .. }
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
+            | Operation::SetCredit { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }
@@ -685,9 +686,7 @@ impl Operation {
             // A description is text beside the thing, never a field a copy
             // follows or an edit merges on; so is a link.
             | Operation::SetDescription { .. }
-            | Operation::SetDocLink { .. }
-            // A credit is written once, at insert, onto main and copy alike.
-            | Operation::SetCredit { .. } => None,
+            | Operation::SetDocLink { .. } => None,
         }
     }
 
@@ -721,6 +720,7 @@ impl Operation {
             | Operation::SetStrokes { id, .. }
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
+            | Operation::SetCredit { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }

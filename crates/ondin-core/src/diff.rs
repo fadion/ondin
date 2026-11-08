@@ -875,6 +875,22 @@ impl<'d> Differ<'d> {
             Value::String(s) => match self.names.get(s) {
                 Some(name) if key != "id" => name.clone(),
                 _ if matches!(key, "content" | "name" | "description" | "doc_link") => quoted(s),
+                // A credit's words and addresses, read as written (`utm_source` keeps
+                // its underscore).
+                _ if matches!(
+                    key,
+                    "text"
+                        | "author"
+                        | "author_url"
+                        | "provider"
+                        | "provider_url"
+                        | "source_url"
+                        | "licence"
+                        | "licence_url"
+                ) =>
+                {
+                    quoted(s)
+                }
                 _ => s.replace('_', " "),
             },
             _ if is_color(v) => hex(v),

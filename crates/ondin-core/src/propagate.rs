@@ -68,6 +68,10 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetMask { .. }
         | Operation::SetMaskMode { .. }
         | Operation::SetFillRule { .. }
+        // A credit follows the picture it credits: a photo filled into a main, its
+        // picture replaced, an icon ungrouped in it reach every copy, and a copy's
+        // own photo is an override.
+        | Operation::SetCredit { .. }
         // A copy's mode is an override like any field (§5.3f), and so is a
         // corner's binding: overrides compare the binding (§5.3d).
         | Operation::SetModes { .. }
@@ -155,9 +159,7 @@ fn mode(op: &Operation) -> Mode {
         // A main's description is the main's; an instance reads it through its
         // link, and so is its documentation address.
         | Operation::SetDescription { .. }
-        | Operation::SetDocLink { .. }
-        // A credit is written on main and copy alike when it is written at all.
-        | Operation::SetCredit { .. } => Mode::Skip,
+        | Operation::SetDocLink { .. } => Mode::Skip,
     }
 }
 

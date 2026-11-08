@@ -155,6 +155,123 @@ fn copies_and_ungrouped_parts_keep_the_credit() {
     assert_eq!(f.doc.get(b).unwrap().credit(), Some(&icon));
 }
 
+/// A main `m` holding a rect, and an instance of it made by the copy path; the
+/// rect and its copy.
+fn main_and_instance(f: &mut F) -> (NodeId, NodeId) {
+    let m = f.add(
+        f.root,
+        NodeKind::Artboard {
+            size: Size::new(100.0, 100.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+    );
+    let a = f.add(m, rect());
+    f.commit(Transaction(vec![Operation::SetComponent {
+        id: m,
+        component: true,
+    }]));
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[build::Placement {
+            nodes: f.doc.capture_subtree(m).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx);
+    let ia = f.doc.get(made[0]).unwrap().children()[0];
+    (a, ia)
+}
+
+/// `ops` and what they owe the instances — the commit's assembly.
+fn commit_propagated(f: &mut F, ops: Vec<Operation>) {
+    let mut tx = Transaction(ops);
+    let follows = ondin_core::propagate::propagate(&f.doc, &tx);
+    tx.0.extend(follows);
+    f.commit(tx);
+}
+
+/// A credit written on a main reaches its copy, and dropped there drops it on
+/// the copy; a copy's own credit is an override the main's edit leaves alone.
+/// flip: `SetCredit` back to `Mode::Skip` in `propagate::mode` → fails at the
+/// first copy assertion.
+#[test]
+fn a_mains_credit_reaches_its_copies() {
+    let mut f = F::new();
+    let (a, ia) = main_and_instance(&mut f);
+    let photo = credit(CreditKind::Photo);
+    commit_propagated(
+        &mut f,
+        vec![Operation::SetCredit {
+            id: a,
+            credit: Some(Box::new(photo.clone())),
+        }],
+    );
+    assert_eq!(f.doc.get(ia).unwrap().credit(), Some(&photo));
+    commit_propagated(
+        &mut f,
+        vec![Operation::SetCredit {
+            id: a,
+            credit: None,
+        }],
+    );
+    assert_eq!(f.doc.get(ia).unwrap().credit(), None);
+
+    let mut own = credit(CreditKind::Photo);
+    own.text = "Photo by Tomás Vidal on Unsplash".into();
+    commit_propagated(
+        &mut f,
+        vec![Operation::SetCredit {
+            id: ia,
+            credit: Some(Box::new(own.clone())),
+        }],
+    );
+    commit_propagated(
+        &mut f,
+        vec![Operation::SetCredit {
+            id: a,
+            credit: Some(Box::new(photo)),
+        }],
+    );
+    assert_eq!(
+        f.doc.get(ia).unwrap().credit(),
+        Some(&own),
+        "an override stays"
+    );
+}
+
+/// Flattening a credited icon's parts keeps the credit on the union.
+/// flip: drop the `SetCredit` push in `build::flatten_union` → fails here.
+#[test]
+fn a_flattened_icon_keeps_its_credit() {
+    let mut f = F::new();
+    let a = f.add(f.root, rect());
+    let b = f.add(f.root, rect());
+    let icon = credit(CreditKind::Icon);
+    f.set_credit(b, icon.clone());
+    let (tx, made) = build::flatten(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, &[a, b])
+        .expect("two rects flatten");
+    f.commit(tx);
+    assert_eq!(f.doc.get(made).unwrap().credit(), Some(&icon));
+}
+
+/// A credit that will not read — a missing field, a kind from a later build —
+/// is dropped on load, and the document opens.
+#[test]
+fn an_unreadable_credit_is_dropped_not_refused() {
+    let mut f = F::new();
+    let a = f.add(f.root, rect());
+    f.set_credit(a, credit(CreditKind::Photo));
+    let text = String::from_utf8(io::save(&f.doc).unwrap()).unwrap();
+    let edited = text.replace("\"photo\"", "\"video\"");
+    assert_ne!(edited, text, "the fixture: the kind is in the file");
+    let loaded = io::load(edited.as_bytes()).expect("the document opens");
+    assert_eq!(loaded.get(a).unwrap().credit(), None);
+}
+
 /// Replacing the picture drops a photo credit and keeps an icon's.
 #[test]
 fn replacing_the_picture_drops_a_photo_credit_only() {

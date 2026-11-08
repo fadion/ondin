@@ -2926,6 +2926,14 @@ pub(crate) fn replace_with_path(
             item: *node.item(),
         });
     }
+    // The path is the same asset, so it owes the same credit: the layer's own, or
+    // a flattened boolean's operands'.
+    if let Some(listed) = crate::credit::credits_in(doc, &[id]).into_iter().next() {
+        ops.push(Operation::SetCredit {
+            id: new,
+            credit: Some(Box::new(listed.credit)),
+        });
+    }
     // Not carried: *Lock* (it would refuse the tidying that follows) and the
     // proportion lock (a path has no authored box).
     ops.push(Operation::DeleteNode { id });
@@ -3008,6 +3016,14 @@ fn flatten_union(
     }];
     let base = doc.get(ordered[0]).expect("checked above");
     ops.extend(carried_paint(base, new));
+    // An icon's parts flattened are still the icon: the first credit among them
+    // goes on the union, the one a CC BY set's licence asks to keep.
+    if let Some(listed) = crate::credit::credits_in(doc, &ordered).into_iter().next() {
+        ops.push(Operation::SetCredit {
+            id: new,
+            credit: Some(Box::new(listed.credit)),
+        });
+    }
     for member in &ordered {
         ops.push(Operation::DeleteNode { id: *member });
     }

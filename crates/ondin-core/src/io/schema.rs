@@ -349,8 +349,13 @@ pub(crate) struct NodeDto {
     pub doc_link: String,
     /// An inserted asset's credit (`crate::credit`), absent on every other
     /// layer. Additive: an older build ignores it. An address not in `web_link`'s
-    /// form is emptied on load, never refused.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// form is emptied on load, never refused, and a credit that will not read
+    /// at all (a hand edit, a kind from a later build) is dropped (`lenient_credit`).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_credit"
+    )]
     pub credit: Option<Box<crate::credit::Credit>>,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
     /// outside the vault — which `crate::kit::check` holds on load.
@@ -398,6 +403,16 @@ pub(crate) struct NodeDto {
     /// v8, as `size_vars` is.
     #[serde(default, skip_serializing_if = "crate::style::StyleRefs::is_empty")]
     pub styles: crate::style::StyleRefs,
+}
+
+/// A node's credit as stored, or none when it does not read: the credit is
+/// provenance, not artwork, and refusing the document over it would lose the
+/// artwork to keep the label.
+fn lenient_credit<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Box<crate::credit::Credit>>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
 }
 
 fn no_size_vars(v: &crate::variable::SizeVars) -> bool {

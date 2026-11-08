@@ -1,10 +1,12 @@
 //! A layer's **credit**: where an inserted icon or photo came from and what its
 //! licence asks for, carried on the node it came with (`Node::credit`).
 //!
-//! Written once, by the assets browser's insert, and never edited by the user. It
-//! rides with every copy (`remap_subtree` clones it), is copied to each child when
-//! an icon is ungrouped (`build::ungroup`), and is dropped when the picture it
-//! credits is replaced by another file. Never drawn.
+//! Written by the assets browser's inserts, never edited by the user. It rides
+//! with every copy (`remap_subtree` clones it) and follows a main to its instances
+//! like any whole-value field, an instance's own being an override a reset puts
+//! back. It is copied to each child when an icon is ungrouped (`build::ungroup`),
+//! carried onto the path that flattens or outlines a layer, and dropped when the
+//! picture it credits is replaced by another file. Never drawn.
 
 use serde::{Deserialize, Serialize};
 

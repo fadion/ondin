@@ -9,7 +9,7 @@
 
 use crate::app::OndinApp;
 use ondin_core::kurbo::{Affine, Point, Rect, Vec2};
-use ondin_core::{NodeId, Resolved, Transaction, build};
+use ondin_core::{Document, NodeId, Resolved, Transaction, build};
 
 /// The transform *Transform again* repeats, measured in world space.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,25 +125,54 @@ pub(crate) struct Watch {
     kind: Kind,
     id: NodeId,
     world: Affine,
-    bounds: Rect,
+    /// The layer's size along its own axes ([`own_size`]).
+    size: Vec2,
+}
+
+/// `id`'s box measured along its own axes, its transform's scale included: what
+/// a resize changes whatever the layer's turn, where world bounds of a layer at
+/// 45° grow alike on both sides for any stretch.
+fn own_size(doc: &Document, res: &Resolved, id: NodeId) -> Option<Vec2> {
+    let b = ondin_core::query::local_box(doc, res, id)?;
+    let s = build::Basis::of(res.world_transform(id)?).scale;
+    Some(Vec2::new(b.width() * s.x, b.height() * s.y))
 }
 
 impl Watch {
-    /// Start watching a commit noted `note`, when its name is a transform's.
-    pub(crate) fn of(note: &ondin_core::StepNote, res: &Resolved) -> Option<Self> {
+    /// Start watching `tx`, a commit noted `note`, when its name is a
+    /// transform's. A *Move* that only changes a layer's slot (a layers-panel
+    /// reorder, which a layout turns into a shift) teaches nothing.
+    pub(crate) fn of(
+        note: &ondin_core::StepNote,
+        tx: &ondin_core::Transaction,
+        doc: &Document,
+        res: &Resolved,
+    ) -> Option<Self> {
         let kind = kind_of(&note.label)?;
         let id = *note.subjects.first()?;
+        let restacked = tx.0.iter().any(|op| {
+            matches!(
+                op,
+                ondin_core::Operation::Reorder { .. } | ondin_core::Operation::Reparent { .. }
+            )
+        });
+        let placed = tx.0.iter().any(|op| {
+            matches!(op, ondin_core::Operation::SetTransform { id: t, .. } if note.subjects.contains(t))
+        });
+        if kind == Kind::Move && restacked && !placed {
+            return None;
+        }
         Some(Self {
             kind,
             id,
             world: res.world_transform(id)?,
-            bounds: res.world_bounds(id)?,
+            size: own_size(doc, res, id)?,
         })
     }
 
     /// What the commit did, read once it has landed; `None` when it did nothing
     /// this can repeat.
-    pub(crate) fn finish(self, res: &Resolved) -> Option<Again> {
+    pub(crate) fn finish(self, doc: &Document, res: &Resolved) -> Option<Again> {
         let now = res.world_transform(self.id)?;
         let delta = now * self.world.inverse();
         let linear = delta * Affine::translate(-(delta * Point::ZERO).to_vec2());
@@ -160,10 +189,10 @@ impl Watch {
             }
             // Only a proportional scale repeats; a stretch has no one factor.
             Kind::Scale => {
-                let now = res.world_bounds(self.id)?;
-                let (was_w, was_h) = (self.bounds.width(), self.bounds.height());
+                let now = own_size(doc, res, self.id)?;
+                let (was_w, was_h) = (self.size.x, self.size.y);
                 (was_w > EPS && was_h > EPS).then_some(())?;
-                let (sx, sy) = (now.width() / was_w, now.height() / was_h);
+                let (sx, sy) = (now.x / was_w, now.y / was_h);
                 ((sx - sy).abs() < 1e-3).then_some(())?;
                 Again::Scale(sx)
             }
@@ -292,6 +321,153 @@ mod tests {
             (scaled.center() - mid).hypot() < 1e-6,
             "scaled about its centre"
         );
+    }
+
+    /// A *Scale* on a layer turned 45° is learnt by its own axes: a stretch keeps
+    /// the old step, though its world bounds grow alike, and an even resize is
+    /// learnt as its factor.
+    /// flip: `Watch::finish` measuring world bounds → fails at "a stretch keeps".
+    #[test]
+    fn a_turned_layer_stretched_keeps_the_old_step() {
+        use ondin_core::kurbo::Size;
+        use ondin_core::{GeometryPatch, NodeKind, Operation};
+        let ctx = eframe::egui::Context::default();
+        let (mut app, ..) = crate::repeat::tests::tick_app(&ctx);
+        let id = app.session.ids.mint();
+        let page = app.session.page;
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 100.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((300.0, 300.0)) * Affine::rotate(45f64.to_radians())),
+            name: None,
+        }])));
+        let learnt = Again::Rotate(15f64.to_radians());
+        app.session.last_transform = Some(learnt);
+        let size = |w, h| {
+            Transaction(vec![Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::Size(Size::new(w, h)),
+            }])
+        };
+        app.session.name_step("Scale", "");
+        assert!(app.session.commit(size(200.0, 100.0)));
+        assert_eq!(
+            app.session.last_transform,
+            Some(learnt),
+            "a stretch keeps the old step"
+        );
+        app.session.name_step("Scale", "");
+        assert!(app.session.commit(size(300.0, 150.0)));
+        assert_eq!(app.session.last_transform, Some(Again::Scale(1.5)));
+    }
+
+    /// A skew is learnt as its lean and named by it, and applied again leans the
+    /// layer as far once more.
+    /// flip: `Watch::finish`'s Skew arm reading the lean before minus after →
+    /// fails at the label.
+    #[test]
+    fn a_skew_is_learnt_and_applied_again() {
+        use ondin_core::kurbo::Size;
+        use ondin_core::{NodeKind, Operation};
+        let ctx = eframe::egui::Context::default();
+        let (mut app, ..) = crate::repeat::tests::tick_app(&ctx);
+        let id = app.session.ids.mint();
+        let page = app.session.page;
+        let at = Affine::translate((300.0, 300.0));
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(at),
+            name: None,
+        }])));
+        let lean = |app: &OndinApp| {
+            let w = app.session.resolved.world_transform(id).unwrap();
+            build::Basis::of(w).orientation.skew.to_degrees()
+        };
+        let skewed = at * Affine::skew(10f64.to_radians().tan(), 0.0);
+        app.session.name_step("Skew", "");
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id,
+                    transform: skewed,
+                }]))
+        );
+        let again = app.session.last_transform.expect("the skew was learnt");
+        assert_eq!(again.label(), "Skew 10°");
+        app.session.selection.set_one(id);
+        app.transform_again();
+        // The shear composes: twice tan 10°, so a touch under 20°.
+        let want = (2.0 * 10f64.to_radians().tan()).atan().to_degrees();
+        assert!(
+            (lean(&app).abs() - want).abs() < 0.1,
+            "leant again: {}",
+            lean(&app)
+        );
+    }
+
+    /// A reorder committed as *Move*, which a layout turns into a shift, teaches
+    /// nothing: no `SetTransform` placed the layer.
+    /// flip: `Watch::of` without its restack check → fails at "kept".
+    #[test]
+    fn a_reorder_named_move_teaches_nothing() {
+        use ondin_core::kurbo::Size;
+        use ondin_core::{NodeKind, Operation};
+        let ctx = eframe::egui::Context::default();
+        let (mut app, ..) = crate::repeat::tests::tick_app(&ctx);
+        let page = app.session.page;
+        let (frame, dot) = (app.session.ids.mint(), app.session.ids.mint());
+        let make = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let artboard = NodeKind::Artboard {
+            size: Size::new(200.0, 200.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        let rect = NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        assert!(app.session.commit(Transaction(vec![
+            make(frame, page, artboard, (500.0, 500.0)),
+            make(dot, frame, rect, (10.0, 10.0)),
+        ])));
+        let learnt = Again::Rotate(15f64.to_radians());
+        app.session.last_transform = Some(learnt);
+        let was = app.session.resolved.world_bounds(dot).unwrap();
+        let tx = Transaction(vec![Operation::Reparent {
+            id: dot,
+            new_parent: page,
+            index: 0,
+        }]);
+        app.session.name_step("Move", "");
+        assert!(app.session.commit(tx));
+        let now = app.session.resolved.world_bounds(dot).unwrap();
+        assert_ne!(
+            was.origin(),
+            now.origin(),
+            "the fixture: the slot change moved it"
+        );
+        assert_eq!(app.session.last_transform, Some(learnt), "kept");
     }
 
     /// With nothing learnt the verb only says what it needs.

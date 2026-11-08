@@ -539,14 +539,16 @@ delta. Each application is one undo step, *Transform again*; the status says *Ro
 
 - **Learnt at the commit, not at the doors.** `Session::commit_inner` starts an `again::Watch` when
   the step's name is a transform's (`Move`, `Nudge`, `Rotate`, `Rotate 90° …`, `Scale`, `Skew`):
-  the first subject's world transform, and for a scale its world bounds, before the commit, compared
-  after. So the canvas drags, the arrow keys, the Transform card's fields and quarter turns, the
+  the first subject's world transform, and for a scale its size along its own axes (`again::own_size`:
+  the local box times its transform's scale), before the commit, compared after. A *Move* whose
+  transaction only restacks (a `Reorder` or `Reparent` and no `SetTransform` on the subject, such as
+  the layers panel's drop, which a layout turns into a shift) teaches nothing. So the canvas drags, the arrow keys, the Transform card's fields and quarter turns, the
   Scale row and the Scale tool's handle drags (named *Scale*, not *Resize*) teach it without each
   door saying so. A step named otherwise teaches nothing: `Resize` (a handle drag under any other
   tool, W/H, `Ctrl`+arrows) and *Transform again* itself, so repeating leaves the step what it was.
 - **What is kept** is `Session::last_transform`, per document, in memory, across selection changes:
-  a move's world delta; a rotation's angle; a scale as the ratio of the world bounds, only when both
-  sides grew alike (a stretch has no one factor and keeps the old step); a skew as the world-space
+  a move's world delta; a rotation's angle; a scale as the ratio of the layer's own size, only when
+  both its sides grew alike, at any turn (a stretch has no one factor and keeps the old step); a skew as the world-space
   lean, named by how far the layer's own lean moved. A commit that changed nothing measurable keeps
   the old step.
 - **Applied** through `edit::rotate_node` (rotation), `edit::transform_node` (the skew's lean about
@@ -594,7 +596,8 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
   (`icon::COPY_SIMPLE`) beside *Step* (`icon::ROTATION`), the step disabled showing 360/count under
   *Full turn* and editable under *Fixed angle*, which starts from the full turn's step; the switch
   *Turn the copies with the step*; the switch *Link the copies* with a caption under it at
-  `ui::SECTION_LABEL_GAP`; foot `settings::footer_row`, *Cancel* then primary *Repeat*. Its settings
+  `ui::SECTION_LABEL_GAP`, always two rows tall and cut with an ellipsis past them, so the card keeps
+  its height as the switch and the selection change the words; foot `settings::footer_row`, *Cancel* then primary *Repeat*. Its settings
   outlive a close, so it reopens on the ring last made.
 - **Keys.** `Enter` repeats (`dispatch` hands `Action::Enter` to the card while it is open); `Escape`
   cancels, the rung after Colour review. The card closes when another document comes to the front.

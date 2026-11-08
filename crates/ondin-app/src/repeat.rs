@@ -18,6 +18,9 @@ use ondin_core::{IdSource, NodeId, Transaction, build};
 const W: f32 = crate::app::POPOVER_W;
 /// The copies' opacity in the preview, out of 255: the 45% previewed copies wear.
 const FADE: u8 = 115;
+/// The rows the caption under *Link the copies* always takes: its longest form
+/// is two at the card's width.
+const CAPTION_ROWS: usize = 2;
 
 /// The card's settings, kept closed rather than dropped so it reopens on the ring
 /// last made.
@@ -441,14 +444,21 @@ impl OndinApp {
                         },
                         (None, false) => "Each copy is its own layer.".to_string(),
                     };
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(caption)
-                                .size(ui::CAPTION_PT)
-                                .color(theme::text::faint()),
-                        )
-                        .wrap(),
+                    // Two rows whatever it says, a long name cut with an ellipsis: the
+                    // popup keeps its height as the switch and the selection change
+                    // the words, since an egui popup never grows back.
+                    let font = egui::FontId::proportional(ui::CAPTION_PT);
+                    let ink = theme::text::faint();
+                    let w = ui.available_width();
+                    let mut job = egui::text::LayoutJob::simple(caption, font.clone(), ink, w);
+                    job.wrap.max_rows = CAPTION_ROWS;
+                    let galley = ui.fonts_mut(|f| f.layout_job(job));
+                    let row_h = ui.fonts_mut(|f| f.row_height(&font));
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(w, row_h * CAPTION_ROWS as f32),
+                        egui::Sense::hover(),
                     );
+                    ui.painter().galley(rect.min, galley, ink);
                 });
                 match crate::settings::footer_row(
                     ui,
@@ -740,6 +750,33 @@ pub(crate) mod tests {
         app.open_repeat();
         app.close_repeat();
         assert!(app.show_pivot, "a pivot already up stays up");
+    }
+
+    /// The card keeps its height when *Link the copies* swaps its one-line caption
+    /// for the two-line one, so the footer does not move under the pointer.
+    /// flip: the caption allocating only the rows its text takes → fails at "one height".
+    #[test]
+    fn the_card_keeps_its_height_as_the_caption_changes() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = tick_app(&ctx);
+        app.open_repeat();
+        let height = |app: &mut OndinApp| {
+            for _ in 0..4 {
+                let _ = pass(&ctx, app, Vec::new());
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("repeat-around")))
+                .expect("the card is up")
+                .height()
+        };
+        app.session.repeat_linked = false;
+        let plain = height(&mut app);
+        app.session.repeat_linked = true;
+        assert!(app.repeats_linked(), "the fixture: linking is allowed");
+        let linked = height(&mut app);
+        assert!(
+            (plain - linked).abs() < 0.5,
+            "one height: {plain} vs {linked}"
+        );
     }
 
     /// One whole frame of the app, at a window the inspector fits in.

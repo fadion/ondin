@@ -1473,7 +1473,7 @@ impl EditorSession {
         if tx.0.is_empty() {
             return Ok(());
         }
-        let watch = crate::again::Watch::of(&note, &self.resolved);
+        let watch = crate::again::Watch::of(&note, &tx, &self.doc, &self.resolved);
         if self.compare.is_some() {
             self.fail(crate::compare::READ_ONLY);
             return Err(CommitError::ReadOnly);
@@ -1615,7 +1615,7 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
-        if let Some(again) = watch.and_then(|w| w.finish(&self.resolved)) {
+        if let Some(again) = watch.and_then(|w| w.finish(&self.doc, &self.resolved)) {
             self.last_transform = Some(again);
         }
         if ondin_core::boolean::failures() != failures {

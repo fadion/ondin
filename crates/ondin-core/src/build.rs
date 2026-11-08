@@ -3659,7 +3659,8 @@ pub enum BoundField {
     Stroke(usize),
     /// A rectangle's or frame's four corners together.
     Radius,
-    /// One corner: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left.
+    /// One corner: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left. Any
+    /// corner of a polygon or star is its one radius.
     Corner(usize),
     /// A container's gaps and padding: bit `k` is `SpacingVars` place `k` —
     /// column gap, row gap, padding top, right, bottom, left.
@@ -3730,6 +3731,11 @@ pub fn bind_field_ops(
         None => detach_text_ops(doc, id, std::array::from_fn(|j| j == k)),
     };
     let one = |id: NodeId| -> Vec<Operation> {
+        // A polygon or star draws one radius, so any corner of it is that radius.
+        let field = match (field, doc.get(id).map(|n| n.kind().has_four_corners())) {
+            (BoundField::Corner(_), Some(false)) => BoundField::Radius,
+            _ => field,
+        };
         match (field, var) {
             (BoundField::Radius, Some(v)) => bind_corners_ops(doc, id, [Some(v); 4]),
             (BoundField::Radius, None) => detach_corners_ops(doc, id),

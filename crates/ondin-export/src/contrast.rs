@@ -105,7 +105,12 @@ pub struct Measurer {
 }
 
 impl ondin_core::contrast::Probe for Measurer {
-    fn measure(&mut self, doc: &Document, ids: &[NodeId], level: Level) -> Vec<Finding> {
+    fn measure(
+        &mut self,
+        doc: &Document,
+        ids: &[NodeId],
+        level: Level,
+    ) -> ondin_core::contrast::Measured {
         let mut pages: Vec<NodeId> = ids.iter().filter_map(|id| doc.page_of(*id)).collect();
         pages.sort();
         pages.dedup();
@@ -114,10 +119,14 @@ impl ondin_core::contrast::Probe for Measurer {
             non_text: true,
             default_ground: self.default_ground,
         };
-        pages
-            .into_iter()
-            .flat_map(|page| Prepared::new(doc, page).check(options, Some(ids)).findings)
-            .collect()
+        let mut out = ondin_core::contrast::Measured::default();
+        for page in pages {
+            let report = Prepared::new(doc, page).check(options, Some(ids));
+            out.findings.extend(report.findings);
+            out.skipped
+                .extend(report.skipped.into_iter().map(|s| (s.id, s.why)));
+        }
+        out
     }
 }
 

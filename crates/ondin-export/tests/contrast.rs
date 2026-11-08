@@ -780,7 +780,7 @@ fn the_fix_contrast_verb_fixes_rendered_text() {
     use ondin_core::contrast::Probe;
     let mut d = doc((0xbb, 0xbb, 0xbb), 16.0, false);
     let mut measurer = contrast::Measurer::default();
-    let before = measurer.measure(&d.doc, &[d.text], Level::Aa);
+    let before = measurer.measure(&d.doc, &[d.text], Level::Aa).findings;
     assert!(
         before.len() == 1 && !before[0].passes(),
         "it fails first: {before:?}"
@@ -797,5 +797,44 @@ fn the_fix_contrast_verb_fixes_rendered_text() {
     assert!(
         only(&check(&d.doc, d.page, Level::Aa)).passes(),
         "it passes after"
+    );
+}
+
+/// The `fix_contrast` verb given a gradient-filled text it cannot measure refuses
+/// and names why, rather than answering as though the text passed.
+///
+/// flip: `Measurer::measure` dropping the report's skipped layers → fails at "the
+/// gradient is named": the verb still refuses, as a layer not measured.
+#[test]
+fn the_fix_contrast_verb_names_a_layer_it_skipped() {
+    let mut d = doc((0xbb, 0xbb, 0xbb), 16.0, false);
+    let gradient = Brush::Gradient(ondin_core::GradientBrush {
+        gradient: ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (100.0, 0.0))
+            .with_stops([Color::from_rgb8(0xbb, 0xbb, 0xbb), Color::WHITE].as_slice()),
+        transform: Affine::IDENTITY,
+        opacity: 1.0,
+    });
+    d.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: d.text,
+            fills: keyed_by_position([Fill {
+                brush: gradient.into(),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+    let script = serde_json::json!([
+        { "verb": "fix_contrast", "args": { "nodes": [d.text.to_wire()] } },
+    ]);
+    let mut measurer = contrast::Measurer::default();
+    let lent = ondin_core::verbs::Lent {
+        contrast: Some(&mut measurer),
+        ..Default::default()
+    };
+    let err = ondin_core::verbs::run_script(&mut d.doc, &mut d.ids, lent, &script)
+        .expect_err("nothing it could fix");
+    assert!(
+        err.why.contains("gradient fill"),
+        "the gradient is named: {err}"
     );
 }

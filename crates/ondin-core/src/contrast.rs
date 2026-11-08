@@ -13,8 +13,18 @@ use crate::{Brush, CharAttr, Document, Fill, ModeId, NodeId, Operation, Transact
 /// What measures layers' contrast against what is drawn behind them, which needs
 /// a renderer core does not have.
 pub trait Probe {
-    /// A finding for each of `ids` it could measure, held to `level`.
-    fn measure(&mut self, doc: &Document, ids: &[NodeId], level: Level) -> Vec<Finding>;
+    /// A finding for each of `ids` it could measure, held to `level`, and why it
+    /// could not measure the others it considered.
+    fn measure(&mut self, doc: &Document, ids: &[NodeId], level: Level) -> Measured;
+}
+
+/// What a [`Probe`] made of the layers it was asked about. A layer in neither
+/// list is not one it measures: not a text layer or a small shape, or not shown.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Measured {
+    pub findings: Vec<Finding>,
+    /// Each layer it considered and could not measure, with why.
+    pub skipped: Vec<(NodeId, &'static str)>,
 }
 
 /// Which standard a check holds text to.

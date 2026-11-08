@@ -43,6 +43,31 @@ fn run(doc: &mut Document, ids: &mut IdSource, name: &str, args: Value) -> Vec<N
     created
 }
 
+/// What `name` with `args` answers on `doc`, committing nothing.
+fn answer(doc: &Document, ids: &mut IdSource, name: &str, args: Value) -> Result<Done, VerbError> {
+    let res = Resolved::rebuild(doc);
+    verbs::call(
+        &mut Ctx {
+            doc,
+            res: &res,
+            ids,
+            images: None,
+            contrast: None,
+        },
+        name,
+        &args,
+    )
+}
+
+/// The parameter `name` with `args` is refused under, panicking when it is not
+/// refused as an invalid argument.
+fn refused_param(doc: &Document, ids: &mut IdSource, name: &str, args: Value) -> &'static str {
+    match answer(doc, ids, name, args) {
+        Err(VerbError::Invalid { param, .. }) => param,
+        other => panic!("{name}: {other:?}"),
+    }
+}
+
 /// The JSON a `kind` argument takes for a frame of `w` × `h`.
 fn frame(w: f64, h: f64) -> Value {
     serde_json::to_value(NodeKind::Artboard {
@@ -803,6 +828,37 @@ fn a_linked_repeat_makes_instances() {
         ),
         "{again:?}"
     );
+
+    let loose: Vec<String> = (0..2)
+        .map(|_| {
+            run(
+                &mut doc,
+                &mut ids,
+                "create_node",
+                json!({ "parent": page.to_wire(), "kind": rect(5.0, 5.0) }),
+            )[0]
+            .to_wire()
+        })
+        .collect();
+    let inside = doc.get(main).unwrap().children()[0];
+    for (nodes, says) in [
+        (json!(loose), "one layer at a time"),
+        (json!([inside.to_wire()]), "inside"),
+    ] {
+        match answer(
+            &doc,
+            &mut ids,
+            "repeat",
+            json!({ "nodes": nodes, "count": 2, "linked": true }),
+        ) {
+            Err(VerbError::Invalid {
+                param: "linked",
+                why,
+                ..
+            }) => assert!(why.contains(says), "{why}"),
+            other => panic!("{says}: {other:?}"),
+        }
+    }
 }
 
 /// `set_size` sizes any kind: a rectangle's size, a group by its box (its child
@@ -1533,6 +1589,63 @@ fn bind_variable_binds_and_detaches_fields() {
     assert!(err.why.contains("no such place"), "{err}");
 }
 
+/// `bind_variable` binds a polygon's one radius whichever corner it is given, so
+/// the shape draws the variable; a paint index no layer has and a layer that does
+/// not exist are refused, not answered as done.
+///
+/// flip: `bind_field_ops` binding a polygon's `Corner(k)` slot alone → fails at
+/// "the polygon draws the variable".
+#[test]
+fn bind_variable_binds_a_polygons_radius_and_refuses_what_is_not_there() {
+    let (mut doc, mut ids, _) = blank();
+    let twelve = serde_json::to_value(ondin_core::Cell::Number(12.0)).unwrap();
+    let pentagon = serde_json::to_value(NodeKind::Polygon {
+        size: Size::new(40.0, 40.0),
+        sides: 5,
+        corner_radius: 4.0,
+        corner_smoothing: 0.0,
+    })
+    .unwrap();
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "number", "name": "r", "value": twelve }, "as": "n" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": pentagon }, "as": "p" },
+        { "verb": "bind_variable", "args": { "nodes": ["@p"], "field": { "corner": 2 }, "variable": "@n" } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let p = NodeId::from_wire(&made[1][0]).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let drawn = match res.used_kind(&doc, p) {
+        Some(NodeKind::Polygon { corner_radius, .. }) => *corner_radius,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(drawn, 12.0, "the polygon draws the variable");
+
+    let refused = |doc: &mut Document, ids: &mut IdSource, args: Value| {
+        verbs::run_script(
+            doc,
+            ids,
+            Lent::default(),
+            &json!([{ "verb": "bind_variable", "args": args }]),
+        )
+        .expect_err("refused")
+        .why
+    };
+    let past = refused(
+        &mut doc,
+        &mut ids,
+        json!({ "nodes": [p.to_wire()], "field": { "fill": 7 }, "variable": made[0][0] }),
+    );
+    assert!(past.contains("fill there"), "{past}");
+    let nothing = ids.mint().to_wire();
+    let gone = refused(
+        &mut doc,
+        &mut ids,
+        json!({ "nodes": [nothing], "field": "visible" }),
+    );
+    assert!(!gone.is_empty());
+}
+
 /// The style verbs, as a script: a fill style added from a value and applied, its
 /// value changed and its users following, renamed, detached from a layer that
 /// keeps its look, one made from a layer, and removed. A taken name is refused.
@@ -1789,6 +1902,163 @@ fn properties_are_defined_and_set_on_instances() {
     );
 }
 
+/// A swap property: `define_property` makes one on a nested instance and binds a
+/// second to it by `property`, refusing a swap on a plain layer and a name that
+/// is empty, taken or a set's variant property; `set_instance_property` swaps the
+/// slot, refusing an id that is no main and a main of another kind.
+///
+/// flip: `set_instance_property` not checking `swap::can_swap_to` → fails at "a
+/// group main is refused".
+#[test]
+fn swap_properties_are_defined_bound_and_set() {
+    let (mut doc, mut ids, page) = blank();
+    let (icon_a, _) = main_component(&mut doc, &mut ids, page, "Icon A", 20.0);
+    let (icon_b, _) = main_component(&mut doc, &mut ids, page, "Icon B", 20.0);
+    let button = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(120.0, 40.0), "name": "Button" }),
+    )[0];
+    let slots: Vec<NodeId> = (0..2)
+        .map(|_| {
+            run(
+                &mut doc,
+                &mut ids,
+                "create_instance",
+                json!({ "main": icon_a.to_wire(), "parent": button.to_wire() }),
+            )[0]
+        })
+        .collect();
+    let label = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": button.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "make_component",
+        json!({ "nodes": [button.to_wire()] }),
+    );
+
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "define_property",
+            json!({ "node": label.to_wire(), "kind": "swap" })
+        ),
+        "kind",
+        "a swap needs a nested instance"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": slots[0].to_wire(), "kind": "swap", "name": "Icon" }),
+    );
+    for name in ["", "Icon"] {
+        assert_eq!(
+            refused_param(
+                &doc,
+                &mut ids,
+                "define_property",
+                json!({ "node": label.to_wire(), "kind": "boolean", "name": name })
+            ),
+            "name",
+            "{name:?} is refused"
+        );
+    }
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": slots[1].to_wire(), "kind": "swap", "property": "Icon" }),
+    );
+    let props = doc.get(button).unwrap().props().to_vec();
+    assert_eq!(props.len(), 1, "bound to the one property");
+    assert_eq!(props[0].bound.len(), 2);
+
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": button.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_instance_property",
+        json!({ "node": inst.to_wire(), "property": "Icon", "value": icon_b.to_wire() }),
+    );
+    let copies: Vec<NodeId> = doc.get(inst).unwrap().children()[..2].to_vec();
+    assert!(
+        copies
+            .iter()
+            .all(|c| ondin_core::component::main_of(&doc, *c) == Some(icon_b)),
+        "both slots show Icon B"
+    );
+
+    let loose = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(5.0, 5.0) }),
+    )[0];
+    let grouped = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(5.0, 5.0) }),
+    )[0];
+    let group = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [grouped.to_wire()] }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "make_component",
+        json!({ "nodes": [group.to_wire()] }),
+    );
+    assert!(doc.get(group).unwrap().component(), "fixture: a group main");
+    let set = |value: Value| json!({ "node": inst.to_wire(), "property": "Icon", "value": value });
+    for (value, why) in [
+        (json!(loose.to_wire()), "a layer that is no main"),
+        (json!("not an id"), "a word"),
+        (json!(group.to_wire()), "a group main is refused"),
+    ] {
+        assert_eq!(
+            refused_param(&doc, &mut ids, "set_instance_property", set(value)),
+            "value",
+            "{why}"
+        );
+    }
+
+    let (small, small_rect) = main_component(&mut doc, &mut ids, page, "Size=Small", 60.0);
+    let (large, _) = main_component(&mut doc, &mut ids, page, "Size=Large", 120.0);
+    run(
+        &mut doc,
+        &mut ids,
+        "combine_as_variants",
+        json!({ "nodes": [small.to_wire(), large.to_wire()] }),
+    );
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "define_property",
+            json!({ "node": small_rect.to_wire(), "kind": "boolean", "name": "Size" })
+        ),
+        "name",
+        "a set's variant property reserves its name"
+    );
+}
+
 /// `reset_overrides` puts an instance's overridden fill back as its main has it,
 /// and refuses layers in no instance.
 ///
@@ -1850,6 +2120,65 @@ fn reset_overrides_puts_an_instance_back() {
     );
 }
 
+/// `reset_overrides`' scope: `fields` puts an overridden fill back and leaves a
+/// removed child gone, and `children` then restores it.
+///
+/// flip: `reset_overrides` reading every scope as `all` → fails at "fields
+/// restore no child".
+#[test]
+fn reset_overrides_resets_only_its_scope() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, _) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": card.to_wire(), "kind": rect(5.0, 5.0) }),
+    );
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    let copies = doc.get(inst).unwrap().children().to_vec();
+    assert_eq!(copies.len(), 2, "fixture: two copies");
+    let red = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": copies[0].to_wire(), "fills": red }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "delete_node",
+        json!({ "nodes": [copies[1].to_wire()] }),
+    );
+    let reset = |doc: &mut Document, ids: &mut IdSource, scope: &str| {
+        run(
+            doc,
+            ids,
+            "reset_overrides",
+            json!({ "nodes": [inst.to_wire()], "scope": scope }),
+        );
+    };
+    reset(&mut doc, &mut ids, "fields");
+    assert!(doc.get(copies[0]).unwrap().paint().fills.is_empty());
+    assert_eq!(
+        doc.get(inst).unwrap().children().len(),
+        1,
+        "fields restore no child"
+    );
+    reset(&mut doc, &mut ids, "children");
+    assert_eq!(doc.get(inst).unwrap().children().len(), 2);
+}
+
 /// `combine_as_variants` makes a set of two mains, and `switch_variant` shows the
 /// other variant in an instance by its property's value.
 #[test]
@@ -1883,8 +2212,9 @@ fn variants_are_combined_and_switched() {
     assert_eq!(ondin_core::component::main_of(&doc, inst), Some(want));
 }
 
-/// A probe that answers one finding for every layer asked: its fill's colour on
-/// white, held to `needs`.
+/// A probe that answers one finding for every layer asked with a solid first
+/// fill: its colour on white, held to `needs`. Any other literal paint is skipped
+/// as a gradient; a layer with no fill or a bound one is not considered.
 struct OnWhite {
     needs: f64,
 }
@@ -1895,13 +2225,18 @@ impl ondin_core::contrast::Probe for OnWhite {
         doc: &Document,
         ids: &[NodeId],
         level: ondin_core::contrast::Level,
-    ) -> Vec<ondin_core::contrast::Finding> {
-        use ondin_core::contrast::{Finding, Sample};
-        ids.iter()
+    ) -> ondin_core::contrast::Measured {
+        use ondin_core::contrast::{Finding, Measured, Sample};
+        let mut skipped = Vec::new();
+        let findings = ids
+            .iter()
             .filter_map(|id| {
                 let ink = match doc.get(*id)?.paint().fills.first()?.brush.literal()? {
                     Brush::Solid(c) => *c,
-                    _ => return None,
+                    _ => {
+                        skipped.push((*id, "gradient fill"));
+                        return None;
+                    }
                 };
                 let sample = Sample {
                     mode: None,
@@ -1927,7 +2262,8 @@ impl ondin_core::contrast::Probe for OnWhite {
                 f.settle(level);
                 Some(f)
             })
-            .collect()
+            .collect();
+        Measured { findings, skipped }
     }
 }
 
@@ -1993,7 +2329,7 @@ fn fix_contrast_gives_a_failing_layer_the_nearest_passing_colour() {
         ondin_core::contrast::Level::Aa,
     );
     assert!(
-        fixed[0].passes(),
+        fixed.findings[0].passes(),
         "the pale layer passes now: {:?}",
         colour(pale)
     );
@@ -2002,6 +2338,89 @@ fn fix_contrast_gives_a_failing_layer_the_nearest_passing_colour() {
     let err =
         verbs::run_script(&mut doc, &mut ids, Lent::default(), &script).expect_err("no probe");
     assert!(err.why.contains("cannot measure"), "{err}");
+}
+
+/// `fix_contrast` binds a failing layer to a colour variable it is given, and
+/// refuses a colour and a variable both, a variable that is not a colour, and
+/// layers it could not measure, naming why, rather than answering as though they
+/// passed.
+///
+/// flip: `fix_contrast` answering an empty edit when nothing was measured → fails
+/// at `expect_err("a gradient")`.
+#[test]
+fn fix_contrast_binds_a_variable_and_refuses_what_it_cannot_fix() {
+    let (mut doc, mut ids, page) = blank();
+    let black = serde_json::to_value(ondin_core::Cell::Color(Color::BLACK)).unwrap();
+    let two = serde_json::to_value(ondin_core::Cell::Number(2.0)).unwrap();
+    let pale = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(0xcc, 0xcc, 0xcc)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    let gradient = serde_json::to_value(vec![Fill {
+        brush: Brush::Gradient(
+            ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)).into(),
+        )
+        .into(),
+        visible: true,
+    }])
+    .unwrap();
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "color", "name": "ink", "value": black }, "as": "ink" },
+        { "verb": "add_variable", "args": { "kind": "number", "name": "two", "value": two }, "as": "two" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0), "name": "Pale" }, "as": "p" },
+        { "verb": "set_fills", "args": { "node": "@p", "fills": pale } },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0), "name": "Sky" }, "as": "g" },
+        { "verb": "set_fills", "args": { "node": "@g", "fills": gradient } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (ink, two, p, g) = (
+        made[0][0].clone(),
+        made[1][0].clone(),
+        made[2][0].clone(),
+        made[4][0].clone(),
+    );
+    let mut probe = OnWhite { needs: 3.0 };
+    let mut fix = |doc: &mut Document, ids: &mut IdSource, args: Value| {
+        let lent = Lent {
+            contrast: Some(&mut probe),
+            ..Lent::default()
+        };
+        verbs::run_script(
+            doc,
+            ids,
+            lent,
+            &json!([{ "verb": "fix_contrast", "args": args }]),
+        )
+    };
+    let colour = serde_json::to_value(Color::BLACK).unwrap();
+    let both = fix(
+        &mut doc,
+        &mut ids,
+        json!({ "nodes": [p], "colour": colour, "variable": ink }),
+    )
+    .expect_err("a colour and a variable");
+    assert!(both.why.contains("not both"), "{both}");
+    let number = fix(&mut doc, &mut ids, json!({ "nodes": [p], "variable": two }))
+        .expect_err("a number variable");
+    assert!(number.why.contains("not a colour"), "{number}");
+    let skipped = fix(&mut doc, &mut ids, json!({ "nodes": [g] })).expect_err("a gradient");
+    assert!(
+        skipped.why.contains("Sky (gradient fill)"),
+        "a gradient is named: {skipped}"
+    );
+
+    fix(&mut doc, &mut ids, json!({ "nodes": [p], "variable": ink }))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let var: ondin_core::VarId = serde_json::from_value(json!(ink)).unwrap();
+    let node = doc.get(NodeId::from_wire(&p).unwrap()).unwrap();
+    assert_eq!(
+        node.paint().fills[0].brush.var(),
+        Some(var),
+        "the fill is bound to the variable"
+    );
+    assert!(doc.get(page).is_some());
 }
 
 /// A sink that takes any picture; its id is the byte length.

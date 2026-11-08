@@ -1442,6 +1442,16 @@ pub static VERBS: &[Verb] = &[
                     if !ctx.doc.get(main).is_some_and(|m| m.component) {
                         return Err(a.invalid("value", "not a main component"));
                     }
+                    let slots = crate::variant::counterparts(ctx.doc, root, p);
+                    if slots
+                        .iter()
+                        .any(|c| !crate::swap::can_swap_to(ctx.doc, *c, main))
+                    {
+                        return Err(a.invalid(
+                            "value",
+                            "the slot cannot show that main: it must be a main of the same kind, not one holding the slot",
+                        ));
+                    }
                     PropValue::Swap(main)
                 }
                 _ => return Err(a.invalid("value", "not a value of the property's kind")),
@@ -1673,11 +1683,29 @@ pub static VERBS: &[Verb] = &[
             if var.is_some_and(|v| ctx.doc.variables().get(v).is_none()) {
                 return Err(a.invalid("variable", "no variable has that id"));
             }
+            let nodes = a.nodes("nodes")?;
+            for id in &nodes {
+                node(ctx, *id)?;
+            }
+            let has_item = |i: usize, stroke: bool| {
+                build::paint_targets(ctx.doc, &nodes).iter().any(|id| {
+                    ctx.doc.get(*id).is_some_and(|n| match stroke {
+                        true => n.paint().strokes.len() > i,
+                        false => n.paint().fills.len() > i,
+                    })
+                })
+            };
+            match field {
+                build::BoundField::Fill(i) if !has_item(i, false) => {
+                    return Err(a.invalid("field", "none of the layers has a fill there"));
+                }
+                build::BoundField::Stroke(i) if !has_item(i, true) => {
+                    return Err(a.invalid("field", "none of the layers has a stroke there"));
+                }
+                _ => {}
+            }
             Ok(Done::edit(build::bind_field_ops(
-                ctx.doc,
-                &a.nodes("nodes")?,
-                field,
-                var,
+                ctx.doc, &nodes, field, var,
             )))
         },
     },
@@ -2436,13 +2464,35 @@ pub static VERBS: &[Verb] = &[
                 (None, None) => None,
             };
             let nodes = a.nodes("nodes")?;
+            for id in &nodes {
+                node(ctx, *id)?;
+            }
             let probe = ctx
                 .contrast
                 .as_mut()
                 .ok_or(VerbError::Nothing("this caller cannot measure contrast"))?;
-            let findings = probe.measure(ctx.doc, &nodes, level);
+            let measured = probe.measure(ctx.doc, &nodes, level);
+            // What was given and is left unfixed for a reason other than passing.
+            let named_as = |id: NodeId, why: &str| {
+                let name = ctx.doc.get(id).map_or("", |n| n.name());
+                format!("{name} ({why})")
+            };
+            let mut unfixed: Vec<String> = measured
+                .skipped
+                .iter()
+                .map(|(id, why)| named_as(*id, why))
+                .collect();
+            unfixed.extend(
+                nodes
+                    .iter()
+                    .filter(|id| {
+                        !measured.findings.iter().any(|f| f.id == **id)
+                            && !measured.skipped.iter().any(|(s, _)| s == *id)
+                    })
+                    .map(|id| named_as(*id, "not a shown text layer or small shape")),
+            );
             let mut ops = Vec::new();
-            for f in findings.iter().filter(|f| !f.passes()) {
+            for f in measured.findings.iter().filter(|f| !f.passes()) {
                 let fix = match named {
                     Some(fix) => fix,
                     None => match f
@@ -2450,8 +2500,10 @@ pub static VERBS: &[Verb] = &[
                         .and_then(|w| crate::contrast::nearest(f, level, w.ink))
                     {
                         Some(c) => Fix::Colour(c),
-                        // No lightness at that hue passes: left as it is.
-                        None => continue,
+                        None => {
+                            unfixed.push(named_as(f.id, "no lightness at its hue passes"));
+                            continue;
+                        }
                     },
                 };
                 let new_fill = ctx.ids.mint_item();
@@ -2460,6 +2512,10 @@ pub static VERBS: &[Verb] = &[
                 {
                     ops.extend(tx.0);
                 }
+            }
+            // Nothing changed is "they pass" only when every layer was measured.
+            if ops.is_empty() && !unfixed.is_empty() {
+                return Err(a.invalid("nodes", format!("could not fix {}", unfixed.join(", "))));
             }
             Ok(Done::ops(ops))
         },

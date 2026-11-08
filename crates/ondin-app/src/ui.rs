@@ -225,7 +225,8 @@ pub fn empty_note(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// little: an optional glyph, a [`CONTROL_PT`] heading in `text::strong()` and a
 /// [`SMALL_PT`] `text::dim()` line saying how to fill it, centred. `below` adds
 /// what follows inside the same centred column, such as a button. The caller sets
-/// the air above, which depends on the surface.
+/// the air above, which depends on the surface; the gaps inside are its own, so
+/// a panel laid out with no item spacing does not stack the lines onto the glyph.
 pub fn empty_state<R>(
     ui: &mut egui::Ui,
     glyph: Option<&str>,
@@ -234,6 +235,7 @@ pub fn empty_state<R>(
     below: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     ui.vertical_centered(|ui| {
+        ui.spacing_mut().item_spacing.y = EMPTY_GAP;
         if let Some(g) = glyph {
             ui.label(theme::icon_text(g, EMPTY_GLYPH_PT, theme::text::dim()));
         }
@@ -258,6 +260,10 @@ pub fn empty_state<R>(
 
 /// An [`empty_state`]'s glyph: larger than a row's, since it stands alone.
 pub const EMPTY_GLYPH_PT: f32 = 18.0;
+
+/// The gap between an [`empty_state`]'s lines: the styles and variables
+/// browser's item spacing, which the heading pulls 4pt closer to its line.
+const EMPTY_GAP: f32 = 10.0;
 
 /// An [`eyebrow`] painted rather than laid out, for a painter-drawn surface
 /// (a canvas popup's section head, a list's group head): the same capitals,

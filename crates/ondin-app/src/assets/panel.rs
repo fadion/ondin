@@ -33,6 +33,9 @@ const ICON_PT: f32 = 22.0;
 const PAGE: usize = 120;
 /// The photo columns' gap.
 const PHOTO_GAP: f32 = 6.0;
+/// A hovered photo's photographer: in from the tile's left and up from its foot
+/// to the baseline.
+const AUTHOR_INSET: f32 = 8.0;
 /// The fill strip's height.
 const STRIP_H: f32 = 24.0;
 /// The foot caption's row, with the hairline above it.
@@ -49,8 +52,8 @@ const CARD_GAP: f32 = 8.0;
 const TYPE_PAUSE: f64 = 0.4;
 /// The search field's id, read to know whether it holds the keyboard.
 const SEARCH_ID: &str = "assets-search";
-/// The air above an empty state, which centres it in the grid's room.
-const EMPTY_AIR: f32 = 70.0;
+/// The air above an empty state: the styles and variables browser's.
+const EMPTY_AIR: f32 = 40.0;
 /// What an icon's `currentColor` becomes: the ink a new text layer draws in,
 /// which has no fill of its own and reads as black.
 const ICON_INK: &str = "#000000";
@@ -1031,7 +1034,7 @@ fn empty(
 ) {
     ui.add_space(EMPTY_AIR);
     let pressed = ui::empty_state(ui, Some(glyph), words.0, words.1, |ui| {
-        ui.add_space(8.0);
+        ui.add_space(2.0);
         crate::settings::text_button(ui, button, ui::FieldButton::Off).clicked()
     });
     if pressed {
@@ -1112,15 +1115,7 @@ fn icons_body(
             Act::RetrySets,
         );
     } else if view.loading.is_empty() {
-        let names: Vec<&str> = view.ready.iter().map(|(s, _)| s.name).collect();
-        note(
-            ui,
-            &format!(
-                "No icons match “{}” in {}",
-                panel.query.trim(),
-                or_list(&names)
-            ),
-        );
+        note(ui, &format!("No icons match “{}”", panel.query.trim()));
     }
     let left = match view.set {
         Some(s) => format!("{} · {}", s.name, s.licence),
@@ -1238,7 +1233,7 @@ fn foot(ui: &mut egui::Ui, bottom: f32, left: &str, right: &str) {
         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
         egui::Stroke::new(1.0, color::divider()),
     );
-    let mid = rect.center().y + 3.0;
+    let mid = rect.center().y + 4.0;
     p.text(
         egui::pos2(rect.left(), mid),
         egui::Align2::LEFT_CENTER,
@@ -1423,11 +1418,24 @@ fn photo_grid(ui: &mut egui::Ui, page: &Page, height: f32, fills: bool, out: &mu
                     mesh.add_triangle(0, 1, 2);
                     mesh.add_triangle(0, 2, 3);
                     p.add(mesh);
-                    p.with_clip_rect(cell).text(
-                        band.left_center() + egui::vec2(8.0, 3.0),
-                        egui::Align2::LEFT_CENTER,
-                        &photo.author,
+                    // Its baseline as far above the tile's foot as the name is in
+                    // from the left, so the two margins read equal.
+                    let name = p.layout_no_wrap(
+                        photo.author.clone(),
                         egui::FontId::proportional(ui::CAPTION_PT),
+                        egui::Color32::WHITE,
+                    );
+                    let baseline = name
+                        .rows
+                        .first()
+                        .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
+                        .unwrap_or(name.size().y);
+                    p.with_clip_rect(cell).galley(
+                        egui::pos2(
+                            cell.left() + AUTHOR_INSET,
+                            cell.bottom() - AUTHOR_INSET - baseline,
+                        ),
+                        name,
                         egui::Color32::WHITE,
                     );
                 }

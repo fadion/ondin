@@ -1852,11 +1852,11 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
         "Any document can become one: open it and choose Make this a kit from the \
          document menu.",
         |ui| {
-            ui.add_space(8.0);
+            ui.add_space(2.0);
             let open =
                 crate::settings::text_button(ui, "Open library", crate::ui::FieldButton::Off)
                     .clicked();
-            ui.add_space(10.0);
+            ui.add_space(4.0);
             open
         },
     )

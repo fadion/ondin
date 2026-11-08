@@ -599,9 +599,7 @@ pub mod icon {
     pub const NUMBER_SQUARE_ONE: &str = "\u{e36c}"; // actual size (1:1 / 100%)
     pub const PLUS: &str = "\u{e3d4}";
     pub const DOTS_THREE: &str = "\u{e1fe}";
-    /// A row's own overflow menu: a Library file's, a kit's in *Kits used…*; and
-    /// the grip on a before-and-after split (`ui::split_handle`), too narrow for
-    /// [`DOTS_SIX_VERTICAL`].
+    /// A row's own overflow menu: a Library file's, a kit's in *Kits used…*.
     ///
     /// Vertical where a head's overflow ([`DOTS_THREE`]) is horizontal: a row's
     /// own menu reads as belonging to the row.
@@ -778,7 +776,8 @@ pub mod icon {
     /// *Unpin* and the Position steps. A box held to its frame's edges by two
     /// pins.
     pub const PIN: &str = "\u{f024}";
-    /// A drag grip on a reorderable row — Fill's and Stroke's paint rows.
+    /// A drag grip: on a reorderable row (Fill's and Stroke's paint rows) and on a
+    /// before-and-after split's divider (`ui::split_handle`).
     pub const DOTS_SIX_VERTICAL: &str = "\u{eae2}";
     /// The rest of a stroke's properties, behind one button: dash, cap and join.
     pub const SLIDERS_HORIZONTAL: &str = "\u{e434}";
@@ -815,7 +814,7 @@ pub mod icon {
     /// Colour review's merge: the target row the others fold into, and the *Merge
     /// colours* step.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
-    /// Unused: a split's grip wears [`DOTS_THREE_VERTICAL`], and a gap is
+    /// Unused: a split's grip wears [`DOTS_SIX_VERTICAL`], and a gap is
     /// [`ARROWS_OUT_LINE_HORIZONTAL`]. Kept because dropping it means rebuilding
     /// the font.
     #[allow(dead_code)]

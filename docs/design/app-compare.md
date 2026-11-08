@@ -118,7 +118,7 @@ matched by id, so a renamed or moved layer is one change.
   With two versions Now draws the newer through a third (`now_canvas`) over the open document's
   drawing, and the frame labels, which are the open document's, are not drawn.
   Swipe clips the version left of a draggable handle (`ui::split_handle`: a 2pt accent line, a
-  12×36 accent grip with three vertical dots), with *THEN* and *NOW* pills in the bottom corners.
+  14×36 accent grip with the drag grip's six dots), with *THEN* and *NOW* pills in the bottom corners.
   A press within `ui::SPLIT_REACH` of the line takes it; anywhere else pans. Over the line and
   through its drag the cursor is the drawn horizontal resize cursor (`canvas::resize_cursor`), not a
   stock icon, which would sit under the drawn arrow `canvas_cursor` has already set. A right-click during

@@ -106,13 +106,14 @@ pub fn duplicate(
         .iter()
         .filter_map(|c| doc.capture_subtree(*c))
         .collect();
+    // Every template the same slot: `insert_subtrees` advances each past the ones
+    // before it, keeping their order.
     let placements: Vec<crate::build::Placement> = templates
         .iter()
-        .enumerate()
-        .map(|(i, t)| crate::build::Placement {
+        .map(|t| crate::build::Placement {
             nodes: t.clone(),
             parent: id,
-            index: Some(i),
+            index: Some(0),
         })
         .collect();
     let (copies, _) = crate::build::insert_subtrees(doc, ids, &placements, Default::default());

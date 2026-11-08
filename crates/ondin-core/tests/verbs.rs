@@ -1930,3 +1930,33 @@ fn a_script_refers_to_what_its_earlier_steps_made() {
         "the step before the refusal stands"
     );
 }
+
+/// *Duplicate page* copies a page holding several top-level layers, in order.
+/// flip: `page::duplicate` giving each template its own index → fails at the
+/// commit ("index out of range").
+#[test]
+fn a_page_of_several_layers_duplicates_in_order() {
+    let (mut doc, mut ids, page) = blank();
+    for name in ["a", "b", "c"] {
+        run(
+            &mut doc,
+            &mut ids,
+            "create_node",
+            json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0), "name": name }),
+        );
+    }
+    let copy = run(
+        &mut doc,
+        &mut ids,
+        "duplicate_page",
+        json!({ "page": page.to_wire() }),
+    )[0];
+    let names: Vec<&str> = doc
+        .get(copy)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|c| doc.get(*c).unwrap().name())
+        .collect();
+    assert_eq!(names, ["a", "b", "c"]);
+}

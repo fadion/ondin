@@ -237,7 +237,12 @@ it created. A verb never commits; its caller does, as every edit is committed.
   commit door's binding passes before `owed` (`EditorSession::commit_inner`) are not run. A string
   argument `"@label"` stands for the first thing an earlier step labelled `label` made (a node's
   wire form, or `add_image`'s id), and `"@page"` for the first page; labels belong to one script.
-  A refusal names its step, counted from 1, and keeps the steps before it.
+  A string starting `@@` is written with one `@` (`"@@home"` is the text *@home*). A step with a
+  key other than `verb`, `args` and `as` is refused, since a misspelled `args` would run the verb
+  with none, at its widest. A refusal names its step, counted from 1, and keeps the steps before it.
+- **A layer verb refuses a page** (`Args::layer`, `Args::layers`): placement, pivot, eye, lock,
+  opacity, blend and exports have no control on a page. `set_name` and `add_page` trim a page's
+  name, as the pages list does, and refuse an empty one.
   `ondin run <script.json> [--in <file.ondin>] -o <out.ondin>` is its door (`export.md`).
 - **Phase 3's verbs call the builders the app's component doors call**: `build::make_component`
   (*Create component*, in place or wrapped), `build::place_instance` and `build::centred_on` (the

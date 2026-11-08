@@ -2008,3 +2008,65 @@ fn a_created_text_keeps_its_runs_on_character_boundaries() {
         }
     }
 }
+
+/// The layer verbs refuse a page, which has no control for what they write;
+/// `set_name` still renames one, trimmed, and an empty page name is refused.
+/// flip: `Args::layer` or `Args::layers` not asking `is_page` → fails at that
+/// verb's refusal.
+#[test]
+fn layer_verbs_refuse_a_page_and_a_page_name_is_trimmed() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let steps = [
+        json!({ "verb": "set_transform", "args": { "node": p, "transform": [2, 0, 0, 2, 5, 5] } }),
+        json!({ "verb": "set_pivot", "args": { "node": p } }),
+        json!({ "verb": "set_opacity", "args": { "nodes": [p], "opacity": 0.5 } }),
+        json!({ "verb": "set_visible", "args": { "nodes": [p], "visible": false } }),
+        json!({ "verb": "set_locked", "args": { "nodes": [p], "locked": true } }),
+        json!({ "verb": "set_blend", "args": { "nodes": [p], "blend": "Multiply" } }),
+        json!({ "verb": "set_exports", "args": { "node": p, "exports": [] } }),
+        json!({ "verb": "set_name", "args": { "node": p, "name": "  " } }),
+        json!({ "verb": "add_page", "args": { "name": "" } }),
+    ];
+    for step in steps {
+        let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &json!([step]))
+            .expect_err(&format!("{step} is refused"));
+        assert!(
+            err.why.contains("a page is not a layer") || err.why.contains("not empty"),
+            "{err}"
+        );
+    }
+    run(
+        &mut doc,
+        &mut ids,
+        "set_name",
+        json!({ "node": p, "name": "  Pricing " }),
+    );
+    assert_eq!(doc.get(page).unwrap().name(), "Pricing");
+}
+
+/// A step with a key other than `verb`, `args` and `as` is refused before it
+/// runs, and `@@` writes a literal `@`.
+/// flip: `run_script` not checking a step's keys → fails at "a misspelled
+/// `args` is refused"; `substitute` without its `@@` arm → fails at the text.
+#[test]
+fn a_script_refuses_a_stray_key_and_escapes_an_at_sign() {
+    let (mut doc, mut ids, page) = blank();
+    let stray = json!([{ "verb": "add_page", "arg": { "name": "Other" } }]);
+    let err = verbs::run_script(&mut doc, &mut ids, Lent::default(), &stray)
+        .expect_err("a misspelled `args` is refused");
+    assert!(err.why.contains("`arg`"), "{err}");
+    assert_eq!(doc.pages().len(), 1, "nothing ran");
+
+    let script = json!([
+        { "verb": "create_text", "args": { "parent": "@page", "text": "@@home is here" }, "as": "t" },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let t = NodeId::from_wire(&made[0][0]).unwrap();
+    let NodeKind::Text { content, .. } = doc.get(t).unwrap().kind() else {
+        unreachable!()
+    };
+    assert_eq!(content, "@home is here");
+    assert_eq!(doc.get(t).unwrap().parent(), Some(page));
+}

@@ -246,6 +246,25 @@ impl<'a> Args<'a> {
         wire(v).map_err(|why| self.invalid(name, why))
     }
 
+    /// The `Node` parameter `name`, refused when it names a page: a page has no
+    /// placement, opacity, eye, lock, blend or export a user can see or clear.
+    pub fn layer(&self, doc: &Document, name: &'static str) -> Result<NodeId, VerbError> {
+        let id = self.node(name)?;
+        match doc.is_page(id) {
+            true => Err(self.invalid(name, "a page is not a layer")),
+            false => Ok(id),
+        }
+    }
+
+    /// The `Nodes` parameter `name`, refused when any names a page, as [`Self::layer`].
+    pub fn layers(&self, doc: &Document, name: &'static str) -> Result<Vec<NodeId>, VerbError> {
+        let ids = self.nodes(name)?;
+        match ids.iter().any(|id| doc.is_page(*id)) {
+            true => Err(self.invalid(name, "a page is not a layer")),
+            false => Ok(ids),
+        }
+    }
+
     /// The `Nodes` parameter `name`.
     pub fn nodes(&self, name: &'static str) -> Result<Vec<NodeId>, VerbError> {
         let Some(Value::Array(list)) = self.get(name) else {
@@ -659,10 +678,22 @@ fn char_range(a: &Args<'_>, content: &str) -> Result<(std::ops::Range<usize>, bo
     Ok((byte(start)..byte(end), start == 0 && end == chars))
 }
 
-/// One op per node of the `nodes` argument, built by `op`.
-fn each(args: &Args<'_>, op: impl Fn(NodeId) -> Operation) -> Result<Done, VerbError> {
+/// A page's `name` trimmed, as the pages list keeps it; an empty one is refused.
+fn page_name<'n>(a: &Args<'_>, name: &'n str) -> Result<&'n str, VerbError> {
+    match name.trim() {
+        "" => Err(a.invalid("name", "a page's name is not empty")),
+        t => Ok(t),
+    }
+}
+
+/// One op per layer of the `nodes` argument, built by `op`; a page is refused.
+fn each(
+    doc: &Document,
+    args: &Args<'_>,
+    op: impl Fn(NodeId) -> Operation,
+) -> Result<Done, VerbError> {
     Ok(Done::ops(
-        args.nodes("nodes")?.into_iter().map(op).collect(),
+        args.layers(doc, "nodes")?.into_iter().map(op).collect(),
     ))
 }
 
@@ -1802,7 +1833,10 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let index = a.index("index").unwrap_or(usize::MAX);
-            let name = a.text("name").map(str::to_owned);
+            let name = a
+                .text("name")
+                .map(|n| page_name(a, n).map(str::to_owned))
+                .transpose()?;
             let (tx, id) = crate::page::add(ctx.doc, ctx.ids, index, name, None);
             Ok(Done::made(tx, vec![id]))
         },
@@ -1878,9 +1912,9 @@ pub static VERBS: &[Verb] = &[
                 "the six coefficients",
             ),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
             Ok(Done::ops(vec![Operation::SetTransform {
-                id: a.node("node")?,
+                id: a.layer(ctx.doc, "node")?,
                 transform: a.model("transform")?,
             }]))
         },
@@ -1896,9 +1930,9 @@ pub static VERBS: &[Verb] = &[
                 "the point; absent clears it",
             ),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
             Ok(Done::ops(vec![Operation::SetPivot {
-                id: a.node("node")?,
+                id: a.layer(ctx.doc, "node")?,
                 pivot: a.model_opt::<Pivot>("pivot")?,
             }]))
         },
@@ -1961,10 +1995,16 @@ pub static VERBS: &[Verb] = &[
             req("node", NODE, "the layer or page"),
             req("name", TEXT, "its new name"),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
+            let id = a.node("node")?;
+            let name = a.text("name").unwrap_or_default();
+            let name = match ctx.doc.is_page(id) {
+                true => page_name(a, name)?,
+                false => name,
+            };
             Ok(Done::ops(vec![Operation::SetName {
-                id: a.node("node")?,
-                name: a.text("name").unwrap_or_default().to_owned(),
+                id,
+                name: name.to_owned(),
             }]))
         },
     },
@@ -1975,9 +2015,9 @@ pub static VERBS: &[Verb] = &[
             req("nodes", NODES, "the layers"),
             req("visible", BOOL, "shown"),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
             let visible = a.bool("visible").unwrap_or(true);
-            each(a, |id| Operation::SetVisible { id, visible })
+            each(ctx.doc, a, |id| Operation::SetVisible { id, visible })
         },
     },
     Verb {
@@ -1987,9 +2027,9 @@ pub static VERBS: &[Verb] = &[
             req("nodes", NODES, "the layers"),
             req("locked", BOOL, "locked"),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
             let locked = a.bool("locked").unwrap_or(false);
-            each(a, |id| Operation::SetLocked { id, locked })
+            each(ctx.doc, a, |id| Operation::SetLocked { id, locked })
         },
     },
     Verb {
@@ -1999,12 +2039,12 @@ pub static VERBS: &[Verb] = &[
             req("nodes", NODES, "the layers"),
             req("opacity", ParamKind::Number, "0 to 1"),
         ],
-        run: |_, a| {
+        run: |ctx, a| {
             let opacity = a.number("opacity").unwrap_or(1.0) as f32;
             if !build::valid_opacity(opacity) {
                 return Err(a.invalid("opacity", "expected 0 to 1"));
             }
-            each(a, |id| Operation::SetOpacity { id, opacity })
+            each(ctx.doc, a, |id| Operation::SetOpacity { id, opacity })
         },
     },
     Verb {
@@ -2022,7 +2062,7 @@ pub static VERBS: &[Verb] = &[
             let blend = blend_of(a.choice("blend").unwrap_or("Normal"));
             Ok(Done::edit(build::set_blend_all(
                 ctx.doc,
-                &a.nodes("nodes")?,
+                &a.layers(ctx.doc, "nodes")?,
                 blend,
             )))
         },
@@ -2243,7 +2283,7 @@ pub static VERBS: &[Verb] = &[
             req("exports", ParamKind::Model("[ExportSpec]"), "the settings"),
         ],
         run: |ctx, a| {
-            let id = a.node("node")?;
+            let id = a.layer(ctx.doc, "node")?;
             let exports = a.model::<Vec<ExportSpec>>("exports")?;
             let own = node(ctx, id)?.exports().to_vec();
             let exports = rekeyed(ctx, &own, exports);
@@ -2718,8 +2758,9 @@ pub struct ScriptError {
 /// Run `script` against `doc`, each step committed before the next reads it: a list
 /// of `{ "verb": name, "args": { … }, "as": label }`. A string argument `"@label"`
 /// stands for the first thing an earlier step labelled `label` made, a node's wire
-/// form or another thing's id ([`Done::made`]), and `"@page"` for the first page. Answers what each
-/// step made, in those forms; on a refusal `doc` keeps the steps before it.
+/// form or another thing's id ([`Done::made`]), and `"@page"` for the first page; a string
+/// starting `@@` is written with one `@`. A step holding any other key is refused.
+/// Answers what each step made, in those forms; on a refusal `doc` keeps the steps before it.
 pub fn run_script(
     doc: &mut Document,
     ids: &mut IdSource,
@@ -2735,6 +2776,13 @@ pub fn run_script(
     let mut out = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         let n = i + 1;
+        // A misspelled `args` would run the verb with none, at its widest.
+        if let Some(extra) = step.as_object().and_then(|m| {
+            m.keys()
+                .find(|k| !["verb", "args", "as"].contains(&k.as_str()))
+        }) {
+            return Err(fail(n, format!("a step takes no `{extra}`")));
+        }
         let verb = step
             .get("verb")
             .and_then(Value::as_str)
@@ -2781,9 +2829,14 @@ pub fn run_script(
     Ok(out)
 }
 
-/// Every `"@label"` string in `v` replaced by what its label stands for.
+/// Every `"@label"` string in `v` replaced by what its label stands for, and a
+/// string starting `@@` by itself less one `@`.
 fn substitute(v: &mut Value, labels: &rustc_hash::FxHashMap<String, String>) -> Result<(), String> {
     match v {
+        // `@@` escapes a literal `@`.
+        Value::String(s) if s.starts_with("@@") => {
+            s.remove(0);
+        }
         Value::String(s) if s.starts_with('@') => {
             let made = labels
                 .get(&s[1..])

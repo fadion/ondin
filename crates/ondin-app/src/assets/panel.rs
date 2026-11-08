@@ -342,12 +342,21 @@ impl OndinApp {
         };
     }
 
-    /// The layers a photo's click fills: the selection, when every layer in it
-    /// can take one.
+    /// The layers a photo's click fills: the selection's unlocked layers, when
+    /// every one of them can take one. A locked layer is left out rather than
+    /// turning the click into a placement, as a set-selecting gesture leaves it.
     fn photo_targets(&self) -> Vec<NodeId> {
-        let ids = self.session.selection.ids();
-        match !ids.is_empty() && ids.iter().all(|id| fillable(&self.session.doc, *id)) {
-            true => ids.to_vec(),
+        let doc = &self.session.doc;
+        let open: Vec<NodeId> = self
+            .session
+            .selection
+            .ids()
+            .iter()
+            .copied()
+            .filter(|id| !ondin_core::is_effectively_locked(doc, *id))
+            .collect();
+        match open.iter().all(|id| fillable(doc, *id)) {
+            true => open,
             false => Vec::new(),
         }
     }
@@ -380,6 +389,10 @@ impl OndinApp {
             .iter()
             .map(|id| crate::private::layer(&self.session.doc, *id).into_owned())
             .collect();
+        let fill_locked = match targets.is_empty() {
+            true => 0,
+            false => self.session.selection.ids().len() - targets.len(),
+        };
         let keys = self.asset_keys.clone();
         let now = ctx.input(|i| i.time);
 
@@ -505,6 +518,7 @@ impl OndinApp {
                         service,
                         key_missing,
                         fill_names: &fill_names,
+                        fill_locked,
                     };
                     photos_body(ui, panel, &view, bottom, now, &mut out);
                 }
@@ -1161,6 +1175,8 @@ struct PhotosView<'a> {
     service: Option<&'static ServiceSpec>,
     key_missing: bool,
     fill_names: &'a [String],
+    /// The selected layers a click leaves out because they are locked.
+    fill_locked: usize,
 }
 
 /// The Photos tab under the tabs: the search, the service and orientation, the
@@ -1187,9 +1203,12 @@ fn photos_body(
     photo_controls(ui, view.on, svc, &mut panel.orientation, &mut out.prefs);
     ui.add_space(ROW_GAP);
     if !view.fill_names.is_empty() {
-        let what = match view.fill_names {
-            [one] => one.clone(),
-            many => ui::count(many.len(), "layer"),
+        // With locked layers left out, the count says so in the strip's room.
+        let n = view.fill_names.len();
+        let what = match (view.fill_names, view.fill_locked) {
+            ([one], 0) => one.clone(),
+            (_, 0) => ui::count(n, "layer"),
+            (_, locked) => format!("{n} of {} layers", n + locked),
         };
         fill_strip(ui, &format!("Click fills {what}"));
         ui.add_space(ROW_GAP);
@@ -1785,6 +1804,23 @@ mod tests {
             locked: true,
         }]));
         assert!(app.photo_targets().is_empty());
+    }
+
+    /// A locked layer beside unlocked shapes is left out of the fill, not a
+    /// reason to place the photo instead.
+    /// flip: `photo_targets` asking `fillable` of every selected layer → fails at
+    /// "the open one fills".
+    #[test]
+    fn a_locked_layer_in_the_selection_is_left_out_of_the_fill() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (open, shut) = (rect(&mut app), rect(&mut app));
+        app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: shut,
+            locked: true,
+        }]));
+        app.session.selection.set(vec![open, shut]);
+        assert_eq!(app.photo_targets(), vec![open], "the open one fills");
     }
 
     /// A part of an inserted icon is no photo target: its one credit is the icon's.

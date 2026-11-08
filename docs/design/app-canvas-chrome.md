@@ -929,7 +929,9 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   embedded. With unlocked shapes or frames selected (not text, a line, a spiral or an arc, nor a
   layer inside an inserted icon, whose one credit is the icon's), a photo's
   click fills them instead (the picture fill or top fill replaced, else a new fill), each a
-  different photo in grid order from the one clicked. At landing a target that is no longer
+  different photo in grid order from the one clicked. A locked layer in the selection is left out
+  of the fill rather than making the click a placement, and the strip counts it (*Click fills 3 of
+  4 layers*). At landing a target that is no longer
   fillable (locked meanwhile) is skipped, and a photo that failed to download leaves its target
   as it was while the rest land (*Filled 2 layers · 1 photo could not be downloaded*); a strip says
   *Click fills Hero image*, and `Alt`-click places. Every insert is one undo step carrying its

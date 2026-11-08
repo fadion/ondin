@@ -1,0 +1,286 @@
+# Fill with content: Spanish. `\uXXXX` in a value is that character.
+
+@name Spanish
+@tag es
+@country España
+@phone {area}# ### ###
+@mobile 6## ### ###
+@date {dd}/{mm}/{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group .
+@price {n} €
+@percent {n} %
+@tld es
+@street {suffix} {street}, {no}
+@unit {no2}.º B
+@address {street}|{postcode} {city}|{country}
+@legal S.L.|S.A.
+
+[given]
+Lucía
+Hugo
+Sofía
+Martín
+María
+Pablo
+Carmen
+Daniel
+Paula
+Alejandro
+Valeria
+Javier
+Elena
+Diego
+Irene
+Adrián
+Claudia
+Álvaro
+Marta
+Sergio
+Noelia
+Raúl
+Alba
+Iker
+Nerea
+Jorge
+Laia
+Omar
+Inés
+Marc
+
+[family]
+Navarro
+García
+Fernández
+González
+Rodríguez
+López
+Martínez
+Sánchez
+Pérez
+Gómez
+Martín
+Jiménez
+Ruiz
+Hernández
+Díaz
+Moreno
+Muñoz
+Álvarez
+Romero
+Alonso
+Gutiérrez
+Torres
+Domínguez
+Vázquez
+Ramos
+Gil
+Serrano
+Blanco
+Molina
+Castro
+
+[cities]
+# city|region|postcode|area code
+Madrid||28001..28055|91
+Barcelona||08001..08042|93
+Valencia||46001..46026|96
+Sevilla||41001..41020|95
+Bilbao||48001..48015|94
+Málaga||29001..29018|95
+Zaragoza||50001..50021|97
+Granada||18001..18015|95
+Valladolid||47001..47016|98
+Palma||07001..07015|97
+Murcia||30001..30012|96
+Santander||39001..39012|94
+
+[streets]
+Mayor
+del Sol
+de la Paz
+de Alcalá
+de las Flores
+del Carmen
+de Cervantes
+de la Constitución
+de San Juan
+de los Olivos
+Real
+de la Luna
+del Mar
+de Goya
+de la Estación
+
+[suffixes]
+Calle
+Avenida
+Paseo
+Plaza
+Camino
+
+[months]
+ene
+feb
+mar
+abr
+may
+jun
+jul
+ago
+sept
+oct
+nov
+dic
+
+[jobs]
+Diseñadora de producto
+Ingeniero de software
+Responsable de ingeniería
+Analista de datos
+Responsable de marketing
+Jefa de proyecto
+Investigador UX
+Ejecutivo de ventas
+Gestora de clientes
+Desarrollador front-end
+Redactora
+Diseñador gráfico
+Contable
+Técnica de selección
+Responsable de producto
+Directora general
+Asistente de dirección
+Administrador de sistemas
+Community manager
+Controller financiera
+Comprador
+Agente de soporte
+
+[departments]
+Diseño
+Ingeniería
+Marketing
+Ventas
+Finanzas
+Personas
+Compras
+Atención al cliente
+Producto
+Legal
+
+[company-a]
+Norte
+Azul
+Plata
+Claro
+Piedra
+Pino
+Hierro
+Oro
+Rojo
+Cumbre
+Puerto
+Viento
+Sol
+Río
+Luz
+Roble
+
+[company-b]
+campo
+hoja
+ola
+puerta
+línea
+taller
+senda
+puente
+patio
+punto
+lab
+forja
+casa
+fuente
+monte
+costa
+
+[product-a]
+Libro
+Atlas
+Pulso
+Lienzo
+Brújula
+Chispa
+Carpeta
+Señal
+Caja
+Ritmo
+Agenda
+Pluma
+
+[product-b]
+Pro
+Plus
+Go
+Uno
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Planifica tu semana en cinco minutos
+Todo lo que tu equipo necesita, en un solo lugar
+Trabaja a tu ritmo
+Hecho para quienes entregan
+Tus finanzas, por fin en orden
+Una nueva forma de colaborar
+Menos papeleo, más buen trabajo
+Herramientas sencillas para proyectos complejos
+Da vida a tus ideas
+Siempre sincronizados, estés donde estés
+Una forma más inteligente de organizar tu día
+Empieza gratis
+Diseñado para concentrarse
+Convierte las opiniones en avances
+Tus archivos siempre a mano
+Reuniones que valen la pena
+Rápido, sencillo y seguro
+Haz crecer tu negocio con confianza
+Descubre lo que viene
+Bienvenido de nuevo
+Juntos llegamos más lejos
+
+[sentences]
+Sigue cada proyecto con tableros compartidos y responsables claros.
+Invita a tu equipo en segundos y decide quién puede ver, comentar o editar.
+{product} reúne tus notas, archivos y conversaciones en un lugar tranquilo.
+Creamos {company} para equipos pequeños que prefieren trabajar antes que gestionar.
+Tus datos se cifran en reposo y en tránsito, y nunca salen de tu cuenta.
+Fija un objetivo, divídelo en pasos y mira cómo crece el progreso semana a semana.
+Los cambios se guardan sobre la marcha, así que nada se pierde.
+Empieza con una plantilla o una página en blanco y adáptala a tu forma de trabajar.
+Nuestro equipo de soporte responde en el día, normalmente en menos de una hora.
+Los informes se actualizan solos, y las cifras de la reunión del lunes siempre cuadran.
+Conecta las herramientas que ya usas y deja que la información fluya en ambos sentidos.
+Todos los planes incluyen proyectos ilimitados y el historial completo de cambios.
+La aplicación funciona sin conexión y se sincroniza en cuanto vuelves a estar en línea.
+Equipos de {city} y de todo el mundo planifican su semana con {product}.
+Los comentarios quedan junto al trabajo al que se refieren.
+Prueba todas las funciones gratis durante treinta días, sin tarjeta.
+Puedes exportarlo todo cuando quieras, en formatos que otras herramientas pueden leer.
+Nuestros precios son sencillos: una tarifa fija por persona, mensual o anual.
+El modo oscuro, los atajos de teclado y una búsqueda rápida vienen incluidos.
+Las copias de seguridad se hacen cada noche y se restauran con un clic.
+El panel muestra primero lo que necesita tu atención.
+Ordena los archivos por proyecto y encuéntralos desde cualquier lugar.
+Los nuevos miembros hacen un recorrido breve y son productivos desde el primer día.
+La accesibilidad forma parte de cada versión, del contraste a los lectores de pantalla.
+{company} nació en {city} de la mano de un pequeño grupo de diseñadores e ingenieros.
+Las integraciones se configuran en minutos y no necesitan código.
+Puedes cambiar de plan o cancelarlo en cualquier momento desde tu cuenta.
+Cada documento guarda un historial de quién cambió qué y cuándo.
+Enviamos un correo breve al mes, y puedes darte de baja cuando quieras.
+Los recordatorios llegan a tu teléfono, a tu ordenador o a ambos.

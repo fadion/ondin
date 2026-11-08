@@ -1,0 +1,301 @@
+# Fill with content: German.
+
+@name German
+@tag de
+@country Deutschland
+@phone {area} ######
+@mobile 0151 ########
+@date {dd}.{mm}.{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group .
+@price {n} €
+@percent {n} %
+@tld de
+@street {street}{suffix} {no}
+@unit Wohnung {no2}
+@address {street}|{postcode} {city}|{country}
+@legal GmbH|AG|KG
+
+[given]
+Lena
+Lukas
+Anna
+Felix
+Marie
+Jonas
+Sophie
+Leon
+Clara
+Paul
+Emma
+Maximilian
+Hannah
+Elias
+Mia
+Niklas
+Laura
+Tim
+Johanna
+David
+Katharina
+Moritz
+Julia
+Finn
+Lea
+Jan
+Charlotte
+Tobias
+Amelie
+Simon
+Selin
+Can
+
+[family]
+Hoffmann
+Müller
+Schmidt
+Schneider
+Fischer
+Weber
+Meyer
+Wagner
+Becker
+Schulz
+Koch
+Richter
+Klein
+Wolf
+Schröder
+Neumann
+Schwarz
+Zimmermann
+Braun
+Krüger
+Hartmann
+Lange
+Werner
+Krause
+Lehmann
+Köhler
+Maier
+Kaiser
+Yılmaz
+Nowak
+
+[cities]
+# city|region|postcode|area code
+Berlin||10115..14199|030
+Hamburg||20095..22769|040
+München||80331..81929|089
+Köln||50667..51149|0221
+Frankfurt am Main||60311..60599|069
+Stuttgart||70173..70619|0711
+Düsseldorf||40210..40629|0211
+Leipzig||04103..04357|0341
+Dresden||01067..01326|0351
+Hannover||30159..30669|0511
+Nürnberg||90402..90491|0911
+Bremen||28195..28779|0421
+Freiburg im Breisgau||79098..79117|0761
+Münster||48143..48167|0251
+
+[streets]
+Linden
+Haupt
+Garten
+Berg
+Schiller
+Goethe
+Ahorn
+Birken
+Mühlen
+Kirch
+Wiesen
+Rosen
+Bahnhof
+Schul
+Wald
+Eichen
+Sonnen
+Feld
+
+[suffixes]
+straße
+weg
+allee
+gasse
+ring
+platz
+
+[months]
+Jan.
+Feb.
+März
+Apr.
+Mai
+Juni
+Juli
+Aug.
+Sept.
+Okt.
+Nov.
+Dez.
+
+[jobs]
+Produktdesignerin
+Softwareentwickler
+Teamleiterin Entwicklung
+Datenanalyst
+Marketingmanagerin
+Projektleiter
+UX-Researcherin
+Vertriebsleiter
+Kundenbetreuerin
+Frontend-Entwickler
+Content-Strategin
+Grafikdesigner
+Buchhalterin
+Personalreferent
+Produktmanagerin
+Werkstudent
+Assistenz der Geschäftsführung
+Geschäftsführerin
+Systemadministrator
+Redakteurin
+Account Manager
+Controllerin
+Einkäufer
+Support-Mitarbeiterin
+
+[departments]
+Design
+Entwicklung
+Marketing
+Vertrieb
+Finanzen
+Personal
+Einkauf
+Kundenservice
+Produkt
+Recht
+
+[company-a]
+Nord
+Blau
+Silber
+Hell
+Klar
+Stein
+Tannen
+Eisen
+Gold
+Rot
+Gipfel
+Hafen
+Linden
+Wind
+Sonnen
+Fluss
+Kraft
+Licht
+
+[company-b]
+werk
+feld
+blatt
+welle
+tor
+linie
+haus
+weg
+brücke
+hof
+punkt
+labor
+schmiede
+bau
+quelle
+wald
+
+[product-a]
+Kasse
+Atlas
+Puls
+Leinwand
+Kompass
+Funke
+Mappe
+Signal
+Tresor
+Takt
+Planer
+Bote
+
+[product-b]
+Pro
+Plus
+Go
+Eins
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Planen Sie Ihre Woche in fünf Minuten
+Alles für Ihr Team an einem Ort
+Arbeit in Ihrem Tempo
+Gemacht für Menschen, die liefern
+Endlich Ordnung in Ihren Finanzen
+Zusammenarbeit, ganz neu gedacht
+Weniger Kleinkram, mehr gute Arbeit
+Einfache Werkzeuge für große Projekte
+Bringen Sie Ihre Ideen ins Leben
+Immer auf dem gleichen Stand
+Der klügere Weg durch den Tag
+Kostenlos starten, später wachsen
+Gestaltet für Konzentration
+Aus Feedback wird Fortschritt
+Alle Dateien immer griffbereit
+Besprechungen, die sich lohnen
+Schnell, freundlich und sicher
+Wachsen Sie mit Zuversicht
+Sehen Sie, was als Nächstes kommt
+Kleine Schritte, große Wirkung
+Willkommen zurück
+Gemeinsam mehr erreichen
+
+[sentences]
+Behalten Sie jedes Projekt im Blick, mit gemeinsamen Boards und klaren Zuständigkeiten.
+Laden Sie Ihr Team in Sekunden ein und legen Sie fest, wer lesen, kommentieren oder bearbeiten darf.
+{product} bringt Notizen, Dateien und Gespräche an einem ruhigen Ort zusammen.
+Wir haben {company} für kleine Teams gebaut, die lieber arbeiten als verwalten.
+Ihre Daten werden verschlüsselt gespeichert und übertragen und verlassen nie Ihr Konto.
+Setzen Sie sich ein Ziel, teilen Sie es in Schritte und sehen Sie den Fortschritt wachsen.
+Änderungen werden laufend gespeichert, damit nichts verloren geht.
+Beginnen Sie mit einer Vorlage oder einer leeren Seite und passen Sie sie an Ihre Arbeitsweise an.
+Unser Support antwortet innerhalb eines Tages, meist sogar innerhalb einer Stunde.
+Berichte aktualisieren sich selbst, damit die Zahlen im Montagsmeeting immer stimmen.
+Verbinden Sie die Werkzeuge, die Sie schon nutzen, und lassen Sie die Daten in beide Richtungen fließen.
+Jeder Tarif enthält unbegrenzt viele Projekte und den vollständigen Verlauf aller Änderungen.
+Die App funktioniert auch offline und gleicht sich ab, sobald Sie wieder verbunden sind.
+Teams in {city} und auf der ganzen Welt planen ihre Woche mit {product}.
+Kommentare stehen direkt neben der Arbeit, um die es geht.
+Testen Sie alle Funktionen dreißig Tage lang kostenlos und ohne Kreditkarte.
+Sie können jederzeit alles exportieren, in Formaten, die andere Programme lesen.
+Unsere Preise sind einfach: ein fester Betrag pro Person, monatlich oder jährlich.
+Dunkler Modus, Tastenkürzel und eine schnelle Suche sind schon eingebaut.
+Automatische Sicherungen laufen jede Nacht, und die Wiederherstellung braucht nur einen Klick.
+Erfassen Sie Zeiten pro Aufgabe und machen Sie daraus eine Rechnung, wenn die Arbeit erledigt ist.
+Das Dashboard zeigt zuerst, was Ihre Aufmerksamkeit braucht.
+Ordnen Sie Dateien nach Projekten und finden Sie sie überall wieder.
+Neue Mitglieder bekommen eine kurze Einführung und können am ersten Tag loslegen.
+Barrierefreiheit gehört zu jeder Version, vom Kontrast bis zum Screenreader.
+{company} wurde in {city} von einer kleinen Gruppe aus Gestaltern und Entwicklern gegründet.
+Integrationen sind in wenigen Minuten eingerichtet und brauchen keinen Code.
+Sie können Ihren Tarif jederzeit in Ihrem Konto ändern oder kündigen.
+Jedes Dokument hat einen Verlauf, damit Sie sehen, wer was wann geändert hat.
+Wir schicken eine kurze E-Mail im Monat, die Sie jederzeit abbestellen können.
+Laden Sie Bilder, Videos und PDFs hoch und sehen Sie sie an, ohne sie herunterzuladen.
+Erinnerungen kommen auf Ihr Telefon, Ihren Rechner oder beides.

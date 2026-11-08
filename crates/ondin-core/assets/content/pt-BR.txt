@@ -1,0 +1,286 @@
+# Fill with content: Portuguese (Brazil). `\uXXXX` in a value is that character.
+
+@name Portuguese (Brazil)
+@tag pt-BR
+@country Brasil
+@phone ({area}) 3###-####
+@mobile ({area}) 9####-####
+@date {dd}/{mm}/{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group .
+@price R$ {n}
+@percent {n}%
+@tld com.br
+@street {suffix} {street}, {no}
+@unit Apto {no2}
+@address {street}|{city} - {region}|{postcode}|{country}
+@legal Ltda.|S.A.
+
+[given]
+Ana
+Gabriel
+Beatriz
+Lucas
+Júlia
+Pedro
+Mariana
+Rafael
+Larissa
+Matheus
+Camila
+Guilherme
+Fernanda
+Thiago
+Isabela
+Bruno
+Letícia
+Felipe
+Juliana
+Gustavo
+Amanda
+Rodrigo
+Vitória
+Caio
+Bianca
+Diego
+Luana
+Enzo
+Yasmin
+João
+
+[family]
+Souza
+Silva
+Santos
+Oliveira
+Pereira
+Lima
+Carvalho
+Ferreira
+Rodrigues
+Almeida
+Costa
+Gomes
+Martins
+Araújo
+Ribeiro
+Barbosa
+Rocha
+Dias
+Nascimento
+Moreira
+Cardoso
+Teixeira
+Correia
+Mendes
+Freitas
+Monteiro
+Cavalcanti
+Nunes
+Pinto
+Batista
+
+[cities]
+# city|region|postcode|area code
+São Paulo|SP|01###-###|11
+Rio de Janeiro|RJ|20###-###|21
+Belo Horizonte|MG|30###-###|31
+Curitiba|PR|80###-###|41
+Porto Alegre|RS|90###-###|51
+Salvador|BA|40###-###|71
+Recife|PE|50###-###|81
+Fortaleza|CE|60###-###|85
+Brasília|DF|70###-###|61
+Florianópolis|SC|88###-###|48
+Campinas|SP|13###-###|19
+Goiânia|GO|74###-###|62
+
+[streets]
+das Flores
+da Paz
+São João
+Sete de Setembro
+Tiradentes
+das Palmeiras
+Santos Dumont
+do Comércio
+Brasil
+dos Andradas
+XV de Novembro
+da Liberdade
+das Acácias
+Paulista
+Getúlio Vargas
+
+[suffixes]
+Rua
+Avenida
+Travessa
+Alameda
+Praça
+
+[months]
+jan.
+fev.
+mar.
+abr.
+mai.
+jun.
+jul.
+ago.
+set.
+out.
+nov.
+dez.
+
+[jobs]
+Designer de produto
+Engenheira de software
+Gerente de engenharia
+Analista de dados
+Gerente de marketing
+Gerente de projetos
+Pesquisador de UX
+Executivo de vendas
+Analista de sucesso do cliente
+Desenvolvedora front-end
+Redator
+Designer gráfica
+Contador
+Analista de recrutamento
+Gerente de produto
+Diretora executiva
+Assistente administrativo
+Analista de sistemas
+Social media
+Analista financeira
+Comprador
+Atendente de suporte
+
+[departments]
+Design
+Engenharia
+Marketing
+Vendas
+Financeiro
+Pessoas
+Compras
+Atendimento
+Produto
+Jurídico
+
+[company-a]
+Norte
+Azul
+Prata
+Claro
+Pedra
+Pinho
+Ferro
+Ouro
+Rubro
+Cume
+Porto
+Vento
+Sol
+Rio
+Luz
+Ipê
+
+[company-b]
+campo
+folha
+onda
+porta
+linha
+oficina
+trilha
+ponte
+pátio
+ponto
+lab
+forja
+casa
+fonte
+serra
+mar
+
+[product-a]
+Livro
+Atlas
+Pulso
+Tela
+Bússola
+Faísca
+Pasta
+Sinal
+Cofre
+Ritmo
+Agenda
+Pena
+
+[product-b]
+Pro
+Plus
+Go
+Um
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Planeje sua semana em cinco minutos
+Tudo o que seu time precisa, em um só lugar
+Trabalhe no seu ritmo
+Feito para quem entrega
+Suas finanças, finalmente em ordem
+Um novo jeito de colaborar
+Menos burocracia, mais trabalho bem feito
+Ferramentas simples para projetos complexos
+Dê vida às suas ideias
+Sempre em sincronia, onde você estiver
+Um jeito mais inteligente de organizar o dia
+Comece grátis
+Pensado para o foco
+Transforme feedback em progresso
+Seus arquivos sempre à mão
+Reuniões que valem a pena
+Rápido, simples e seguro
+Cresça seu negócio com confiança
+Veja o que vem por aí
+Que bom ter você de volta
+Juntos vamos mais longe
+
+[sentences]
+Acompanhe cada projeto com quadros compartilhados e responsáveis claros.
+Convide seu time em segundos e decida quem pode ver, comentar ou editar.
+{product} reúne suas notas, arquivos e conversas em um lugar tranquilo.
+Criamos a {company} para times pequenos que preferem trabalhar a gerenciar.
+Seus dados são criptografados em repouso e em trânsito, e nunca saem da sua conta.
+Defina uma meta, divida em etapas e veja o progresso crescer semana a semana.
+As alterações são salvas enquanto você trabalha, então nada se perde.
+Comece com um modelo ou uma página em branco e adapte ao seu jeito de trabalhar.
+Nosso suporte responde no mesmo dia, geralmente em menos de uma hora.
+Os relatórios se atualizam sozinhos, e os números da reunião de segunda estão sempre certos.
+Conecte as ferramentas que você já usa e deixe as informações fluírem nos dois sentidos.
+Todos os planos incluem projetos ilimitados e o histórico completo de alterações.
+O aplicativo funciona offline e sincroniza assim que você volta a ficar online.
+Times em {city} e no mundo todo planejam a semana com o {product}.
+Os comentários ficam ao lado do trabalho a que se referem.
+Teste todos os recursos de graça por trinta dias, sem cartão.
+Você pode exportar tudo a qualquer momento, em formatos que outras ferramentas leem.
+Nossos preços são simples: um valor fixo por pessoa, mensal ou anual.
+Modo escuro, atalhos de teclado e uma busca rápida já vêm incluídos.
+Os backups automáticos rodam toda noite e são restaurados com um clique.
+O painel mostra primeiro o que precisa da sua atenção.
+Organize os arquivos por projeto e encontre-os em qualquer lugar.
+Novos membros fazem um tour rápido e já são produtivos no primeiro dia.
+A acessibilidade faz parte de cada versão, do contraste aos leitores de tela.
+A {company} nasceu em {city} pelas mãos de um pequeno grupo de designers e engenheiros.
+As integrações são configuradas em minutos e não precisam de código.
+Você pode mudar de plano ou cancelar a qualquer momento na sua conta.
+Cada documento guarda o histórico de quem mudou o quê, e quando.
+Enviamos um e-mail curto por mês, e você pode cancelar a inscrição quando quiser.
+Os lembretes chegam no seu celular, no computador ou nos dois.

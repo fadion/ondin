@@ -1,0 +1,149 @@
+# Fill with content: English (UK). A section left out here is read from @inherit.
+# Phone numbers are Ofcom's ranges reserved for drama.
+
+@name English (UK)
+@tag en-GB
+@inherit en-US
+@country United Kingdom
+@phone {area} 0###
+@mobile 07700 900###
+@date {d} {mon} {yyyy}
+@time {HH}:{MM}
+@decimal .
+@group ,
+@price £{n}
+@percent {n}%
+@tld co.uk
+@street {no} {street} {suffix}
+@unit Flat {no2}
+@address {street}|{city}|{postcode}|{country}
+@legal Ltd|& Co.
+
+[given]
+Oliver
+Amelia
+Harry
+Isla
+George
+Poppy
+Arthur
+Freya
+Alfie
+Evie
+Jack
+Imogen
+Rhys
+Niamh
+Callum
+Aisha
+Rory
+Ellie
+Hamza
+Phoebe
+Finley
+Martha
+Kieran
+Libby
+Euan
+Sienna
+Toby
+Ffion
+Reuben
+Tilly
+
+[family]
+Bennett
+Clarke
+Hughes
+Walsh
+Patel
+Wright
+Turner
+Ahmed
+Fletcher
+Doyle
+Lloyd
+Kaur
+Barker
+Holmes
+Marsh
+Pearson
+Begum
+Bailey
+Shaw
+Fraser
+Murray
+Reid
+Lawson
+Gibson
+Ellis
+Booth
+Kerr
+Davies
+Evans
+Morgan
+
+[cities]
+# city|region|postcode|phone prefix (Ofcom drama ranges)
+London||SW# #@@|020 7946
+London||E# #@@|020 7946
+London||N# #@@|020 7946
+Birmingham||B# #@@|0121 496
+Bristol||BS# #@@|0117 496
+Edinburgh||EH# #@@|0131 496
+Glasgow||G# #@@|0141 496
+Leeds||LS# #@@|0113 496
+Leicester||LE# #@@|0116 496
+Liverpool||L# #@@|0151 496
+Manchester||M# #@@|0161 496
+Nottingham||NG# #@@|0115 496
+Reading||RG# #@@|0118 496
+Sheffield||S# #@@|0114 496
+
+[streets]
+Church
+Station
+Victoria
+Albert
+Mill
+Park
+Queen's
+King's
+Manor
+Grange
+Highfield
+Chapel
+Orchard
+Windsor
+Meadow
+Hawthorn
+Clarence
+York
+Elm
+Brook
+
+[suffixes]
+Road
+Street
+Lane
+Avenue
+Close
+Gardens
+Crescent
+Terrace
+Grove
+Mews
+
+[months]
+Jan
+Feb
+Mar
+Apr
+May
+Jun
+Jul
+Aug
+Sept
+Oct
+Nov
+Dec

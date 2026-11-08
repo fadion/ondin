@@ -1,0 +1,2025 @@
+//! *Fill with content…*: realistic names, addresses, job titles, companies, text,
+//! numbers and avatars for the text layers of a selection, a different value per
+//! layer, drawn from the tables in `assets/content` (one file per locale, so the
+//! fill works offline and a locale is added without code).
+//!
+//! [`plan`] reads each layer's kind from its name, then its text; groups layers
+//! into records whose values agree (a row's email is built from its name); draws
+//! every value from a seed, so the same seed gives the same fill; and redraws a
+//! value that would overflow a fixed-width line. An avatar is vector art
+//! ([`Avatar::art`]) that the caller's [`ImageSink::draw`] turns into a picture.
+
+use crate::build::{all_in_document_order, outermost};
+use crate::component::main_of;
+use crate::node::{NodeKind, TextRef, TextSizing};
+use crate::query::is_effectively_locked;
+use crate::svg_in::ImageSink;
+use crate::{Document, Fill, NodeId, Operation, Transaction, keyed_by_position};
+use kurbo::{BezPath, Circle, Rect, Shape};
+use peniko::Color;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
+// --- the tables ---------------------------------------------------------------
+
+/// The shipped tables, in the order the locale list shows them. The first of a
+/// language is the one its bare tag means (`en` is English (US)).
+static SOURCES: [&str; 8] = [
+    include_str!("../assets/content/en-US.txt"),
+    include_str!("../assets/content/en-GB.txt"),
+    include_str!("../assets/content/de.txt"),
+    include_str!("../assets/content/fr.txt"),
+    include_str!("../assets/content/es.txt"),
+    include_str!("../assets/content/it.txt"),
+    include_str!("../assets/content/pt-BR.txt"),
+    include_str!("../assets/content/nl.txt"),
+];
+
+/// One locale's tables: its formats (`@key value`) and lists (`[section]`), with
+/// whatever it leaves out read from the locale it names in `@inherit`.
+#[derive(Debug)]
+pub struct Locale {
+    /// The BCP-47 tag (`en-US`, `de`), matched against a text's Language.
+    pub tag: String,
+    /// How the locale list names it, in English as the Type panel names languages.
+    pub name: String,
+    formats: HashMap<String, String>,
+    lists: HashMap<String, Vec<String>>,
+}
+
+impl Locale {
+    /// A format, or `""` when neither this locale nor the one it inherits from
+    /// sets it.
+    fn format(&self, key: &str) -> &str {
+        self.formats.get(key).map_or("", String::as_str)
+    }
+
+    fn list(&self, key: &str) -> &[String] {
+        self.lists.get(key).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// `\uXXXX` in a value is that character, so a no-break space can be written.
+fn unescape(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(at) = rest.find("\\u") {
+        out.push_str(&rest[..at]);
+        let hex = rest.get(at + 2..at + 6).unwrap_or("");
+        match u32::from_str_radix(hex, 16).ok().and_then(char::from_u32) {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[at + 6..];
+            }
+            None => {
+                out.push_str("\\u");
+                rest = &rest[at + 2..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// One table file read: `#` lines are comments, `@key value` a format,
+/// `[name]` starts a list whose entries are the lines under it.
+fn parse(source: &str) -> (Locale, Option<String>) {
+    let mut formats = HashMap::new();
+    let mut lists: HashMap<String, Vec<String>> = HashMap::new();
+    let mut section: Option<String> = None;
+    for line in source.lines() {
+        let line = line.trim_end();
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('@') {
+            let (key, value) = rest.split_once(' ').unwrap_or((rest, ""));
+            formats.insert(key.to_string(), unescape(value.trim()));
+        } else if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = Some(name.to_string());
+            lists.entry(name.to_string()).or_default();
+        } else if let Some(name) = &section {
+            lists
+                .entry(name.clone())
+                .or_default()
+                .push(unescape(line.trim()));
+        }
+    }
+    let inherit = formats.remove("inherit");
+    let locale = Locale {
+        tag: formats.remove("tag").unwrap_or_default(),
+        name: formats.remove("name").unwrap_or_default(),
+        formats,
+        lists,
+    };
+    (locale, inherit)
+}
+
+/// A locale's formats and lists, as another inherits them.
+type Tables = (HashMap<String, String>, HashMap<String, Vec<String>>);
+
+static LOCALES: LazyLock<Vec<Locale>> = LazyLock::new(|| {
+    let parsed: Vec<(Locale, Option<String>)> = SOURCES.iter().map(|s| parse(s)).collect();
+    // What each locale inherits, copied out first: one level, which is all the
+    // tables use.
+    let inherited: Vec<Option<Tables>> = parsed
+        .iter()
+        .map(|(_, inherit)| {
+            let parent = parsed
+                .iter()
+                .find(|(p, _)| Some(&p.tag) == inherit.as_ref())?;
+            Some((parent.0.formats.clone(), parent.0.lists.clone()))
+        })
+        .collect();
+    parsed
+        .into_iter()
+        .zip(inherited)
+        .map(|((mut locale, _), parent)| {
+            if let Some((formats, lists)) = parent {
+                for (k, v) in formats {
+                    locale.formats.entry(k).or_insert(v);
+                }
+                for (k, v) in lists {
+                    locale.lists.entry(k).or_insert(v);
+                }
+            }
+            locale
+        })
+        .collect()
+});
+
+/// Every shipped locale, in the order the locale list shows them.
+pub fn locales() -> &'static [Locale] {
+    &LOCALES
+}
+
+/// The locale for a BCP-47 tag: the one with that exact tag, else the first of
+/// its language (`de-AT` → German, `en` → English (US)).
+pub fn locale_for(tag: &str) -> Option<&'static Locale> {
+    let tag = tag.trim();
+    let primary = |t: &str| {
+        t.split(['-', '_'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    locales()
+        .iter()
+        .find(|l| l.tag.eq_ignore_ascii_case(tag))
+        .or_else(|| locales().iter().find(|l| primary(&l.tag) == primary(tag)))
+}
+
+// --- kinds --------------------------------------------------------------------
+
+/// What a layer is filled with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    FullName,
+    FirstName,
+    LastName,
+    Email,
+    Phone,
+    JobTitle,
+    Department,
+    Username,
+    Street,
+    City,
+    Postcode,
+    Country,
+    Address,
+    Company,
+    Product,
+    Headline,
+    Sentence,
+    Paragraph,
+    Price,
+    Number,
+    Percent,
+    Date,
+    Time,
+    /// A shape's picture: the record's initials or a pattern, never text.
+    Avatar,
+}
+
+/// Each kind's key, in [`Kind`]'s declaration order, which [`Kind::ALL`] keeps.
+pub const KIND_KEYS: [&str; 24] = [
+    "full_name",
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "job_title",
+    "department",
+    "username",
+    "street",
+    "city",
+    "postcode",
+    "country",
+    "address",
+    "company",
+    "product",
+    "headline",
+    "sentence",
+    "paragraph",
+    "price",
+    "number",
+    "percent",
+    "date",
+    "time",
+    "avatar",
+];
+
+/// The heading a kind is listed under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Group {
+    Person,
+    Place,
+    Company,
+    Text,
+    Numbers,
+    Image,
+}
+
+impl Group {
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::Person => "Person",
+            Group::Place => "Place",
+            Group::Company => "Company",
+            Group::Text => "Text",
+            Group::Numbers => "Numbers and dates",
+            Group::Image => "Image",
+        }
+    }
+}
+
+impl Kind {
+    /// Every kind, in the order the kind list shows them, grouped.
+    pub const ALL: [Kind; 24] = [
+        Kind::FullName,
+        Kind::FirstName,
+        Kind::LastName,
+        Kind::Email,
+        Kind::Phone,
+        Kind::JobTitle,
+        Kind::Department,
+        Kind::Username,
+        Kind::Street,
+        Kind::City,
+        Kind::Postcode,
+        Kind::Country,
+        Kind::Address,
+        Kind::Company,
+        Kind::Product,
+        Kind::Headline,
+        Kind::Sentence,
+        Kind::Paragraph,
+        Kind::Price,
+        Kind::Number,
+        Kind::Percent,
+        Kind::Date,
+        Kind::Time,
+        Kind::Avatar,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::FullName => "Full name",
+            Kind::FirstName => "First name",
+            Kind::LastName => "Last name",
+            Kind::Email => "Email",
+            Kind::Phone => "Phone",
+            Kind::JobTitle => "Job title",
+            Kind::Department => "Department",
+            Kind::Username => "Username",
+            Kind::Street => "Street address",
+            Kind::City => "City",
+            Kind::Postcode => "Postcode",
+            Kind::Country => "Country",
+            Kind::Address => "Full address",
+            Kind::Company => "Company",
+            Kind::Product => "Product",
+            Kind::Headline => "Headline",
+            Kind::Sentence => "Sentence",
+            Kind::Paragraph => "Paragraph",
+            Kind::Price => "Price",
+            Kind::Number => "Number",
+            Kind::Percent => "Percent",
+            Kind::Date => "Date",
+            Kind::Time => "Time",
+            Kind::Avatar => "Avatar",
+        }
+    }
+
+    /// How the verb and prefs spell it: its entry in [`KIND_KEYS`].
+    pub fn key(self) -> &'static str {
+        KIND_KEYS[self as usize]
+    }
+
+    pub fn from_key(key: &str) -> Option<Kind> {
+        Kind::ALL.into_iter().find(|k| k.key() == key)
+    }
+
+    pub fn group(self) -> Group {
+        match self {
+            Kind::FullName
+            | Kind::FirstName
+            | Kind::LastName
+            | Kind::Email
+            | Kind::Phone
+            | Kind::JobTitle
+            | Kind::Department
+            | Kind::Username => Group::Person,
+            Kind::Street | Kind::City | Kind::Postcode | Kind::Country | Kind::Address => {
+                Group::Place
+            }
+            Kind::Company | Kind::Product => Group::Company,
+            Kind::Headline | Kind::Sentence | Kind::Paragraph => Group::Text,
+            Kind::Price | Kind::Number | Kind::Percent | Kind::Date | Kind::Time => Group::Numbers,
+            Kind::Avatar => Group::Image,
+        }
+    }
+
+    /// Whether the kind writes text, as every kind but [`Kind::Avatar`] does.
+    pub fn is_text(self) -> bool {
+        self != Kind::Avatar
+    }
+}
+
+/// The value a record's rows agree on that a kind is drawn from, so redrawing
+/// one row of it redraws them together and its email still matches its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Entity {
+    Person,
+    Place,
+    Firm,
+}
+
+fn entity_of(kind: Kind) -> Option<Entity> {
+    match kind {
+        Kind::FullName
+        | Kind::FirstName
+        | Kind::LastName
+        | Kind::Email
+        | Kind::Username
+        | Kind::Avatar => Some(Entity::Person),
+        Kind::Street | Kind::City | Kind::Postcode | Kind::Address | Kind::Phone => {
+            Some(Entity::Place)
+        }
+        Kind::Company => Some(Entity::Firm),
+        _ => None,
+    }
+}
+
+// --- reading a layer's kind ---------------------------------------------------
+
+/// The words of a name, lowercased, digits and punctuation dropped.
+fn words(name: &str) -> Vec<String> {
+    name.split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Whether `phrase`'s words appear in `ws`, consecutively.
+fn has_phrase(ws: &[String], phrase: &str) -> bool {
+    let p: Vec<&str> = phrase.split(' ').collect();
+    ws.windows(p.len())
+        .any(|w| w.iter().zip(&p).all(|(a, b)| a == b))
+}
+
+/// The phrases a text layer's name is read for, most specific first: *Job
+/// title* is a job before *title* is a headline, *Company name* a company before
+/// *name* is a person.
+const NAME_RULES: &[(Kind, &[&str])] = &[
+    (
+        Kind::Username,
+        &[
+            "username",
+            "user name",
+            "handle",
+            "nickname",
+            "benutzername",
+            "usuario",
+            "utente",
+        ],
+    ),
+    (
+        Kind::FirstName,
+        &[
+            "first name",
+            "firstname",
+            "given name",
+            "forename",
+            "vorname",
+            "prénom",
+            "prenom",
+            "nombre de pila",
+            "nome proprio",
+            "primeiro nome",
+            "voornaam",
+        ],
+    ),
+    (
+        Kind::LastName,
+        &[
+            "last name",
+            "lastname",
+            "surname",
+            "family name",
+            "nachname",
+            "nom de famille",
+            "apellido",
+            "apellidos",
+            "cognome",
+            "sobrenome",
+            "achternaam",
+        ],
+    ),
+    (
+        Kind::FullName,
+        &[
+            "full name",
+            "fullname",
+            "display name",
+            "nombre completo",
+            "nome completo",
+            "nom complet",
+            "volledige naam",
+            "author",
+            "autor",
+            "auteur",
+            "autore",
+            "auteur",
+        ],
+    ),
+    (
+        Kind::Email,
+        &["email", "e mail", "mail", "correo", "courriel"],
+    ),
+    (
+        Kind::Phone,
+        &[
+            "phone",
+            "telephone",
+            "tel",
+            "mobile",
+            "cell",
+            "telefon",
+            "handy",
+            "téléphone",
+            "teléfono",
+            "telefono",
+            "telefone",
+            "celular",
+            "móvil",
+            "cellulare",
+            "telefoon",
+            "mobiel",
+        ],
+    ),
+    (
+        Kind::JobTitle,
+        &[
+            "job",
+            "job title",
+            "role",
+            "position",
+            "occupation",
+            "beruf",
+            "rolle",
+            "poste",
+            "fonction",
+            "métier",
+            "puesto",
+            "cargo",
+            "ruolo",
+            "professione",
+            "função",
+            "profissão",
+            "functie",
+            "beroep",
+        ],
+    ),
+    (
+        Kind::Department,
+        &[
+            "department",
+            "dept",
+            "team",
+            "division",
+            "abteilung",
+            "département",
+            "departamento",
+            "reparto",
+            "dipartimento",
+            "setor",
+            "afdeling",
+        ],
+    ),
+    (
+        Kind::Company,
+        &[
+            "company",
+            "organization",
+            "organisation",
+            "org",
+            "employer",
+            "business",
+            "firma",
+            "unternehmen",
+            "entreprise",
+            "société",
+            "empresa",
+            "compañía",
+            "azienda",
+            "società",
+            "bedrijf",
+            "organisatie",
+        ],
+    ),
+    (
+        Kind::Product,
+        &[
+            "product", "app name", "produkt", "produit", "producto", "prodotto", "produto",
+        ],
+    ),
+    (
+        Kind::Address,
+        &[
+            "address",
+            "adresse",
+            "anschrift",
+            "dirección",
+            "direccion",
+            "indirizzo",
+            "endereço",
+            "endereco",
+            "adres",
+        ],
+    ),
+    (
+        Kind::Street,
+        &[
+            "street", "straße", "strasse", "rue", "calle", "rua", "straat",
+        ],
+    ),
+    (
+        Kind::Postcode,
+        &[
+            "zip",
+            "zip code",
+            "postcode",
+            "postal code",
+            "postal",
+            "plz",
+            "postleitzahl",
+            "code postal",
+            "código postal",
+            "codice postale",
+            "cep",
+        ],
+    ),
+    (
+        Kind::City,
+        &[
+            "city", "town", "location", "stadt", "ort", "ville", "ciudad", "città", "citta",
+            "cidade", "stad", "plaats",
+        ],
+    ),
+    (
+        Kind::Country,
+        &[
+            "country", "land", "pays", "país", "pais", "paese", "nazione",
+        ],
+    ),
+    (
+        Kind::Price,
+        &[
+            "price", "cost", "amount", "total", "subtotal", "fee", "preis", "betrag", "prix",
+            "montant", "precio", "importe", "prezzo", "importo", "preço", "valor", "prijs",
+            "bedrag",
+        ],
+    ),
+    (
+        Kind::Percent,
+        &[
+            "percent",
+            "percentage",
+            "discount",
+            "prozent",
+            "pourcentage",
+            "porcentaje",
+            "percentuale",
+            "porcentagem",
+            "procent",
+        ],
+    ),
+    (
+        Kind::Date,
+        &[
+            "date", "day", "datum", "fecha", "due", "deadline", "birthday", "created", "updated",
+        ],
+    ),
+    (
+        Kind::Time,
+        &[
+            "time", "hour", "uhrzeit", "zeit", "heure", "hora", "ora", "tijd",
+        ],
+    ),
+    (
+        Kind::Number,
+        &[
+            "number",
+            "count",
+            "qty",
+            "quantity",
+            "views",
+            "followers",
+            "likes",
+            "score",
+            "anzahl",
+            "número",
+            "numero",
+            "aantal",
+        ],
+    ),
+    (
+        Kind::Headline,
+        &[
+            "headline", "title", "hero", "titel", "titre", "título", "titolo",
+        ],
+    ),
+    (
+        Kind::Sentence,
+        &[
+            "subtitle",
+            "subheading",
+            "subhead",
+            "tagline",
+            "caption",
+            "sentence",
+            "summary",
+            "teaser",
+            "excerpt",
+            "quote",
+        ],
+    ),
+    (
+        Kind::Paragraph,
+        &[
+            "paragraph",
+            "body",
+            "description",
+            "bio",
+            "copy",
+            "about",
+            "content",
+            "lorem",
+            "beschreibung",
+            "texte",
+            "descripción",
+            "descrizione",
+            "descrição",
+            "beschrijving",
+            "omschrijving",
+        ],
+    ),
+    (
+        Kind::FullName,
+        &[
+            "name", "nombre", "nom", "nome", "naam", "person", "contact", "customer",
+        ],
+    ),
+];
+
+/// The names that make a shape an avatar.
+const AVATAR_WORDS: &[&str] = &[
+    "avatar", "photo", "picture", "pic", "profile", "portrait", "headshot", "pfp", "foto", "bild",
+];
+
+/// A text layer's kind read from its name, or `None` when no rule matches.
+pub fn kind_from_name(name: &str) -> Option<Kind> {
+    let ws = words(name);
+    NAME_RULES
+        .iter()
+        .find(|(_, phrases)| phrases.iter().any(|p| has_phrase(&ws, p)))
+        .map(|(k, _)| *k)
+}
+
+/// Whether a shape's name makes it an avatar.
+pub fn is_avatar_name(name: &str) -> bool {
+    let ws = words(name);
+    AVATAR_WORDS.iter().any(|w| has_phrase(&ws, w))
+}
+
+static EMAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[^\s@]+@[^\s@]+$").unwrap());
+static PRICE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:R\$|\p{Sc})\s?[+-]?\d[\d.,\s\u{A0}\u{202F}]*$|^[+-]?\d[\d.,\s\u{A0}\u{202F}]*\s?\p{Sc}$")
+        .unwrap()
+});
+static PERCENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[+-]?\d[\d.,]*\s?\u{A0}?%$").unwrap());
+static TIME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{1,2}[:.]\d{2}(\s?[AaPp]\.?[Mm]\.?)?$").unwrap());
+static DATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}$|^\p{L}{3,9}\.? \d{1,2},? \d{4}$|^\d{1,2}\.? \p{L}{3,9}\.? \d{4}$",
+    )
+    .unwrap()
+});
+static PHONE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+?[\d\s().\-]{7,}$").unwrap());
+static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[+-]?\d[\d.,\s]*$").unwrap());
+
+/// A text layer's kind read from what it says: `@` is an email, a currency an
+/// amount, a run of digits a phone number. `None` when it reads as none of them.
+pub fn kind_from_text(text: &str) -> Option<Kind> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if t.to_lowercase().starts_with("lorem ipsum") {
+        return Some(Kind::Paragraph);
+    }
+    let digits = t.chars().filter(char::is_ascii_digit).count();
+    if EMAIL.is_match(t) {
+        Some(Kind::Email)
+    } else if PRICE.is_match(t) {
+        Some(Kind::Price)
+    } else if PERCENT.is_match(t) {
+        Some(Kind::Percent)
+    } else if TIME.is_match(t) {
+        Some(Kind::Time)
+    } else if DATE.is_match(t) {
+        Some(Kind::Date)
+    } else if PHONE.is_match(t) && digits >= 7 {
+        Some(Kind::Phone)
+    } else if NUMBER.is_match(t) {
+        Some(Kind::Number)
+    } else {
+        None
+    }
+}
+
+// --- drawing ------------------------------------------------------------------
+
+/// A splitmix64 stream: small, seedable and the same on every machine.
+struct Rng(u64);
+
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// FNV-1a over a string, for seeding from names and ids.
+fn hash_str(s: &str) -> u64 {
+    s.bytes().fold(0xCBF2_9CE4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01B3)
+    })
+}
+
+impl Rng {
+    fn new(parts: &[u64]) -> Self {
+        Rng(parts.iter().fold(0x9E37_79B9_7F4A_7C15, |h, p| {
+            mix(h ^ p.wrapping_add(0x9E37_79B9))
+        }))
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        mix(self.0)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        if n == 0 { 0 } else { self.next() % n }
+    }
+
+    fn range(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.below(hi.saturating_sub(lo) + 1)
+    }
+
+    fn pick<'a>(&mut self, xs: &'a [String]) -> &'a str {
+        match xs.len() {
+            0 => "",
+            n => &xs[self.below(n as u64) as usize],
+        }
+    }
+
+    fn chance(&mut self, one_in: u64) -> bool {
+        self.below(one_in) == 0
+    }
+}
+
+/// The letters `@` draws in a pattern: those a UK postcode's inward code uses.
+const LETTERS: &[u8] = b"ABDEFGHJLNPQRSTUWXYZ";
+
+/// A pattern filled: `#` a digit, `@` a capital, and a whole `lo..hi` a number in
+/// that range at `lo`'s width.
+fn fill_pattern(pattern: &str, rng: &mut Rng) -> String {
+    if let Some((lo, hi)) = pattern.split_once("..")
+        && let (Ok(a), Ok(b)) = (lo.parse::<u64>(), hi.parse::<u64>())
+    {
+        return format!("{:0width$}", rng.range(a, b), width = lo.len());
+    }
+    pattern
+        .chars()
+        .map(|c| match c {
+            '#' => char::from(b'0' + rng.below(10) as u8),
+            '@' => char::from(LETTERS[rng.below(LETTERS.len() as u64) as usize]),
+            c => c,
+        })
+        .collect()
+}
+
+/// `{key}` in `template` replaced by its value; an unknown key is left.
+fn render(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (k, v) in values {
+        out = out.replace(&format!("{{{k}}}"), v);
+    }
+    out
+}
+
+/// A name folded to what an email address or handle holds: lowercase ASCII
+/// letters and digits.
+fn ascii_fold(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.to_lowercase().chars() {
+        let folded = match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
+            'æ' => "ae",
+            'ç' => "c",
+            'è' | 'é' | 'ê' | 'ë' => "e",
+            'ì' | 'í' | 'î' | 'ï' | 'ı' => "i",
+            'ñ' => "n",
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
+            'œ' => "oe",
+            'ù' | 'ú' | 'û' | 'ü' => "u",
+            'ý' | 'ÿ' => "y",
+            'ß' => "ss",
+            'ł' => "l",
+            c if c.is_ascii_alphanumeric() => {
+                out.push(c);
+                continue;
+            }
+            _ => "",
+        };
+        out.push_str(folded);
+    }
+    out
+}
+
+/// `n` with the locale's thousands separator.
+fn grouped(n: u64, sep: &str) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push_str(sep);
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A record's person.
+#[derive(Clone, Debug)]
+struct Person {
+    given: String,
+    family: String,
+    /// Which of the address forms its email takes.
+    email_form: u64,
+}
+
+impl Person {
+    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
+        Person {
+            given: rng.pick(locale.list("given")).to_string(),
+            family: rng.pick(locale.list("family")).to_string(),
+            email_form: rng.below(3),
+        }
+    }
+
+    fn full(&self) -> String {
+        format!("{} {}", self.given, self.family)
+    }
+
+    /// The first letter of the given name and of the family name's last word
+    /// (*de Vries* → *V*).
+    fn initials(&self) -> String {
+        let first = |s: &str| {
+            s.chars()
+                .next()
+                .map(|c| c.to_uppercase().collect::<String>())
+        };
+        let family = self.family.split(' ').next_back().unwrap_or("");
+        [first(&self.given), first(family)]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    fn email(&self, domain: &str) -> String {
+        let given = ascii_fold(&self.given);
+        let family = ascii_fold(&self.family);
+        let local = match self.email_form {
+            0 => format!("{given}.{family}"),
+            1 => format!("{}.{family}", given.chars().next().unwrap_or('x')),
+            _ => given,
+        };
+        format!("{local}@{domain}")
+    }
+
+    fn username(&self) -> String {
+        let given = ascii_fold(&self.given);
+        format!(
+            "@{}{}",
+            given.chars().next().unwrap_or('x'),
+            ascii_fold(&self.family)
+        )
+    }
+}
+
+/// A record's address.
+#[derive(Clone, Debug)]
+struct Place {
+    street: String,
+    unit: Option<String>,
+    city: String,
+    region: String,
+    postcode: String,
+    area: String,
+    country: String,
+}
+
+impl Place {
+    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
+        let row = rng.pick(locale.list("cities")).to_string();
+        let mut cols = row.split('|');
+        let mut col = || cols.next().unwrap_or("").trim().to_string();
+        let (city, region, code, area) = (col(), col(), col(), col());
+        let house = locale.format("house");
+        let house = fill_pattern(if house.is_empty() { "1..120" } else { house }, rng);
+        let street = render(
+            locale.format("street"),
+            &[
+                ("no", &house),
+                ("street", rng.pick(locale.list("streets"))),
+                ("suffix", rng.pick(locale.list("suffixes"))),
+            ],
+        );
+        let unit = rng.chance(3).then(|| {
+            let no = rng.range(1, 12).to_string();
+            render(locale.format("unit"), &[("no2", &no)])
+        });
+        Place {
+            street,
+            unit,
+            city,
+            region,
+            postcode: fill_pattern(&code, rng),
+            area,
+            country: locale.format("country").to_string(),
+        }
+    }
+
+    fn address(&self, locale: &Locale) -> String {
+        let street = match &self.unit {
+            Some(u) => format!("{}, {u}", self.street),
+            None => self.street.clone(),
+        };
+        render(
+            locale.format("address"),
+            &[
+                ("street", &street),
+                ("city", &self.city),
+                ("region", &self.region),
+                ("postcode", &self.postcode),
+                ("country", &self.country),
+            ],
+        )
+        .split('|')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+
+    fn phone(&self, locale: &Locale, mobile: bool, rng: &mut Rng) -> String {
+        let pattern = match mobile {
+            true => locale.format("mobile"),
+            false => locale.format("phone"),
+        };
+        fill_pattern(&render(pattern, &[("area", &self.area)]), rng)
+    }
+}
+
+/// A company: its name, the legal form some records print, and its domain.
+#[derive(Clone, Debug)]
+struct Firm {
+    name: String,
+    legal: Option<String>,
+    domain: String,
+}
+
+impl Firm {
+    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
+        let name = format!(
+            "{}{}",
+            rng.pick(locale.list("company-a")),
+            rng.pick(locale.list("company-b"))
+        );
+        // One in three prints its legal form (*Northwind Inc.*).
+        let forms: Vec<String> = locale
+            .format("legal")
+            .split('|')
+            .map(str::to_string)
+            .collect();
+        let legal = rng
+            .chance(3)
+            .then(|| rng.pick(&forms).to_string())
+            .filter(|l| !l.is_empty());
+        let domain = format!("{}.{}", ascii_fold(&name), locale.format("tld"));
+        Firm {
+            name,
+            legal,
+            domain,
+        }
+    }
+
+    fn label(&self) -> String {
+        match &self.legal {
+            Some(l) => format!("{} {l}", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+fn product(locale: &Locale, rng: &mut Rng) -> String {
+    format!(
+        "{} {}",
+        rng.pick(locale.list("product-a")),
+        rng.pick(locale.list("product-b"))
+    )
+}
+
+/// What a record's values are drawn from.
+struct Drawn<'a> {
+    locale: &'a Locale,
+    person: Person,
+    place: Place,
+    firm: Firm,
+    /// The company the whole fill's emails share when the record names none.
+    domain: &'a str,
+    /// Whether the record has a company row, whose domain its emails then take.
+    own_firm: bool,
+}
+
+impl Drawn<'_> {
+    fn domain(&self) -> &str {
+        match self.own_firm {
+            true => &self.firm.domain,
+            false => self.domain,
+        }
+    }
+
+    /// One sentence from the bank, its slots filled from the record.
+    fn sentence(&self, rng: &mut Rng) -> String {
+        let product = product(self.locale, rng);
+        render(
+            rng.pick(self.locale.list("sentences")),
+            &[
+                ("company", &self.firm.name),
+                ("product", &product),
+                ("city", &self.place.city),
+                ("first", &self.person.given),
+            ],
+        )
+    }
+
+    /// A text kind's value. `mobile` asks a phone for a mobile number.
+    fn text(&self, kind: Kind, mobile: bool, rng: &mut Rng) -> String {
+        let l = self.locale;
+        match kind {
+            Kind::FullName => self.person.full(),
+            Kind::FirstName => self.person.given.clone(),
+            Kind::LastName => self.person.family.clone(),
+            Kind::Email => self.person.email(self.domain()),
+            Kind::Username => self.person.username(),
+            Kind::Phone => self.place.phone(l, mobile, rng),
+            Kind::JobTitle => rng.pick(l.list("jobs")).to_string(),
+            Kind::Department => rng.pick(l.list("departments")).to_string(),
+            Kind::Street => self.place.street.clone(),
+            Kind::City => self.place.city.clone(),
+            Kind::Postcode => self.place.postcode.clone(),
+            Kind::Country => self.place.country.clone(),
+            Kind::Address => self.place.address(l),
+            Kind::Company => self.firm.label(),
+            Kind::Product => product(l, rng),
+            Kind::Headline => rng.pick(l.list("headlines")).to_string(),
+            Kind::Sentence | Kind::Paragraph => self.sentence(rng),
+            Kind::Price => {
+                let whole = match rng.below(3) {
+                    0 => rng.range(2, 99),
+                    1 => rng.range(10, 999),
+                    _ => rng.range(100, 4999),
+                };
+                let cents = if rng.chance(2) { "00" } else { "99" };
+                let n = format!(
+                    "{}{}{cents}",
+                    grouped(whole, l.format("group")),
+                    l.format("decimal")
+                );
+                render(l.format("price"), &[("n", &n)])
+            }
+            Kind::Number => grouped(rng.range(1, 9999), l.format("group")),
+            Kind::Percent => render(l.format("percent"), &[("n", &rng.range(1, 99).to_string())]),
+            Kind::Date => {
+                let (y, m, d) = (rng.range(2025, 2027), rng.range(1, 12), rng.range(1, 28));
+                let months = l.list("months");
+                let mon = months.get(m as usize - 1).map_or("", String::as_str);
+                render(
+                    l.format("date"),
+                    &[
+                        ("d", &d.to_string()),
+                        ("dd", &format!("{d:02}")),
+                        ("mm", &format!("{m:02}")),
+                        ("mon", mon),
+                        ("yyyy", &y.to_string()),
+                    ],
+                )
+            }
+            Kind::Time => {
+                let h = rng.range(7, 20);
+                let m = rng.below(4) * 15;
+                let h12 = if h > 12 { h - 12 } else { h };
+                let ampm = if h >= 12 {
+                    l.format("pm")
+                } else {
+                    l.format("am")
+                };
+                render(
+                    l.format("time"),
+                    &[
+                        ("HH", &format!("{h:02}")),
+                        ("h12", &h12.to_string()),
+                        ("MM", &format!("{m:02}")),
+                        ("ampm", ampm),
+                    ],
+                )
+            }
+            Kind::Avatar => String::new(),
+        }
+    }
+}
+
+// --- fitting ------------------------------------------------------------------
+
+/// The room a text layer's box leaves.
+#[derive(Clone, Copy, Debug)]
+enum Room {
+    /// Auto width: the value takes its natural length.
+    Free,
+    /// One line of this width.
+    Line(f64),
+    /// Wraps and grows downward; a paragraph keeps about this many characters,
+    /// the length it has now.
+    Wrap(usize),
+    /// A fixed box this wide and tall.
+    Area(f64, f64),
+}
+
+/// The slack a measurement is allowed before a value counts as overflowing.
+const FIT_SLACK: f64 = 0.5;
+
+/// How many times a value is drawn before an overflow is accepted.
+const ATTEMPTS: u64 = 4;
+
+/// `kind`'s text parts with `text` in place of its content, styled as the first
+/// character was.
+fn with_text<R>(
+    kind: &NodeKind,
+    text: &str,
+    sizing: Option<TextSizing>,
+    f: impl FnOnce(TextRef<'_>) -> R,
+) -> Option<R> {
+    let NodeKind::Text {
+        content,
+        style,
+        spans,
+        para_spans,
+        paragraph,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    let base = TextRef::of(kind)?;
+    let spans = spans.replaced(0, content.len(), text.len(), style);
+    let para = para_spans.edited(0, content.len(), text.len(), paragraph);
+    let sizing = sizing.unwrap_or(*base.sizing);
+    Some(f(TextRef {
+        content: text,
+        spans: &spans,
+        para_spans: &para,
+        sizing: &sizing,
+        ..base
+    }))
+}
+
+fn room(kind: &NodeKind) -> Room {
+    let NodeKind::Text {
+        content, sizing, ..
+    } = kind
+    else {
+        return Room::Free;
+    };
+    // One line's height in this style, against which a box is one line or more.
+    let line = with_text(kind, "Xg", Some(TextSizing::Auto), |p| {
+        crate::text::measure(p).height()
+    })
+    .unwrap_or(0.0);
+    let height = |t: &str, w: f64| {
+        with_text(kind, t, Some(TextSizing::AutoHeight(w)), |p| {
+            crate::text::measure(p).height()
+        })
+        .unwrap_or(0.0)
+    };
+    match *sizing {
+        TextSizing::Auto => Room::Free,
+        TextSizing::AutoHeight(w) => {
+            match content.contains('\n') || height(content, w) > line * 1.5 {
+                true => Room::Wrap(content.chars().count()),
+                false => Room::Line(w),
+            }
+        }
+        TextSizing::Fixed(s) => match s.height >= line * 1.8 {
+            true => Room::Area(s.width, s.height),
+            false => Room::Line(s.width),
+        },
+    }
+}
+
+fn fits(kind: &NodeKind, room: Room, text: &str) -> bool {
+    match room {
+        Room::Free | Room::Wrap(..) => true,
+        Room::Line(w) => {
+            !text.contains('\n')
+                && with_text(kind, text, Some(TextSizing::Auto), |p| {
+                    crate::text::content_widths(p).1
+                })
+                .is_some_and(|width| width <= w + FIT_SLACK)
+        }
+        Room::Area(w, h) => with_text(kind, text, Some(TextSizing::AutoHeight(w)), |p| {
+            crate::text::measure(p).height()
+        })
+        .is_some_and(|height| height <= h + FIT_SLACK),
+    }
+}
+
+// --- avatars ------------------------------------------------------------------
+
+/// How an avatar is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AvatarStyle {
+    /// The record's initials, white on one of [`GROUNDS`].
+    #[default]
+    Initials,
+    /// Three shapes from [`GROUNDS`] on another of them.
+    Pattern,
+}
+
+impl AvatarStyle {
+    pub fn label(self) -> &'static str {
+        match self {
+            AvatarStyle::Initials => "Initials",
+            AvatarStyle::Pattern => "Pattern",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            AvatarStyle::Initials => "initials",
+            AvatarStyle::Pattern => "pattern",
+        }
+    }
+}
+
+/// The eight grounds an avatar is drawn on, each at least 4.5:1 against white so
+/// white initials read on any of them.
+pub const GROUNDS: [Color; 8] = [
+    Color::from_rgb8(0x24, 0x59, 0xC4),
+    Color::from_rgb8(0x0F, 0x76, 0x6E),
+    Color::from_rgb8(0x2F, 0x7A, 0x3B),
+    Color::from_rgb8(0x6D, 0x3F, 0xC0),
+    Color::from_rgb8(0xB0, 0x30, 0x6A),
+    Color::from_rgb8(0xC0, 0x39, 0x2B),
+    Color::from_rgb8(0xA8, 0x4B, 0x0A),
+    Color::from_rgb8(0x47, 0x55, 0x69),
+];
+
+/// An avatar for a person, seeded by the name, so the same person always gets
+/// the same picture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Avatar {
+    pub name: String,
+    pub initials: String,
+    pub style: AvatarStyle,
+}
+
+impl Avatar {
+    fn seed(&self) -> u64 {
+        hash_str(&self.name)
+    }
+
+    /// The ground it is drawn on.
+    pub fn ground(&self) -> Color {
+        GROUNDS[(self.seed() % GROUNDS.len() as u64) as usize]
+    }
+
+    /// The picture as filled paths over a `w`×`h` box, bottom first: the ground,
+    /// then the initials or the pattern's shapes.
+    pub fn art(&self, w: f64, h: f64) -> Vec<(BezPath, Color)> {
+        let ground = self.ground();
+        let mut out = vec![(Rect::new(0.0, 0.0, w, h).to_path(0.1), ground)];
+        let side = w.min(h);
+        match self.style {
+            AvatarStyle::Initials => {
+                let style = crate::TextStyle {
+                    font_size: side * 0.4,
+                    weight: 600,
+                    ..Default::default()
+                };
+                let (spans, para_spans) = (Default::default(), Default::default());
+                let (paragraph, block) = (Default::default(), Default::default());
+                let sizing = TextSizing::Auto;
+                let layout = crate::text::layout(TextRef {
+                    content: &self.initials,
+                    style: &style,
+                    spans: &spans,
+                    para_spans: &para_spans,
+                    paragraph: &paragraph,
+                    block: &block,
+                    sizing: &sizing,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                });
+                let mut ink = crate::text::outline(&layout);
+                let b = ink.bounding_box();
+                if b.width() > 0.0 {
+                    ink.apply_affine(kurbo::Affine::translate((
+                        w / 2.0 - b.center().x,
+                        h / 2.0 - b.center().y,
+                    )));
+                    out.push((ink, Color::WHITE));
+                }
+            }
+            AvatarStyle::Pattern => {
+                let mut rng = Rng::new(&[self.seed(), 7]);
+                let others: Vec<Color> = GROUNDS.into_iter().filter(|c| *c != ground).collect();
+                for i in 0..3u64 {
+                    let colour = others[rng.below(others.len() as u64) as usize];
+                    let (cx, cy) = (
+                        w * (rng.range(10, 90) as f64 / 100.0),
+                        h * (rng.range(10, 90) as f64 / 100.0),
+                    );
+                    let r = side * (rng.range(18, 40) as f64 / 100.0);
+                    let path = match (i + rng.below(3)) % 3 {
+                        0 => Circle::new((cx, cy), r).to_path(0.1),
+                        1 => {
+                            let mut p = Rect::new(cx - r, cy - r, cx + r, cy + r).to_path(0.1);
+                            let turn = rng.range(0, 90) as f64;
+                            p.apply_affine(kurbo::Affine::rotate_about(
+                                turn.to_radians(),
+                                (cx, cy),
+                            ));
+                            p
+                        }
+                        _ => {
+                            let mut p = BezPath::new();
+                            p.move_to((cx, cy - r));
+                            p.line_to((cx + r, cy + r * 0.8));
+                            p.line_to((cx - r, cy + r * 0.8));
+                            p.close_path();
+                            p
+                        }
+                    };
+                    out.push((path, colour));
+                }
+            }
+        }
+        out
+    }
+}
+
+// --- the plan -----------------------------------------------------------------
+
+/// What a fill is asked for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Options {
+    /// The locale's tag ([`Locale::tag`]).
+    pub locale: String,
+    /// One kind for every text layer, or `None` to read each from its name.
+    pub content: Option<Kind>,
+    /// Keep a record's values together.
+    pub records: bool,
+    /// How avatars are drawn, or `None` to leave avatar shapes out.
+    pub avatars: Option<AvatarStyle>,
+    /// The draw: the same seed gives the same values.
+    pub seed: u64,
+    /// A kind chosen for one layer, `None` meaning *Leave as is*, over the rest.
+    pub kinds: HashMap<NodeId, Option<Kind>>,
+    /// How many times each layer's value has been redrawn.
+    pub redraws: HashMap<NodeId, u64>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            locale: "en-US".into(),
+            content: None,
+            records: true,
+            avatars: Some(AvatarStyle::Initials),
+            seed: 0,
+            kinds: HashMap::new(),
+            redraws: HashMap::new(),
+        }
+    }
+}
+
+/// What a layer is given.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    /// Left as it is.
+    Kept,
+    Text(String),
+    Avatar(Avatar),
+}
+
+/// One layer of the fill.
+#[derive(Clone, Debug)]
+pub struct Row {
+    pub node: NodeId,
+    /// Its record, an index into [`Plan::records`].
+    pub record: usize,
+    /// What it is filled with; `None` is *Leave as is*.
+    pub kind: Option<Kind>,
+    /// What its name or text says it is, which *By layer name* gives it.
+    pub read: Option<Kind>,
+    /// Whether it is a shape (an avatar's place) rather than text.
+    pub shape: bool,
+    pub value: Value,
+    /// Whether the value fits its box; an overflow is kept after
+    /// [`ATTEMPTS`] draws.
+    pub fits: bool,
+}
+
+/// A group of rows whose values agree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Record {
+    /// The frame it is, or `None` for loose layers drawn together.
+    pub root: Option<NodeId>,
+}
+
+/// The fill [`plan`] makes.
+#[derive(Clone, Debug, Default)]
+pub struct Plan {
+    pub rows: Vec<Row>,
+    pub records: Vec<Record>,
+    /// Text or avatar layers skipped because they are locked.
+    pub locked: usize,
+}
+
+impl Plan {
+    /// The rows that change.
+    pub fn changes(&self) -> usize {
+        self.rows.iter().filter(|r| r.value != Value::Kept).count()
+    }
+
+    /// The rows left as they are.
+    pub fn left(&self) -> usize {
+        self.rows.len() - self.changes()
+    }
+
+    /// The frames that are records and have a row that changes: what *in 3
+    /// rows* counts.
+    pub fn filled_records(&self) -> Vec<NodeId> {
+        self.records
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                let root = r.root?;
+                self.rows
+                    .iter()
+                    .any(|row| row.record == i && row.value != Value::Kept)
+                    .then_some(root)
+            })
+            .collect()
+    }
+
+    /// What a record is called in the counts: the frames' shared name when they
+    /// share one word (*row*, *card*), else *record*. Singular.
+    pub fn record_noun(&self, doc: &Document) -> String {
+        let stems: HashSet<String> = self
+            .filled_records()
+            .iter()
+            .filter_map(|id| doc.get(*id))
+            .map(|n| stem(n.name()))
+            .collect();
+        match stems.into_iter().collect::<Vec<_>>().as_slice() {
+            [one] if !one.is_empty() && one.chars().all(char::is_alphabetic) => one.clone(),
+            _ => "record".to_string(),
+        }
+    }
+
+    /// The fill as one transaction. A text takes its new content styled as its
+    /// first character was; an avatar replaces the shape's fills with one picture
+    /// drawn at twice the shape's size through `pictures`, and is left out when
+    /// nothing is lent or it cannot draw.
+    pub fn transaction(
+        &self,
+        doc: &Document,
+        mut pictures: Option<&mut (dyn ImageSink + '_)>,
+    ) -> Transaction {
+        let mut ops = Vec::new();
+        let mut added = HashSet::new();
+        for row in &self.rows {
+            let Some(node) = doc.get(row.node) else {
+                continue;
+            };
+            match (&row.value, node.kind()) {
+                (
+                    Value::Text(text),
+                    NodeKind::Text {
+                        content,
+                        style,
+                        spans,
+                        para_spans,
+                        paragraph,
+                        ..
+                    },
+                ) => ops.push(Operation::SetText {
+                    id: row.node,
+                    content: text.clone(),
+                    spans: spans.replaced(0, content.len(), text.len(), style),
+                    para_spans: para_spans.edited(0, content.len(), text.len(), paragraph),
+                }),
+                (Value::Avatar(avatar), kind) => {
+                    let Some(sink) = pictures.as_deref_mut() else {
+                        continue;
+                    };
+                    let size = kind.box_size().unwrap_or(kurbo::Size::new(32.0, 32.0));
+                    let px = |v: f64| (v * 2.0).ceil().clamp(8.0, 2048.0);
+                    let (w, h) = (px(size.width), px(size.height));
+                    let Some((id, entry)) = sink.draw(w as u32, h as u32, &avatar.art(w, h)) else {
+                        continue;
+                    };
+                    if !doc.has_image(&id) && added.insert(id.clone()) {
+                        ops.push(Operation::AddImage {
+                            id: id.clone(),
+                            entry,
+                        });
+                    }
+                    ops.push(Operation::SetFills {
+                        id: row.node,
+                        fills: keyed_by_position([Fill {
+                            brush: crate::image_brush(id).into(),
+                            visible: true,
+                        }]),
+                    });
+                }
+                _ => {}
+            }
+        }
+        Transaction(ops)
+    }
+}
+
+/// A frame's name without its trailing number, lowercased: *Row 2* → *row*.
+fn stem(name: &str) -> String {
+    name.trim_end_matches(|c: char| c.is_ascii_digit() || c.is_whitespace() || "#-_".contains(c))
+        .trim()
+        .to_lowercase()
+}
+
+/// A layer the fill may write, found under the selection.
+struct Target {
+    node: NodeId,
+    shape: bool,
+    read: Option<Kind>,
+}
+
+fn is_container(kind: &NodeKind) -> bool {
+    matches!(kind, NodeKind::Artboard { .. } | NodeKind::Group)
+}
+
+/// Whether a layer is a shape the fill lists: a box whose fill a picture can
+/// replace (a frame only while empty), named as an avatar or showing a picture.
+fn is_shape_target(n: &crate::Node) -> bool {
+    let shape = match n.kind() {
+        NodeKind::Rect { .. }
+        | NodeKind::Ellipse { .. }
+        | NodeKind::Polygon { .. }
+        | NodeKind::Star { .. } => true,
+        NodeKind::Artboard { .. } => n.children().is_empty(),
+        _ => false,
+    };
+    shape && (is_avatar_name(n.name()) || n.paint().image_fill().is_some())
+}
+
+/// The text layers under `roots`, and the shapes named as avatars or showing a
+/// picture, in reading order (each parent's children first to last), with how
+/// many such layers were skipped as locked. Hidden layers and texts bound to a
+/// variable are passed over.
+fn gather(doc: &Document, roots: &[NodeId]) -> (Vec<Target>, usize) {
+    let roots = all_in_document_order(doc, &outermost(doc, roots));
+    let mut out = Vec::new();
+    let mut locked = 0;
+    for root in roots {
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = doc.get(id) else { continue };
+            if !doc.shown(id) {
+                continue;
+            }
+            let target = match n.kind() {
+                NodeKind::Text { content, .. }
+                    if n.text_vars()[crate::variable::TEXT_CONTENT].is_none() =>
+                {
+                    Some(Target {
+                        node: id,
+                        shape: false,
+                        read: kind_from_name(n.name()).or_else(|| kind_from_text(content)),
+                    })
+                }
+                _ if is_shape_target(n) => Some(Target {
+                    node: id,
+                    shape: true,
+                    read: is_avatar_name(n.name()).then_some(Kind::Avatar),
+                }),
+                _ => None,
+            };
+            if let Some(t) = target {
+                match is_effectively_locked(doc, id) {
+                    true => locked += 1,
+                    false => out.push(t),
+                }
+            }
+            stack.extend(n.children().iter().rev());
+        }
+    }
+    (out, locked)
+}
+
+/// The frames under `roots` that are records: each selected frame, and each
+/// child of a frame whose children repeat (two or more with one main, or one
+/// name and kind).
+fn record_roots(doc: &Document, roots: &[NodeId]) -> HashSet<NodeId> {
+    let mut out = HashSet::new();
+    for &root in roots {
+        let Some(n) = doc.get(root) else { continue };
+        if is_container(n.kind()) {
+            out.insert(root);
+        }
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = doc.get(id) else { continue };
+            let mut by_key: HashMap<String, Vec<NodeId>> = HashMap::new();
+            for &c in n.children() {
+                let Some(child) = doc.get(c) else { continue };
+                if !is_container(child.kind()) {
+                    continue;
+                }
+                stack.push(c);
+                let key = match main_of(doc, c) {
+                    Some(main) => format!("main:{main:?}"),
+                    None => format!(
+                        "{}:{}",
+                        stem(child.name()),
+                        matches!(child.kind(), NodeKind::Group)
+                    ),
+                };
+                by_key.entry(key).or_default().push(c);
+            }
+            out.extend(by_key.into_values().filter(|v| v.len() >= 2).flatten());
+        }
+    }
+    out
+}
+
+/// The nearest record frame above `id`, or `None` outside every one.
+fn record_of(doc: &Document, id: NodeId, roots: &HashSet<NodeId>) -> Option<NodeId> {
+    let mut at = doc.get(id).and_then(|n| n.parent());
+    while let Some(a) = at {
+        if roots.contains(&a) {
+            return Some(a);
+        }
+        at = doc.get(a).and_then(|n| n.parent());
+    }
+    None
+}
+
+/// The fill of the layers under `roots` that `opts` asks for. Read-only: the
+/// edit is [`Plan::transaction`].
+pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
+    let Some(locale) = locale_for(&opts.locale).or_else(|| locales().first()) else {
+        return Plan::default();
+    };
+    let (targets, locked) = gather(doc, roots);
+    // Each layer's kind: the one chosen for it, else the box's, else its own.
+    let mut rows: Vec<Row> = targets
+        .into_iter()
+        .filter(|t| !t.shape || opts.avatars.is_some())
+        .map(|t| {
+            let kind = match opts.kinds.get(&t.node) {
+                Some(chosen) => *chosen,
+                None if t.shape => t.read,
+                None => opts.content.filter(|k| k.is_text()).or(t.read),
+            };
+            Row {
+                node: t.node,
+                record: 0,
+                kind,
+                read: t.read,
+                shape: t.shape,
+                value: Value::Kept,
+                fits: true,
+            }
+        })
+        .collect();
+
+    // Records: a frame's layers draw together; loose layers under one parent
+    // draw together unless two of them want the same kind, when each is its own.
+    let mut records: Vec<Record> = Vec::new();
+    let mut index: HashMap<(Option<NodeId>, Option<NodeId>), usize> = HashMap::new();
+    let frames = match opts.records {
+        true => record_roots(doc, roots),
+        false => HashSet::new(),
+    };
+    let parent = |id: NodeId| doc.get(id).and_then(|n| n.parent());
+    let mut repeated: HashSet<Option<NodeId>> = HashSet::new();
+    if opts.records {
+        let mut seen: HashSet<(Option<NodeId>, Kind)> = HashSet::new();
+        for r in rows
+            .iter()
+            .filter(|r| record_of(doc, r.node, &frames).is_none())
+        {
+            if let Some(k) = r.kind
+                && !seen.insert((parent(r.node), k))
+            {
+                repeated.insert(parent(r.node));
+            }
+        }
+    }
+    for row in &mut rows {
+        let key = match record_of(doc, row.node, &frames) {
+            Some(frame) => (Some(frame), None),
+            None if opts.records && !repeated.contains(&parent(row.node)) => {
+                (None, parent(row.node))
+            }
+            None => (None, Some(row.node)),
+        };
+        row.record = *index.entry(key).or_insert_with(|| {
+            records.push(Record { root: key.0 });
+            records.len() - 1
+        });
+    }
+
+    // The company the fill's emails share when a record names none.
+    let shared = Firm::draw(locale, &mut Rng::new(&[opts.seed, 0xF1]));
+    let redraws = |id: NodeId| opts.redraws.get(&id).copied().unwrap_or(0);
+    for r in 0..records.len() {
+        let members: Vec<usize> = (0..rows.len()).filter(|i| rows[*i].record == r).collect();
+        let salt = |e: Entity| -> u64 {
+            members
+                .iter()
+                .filter(|i| rows[**i].kind.and_then(entity_of) == Some(e))
+                .map(|i| redraws(rows[*i].node))
+                .sum()
+        };
+        let own_firm = members.iter().any(|i| rows[*i].kind == Some(Kind::Company));
+        let rooms: Vec<Room> = members
+            .iter()
+            .map(|i| {
+                doc.get(rows[*i].node)
+                    .map_or(Room::Free, |n| room(n.kind()))
+            })
+            .collect();
+        let entity_rng = |e: Entity, attempt: u64| {
+            Rng::new(&[opts.seed, r as u64, e as u64 + 1, salt(e), attempt])
+        };
+        let mut drawn = Drawn {
+            locale,
+            person: Person::draw(locale, &mut entity_rng(Entity::Person, 0)),
+            place: Place::draw(locale, &mut entity_rng(Entity::Place, 0)),
+            firm: Firm::draw(locale, &mut entity_rng(Entity::Firm, 0)),
+            domain: &shared.domain,
+            own_firm,
+        };
+        // Each entity is redrawn until every row drawn from it fits its line.
+        for e in [Entity::Firm, Entity::Person, Entity::Place] {
+            for attempt in 0..ATTEMPTS {
+                match e {
+                    Entity::Person => {
+                        drawn.person = Person::draw(locale, &mut entity_rng(e, attempt))
+                    }
+                    Entity::Place => drawn.place = Place::draw(locale, &mut entity_rng(e, attempt)),
+                    Entity::Firm => drawn.firm = Firm::draw(locale, &mut entity_rng(e, attempt)),
+                }
+                let all_fit = members.iter().zip(&rooms).all(|(i, room)| {
+                    let row = &rows[*i];
+                    match row.kind.filter(|k| entity_of(*k) == Some(e) && k.is_text()) {
+                        Some(k) => doc.get(row.node).is_none_or(|n| {
+                            // The stream and form the row's own draw below takes.
+                            let mut rng = Rng::new(&[
+                                opts.seed,
+                                hash_str(&format!("{:?}", row.node)),
+                                redraws(row.node),
+                                0,
+                            ]);
+                            let text =
+                                for_room(drawn.text(k, is_mobile(n.name()), &mut rng), *room);
+                            fits(n.kind(), *room, &text)
+                        }),
+                        None => true,
+                    }
+                });
+                if all_fit {
+                    break;
+                }
+                if attempt + 1 == ATTEMPTS {
+                    match e {
+                        Entity::Person => {
+                            drawn.person = Person::draw(locale, &mut entity_rng(e, 0))
+                        }
+                        Entity::Place => drawn.place = Place::draw(locale, &mut entity_rng(e, 0)),
+                        Entity::Firm => drawn.firm = Firm::draw(locale, &mut entity_rng(e, 0)),
+                    }
+                }
+            }
+        }
+        for (i, room) in members.iter().zip(rooms) {
+            let row = &rows[*i];
+            let Some(kind) = row.kind else { continue };
+            let Some(node) = doc.get(row.node) else {
+                continue;
+            };
+            let node_seed = hash_str(&format!("{:?}", row.node));
+            let (value, ok) = if kind == Kind::Avatar {
+                match row.shape {
+                    true => (
+                        Value::Avatar(Avatar {
+                            name: drawn.person.full(),
+                            initials: drawn.person.initials(),
+                            style: opts.avatars.unwrap_or_default(),
+                        }),
+                        true,
+                    ),
+                    false => (Value::Kept, true),
+                }
+            } else if row.shape {
+                (Value::Kept, true)
+            } else {
+                let mobile = is_mobile(node.name());
+                let mut best: Option<(String, bool)> = None;
+                for attempt in 0..ATTEMPTS {
+                    let mut rng = Rng::new(&[opts.seed, node_seed, redraws(row.node), attempt]);
+                    let text = match kind {
+                        Kind::Paragraph => paragraph(&drawn, node.kind(), room, &mut rng),
+                        _ => for_room(drawn.text(kind, mobile, &mut rng), room),
+                    };
+                    let ok = fits(node.kind(), room, &text);
+                    if best.is_none() || ok {
+                        best = Some((text, ok));
+                    }
+                    // A value drawn from the record does not change with a redraw.
+                    if ok || entity_of(kind).is_some() || kind == Kind::Country {
+                        break;
+                    }
+                }
+                let (text, ok) = best.unwrap_or_default();
+                (Value::Text(text), ok)
+            };
+            rows[*i].value = value;
+            rows[*i].fits = ok;
+        }
+    }
+    Plan {
+        rows,
+        records,
+        locked,
+    }
+}
+
+/// A paragraph for `room`: sentences added while a fixed box has space, up to
+/// the length a growing box has now, or one where the width is the text's own.
+fn paragraph(drawn: &Drawn<'_>, kind: &NodeKind, room: Room, rng: &mut Rng) -> String {
+    let mut text = drawn.sentence(rng);
+    let mut used = HashSet::from([text.clone()]);
+    for _ in 0..24 {
+        let next = drawn.sentence(rng);
+        if !used.insert(next.clone()) {
+            continue;
+        }
+        let longer = format!("{text} {next}");
+        match room {
+            Room::Area(..) if fits(kind, room, &longer) => text = longer,
+            Room::Wrap(chars) if text.chars().count() < chars => text = longer,
+            _ => break,
+        }
+    }
+    text
+}
+
+/// Whether a phone layer's name asks for a mobile number.
+fn is_mobile(name: &str) -> bool {
+    const MOBILE: [&str; 7] = [
+        "mobile",
+        "cell",
+        "handy",
+        "móvil",
+        "cellulare",
+        "celular",
+        "mobiel",
+    ];
+    words(name).iter().any(|w| MOBILE.contains(&w.as_str()))
+}
+
+/// A value laid out for its room: a full address on one line reads with commas
+/// where its lines broke.
+fn for_room(text: String, room: Room) -> String {
+    match room {
+        Room::Line(_) if text.contains('\n') => text.replace('\n', ", "),
+        _ => text,
+    }
+}
+
+/// Whether anything under `roots` can be filled: a text layer, or a shape named
+/// as an avatar or showing a picture, that is shown and not locked. Stops at
+/// the first, since the doors ask every frame a menu is open.
+pub fn fillable(doc: &Document, roots: &[NodeId]) -> bool {
+    let mut stack: Vec<NodeId> = roots.to_vec();
+    while let Some(id) = stack.pop() {
+        let Some(n) = doc.get(id) else { continue };
+        if !doc.shown(id) {
+            continue;
+        }
+        let target = match n.kind() {
+            NodeKind::Text { .. } => n.text_vars()[crate::variable::TEXT_CONTENT].is_none(),
+            _ => is_shape_target(n),
+        };
+        if target && !is_effectively_locked(doc, id) {
+            return true;
+        }
+        stack.extend(n.children());
+    }
+    false
+}
+
+/// The locale the text layers under `roots` that set a Language agree on, or
+/// `None` when they disagree, one names a locale not shipped, or none sets one.
+pub fn agreed_locale(doc: &Document, roots: &[NodeId]) -> Option<&'static Locale> {
+    let (targets, _) = gather(doc, roots);
+    let mut agreed: Option<&'static Locale> = None;
+    for t in targets.iter().filter(|t| !t.shape) {
+        let NodeKind::Text { style, .. } = doc.get(t.node)?.kind() else {
+            continue;
+        };
+        // A text without a Language says nothing; one in a locale not shipped
+        // disagrees with every shipped one.
+        let Some(tag) = style.locale.as_deref() else {
+            continue;
+        };
+        let l = locale_for(tag)?;
+        if agreed.is_some_and(|a| a.tag != l.tag) {
+            return None;
+        }
+        agreed = Some(l);
+    }
+    agreed
+}
+
+/// A sample of `kind` in `locale`, for the kind list's faint tail.
+pub fn sample(kind: Kind, locale: &str) -> String {
+    let Some(locale) = locale_for(locale) else {
+        return String::new();
+    };
+    let mut rng = Rng::new(&[1, kind as u64]);
+    let shared = Firm::draw(locale, &mut rng);
+    let drawn = Drawn {
+        locale,
+        person: Person::draw(locale, &mut rng),
+        place: Place::draw(locale, &mut rng),
+        firm: Firm::draw(locale, &mut rng),
+        domain: &shared.domain,
+        own_firm: false,
+    };
+    match kind {
+        Kind::Avatar => drawn.person.initials(),
+        Kind::Address => drawn.place.address(locale).replace('\n', ", "),
+        _ => drawn.text(kind, false, &mut rng),
+    }
+}

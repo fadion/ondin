@@ -202,9 +202,13 @@ it created. A verb never commits; its caller does, as every edit is committed.
 - **What core cannot do, a caller lends** (`verbs::Lent`, held in `Ctx`): `add_image` borrows an
   `svg_in::ImageSink` to hash and size a picture, `fix_contrast` a `contrast::Probe` to measure
   against a rendered backdrop (`ondin_export::contrast::Measurer`). A verb without its loan is
-  refused; `ondin run` lends both.
+  refused, but for `fill_content`, which fills the texts and leaves the avatars out; `ondin run`
+  lends both.
 - **`clean_up` is the *Clean up…* box's plan** (`clean_up::plan`, its rule in `app-canvas-chrome.md`,
   *Clean up*), one bool per rule plus `skip_locked`, over every non-draft page unless given `nodes`.
+- **`fill_content` is the *Fill with content…* box's plan** (`content_fill::plan`, its rule in
+  `app-canvas-chrome.md`, *Fill with content*) over `nodes`, with `locale`, `kind`, `records`,
+  `avatars` and `seed`; its avatars are drawn through `ImageSink::draw` on the lent sink.
 - **`duplicate` places as `Ctrl+D` does** (`build::duplicate_placements`: the outermost layers, each
   copy one step above its original) and takes its offset as `dx`/`dy`. The clone chain that repeats
   a moved duplicate's step is the app's session state, so the verb has none.

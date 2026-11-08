@@ -108,6 +108,19 @@ pub trait ImageSink {
         bytes: Vec<u8>,
         format: crate::image::ImageFormat,
     ) -> Option<(crate::image::ImageId, crate::image::ImageEntry)>;
+
+    /// Filled paths rasterised into a `width`×`height` picture and placed as
+    /// [`Self::place`] places one: how *Fill with content* makes an avatar. `None`
+    /// by default, for a host with no renderer, which leaves the avatar out.
+    fn draw(
+        &mut self,
+        width: u32,
+        height: u32,
+        art: &[(kurbo::BezPath, peniko::Color)],
+    ) -> Option<(crate::image::ImageId, crate::image::ImageEntry)> {
+        let _ = (width, height, art);
+        None
+    }
 }
 
 /// The four characters XML (and CSS `white-space: normal`) calls whitespace.

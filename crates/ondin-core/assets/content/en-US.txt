@@ -1,0 +1,368 @@
+# Fill with content: English (US). The format is read by `ondin_core::content_fill`.
+# `@key value` lines set a format; `[section]` lines start a list, one entry per line.
+# In a pattern, `#` is a digit and `@` a capital letter; `a..b` is a number range.
+
+@name English (US)
+@tag en-US
+@country United States
+@phone ({area}) 555-01##
+@mobile ({area}) 555-01##
+@date {mon} {d}, {yyyy}
+@time {h12}:{MM} {ampm}
+@am AM
+@pm PM
+@decimal .
+@group ,
+@price ${n}
+@percent {n}%
+@tld com
+@street {no} {street} {suffix}
+@unit Apt {no2}
+@address {street}|{city}, {region} {postcode}|{country}
+@legal Inc.|LLC|Co.
+
+[given]
+Maya
+Daniel
+Olivia
+James
+Sofia
+Ethan
+Grace
+Lucas
+Chloe
+Noah
+Priya
+Marcus
+Hannah
+Julian
+Aaliyah
+Owen
+Naomi
+Caleb
+Elena
+Isaac
+Ruby
+Mateo
+Leah
+Adrian
+Zoe
+Samuel
+Nora
+Theo
+Camila
+Dylan
+Avery
+Jordan
+Imani
+Kenji
+Rosa
+Victor
+Harper
+Miles
+Lily
+Gabriel
+
+[family]
+Okafor
+Kowalski
+Bennett
+Nguyen
+Ramirez
+Patel
+Thompson
+Brooks
+Sullivan
+Chen
+Carter
+Hayes
+Morales
+Fischer
+Reed
+Coleman
+Park
+Delgado
+Foster
+Hughes
+Price
+Bishop
+Warren
+Kim
+Alvarez
+Russell
+Grant
+Nakamura
+Shah
+Mitchell
+Owens
+Barnes
+Romero
+Holt
+Weaver
+Lin
+Dawson
+Cruz
+Harrington
+Sato
+
+[cities]
+# city|region|postcode|area code
+Portland|OR|97201..97239|503
+Seattle|WA|98101..98199|206
+San Francisco|CA|94102..94134|415
+Los Angeles|CA|90001..90089|213
+San Diego|CA|92101..92130|619
+Denver|CO|80201..80239|303
+Austin|TX|78701..78759|512
+Chicago|IL|60601..60661|312
+Minneapolis|MN|55401..55488|612
+Boston|MA|02108..02137|617
+New York|NY|10001..10282|212
+Brooklyn|NY|11201..11239|718
+Philadelphia|PA|19102..19154|215
+Atlanta|GA|30303..30363|404
+Nashville|TN|37201..37250|615
+Miami|FL|33101..33199|305
+Phoenix|AZ|85003..85054|602
+Salt Lake City|UT|84101..84152|801
+Madison|WI|53703..53726|608
+Raleigh|NC|27601..27617|919
+
+[streets]
+Alder
+Maple
+Cedar
+Willow
+Birch
+Elm
+Oak
+Pine
+Hawthorne
+Lincoln
+Washington
+Franklin
+Jefferson
+Madison
+Park
+Lake
+Hill
+River
+Spring
+Sunset
+Harbor
+Garfield
+Grand
+Mission
+Union
+
+[suffixes]
+St
+Ave
+Rd
+Blvd
+Ln
+Dr
+Way
+Pl
+Ct
+
+[months]
+Jan
+Feb
+Mar
+Apr
+May
+Jun
+Jul
+Aug
+Sep
+Oct
+Nov
+Dec
+
+[jobs]
+Product designer
+Engineering manager
+Software engineer
+Data analyst
+Marketing lead
+Head of product
+UX researcher
+Account executive
+Customer success manager
+Frontend developer
+Backend engineer
+Content strategist
+Brand designer
+Operations manager
+Financial analyst
+Recruiter
+Sales director
+Project manager
+Design lead
+Mobile developer
+Copywriter
+Office manager
+Chief of staff
+Support specialist
+Growth marketer
+QA engineer
+Solutions architect
+Community manager
+Illustrator
+HR partner
+
+[departments]
+Design
+Engineering
+Marketing
+Sales
+Finance
+Operations
+Support
+People
+Product
+Legal
+Research
+
+[company-a]
+North
+Blue
+Silver
+Bright
+Clear
+Stone
+Pine
+Iron
+Golden
+Red
+Summit
+Harbor
+Maple
+Swift
+Open
+Little
+True
+Wild
+Cedar
+Lumen
+
+[company-b]
+wind
+field
+leaf
+wave
+gate
+line
+works
+light
+path
+peak
+bridge
+stack
+craft
+yard
+hive
+point
+labs
+forge
+mark
+bay
+
+[product-a]
+Ledger
+Atlas
+Pulse
+Canvas
+Beacon
+Orbit
+Relay
+Harbor
+Compass
+Spark
+Folio
+Quill
+Signal
+Vault
+Tempo
+
+[product-b]
+Pro
+Plus
+Go
+One
+Studio
+Cloud
+Lite
+Max
+Hub
+Kit
+
+[headlines]
+Plan your week in five minutes
+Everything your team needs, in one place
+Work that moves at your pace
+Built for people who ship
+Your money, finally organized
+Meet the new way to collaborate
+Less busywork, more good work
+Simple tools for complex projects
+Bring your ideas to life
+Stay in sync, wherever you are
+The smarter way to run your day
+Start free, upgrade when you're ready
+Designed for focus
+Turn feedback into progress
+All your files, always within reach
+Make every meeting count
+Fast, friendly and secure
+Grow your business with confidence
+See what's next
+Join thousands of happy teams
+Small changes, big results
+Your weekend starts here
+Ideas worth sharing
+Get more done together
+Welcome back
+
+[sentences]
+Keep every project on track with shared boards, clear owners and gentle reminders.
+Invite your team in seconds and decide who can view, comment or edit.
+{product} brings your notes, files and conversations together in one calm place.
+We built {company} for small teams who would rather do the work than manage it.
+Your data is encrypted at rest and in transit, and it never leaves your account.
+Set a goal, break it into steps and watch the progress add up week by week.
+Changes save as you go, so nothing is lost when the connection drops.
+Start with a template or a blank page, and shape it to fit the way you work.
+Our support team answers within a day, and usually within the hour.
+Reports update on their own, so the numbers in Monday's meeting are always current.
+Connect the tools you already use and let the updates flow both ways.
+Every plan includes unlimited projects and a full history of every change.
+The mobile app works offline and syncs the moment you are back online.
+Teams in {city} and around the world use {product} to plan their week.
+Comments stay next to the work they are about, so nobody has to search for context.
+Try every feature free for thirty days, with no card required.
+You can export everything at any time, in formats other tools can read.
+Our pricing is simple: one flat rate per person, billed monthly or yearly.
+Dark mode, keyboard shortcuts and a fast search come built in.
+We review every request from customers and publish what we ship each month.
+Schedule posts ahead of time and see how each one performs.
+Share a link with clients so they can approve designs without signing up.
+Automatic backups run every night, and restoring one takes a single click.
+Track time against tasks and turn it into an invoice when the work is done.
+The dashboard shows what needs your attention first, and hides the rest.
+Organize files by project, tag them once and find them anywhere.
+Set working hours so notifications wait until you are ready for them.
+New members get a short tour and can be productive on their first day.
+Accessibility is part of every release, from contrast to screen readers.
+{company} was founded in {city} by a small group of designers and engineers.
+Move tasks between columns as they progress, and archive them when they are done.
+Each workspace has its own members, settings and billing.
+Our community forum is full of tips from people who use {product} every day.
+Integrations take minutes to set up and need no code at all.
+Plans can be changed or canceled at any time from your account page.
+Recurring tasks repeat on the schedule you choose, from daily to yearly.
+Every document keeps a history, so you can see who changed what and when.
+We send one short email a month, and you can unsubscribe at any time.
+Upload images, video and PDFs, and preview them without downloading.
+Reminders arrive on your phone, your desktop or both, as you prefer.

@@ -2459,6 +2459,72 @@ pub static VERBS: &[Verb] = &[
             ))
         },
     },
+    Verb {
+        name: "fill_content",
+        doc: "Fill text layers with realistic names, addresses, companies, text, numbers and \
+              dates, and avatar shapes with initials or a pattern",
+        params: &[
+            req(
+                "nodes",
+                NODES,
+                "the layers to fill, with every text layer under them",
+            ),
+            opt(
+                "locale",
+                TEXT,
+                "a shipped locale's tag (en-US, en-GB, de, fr, es, it, pt-BR, nl); the \
+                 layers' own Language when they agree, else en-US, unless given",
+            ),
+            opt(
+                "kind",
+                ParamKind::Choice(&crate::content_fill::KIND_KEYS),
+                "one kind for every text layer; each read from its name, then its text, \
+                 unless given",
+            ),
+            opt(
+                "records",
+                ParamKind::Bool,
+                "keep each frame's values together; on unless given",
+            ),
+            opt(
+                "avatars",
+                ParamKind::Choice(&["initials", "pattern", "none"]),
+                "how shapes named as avatars are drawn; initials unless given",
+            ),
+            opt(
+                "seed",
+                INDEX,
+                "the draw: one seed always fills the same values; 0 unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::content_fill::{self as fill, AvatarStyle, Kind, Options};
+            let nodes = a.nodes("nodes")?;
+            let locale = match a.text("locale") {
+                Some(tag) => fill::locale_for(tag)
+                    .ok_or_else(|| a.invalid("locale", "not one of the shipped locales"))?,
+                None => fill::agreed_locale(ctx.doc, &nodes)
+                    .or_else(|| fill::locales().first())
+                    .ok_or(VerbError::Nothing("no locale is shipped"))?,
+            };
+            let opts = Options {
+                locale: locale.tag.clone(),
+                content: a.choice("kind").and_then(Kind::from_key),
+                records: a.bool("records").unwrap_or(true),
+                avatars: match a.choice("avatars") {
+                    Some("pattern") => Some(AvatarStyle::Pattern),
+                    Some("none") => None,
+                    _ => Some(AvatarStyle::Initials),
+                },
+                seed: a.index("seed").unwrap_or(0) as u64,
+                ..Options::default()
+            };
+            let plan = fill::plan(ctx.doc, &nodes, &opts);
+            Ok(Done::edit(
+                plan.transaction(ctx.doc, ctx.images.as_deref_mut()),
+            ))
+        },
+    },
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",

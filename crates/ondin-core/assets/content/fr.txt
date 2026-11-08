@@ -1,0 +1,287 @@
+# Fill with content: French. `\uXXXX` in a value is that character.
+
+@name French
+@tag fr
+@country France
+@phone {area} ## ## ## ##
+@mobile 06 ## ## ## ##
+@date {dd}/{mm}/{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group
+@price {n} €
+@percent {n} %
+@tld fr
+@street {no} {suffix} {street}
+@unit Appartement {no2}
+@address {street}|{postcode} {city}|{country}
+@legal SAS|SARL|SA
+
+[given]
+Camille
+Lucas
+Léa
+Hugo
+Manon
+Louis
+Chloé
+Gabriel
+Inès
+Arthur
+Jade
+Raphaël
+Louise
+Jules
+Emma
+Nathan
+Sarah
+Théo
+Zoé
+Antoine
+Juliette
+Mathis
+Clara
+Maxime
+Yasmine
+Bastien
+Margaux
+Karim
+Elise
+Paul
+
+[family]
+Laurent
+Martin
+Bernard
+Dubois
+Thomas
+Robert
+Richard
+Petit
+Durand
+Leroy
+Moreau
+Simon
+Lefèvre
+Michel
+Garcia
+David
+Bertrand
+Roux
+Vincent
+Fournier
+Morel
+Girard
+André
+Mercier
+Blanc
+Guérin
+Boyer
+Chevalier
+Benali
+Faure
+
+[cities]
+# city|region|postcode|area code
+Paris||75001..75020|01
+Lyon||69001..69009|04
+Marseille||13001..13016|04
+Toulouse||31000..31500|05
+Bordeaux||33000..33800|05
+Nantes||44000..44300|02
+Lille||59000..59800|03
+Strasbourg||67000..67200|03
+Montpellier||34000..34090|04
+Rennes||35000..35700|02
+Nice||06000..06300|04
+Grenoble||38000..38100|04
+
+[streets]
+de la République
+Victor-Hugo
+des Lilas
+du Moulin
+de la Gare
+Pasteur
+des Écoles
+Jean-Jaurès
+de la Paix
+des Tilleuls
+du Château
+Gambetta
+de Verdun
+des Roses
+Saint-Martin
+
+[suffixes]
+rue
+avenue
+boulevard
+place
+impasse
+allée
+
+[months]
+janv.
+févr.
+mars
+avr.
+mai
+juin
+juil.
+août
+sept.
+oct.
+nov.
+déc.
+
+[jobs]
+Designer produit
+Ingénieure logiciel
+Responsable technique
+Analyste de données
+Responsable marketing
+Cheffe de projet
+Chercheur UX
+Commercial
+Chargée de clientèle
+Développeur front-end
+Rédactrice
+Graphiste
+Comptable
+Chargé de recrutement
+Responsable produit
+Directrice générale
+Assistant de direction
+Administrateur système
+Community manager
+Contrôleuse de gestion
+Acheteur
+Conseillère support
+
+[departments]
+Design
+Technique
+Marketing
+Ventes
+Finances
+Ressources humaines
+Achats
+Service client
+Produit
+Juridique
+
+[company-a]
+Nord
+Azur
+Argent
+Clair
+Pierre
+Pin
+Fer
+Or
+Rouge
+Sommet
+Port
+Vent
+Soleil
+Rivière
+Lumière
+Chêne
+
+[company-b]
+champ
+feuille
+vague
+porte
+ligne
+atelier
+chemin
+pont
+cour
+point
+labo
+forge
+maison
+source
+bois
+rive
+
+[product-a]
+Registre
+Atlas
+Pouls
+Toile
+Boussole
+Étincelle
+Dossier
+Signal
+Coffre
+Tempo
+Agenda
+Plume
+
+[product-b]
+Pro
+Plus
+Go
+Un
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Organisez votre semaine en cinq minutes
+Tout ce qu'il faut à votre équipe, au même endroit
+Travaillez à votre rythme
+Conçu pour ceux qui livrent
+Vos finances enfin en ordre
+Une nouvelle façon de collaborer
+Moins de paperasse, plus de bon travail
+Des outils simples pour des projets complexes
+Donnez vie à vos idées
+Restez synchronisés, où que vous soyez
+Une journée mieux organisée
+Commencez gratuitement
+Pensé pour la concentration
+Des retours qui font avancer
+Vos fichiers toujours à portée de main
+Des réunions qui comptent
+Rapide, simple et sûr
+Développez votre activité en confiance
+Découvrez la suite
+Bon retour parmi nous
+Ensemble, on va plus loin
+
+[sentences]
+Suivez chaque projet grâce à des tableaux partagés et des responsables bien identifiés.
+Invitez votre équipe en quelques secondes et choisissez qui peut lire, commenter ou modifier.
+{product} réunit vos notes, vos fichiers et vos échanges dans un seul endroit calme.
+Nous avons créé {company} pour les petites équipes qui préfèrent travailler plutôt que gérer.
+Vos données sont chiffrées au repos et en transit, et ne quittent jamais votre compte.
+Fixez un objectif, découpez-le en étapes et regardez les progrès s'accumuler.
+Les modifications sont enregistrées au fil de l'eau, rien ne se perd.
+Partez d'un modèle ou d'une page blanche et adaptez-la à votre façon de travailler.
+Notre équipe d'assistance répond dans la journée, souvent dans l'heure.
+Les rapports se mettent à jour tout seuls, les chiffres sont toujours justes.
+Connectez les outils que vous utilisez déjà et laissez les informations circuler.
+Chaque offre comprend des projets illimités et l'historique complet des modifications.
+L'application fonctionne hors ligne et se synchronise dès votre retour.
+Des équipes à {city} et partout dans le monde planifient leur semaine avec {product}.
+Les commentaires restent à côté du travail qu'ils concernent.
+Essayez toutes les fonctionnalités gratuitement pendant trente jours, sans carte bancaire.
+Vous pouvez tout exporter à tout moment, dans des formats lisibles par d'autres outils.
+Nos tarifs sont simples : un prix fixe par personne, au mois ou à l'année.
+Le mode sombre, les raccourcis clavier et une recherche rapide sont inclus.
+Des sauvegardes automatiques ont lieu chaque nuit et se restaurent en un clic.
+Le tableau de bord montre d'abord ce qui demande votre attention.
+Classez vos fichiers par projet et retrouvez-les partout.
+Les nouveaux membres suivent une courte visite et sont efficaces dès le premier jour.
+L'accessibilité fait partie de chaque version, du contraste aux lecteurs d'écran.
+{company} a été fondée à {city} par un petit groupe de designers et d'ingénieurs.
+Les intégrations se configurent en quelques minutes, sans une ligne de code.
+Vous pouvez changer d'offre ou résilier à tout moment depuis votre compte.
+Chaque document garde un historique de qui a modifié quoi, et quand.
+Nous envoyons un court courriel par mois, et vous pouvez vous désabonner à tout moment.
+Les rappels arrivent sur votre téléphone, votre ordinateur ou les deux.

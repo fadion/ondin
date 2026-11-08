@@ -1,0 +1,286 @@
+# Fill with content: Italian. `\uXXXX` in a value is that character.
+
+@name Italian
+@tag it
+@country Italia
+@phone {area} #### ####
+@mobile 3## ### ####
+@date {dd}/{mm}/{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group .
+@price {n} €
+@percent {n}%
+@tld it
+@street {suffix} {street} {no}
+@unit Interno {no2}
+@address {street}|{postcode} {city}|{country}
+@legal S.r.l.|S.p.A.
+
+[given]
+Giulia
+Francesco
+Sofia
+Alessandro
+Aurora
+Lorenzo
+Chiara
+Matteo
+Martina
+Leonardo
+Alice
+Andrea
+Giorgia
+Riccardo
+Sara
+Tommaso
+Elisa
+Davide
+Beatrice
+Marco
+Federica
+Simone
+Valentina
+Luca
+Noemi
+Gabriele
+Irene
+Samir
+Ludovica
+Pietro
+
+[family]
+Romano
+Rossi
+Russo
+Ferrari
+Esposito
+Bianchi
+Colombo
+Ricci
+Marino
+Greco
+Bruno
+Gallo
+Conti
+De Luca
+Mancini
+Costa
+Giordano
+Rizzo
+Lombardi
+Moretti
+Barbieri
+Fontana
+Santoro
+Mariani
+Rinaldi
+Caruso
+Ferrara
+Galli
+Martini
+Leone
+
+[cities]
+# city|region|postcode|area code
+Roma|RM|00118..00199|06
+Milano|MI|20121..20162|02
+Torino|TO|10121..10156|011
+Napoli|NA|80121..80147|081
+Bologna|BO|40121..40141|051
+Firenze|FI|50121..50145|055
+Genova|GE|16121..16167|010
+Venezia|VE|30121..30176|041
+Verona|VR|37121..37142|045
+Palermo|PA|90121..90151|091
+Bari|BA|70121..70132|080
+Padova|PD|35121..35143|049
+
+[streets]
+Roma
+Garibaldi
+Mazzini
+Dante
+dei Mille
+Verdi
+Cavour
+della Libertà
+dei Tigli
+del Sole
+Manzoni
+XX Settembre
+delle Rose
+San Marco
+Vittorio Emanuele
+
+[suffixes]
+Via
+Viale
+Corso
+Piazza
+Vicolo
+
+[months]
+gen
+feb
+mar
+apr
+mag
+giu
+lug
+ago
+set
+ott
+nov
+dic
+
+[jobs]
+Product designer
+Ingegnere del software
+Responsabile tecnico
+Analista dei dati
+Responsabile marketing
+Project manager
+Ricercatrice UX
+Commerciale
+Customer success manager
+Sviluppatore front-end
+Copywriter
+Grafica
+Contabile
+Recruiter
+Responsabile di prodotto
+Amministratrice delegata
+Assistente di direzione
+Sistemista
+Social media manager
+Controller
+Buyer
+Addetta al supporto
+
+[departments]
+Design
+Ingegneria
+Marketing
+Vendite
+Amministrazione
+Risorse umane
+Acquisti
+Assistenza clienti
+Prodotto
+Legale
+
+[company-a]
+Nord
+Blu
+Argento
+Chiaro
+Pietra
+Pino
+Ferro
+Oro
+Rosso
+Vetta
+Porto
+Vento
+Sole
+Fiume
+Luce
+Quercia
+
+[company-b]
+campo
+foglia
+onda
+porta
+linea
+bottega
+sentiero
+ponte
+corte
+punto
+lab
+fucina
+casa
+fonte
+monte
+riva
+
+[product-a]
+Registro
+Atlas
+Polso
+Tela
+Bussola
+Scintilla
+Cartella
+Segnale
+Cassa
+Ritmo
+Agenda
+Piuma
+
+[product-b]
+Pro
+Plus
+Go
+Uno
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Pianifica la tua settimana in cinque minuti
+Tutto ciò che serve al tuo team, in un solo posto
+Lavora al tuo ritmo
+Fatto per chi consegna
+Le tue finanze, finalmente in ordine
+Un nuovo modo di collaborare
+Meno burocrazia, più lavoro fatto bene
+Strumenti semplici per progetti complessi
+Dai vita alle tue idee
+Sempre allineati, ovunque tu sia
+Un modo più intelligente di organizzare la giornata
+Inizia gratis
+Pensato per la concentrazione
+Trasforma i commenti in progressi
+I tuoi file sempre a portata di mano
+Riunioni che contano
+Veloce, semplice e sicuro
+Fai crescere la tua attività con fiducia
+Scopri cosa c'è di nuovo
+Bentornato
+Insieme si va più lontano
+
+[sentences]
+Segui ogni progetto con bacheche condivise e responsabili chiari.
+Invita il tuo team in pochi secondi e decidi chi può vedere, commentare o modificare.
+{product} riunisce note, file e conversazioni in un unico posto tranquillo.
+Abbiamo creato {company} per i piccoli team che preferiscono lavorare piuttosto che gestire.
+I tuoi dati sono cifrati a riposo e in transito, e non lasciano mai il tuo account.
+Fissa un obiettivo, dividilo in passi e guarda i progressi crescere settimana dopo settimana.
+Le modifiche si salvano mentre lavori, così non si perde nulla.
+Parti da un modello o da una pagina bianca e adattala al tuo modo di lavorare.
+Il nostro supporto risponde in giornata, di solito entro un'ora.
+I report si aggiornano da soli, e i numeri della riunione del lunedì sono sempre giusti.
+Collega gli strumenti che usi già e lascia che le informazioni scorrano nei due sensi.
+Ogni piano include progetti illimitati e la cronologia completa delle modifiche.
+L'app funziona offline e si sincronizza appena torni in linea.
+Team a {city} e in tutto il mondo pianificano la settimana con {product}.
+I commenti restano accanto al lavoro a cui si riferiscono.
+Prova tutte le funzioni gratis per trenta giorni, senza carta di credito.
+Puoi esportare tutto in qualsiasi momento, in formati leggibili da altri strumenti.
+I nostri prezzi sono semplici: una tariffa fissa a persona, mensile o annuale.
+Modalità scura, scorciatoie da tastiera e una ricerca veloce sono già incluse.
+I backup automatici partono ogni notte e si ripristinano con un clic.
+La dashboard mostra prima ciò che richiede la tua attenzione.
+Organizza i file per progetto e ritrovali ovunque.
+I nuovi membri fanno un breve tour e sono operativi dal primo giorno.
+L'accessibilità fa parte di ogni versione, dal contrasto ai lettori di schermo.
+{company} è nata a {city} da un piccolo gruppo di designer e ingegneri.
+Le integrazioni si configurano in pochi minuti, senza scrivere codice.
+Puoi cambiare piano o disdirlo in qualsiasi momento dal tuo account.
+Ogni documento conserva la cronologia di chi ha cambiato cosa, e quando.
+Inviamo una breve email al mese, e puoi annullare l'iscrizione quando vuoi.
+I promemoria arrivano sul telefono, sul computer o su entrambi.

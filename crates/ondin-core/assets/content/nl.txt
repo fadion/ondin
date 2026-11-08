@@ -1,0 +1,287 @@
+# Fill with content: Dutch. `\uXXXX` in a value is that character.
+
+@name Dutch
+@tag nl
+@country Nederland
+@phone {area} ### ####
+@mobile 06 ########
+@date {dd}-{mm}-{yyyy}
+@time {HH}:{MM}
+@decimal ,
+@group .
+@price € {n}
+@percent {n}%
+@tld nl
+@street {street}{suffix} {no}
+@unit {no2}A
+@address {street}|{postcode} {city}|{country}
+@legal B.V.|N.V.
+
+[given]
+Daan
+Emma
+Sem
+Julia
+Lucas
+Tess
+Finn
+Sophie
+Levi
+Mila
+Noah
+Zoë
+Milan
+Sara
+Jesse
+Anna
+Thijs
+Lotte
+Bram
+Fleur
+Ruben
+Eva
+Lars
+Noor
+Stijn
+Isa
+Mohammed
+Yara
+Joris
+Femke
+
+[family]
+de Vries
+de Jong
+Jansen
+Bakker
+Visser
+Smit
+Meijer
+de Boer
+Mulder
+de Groot
+Bos
+Vos
+Peters
+Hendriks
+van Leeuwen
+Dekker
+Brouwer
+de Wit
+Dijkstra
+Smits
+de Graaf
+van der Meer
+Kok
+Jacobs
+de Haan
+Vermeulen
+van den Berg
+Willems
+Postma
+Kuipers
+
+[cities]
+# city|region|postcode|area code
+Amsterdam||10## @@|020
+Rotterdam||30## @@|010
+Den Haag||25## @@|070
+Utrecht||35## @@|030
+Eindhoven||56## @@|040
+Groningen||97## @@|050
+Tilburg||50## @@|013
+Nijmegen||65## @@|024
+Haarlem||20## @@|023
+Leiden||23## @@|071
+Maastricht||62## @@|043
+Zwolle||80## @@|038
+
+[streets]
+Linden
+Kerk
+Molen
+Beuken
+Eiken
+Heren
+Prinsen
+Stations
+Dorps
+Wilgen
+Rozen
+Zuid
+Oost
+Berken
+Haven
+
+[suffixes]
+straat
+laan
+weg
+gracht
+plein
+kade
+
+[months]
+jan
+feb
+mrt
+apr
+mei
+jun
+jul
+aug
+sep
+okt
+nov
+dec
+
+[jobs]
+Productontwerper
+Software-engineer
+Engineering manager
+Data-analist
+Marketingmanager
+Projectleider
+UX-onderzoeker
+Accountmanager
+Klantsuccesmanager
+Frontend-developer
+Copywriter
+Grafisch ontwerper
+Boekhouder
+Recruiter
+Productmanager
+Directeur
+Office manager
+Systeembeheerder
+Communitymanager
+Financieel controller
+Inkoper
+Supportmedewerker
+
+[departments]
+Design
+Engineering
+Marketing
+Verkoop
+Financiën
+HR
+Inkoop
+Klantenservice
+Product
+Juridisch
+
+[company-a]
+Noord
+Blauw
+Zilver
+Helder
+Steen
+Den
+IJzer
+Goud
+Rood
+Top
+Haven
+Wind
+Zon
+Rivier
+Licht
+Eik
+
+[company-b]
+veld
+blad
+golf
+poort
+lijn
+werk
+pad
+brug
+hof
+punt
+lab
+smederij
+huis
+bron
+bos
+kust
+
+[product-a]
+Grootboek
+Atlas
+Pols
+Doek
+Kompas
+Vonk
+Map
+Signaal
+Kluis
+Ritme
+Agenda
+Pen
+
+[product-b]
+Pro
+Plus
+Go
+Een
+Studio
+Cloud
+Lite
+Max
+
+[headlines]
+Plan je week in vijf minuten
+Alles wat je team nodig heeft, op één plek
+Werk in je eigen tempo
+Gemaakt voor mensen die leveren
+Eindelijk overzicht in je geldzaken
+Een nieuwe manier van samenwerken
+Minder gedoe, meer goed werk
+Eenvoudige tools voor complexe projecten
+Breng je ideeën tot leven
+Altijd in sync, waar je ook bent
+Een slimmere manier om je dag in te delen
+Begin gratis
+Ontworpen voor focus
+Van feedback naar vooruitgang
+Al je bestanden altijd binnen handbereik
+Vergaderingen die ertoe doen
+Snel, vriendelijk en veilig
+Laat je bedrijf met vertrouwen groeien
+Zie wat er komt
+Welkom terug
+Samen kom je verder
+
+[sentences]
+Houd elk project bij met gedeelde borden en duidelijke eigenaren.
+Nodig je team in een paar seconden uit en bepaal wie mag kijken, reageren of bewerken.
+{product} brengt je notities, bestanden en gesprekken samen op één rustige plek.
+We bouwden {company} voor kleine teams die liever werken dan beheren.
+Je gegevens worden versleuteld opgeslagen en verstuurd, en verlaten nooit je account.
+Stel een doel, deel het op in stappen en zie de voortgang week na week groeien.
+Wijzigingen worden onderweg opgeslagen, dus er gaat niets verloren.
+Begin met een sjabloon of een lege pagina en pas die aan op jouw manier van werken.
+Ons supportteam antwoordt binnen een dag, meestal binnen het uur.
+Rapporten werken zichzelf bij, dus de cijfers in het maandagoverleg kloppen altijd.
+Koppel de tools die je al gebruikt en laat de informatie twee kanten op stromen.
+Elk abonnement bevat onbeperkt projecten en de volledige geschiedenis van elke wijziging.
+De app werkt offline en synchroniseert zodra je weer online bent.
+Teams in {city} en de rest van de wereld plannen hun week met {product}.
+Opmerkingen staan naast het werk waar ze over gaan.
+Probeer alle functies dertig dagen gratis, zonder creditcard.
+Je kunt alles op elk moment exporteren, in formaten die andere tools kunnen lezen.
+Onze prijzen zijn eenvoudig: één vast bedrag per persoon, per maand of per jaar.
+Donkere modus, sneltoetsen en een snelle zoekfunctie zitten er standaard in.
+Elke nacht wordt er automatisch een back-up gemaakt, terugzetten kost één klik.
+Het dashboard laat eerst zien wat je aandacht nodig heeft.
+Orden bestanden per project en vind ze overal terug.
+Nieuwe leden krijgen een korte rondleiding en zijn op hun eerste dag productief.
+Toegankelijkheid hoort bij elke versie, van contrast tot schermlezers.
+{company} is in {city} opgericht door een kleine groep ontwerpers en ontwikkelaars.
+Koppelingen zijn in een paar minuten ingesteld en vragen geen code.
+Je kunt je abonnement altijd wijzigen of opzeggen vanuit je account.
+Elk document houdt bij wie wat wanneer heeft veranderd.
+We sturen één korte e-mail per maand, en je kunt je altijd afmelden.
+Herinneringen komen binnen op je telefoon, je computer of allebei.

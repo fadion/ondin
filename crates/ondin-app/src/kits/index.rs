@@ -178,12 +178,17 @@ pub(crate) struct Pixels {
 }
 
 impl Pixels {
-    /// As an egui texture named `name`.
+    /// As an egui texture named `name`. Pixels with no area become one clear
+    /// pixel: wgpu's default error handler panics on a zero-sized texture.
     pub(crate) fn texture(&self, ctx: &egui::Context, name: String) -> egui::TextureHandle {
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [self.width as usize, self.height as usize],
-            &self.rgba,
-        );
+        let image = if self.width == 0 || self.height == 0 {
+            egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT])
+        } else {
+            egui::ColorImage::from_rgba_unmultiplied(
+                [self.width as usize, self.height as usize],
+                &self.rgba,
+            )
+        };
         ctx.load_texture(name, image, egui::TextureOptions::LINEAR)
     }
 }

@@ -860,17 +860,21 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   winning, or a second package (Font Awesome's Solid and Regular). Iconify has no tags, so search
   ranks the name, then aliases. Photo services (`photos::SERVICES`): Unsplash and Pexels, each with
   the user's own key, and Openverse with none, searched only for licences allowing commercial use
-  and modification. Every request runs on the module's workers, with the font service's deadlines;
-  thumbnails are kept for the session only. Nothing is on by default, and nothing reaches the
-  network until a set or service is switched on.
+  and modification. Every request runs on the module's workers, with the font service's deadlines.
+  A thumbnail is decoded through the insert's bounded decoder and fitted into 320 × 960 (an empty
+  one is refused: a zero-sized texture is fatal to wgpu); a first page landing releases the
+  thumbnails it does not show and forgets a failed one, which is then asked for again. Nothing is
+  on by default, and nothing reaches the network until a set or service is switched on.
 - **Keys** live in the system keychain (`keychain::read_account`, `store_account`,
   `forget_account`; account `<service>-key`, the Figma token's `figma-token` beside them), read and
   written on workers, and sent only in their own service's `Authorization` header. They are read
-  once a session, and only once a keyed service is on (a Linux store may ask to unlock); a write
+  once a session, and only once a keyed service is on (a Linux store may ask to unlock); searches
+  and reports take the session's keys, reading the keychain only while they are unread. A write
   is read back, so the panel and the form believe what the store kept, and a refused write is said
   in the status line. Unsplash's links carry its referral `utm_` parameters, and each Unsplash
-  download is reported to its `download_location` when the photo is fetched for an insert, never
-  for a preview — with the key only when that address is Unsplash's API, over https.
+  photo is reported to its `download_location` once its insert is committed, never for a preview
+  or a fetch that was replaced — with the key only when that address is Unsplash's API, over
+  https. A fetch replaced by another click or a document switch stops before its next download.
 - **The panel** (`panel.rs`) is a `ui::rail_popup` 340 wide, bottom-aligned with its rail button
   (`icon::ASSETS`, the top of the rail's foot: *Assets*, *Styles and variables*, *Insert
   components*). It is one of three panels in that place, with the insert picker and the styles
@@ -899,10 +903,12 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   `image_tx` for a photo); a flex frame's gap is not chosen. An icon is the SVG importer's group
   named after the icon, `size` points across, its `currentColor` written black, the ink of a new
   text layer. A photo is fetched at Settings' *Photo size* (Openverse serves only the original) and
-  embedded. With unlocked shapes or frames selected (not text, a line or a spiral, nor a part of
-  an inserted icon, whose one credit is the icon's), a photo's
+  embedded. With unlocked shapes or frames selected (not text, a line, a spiral or an arc, nor a
+  layer inside an inserted icon, whose one credit is the icon's), a photo's
   click fills them instead (the picture fill or top fill replaced, else a new fill), each a
-  different photo in grid order from the one clicked; a strip says
+  different photo in grid order from the one clicked. At landing a target that is no longer
+  fillable (locked meanwhile) is skipped, and a photo that failed to download leaves its target
+  as it was while the rest land (*Filled 2 layers · 1 photo could not be downloaded*); a strip says
   *Click fills Hero image*, and `Alt`-click places. Every insert is one undo step carrying its
   credit: *Insert icon*, *Insert photo*, *Fill with photo*. The status says *Placed Arrow right ·
   Ctrl+Z to undo*, or *Filled Hero image · Photo by … · Ctrl+Z to undo* (names through private

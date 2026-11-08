@@ -301,19 +301,27 @@ fn photo_error_words(err: &PhotoError, service: &str) -> (String, String) {
     }
 }
 
-/// Whether a layer can take a photo as its fill: a shape or a frame, unlocked,
-/// and not part of an inserted icon — a layer holds one credit, and the photo's
-/// would take the place of the icon's (a CC BY set's attribution).
+/// Whether a layer can take a photo as its fill: a closed shape or a frame,
+/// unlocked, and not part of an inserted icon, on itself or an ancestor — a layer
+/// holds one credit, and the photo's would take the place of the icon's (a CC BY
+/// set's attribution) once the icon is ungrouped.
 fn fillable(doc: &ondin_core::Document, id: NodeId) -> bool {
+    let in_icon =
+        std::iter::successors(doc.get(id), |n| n.parent().and_then(|p| doc.get(p))).any(|n| {
+            n.credit()
+                .is_some_and(|c| c.kind == ondin_core::CreditKind::Icon)
+        });
     doc.get(id).is_some_and(|n| {
         n.kind().takes_paint()
             && !matches!(
                 n.kind(),
-                NodeKind::Text { .. } | NodeKind::Line { .. } | NodeKind::Spiral { .. }
+                NodeKind::Text { .. }
+                    | NodeKind::Line { .. }
+                    | NodeKind::Spiral { .. }
+                    | NodeKind::Arc { .. }
             )
-            && n.credit()
-                .is_none_or(|c| c.kind != ondin_core::CreditKind::Icon)
-    }) && !ondin_core::is_effectively_locked(doc, id)
+    }) && !in_icon
+        && !ondin_core::is_effectively_locked(doc, id)
 }
 
 impl OndinApp {
@@ -519,7 +527,8 @@ impl OndinApp {
         // Searches, after the frame: a later page joins the shown one.
         if let Some((q, svc, o)) = search {
             let page = self.asset_panel.as_ref().map_or(1, |p| p.page.max(1));
-            self.assets.search_photos(svc, &q, page, o);
+            self.assets
+                .search_photos(svc, &q, page, o, self.asset_keys.as_ref());
         }
         if new_prefs != self.prefs.assets {
             self.prefs.assets = new_prefs;
@@ -718,26 +727,37 @@ impl OndinApp {
             return;
         };
         let today = today();
+        // Each read keeps its slot, so a Fill's target is the one its photo was
+        // chosen for; a failed download leaves its slot empty and the rest land.
         let mut loaded = Vec::new();
-        for (photo, read) in fetch.photos.iter().zip(reads) {
+        let mut failed = None;
+        for read in reads {
             match read {
                 Ok((image, pixels)) => {
                     self.canvas.images_mut().adopt(&image.id, pixels);
-                    loaded.push((photo, image));
+                    loaded.push(Some(image));
                 }
                 Err(why) => {
-                    self.session.fail(why);
-                    return;
+                    failed.get_or_insert(why);
+                    loaded.push(None);
                 }
             }
         }
-        let Some((first, _)) = loaded.first() else {
+        let missed = loaded.iter().filter(|l| l.is_none()).count();
+        let Some(first) = fetch.photos.iter().zip(&loaded).find(|(_, l)| l.is_some()) else {
+            if let Some(why) = failed {
+                self.session.fail(why);
+            }
             return;
         };
-        let credit_line = first.credit(&today).text;
+        let credit_line = first.0.credit(&today).text;
+        let keys = self.asset_keys.clone();
         match fetch.intent {
             PhotoIntent::Place { at } => {
-                let (photo, image) = &loaded[0];
+                let (Some(photo), Some(Some(image))) = (fetch.photos.first(), loaded.first())
+                else {
+                    return;
+                };
                 let world = at.unwrap_or_else(|| self.viewport_centre());
                 let (mut tx, node) = self.image_tx(None, image, world);
                 tx.0.push(Operation::SetCredit {
@@ -746,6 +766,7 @@ impl OndinApp {
                 });
                 self.session.name_step("Insert photo", icon::IMAGE);
                 if self.commit_edit(tx) {
+                    self.assets.report_download(photo, keys.as_ref());
                     self.session.selection.set_one(node);
                     self.session.info(format!(
                         "Placed {} · {credit_line} · Ctrl+Z to undo",
@@ -757,7 +778,15 @@ impl OndinApp {
                 let mut ops = Vec::new();
                 let mut advanced = self.session.doc.clone();
                 let mut filled = Vec::new();
-                for ((photo, image), id) in loaded.iter().zip(&targets) {
+                let mut used = Vec::new();
+                for ((photo, image), id) in fetch.photos.iter().zip(&loaded).zip(&targets) {
+                    let Some(image) = image else {
+                        continue;
+                    };
+                    // Locked or otherwise changed while the photo downloaded.
+                    if !fillable(&advanced, *id) {
+                        continue;
+                    }
                     let Some(tx) = fill_tx(&advanced, *id, image) else {
                         continue;
                     };
@@ -769,6 +798,7 @@ impl OndinApp {
                     if advanced.apply(&tx).is_ok() {
                         ops.extend(tx.0);
                         filled.push(*id);
+                        used.push(photo);
                     }
                 }
                 if filled.is_empty() {
@@ -779,13 +809,20 @@ impl OndinApp {
                 self.session
                     .name_step("Fill with photo", icon::PAINT_BUCKET);
                 if self.commit_edit(Transaction(ops)) {
+                    for photo in used {
+                        self.assets.report_download(photo, keys.as_ref());
+                    }
                     let what = match filled.as_slice() {
                         [one] => crate::private::layer(&self.session.doc, *one).into_owned(),
                         many => ui::count(many.len(), "layer"),
                     };
-                    let said = match filled.len() {
-                        1 => format!("Filled {what} · {credit_line} · Ctrl+Z to undo"),
-                        _ => format!("Filled {what} · Ctrl+Z to undo"),
+                    let said = match (filled.len(), missed) {
+                        (1, 0) => format!("Filled {what} · {credit_line} · Ctrl+Z to undo"),
+                        (_, 0) => format!("Filled {what} · Ctrl+Z to undo"),
+                        (_, n) => format!(
+                            "Filled {what} · {} could not be downloaded · Ctrl+Z to undo",
+                            ui::count(n, "photo")
+                        ),
                     };
                     self.session.info(said);
                 }
@@ -1793,6 +1830,85 @@ mod tests {
         });
         app.reset_transient_state();
         assert!(app.assets.fetch.is_none() && app.assets.landed.is_none());
+    }
+
+    /// A path inside an inserted icon's group is no photo target either: filled,
+    /// then ungrouped, it would keep the photo's credit and drop the icon's.
+    /// flip: `fillable` testing the layer's own credit only → fails here.
+    #[test]
+    fn a_path_inside_an_icon_takes_no_photo() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let set = Arc::new(IconSet {
+            icons: vec![sets::Icon {
+                name: "bell".into(),
+                variant: 0,
+                body: r#"<path fill="currentColor" d="M0 0h32v32H0z"/>"#.into(),
+                view: [0.0, 0.0, 32.0, 32.0],
+                aliases: Vec::new(),
+            }],
+            grid: 32.0,
+        });
+        let hit = Hit {
+            spec: SetSpec::by_key("font-awesome").unwrap(),
+            set,
+            index: 0,
+        };
+        app.insert_icon(&hit, 24.0, None);
+        let group = app.session.selection.ids()[0];
+        let part = app.session.doc.get(group).unwrap().children()[0];
+        app.session.selection.set_one(part);
+        assert!(app.photo_targets().is_empty());
+    }
+
+    /// One failed download among three fills the other two targets and says how
+    /// many photos were missed; a target locked while its photo downloaded is
+    /// left alone.
+    /// flip: `land_asset_photos` without its `fillable` re-check → fails at "the
+    /// locked target keeps its fill".
+    #[test]
+    fn a_failed_or_locked_slot_leaves_the_rest_to_land() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let [a, b, c, d] = [0; 4].map(|_| rect(&mut app));
+        app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: d,
+            locked: true,
+        }]));
+        let png = crate::app::rgba_to_png(&[200u8; 8 * 6 * 4], (8, 6)).unwrap();
+        let ok = || {
+            crate::app::read_picture(png.clone(), None, Some("a coffee cup".into()))
+                .map_err(|_| String::new())
+        };
+        app.assets.landed = Some((
+            super::super::Fetch {
+                token: 1,
+                photos: vec![photo(); 4],
+                intent: PhotoIntent::Fill {
+                    targets: vec![a, b, c, d],
+                },
+            },
+            vec![
+                ok(),
+                Err("The photo could not be downloaded".into()),
+                ok(),
+                ok(),
+            ],
+        ));
+        app.land_asset_photos();
+        let imaged = |id| {
+            matches!(
+                app.session.doc.get(id).unwrap().paint().fills[0]
+                    .brush
+                    .literal(),
+                Some(ondin_core::Brush::Image(_))
+            )
+        };
+        assert!(imaged(a) && imaged(c), "the others land");
+        assert!(!imaged(b), "the failed slot keeps its fill");
+        assert!(!imaged(d), "the locked target keeps its fill");
+        let said = &app.session.status().text;
+        assert!(said.contains("1 photo could not be downloaded"), "{said}");
     }
 
     /// The panel shares its place: opening it closes the insert picker and the

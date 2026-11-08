@@ -4,7 +4,7 @@
 //! Settings. An icon set is downloaded once, whole, the first time it is needed,
 //! and kept in the machine's cache folder beside the web fonts, so it works
 //! offline afterwards. Photos are searched online each time, and their thumbnails
-//! are kept for the session only. Every request runs on [`WORKERS`] threads; the
+//! are kept while their search shows them. Every request runs on [`WORKERS`] threads; the
 //! frame loop reads what landed in [`Assets::pass`].
 
 pub(crate) mod panel;
@@ -17,6 +17,7 @@ use sets::{IconSet, SetSpec};
 use std::collections::HashMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 /// Where an Unsplash download is reported: the one address its key goes to
@@ -29,6 +30,9 @@ const MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// The widest a thumbnail is kept, in pixels: two columns of a 340-point panel
 /// at twice the scale.
 const THUMB_MAX_W: u32 = 320;
+/// The tallest a thumbnail is kept: a tile shows no more than a 1:3 portrait, and
+/// an unbounded height could pass the GPU's texture side.
+const THUMB_MAX_H: u32 = 3 * THUMB_MAX_W;
 
 /// Where an icon set stands.
 pub(crate) enum SetState {
@@ -78,6 +82,17 @@ enum Done {
         reads: Vec<Fetched>,
     },
     CacheSize(u64),
+    /// A download report went out; nothing to take.
+    Reported,
+}
+
+/// `service`'s key as the session holds it: `Some(None)` when the keychain was
+/// read and holds none, `None` while it is unread (the worker reads it then).
+fn session_key(
+    service: &ServiceSpec,
+    keys: Option<&std::collections::BTreeMap<String, String>>,
+) -> Option<Option<String>> {
+    keys.map(|k| k.get(service.key).cloned())
 }
 
 type Work = Box<dyn FnOnce() -> Done + Send>;
@@ -134,6 +149,9 @@ pub(crate) struct Assets {
     /// The photos being fetched for an insert; a second click replaces them.
     pub(crate) fetch: Option<Fetch>,
     fetch_seq: u64,
+    /// The token of the fetch still wanted, read by its worker between downloads;
+    /// 0 when none is.
+    fetch_live: Arc<AtomicU64>,
     /// Fetched photos waiting for the app to place them, one read per photo.
     pub(crate) landed: Option<(Fetch, Vec<Fetched>)>,
     cache_bytes: Option<u64>,
@@ -159,6 +177,7 @@ impl Default for Assets {
             more_asked: false,
             fetch: None,
             fetch_seq: 0,
+            fetch_live: Arc::default(),
             landed: None,
             cache_bytes: None,
             prefs_dirty: false,
@@ -279,14 +298,26 @@ fn load_set(
     read.map(Arc::new)
 }
 
-/// A picture's bytes decoded and shrunk to at most [`THUMB_MAX_W`] wide.
+/// A picture's bytes decoded through the app's bounded decoder (the insert's own)
+/// and fitted into [`THUMB_MAX_W`] × [`THUMB_MAX_H`]. `None` for what will not
+/// decode or has no area: a zero-sized texture is fatal to wgpu.
 fn thumb_pixels(bytes: &[u8]) -> Option<Pixels> {
-    let img = image::load_from_memory(bytes).ok()?;
-    let img = match img.width() > THUMB_MAX_W {
-        true => img.resize(THUMB_MAX_W, u32::MAX, image::imageops::FilterType::Triangle),
+    let format = crate::app::image_format_of(None, bytes)?;
+    let data = ondin_render::images::decode(bytes, format).ok()?;
+    let img = image::RgbaImage::from_raw(data.width, data.height, data.data.data().to_vec())?;
+    let rgba = match img.width() > THUMB_MAX_W || img.height() > THUMB_MAX_H {
+        true => image::DynamicImage::ImageRgba8(img)
+            .resize(
+                THUMB_MAX_W,
+                THUMB_MAX_H,
+                image::imageops::FilterType::Triangle,
+            )
+            .to_rgba8(),
         false => img,
     };
-    let rgba = img.to_rgba8();
+    if rgba.width() == 0 || rgba.height() == 0 {
+        return None;
+    }
     Some(Pixels {
         width: rgba.width(),
         height: rgba.height(),
@@ -392,15 +423,21 @@ impl Assets {
                     self.tiles.insert(key, tile);
                 }
                 Done::Thumb { url, pixels } => {
-                    let tile = match pixels {
+                    // One a new search swept while it was in flight is not kept.
+                    let Some(slot) = self.thumbs.get_mut(&url) else {
+                        continue;
+                    };
+                    *slot = match pixels {
                         Some(p) => Tile::Ready(p.texture(ctx, format!("asset-thumb-{url}"))),
                         None => Tile::Failed,
                     };
-                    self.thumbs.insert(url, tile);
                 }
                 Done::Photos { token, page } => {
                     if token == self.token {
                         let later = std::mem::take(&mut self.more_asked);
+                        if !later {
+                            self.sweep_thumbs(&page);
+                        }
                         self.photos = Some(match (self.photos.take(), page) {
                             // A later page joins the one shown, less any photo the
                             // provider's drift repeats; one that failed or came back
@@ -416,8 +453,21 @@ impl Assets {
                     }
                 }
                 Done::CacheSize(n) => self.cache_bytes = Some(n),
+                Done::Reported => {}
             }
         }
+    }
+
+    /// Keep only the thumbnails a newly landed first page shows, and those not
+    /// failed: textures of photos no longer shown are released, and a failed one
+    /// is asked for again when it shows again.
+    fn sweep_thumbs(&mut self, page: &Result<Page, PhotoError>) {
+        let shown: std::collections::HashSet<&str> = match page {
+            Ok(p) => p.photos.iter().map(|p| p.thumb.as_str()).collect(),
+            Err(_) => Default::default(),
+        };
+        self.thumbs
+            .retain(|url, tile| shown.contains(url.as_str()) && !matches!(tile, Tile::Failed));
     }
 
     /// The set by key, asked for if it is not loaded or loading: read from the
@@ -489,14 +539,16 @@ impl Assets {
     }
 
     /// Search `service` for `query`, page `page`: the first page replaces what is
-    /// shown, a later one joins it. The key is read from the keychain on the worker,
-    /// and sent to its own service only.
+    /// shown, a later one joins it. The key is the session's (`keys`, the
+    /// keychain's answer once read), else read from the keychain on the worker;
+    /// sent to its own service only.
     pub(crate) fn search_photos(
         &mut self,
         service: &'static ServiceSpec,
         query: &str,
         page: u32,
         orientation: photos::Orientation,
+        keys: Option<&std::collections::BTreeMap<String, String>>,
     ) {
         if page <= 1 {
             self.token += 1;
@@ -505,10 +557,13 @@ impl Assets {
         self.more_asked = page > 1;
         let token = self.token;
         let query = query.to_string();
+        let known = session_key(service, keys);
         self.run(Box::new(move || {
-            let key = service
-                .key_label
-                .and_then(|_| crate::keychain::read_account(&service.account()));
+            let key = known.unwrap_or_else(|| {
+                service
+                    .key_label
+                    .and_then(|_| crate::keychain::read_account(&service.account()))
+            });
             let page = photos::request(service, &query, page, orientation, key.as_deref())
                 .and_then(|(url, auth)| {
                     let body = get(&agent(), &url, auth.as_deref(), |_, _| {})
@@ -524,9 +579,9 @@ impl Assets {
         (self.photos.is_none() && self.token > 0) || self.more_asked
     }
 
-    /// Fetch `photos` at `size` for one insert, then report each download to its
-    /// service when it asks for that (Unsplash): at the insert, never on preview.
-    /// A fetch asked for meanwhile replaces this one, whose answer is dropped.
+    /// Fetch `photos` at `size` for one insert. A fetch asked for meanwhile, or
+    /// [`Assets::drop_fetch`], replaces this one: its worker stops before its next
+    /// download, and its answer is dropped.
     pub(crate) fn fetch_photos(
         &mut self,
         photos: Vec<Photo>,
@@ -535,7 +590,8 @@ impl Assets {
     ) {
         self.fetch_seq += 1;
         let token = self.fetch_seq;
-        let jobs: Vec<(String, Option<String>, Option<&'static ServiceSpec>, String)> = photos
+        self.fetch_live.store(token, Ordering::Relaxed);
+        let jobs: Vec<(String, String)> = photos
             .iter()
             .map(|p| {
                 let url = p.urls[match size {
@@ -544,12 +600,7 @@ impl Assets {
                     PhotoSize::Full => 2,
                 }]
                 .clone();
-                (
-                    url,
-                    p.report_url.clone(),
-                    ServiceSpec::by_key(p.service),
-                    p.layer_name(),
-                )
+                (url, p.layer_name())
             })
             .collect();
         self.fetch = Some(Fetch {
@@ -557,32 +608,58 @@ impl Assets {
             photos,
             intent,
         });
+        let live = Arc::clone(&self.fetch_live);
         self.run(Box::new(move || {
             let agent = agent();
-            let reads = jobs
-                .into_iter()
-                .map(|(url, report, service, name)| {
-                    let read = get(&agent, &url, None, |_, _| {})
+            let mut reads = Vec::with_capacity(jobs.len());
+            for (url, name) in jobs {
+                if live.load(Ordering::Relaxed) != token {
+                    break;
+                }
+                reads.push(
+                    get(&agent, &url, None, |_, _| {})
                         .map_err(|_| "The photo could not be downloaded".to_string())
                         .and_then(|bytes| {
                             crate::app::read_picture(bytes, None, Some(name))
                                 .map_err(|_| "The photo could not be read".to_string())
-                        });
-                    // The address comes from the API's answer: the key goes with
-                    // it only to the service's own API, over https.
-                    if read.is_ok()
-                        && let (Some(report), Some(service)) = (report, service)
-                        && service.key == "unsplash"
-                        && report.starts_with(UNSPLASH_API)
-                    {
-                        let key = crate::keychain::read_account(&service.account());
-                        let auth = key.map(|k| format!("Client-ID {}", k.trim()));
-                        let _ = get(&agent, &report, auth.as_deref(), |_, _| {});
-                    }
-                    read
-                })
-                .collect();
+                        }),
+                );
+            }
             Done::Fetched { token, reads }
+        }));
+    }
+
+    /// Forget the fetch in flight: its worker stops before its next download, and
+    /// what it brings is not placed.
+    pub(crate) fn drop_fetch(&mut self) {
+        self.fetch = None;
+        self.landed = None;
+        self.fetch_live.store(0, Ordering::Relaxed);
+    }
+
+    /// Tell the service a photo was used, when it asks for that (Unsplash):
+    /// called once the insert is committed, never on preview or download. The
+    /// address comes from the API's answer, so the key goes with it only to the
+    /// service's own API, over https.
+    pub(crate) fn report_download(
+        &mut self,
+        photo: &Photo,
+        keys: Option<&std::collections::BTreeMap<String, String>>,
+    ) {
+        let (Some(report), Some(service)) = (&photo.report_url, ServiceSpec::by_key(photo.service))
+        else {
+            return;
+        };
+        if service.key != "unsplash" || !report.starts_with(UNSPLASH_API) {
+            return;
+        }
+        let report = report.clone();
+        let known = session_key(service, keys);
+        self.run(Box::new(move || {
+            let key = known.unwrap_or_else(|| crate::keychain::read_account(&service.account()));
+            let auth = key.map(|k| format!("Client-ID {}", k.trim()));
+            let _ = get(&agent(), &report, auth.as_deref(), |_, _| {});
+            Done::Reported
         }));
     }
 
@@ -660,7 +737,7 @@ mod tests {
             licence_url: String::new(),
             report_url: None,
         };
-        a.search_photos(svc, "coffee", 1, photos::Orientation::Any);
+        a.search_photos(svc, "coffee", 1, photos::Orientation::Any, None);
         let first = Page {
             photos: vec![photo("a")],
             total: 2,
@@ -672,7 +749,7 @@ mod tests {
         });
         a.pass(&ctx);
         assert!(!a.searching(), "the fixture: the first page landed");
-        a.search_photos(svc, "coffee", 2, photos::Orientation::Any);
+        a.search_photos(svc, "coffee", 2, photos::Orientation::Any, None);
         assert!(a.searching(), "a later page in flight is a search");
         // The provider's drift repeats "a": it is not shown twice.
         let next = Page {
@@ -694,7 +771,7 @@ mod tests {
         assert!(shown.more);
 
         // A later page refused (an hourly limit) keeps the grid and stops paging.
-        a.search_photos(svc, "coffee", 3, photos::Orientation::Any);
+        a.search_photos(svc, "coffee", 3, photos::Orientation::Any, None);
         let _ = a.done_tx.send(Done::Photos {
             token: a.token,
             page: Err(PhotoError::Limited),
@@ -713,6 +790,104 @@ mod tests {
         let png = crate::app::rgba_to_png(&vec![200u8; 800 * 400 * 4], (800, 400)).unwrap();
         let p = thumb_pixels(&png).unwrap();
         assert_eq!((p.width, p.height), (THUMB_MAX_W, THUMB_MAX_W / 2));
+    }
+
+    /// A tall picture is fitted by its height too, and one decoding with no area
+    /// (a GIF whose screen is 0 wide) is refused: either would be a texture wgpu
+    /// rejects, and its default handler panics.
+    /// flip: `thumb_pixels` without the area check and its bounded decode →
+    /// fails at "no area".
+    #[test]
+    fn a_thumbnail_too_tall_or_empty_never_reaches_the_gpu() {
+        let png = crate::app::rgba_to_png(&vec![200u8; 100 * 4000 * 4], (100, 4000)).unwrap();
+        let p = thumb_pixels(&png).unwrap();
+        assert!(
+            p.height <= THUMB_MAX_H && p.width <= THUMB_MAX_W,
+            "{}×{}",
+            p.width,
+            p.height
+        );
+        // GIF89a, screen 0×5, one 1×1 frame.
+        let gif: &[u8] = &[
+            0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00, 0x00, 0x05, 0x00, 0x80, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+            0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+        ];
+        let raw = image::load_from_memory(gif).map(|i| (i.width(), i.height()));
+        assert_eq!(raw.ok(), Some((0, 5)), "the fixture: decodes with no width");
+        assert!(thumb_pixels(gif).is_none(), "no area");
+    }
+
+    /// A first page landing releases the thumbnails it does not show and forgets
+    /// a failed one it does, so that one is asked for again; one landing after
+    /// its sweep is dropped.
+    /// flip: drop `sweep_thumbs` from `Assets::pass` → fails at "released".
+    #[test]
+    fn a_new_search_sweeps_old_and_failed_thumbnails() {
+        let ctx = egui::Context::default();
+        let mut a = Assets::default();
+        let svc = ServiceSpec::by_key("openverse").unwrap();
+        let pixels = || Pixels {
+            rgba: vec![0; 4],
+            width: 1,
+            height: 1,
+        };
+        assert!(a.thumb("old").is_none() && a.thumb("again").is_none());
+        let _ = a.done_tx.send(Done::Thumb {
+            url: "old".into(),
+            pixels: Some(pixels()),
+        });
+        let _ = a.done_tx.send(Done::Thumb {
+            url: "again".into(),
+            pixels: None,
+        });
+        a.pass(&ctx);
+        assert!(a.thumb("old").is_some(), "the fixture: landed");
+        assert!(matches!(a.thumbs.get("again"), Some(Tile::Failed)));
+        a.thumb("late");
+
+        a.search_photos(svc, "tea", 1, photos::Orientation::Any, None);
+        let mut shown = Photo {
+            service: "openverse",
+            id: "1".into(),
+            size: None,
+            thumb: "again".into(),
+            urls: Default::default(),
+            title: String::new(),
+            author: String::new(),
+            author_url: String::new(),
+            page_url: String::new(),
+            licence: String::new(),
+            licence_url: String::new(),
+            report_url: None,
+        };
+        let other = shown.clone();
+        shown.id = "2".into();
+        let _ = a.done_tx.send(Done::Photos {
+            token: a.token,
+            page: Ok(Page {
+                photos: vec![other, shown],
+                total: 2,
+                more: false,
+            }),
+        });
+        a.pass(&ctx);
+        assert!(!a.thumbs.contains_key("old"), "released");
+        assert!(!a.thumbs.contains_key("again"), "the failed one forgotten");
+        assert!(a.thumb("again").is_none());
+        assert!(
+            matches!(a.thumbs.get("again"), Some(Tile::Pending)),
+            "asked again"
+        );
+        let _ = a.done_tx.send(Done::Thumb {
+            url: "late".into(),
+            pixels: Some(pixels()),
+        });
+        a.pass(&ctx);
+        assert!(
+            !a.thumbs.contains_key("late"),
+            "a swept thumbnail's landing is dropped"
+        );
     }
 
     /// An icon draws through the SVG importer at its own size.

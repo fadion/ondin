@@ -6402,8 +6402,7 @@ impl OndinApp {
         self.asset_panel = None;
         self.credits_open = false;
         // A photo asked for in the document left behind is not placed in this one.
-        self.assets.fetch = None;
-        self.assets.landed = None;
+        self.assets.drop_fetch();
         self.kit_placing = None;
         self.var_browser = None;
         self.var_complete = None;
@@ -7275,7 +7274,7 @@ pub(crate) fn rgba_to_png(rgba: &[u8], (w, h): (u32, u32)) -> Option<Vec<u8>> {
 
 /// Which of the four formats a picked file is. The bytes decide, as the decoder
 /// will; the extension answers only when the magic number says nothing.
-fn image_format_of(ext: Option<&str>, bytes: &[u8]) -> Option<ondin_core::ImageFormat> {
+pub(crate) fn image_format_of(ext: Option<&str>, bytes: &[u8]) -> Option<ondin_core::ImageFormat> {
     use ondin_core::ImageFormat as F;
     let sniffed = image::guess_format(bytes).ok();
     let by_ext = || match ext.map(str::to_ascii_lowercase).as_deref() {

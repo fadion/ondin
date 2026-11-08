@@ -141,12 +141,10 @@ impl OndinApp {
         }
     }
 
-    /// Whether any layer of the document carries a credit: what *Credits…* is
-    /// offered on. One whose licence asks for none opens the card on its note.
+    /// Whether any layer of the document carries a credit its licence asks to
+    /// show: what *Credits…* is offered on, since the card lists only those.
     pub(crate) fn has_credits(&self) -> bool {
-        let doc = &self.session.doc;
-        let pages: Vec<NodeId> = doc.page_ids().collect();
-        !credits_in(doc, &pages).is_empty()
+        !self.listed_credits().is_empty()
     }
 
     /// The credits the Credits card lists: every page's, those whose licence asks
@@ -192,8 +190,12 @@ impl OndinApp {
                 .show(ui, |ui| {
                     ui.set_width(W - 16.0);
                     if listed.is_empty() {
+                        // At the eyebrows' and notes' inset, level with the head.
                         ui.add_space(6.0);
-                        ui::empty_note(ui, NOTHING_OWED);
+                        ui.horizontal(|ui| {
+                            ui.add_space(6.0);
+                            ui::empty_note(ui, NOTHING_OWED);
+                        });
                     }
                     for kind in [CreditKind::Photo, CreditKind::Icon] {
                         let rows: Vec<&Listed> =
@@ -217,7 +219,7 @@ impl OndinApp {
                                 [one] => crate::private::layer(doc, *one).into_owned(),
                                 many => ui::count(many.len(), "layer"),
                             };
-                            let row = ui::MenuRow::new(glyph, &l.credit.text).accel(Some(&right));
+                            let row = ui::MenuRow::new(glyph, &l.credit.text).note(&right);
                             if ui::menu_row(ui, row, ROW_H).clicked() {
                                 select = Some(l.layers.clone());
                             }
@@ -249,7 +251,11 @@ impl OndinApp {
             match crate::settings::card_foot(
                 ui,
                 W,
-                "Click a row to select its layers",
+                if listed.is_empty() {
+                    ""
+                } else {
+                    "Click a row to select its layers"
+                },
                 &[("Close", ui::FieldButton::Off), ("Copy all", copy_state)],
                 listed.is_empty().then_some(NOTHING_OWED),
             ) {
@@ -309,5 +315,93 @@ mod tests {
         assert_eq!(day("2026-11-08"), "8 Nov 2026");
         assert_eq!(day("2026-13-08"), "2026-13-08");
         assert_eq!(day(""), "");
+    }
+
+    /// A credit line whose layer has a long name keeps half the row for its
+    /// sentence, both cut with an ellipsis.
+    /// flip: paint `menu_row`'s note uncut → fails at "the name is cut".
+    #[test]
+    fn a_long_layer_name_leaves_the_credit_its_half() {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let id = app.session.ids.mint();
+        let page = app.session.page;
+        let sentence = "Photo by Somebody With A Very Long Name Indeed on Unsplash";
+        let name = "A photo of a laptop on a wooden desk by the window, late at night";
+        let credit = Credit {
+            kind: CreditKind::Photo,
+            text: sentence.into(),
+            author: "x".into(),
+            author_url: String::new(),
+            provider: "Unsplash".into(),
+            provider_url: String::new(),
+            source_url: String::new(),
+            licence: "Unsplash License".into(),
+            licence_url: String::new(),
+            required: true,
+            inserted: String::new(),
+        };
+        app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some(name.into()),
+            },
+            Operation::SetCredit {
+                id,
+                credit: Some(Box::new(credit)),
+            },
+        ]));
+        app.canvas_rect =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 800.0));
+        app.credits_open = true;
+        let mut texts = Vec::new();
+        for _ in 0..2 {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.credits_ui(ui.ctx()),
+            );
+            texts = out
+                .shapes
+                .into_iter()
+                .filter_map(|s| match s.shape {
+                    egui::epaint::Shape::Text(t) => Some(t.galley),
+                    _ => None,
+                })
+                .collect();
+        }
+        let find = |text: &str| {
+            texts
+                .iter()
+                .find(|g| g.text() == text)
+                .unwrap_or_else(|| panic!("{text:?} is drawn"))
+        };
+        let (line, layer) = (find(sentence), find(name));
+        assert!(layer.elided, "the name is cut");
+        assert!(line.elided, "the fixture: the sentence is too long to fit");
+        let ends = |g: &egui::Galley| g.rows[0].row.glyphs.last().map(|g| g.chr);
+        assert_eq!(ends(line), Some('…'));
+        assert_eq!(ends(layer), Some('…'));
+        assert!(
+            line.size().x >= 0.9 * layer.size().x,
+            "the sentence keeps about the name's room: {} vs {}",
+            line.size().x,
+            layer.size().x
+        );
     }
 }

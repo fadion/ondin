@@ -511,16 +511,33 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         (Some(accel), _) => Some(crate::input::keys(accel)),
         (None, note) => note.map(std::borrow::Cow::Borrowed),
     };
+    // A note built from the user's text (a layer's name) is cut at half the row,
+    // so a long one cannot eat the label; chords never come near that.
+    let mut tail_cut = false;
     let accel_w = match tail {
         Some(tail) => {
-            let r = p.text(
-                egui::pos2(rect.right() - 8.0, rect.center().y),
-                egui::Align2::RIGHT_CENTER,
-                tail,
-                egui::FontId::proportional(CAPTION_PT),
+            let mut job = egui::text::LayoutJob::single_section(
+                tail.into_owned(),
+                egui::TextFormat::simple(egui::FontId::proportional(CAPTION_PT), accel_col),
+            );
+            job.wrap = egui::text::TextWrapping {
+                max_width: ((rect.width() - label_x - 8.0) / 2.0).max(0.0),
+                max_rows: 1,
+                break_anywhere: true,
+                overflow_character: Some('…'),
+            };
+            let galley = p.layout_job(job);
+            tail_cut = galley.elided;
+            let w = galley.size().x;
+            p.galley(
+                egui::pos2(
+                    rect.right() - 8.0 - w,
+                    rect.center().y - galley.size().y / 2.0,
+                ),
+                galley,
                 accel_col,
             );
-            r.width() + MENU_ACCEL_GAP
+            w + MENU_ACCEL_GAP
         }
         None => 0.0,
     };
@@ -546,10 +563,13 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         galley,
         label_col,
     );
-    if cut {
-        return resp.on_hover_text(row.label);
+    match (cut, tail_cut, row.note) {
+        (_, true, Some(note)) if row.accel.is_none() => {
+            resp.on_hover_text(format!("{} · {note}", row.label))
+        }
+        (true, ..) => resp.on_hover_text(row.label),
+        _ => resp,
     }
-    resp
 }
 
 /// Where a [`menu_row`]'s label starts after its glyph: the 8pt inset, the 15pt

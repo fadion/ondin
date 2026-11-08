@@ -212,11 +212,11 @@ impl OndinApp {
         let (name, _) = where_label(&path);
         match std::fs::write(&path, &tokens.json) {
             Ok(()) => self.session.info(match tokens.notes.len() {
-                0 => format!("Exported {name}"),
-                1 => format!("Exported {name} \u{b7} {}", tokens.notes[0]),
-                n => format!("Exported {name} \u{b7} {n} things left out or changed"),
+                0 => format!("Exported “{name}”"),
+                1 => format!("Exported “{name}” \u{b7} {}", tokens.notes[0]),
+                n => format!("Exported “{name}” \u{b7} {n} things left out or changed"),
             }),
-            Err(e) => self.session.info(format!("Could not write {name}: {e}")),
+            Err(e) => self.session.info(format!("Could not write “{name}”: {e}")),
         }
     }
 
@@ -231,7 +231,7 @@ impl OndinApp {
         let (name, _) = where_label(Path::new(&link.path));
         self.session.doc.set_tokens_link(None);
         self.session.mark_unsaved();
-        self.session.info(format!("Unlinked {name}"));
+        self.session.info(format!("Unlinked “{name}”"));
     }
 
     /// The linked file's review of what changed since it was last applied.
@@ -254,7 +254,7 @@ impl OndinApp {
         };
         match text {
             Ok(text) => self.open_tokens_text(path, text, true, from_link),
-            Err(e) => self.session.info(format!("Could not read {name}: {e}")),
+            Err(e) => self.session.info(format!("Could not read “{name}”: {e}")),
         }
     }
 
@@ -275,7 +275,7 @@ impl OndinApp {
             Ok(f) => f,
             Err(r) => {
                 self.session
-                    .info(format!("{name} is not design tokens: {r}"));
+                    .info(format!("“{name}” is not design tokens: {r}"));
                 return;
             }
         };
@@ -290,7 +290,7 @@ impl OndinApp {
             match dtcg_in::review(&self.session.doc, &file, into, &mut self.session.ids) {
                 Ok(r) => r,
                 Err(r) => {
-                    self.session.info(format!("{name} cannot be read: {r}"));
+                    self.session.info(format!("“{name}” cannot be read: {r}"));
                     return;
                 }
             };
@@ -385,13 +385,13 @@ impl OndinApp {
                     self.session.mark_unsaved();
                 }
                 if said.is_none() {
-                    said = Some(format!("Linked {name}"));
+                    said = Some(format!("Linked “{name}”"));
                 }
             }
         } else if same {
             self.session.doc.set_tokens_link(None);
             self.session.mark_unsaved();
-            said.get_or_insert_with(|| format!("Unlinked {name}"));
+            said.get_or_insert_with(|| format!("Unlinked “{name}”"));
         }
         self.tokens_watch.key = None;
         if let Some(s) = said {
@@ -1581,7 +1581,7 @@ mod tests {
         assert!(app.tokens_import.is_none());
         assert_eq!(
             app.session.status().text,
-            "tokens.json is not design tokens: a: a group or token must be an object"
+            "“tokens.json” is not design tokens: a: a group or token must be an object"
         );
     }
 }

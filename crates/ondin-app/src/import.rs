@@ -148,11 +148,13 @@ fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
     };
     outcome.unwrap_or_else(|why| {
         Read::Refused(match why {
-            SvgImport::TooDeep => format!("{name} is nested too deeply to read"),
-            SvgImport::Locked => format!("{name} is password-protected"),
-            SvgImport::TooLarge => format!("{name} draws shadings or pictures too large to read"),
+            SvgImport::TooDeep => format!("“{name}” is nested too deeply to read"),
+            SvgImport::Locked => format!("“{name}” is password-protected"),
+            SvgImport::TooLarge => {
+                format!("“{name}” draws shadings or pictures too large to read")
+            }
             SvgImport::Placed(_) | SvgImport::Unreadable => {
-                format!("{name} could not be read as {kind}")
+                format!("“{name}” could not be read as {kind}")
             }
         })
     })
@@ -467,7 +469,7 @@ impl OndinApp {
                     said.push(format!("Imported “{name}” — {made}"));
                     selected.extend_from_slice(self.session.selection.ids());
                 }
-                _ => failed.push(format!("{name} could not be read as {kind}")),
+                _ => failed.push(format!("“{name}” could not be read as {kind}")),
             }
         }
         if !failed.is_empty() {
@@ -542,9 +544,34 @@ mod tests {
             }
         };
         let pdf = read(b"%PDF-1.4 not really", &mut ids);
-        assert_eq!(pdf, "Logo.AI could not be read as PDF", "took the PDF arm");
+        assert_eq!(
+            pdf, "“Logo.AI” could not be read as PDF",
+            "took the PDF arm"
+        );
         let ps = read(b"%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator", &mut ids);
         assert!(ps.contains("re-save"), "{ps}");
+    }
+
+    /// A refused file's name is quoted, so the status line's chord respelling
+    /// leaves it as the user wrote it.
+    /// flip: `read_one`'s unreadable arm writing the name bare → fails at "kept".
+    #[test]
+    fn a_refused_file_keeps_its_name_on_a_mac() {
+        let mut ids = IdSource::new(1);
+        let parent = ids.mint();
+        let file = Incoming {
+            name: "Shift+Logo.svg".into(),
+            bytes: Some(Arc::from(&b"<svg"[..])),
+            path: None,
+        };
+        let Read::Refused(why) = read_one(file, &mut ids, parent) else {
+            panic!("the fixture is no SVG that parses");
+        };
+        assert_eq!(
+            crate::input::keys_for(&why, true),
+            why.as_str(),
+            "the name is kept"
+        );
     }
 
     /// The nodes on the document's first page.

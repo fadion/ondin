@@ -296,7 +296,7 @@ impl OndinApp {
         };
         if let Err(e) = crate::library::store::set_kit(&self.library.root, &entry, sharing) {
             self.session.fail(format!(
-                "Could not change {}: {e}",
+                "Could not change “{}”: {e}",
                 self.library.shown_entry(&entry)
             ));
             return;

@@ -1997,7 +1997,7 @@ impl OndinApp {
                 let tx = Transaction(var::remove_mode_ops(doc, mode));
                 self.session.name_step("Delete mode", icon::TRASH);
                 if self.commit_edit(tx) {
-                    self.session.info(format!("Deleted mode {name}"));
+                    self.session.info(format!("Deleted mode “{name}”"));
                 }
             }
         }

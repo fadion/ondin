@@ -2072,7 +2072,7 @@ impl OndinApp {
             (None, false, _) | (None, true, 0)
                 if written == 1 && name.is_some() && !crate::private::on() =>
             {
-                format!("Exported {}", name.unwrap_or_default())
+                format!("Exported “{}”", name.unwrap_or_default())
             }
             (None, false, _) | (None, true, 0) => export_count(written),
             (None, true, n) => format!("{} ({n} replaced)", export_count(written)),
@@ -4197,7 +4197,7 @@ mod export_all_scope_tests {
         app.settle_exports();
         let first = app.session.status().text.clone();
         assert!(
-            first.starts_with("Exported Icon"),
+            first.starts_with("Exported “Icon"),
             "the first run writes it, by name: {first:?}"
         );
         assert!(
@@ -4228,7 +4228,7 @@ mod export_all_scope_tests {
         app.settle_exports();
         let file = app.session.status().text.clone();
         assert_eq!(
-            file, "Exported named.png",
+            file, "Exported “named.png”",
             "a save-dialog destination names its file and not its folder"
         );
 
@@ -4347,7 +4347,7 @@ mod export_all_scope_tests {
             std::thread::yield_now();
         }
         assert!(
-            app.session.status().text.starts_with("Exported Icon"),
+            app.session.status().text.starts_with("Exported “Icon"),
             "the frame loop reports it: {:?}",
             app.session.status().text
         );

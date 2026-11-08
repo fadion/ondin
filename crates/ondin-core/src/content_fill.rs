@@ -193,6 +193,10 @@ pub enum Kind {
     Headline,
     Sentence,
     Paragraph,
+    /// A short third-person bio of the record's person.
+    Bio,
+    /// A customer's testimonial, in the first person.
+    Quote,
     Price,
     Number,
     Percent,
@@ -203,7 +207,7 @@ pub enum Kind {
 }
 
 /// Each kind's key, in [`Kind`]'s declaration order, which [`Kind::ALL`] keeps.
-pub const KIND_KEYS: [&str; 24] = [
+pub const KIND_KEYS: [&str; 26] = [
     "full_name",
     "first_name",
     "last_name",
@@ -222,6 +226,8 @@ pub const KIND_KEYS: [&str; 24] = [
     "headline",
     "sentence",
     "paragraph",
+    "bio",
+    "quote",
     "price",
     "number",
     "percent",
@@ -256,7 +262,7 @@ impl Group {
 
 impl Kind {
     /// Every kind, in the order the kind list shows them, grouped.
-    pub const ALL: [Kind; 24] = [
+    pub const ALL: [Kind; 26] = [
         Kind::FullName,
         Kind::FirstName,
         Kind::LastName,
@@ -275,6 +281,8 @@ impl Kind {
         Kind::Headline,
         Kind::Sentence,
         Kind::Paragraph,
+        Kind::Bio,
+        Kind::Quote,
         Kind::Price,
         Kind::Number,
         Kind::Percent,
@@ -303,6 +311,8 @@ impl Kind {
             Kind::Headline => "Headline",
             Kind::Sentence => "Sentence",
             Kind::Paragraph => "Paragraph",
+            Kind::Bio => "Bio",
+            Kind::Quote => "Quote",
             Kind::Price => "Price",
             Kind::Number => "Number",
             Kind::Percent => "Percent",
@@ -335,7 +345,9 @@ impl Kind {
                 Group::Place
             }
             Kind::Company | Kind::Product => Group::Company,
-            Kind::Headline | Kind::Sentence | Kind::Paragraph => Group::Text,
+            Kind::Headline | Kind::Sentence | Kind::Paragraph | Kind::Bio | Kind::Quote => {
+                Group::Text
+            }
             Kind::Price | Kind::Number | Kind::Percent | Kind::Date | Kind::Time => Group::Numbers,
             Kind::Avatar => Group::Image,
         }
@@ -391,7 +403,7 @@ fn has_phrase(ws: &[String], phrase: &str) -> bool {
 
 /// The phrases a text layer's name is read for, most specific first: *Job
 /// title* is a job before *title* is a headline, *Company name* a company before
-/// *name* is a person.
+/// *name* is a person, *Street address* a street before *address* is a whole one.
 const NAME_RULES: &[(Kind, &[&str])] = &[
     (
         Kind::Username,
@@ -451,7 +463,8 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
             "autor",
             "auteur",
             "autore",
-            "auteur",
+            "team member",
+            "member",
         ],
     ),
     (
@@ -465,7 +478,8 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
             "telephone",
             "tel",
             "mobile",
-            "cell",
+            "cell phone",
+            "cellphone",
             "telefon",
             "handy",
             "téléphone",
@@ -540,9 +554,23 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
         ],
     ),
     (
+        Kind::Price,
+        &[
+            "price", "cost", "amount", "total", "subtotal", "fee", "preis", "betrag", "prix",
+            "montant", "precio", "importe", "prezzo", "importo", "preço", "valor", "prijs",
+            "bedrag",
+        ],
+    ),
+    (
         Kind::Product,
         &[
             "product", "app name", "produkt", "produit", "producto", "prodotto", "produto",
+        ],
+    ),
+    (
+        Kind::Street,
+        &[
+            "street", "straße", "strasse", "rue", "calle", "rua", "straat",
         ],
     ),
     (
@@ -557,12 +585,6 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
             "endereço",
             "endereco",
             "adres",
-        ],
-    ),
-    (
-        Kind::Street,
-        &[
-            "street", "straße", "strasse", "rue", "calle", "rua", "straat",
         ],
     ),
     (
@@ -595,14 +617,6 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
         ],
     ),
     (
-        Kind::Price,
-        &[
-            "price", "cost", "amount", "total", "subtotal", "fee", "preis", "betrag", "prix",
-            "montant", "precio", "importe", "prezzo", "importo", "preço", "valor", "prijs",
-            "bedrag",
-        ],
-    ),
-    (
         Kind::Percent,
         &[
             "percent",
@@ -617,15 +631,28 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
         ],
     ),
     (
-        Kind::Date,
-        &[
-            "date", "day", "datum", "fecha", "due", "deadline", "birthday", "created", "updated",
-        ],
-    ),
-    (
         Kind::Time,
         &[
             "time", "hour", "uhrzeit", "zeit", "heure", "hora", "ora", "tijd",
+        ],
+    ),
+    (
+        Kind::Date,
+        &[
+            "date",
+            "day",
+            "datum",
+            "fecha",
+            "due",
+            "deadline",
+            "birthday",
+            "born",
+            "dob",
+            "created",
+            "updated",
+            "joined",
+            "published",
+            "posted",
         ],
     ),
     (
@@ -663,7 +690,39 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
             "summary",
             "teaser",
             "excerpt",
+        ],
+    ),
+    (
+        Kind::Bio,
+        &[
+            "bio",
+            "biography",
+            "about me",
+            "biografie",
+            "biographie",
+            "biografía",
+            "biografia",
+        ],
+    ),
+    (
+        Kind::Quote,
+        &[
             "quote",
+            "testimonial",
+            "review",
+            "zitat",
+            "citation",
+            "témoignage",
+            "cita",
+            "testimonio",
+            "reseña",
+            "citazione",
+            "testimonianza",
+            "recensione",
+            "citação",
+            "depoimento",
+            "citaat",
+            "recensie",
         ],
     ),
     (
@@ -672,7 +731,6 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
             "paragraph",
             "body",
             "description",
-            "bio",
             "copy",
             "about",
             "content",
@@ -694,9 +752,17 @@ const NAME_RULES: &[(Kind, &[&str])] = &[
     ),
 ];
 
-/// The names that make a shape an avatar.
-const AVATAR_WORDS: &[&str] = &[
-    "avatar", "photo", "picture", "pic", "profile", "portrait", "headshot", "pfp", "foto", "bild",
+/// The words that make a shape an avatar wherever they stand in its name.
+const AVATAR_WORDS: &[&str] = &["avatar", "headshot", "pfp", "portrait"];
+
+/// The words that make a shape an avatar only when every word of its name is
+/// one of these or [`AVATAR_FILLER`]: *Profile picture* is one, *Profile header
+/// bg* is not.
+const AVATAR_WEAK: &[&str] = &["photo", "picture", "pic", "profile", "foto", "bild"];
+
+/// The words an avatar's name may carry beside [`AVATAR_WEAK`].
+const AVATAR_FILLER: &[&str] = &[
+    "user", "author", "member", "person", "account", "image", "img",
 ];
 
 /// A text layer's kind read from its name, or `None` when no rule matches.
@@ -711,7 +777,37 @@ pub fn kind_from_name(name: &str) -> Option<Kind> {
 /// Whether a shape's name makes it an avatar.
 pub fn is_avatar_name(name: &str) -> bool {
     let ws = words(name);
-    AVATAR_WORDS.iter().any(|w| has_phrase(&ws, w))
+    let is = |list: &[&str], w: &String| list.contains(&w.as_str());
+    ws.iter().any(|w| is(AVATAR_WORDS, w))
+        || (ws.iter().any(|w| is(AVATAR_WEAK, w))
+            && ws
+                .iter()
+                .all(|w| is(AVATAR_WEAK, w) || is(AVATAR_FILLER, w)))
+}
+
+/// Whether a layer's name only repeats its text, as an importer names every
+/// text layer. Such a name may be a placeholder's (*Name* in a card) or a
+/// label's (*Email* over a field), so it is read with care.
+fn named_like_text(name: &str, content: &str) -> bool {
+    let named = words(name);
+    !named.is_empty() && named == words(content)
+}
+
+/// A text layer's kind: read from its name, then from its text. A name that
+/// only repeats a text of three words or fewer is not read as a paragraph,
+/// sentence, bio or quote: *About* in a nav bar and *Copy link* on a button are
+/// labels, not body copy.
+pub fn kind_of_text_layer(name: &str, content: &str) -> Option<Kind> {
+    let long = |k: &Kind| {
+        matches!(
+            k,
+            Kind::Paragraph | Kind::Sentence | Kind::Bio | Kind::Quote
+        )
+    };
+    let short_label = named_like_text(name, content) && words(content).len() <= 3;
+    kind_from_name(name)
+        .filter(|k| !(short_label && long(k)))
+        .or_else(|| kind_from_text(content))
 }
 
 static EMAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[^\s@]+@[^\s@]+$").unwrap());
@@ -810,13 +906,47 @@ impl Rng {
     fn chance(&mut self, one_in: u64) -> bool {
         self.below(one_in) == 0
     }
+
+    /// An entry of `xs` that `taken` does not hold, while one is left: the
+    /// drawn one, or the next free one after it. Always one draw, so the
+    /// stream stays in step whatever is taken.
+    fn pick_fresh<'a>(&mut self, xs: &'a [String], taken: &HashSet<String>) -> &'a str {
+        let n = xs.len();
+        if n == 0 {
+            return "";
+        }
+        let start = self.below(n as u64) as usize;
+        (0..n)
+            .map(|k| xs[(start + k) % n].as_str())
+            .find(|x| !taken.contains(*x))
+            .unwrap_or(&xs[start])
+    }
+}
+
+/// What the records drawn before take from each list, by the list's name, so a
+/// later record passes over them while its list has others.
+type Taken = HashMap<&'static str, HashSet<String>>;
+
+/// The entries a draw took, by list, for [`Taken`].
+type Picks = Vec<(&'static str, String)>;
+
+/// `taken`'s entries of `list`, with those `picks` already holds.
+fn taken_with(taken: &Taken, picks: &Picks, list: &str) -> HashSet<String> {
+    let mut out = taken.get(list).cloned().unwrap_or_default();
+    out.extend(
+        picks
+            .iter()
+            .filter(|(l, _)| *l == list)
+            .map(|(_, v)| v.clone()),
+    );
+    out
 }
 
 /// The letters `@` draws in a pattern: those a UK postcode's inward code uses.
 const LETTERS: &[u8] = b"ABDEFGHJLNPQRSTUWXYZ";
 
-/// A pattern filled: `#` a digit, `@` a capital, and a whole `lo..hi` a number in
-/// that range at `lo`'s width.
+/// A pattern filled: `#` a digit, `&` a digit but 0, `@` a capital, and a whole
+/// `lo..hi` a number in that range at `lo`'s width.
 fn fill_pattern(pattern: &str, rng: &mut Rng) -> String {
     if let Some((lo, hi)) = pattern.split_once("..")
         && let (Ok(a), Ok(b)) = (lo.parse::<u64>(), hi.parse::<u64>())
@@ -827,10 +957,29 @@ fn fill_pattern(pattern: &str, rng: &mut Rng) -> String {
         .chars()
         .map(|c| match c {
             '#' => char::from(b'0' + rng.below(10) as u8),
+            '&' => char::from(b'1' + rng.below(9) as u8),
             '@' => char::from(LETTERS[rng.below(LETTERS.len() as u64) as usize]),
             c => c,
         })
         .collect()
+}
+
+/// Whom a gendered entry agrees with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Gender {
+    Female,
+    Male,
+}
+
+/// An entry written `masculine|feminine` in the form `gender` takes, or the
+/// entry itself when it has one form. A person the locale gives no gender
+/// takes the first.
+fn gendered(entry: &str, gender: Option<Gender>) -> &str {
+    match (entry.split_once('|'), gender) {
+        (Some((_, f)), Some(Gender::Female)) => f,
+        (Some((m, _)), _) => m,
+        (None, _) => entry,
+    }
 }
 
 /// `{key}` in `template` replaced by its value; an unknown key is left.
@@ -889,17 +1038,48 @@ fn grouped(n: u64, sep: &str) -> String {
 struct Person {
     given: String,
     family: String,
+    /// `None` where the locale lists its given names ungendered.
+    gender: Option<Gender>,
     /// Which of the address forms its email takes.
     email_form: u64,
+    /// Which of the handle forms its username takes.
+    handle_form: u64,
+    /// The two digits a handle may end in.
+    handle_no: u64,
 }
 
 impl Person {
-    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
+    /// A person whose given and family names no earlier record took, while the
+    /// lists have others. A locale lists given names as `given-f` and `given-m`,
+    /// or ungendered as `given`.
+    fn draw(locale: &Locale, rng: &mut Rng, taken: &Taken) -> Self {
+        let none = HashSet::new();
+        let given_taken = taken.get("given").unwrap_or(&none);
+        let (female, male) = (locale.list("given-f"), locale.list("given-m"));
+        let (given, gender) = match female.is_empty() || male.is_empty() {
+            true => (rng.pick_fresh(locale.list("given"), given_taken), None),
+            false => match rng.chance(2) {
+                true => (rng.pick_fresh(female, given_taken), Some(Gender::Female)),
+                false => (rng.pick_fresh(male, given_taken), Some(Gender::Male)),
+            },
+        };
         Person {
-            given: rng.pick(locale.list("given")).to_string(),
-            family: rng.pick(locale.list("family")).to_string(),
+            given: given.to_string(),
+            family: rng
+                .pick_fresh(locale.list("family"), taken.get("family").unwrap_or(&none))
+                .to_string(),
+            gender,
             email_form: rng.below(3),
+            handle_form: rng.below(5),
+            handle_no: rng.range(10, 99),
         }
+    }
+
+    fn picks(&self) -> Picks {
+        vec![
+            ("given", self.given.clone()),
+            ("family", self.family.clone()),
+        ]
     }
 
     fn full(&self) -> String {
@@ -934,17 +1114,23 @@ impl Person {
 
     fn username(&self) -> String {
         let given = ascii_fold(&self.given);
-        format!(
-            "@{}{}",
-            given.chars().next().unwrap_or('x'),
-            ascii_fold(&self.family)
-        )
+        let family = ascii_fold(&self.family);
+        let initial = |s: &str| s.chars().next().unwrap_or('x');
+        match self.handle_form {
+            0 => format!("@{}{family}", initial(&given)),
+            1 => format!("@{given}{family}"),
+            2 => format!("@{given}.{family}"),
+            3 => format!("@{given}_{}", initial(&family)),
+            _ => format!("@{given}{}", self.handle_no),
+        }
     }
 }
 
 /// A record's address.
 #[derive(Clone, Debug)]
 struct Place {
+    /// Its row of the `cities` list, which [`Taken`] holds.
+    row: String,
     street: String,
     unit: Option<String>,
     city: String,
@@ -955,8 +1141,12 @@ struct Place {
 }
 
 impl Place {
-    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
-        let row = rng.pick(locale.list("cities")).to_string();
+    /// A place in a city no earlier record took, while the list has others.
+    fn draw(locale: &Locale, rng: &mut Rng, taken: &Taken) -> Self {
+        let none = HashSet::new();
+        let row = rng
+            .pick_fresh(locale.list("cities"), taken.get("cities").unwrap_or(&none))
+            .to_string();
         let mut cols = row.split('|');
         let mut col = || cols.next().unwrap_or("").trim().to_string();
         let (city, region, code, area) = (col(), col(), col(), col());
@@ -975,6 +1165,7 @@ impl Place {
             render(locale.format("unit"), &[("no2", &no)])
         });
         Place {
+            row,
             street,
             unit,
             city,
@@ -983,6 +1174,10 @@ impl Place {
             area,
             country: locale.format("country").to_string(),
         }
+    }
+
+    fn picks(&self) -> Picks {
+        vec![("cities", self.row.clone())]
     }
 
     fn address(&self, locale: &Locale) -> String {
@@ -1007,12 +1202,16 @@ impl Place {
         .join("\n")
     }
 
+    /// A number in the city's area. A format may list alternatives split by `|`,
+    /// as a locale whose numbers reserved for fiction come in several blocks does.
     fn phone(&self, locale: &Locale, mobile: bool, rng: &mut Rng) -> String {
-        let pattern = match mobile {
+        let format = match mobile {
             true => locale.format("mobile"),
             false => locale.format("phone"),
         };
-        fill_pattern(&render(pattern, &[("area", &self.area)]), rng)
+        let blocks: Vec<String> = format.split('|').map(str::to_string).collect();
+        let pattern = rng.pick(&blocks).to_string();
+        fill_pattern(&render(&pattern, &[("area", &self.area)]), rng)
     }
 }
 
@@ -1025,12 +1224,22 @@ struct Firm {
 }
 
 impl Firm {
-    fn draw(locale: &Locale, rng: &mut Rng) -> Self {
-        let name = format!(
-            "{}{}",
-            rng.pick(locale.list("company-a")),
-            rng.pick(locale.list("company-b"))
-        );
+    /// A company no earlier record named, after a few tries.
+    fn draw(locale: &Locale, rng: &mut Rng, taken: &Taken) -> Self {
+        let named = |rng: &mut Rng| {
+            format!(
+                "{}{}",
+                rng.pick(locale.list("company-a")),
+                rng.pick(locale.list("company-b"))
+            )
+        };
+        let mut name = named(rng);
+        for _ in 0..8 {
+            if !taken.get("firm").is_some_and(|t| t.contains(&name)) {
+                break;
+            }
+            name = named(rng);
+        }
         // One in three prints its legal form (*Northwind Inc.*).
         let forms: Vec<String> = locale
             .format("legal")
@@ -1049,6 +1258,10 @@ impl Firm {
         }
     }
 
+    fn picks(&self) -> Picks {
+        vec![("firm", self.name.clone())]
+    }
+
     fn label(&self) -> String {
         match &self.legal {
             Some(l) => format!("{} {l}", self.name),
@@ -1065,6 +1278,10 @@ fn product(locale: &Locale, rng: &mut Rng) -> String {
     )
 }
 
+/// The domain every email takes when [`Options::example_emails`] is on: reserved
+/// for examples, so no address a mockup shows can reach anyone.
+const EXAMPLE_DOMAIN: &str = "example.com";
+
 /// What a record's values are drawn from.
 struct Drawn<'a> {
     locale: &'a Locale,
@@ -1075,21 +1292,54 @@ struct Drawn<'a> {
     domain: &'a str,
     /// Whether the record has a company row, whose domain its emails then take.
     own_firm: bool,
+    /// Every email at [`EXAMPLE_DOMAIN`].
+    example_emails: bool,
+    /// What the records drawn before took, which a row's own draws pass over.
+    taken: &'a Taken,
 }
 
 impl Drawn<'_> {
     fn domain(&self) -> &str {
-        match self.own_firm {
-            true => &self.firm.domain,
-            false => self.domain,
+        match (self.example_emails, self.own_firm) {
+            (true, _) => EXAMPLE_DOMAIN,
+            (false, true) => &self.firm.domain,
+            (false, false) => self.domain,
         }
     }
 
-    /// One sentence from the bank, its slots filled from the record.
-    fn sentence(&self, rng: &mut Rng) -> String {
+    /// An entry of `list` that neither an earlier record nor this row took.
+    fn fresh(&self, list: &'static str, rng: &mut Rng, picks: &mut Picks) -> String {
+        let taken = taken_with(self.taken, picks, list);
+        let entry = rng.pick_fresh(self.locale.list(list), &taken).to_string();
+        picks.push((list, entry.clone()));
+        entry
+    }
+
+    /// `fresh`'s entry in the form the record's person takes.
+    fn fresh_gendered(&self, list: &'static str, rng: &mut Rng, picks: &mut Picks) -> String {
+        let entry = self.fresh(list, rng, picks);
+        gendered(&entry, self.person.gender).to_string()
+    }
+
+    /// A product no earlier record named, after a few tries.
+    fn product(&self, rng: &mut Rng, picks: &mut Picks) -> String {
+        let taken = taken_with(self.taken, picks, "product");
+        let mut name = product(self.locale, rng);
+        for _ in 0..8 {
+            if !taken.contains(&name) {
+                break;
+            }
+            name = product(self.locale, rng);
+        }
+        picks.push(("product", name.clone()));
+        name
+    }
+
+    /// `template` with its slots filled from the record.
+    fn slots(&self, template: &str, rng: &mut Rng) -> String {
         let product = product(self.locale, rng);
         render(
-            rng.pick(self.locale.list("sentences")),
+            template,
             &[
                 ("company", &self.firm.name),
                 ("product", &product),
@@ -1099,8 +1349,16 @@ impl Drawn<'_> {
         )
     }
 
-    /// A text kind's value. `mobile` asks a phone for a mobile number.
-    fn text(&self, kind: Kind, mobile: bool, rng: &mut Rng) -> String {
+    /// One sentence from the bank, its slots filled from the record.
+    fn sentence(&self, rng: &mut Rng, picks: &mut Picks) -> String {
+        let template = self.fresh("sentences", rng, picks);
+        self.slots(&template, rng)
+    }
+
+    /// A text kind's value for the layer named `name`, whose words ask a phone
+    /// for a mobile number and a date for a birthday or a past day. The list
+    /// entries it takes are added to `picks`.
+    fn text(&self, kind: Kind, name: &str, rng: &mut Rng, picks: &mut Picks) -> String {
         let l = self.locale;
         match kind {
             Kind::FullName => self.person.full(),
@@ -1108,8 +1366,9 @@ impl Drawn<'_> {
             Kind::LastName => self.person.family.clone(),
             Kind::Email => self.person.email(self.domain()),
             Kind::Username => self.person.username(),
-            Kind::Phone => self.place.phone(l, mobile, rng),
-            Kind::JobTitle => rng.pick(l.list("jobs")).to_string(),
+            Kind::Phone => self.place.phone(l, is_mobile(name), rng),
+            Kind::JobTitle => self.fresh_gendered("jobs", rng, picks),
+            // Departments repeat down a real list, so they are not kept apart.
             Kind::Department => rng.pick(l.list("departments")).to_string(),
             Kind::Street => self.place.street.clone(),
             Kind::City => self.place.city.clone(),
@@ -1117,9 +1376,17 @@ impl Drawn<'_> {
             Kind::Country => self.place.country.clone(),
             Kind::Address => self.place.address(l),
             Kind::Company => self.firm.label(),
-            Kind::Product => product(l, rng),
-            Kind::Headline => rng.pick(l.list("headlines")).to_string(),
-            Kind::Sentence | Kind::Paragraph => self.sentence(rng),
+            Kind::Product => self.product(rng, picks),
+            Kind::Headline => self.fresh("headlines", rng, picks),
+            Kind::Sentence | Kind::Paragraph => self.sentence(rng, picks),
+            Kind::Bio => {
+                let template = self.fresh_gendered("bios", rng, picks);
+                self.slots(&template, rng)
+            }
+            Kind::Quote => {
+                let template = self.fresh_gendered("quotes", rng, picks);
+                self.slots(&template, rng)
+            }
             Kind::Price => {
                 let whole = match rng.below(3) {
                     0 => rng.range(2, 99),
@@ -1134,10 +1401,16 @@ impl Drawn<'_> {
                 );
                 render(l.format("price"), &[("n", &n)])
             }
-            Kind::Number => grouped(rng.range(1, 9999), l.format("group")),
+            Kind::Number => {
+                // As many one-digit as four-digit counts, as a page of counts has.
+                let digits = rng.range(1, 4) as u32;
+                let n = rng.range(10u64.pow(digits - 1), 10u64.pow(digits) - 1);
+                grouped(n, l.format("group"))
+            }
             Kind::Percent => render(l.format("percent"), &[("n", &rng.range(1, 99).to_string())]),
             Kind::Date => {
-                let (y, m, d) = (rng.range(2025, 2027), rng.range(1, 12), rng.range(1, 28));
+                let (from, to) = date_years(name);
+                let (y, m, d) = (rng.range(from, to), rng.range(1, 12), rng.range(1, 28));
                 let months = l.list("months");
                 let mon = months.get(m as usize - 1).map_or("", String::as_str);
                 render(
@@ -1434,6 +1707,9 @@ pub struct Options {
     pub kinds: HashMap<NodeId, Option<Kind>>,
     /// How many times each layer's value has been redrawn.
     pub redraws: HashMap<NodeId, u64>,
+    /// Every email at `example.com`, which can reach no one, instead of a
+    /// domain built from a company's name, which may be someone's.
+    pub example_emails: bool,
 }
 
 impl Default for Options {
@@ -1446,6 +1722,7 @@ impl Default for Options {
             seed: 0,
             kinds: HashMap::new(),
             redraws: HashMap::new(),
+            example_emails: false,
         }
     }
 }
@@ -1610,6 +1887,9 @@ struct Target {
     node: NodeId,
     shape: bool,
     read: Option<Kind>,
+    /// A text named only by its own text ([`named_like_text`]), whose kind came
+    /// from that name: a label if another layer shows the same kind.
+    label_like: bool,
 }
 
 fn is_container(kind: &NodeKind) -> bool {
@@ -1649,16 +1929,21 @@ fn gather(doc: &Document, roots: &[NodeId]) -> (Vec<Target>, usize) {
                 NodeKind::Text { content, .. }
                     if n.text_vars()[crate::variable::TEXT_CONTENT].is_none() =>
                 {
+                    let read = kind_of_text_layer(n.name(), content);
                     Some(Target {
                         node: id,
                         shape: false,
-                        read: kind_from_name(n.name()).or_else(|| kind_from_text(content)),
+                        read,
+                        label_like: named_like_text(n.name(), content)
+                            && read.is_some()
+                            && read != kind_from_text(content),
                     })
                 }
                 _ if is_shape_target(n) => Some(Target {
                     node: id,
                     shape: true,
                     read: is_avatar_name(n.name()).then_some(Kind::Avatar),
+                    label_like: false,
                 }),
                 _ => None,
             };
@@ -1722,13 +2007,23 @@ fn record_of(doc: &Document, id: NodeId, roots: &HashSet<NodeId>) -> Option<Node
     None
 }
 
-/// The fill of the layers under `roots` that `opts` asks for. Read-only: the
-/// edit is [`Plan::transaction`].
-pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
-    let Some(locale) = locale_for(&opts.locale).or_else(|| locales().first()) else {
-        return Plan::default();
-    };
+/// A fill's rows and records before any value is drawn, with each record's
+/// seed: a hash of what it is (its frame, or its loose layers' parent or
+/// layer), so a record draws the same values wherever it falls in the list.
+struct Layout {
+    rows: Vec<Row>,
+    records: Vec<Record>,
+    seeds: Vec<u64>,
+    locked: usize,
+}
+
+fn layout(doc: &Document, roots: &[NodeId], opts: &Options) -> Layout {
     let (targets, locked) = gather(doc, roots);
+    let label_like: HashSet<NodeId> = targets
+        .iter()
+        .filter(|t| t.label_like)
+        .map(|t| t.node)
+        .collect();
     // Each layer's kind: the one chosen for it, else the box's, else its own.
     let mut rows: Vec<Row> = targets
         .into_iter()
@@ -1750,16 +2045,52 @@ pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
             }
         })
         .collect();
-
-    // Records: a frame's layers draw together; loose layers under one parent
-    // draw together unless two of them want the same kind, when each is its own.
-    let mut records: Vec<Record> = Vec::new();
-    let mut index: HashMap<(Option<NodeId>, Option<NodeId>), usize> = HashMap::new();
     let frames = match opts.records {
         true => record_roots(doc, roots),
         false => HashSet::new(),
     };
     let parent = |id: NodeId| doc.get(id).and_then(|n| n.parent());
+
+    // A layer named only by its text is a label, read as nothing, where another
+    // layer shows the same kind beside it (a field's label over its value) or in
+    // a record inside its own (a table's header over its rows).
+    let within = |inner: NodeId, outer: Option<NodeId>| {
+        let Some(outer) = outer else { return true };
+        let mut at = parent(inner);
+        while let Some(a) = at {
+            if a == outer {
+                return true;
+            }
+            at = parent(a);
+        }
+        false
+    };
+    let labels: HashSet<NodeId> = rows
+        .iter()
+        .filter(|a| label_like.contains(&a.node))
+        .filter(|a| {
+            let own = record_of(doc, a.node, &frames);
+            rows.iter().any(|b| {
+                let beside = parent(b.node) == parent(a.node) && !label_like.contains(&b.node);
+                let below = record_of(doc, b.node, &frames)
+                    .is_some_and(|theirs| Some(theirs) != own && within(theirs, own));
+                b.node != a.node && b.read == a.read && (beside || below)
+            })
+        })
+        .map(|a| a.node)
+        .collect();
+    for row in rows.iter_mut().filter(|r| labels.contains(&r.node)) {
+        row.read = None;
+        if !opts.kinds.contains_key(&row.node) && opts.content.is_none() {
+            row.kind = None;
+        }
+    }
+
+    // Records: a frame's layers draw together; loose layers under one parent
+    // draw together unless two of them want the same kind, when each is its own.
+    let mut records: Vec<Record> = Vec::new();
+    let mut seeds: Vec<u64> = Vec::new();
+    let mut index: HashMap<(Option<NodeId>, Option<NodeId>), usize> = HashMap::new();
     let mut repeated: HashSet<Option<NodeId>> = HashSet::new();
     if opts.records {
         let mut seen: HashSet<(Option<NodeId>, Kind)> = HashSet::new();
@@ -1784,127 +2115,262 @@ pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
         };
         row.record = *index.entry(key).or_insert_with(|| {
             records.push(Record { root: key.0 });
+            seeds.push(hash_str(&format!("{key:?}")));
             records.len() - 1
         });
     }
+    Layout {
+        rows,
+        records,
+        seeds,
+        locked,
+    }
+}
 
-    // The company the fill's emails share when a record names none.
-    let shared = Firm::draw(locale, &mut Rng::new(&[opts.seed, 0xF1]));
-    let redraws = |id: NodeId| opts.redraws.get(&id).copied().unwrap_or(0);
-    for r in 0..records.len() {
-        let members: Vec<usize> = (0..rows.len()).filter(|i| rows[*i].record == r).collect();
-        let salt = |e: Entity| -> u64 {
-            members
-                .iter()
-                .filter(|i| rows[**i].kind.and_then(entity_of) == Some(e))
-                .map(|i| redraws(rows[*i].node))
-                .sum()
-        };
-        let own_firm = members.iter().any(|i| rows[*i].kind == Some(Kind::Company));
-        let rooms: Vec<Room> = members
+/// What [`plan`] draws a record with, beside the record itself.
+struct Draw<'a> {
+    doc: &'a Document,
+    opts: &'a Options,
+    locale: &'a Locale,
+    /// The domain the fill's emails share when a record names no company.
+    shared: &'a str,
+}
+
+/// One record's values, by row index, and the list entries they took.
+struct RecordDraw {
+    values: Vec<(usize, Value, bool)>,
+    picks: Picks,
+}
+
+fn add_picks(taken: &mut Taken, picks: &Picks) {
+    for (list, entry) in picks {
+        taken.entry(list).or_default().insert(entry.clone());
+    }
+}
+
+/// The values of the record whose rows are `members`, seeded by `seed`,
+/// passing over what `taken` holds. Unless `redrawn`, every row draws as if it
+/// had never been redrawn.
+fn draw_record(
+    d: &Draw<'_>,
+    rows: &[Row],
+    members: &[usize],
+    seed: u64,
+    redrawn: bool,
+    taken: &Taken,
+) -> RecordDraw {
+    let (doc, opts, locale) = (d.doc, d.opts, d.locale);
+    let redraws = |id: NodeId| match redrawn {
+        true => opts.redraws.get(&id).copied().unwrap_or(0),
+        false => 0,
+    };
+    let uses = |e: Entity| {
+        members
             .iter()
-            .map(|i| {
-                doc.get(rows[*i].node)
-                    .map_or(Room::Free, |n| room(n.kind()))
-            })
-            .collect();
-        let entity_rng = |e: Entity, attempt: u64| {
-            Rng::new(&[opts.seed, r as u64, e as u64 + 1, salt(e), attempt])
-        };
-        let mut drawn = Drawn {
-            locale,
-            person: Person::draw(locale, &mut entity_rng(Entity::Person, 0)),
-            place: Place::draw(locale, &mut entity_rng(Entity::Place, 0)),
-            firm: Firm::draw(locale, &mut entity_rng(Entity::Firm, 0)),
-            domain: &shared.domain,
-            own_firm,
-        };
-        // Each entity is redrawn until every row drawn from it fits its line.
-        for e in [Entity::Firm, Entity::Person, Entity::Place] {
-            for attempt in 0..ATTEMPTS {
+            .any(|i| rows[*i].kind.and_then(entity_of) == Some(e))
+    };
+    let salt = |e: Entity| -> u64 {
+        members
+            .iter()
+            .filter(|i| rows[**i].kind.and_then(entity_of) == Some(e))
+            .map(|i| redraws(rows[*i].node))
+            .sum()
+    };
+    let rooms: Vec<Room> = members
+        .iter()
+        .map(|i| {
+            doc.get(rows[*i].node)
+                .map_or(Room::Free, |n| room(n.kind()))
+        })
+        .collect();
+    let entity_rng =
+        |e: Entity, attempt: u64| Rng::new(&[opts.seed, seed, e as u64 + 1, salt(e), attempt]);
+    let mut drawn = Drawn {
+        locale,
+        person: Person::draw(locale, &mut entity_rng(Entity::Person, 0), taken),
+        place: Place::draw(locale, &mut entity_rng(Entity::Place, 0), taken),
+        firm: Firm::draw(locale, &mut entity_rng(Entity::Firm, 0), taken),
+        domain: d.shared,
+        own_firm: members.iter().any(|i| rows[*i].kind == Some(Kind::Company)),
+        example_emails: opts.example_emails,
+        taken,
+    };
+    // Each entity is redrawn until every row drawn from it fits its line.
+    for e in [Entity::Firm, Entity::Person, Entity::Place] {
+        for attempt in 0..ATTEMPTS {
+            let mut rng = entity_rng(e, attempt);
+            match e {
+                Entity::Person => drawn.person = Person::draw(locale, &mut rng, taken),
+                Entity::Place => drawn.place = Place::draw(locale, &mut rng, taken),
+                Entity::Firm => drawn.firm = Firm::draw(locale, &mut rng, taken),
+            }
+            let all_fit = members.iter().zip(&rooms).all(|(i, room)| {
+                let row = &rows[*i];
+                match row.kind.filter(|k| entity_of(*k) == Some(e) && k.is_text()) {
+                    Some(k) => doc.get(row.node).is_none_or(|n| {
+                        // The stream and form the row's own draw below takes.
+                        let mut rng = Rng::new(&[
+                            opts.seed,
+                            hash_str(&format!("{:?}", row.node)),
+                            redraws(row.node),
+                            0,
+                        ]);
+                        let text = drawn.text(k, n.name(), &mut rng, &mut Picks::new());
+                        fits(n.kind(), *room, &for_room(text, *room))
+                    }),
+                    None => true,
+                }
+            });
+            if all_fit {
+                break;
+            }
+            if attempt + 1 == ATTEMPTS {
+                let mut rng = entity_rng(e, 0);
                 match e {
-                    Entity::Person => {
-                        drawn.person = Person::draw(locale, &mut entity_rng(e, attempt))
-                    }
-                    Entity::Place => drawn.place = Place::draw(locale, &mut entity_rng(e, attempt)),
-                    Entity::Firm => drawn.firm = Firm::draw(locale, &mut entity_rng(e, attempt)),
-                }
-                let all_fit = members.iter().zip(&rooms).all(|(i, room)| {
-                    let row = &rows[*i];
-                    match row.kind.filter(|k| entity_of(*k) == Some(e) && k.is_text()) {
-                        Some(k) => doc.get(row.node).is_none_or(|n| {
-                            // The stream and form the row's own draw below takes.
-                            let mut rng = Rng::new(&[
-                                opts.seed,
-                                hash_str(&format!("{:?}", row.node)),
-                                redraws(row.node),
-                                0,
-                            ]);
-                            let text =
-                                for_room(drawn.text(k, is_mobile(n.name()), &mut rng), *room);
-                            fits(n.kind(), *room, &text)
-                        }),
-                        None => true,
-                    }
-                });
-                if all_fit {
-                    break;
-                }
-                if attempt + 1 == ATTEMPTS {
-                    match e {
-                        Entity::Person => {
-                            drawn.person = Person::draw(locale, &mut entity_rng(e, 0))
-                        }
-                        Entity::Place => drawn.place = Place::draw(locale, &mut entity_rng(e, 0)),
-                        Entity::Firm => drawn.firm = Firm::draw(locale, &mut entity_rng(e, 0)),
-                    }
+                    Entity::Person => drawn.person = Person::draw(locale, &mut rng, taken),
+                    Entity::Place => drawn.place = Place::draw(locale, &mut rng, taken),
+                    Entity::Firm => drawn.firm = Firm::draw(locale, &mut rng, taken),
                 }
             }
         }
-        for (i, room) in members.iter().zip(rooms) {
-            let row = &rows[*i];
-            let Some(kind) = row.kind else { continue };
-            let Some(node) = doc.get(row.node) else {
-                continue;
-            };
-            let node_seed = hash_str(&format!("{:?}", row.node));
-            let (value, ok) = if kind == Kind::Avatar {
-                match row.shape {
-                    true => (
-                        Value::Avatar(Avatar {
-                            name: drawn.person.full(),
-                            initials: drawn.person.initials(),
-                            style: opts.avatars.unwrap_or_default(),
-                        }),
-                        true,
-                    ),
-                    false => (Value::Kept, true),
+    }
+    // The person always counts as taken; a place or company only where a row
+    // shows it, so a list of names leaves the cities to the lists that show them.
+    let mut picks = drawn.person.picks();
+    if uses(Entity::Place) {
+        picks.extend(drawn.place.picks());
+    }
+    if uses(Entity::Firm) {
+        picks.extend(drawn.firm.picks());
+    }
+    let mut values = Vec::new();
+    for (i, room) in members.iter().zip(rooms) {
+        let row = &rows[*i];
+        let Some(kind) = row.kind else { continue };
+        let Some(node) = doc.get(row.node) else {
+            continue;
+        };
+        let node_seed = hash_str(&format!("{:?}", row.node));
+        let (value, ok) = if kind == Kind::Avatar {
+            match row.shape {
+                true => (
+                    Value::Avatar(Avatar {
+                        name: drawn.person.full(),
+                        initials: drawn.person.initials(),
+                        style: opts.avatars.unwrap_or_default(),
+                    }),
+                    true,
+                ),
+                false => (Value::Kept, true),
+            }
+        } else if row.shape {
+            (Value::Kept, true)
+        } else {
+            let mut best: Option<(String, bool, Picks)> = None;
+            for attempt in 0..ATTEMPTS {
+                let mut rng = Rng::new(&[opts.seed, node_seed, redraws(row.node), attempt]);
+                let mut trial = picks.clone();
+                let text = match kind {
+                    Kind::Paragraph => paragraph(&drawn, node.kind(), room, &mut rng, &mut trial),
+                    _ => for_room(drawn.text(kind, node.name(), &mut rng, &mut trial), room),
+                };
+                let ok = fits(node.kind(), room, &text);
+                if best.is_none() || ok {
+                    best = Some((text, ok, trial));
                 }
-            } else if row.shape {
-                (Value::Kept, true)
-            } else {
-                let mobile = is_mobile(node.name());
-                let mut best: Option<(String, bool)> = None;
-                for attempt in 0..ATTEMPTS {
-                    let mut rng = Rng::new(&[opts.seed, node_seed, redraws(row.node), attempt]);
-                    let text = match kind {
-                        Kind::Paragraph => paragraph(&drawn, node.kind(), room, &mut rng),
-                        _ => for_room(drawn.text(kind, mobile, &mut rng), room),
-                    };
-                    let ok = fits(node.kind(), room, &text);
-                    if best.is_none() || ok {
-                        best = Some((text, ok));
-                    }
-                    // A value drawn from the record does not change with a redraw.
-                    if ok || entity_of(kind).is_some() || kind == Kind::Country {
-                        break;
-                    }
+                // A value drawn from the record, or the locale's one country,
+                // does not change with another try.
+                if ok || entity_of(kind).is_some() || kind == Kind::Country {
+                    break;
                 }
-                let (text, ok) = best.unwrap_or_default();
-                (Value::Text(text), ok)
-            };
-            rows[*i].value = value;
-            rows[*i].fits = ok;
+            }
+            let (text, ok, trial) = best.unwrap_or_default();
+            picks = trial;
+            (Value::Text(text), ok)
+        };
+        values.push((*i, value, ok));
+    }
+    RecordDraw { values, picks }
+}
+
+/// The fill of the layers under `roots` that `opts` asks for. Read-only: the
+/// edit is [`Plan::transaction`].
+///
+/// Every record is drawn first as if nothing were redrawn, each passing over
+/// the names, cities, jobs and lines the records before it took. A record with
+/// a redrawn row is then drawn again, passing over every other record's values,
+/// so a redraw changes its own record and no other.
+pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
+    let Some(locale) = locale_for(&opts.locale).or_else(|| locales().first()) else {
+        return Plan::default();
+    };
+    let Layout {
+        mut rows,
+        records,
+        seeds,
+        locked,
+    } = layout(doc, roots, opts);
+    let shared = Firm::draw(locale, &mut Rng::new(&[opts.seed, 0xF1]), &Taken::new());
+    let d = Draw {
+        doc,
+        opts,
+        locale,
+        shared: &shared.domain,
+    };
+    let members: Vec<Vec<usize>> = (0..records.len())
+        .map(|r| (0..rows.len()).filter(|i| rows[*i].record == r).collect())
+        .collect();
+    let mut taken = Taken::new();
+    let mut draws: Vec<RecordDraw> = Vec::with_capacity(records.len());
+    for r in 0..records.len() {
+        let draw = draw_record(&d, &rows, &members[r], seeds[r], false, &taken);
+        add_picks(&mut taken, &draw.picks);
+        draws.push(draw);
+    }
+    let redrawn = |r: usize| {
+        members[r]
+            .iter()
+            .any(|i| opts.redraws.get(&rows[*i].node).is_some_and(|n| *n > 0))
+    };
+    let mut again = Picks::new();
+    for r in (0..records.len()).filter(|r| redrawn(*r)) {
+        let mut others = Taken::new();
+        for (o, draw) in draws.iter().enumerate() {
+            if o != r {
+                add_picks(&mut others, &draw.picks);
+            }
+        }
+        add_picks(&mut others, &again);
+        let draw = draw_record(&d, &rows, &members[r], seeds[r], true, &others);
+        again.extend(draw.picks.iter().cloned());
+        draws[r] = draw;
+    }
+    for draw in draws {
+        for (i, value, ok) in draw.values {
+            rows[i].value = value;
+            rows[i].fits = ok;
+        }
+    }
+    Plan {
+        rows,
+        records,
+        locked,
+    }
+}
+
+/// The rows and records [`plan`] would make, with no value drawn: a row that
+/// would change holds an empty text. For counts of a choice not taken, which a
+/// whole plan's text measuring would make dear.
+pub fn outline(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
+    let Layout {
+        mut rows,
+        records,
+        locked,
+        ..
+    } = layout(doc, roots, opts);
+    for row in &mut rows {
+        if row.kind.is_some_and(|k| k.is_text() != row.shape) {
+            row.value = Value::Text(String::new());
         }
     }
     Plan {
@@ -1916,13 +2382,20 @@ pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
 
 /// A paragraph for `room`: sentences added while a fixed box has space, up to
 /// the length a growing box has now, or one where the width is the text's own.
-fn paragraph(drawn: &Drawn<'_>, kind: &NodeKind, room: Room, rng: &mut Rng) -> String {
-    let mut text = drawn.sentence(rng);
+fn paragraph(
+    drawn: &Drawn<'_>,
+    kind: &NodeKind,
+    room: Room,
+    rng: &mut Rng,
+    picks: &mut Picks,
+) -> String {
+    let mut text = drawn.sentence(rng, picks);
     let mut used = HashSet::from([text.clone()]);
     for _ in 0..24 {
-        let next = drawn.sentence(rng);
+        let next = drawn.sentence(rng, picks);
+        // The bank is spent: what is left repeats this paragraph.
         if !used.insert(next.clone()) {
-            continue;
+            break;
         }
         let longer = format!("{text} {next}");
         match room {
@@ -1946,6 +2419,43 @@ fn is_mobile(name: &str) -> bool {
         "mobiel",
     ];
     words(name).iter().any(|w| MOBILE.contains(&w.as_str()))
+}
+
+/// The years a date layer's name asks for: a birthday's decades back, a
+/// creation or update's recent past, else the years around now.
+fn date_years(name: &str) -> (u64, u64) {
+    const BIRTH: [&str; 12] = [
+        "birthday",
+        "birth",
+        "born",
+        "dob",
+        "geburtstag",
+        "geburtsdatum",
+        "naissance",
+        "nacimiento",
+        "nascita",
+        "nascimento",
+        "geboortedatum",
+        "verjaardag",
+    ];
+    const PAST: [&str; 9] = [
+        "created",
+        "updated",
+        "joined",
+        "since",
+        "published",
+        "posted",
+        "modified",
+        "erstellt",
+        "aktualisiert",
+    ];
+    let ws = words(name);
+    let any = |list: &[&str]| list.iter().any(|w| ws.iter().any(|x| x == w));
+    match () {
+        _ if any(&BIRTH) => (1965, 2004),
+        _ if any(&PAST) => (2022, 2025),
+        _ => (2025, 2027),
+    }
 }
 
 /// A value laid out for its room: a full address on one line reads with commas
@@ -2008,18 +2518,21 @@ pub fn sample(kind: Kind, locale: &str) -> String {
         return String::new();
     };
     let mut rng = Rng::new(&[1, kind as u64]);
-    let shared = Firm::draw(locale, &mut rng);
+    let taken = Taken::new();
+    let shared = Firm::draw(locale, &mut rng, &taken);
     let drawn = Drawn {
         locale,
-        person: Person::draw(locale, &mut rng),
-        place: Place::draw(locale, &mut rng),
-        firm: Firm::draw(locale, &mut rng),
+        person: Person::draw(locale, &mut rng, &taken),
+        place: Place::draw(locale, &mut rng, &taken),
+        firm: Firm::draw(locale, &mut rng, &taken),
         domain: &shared.domain,
         own_firm: false,
+        example_emails: false,
+        taken: &taken,
     };
     match kind {
         Kind::Avatar => drawn.person.initials(),
         Kind::Address => drawn.place.address(locale).replace('\n', ", "),
-        _ => drawn.text(kind, false, &mut rng),
+        _ => drawn.text(kind, "", &mut rng, &mut Picks::new()),
     }
 }

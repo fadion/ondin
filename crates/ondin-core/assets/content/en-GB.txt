@@ -5,7 +5,7 @@
 @tag en-GB
 @inherit en-US
 @country United Kingdom
-@phone {area} 0###
+@phone {area}
 @mobile 07700 900###
 @date {d} {mon} {yyyy}
 @time {HH}:{MM}
@@ -19,37 +19,73 @@
 @address {street}|{city}|{postcode}|{country}
 @legal Ltd|& Co.
 
-[given]
-Oliver
+[given-f]
 Amelia
-Harry
 Isla
-George
 Poppy
-Arthur
 Freya
-Alfie
 Evie
-Jack
 Imogen
-Rhys
 Niamh
-Callum
 Aisha
-Rory
 Ellie
-Hamza
 Phoebe
-Finley
 Martha
-Kieran
 Libby
-Euan
 Sienna
-Toby
 Ffion
-Reuben
 Tilly
+Charlotte
+Harriet
+Lucy
+Zara
+Megan
+Bethany
+Rosie
+Hollie
+Maryam
+Priya
+Georgia
+Eleanor
+Abigail
+Jasmine
+Nia
+Kirsty
+Saoirse
+
+[given-m]
+Oliver
+Harry
+George
+Arthur
+Alfie
+Jack
+Rhys
+Callum
+Rory
+Hamza
+Finley
+Kieran
+Euan
+Toby
+Reuben
+Thomas
+William
+Joshua
+Ewan
+Liam
+Connor
+Ollie
+Bilal
+Dev
+Samuel
+Hugo
+Jamie
+Declan
+Ibrahim
+Aidan
+Ravi
+Kofi
 
 [family]
 Bennett
@@ -82,23 +118,54 @@ Kerr
 Davies
 Evans
 Morgan
+Robinson
+Thompson
+Hall
+Green
+Wood
+Harrison
+Khan
+Hussain
+Jenkins
+Owen
+Campbell
+Stewart
+Mason
+Ward
+Cooper
+Knight
+Chapman
+Webb
+O'Brien
+Mensah
 
 [cities]
-# city|region|postcode|phone prefix (Ofcom drama ranges)
-London||SW# #@@|020 7946
-London||E# #@@|020 7946
-London||N# #@@|020 7946
-Birmingham||B# #@@|0121 496
-Bristol||BS# #@@|0117 496
-Edinburgh||EH# #@@|0131 496
-Glasgow||G# #@@|0141 496
-Leeds||LS# #@@|0113 496
-Leicester||LE# #@@|0116 496
-Liverpool||L# #@@|0151 496
-Manchester||M# #@@|0161 496
-Nottingham||NG# #@@|0115 496
-Reading||RG# #@@|0118 496
-Sheffield||S# #@@|0114 496
+# city|region|postcode|phone number (Ofcom's drama ranges; 01632 960 for the towns
+# without one of their own)
+London||SW& #@@|020 7946 0###
+London||E& #@@|020 7946 0###
+London||N& #@@|020 7946 0###
+Birmingham||B& #@@|0121 496 0###
+Bristol||BS& #@@|0117 496 0###
+Edinburgh||EH& #@@|0131 496 0###
+Glasgow||G& #@@|0141 496 0###
+Leeds||LS& #@@|0113 496 0###
+Leicester||LE& #@@|0116 496 0###
+Liverpool||L& #@@|0151 496 0###
+Manchester||M& #@@|0161 496 0###
+Nottingham||NG& #@@|0115 496 0###
+Reading||RG& #@@|0118 496 0###
+Sheffield||S& #@@|0114 496 0###
+Newcastle upon Tyne||NE& #@@|0191 498 0###
+Cardiff||CF& #@@|029 2018 0###
+Belfast||BT& #@@|028 9649 6###
+Oxford||OX& #@@|01632 960###
+Cambridge||CB& #@@|01632 960###
+York||YO& #@@|01632 960###
+Brighton||BN& #@@|01632 960###
+Bath||BA& #@@|01632 960###
+Norwich||NR& #@@|01632 960###
+Exeter||EX& #@@|01632 960###
 
 [streets]
 Church
@@ -121,6 +188,16 @@ Clarence
 York
 Elm
 Brook
+Bridge
+North
+Cross
+Abbey
+Market
+Castle
+Ash
+Fairfield
+St John's
+Beech
 
 [suffixes]
 Road

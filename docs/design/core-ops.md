@@ -208,7 +208,7 @@ it created. A verb never commits; its caller does, as every edit is committed.
   *Clean up*), one bool per rule plus `skip_locked`, over every non-draft page unless given `nodes`.
 - **`fill_content` is the *Fill with content…* box's plan** (`content_fill::plan`, its rule in
   `app-canvas-chrome.md`, *Fill with content*) over `nodes`, with `locale`, `kind`, `records`,
-  `avatars` and `seed`; its avatars are drawn through `ImageSink::draw` on the lent sink.
+  `avatars`, `seed` and `example_emails`; its avatars are drawn through `ImageSink::draw` on the lent sink.
 - **`duplicate` places as `Ctrl+D` does** (`build::duplicate_placements`: the outermost layers, each
   copy one step above its original) and takes its offset as `dx`/`dy`. The clone chain that repeats
   a moved duplicate's step is the app's session state, so the verb has none.

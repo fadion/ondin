@@ -1,4 +1,5 @@
 # Fill with content: Spanish. `\uXXXX` in a value is that character.
+# No regulator reserves numbers for fiction here; phone numbers are only well-formed.
 
 @name Spanish
 @tag es
@@ -17,37 +18,82 @@
 @address {street}|{postcode} {city}|{country}
 @legal S.L.|S.A.
 
-[given]
+[given-f]
 Lucía
-Hugo
 Sofía
-Martín
 María
-Pablo
 Carmen
-Daniel
 Paula
-Alejandro
 Valeria
-Javier
 Elena
-Diego
 Irene
-Adrián
 Claudia
-Álvaro
 Marta
-Sergio
 Noelia
-Raúl
 Alba
-Iker
 Nerea
-Jorge
 Laia
-Omar
 Inés
+Laura
+Cristina
+Ana
+Sara
+Andrea
+Raquel
+Patricia
+Silvia
+Beatriz
+Rocío
+Nuria
+Ainhoa
+Julia
+Carla
+Fátima
+Ioana
+Camila
+Daniela
+Natalia
+Leire
+Yasmin
+Mei
+
+[given-m]
+Hugo
+Martín
+Pablo
+Daniel
+Alejandro
+Javier
+Diego
+Adrián
+Álvaro
+Sergio
+Raúl
+Iker
+Jorge
+Omar
 Marc
+David
+Carlos
+Manuel
+Antonio
+Rubén
+Iván
+Óscar
+Alberto
+Fernando
+Víctor
+Andrés
+Gonzalo
+Unai
+Jordi
+Youssef
+Mohamed
+Andrei
+Kevin
+Rafael
+Ignacio
+Mateo
 
 [family]
 Navarro
@@ -80,6 +126,28 @@ Serrano
 Blanco
 Molina
 Castro
+Ortega
+Delgado
+Morales
+Ortiz
+Marín
+Rubio
+Sanz
+Iglesias
+Medina
+Garrido
+Cortés
+Castillo
+Lozano
+Guerrero
+Cano
+Prieto
+Méndez
+Calvo
+Vidal
+Herrera
+Popescu
+El Amrani
 
 [cities]
 # city|region|postcode|area code
@@ -95,6 +163,22 @@ Valladolid||47001..47016|98
 Palma||07001..07015|97
 Murcia||30001..30012|96
 Santander||39001..39012|94
+Alicante||03001..03016|96
+Córdoba||14001..14014|95
+Vigo||36201..36216|98
+A Coruña||15001..15011|98
+Gijón||33201..33213|98
+Oviedo||33001..33013|98
+Pamplona||31001..31016|94
+San Sebastián||20001..20018|94
+Vitoria-Gasteiz||01001..01015|94
+Salamanca||37001..37008|92
+Cádiz||11001..11012|95
+Las Palmas de Gran Canaria||35001..35019|92
+Santa Cruz de Tenerife||38001..38010|92
+Toledo||45001..45008|92
+Logroño||26001..26009|94
+Girona||17001..17007|97
 
 [streets]
 Mayor
@@ -112,6 +196,22 @@ de la Luna
 del Mar
 de Goya
 de la Estación
+de Colón
+de la Reina
+del Prado
+de Santa Ana
+de la Libertad
+de Velázquez
+de Antonio Machado
+de Rosalía de Castro
+de la Iglesia
+de los Pinos
+del Pilar
+de Andalucía
+de Europa
+de la Marina
+de Castilla
+de la Ermita
 
 [suffixes]
 Calle
@@ -135,28 +235,46 @@ nov
 dic
 
 [jobs]
-Diseñadora de producto
-Ingeniero de software
+Diseñador de producto|Diseñadora de producto
+Ingeniero de software|Ingeniera de software
 Responsable de ingeniería
 Analista de datos
 Responsable de marketing
-Jefa de proyecto
-Investigador UX
-Ejecutivo de ventas
-Gestora de clientes
-Desarrollador front-end
-Redactora
-Diseñador gráfico
+Jefe de proyecto|Jefa de proyecto
+Investigador UX|Investigadora UX
+Ejecutivo de ventas|Ejecutiva de ventas
+Gestor de clientes|Gestora de clientes
+Desarrollador front-end|Desarrolladora front-end
+Redactor|Redactora
+Diseñador gráfico|Diseñadora gráfica
 Contable
-Técnica de selección
+Técnico de selección|Técnica de selección
 Responsable de producto
-Directora general
+Director general|Directora general
 Asistente de dirección
-Administrador de sistemas
+Administrador de sistemas|Administradora de sistemas
 Community manager
-Controller financiera
-Comprador
+Controller financiero|Controller financiera
+Comprador|Compradora
 Agente de soporte
+Desarrollador back-end|Desarrolladora back-end
+Ingeniero de datos|Ingeniera de datos
+Diseñador UX/UI|Diseñadora UX/UI
+Consultor de negocio|Consultora de negocio
+Abogado|Abogada
+Arquitecto de soluciones|Arquitecta de soluciones
+Ilustrador|Ilustradora
+Fotógrafo|Fotógrafa
+Especialista en SEO
+Product owner
+Técnico de recursos humanos|Técnica de recursos humanos
+Coordinador de eventos|Coordinadora de eventos
+Director de arte|Directora de arte
+Desarrollador móvil|Desarrolladora móvil
+Ingeniero de QA|Ingeniera de QA
+Responsable de operaciones
+Periodista
+Traductor|Traductora
 
 [departments]
 Diseño
@@ -169,6 +287,10 @@ Compras
 Atención al cliente
 Producto
 Legal
+Operaciones
+Investigación
+Comunicación
+Tecnología
 
 [company-a]
 Norte
@@ -187,6 +309,15 @@ Sol
 Río
 Luz
 Roble
+Alba
+Nube
+Mar
+Lince
+Faro
+Cielo
+Brisa
+Verde
+Cobre
 
 [company-b]
 campo
@@ -205,6 +336,15 @@ casa
 fuente
 monte
 costa
+nido
+vela
+red
+rama
+ruta
+valle
+mesa
+obra
+cima
 
 [product-a]
 Libro
@@ -219,6 +359,15 @@ Caja
 Ritmo
 Agenda
 Pluma
+Faro
+Mapa
+Nota
+Puente
+Vela
+Cuaderno
+Reloj
+Órbita
+Hilo
 
 [product-b]
 Pro
@@ -229,6 +378,11 @@ Studio
 Cloud
 Lite
 Max
+Hub
+Kit
+Flow
+Smart
+Team
 
 [headlines]
 Planifica tu semana en cinco minutos
@@ -252,6 +406,29 @@ Haz crecer tu negocio con confianza
 Descubre lo que viene
 Bienvenido de nuevo
 Juntos llegamos más lejos
+Tu próximo viaje empieza aquí
+Envío gratis en todos los pedidos
+Las rebajas de temporada ya están aquí
+Cocina de mercado, cada día
+Reserva tu mesa en segundos
+Ahorra sin pensarlo
+Tu dinero, bajo control
+Entradas ya a la venta
+Nos vemos en el festival
+Cuídate a tu manera
+Tu salud, siempre a mano
+Historias que importan
+Lo más leído de la semana
+Te damos la bienvenida
+Crea tu cuenta en un minuto
+Escapadas de fin de semana a buen precio
+Descubre la nueva colección
+Del huerto a tu mesa
+Paga a plazos, sin intereses
+Vuela más, paga menos
+Tu farmacia de confianza, ahora en línea
+Pide cita sin esperas
+Recetas para cada día de la semana
 
 [sentences]
 Sigue cada proyecto con tableros compartidos y responsables claros.
@@ -284,3 +461,101 @@ Puedes cambiar de plan o cancelarlo en cualquier momento desde tu cuenta.
 Cada documento guarda un historial de quién cambió qué y cuándo.
 Enviamos un correo breve al mes, y puedes darte de baja cuando quieras.
 Los recordatorios llegan a tu teléfono, a tu ordenador o a ambos.
+Los pedidos realizados antes de las 14:00 salen el mismo día.
+Puedes devolver cualquier artículo en un plazo de treinta días, sin dar explicaciones.
+Elige tu talla habitual: nuestras prendas siguen la tabla estándar.
+Te avisamos en cuanto tu pedido salga del almacén.
+Reserva hoy y paga al llegar, con cancelación gratuita hasta el día antes.
+Nuestros apartamentos en {city} están a un paseo del casco antiguo.
+Compara vuelos, trenes y autobuses en una sola búsqueda.
+Guarda tus destinos favoritos y te avisaremos cuando bajen los precios.
+El menú cambia cada semana según lo que trae el mercado.
+Pide a domicilio y recibe la comida caliente en menos de cuarenta minutos.
+Todas nuestras recetas indican los alérgenos y el tiempo de preparación.
+Abrimos de martes a domingo, y los fines de semana conviene reservar.
+Abre tu cuenta desde el móvil en menos de diez minutos y sin comisiones.
+Aparta una parte de cada nómina y deja que el ahorro crezca solo.
+Cada movimiento aparece al instante, con su categoría ya asignada.
+Si pierdes la tarjeta, puedes bloquearla desde la aplicación en un momento.
+Paga con tarjeta, Bizum o transferencia, como te resulte más cómodo.
+Las entradas llegan por correo y también puedes llevarlas en el móvil.
+Las puertas se abren una hora antes del concierto.
+El programa completo de las jornadas se publicará a principios de mes.
+Inscríbete antes del viernes para conseguir el precio reducido.
+Pide cita con tu médico de cabecera sin esperar al teléfono.
+Los resultados de tus análisis llegan a la aplicación en cuanto están listos.
+Diez minutos de estiramientos al día bastan para notar la diferencia.
+Nuestro equipo de nutricionistas prepara un plan que encaja con tus horarios.
+Cada mañana seleccionamos las noticias que merece la pena leer.
+Suscríbete y lee sin límites en la web y en la aplicación.
+Este reportaje forma parte de una serie sobre la vida en {city}.
+En dos minutos tendrás tu cuenta lista para empezar.
+Completa tu perfil para recibir recomendaciones más útiles.
+Activa las notificaciones para no perderte nada importante.
+{company} trabaja con productores locales desde el primer día.
+Plantamos un árbol por cada pedido desde que abrimos.
+Los envíos a Baleares y Canarias tardan uno o dos días más.
+{product} te ayuda a repartir los gastos del piso sin discusiones.
+Lleva las cuentas al día y presenta los impuestos sin sustos.
+Consulta la disponibilidad en tienda antes de salir de casa.
+Los socios del club tienen acceso anticipado a las rebajas.
+Atendemos de lunes a viernes, de nueve de la mañana a seis de la tarde.
+Si es un regalo, indícalo en el pedido y lo enviaremos sin el precio.
+La clase de prueba es gratuita y no hace falta traer material.
+Con {product}, organizar las vacaciones en familia es mucho más fácil.
+El café que servimos se tuesta cada semana a pocos kilómetros de aquí.
+
+[bios]
+{first} es diseñador de producto en {company} y vive en {city}.|{first} es diseñadora de producto en {company} y vive en {city}.
+{first} lleva más de diez años construyendo infraestructura en la nube y ahora dirige el equipo de plataforma de {company}.
+{first} fundó {company} en {city} tras una década en la consultoría.
+{first} da clases de matemáticas en un instituto de {city} y escribe sobre educación en su tiempo libre.
+Tras formarse en San Sebastián, {first} abrió su propio restaurante en {city}, donde cocina con producto de temporada.
+{first} es investigador en biología marina y estudia cómo afecta el cambio climático a las praderas de posidonia.|{first} es investigadora en biología marina y estudia cómo afecta el cambio climático a las praderas de posidonia.
+{first} escribe novelas policiacas y colabora con varios medios culturales.
+{first} trabaja como enfermero en el servicio de urgencias de un hospital de {city}.|{first} trabaja como enfermera en el servicio de urgencias de un hospital de {city}.
+{first} es fotógrafo de bodas y retratos, y ha publicado dos libros sobre la costa cantábrica.|{first} es fotógrafa de bodas y retratos, y ha publicado dos libros sobre la costa cantábrica.
+Ingeniero de datos en {company}, {first} se encarga de que los informes lleguen a tiempo y sin errores.|Ingeniera de datos en {company}, {first} se encarga de que los informes lleguen a tiempo y sin errores.
+{first} coordina el equipo de atención al cliente de {company} desde {city}.
+{first} empezó en el diseño gráfico y hoy dirige el área de marca de {company}.
+Periodista de formación, {first} lleva cinco años contando historias con datos para medios digitales.
+{first} es cofundador de {company}, una empresa de {city} que ayuda a pequeños comercios a vender en línea.|{first} es cofundadora de {company}, una empresa de {city} que ayuda a pequeños comercios a vender en línea.
+{first} enseña yoga y pilates en un pequeño estudio del centro de {city}.
+{first} es arquitecto y está especializado en rehabilitar edificios antiguos sin que pierdan su carácter.|{first} es arquitecta y está especializada en rehabilitar edificios antiguos sin que pierdan su carácter.
+Desde {city}, {first} desarrolla aplicaciones móviles para clientes de toda Europa.
+{first} es ilustrador y ha trabajado para editoriales infantiles de España y Latinoamérica.|{first} es ilustradora y ha trabajado para editoriales infantiles de España y Latinoamérica.
+{first} investiga el aprendizaje automático aplicado a la medicina en una universidad de {city}.
+Antes de unirse a {company}, {first} pasó seis años en el sector bancario.
+{first} es pastelero y dirige el obrador familiar que abrieron sus abuelos en {city}.|{first} es pastelera y dirige el obrador familiar que abrieron sus abuelos en {city}.
+{first} es traductor literario del inglés y del francés.|{first} es traductora literaria del inglés y del francés.
+{first} dirige el equipo de producto de {company} y disfruta hablando con quienes usan la aplicación cada día.
+{first} es abogado laboralista y asesora a empresas emergentes en materia de contratación.|{first} es abogada laboralista y asesora a empresas emergentes en materia de contratación.
+{first} compagina su trabajo como desarrollador back-end con la organización de encuentros de programación en {city}.|{first} compagina su trabajo como desarrolladora back-end con la organización de encuentros de programación en {city}.
+{first} es veterinario en una clínica de {city} y colabora como voluntario con una protectora de animales.|{first} es veterinaria en una clínica de {city} y colabora como voluntaria con una protectora de animales.
+
+[quotes]
+{product} nos ha ahorrado horas de reuniones cada semana.
+Lo instalé un lunes y el miércoles ya lo usaba todo el equipo.
+Por fin tengo todas las facturas en el mismo sitio.
+Estoy encantado con el servicio: rápido, amable y sin letra pequeña.|Estoy encantada con el servicio: rápido, amable y sin letra pequeña.
+El pedido llegó al día siguiente y perfectamente embalado.
+Repetiremos seguro; la habitación tenía unas vistas increíbles.
+La atención al cliente de {company} es la mejor que he probado.
+Desde que uso {product} sé exactamente en qué se me va el dinero cada mes.
+Me quedé sorprendido de lo fácil que fue pasar todos nuestros datos.|Me quedé sorprendida de lo fácil que fue pasar todos nuestros datos.
+La comida, de diez. Y el trato, todavía mejor.
+Pensaba que sería una aplicación más, pero se ha vuelto imprescindible.
+Nuestros clientes notan la diferencia y nos lo dicen.
+Compré las entradas en un minuto y al momento las tenía en el móvil.
+He probado muchas herramientas y {product} es la única que sigo usando.
+Al principio estaba un poco perdido, pero el equipo de soporte me ayudó en todo.|Al principio estaba un poco perdida, pero el equipo de soporte me ayudó en todo.
+Cambiar de plan fue sencillo y no hubo sorpresas en la factura.
+Se lo recomiendo a cualquier equipo pequeño que quiera organizarse.
+Gracias a {company} hemos duplicado las ventas en línea en un año.
+Las clases son muy amenas y he notado la mejora desde la primera semana.
+Llevo dos años con ellos y nunca he tenido un problema.
+Estoy muy contento con el resultado, superó lo que esperaba.|Estoy muy contenta con el resultado, superó lo que esperaba.
+La aplicación es clara y no hace falta leer ningún manual.
+En cuanto lo probamos, supimos que era lo que buscábamos.
+Mis pedidos siempre llegan a tiempo, incluso en Navidad.
+Estoy más tranquilo sabiendo que todo tiene copia de seguridad.|Estoy más tranquila sabiendo que todo tiene copia de seguridad.

@@ -1,10 +1,11 @@
 # Fill with content: German.
+# Phone numbers: the Bundesnetzagentur's drama numbers, or a number starting with 0 after the area code, which is never assigned.
 
 @name German
 @tag de
 @country Deutschland
-@phone {area} ######
-@mobile 0151 ########
+@phone {area}
+@mobile 0171 39200##|0176 040690##
 @date {dd}.{mm}.{yyyy}
 @time {HH}:{MM}
 @decimal ,
@@ -17,39 +18,80 @@
 @address {street}|{postcode} {city}|{country}
 @legal GmbH|AG|KG
 
-[given]
+[given-f]
 Lena
-Lukas
 Anna
-Felix
 Marie
-Jonas
 Sophie
-Leon
 Clara
-Paul
 Emma
-Maximilian
 Hannah
-Elias
 Mia
-Niklas
 Laura
-Tim
 Johanna
-David
 Katharina
-Moritz
 Julia
-Finn
 Lea
-Jan
 Charlotte
-Tobias
 Amelie
-Simon
 Selin
+Sarah
+Lisa
+Jana
+Nina
+Christina
+Franziska
+Theresa
+Miriam
+Ayşe
+Elif
+Leonie
+Vanessa
+Melanie
+Natalia
+Fatma
+Zeynep
+Antonia
+Carolin
+Svenja
+
+[given-m]
+Lukas
+Felix
+Jonas
+Leon
+Paul
+Maximilian
+Elias
+Niklas
+Tim
+David
+Moritz
+Finn
+Jan
+Tobias
+Simon
 Can
+Florian
+Sebastian
+Daniel
+Philipp
+Benedikt
+Fabian
+Markus
+Kevin
+Dennis
+Mehmet
+Emre
+Ali
+Luca
+Matthias
+Stefan
+Johannes
+Kai
+Marco
+Tomasz
+Yusuf
 
 [family]
 Hoffmann
@@ -82,23 +124,63 @@ Maier
 Kaiser
 Yılmaz
 Nowak
+Schäfer
+Bauer
+Schmitz
+Hofmann
+Schulze
+Peters
+Vogel
+Friedrich
+Günther
+Frank
+Berger
+Kraus
+Böhm
+Huber
+Kaya
+Demir
+Öztürk
+Şahin
+Kowalski
+Popović
+Petrović
+Nguyen
+Rossi
+Lorenz
+Seidel
+Jung
 
 [cities]
-# city|region|postcode|area code
-Berlin||10115..14199|030
-Hamburg||20095..22769|040
-München||80331..81929|089
-Köln||50667..51149|0221
-Frankfurt am Main||60311..60599|069
-Stuttgart||70173..70619|0711
-Düsseldorf||40210..40629|0211
-Leipzig||04103..04357|0341
-Dresden||01067..01326|0351
-Hannover||30159..30669|0511
-Nürnberg||90402..90491|0911
-Bremen||28195..28779|0421
-Freiburg im Breisgau||79098..79117|0761
-Münster||48143..48167|0251
+# city|region|postcode|phone number
+Berlin||10115..14199|030 23125 ###
+Hamburg||20095..22769|040 66969 ###
+München||80331..81929|089 99998 ###
+Köln||50667..51149|0221 4710 ###
+Frankfurt am Main||60311..60599|069 90009 ###
+Stuttgart||70173..70619|0711 0######
+Düsseldorf||40210..40629|0211 0######
+Leipzig||04103..04357|0341 0######
+Dresden||01067..01326|0351 0######
+Hannover||30159..30669|0511 0######
+Nürnberg||90402..90491|0911 0######
+Bremen||28195..28779|0421 0######
+Freiburg im Breisgau||79098..79117|0761 0######
+Münster||48143..48167|0251 0######
+Essen||45127..45359|0201 0######
+Dortmund||44135..44388|0231 0######
+Bonn||53111..53229|0228 0######
+Mannheim||68159..68309|0621 0######
+Karlsruhe||76131..76229|0721 0######
+Augsburg||86150..86199|0821 0######
+Kiel||24103..24159|0431 0######
+Mainz||55116..55131|06131 0#####
+Heidelberg||69115..69126|06221 0#####
+Rostock||18055..18147|0381 0######
+Potsdam||14467..14482|0331 0######
+Wiesbaden||65183..65207|0611 0######
+Aachen||52062..52080|0241 0######
+Regensburg||93047..93059|0941 0######
 
 [streets]
 Linden
@@ -119,6 +201,20 @@ Wald
 Eichen
 Sonnen
 Feld
+Lerchen
+Tulpen
+Ulmen
+Kastanien
+Buchen
+Markt
+Post
+Schloss
+Kloster
+Brunnen
+Kirschen
+Heine
+Mozart
+Rathaus
 
 [suffixes]
 straße
@@ -143,30 +239,46 @@ Nov.
 Dez.
 
 [jobs]
-Produktdesignerin
-Softwareentwickler
-Teamleiterin Entwicklung
-Datenanalyst
-Marketingmanagerin
-Projektleiter
-UX-Researcherin
-Vertriebsleiter
-Kundenbetreuerin
-Frontend-Entwickler
-Content-Strategin
-Grafikdesigner
-Buchhalterin
-Personalreferent
-Produktmanagerin
-Werkstudent
+Produktdesigner|Produktdesignerin
+Softwareentwickler|Softwareentwicklerin
+Teamleiter Entwicklung|Teamleiterin Entwicklung
+Datenanalyst|Datenanalystin
+Marketingmanager|Marketingmanagerin
+Projektleiter|Projektleiterin
+UX-Researcher|UX-Researcherin
+Vertriebsleiter|Vertriebsleiterin
+Kundenbetreuer|Kundenbetreuerin
+Frontend-Entwickler|Frontend-Entwicklerin
+Content-Stratege|Content-Strategin
+Grafikdesigner|Grafikdesignerin
+Buchhalter|Buchhalterin
+Personalreferent|Personalreferentin
+Produktmanager|Produktmanagerin
+Werkstudent|Werkstudentin
 Assistenz der Geschäftsführung
-Geschäftsführerin
-Systemadministrator
-Redakteurin
+Geschäftsführer|Geschäftsführerin
+Systemadministrator|Systemadministratorin
+Redakteur|Redakteurin
 Account Manager
-Controllerin
-Einkäufer
-Support-Mitarbeiterin
+Controller|Controllerin
+Einkäufer|Einkäuferin
+Support-Mitarbeiter|Support-Mitarbeiterin
+Backend-Entwickler|Backend-Entwicklerin
+Art Director
+Illustrator|Illustratorin
+Texter|Texterin
+Steuerberater|Steuerberaterin
+Architekt|Architektin
+Ingenieur|Ingenieurin
+Lehrer|Lehrerin
+Pflegefachmann|Pflegefachfrau
+Koch|Köchin
+Fotograf|Fotografin
+Rechtsanwalt|Rechtsanwältin
+Head of Marketing
+Office Manager
+Community Manager
+Scrum Master
 
 [departments]
 Design
@@ -179,6 +291,10 @@ Einkauf
 Kundenservice
 Produkt
 Recht
+Betrieb
+Forschung
+Kommunikation
+IT
 
 [company-a]
 Nord
@@ -199,6 +315,13 @@ Sonnen
 Fluss
 Kraft
 Licht
+Morgen
+Fels
+Hoch
+Weit
+Frei
+Ost
+Weiß
 
 [company-b]
 werk
@@ -217,6 +340,15 @@ schmiede
 bau
 quelle
 wald
+stern
+zeit
+kreis
+garten
+burg
+land
+form
+bogen
+ufer
 
 [product-a]
 Kasse
@@ -231,6 +363,15 @@ Tresor
 Takt
 Planer
 Bote
+Anker
+Lotse
+Faden
+Kiste
+Fokus
+Bühne
+Notiz
+Quelle
+Waage
 
 [product-b]
 Pro
@@ -241,6 +382,11 @@ Studio
 Cloud
 Lite
 Max
+Hub
+Kit
+Neo
+Team
+Flex
 
 [headlines]
 Planen Sie Ihre Woche in fünf Minuten
@@ -265,6 +411,29 @@ Sehen Sie, was als Nächstes kommt
 Kleine Schritte, große Wirkung
 Willkommen zurück
 Gemeinsam mehr erreichen
+Ihr nächster Urlaub beginnt hier
+Frisch gekocht, schnell geliefert
+Die neue Kollektion ist da
+Heute bestellt, morgen geliefert
+Sparen ohne Umwege
+Die Sommertickets sind da
+Gesund durch den Winter
+Entdecken Sie Ihre Stadt neu
+Lesen, was wirklich zählt
+Schön, dass Sie da sind
+Ihr Konto ist bereit
+Der Wochenmarkt kommt zu Ihnen
+Mehr Zeit für das, was zählt
+Jetzt einen Tisch reservieren
+Die besten Rezepte der Saison
+Reisen ohne Stress
+Bewegung, die Spaß macht
+Bis zu 30 % Rabatt im Sale
+Neu in der Stadt? Wir zeigen Ihnen alles
+Ihre Bank für die Hosentasche
+Jetzt anmelden und dabei sein
+Geschichten aus unserer Redaktion
+Termine einfach online buchen
 
 [sentences]
 Behalten Sie jedes Projekt im Blick, mit gemeinsamen Boards und klaren Zuständigkeiten.
@@ -299,3 +468,99 @@ Jedes Dokument hat einen Verlauf, damit Sie sehen, wer was wann geändert hat.
 Wir schicken eine kurze E-Mail im Monat, die Sie jederzeit abbestellen können.
 Laden Sie Bilder, Videos und PDFs hoch und sehen Sie sie an, ohne sie herunterzuladen.
 Erinnerungen kommen auf Ihr Telefon, Ihren Rechner oder beides.
+Bestellen Sie bis 14 Uhr, dann ist Ihr Paket am nächsten Werktag bei Ihnen.
+Rücksendungen sind dreißig Tage lang kostenlos, ganz ohne Begründung.
+Unsere Köche bereiten jedes Gericht am Morgen frisch zu, mit Zutaten aus der Region.
+Reservieren Sie Ihren Tisch online und sehen Sie sofort, welche Zeiten noch frei sind.
+Jede Unterkunft wird von unserem Team persönlich geprüft, bevor sie online geht.
+Stornieren Sie Ihre Reise bis 48 Stunden vor Abfahrt kostenlos.
+Mit {product} sehen Sie auf einen Blick, wohin Ihr Geld jeden Monat fließt.
+Überweisungen in Euro kommen in wenigen Sekunden an, auch am Wochenende.
+Das Festival findet an drei Tagen auf vier Bühnen mitten in {city} statt.
+Tickets gibt es nur online, Einlass ist ab 18 Uhr.
+Vereinbaren Sie Ihren Arzttermin rund um die Uhr, ganz ohne Warteschleife.
+Unsere Kurse sind für Einsteiger gemacht und lassen sich jederzeit pausieren.
+In der neuen Ausgabe sprechen wir mit Menschen, die ihr Viertel verändern.
+Jeden Freitag stellt die Redaktion die fünf lesenswertesten Geschichten der Woche zusammen.
+Willkommen an Bord, in wenigen Schritten ist Ihr Konto eingerichtet.
+Die neue Kollektion besteht aus recycelten Materialien und wird in Portugal genäht.
+Unser Laden in {city} hat montags bis samstags von 10 bis 19 Uhr geöffnet.
+Wählen Sie Ihre Lieblingsgerichte, und wir liefern die Zutaten passend abgewogen nach Hause.
+Mit der Kundenkarte sammeln Sie bei jedem Einkauf Punkte und lösen sie an der Kasse ein.
+Der Newsletter erscheint jeden Sonntagmorgen und ist in zehn Minuten gelesen.
+Alle Zimmer haben ein eigenes Bad, schnelles WLAN und ein Frühstück, für das sich das Aufstehen lohnt.
+Die Wanderung dauert etwa vier Stunden und ist auch für Familien geeignet.
+Das Abo ist monatlich kündbar, ohne Mindestlaufzeit.
+{company} unterstützt jedes Jahr Projekte in der Nachbarschaft mit einem Teil des Umsatzes.
+Ihre Bestellung wird klimaneutral verschickt, in einer Verpackung ohne Plastik.
+Fragen zu Ihrer Rechnung beantworten wir per Chat, E-Mail oder Telefon.
+Sparen Sie nebenbei, indem jede Kartenzahlung auf den nächsten vollen Euro aufgerundet wird.
+Karten lassen sich in der App mit einem Fingertipp sperren und wieder freigeben.
+Unser Team in {city} berät Sie gern persönlich, nach Feierabend auch per Video.
+Die Sprechstunde findet jeden Dienstag statt, eine Anmeldung ist nicht nötig.
+Schreiben Sie uns, was Ihnen fehlt, denn wir lesen jede Nachricht.
+Samstags finden Sie uns auf dem Wochenmarkt, mit frischem Brot und Kuchen.
+Der Kaffee wird in kleinen Mengen geröstet und innerhalb einer Woche verschickt.
+Wer früh bucht, bekommt den besten Preis und einen Platz in der ersten Reihe.
+Alle Workshops werden aufgezeichnet und stehen danach ein Jahr lang zur Verfügung.
+{product} erinnert Sie an Rechnungen, bevor sie fällig werden.
+Die Anmeldung dauert zwei Minuten, danach können Sie sofort loslegen.
+Testen Sie {product} vierzehn Tage lang und entscheiden Sie dann in Ruhe.
+Gutscheine gibt es in jeder Höhe, und sie sind drei Jahre lang gültig.
+Die Führung durch die Altstadt beginnt täglich um 11 Uhr am Rathaus.
+Leihräder gibt es stunden- oder tageweise, und Sie geben sie an jeder Station wieder ab.
+
+[bios]
+{first} arbeitet als Produktdesigner bei {company} in {city}.|{first} arbeitet als Produktdesignerin bei {company} in {city}.
+{first} entwickelt seit zehn Jahren Software und leitet heute das Plattform-Team von {company}.
+{first} hat {company} 2019 in {city} gegründet und kümmert sich dort um Strategie und Finanzen.
+Als Lehrer an einer Gesamtschule in {city} unterrichtet {first} Mathematik und Physik.|Als Lehrerin an einer Gesamtschule in {city} unterrichtet {first} Mathematik und Physik.
+{first} hat fünfzehn Jahre in Restaurants zwischen Lyon und {city} gekocht und führt heute eine eigene Küche mit saisonaler Karte.
+{first} forscht an einer Universität in {city} zu Batteriespeichern und schreibt nebenbei für Fachzeitschriften.
+{first} ist freier Autor und schreibt Reportagen über Arbeit, Wohnen und Stadtentwicklung.|{first} ist freie Autorin und schreibt Reportagen über Arbeit, Wohnen und Stadtentwicklung.
+{first} arbeitet als Pflegefachmann auf einer Intensivstation in {city} und bildet neue Kolleginnen und Kollegen aus.|{first} arbeitet als Pflegefachfrau auf einer Intensivstation in {city} und bildet neue Kolleginnen und Kollegen aus.
+{first} fotografiert Hochzeiten, Porträts und Architektur, am liebsten bei natürlichem Licht.
+Bei {company} verantwortet {first} das Marketing für Deutschland, Österreich und die Schweiz.
+{first} ist Architekt in {city} und plant vor allem Schulen und Wohnprojekte aus Holz.|{first} ist Architektin in {city} und plant vor allem Schulen und Wohnprojekte aus Holz.
+{first} leitet seit 2021 den Kundenservice von {company} und sorgt dafür, dass keine Anfrage liegen bleibt.
+{first} ist Illustrator und zeichnet Kinderbücher, Plakate und gelegentlich ein Tattoo.|{first} ist Illustratorin und zeichnet Kinderbücher, Plakate und gelegentlich ein Tattoo.
+{first} hat in {city} Informatik studiert und baut heute Datenpipelines für {company}.
+{first} unterrichtet Yoga und Pilates in einem kleinen Studio in {city}.
+{first} berät mittelständische Unternehmen zu Steuern und Buchhaltung und ist überzeugt, dass Zahlen Geschichten erzählen.
+{first} ist Tierarzt in einer Landpraxis und kennt jeden Hof im Umkreis von zwanzig Kilometern.|{first} ist Tierärztin in einer Landpraxis und kennt jeden Hof im Umkreis von zwanzig Kilometern.
+{first} arbeitet als UX-Researcher bei {company} und spricht jede Woche mit Menschen, die das Produkt nutzen.|{first} arbeitet als UX-Researcherin bei {company} und spricht jede Woche mit Menschen, die das Produkt nutzen.
+Seit 2018 führt {first} eine kleine Bäckerei in {city}, die für ihr Sauerteigbrot bekannt ist.
+{first} ist Journalist und berichtet für eine Tageszeitung in {city} über Wirtschaft und Verkehr.|{first} ist Journalistin und berichtet für eine Tageszeitung in {city} über Wirtschaft und Verkehr.
+{first} hat zwölf Jahre als Ingenieur in der Autoindustrie gearbeitet und ist heute Technikchef bei {company}.|{first} hat zwölf Jahre als Ingenieurin in der Autoindustrie gearbeitet und ist heute Technikchefin bei {company}.
+{first} gestaltet Schriften und Erscheinungsbilder für Kulturhäuser in ganz Europa.
+{first} ist Physiotherapeut mit eigener Praxis in {city} und betreut nebenbei einen Ruderverein.|{first} ist Physiotherapeutin mit eigener Praxis in {city} und betreut nebenbei einen Ruderverein.
+{first} leitet eine Grundschule in {city} und setzt sich für mehr Unterricht im Freien ein.
+{first} programmiert seit der Schulzeit und hat zwei Open-Source-Bibliotheken für Kartendienste geschrieben.
+{first} ist Gründer von {company} und war vorher Produktchef bei einem Reiseportal.|{first} ist Gründerin von {company} und war vorher Produktchefin bei einem Reiseportal.
+
+[quotes]
+Seit wir {product} nutzen, ist unser Montagsmeeting halb so lang.
+Ich habe die App an einem Abend eingerichtet und seitdem keine Rechnung mehr vergessen.
+Endlich ein Tool, das mein ganzes Team ohne Schulung versteht.
+Der Support hat mir an einem Sonntag innerhalb einer Stunde geholfen.
+Die Lieferung kam pünktlich, und das Essen war noch warm.
+Wir haben drei andere Programme ausprobiert, bevor wir bei {product} geblieben sind.
+Die Buchung war in zwei Minuten erledigt, und vor Ort hat alles gestimmt.
+Ich spare jeden Monat Geld, ohne darüber nachzudenken.
+{company} hat unseren Laden und den Onlineshop endlich zusammengebracht.
+Die Schuhe passen perfekt, und der Umtausch war völlig unkompliziert.
+Unsere Kundschaft merkt den Unterschied sofort.
+Ich lese den Newsletter jeden Sonntag beim Frühstück.
+Das beste Konzert des Jahres, und der Einlass ging erstaunlich schnell.
+Seit {product} schreiben wir weniger E-Mails und haben mehr Zeit für die eigentliche Arbeit.
+Ich hätte nie gedacht, dass Buchhaltung so wenig Nerven kosten kann.
+Die Kurse sind gut erklärt, und ich übe, wann es mir passt.
+Wir würden {company} jederzeit weiterempfehlen.
+Das Zimmer war ruhig, sauber und hatte den schönsten Blick der ganzen Reise.
+Mit {product} weiß ich jeden Morgen, womit ich anfangen soll.
+Mein Arzttermin war in einer Minute gebucht, ganz ohne Warteschleife.
+Unser Team sitzt in drei Städten und fühlt sich trotzdem wie ein Büro an.
+Die Beratung war ehrlich, auch als das hieß, weniger zu kaufen.
+Ich bin seit fünf Jahren Kunde und immer noch begeistert.|Ich bin seit fünf Jahren Kundin und immer noch begeistert.
+Als Selbstständiger spare ich mit {product} jede Woche mehrere Stunden.|Als Selbstständige spare ich mit {product} jede Woche mehrere Stunden.
+Das Brot schmeckt wie früher bei meiner Oma.

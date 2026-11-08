@@ -518,3 +518,334 @@ fn the_verb_fills_in_the_locale_given() {
     };
     assert!(content.ends_with(".nl"), "a Dutch domain: {content}");
 }
+
+impl Fixture {
+    /// A frame of `n` rows, each a frame holding a text layer per field, named
+    /// and reading as the field. Answers the list and its rows.
+    fn list(&mut self, n: usize, fields: &[&str], locale: Option<&str>) -> (NodeId, Vec<NodeId>) {
+        let list = self.add(self.page, frame(), "List");
+        let rows = (1..=n)
+            .map(|i| {
+                let row = self.add(list, frame(), &format!("Row {i}"));
+                for field in fields {
+                    self.add(row, text(field, TextSizing::Auto, locale), field);
+                }
+                row
+            })
+            .collect();
+        (list, rows)
+    }
+
+    /// Each row's value of its layer named `field`.
+    fn column(&self, plan: &Plan, rows: &[NodeId], field: &str) -> Vec<String> {
+        rows.iter()
+            .map(|r| Self::text_of(plan, self.child(*r, field)))
+            .collect()
+    }
+}
+
+/// The entries of a table's `[name]` section.
+fn section<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
+    let head = format!("[{name}]");
+    source
+        .lines()
+        .map(str::trim_end)
+        .skip_while(|l| *l != head)
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect()
+}
+
+fn opts(locale: &str) -> Options {
+    Options {
+        locale: locale.into(),
+        ..Options::default()
+    }
+}
+
+/// Two cards filled one call at a time with one seed get different people: a
+/// record is seeded by its frame, not by being the first in the fill.
+/// flip: seeding a record by its index → fails at "another card".
+#[test]
+fn cards_filled_one_at_a_time_differ() {
+    let mut f = Fixture::new();
+    let a = f.add(f.page, frame(), "Card");
+    let b = f.add(f.page, frame(), "Card");
+    let name_a = f.add(a, text("Name", TextSizing::Auto, None), "Name");
+    let name_b = f.add(b, text("Name", TextSizing::Auto, None), "Name");
+    let first = Fixture::text_of(&f.plan(&[a], &Options::default()), name_a);
+    let second = Fixture::text_of(&f.plan(&[b], &Options::default()), name_b);
+    assert_ne!(first, second, "another card, another person");
+}
+
+/// Down a long list no given name, job or city repeats while the tables have
+/// others, and a redraw still moves only its own row.
+/// flip: `Rng::pick_fresh` returning its first draw whatever is taken → fails
+/// at "no name twice".
+#[test]
+fn a_long_list_repeats_no_name_job_or_city() {
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(20, &["Name", "Role", "City"], None);
+    let plan = f.plan(&[list], &Options::default());
+    let distinct = |xs: &[String]| xs.iter().collect::<std::collections::HashSet<_>>().len();
+    let names = f.column(&plan, &rows, "Name");
+    let given: Vec<String> = names
+        .iter()
+        .map(|n| n.split(' ').next().unwrap().to_string())
+        .collect();
+    assert_eq!(distinct(&given), 20, "no name twice: {given:?}");
+    let jobs = f.column(&plan, &rows, "Role");
+    assert_eq!(distinct(&jobs), 20, "no job twice: {jobs:?}");
+    let cities = f.column(&plan, &rows, "City");
+    assert_eq!(distinct(&cities), 20, "no city twice: {cities:?}");
+
+    let mut redraw = Options::default();
+    redraw.redraws.insert(f.child(rows[5], "Name"), 1);
+    let again = f.plan(&[list], &redraw);
+    for (i, row) in rows.iter().enumerate() {
+        let before = Fixture::text_of(&plan, f.child(*row, "Name"));
+        let after = Fixture::text_of(&again, f.child(*row, "Name"));
+        assert_eq!(before == after, i != 5, "row {i}: {before} → {after}");
+    }
+    let redrawn = f.column(&again, &rows, "Name");
+    assert_eq!(
+        distinct(&redrawn),
+        20,
+        "the redrawn row takes no one else's name"
+    );
+}
+
+/// In German a person's job takes the form that agrees with their name.
+#[test]
+fn a_job_agrees_with_its_person() {
+    let de = include_str!("../assets/content/de.txt");
+    let women: std::collections::HashSet<&str> = section(de, "given-f").into_iter().collect();
+    let mut form_of = std::collections::HashMap::new();
+    for pair in section(de, "jobs") {
+        if let Some((m, w)) = pair.split_once('|') {
+            form_of.insert(m, false);
+            form_of.insert(w, true);
+        }
+    }
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(30, &["Name", "Role"], None);
+    let plan = f.plan(&[list], &opts("de"));
+    let mut gendered = 0;
+    for (name, job) in f
+        .column(&plan, &rows, "Name")
+        .iter()
+        .zip(f.column(&plan, &rows, "Role"))
+    {
+        let woman = women.contains(name.split(' ').next().unwrap());
+        if let Some(feminine) = form_of.get(job.as_str()) {
+            gendered += 1;
+            assert_eq!(*feminine, woman, "{name}, {job}");
+        }
+    }
+    assert!(gendered >= 10, "the list drew gendered jobs: {gendered}");
+}
+
+/// The most specific phrase wins, a short label is not body copy, and a
+/// shape's name makes it an avatar only when it is about a picture of someone.
+#[test]
+fn names_read_most_specific_first() {
+    assert_eq!(kind_from_name("Street address"), Some(Kind::Street));
+    assert_eq!(kind_from_name("Product price"), Some(Kind::Price));
+    assert_eq!(kind_from_name("Product name"), Some(Kind::Product));
+    assert_eq!(kind_from_name("Team member"), Some(Kind::FullName));
+    assert_eq!(kind_from_name("Team"), Some(Kind::Department));
+    assert_eq!(kind_from_name("Updated time"), Some(Kind::Time));
+    assert_eq!(kind_from_name("Bio"), Some(Kind::Bio));
+    assert_eq!(kind_from_name("Testimonial 2"), Some(Kind::Quote));
+    assert_eq!(kind_from_name("Table cell"), None);
+    assert_eq!(fill::kind_of_text_layer("About", "About"), None);
+    assert_eq!(fill::kind_of_text_layer("Copy link", "Copy link"), None);
+    assert_eq!(
+        fill::kind_of_text_layer("Description", "A few words about it"),
+        Some(Kind::Paragraph)
+    );
+    assert_eq!(
+        fill::kind_of_text_layer("Name", "Name"),
+        Some(Kind::FullName),
+        "a placeholder named by its text is a slot until a value shows it is a label"
+    );
+    for name in ["Avatar", "User avatar", "Photo", "Profile picture", "Pfp 2"] {
+        assert!(fill::is_avatar_name(name), "{name}");
+    }
+    for name in ["Profile header bg", "Product photo", "Picture frame border"] {
+        assert!(!fill::is_avatar_name(name), "{name}");
+    }
+}
+
+/// A label named by its text is left where another layer shows its kind: a
+/// field's *Email* beside its value, a table's *Name* header over its rows.
+/// flip: dropping the `labels` pass in `layout` → fails at "the label".
+#[test]
+fn a_label_over_its_value_is_left() {
+    let mut f = Fixture::new();
+    let field = f.add(f.page, frame(), "Field");
+    let label = f.add(field, text("Email", TextSizing::Auto, None), "Email");
+    let value = f.add(
+        field,
+        text("jane@acme.com", TextSizing::Auto, None),
+        "jane@acme.com",
+    );
+    let plan = f.plan(&[field], &Options::default());
+    let row = |p: &Plan, id| p.rows.iter().find(|r| r.node == id).unwrap().value.clone();
+    assert_eq!(row(&plan, label), Value::Kept, "the label");
+    assert!(Fixture::text_of(&plan, value).contains('@'));
+
+    let (table, rows) = f.list(3, &["Name"], None);
+    let header = f.add(table, text("Name", TextSizing::Auto, None), "Name");
+    let plan = f.plan(&[table], &Options::default());
+    assert_eq!(row(&plan, header), Value::Kept, "the header");
+    assert!(
+        f.column(&plan, &rows, "Name")
+            .iter()
+            .all(|n| n.contains(' '))
+    );
+}
+
+/// Phone numbers come from the blocks reserved for fiction where a country has
+/// them, and a UK postcode's district never reads 0.
+#[test]
+fn phone_numbers_are_reserved_for_fiction() {
+    let blocks: [(&str, &[&str], &[&str]); 4] = [
+        ("en-US", &["555-01"], &["555-01"]),
+        (
+            "en-GB",
+            &[
+                "020 7946 0",
+                " 496 0",
+                "0191 498 0",
+                "029 2018 0",
+                "028 9649 6",
+                "01632 960",
+            ],
+            &["07700 900"],
+        ),
+        (
+            "fr",
+            &["01 99 00", "02 61 91", "03 53 01", "04 65 71", "05 36 49"],
+            &["06 39 98"],
+        ),
+        (
+            "de",
+            &[
+                "030 23125",
+                "069 90009",
+                "040 66969",
+                "0221 4710",
+                "089 99998",
+            ],
+            &["0171 39200", "0176 040690"],
+        ),
+    ];
+    for (tag, phone, mobile) in blocks {
+        let mut f = Fixture::new();
+        let (list, rows) = f.list(24, &["Phone", "Mobile", "Postcode"], None);
+        let plan = f.plan(&[list], &opts(tag));
+        for p in f.column(&plan, &rows, "Phone") {
+            // A German number outside the five cities starts with 0 after its
+            // area code, which is never assigned.
+            let unassigned = tag == "de" && p.split(' ').nth(1).is_some_and(|s| s.starts_with('0'));
+            assert!(
+                unassigned || phone.iter().any(|b| p.contains(b)),
+                "{tag} phone {p}"
+            );
+        }
+        for m in f.column(&plan, &rows, "Mobile") {
+            assert!(
+                mobile.iter().any(|b| m.starts_with(b) || m.contains(b)),
+                "{tag} mobile {m}"
+            );
+        }
+        if tag == "en-GB" {
+            for pc in f.column(&plan, &rows, "Postcode") {
+                let district = pc.split(' ').next().unwrap();
+                assert!(!district.ends_with('0'), "{pc}");
+            }
+        }
+    }
+}
+
+/// With example emails on, every address is at example.com.
+/// flip: `Drawn::domain` ignoring `example_emails` → fails at the assertion.
+#[test]
+fn example_emails_reach_no_one() {
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(5, &["Name", "Email", "Company"], None);
+    let plan = f.plan(
+        &[list],
+        &Options {
+            example_emails: true,
+            ..Options::default()
+        },
+    );
+    for email in f.column(&plan, &rows, "Email") {
+        assert!(email.ends_with("@example.com"), "{email}");
+    }
+}
+
+/// The outline counts the rows, changes and records the plan does, undrawn.
+#[test]
+fn the_outline_counts_as_the_plan_does() {
+    let mut f = Fixture::new();
+    let (list, _) = f.team();
+    let plan = f.plan(&[list], &Options::default());
+    let outline = fill::outline(&f.doc, &[list], &Options::default());
+    assert_eq!(outline.rows.len(), plan.rows.len());
+    assert_eq!(outline.changes(), plan.changes());
+    assert_eq!(outline.filled_records(), plan.filled_records());
+}
+
+/// In every locale, every kind's value is whole: no slot left unfilled and no
+/// gendered pair left unsplit. Numbers run from one digit to four, and a
+/// birthday is decades back.
+#[test]
+fn every_value_is_whole() {
+    let fields: Vec<&str> = Kind::ALL
+        .into_iter()
+        .filter(|k| k.is_text())
+        .map(Kind::label)
+        .collect();
+    for l in locales() {
+        let mut f = Fixture::new();
+        let (list, rows) = f.list(6, &fields, None);
+        let mut o = opts(&l.tag);
+        for row in &rows {
+            for (field, kind) in fields
+                .iter()
+                .zip(Kind::ALL.into_iter().filter(|k| k.is_text()))
+            {
+                o.kinds.insert(f.child(*row, field), Some(kind));
+            }
+        }
+        let plan = f.plan(&[list], &o);
+        for r in &plan.rows {
+            let Value::Text(t) = &r.value else {
+                panic!("{:?} drew nothing in {}", r.kind, l.tag)
+            };
+            assert!(
+                !t.is_empty() && !t.contains(['{', '}', '|']),
+                "{} {:?}: {t}",
+                l.tag,
+                r.kind
+            );
+        }
+    }
+
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(40, &["Count", "Birthday"], None);
+    let plan = f.plan(&[list], &Options::default());
+    let counts = f.column(&plan, &rows, "Count");
+    assert!(
+        counts.iter().any(|c| c.len() <= 2),
+        "short counts: {counts:?}"
+    );
+    for day in f.column(&plan, &rows, "Birthday") {
+        let year: u32 = day.rsplit(' ').next().unwrap().parse().unwrap();
+        assert!(year <= 2004, "{day}");
+    }
+}

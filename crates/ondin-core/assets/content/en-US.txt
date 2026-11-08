@@ -1,6 +1,10 @@
 # Fill with content: English (US). The format is read by `ondin_core::content_fill`.
 # `@key value` lines set a format; `[section]` lines start a list, one entry per line.
-# In a pattern, `#` is a digit and `@` a capital letter; `a..b` is a number range.
+# In a pattern, `#` is a digit, `&` a digit but 0 and `@` a capital letter; `a..b`
+# is a number range. A phone format may list blocks split by `|`, one drawn per number.
+# Given names come as `[given-f]` and `[given-m]` (or ungendered as `[given]`); a job,
+# bio or quote whose words agree with the person is written `masculine|feminine`.
+# Phone numbers are the 555-0100 to 555-0199 block, reserved for fiction.
 
 @name English (US)
 @tag en-US
@@ -21,47 +25,75 @@
 @address {street}|{city}, {region} {postcode}|{country}
 @legal Inc.|LLC|Co.
 
-[given]
+[given-f]
 Maya
-Daniel
 Olivia
-James
 Sofia
-Ethan
 Grace
-Lucas
 Chloe
-Noah
 Priya
-Marcus
 Hannah
-Julian
 Aaliyah
-Owen
 Naomi
-Caleb
 Elena
-Isaac
 Ruby
-Mateo
 Leah
-Adrian
 Zoe
-Samuel
 Nora
-Theo
 Camila
-Dylan
 Avery
-Jordan
 Imani
-Kenji
 Rosa
-Victor
 Harper
-Miles
 Lily
+Jasmine
+Mei
+Claire
+Destiny
+Fatima
+Sarah
+Megan
+Ava
+Isabel
+Keisha
+Alana
+Natalie
+Tessa
+
+[given-m]
+Daniel
+James
+Ethan
+Lucas
+Noah
+Marcus
+Julian
+Owen
+Caleb
+Isaac
+Mateo
+Adrian
+Samuel
+Theo
+Dylan
+Jordan
+Kenji
+Victor
+Miles
 Gabriel
+Andre
+Omar
+Ryan
+Ben
+Malik
+Diego
+Wesley
+Hiro
+Nathan
+Elijah
+Connor
+Arjun
+Tyler
 
 [family]
 Okafor
@@ -104,6 +136,21 @@ Dawson
 Cruz
 Harrington
 Sato
+Johnson
+Ortiz
+Walker
+Jackson
+Rivera
+Tran
+Singh
+Flores
+Murphy
+Abbott
+Goldberg
+Okonkwo
+Castillo
+Yamamoto
+Lindqvist
 
 [cities]
 # city|region|postcode|area code
@@ -127,6 +174,12 @@ Phoenix|AZ|85003..85054|602
 Salt Lake City|UT|84101..84152|801
 Madison|WI|53703..53726|608
 Raleigh|NC|27601..27617|919
+Pittsburgh|PA|15201..15237|412
+Columbus|OH|43201..43235|614
+Kansas City|MO|64101..64157|816
+Charlotte|NC|28202..28277|704
+Sacramento|CA|95811..95838|916
+New Orleans|LA|70112..70131|504
 
 [streets]
 Alder
@@ -154,6 +207,12 @@ Garfield
 Grand
 Mission
 Union
+Chestnut
+Walnut
+Highland
+Prospect
+Forest
+Ridge
 
 [suffixes]
 St
@@ -211,6 +270,14 @@ Solutions architect
 Community manager
 Illustrator
 HR partner
+Data engineer
+Nurse practitioner
+Teacher
+Photographer
+Product marketing manager
+Architect
+Pastry chef
+Physical therapist
 
 [departments]
 Design
@@ -224,6 +291,7 @@ People
 Product
 Legal
 Research
+Customer success
 
 [company-a]
 North
@@ -246,6 +314,10 @@ True
 Wild
 Cedar
 Lumen
+Copper
+Arrow
+Quiet
+Sun
 
 [company-b]
 wind
@@ -268,6 +340,10 @@ labs
 forge
 mark
 bay
+grove
+rock
+spring
+beam
 
 [product-a]
 Ledger
@@ -285,6 +361,11 @@ Quill
 Signal
 Vault
 Tempo
+Nimbus
+Prism
+Lantern
+Meridian
+Ember
 
 [product-b]
 Pro
@@ -297,6 +378,8 @@ Lite
 Max
 Hub
 Kit
+Flow
+Edge
 
 [headlines]
 Plan your week in five minutes
@@ -324,6 +407,22 @@ Your weekend starts here
 Ideas worth sharing
 Get more done together
 Welcome back
+Fresh picks for your weekend
+Find your next stay
+Dinner, sorted
+Book in under a minute
+Travel lighter
+Save more every month
+New arrivals are here
+Feel better, sleep better
+Tickets on sale now
+Stories worth your time
+Your order is on its way
+Explore the city like a local
+Free shipping on every order
+Eat well without the effort
+Plan the trip of a lifetime
+The season's best, all in one place
 
 [sentences]
 Keep every project on track with shared boards, clear owners and gentle reminders.
@@ -366,3 +465,87 @@ Every document keeps a history, so you can see who changed what and when.
 We send one short email a month, and you can unsubscribe at any time.
 Upload images, video and PDFs, and preview them without downloading.
 Reminders arrive on your phone, your desktop or both, as you prefer.
+Order by noon and your groceries arrive the same evening.
+Every room is cleaned to a checklist and inspected before you arrive.
+Our bakers start at four, so the bread on the shelf is always from today.
+Compare flights, hotels and trains side by side, then book them in one go.
+Returns are free for thirty days, no questions asked.
+Fresh menus every week, with recipes that take thirty minutes or less.
+Track your spending by category and see where every dollar goes.
+Classes run morning and evening, so there is always one that fits your day.
+Seats go fast, so we hold yours for ten minutes while you check out.
+Each piece is made by hand in our workshop in {city}.
+Your savings earn interest from the first day, with no minimum balance.
+Book a table for tonight and skip the line at the door.
+Every listing is checked by our team before it goes live.
+Pick a delivery window that suits you, and change it right up to the morning.
+Our editors read every story before it reaches your inbox.
+Members get early access to sales and free shipping on every order.
+Rent the gear you need for the weekend and return it on Monday.
+Talk to a licensed doctor by video, usually within fifteen minutes.
+The new collection is made from recycled fabric and natural dyes.
+Earn points on every stay and spend them on your next trip.
+{company} has served the {city} area for more than twenty years.
+Download the guide and plan your route before you leave home.
+Choose from more than two hundred trails, sorted by length and difficulty.
+Every coffee is roasted to order and shipped within two days.
+Split the bill with friends and settle up in a tap.
+Our tutors are matched to each student and meet online twice a week.
+Prices include taxes and fees, so the number you see is the number you pay.
+Get a reminder before every appointment, and reschedule with one tap.
+The festival runs for three days, with more than forty artists on four stages.
+Sign up today and your first box ships free.
+
+[bios]
+{first} leads the design team at {company} and has spent the last decade building tools for small businesses.
+{first} is a software engineer in {city} who writes about performance and accessibility.
+Before founding {company}, {first} spent eight years in product management at two early-stage startups.
+{first} is a pastry chef who trained in Lyon and now runs a small bakery in {city}.
+{first} teaches high school chemistry and coaches the robotics club on weekends.
+{first} is a freelance photographer covering food, travel and the people who make {city} what it is.
+{first} joined {company} as its first support hire and now runs customer success for the whole company.
+{first} researches urban mobility and has advised three city governments on bike infrastructure.
+{first} is a registered nurse who spent six years in emergency care before moving into patient education.
+A former journalist, {first} now writes the {company} newsletter, read by forty thousand people each week.
+{first} is a data analyst who turns messy spreadsheets into dashboards people actually use.
+{first} runs a ceramics studio in {city} and teaches beginner classes twice a week.
+{first} is an architect focused on affordable housing and community spaces.
+{first} has been building iOS apps since the first SDK and still ships one side project a year.
+{first} coordinates volunteers for a food bank in {city} and organizes its yearly fundraiser.
+{first} is a brand designer who has worked with more than fifty independent shops and restaurants.
+{first} manages operations at {company}, keeping a remote team of thirty in sync across four time zones.
+{first} is a physical therapist who specializes in running injuries and marathon training.
+{first} studied economics, worked in banking for five years, then left to start {company}.
+{first} is an illustrator whose work has appeared in children's books, magazines and one very large mural.
+{first} leads engineering at {company} and cares most about calm on-call rotations and clear docs.
+{first} is a high school librarian who runs the city's largest teen book club.
+{first} moved to {city} for graduate school and stayed to open a neighborhood coffee shop.
+{first} is a UX researcher who has interviewed more than a thousand customers across three continents.
+{first} spends weekdays writing code and weekends guiding hikes in the mountains near {city}.
+
+[quotes]
+{product} saved our team hours every week. I can't imagine going back.
+Setup took ten minutes, and the support team answered every question the same day.
+We switched from three different tools to {product}, and nobody misses the old way.
+The first app I open every morning. Simple, fast and it just works.
+Our clients love the shared links. Approvals that took a week now take a day.
+I was skeptical about switching, but the import moved everything over in one go.
+The best customer service I've had from any company, full stop.
+It paid for itself in the first month.
+Finally, a tool my whole team actually enjoys using.
+We onboarded forty people in an afternoon without a single training session.
+The mobile app is just as good as the desktop one, which is rare.
+I booked the whole trip on my phone during my lunch break.
+The food arrived hot, on time and exactly as ordered. We order every Friday now.
+Clear pricing, no surprises, and the product keeps getting better.
+I recommend {company} to every founder I meet.
+The reports used to take me a full day. Now they build themselves.
+Every stay has been spotless, and check-in takes less than a minute.
+It feels like the people who built {product} have done my job.
+Our sales went up by a third the season we moved our shop over.
+Friendly, quick and genuinely helpful. Five stars from me.
+The kids ask for the recipes again, which says it all.
+I've tried every budgeting app out there. This is the one that stuck.
+Small details make a big difference, and {product} gets them right.
+We trust {company} with our most important files, and they have never let us down.
+Ordering is so easy that my parents use it without calling me first.

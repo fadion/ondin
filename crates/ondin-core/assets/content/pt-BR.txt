@@ -1,9 +1,10 @@
 # Fill with content: Portuguese (Brazil). `\uXXXX` in a value is that character.
+# No regulator reserves numbers for fiction here; landlines start the subscriber number with 0, which is never assigned. Mobile numbers are only well-formed.
 
 @name Portuguese (Brazil)
 @tag pt-BR
 @country Brasil
-@phone ({area}) 3###-####
+@phone ({area}) 0###-####
 @mobile ({area}) 9####-####
 @date {dd}/{mm}/{yyyy}
 @time {HH}:{MM}
@@ -17,37 +18,79 @@
 @address {street}|{city} - {region}|{postcode}|{country}
 @legal Ltda.|S.A.
 
-[given]
+[given-f]
 Ana
-Gabriel
 Beatriz
-Lucas
 Júlia
-Pedro
 Mariana
-Rafael
 Larissa
-Matheus
 Camila
-Guilherme
 Fernanda
-Thiago
 Isabela
-Bruno
 Letícia
-Felipe
 Juliana
-Gustavo
 Amanda
-Rodrigo
 Vitória
-Caio
 Bianca
-Diego
 Luana
-Enzo
 Yasmin
+Patrícia
+Aline
+Carolina
+Gabriela
+Natália
+Renata
+Tatiane
+Priscila
+Daniela
+Vanessa
+Jéssica
+Bruna
+Raquel
+Débora
+Thaís
+Luciana
+Mayara
+Sabrina
+Akemi
+Samira
+
+[given-m]
+Gabriel
+Lucas
+Pedro
+Rafael
+Matheus
+Guilherme
+Thiago
+Bruno
+Felipe
+Gustavo
+Rodrigo
+Caio
+Diego
+Enzo
 João
+Leonardo
+Marcelo
+Eduardo
+André
+Ricardo
+Vinícius
+Leandro
+Daniel
+Fábio
+Henrique
+Samuel
+Igor
+Renan
+Alexandre
+Márcio
+Kenji
+Jean
+Wesley
+Luiz
+Murilo
 
 [family]
 Souza
@@ -80,6 +123,29 @@ Cavalcanti
 Nunes
 Pinto
 Batista
+Lopes
+Vieira
+Barros
+Soares
+Fernandes
+Melo
+Castro
+Campos
+Rezende
+Machado
+Ramos
+Azevedo
+Duarte
+Moura
+Cunha
+Pires
+Medeiros
+Tavares
+Fonseca
+Andrade
+Nogueira
+Tanaka
+Haddad
 
 [cities]
 # city|region|postcode|area code
@@ -92,9 +158,25 @@ Salvador|BA|40###-###|71
 Recife|PE|50###-###|81
 Fortaleza|CE|60###-###|85
 Brasília|DF|70###-###|61
-Florianópolis|SC|88###-###|48
-Campinas|SP|13###-###|19
+Florianópolis|SC|880##-###|48
+Campinas|SP|130##-###|19
 Goiânia|GO|74###-###|62
+Manaus|AM|690##-###|92
+Belém|PA|66###-###|91
+São Luís|MA|650##-###|98
+Natal|RN|590##-###|84
+João Pessoa|PB|580##-###|83
+Maceió|AL|570##-###|82
+Aracaju|SE|490##-###|79
+Teresina|PI|640##-###|86
+Vitória|ES|290##-###|27
+Campo Grande|MS|790##-###|67
+Cuiabá|MT|780##-###|65
+Santos|SP|110##-###|13
+Niterói|RJ|240##-###|21
+Londrina|PR|860##-###|43
+Joinville|SC|8920#-###|47
+Ribeirão Preto|SP|140##-###|16
 
 [streets]
 das Flores
@@ -112,6 +194,22 @@ da Liberdade
 das Acácias
 Paulista
 Getúlio Vargas
+Rio Branco
+Marechal Deodoro
+Dom Pedro II
+Princesa Isabel
+Rui Barbosa
+Castro Alves
+Duque de Caxias
+Floriano Peixoto
+dos Ipês
+das Mangueiras
+Bela Vista
+Boa Vista
+do Sol
+da Saudade
+Joaquim Nabuco
+Machado de Assis
 
 [suffixes]
 Rua
@@ -136,27 +234,45 @@ dez.
 
 [jobs]
 Designer de produto
-Engenheira de software
+Engenheiro de software|Engenheira de software
 Gerente de engenharia
 Analista de dados
 Gerente de marketing
 Gerente de projetos
-Pesquisador de UX
-Executivo de vendas
+Pesquisador de UX|Pesquisadora de UX
+Executivo de vendas|Executiva de vendas
 Analista de sucesso do cliente
-Desenvolvedora front-end
-Redator
-Designer gráfica
-Contador
+Desenvolvedor front-end|Desenvolvedora front-end
+Redator|Redatora
+Designer gráfico|Designer gráfica
+Contador|Contadora
 Analista de recrutamento
 Gerente de produto
-Diretora executiva
-Assistente administrativo
+Diretor executivo|Diretora executiva
+Assistente administrativo|Assistente administrativa
 Analista de sistemas
 Social media
-Analista financeira
-Comprador
+Analista financeiro|Analista financeira
+Comprador|Compradora
 Atendente de suporte
+Desenvolvedor back-end|Desenvolvedora back-end
+Engenheiro de dados|Engenheira de dados
+Designer UX/UI
+Consultor de negócios|Consultora de negócios
+Advogado|Advogada
+Arquiteto de soluções|Arquiteta de soluções
+Ilustrador|Ilustradora
+Fotógrafo|Fotógrafa
+Especialista em SEO
+Product owner
+Analista de RH
+Coordenador de eventos|Coordenadora de eventos
+Diretor de arte|Diretora de arte
+Desenvolvedor mobile|Desenvolvedora mobile
+Analista de QA
+Gerente de operações
+Jornalista
+Tradutor|Tradutora
 
 [departments]
 Design
@@ -169,6 +285,10 @@ Compras
 Atendimento
 Produto
 Jurídico
+Operações
+Pesquisa
+Comunicação
+Tecnologia
 
 [company-a]
 Norte
@@ -187,6 +307,15 @@ Sol
 Rio
 Luz
 Ipê
+Alba
+Nuvem
+Brisa
+Farol
+Aurora
+Verde
+Cobre
+Lince
+Jade
 
 [company-b]
 campo
@@ -205,6 +334,15 @@ casa
 fonte
 serra
 mar
+ninho
+vela
+rede
+rota
+vale
+mesa
+obra
+ramo
+raiz
 
 [product-a]
 Livro
@@ -219,6 +357,15 @@ Cofre
 Ritmo
 Agenda
 Pena
+Farol
+Mapa
+Nota
+Ponte
+Vela
+Caderno
+Relógio
+Órbita
+Fio
 
 [product-b]
 Pro
@@ -229,6 +376,11 @@ Studio
 Cloud
 Lite
 Max
+Hub
+Kit
+Flow
+Smart
+Team
 
 [headlines]
 Planeje sua semana em cinco minutos
@@ -252,6 +404,29 @@ Cresça seu negócio com confiança
 Veja o que vem por aí
 Que bom ter você de volta
 Juntos vamos mais longe
+Sua próxima viagem começa aqui
+Frete grátis para todo o Brasil
+A liquidação de temporada já começou
+Comida de verdade, todo dia
+Reserve sua mesa em segundos
+Economize sem nem perceber
+Seu dinheiro sob controle
+Ingressos já à venda
+A gente se vê no festival
+Cuide de você do seu jeito
+Sua saúde sempre por perto
+Histórias que importam
+Os mais lidos da semana
+Boas-vindas
+Crie sua conta em um minuto
+Viagens de fim de semana que cabem no bolso
+Conheça a nova coleção
+Da horta para a sua mesa
+Parcele sem juros
+Voe mais, pague menos
+Sua farmácia de confiança, agora online
+Agende sua consulta sem fila
+Receitas para todos os dias da semana
 
 [sentences]
 Acompanhe cada projeto com quadros compartilhados e responsáveis claros.
@@ -284,3 +459,101 @@ Você pode mudar de plano ou cancelar a qualquer momento na sua conta.
 Cada documento guarda o histórico de quem mudou o quê, e quando.
 Enviamos um e-mail curto por mês, e você pode cancelar a inscrição quando quiser.
 Os lembretes chegam no seu celular, no computador ou nos dois.
+Pedidos feitos até as 14h são enviados no mesmo dia.
+Você pode devolver qualquer produto em até trinta dias, sem precisar explicar o motivo.
+Escolha o tamanho que você costuma usar: nossas peças seguem a tabela padrão.
+Avisamos assim que o seu pedido sair do centro de distribuição.
+Reserve hoje e pague na chegada, com cancelamento grátis até a véspera.
+Nossos apartamentos em {city} ficam a poucos passos da praia.
+Compare voos e passagens de ônibus em uma única busca.
+Salve seus destinos favoritos e avisamos quando os preços caírem.
+O cardápio muda toda semana de acordo com o que chega da feira.
+Peça pelo app e receba a comida quentinha em menos de quarenta minutos.
+Todas as receitas trazem o tempo de preparo e a lista de alergênicos.
+Abrimos de terça a domingo, e nos fins de semana é bom reservar.
+Abra sua conta pelo celular em menos de dez minutos, sem tarifa de manutenção.
+Separe uma parte do salário todo mês e deixe a sua reserva crescer sozinha.
+Cada gasto aparece na hora, já com a categoria certa.
+Bloqueie o cartão pelo app em caso de perda ou roubo.
+Pague com Pix, cartão ou boleto, como for mais prático.
+Os ingressos chegam por e-mail e também ficam salvos no app.
+Os portões abrem uma hora antes do show.
+A programação completa do evento sai no início do mês.
+Inscreva-se até sexta para garantir o valor promocional.
+Agende consultas e exames sem ficar esperando no telefone.
+Os resultados dos exames chegam no app assim que ficam prontos.
+Dez minutos de alongamento por dia já fazem diferença.
+Nossa equipe de nutricionistas monta um plano que cabe na sua rotina.
+Toda manhã selecionamos as notícias que valem a leitura.
+Assine e leia sem limites no site e no aplicativo.
+Esta reportagem faz parte de uma série sobre a vida em {city}.
+Em dois minutos sua conta está pronta para usar.
+Complete seu perfil para receber recomendações mais úteis.
+Ative as notificações para não perder nada importante.
+A {company} trabalha com produtores locais desde o primeiro dia.
+Plantamos uma árvore a cada pedido desde que abrimos as portas.
+Entregas para o Norte e o Nordeste podem levar alguns dias a mais.
+O {product} ajuda a dividir as contas da casa sem discussão.
+Mantenha as contas em dia e declare o imposto de renda sem susto.
+Confira o estoque da loja antes de sair de casa.
+Quem faz parte do clube tem acesso antecipado às promoções.
+Nosso atendimento funciona de segunda a sexta, das 9h às 18h.
+Se for presente, avise no pedido e enviamos sem o preço na embalagem.
+A aula experimental é gratuita e não precisa levar nada.
+Com o {product}, planejar as férias em família fica muito mais fácil.
+O café que servimos é torrado toda semana aqui pertinho.
+
+[bios]
+{first} é designer de produto na {company} e mora em {city}.
+{first} trabalha com infraestrutura em nuvem há mais de dez anos e hoje lidera o time de plataforma da {company}.
+{first} fundou a {company} em {city} depois de uma década em consultoria.
+{first} dá aulas de matemática em uma escola pública de {city} e escreve sobre educação nas horas vagas.
+Depois de estudar gastronomia em São Paulo, {first} abriu o próprio restaurante em {city}, onde cozinha com ingredientes da estação.
+{first} é pesquisador em biologia marinha e estuda o efeito do aquecimento dos oceanos nos recifes de coral.|{first} é pesquisadora em biologia marinha e estuda o efeito do aquecimento dos oceanos nos recifes de coral.
+{first} escreve romances policiais e colabora com revistas de cultura.
+{first} trabalha como enfermeiro no pronto-socorro de um hospital de {city}.|{first} trabalha como enfermeira no pronto-socorro de um hospital de {city}.
+{first} é fotógrafo de casamentos e retratos, e já publicou dois livros sobre o litoral nordestino.|{first} é fotógrafa de casamentos e retratos, e já publicou dois livros sobre o litoral nordestino.
+Engenheiro de dados na {company}, {first} cuida para que os relatórios cheguem no prazo e sem erros.|Engenheira de dados na {company}, {first} cuida para que os relatórios cheguem no prazo e sem erros.
+{first} coordena o time de atendimento da {company} a partir de {city}.
+{first} começou no design gráfico e hoje comanda a área de marca da {company}.
+Jornalista de formação, {first} conta histórias com dados para veículos digitais há cinco anos.
+{first} é cofundador da {company}, uma startup de {city} que ajuda pequenos comércios a vender online.|{first} é cofundadora da {company}, uma startup de {city} que ajuda pequenos comércios a vender online.
+{first} dá aulas de ioga e pilates em um pequeno estúdio no centro de {city}.
+{first} é arquiteto e se especializou em restaurar casarões antigos sem perder o charme original.|{first} é arquiteta e se especializou em restaurar casarões antigos sem perder o charme original.
+De {city}, {first} desenvolve aplicativos para clientes do Brasil e do exterior.
+{first} é ilustrador e já trabalhou para editoras de livros infantis no Brasil e em Portugal.|{first} é ilustradora e já trabalhou para editoras de livros infantis no Brasil e em Portugal.
+{first} pesquisa aprendizado de máquina aplicado à saúde em uma universidade de {city}.
+Antes de entrar na {company}, {first} passou seis anos no mercado financeiro.
+{first} é confeiteiro e comanda a doceria que os avós abriram em {city}.|{first} é confeiteira e comanda a doceria que os avós abriram em {city}.
+{first} é tradutor literário de inglês e espanhol.|{first} é tradutora literária de inglês e espanhol.
+{first} lidera o time de produto da {company} e adora conversar com quem usa o app todos os dias.
+{first} é advogado trabalhista e orienta startups sobre contratação.|{first} é advogada trabalhista e orienta startups sobre contratação.
+{first} concilia o trabalho como desenvolvedor back-end com a organização de meetups de programação em {city}.|{first} concilia o trabalho como desenvolvedora back-end com a organização de meetups de programação em {city}.
+{first} é veterinário em uma clínica de {city} e voluntário em um abrigo de animais.|{first} é veterinária em uma clínica de {city} e voluntária em um abrigo de animais.
+
+[quotes]
+O {product} economizou horas de reunião do nosso time toda semana.
+Instalei numa segunda e na quarta o time inteiro já estava usando.
+Finalmente tenho todas as notas fiscais em um só lugar.
+Fiquei impressionado com o atendimento: rápido, gentil e sem enrolação.|Fiquei impressionada com o atendimento: rápido, gentil e sem enrolação.
+O pedido chegou no dia seguinte e muito bem embalado.
+Com certeza vamos voltar; a vista do quarto era incrível.
+O atendimento da {company} é o melhor que já tive.
+Desde que comecei a usar o {product}, sei exatamente para onde vai meu dinheiro.
+Fiquei surpreso com a facilidade de migrar todos os nossos dados.|Fiquei surpresa com a facilidade de migrar todos os nossos dados.
+A comida é nota dez, e o atendimento é melhor ainda.
+Achei que seria só mais um aplicativo, mas virou indispensável.
+Nossos clientes percebem a diferença e fazem questão de dizer.
+Comprei os ingressos em um minuto e eles já apareceram no celular.
+Já testei muitas ferramentas, e o {product} é a única que continuo usando.
+No começo fiquei meio perdido, mas o suporte me ajudou em tudo.|No começo fiquei meio perdida, mas o suporte me ajudou em tudo.
+Mudar de plano foi simples e sem surpresas na fatura.
+Recomendo para qualquer time pequeno que queira se organizar.
+Com a {company}, dobramos as vendas online em um ano.
+As aulas são leves e senti a melhora já na primeira semana.
+Uso há dois anos e nunca tive problema.
+Fiquei muito satisfeito com o resultado, superou o que eu esperava.|Fiquei muito satisfeita com o resultado, superou o que eu esperava.
+O app é claro e não precisa ler manual nenhum.
+Assim que testamos, sabíamos que era o que estávamos procurando.
+Meus pedidos sempre chegam no prazo, até no Natal.
+Fico mais tranquilo sabendo que está tudo com backup.|Fico mais tranquila sabendo que está tudo com backup.

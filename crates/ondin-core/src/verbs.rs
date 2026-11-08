@@ -2496,6 +2496,11 @@ pub static VERBS: &[Verb] = &[
                 INDEX,
                 "the draw: one seed always fills the same values; 0 unless given",
             ),
+            opt(
+                "example_emails",
+                ParamKind::Bool,
+                "every email at example.com, which reaches no one; off unless given",
+            ),
         ],
         run: |ctx, a| {
             use crate::content_fill::{self as fill, AvatarStyle, Kind, Options};
@@ -2517,6 +2522,7 @@ pub static VERBS: &[Verb] = &[
                     _ => Some(AvatarStyle::Initials),
                 },
                 seed: a.index("seed").unwrap_or(0) as u64,
+                example_emails: a.bool("example_emails").unwrap_or(false),
                 ..Options::default()
             };
             let plan = fill::plan(ctx.doc, &nodes, &opts);

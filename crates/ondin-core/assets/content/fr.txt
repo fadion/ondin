@@ -1,10 +1,11 @@
 # Fill with content: French. `\uXXXX` in a value is that character.
+# Phone numbers: ARCEP's blocks reserved for audiovisual fiction.
 
 @name French
 @tag fr
 @country France
-@phone {area} ## ## ## ##
-@mobile 06 ## ## ## ##
+@phone {area} ## ##
+@mobile 06 39 98 ## ##
 @date {dd}/{mm}/{yyyy}
 @time {HH}:{MM}
 @decimal ,
@@ -17,37 +18,85 @@
 @address {street}|{postcode} {city}|{country}
 @legal SAS|SARL|SA
 
-[given]
+[given-f]
 Camille
-Lucas
 Léa
-Hugo
 Manon
-Louis
 Chloé
-Gabriel
 Inès
-Arthur
 Jade
-Raphaël
 Louise
-Jules
 Emma
-Nathan
 Sarah
-Théo
 Zoé
-Antoine
 Juliette
-Mathis
 Clara
-Maxime
 Yasmine
-Bastien
 Margaux
-Karim
 Elise
+Pauline
+Marine
+Lucie
+Laura
+Anaïs
+Mélanie
+Julie
+Audrey
+Céline
+Amandine
+Océane
+Charlotte
+Fatou
+Nadia
+Leïla
+Myriam
+Aïcha
+Mathilde
+Élodie
+Sabrina
+Amina
+Linh
+Sonia
+
+[given-m]
+Lucas
+Hugo
+Louis
+Gabriel
+Arthur
+Raphaël
+Jules
+Nathan
+Théo
+Antoine
+Mathis
+Maxime
+Bastien
+Karim
 Paul
+Thomas
+Nicolas
+Julien
+Alexandre
+Romain
+Kevin
+Quentin
+Florian
+Mehdi
+Yanis
+Sofiane
+Mamadou
+Moussa
+Adrien
+Guillaume
+Benjamin
+Clément
+Damien
+Rayan
+Samuel
+Pierre
+Vincent
+Bilal
 
 [family]
 Laurent
@@ -80,21 +129,68 @@ Boyer
 Chevalier
 Benali
 Faure
+Lambert
+Fontaine
+Rousseau
+Bonnet
+Muller
+Lemaire
+Gauthier
+Perrin
+Nguyen
+Traoré
+Diallo
+Haddad
+Mansouri
+Da Silva
+Ferreira
+Martinez
+Lopez
+Rodrigues
+Fernandes
+Meyer
+Henry
+Roussel
+Brunet
+Schmitt
+Diop
+Bouzid
+Le Gall
+Tran
 
 [cities]
 # city|region|postcode|area code
-Paris||75001..75020|01
-Lyon||69001..69009|04
-Marseille||13001..13016|04
-Toulouse||31000..31500|05
-Bordeaux||33000..33800|05
-Nantes||44000..44300|02
-Lille||59000..59800|03
-Strasbourg||67000..67200|03
-Montpellier||34000..34090|04
-Rennes||35000..35700|02
-Nice||06000..06300|04
-Grenoble||38000..38100|04
+Paris||75001..75020|01 99 00
+Boulogne-Billancourt||92100|01 99 00
+Versailles||78000|01 99 00
+Montreuil||93100|01 99 00
+Lyon||69001..69009|04 65 71
+Marseille||13001..13016|04 65 71
+Nice||06000..06300|04 65 71
+Montpellier||34000..34090|04 65 71
+Grenoble||38000..38100|04 65 71
+Saint-Étienne||42000..42100|04 65 71
+Toulon||83000..83200|04 65 71
+Annecy||74000|04 65 71
+Aix-en-Provence||13100|04 65 71
+Clermont-Ferrand||63000..63100|04 65 71
+Toulouse||31000..31500|05 36 49
+Bordeaux||33000..33800|05 36 49
+Limoges||87000..87100|05 36 49
+Pau||64000|05 36 49
+Nantes||44000..44300|02 61 91
+Rennes||35000..35700|02 61 91
+Brest||29200|02 61 91
+Angers||49000..49100|02 61 91
+Caen||14000|02 61 91
+Rouen||76000..76100|02 61 91
+Tours||37000..37200|02 61 91
+Lille||59000..59800|03 53 01
+Strasbourg||67000..67200|03 53 01
+Reims||51100|03 53 01
+Nancy||54000..54100|03 53 01
+Metz||57000..57070|03 53 01
+Dijon||21000|03 53 01
 
 [streets]
 de la République
@@ -112,6 +208,22 @@ Gambetta
 de Verdun
 des Roses
 Saint-Martin
+Voltaire
+des Acacias
+de la Liberté
+du Général-de-Gaulle
+Molière
+des Peupliers
+de l'Église
+du Marché
+Émile-Zola
+Carnot
+de la Fontaine
+des Vignes
+du Port
+Pierre-Curie
+des Cerisiers
+Anatole-France
 
 [suffixes]
 rue
@@ -137,27 +249,43 @@ déc.
 
 [jobs]
 Designer produit
-Ingénieure logiciel
+Ingénieur logiciel|Ingénieure logiciel
 Responsable technique
 Analyste de données
 Responsable marketing
-Cheffe de projet
-Chercheur UX
-Commercial
-Chargée de clientèle
-Développeur front-end
-Rédactrice
+Chef de projet|Cheffe de projet
+Chercheur UX|Chercheuse UX
+Commercial|Commerciale
+Chargé de clientèle|Chargée de clientèle
+Développeur front-end|Développeuse front-end
+Rédacteur|Rédactrice
 Graphiste
 Comptable
-Chargé de recrutement
+Chargé de recrutement|Chargée de recrutement
 Responsable produit
-Directrice générale
-Assistant de direction
-Administrateur système
+Directeur général|Directrice générale
+Assistant de direction|Assistante de direction
+Administrateur système|Administratrice système
 Community manager
-Contrôleuse de gestion
-Acheteur
-Conseillère support
+Contrôleur de gestion|Contrôleuse de gestion
+Acheteur|Acheteuse
+Conseiller support|Conseillère support
+Développeur back-end|Développeuse back-end
+Directeur artistique|Directrice artistique
+Product manager
+Data scientist
+Juriste
+Infirmier|Infirmière
+Professeur des écoles|Professeure des écoles
+Architecte
+Photographe
+Consultant|Consultante
+Chef de cuisine|Cheffe de cuisine
+Pharmacien|Pharmacienne
+Responsable RH
+Illustrateur|Illustratrice
+Ingénieur DevOps|Ingénieure DevOps
+Office manager
 
 [departments]
 Design
@@ -170,6 +298,9 @@ Achats
 Service client
 Produit
 Juridique
+Recherche
+Opérations
+Communication
 
 [company-a]
 Nord
@@ -188,6 +319,15 @@ Soleil
 Rivière
 Lumière
 Chêne
+Ciel
+Sel
+Mer
+Lune
+Étoile
+Roc
+Val
+Haut
+Vif
 
 [company-b]
 champ
@@ -206,6 +346,15 @@ maison
 source
 bois
 rive
+mont
+plume
+toit
+fil
+phare
+quai
+ruche
+prisme
+jardin
 
 [product-a]
 Registre
@@ -220,6 +369,15 @@ Coffre
 Tempo
 Agenda
 Plume
+Phare
+Relais
+Orbite
+Cadran
+Carnet
+Balise
+Prisme
+Ancre
+Écho
 
 [product-b]
 Pro
@@ -230,6 +388,11 @@ Studio
 Cloud
 Lite
 Max
+Duo
+Équipe
+Express
+Hub
+Kit
 
 [headlines]
 Organisez votre semaine en cinq minutes
@@ -253,6 +416,27 @@ Développez votre activité en confiance
 Découvrez la suite
 Bon retour parmi nous
 Ensemble, on va plus loin
+Vos courses livrées en moins d'une heure
+Partez plus loin, payez moins cher
+Le goût du fait maison, livré chez vous
+Des billets pour tous les concerts de l'été
+Prenez soin de vous, à votre rythme
+Votre banque, sans frais cachés
+Les nouveautés de la saison sont arrivées
+Réservez votre table en deux clics
+Votre prochain week-end commence ici
+Bienvenue chez vous
+Soldes d'hiver : jusqu'à -50 %
+Épargnez sans y penser
+L'actualité qui compte, chaque matin
+Trouvez le séjour qui vous ressemble
+Bougez plus, stressez moins
+Des recettes de saison pour toute la semaine
+Votre rendez-vous médical en ligne
+Livraison offerte dès 50 €
+Créez votre compte en une minute
+Le meilleur de la ville, près de chez vous
+Tout commence maintenant
 
 [sentences]
 Suivez chaque projet grâce à des tableaux partagés et des responsables bien identifiés.
@@ -285,3 +469,100 @@ Vous pouvez changer d'offre ou résilier à tout moment depuis votre compte.
 Chaque document garde un historique de qui a modifié quoi, et quand.
 Nous envoyons un court courriel par mois, et vous pouvez vous désabonner à tout moment.
 Les rappels arrivent sur votre téléphone, votre ordinateur ou les deux.
+Commandez avant midi et recevez votre colis le lendemain.
+Les retours sont gratuits pendant trente jours, sans justification.
+Comparez les vols, les trains et les hôtels en un coup d'œil.
+Annulez sans frais jusqu'à quarante-huit heures avant l'arrivée.
+Nos chefs préparent chaque plat le matin même avec des produits de saison.
+Choisissez vos recettes, nous livrons les ingrédients déjà dosés.
+Suivez vos dépenses par catégorie et recevez une alerte avant de dépasser votre budget.
+Votre carte se bloque et se débloque d'un geste depuis l'application.
+Les virements sont instantanés et gratuits, sept jours sur sept.
+Réservez vos places pour les concerts et festivals de la région en quelques secondes.
+Les billets arrivent directement sur votre téléphone, inutile de les imprimer.
+Prenez rendez-vous avec un médecin disponible aujourd'hui, au cabinet ou en vidéo.
+Un rappel arrive la veille de chaque rendez-vous.
+Chaque matin, notre rédaction résume l'essentiel de l'actualité en cinq articles.
+Abonnez-vous à notre lettre hebdomadaire pour ne rien manquer.
+Répondez à quelques questions et votre espace sera prêt en un instant.
+Retrouvez {product} dans plus de deux cents magasins partout en France.
+La boutique de {city} vous accueille du mardi au samedi, de 10 h à 19 h.
+Chaque commande est préparée à la main dans notre atelier de {city}.
+Nos emballages sont recyclables et sans plastique.
+Payez en trois fois sans frais dès 100 € d'achat.
+Cumulez des points à chaque achat et profitez de remises réservées aux membres.
+Notre guide rassemble nos meilleures adresses pour un week-end réussi.
+Les hôtes sont vérifiés et chaque logement est noté par de vrais voyageurs.
+Planifiez vos séances de sport et suivez vos progrès semaine après semaine.
+Des cours de yoga en ligne pour tous les niveaux, à suivre depuis chez soi.
+Notre service client est joignable par téléphone, par chat ou par courriel.
+{company} soutient les producteurs locaux depuis plus de dix ans.
+La livraison est offerte dès 50 € d'achat.
+Ajoutez vos articles préférés à une liste et recevez une alerte quand leur prix baisse.
+Votre épargne travaille pour vous, sans engagement ni frais d'entrée.
+Partagez l'addition entre amis directement depuis l'application.
+Les places sont limitées, pensez à réserver votre table.
+La carte change chaque semaine, au gré du marché.
+Votre dossier médical reste confidentiel et n'est partagé qu'avec votre accord.
+L'inscription est gratuite et ne prend qu'une minute.
+Téléchargez l'application pour suivre votre commande en temps réel.
+Découvrez les coulisses de {company} dans notre nouveau reportage.
+Tout l'été, les enfants de moins de douze ans voyagent à moitié prix.
+Nos conseillers répondent en direct à toutes vos questions avant la commande.
+Chaque mois, nos libraires vous proposent une sélection de livres coup de cœur.
+Le paiement est sécurisé et vos coordonnées bancaires ne sont jamais conservées.
+
+[bios]
+{first} est designer produit chez {company}, où l'équipe conçoit des outils pour les petites entreprises.
+Ingénieur logiciel depuis dix ans, {first} travaille aujourd'hui sur l'infrastructure de {company}.|Ingénieure logiciel depuis dix ans, {first} travaille aujourd'hui sur l'infrastructure de {company}.
+{first} a fondé {company} à {city} après quinze ans dans la restauration.
+Professeur de mathématiques au collège, {first} anime aussi un atelier de robotique le mercredi.|Professeure de mathématiques au collège, {first} anime aussi un atelier de robotique le mercredi.
+Chef dans un bistrot de {city}, {first} cuisine des produits achetés au marché le matin même.|Cheffe dans un bistrot de {city}, {first} cuisine des produits achetés au marché le matin même.
+{first} est chercheur en biologie marine et passe une partie de l'année en mission en Bretagne.|{first} est chercheuse en biologie marine et passe une partie de l'année en mission en Bretagne.
+Auteur de trois romans, {first} écrit aussi des chroniques pour la presse régionale.|Autrice de trois romans, {first} écrit aussi des chroniques pour la presse régionale.
+Infirmier en pédiatrie à {city}, {first} forme également les nouvelles recrues du service.|Infirmière en pédiatrie à {city}, {first} forme également les nouvelles recrues du service.
+{first} est photographe indépendant et travaille surtout pour des marques de mode et de décoration.|{first} est photographe indépendante et travaille surtout pour des marques de mode et de décoration.
+Après des études d'architecture, {first} a rejoint {company} pour diriger l'équipe de design.
+{first} dirige le service client de {company} et veille à ce que chaque demande reçoive une réponse dans la journée.
+Développeur mobile, {first} a contribué à plusieurs applications utilisées par des millions de personnes.|Développeuse mobile, {first} a contribué à plusieurs applications utilisées par des millions de personnes.
+{first} enseigne le design graphique dans une école d'art de {city}.
+Arrivé à {city} en 2015, {first} y a ouvert une librairie qui accueille des rencontres chaque semaine.|Arrivée à {city} en 2015, {first} y a ouvert une librairie qui accueille des rencontres chaque semaine.
+{first} est data scientist chez {company} et travaille sur la prévision de la demande.
+Directeur artistique depuis plus de dix ans, {first} a travaillé pour l'édition, la musique et la publicité.|Directrice artistique depuis plus de dix ans, {first} a travaillé pour l'édition, la musique et la publicité.
+{first} accompagne les jeunes entreprises de {city} dans leurs premiers recrutements.
+Ancien sportif de haut niveau, {first} est aujourd'hui coach et intervient en entreprise.|Ancienne sportive de haut niveau, {first} est aujourd'hui coach et intervient en entreprise.
+{first} est pharmacien à {city} et participe aux campagnes de vaccination du quartier.|{first} est pharmacienne à {city} et participe aux campagnes de vaccination du quartier.
+Journaliste culturel, {first} couvre les festivals et la rentrée littéraire pour un quotidien national.|Journaliste culturelle, {first} couvre les festivals et la rentrée littéraire pour un quotidien national.
+{first} a commencé chez {company} en stage et dirige aujourd'hui l'équipe produit.
+Illustrateur jeunesse, {first} a publié une vingtaine d'albums traduits dans plusieurs langues.|Illustratrice jeunesse, {first} a publié une vingtaine d'albums traduits dans plusieurs langues.
+{first} est consultant en stratégie et aide les commerces de proximité à vendre en ligne.|{first} est consultante en stratégie et aide les commerces de proximité à vendre en ligne.
+Passionné de vélo, {first} organise chaque été une randonnée solidaire entre {city} et la mer.|Passionnée de vélo, {first} organise chaque été une randonnée solidaire entre {city} et la mer.
+{first} tient la comptabilité de {company} et de plusieurs associations du quartier.
+Ingénieur agronome de formation, {first} conseille des exploitations agricoles dans leur passage au bio.|Ingénieure agronome de formation, {first} conseille des exploitations agricoles dans leur passage au bio.
+
+[quotes]
+J'utilise {product} tous les jours et je ne pourrais plus m'en passer.
+Je suis ravi du service, la livraison est arrivée en avance.|Je suis ravie du service, la livraison est arrivée en avance.
+L'équipe de {company} a répondu à toutes mes questions en moins d'une heure.
+Enfin une application bancaire claire et sans mauvaises surprises.
+Toute l'équipe est passée sur {product} et nous gagnons des heures chaque semaine.
+Le séjour était parfait, je recommande sans hésiter.
+Les plats arrivent encore chauds et les portions sont généreuses.
+J'étais sceptique au début, mais {product} m'a vite convaincu.|J'étais sceptique au début, mais {product} m'a vite convaincue.
+Prendre rendez-vous n'a jamais été aussi simple.
+Mes clients valident les maquettes en un clic, c'est un vrai gain de temps.
+Je suis client depuis cinq ans et je n'ai jamais été déçu.|Je suis cliente depuis cinq ans et je n'ai jamais été déçue.
+La qualité est au rendez-vous et le prix reste raisonnable.
+Le support m'a aidé à tout configurer en un après-midi.|Le support m'a aidée à tout configurer en un après-midi.
+Je recommande {company} à tout mon entourage.
+L'interface est si simple que même mes parents s'en servent.
+Le retour était gratuit et le remboursement est arrivé en quelques jours.
+Grâce à {product}, je sais enfin où passe mon argent.
+Le concert était inoubliable et l'entrée s'est faite sans attente.
+Nous avons réservé toutes nos vacances avec {company} et tout s'est bien passé.
+Je suis très content de mon achat, il correspond parfaitement à la description.|Je suis très contente de mon achat, il correspond parfaitement à la description.
+Les cours en ligne m'ont redonné le goût du sport.
+Un service humain et attentif, c'est devenu rare.
+Je lis la lettre du matin avec mon café, c'est devenu un rituel.
+Depuis que nous utilisons {product}, nos réunions durent deux fois moins longtemps.
+Commandé le soir, reçu le lendemain matin : impeccable.

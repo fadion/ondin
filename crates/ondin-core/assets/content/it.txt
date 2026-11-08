@@ -1,9 +1,10 @@
 # Fill with content: Italian. `\uXXXX` in a value is that character.
+# No regulator reserves numbers for fiction here; phone numbers are only well-formed.
 
 @name Italian
 @tag it
 @country Italia
-@phone {area} #### ####
+@phone {area}
 @mobile 3## ### ####
 @date {dd}/{mm}/{yyyy}
 @time {HH}:{MM}
@@ -17,37 +18,84 @@
 @address {street}|{postcode} {city}|{country}
 @legal S.r.l.|S.p.A.
 
-[given]
+[given-f]
 Giulia
-Francesco
 Sofia
-Alessandro
 Aurora
-Lorenzo
 Chiara
-Matteo
 Martina
-Leonardo
 Alice
-Andrea
 Giorgia
-Riccardo
 Sara
-Tommaso
 Elisa
-Davide
 Beatrice
-Marco
 Federica
-Simone
 Valentina
-Luca
 Noemi
-Gabriele
 Irene
-Samir
 Ludovica
+Francesca
+Laura
+Silvia
+Elena
+Roberta
+Serena
+Alessia
+Ilaria
+Eleonora
+Camilla
+Arianna
+Marta
+Anna
+Paola
+Fatima
+Andreea
+Ioana
+Amira
+Mei
+Erika
+Veronica
+Greta
+
+[given-m]
+Francesco
+Alessandro
+Lorenzo
+Matteo
+Leonardo
+Andrea
+Riccardo
+Tommaso
+Davide
+Marco
+Simone
+Luca
+Gabriele
+Samir
 Pietro
+Giuseppe
+Antonio
+Giovanni
+Stefano
+Paolo
+Roberto
+Fabio
+Daniele
+Emanuele
+Nicola
+Michele
+Alessio
+Mattia
+Federico
+Filippo
+Edoardo
+Youssef
+Ahmed
+Mihai
+Omar
+Kevin
+Christian
+Diego
 
 [family]
 Romano
@@ -80,21 +128,61 @@ Ferrara
 Galli
 Martini
 Leone
+Gentile
+Lombardo
+Longo
+Ferri
+Fabbri
+Villa
+Marchetti
+Cattaneo
+Bellini
+Sala
+Pellegrini
+Palumbo
+Sanna
+Fiore
+Testa
+Vitale
+D'Angelo
+Serra
+Parisi
+Monti
+Popescu
+Hoxha
+Chen
+Hu
+El Amrani
+Singh
+Zhou
 
 [cities]
-# city|region|postcode|area code
-Roma|RM|00118..00199|06
-Milano|MI|20121..20162|02
-Torino|TO|10121..10156|011
-Napoli|NA|80121..80147|081
-Bologna|BO|40121..40141|051
-Firenze|FI|50121..50145|055
-Genova|GE|16121..16167|010
-Venezia|VE|30121..30176|041
-Verona|VR|37121..37142|045
-Palermo|PA|90121..90151|091
-Bari|BA|70121..70132|080
-Padova|PD|35121..35143|049
+# city|region|postcode|phone number (ten digits: the area code, then the rest)
+Roma|RM|00118..00199|06 #### ####
+Milano|MI|20121..20162|02 #### ####
+Torino|TO|10121..10156|011 ### ####
+Napoli|NA|80121..80147|081 ### ####
+Bologna|BO|40121..40141|051 ### ####
+Firenze|FI|50121..50145|055 ### ####
+Genova|GE|16121..16167|010 ### ####
+Venezia|VE|30121..30176|041 ### ####
+Verona|VR|37121..37142|045 ### ####
+Palermo|PA|90121..90151|091 ### ####
+Bari|BA|70121..70132|080 ### ####
+Padova|PD|35121..35143|049 ### ####
+Catania|CT|95121..95131|095 ### ####
+Trieste|TS|34121..34151|040 ### ####
+Brescia|BS|25121..25136|030 ### ####
+Modena|MO|41121..41126|059 ### ####
+Cagliari|CA|09121..09134|070 ### ####
+Perugia|PG|06121..06135|075 ### ####
+Pisa|PI|56121..56128|050 ### ####
+Bergamo|BG|24121..24129|035 ### ####
+Salerno|SA|84121..84135|089 ### ####
+Messina|ME|98121..98168|090 ### ####
+Pescara|PE|65121..65129|085 ### ####
+Ancona|AN|60121..60131|071 ### ####
+Como|CO|22100|031 ### ####
 
 [streets]
 Roma
@@ -112,6 +200,22 @@ XX Settembre
 delle Rose
 San Marco
 Vittorio Emanuele
+Nazionale
+Volta
+Matteotti
+Gramsci
+Carducci
+della Repubblica
+IV Novembre
+dei Pini
+Marconi
+Leopardi
+Galileo Galilei
+delle Querce
+Santa Lucia
+del Mare
+Monte Grappa
+dei Gelsomini
 
 [suffixes]
 Via
@@ -136,27 +240,43 @@ dic
 
 [jobs]
 Product designer
-Ingegnere del software
-Responsabile tecnico
+Ingegnere del software|Ingegnera del software
+Responsabile tecnico|Responsabile tecnica
 Analista dei dati
 Responsabile marketing
 Project manager
-Ricercatrice UX
+Ricercatore UX|Ricercatrice UX
 Commerciale
 Customer success manager
-Sviluppatore front-end
+Sviluppatore front-end|Sviluppatrice front-end
 Copywriter
-Grafica
+Grafico|Grafica
 Contabile
 Recruiter
 Responsabile di prodotto
-Amministratrice delegata
+Amministratore delegato|Amministratrice delegata
 Assistente di direzione
 Sistemista
 Social media manager
 Controller
 Buyer
-Addetta al supporto
+Addetto al supporto|Addetta al supporto
+Sviluppatore back-end|Sviluppatrice back-end
+Direttore generale|Direttrice generale
+Direttore creativo|Direttrice creativa
+Data scientist
+Infermiere|Infermiera
+Insegnante
+Fotografo|Fotografa
+Consulente
+Chef
+Farmacista
+Responsabile risorse umane
+Illustratore|Illustratrice
+Product manager
+Traduttore|Traduttrice
+Office manager
+Commercialista
 
 [departments]
 Design
@@ -169,6 +289,9 @@ Acquisti
 Assistenza clienti
 Prodotto
 Legale
+Ricerca
+Operazioni
+Comunicazione
 
 [company-a]
 Nord
@@ -187,6 +310,15 @@ Sole
 Fiume
 Luce
 Quercia
+Cielo
+Mare
+Luna
+Stella
+Rocca
+Valle
+Alto
+Lago
+Selva
 
 [company-b]
 campo
@@ -205,6 +337,14 @@ casa
 fonte
 monte
 riva
+faro
+molo
+prisma
+nido
+vela
+rete
+filo
+giardino
 
 [product-a]
 Registro
@@ -219,6 +359,15 @@ Cassa
 Ritmo
 Agenda
 Piuma
+Faro
+Orbita
+Quadrante
+Taccuino
+Ancora
+Prisma
+Eco
+Mappa
+Ponte
 
 [product-b]
 Pro
@@ -229,6 +378,11 @@ Studio
 Cloud
 Lite
 Max
+Duo
+Team
+Express
+Hub
+Kit
 
 [headlines]
 Pianifica la tua settimana in cinque minuti
@@ -252,6 +406,27 @@ Fai crescere la tua attività con fiducia
 Scopri cosa c'è di nuovo
 Bentornato
 Insieme si va più lontano
+La spesa a casa tua in meno di un'ora
+Viaggia di più, spendi di meno
+Il sapore di casa, consegnato a domicilio
+I biglietti per tutti i concerti dell'estate
+Prenditi cura di te, con calma
+La tua banca, senza costi nascosti
+Sono arrivate le novità di stagione
+Prenota il tuo tavolo in due clic
+Il tuo prossimo weekend comincia qui
+Ti diamo il benvenuto
+Saldi invernali fino al 50%
+Risparmia senza pensarci
+Le notizie che contano, ogni mattina
+Trova il viaggio che fa per te
+Muoviti di più, preoccupati di meno
+Ricette di stagione per tutta la settimana
+Prenota la tua visita medica online
+Spedizione gratuita sopra i 50 €
+Crea il tuo account in un minuto
+Il meglio della città, vicino a te
+Si comincia adesso
 
 [sentences]
 Segui ogni progetto con bacheche condivise e responsabili chiari.
@@ -284,3 +459,100 @@ Puoi cambiare piano o disdirlo in qualsiasi momento dal tuo account.
 Ogni documento conserva la cronologia di chi ha cambiato cosa, e quando.
 Inviamo una breve email al mese, e puoi annullare l'iscrizione quando vuoi.
 I promemoria arrivano sul telefono, sul computer o su entrambi.
+Ordina entro mezzogiorno e ricevi il pacco il giorno dopo.
+Il reso è gratuito per trenta giorni, senza bisogno di spiegazioni.
+Confronta voli, treni e hotel con un solo colpo d'occhio.
+Puoi cancellare senza penali fino a quarantotto ore prima dell'arrivo.
+I nostri cuochi preparano ogni piatto la mattina stessa con ingredienti di stagione.
+Scegli le ricette e ti portiamo a casa gli ingredienti già dosati.
+Tieni d'occhio le spese per categoria e ricevi un avviso prima di sforare il budget.
+Blocca e sblocca la carta con un gesto direttamente dall'app.
+Bonifici istantanei e senza commissioni, sette giorni su sette.
+Prenota i posti per concerti e festival della tua zona in pochi secondi.
+I biglietti arrivano direttamente sul telefono, senza bisogno di stamparli.
+Prenota una visita con un medico disponibile oggi, in studio o in videochiamata.
+Un promemoria arriva il giorno prima di ogni appuntamento.
+Ogni mattina la redazione seleziona le notizie più importanti in cinque articoli.
+Iscriviti alla newsletter settimanale per non perderti nulla.
+Rispondi a qualche domanda e il tuo spazio sarà pronto in un attimo.
+Trovi {product} in oltre duecento negozi in tutta Italia.
+Il negozio di {city} è aperto dal martedì al sabato, dalle 10 alle 19.
+Ogni ordine viene preparato a mano nel nostro laboratorio di {city}.
+Le nostre confezioni sono riciclabili e senza plastica.
+Paga in tre rate senza interessi per acquisti a partire da 100 €.
+Accumula punti a ogni acquisto e approfitta degli sconti riservati ai soci.
+La nostra guida raccoglie gli indirizzi preferiti della redazione per un weekend perfetto.
+Gli host sono verificati e ogni alloggio è recensito da viaggiatori veri.
+Pianifica gli allenamenti e segui i tuoi progressi settimana dopo settimana.
+Lezioni di yoga online per tutti i livelli, da seguire comodamente a casa.
+Il nostro servizio clienti risponde al telefono, in chat o via email.
+Da oltre dieci anni {company} sostiene i produttori locali.
+La spedizione è gratuita per ordini sopra i 50 €.
+Aggiungi gli articoli preferiti a una lista e ricevi un avviso quando il prezzo scende.
+I tuoi risparmi lavorano per te, senza vincoli e senza costi di ingresso.
+Dividi il conto con gli amici direttamente dall'app.
+I posti sono limitati, quindi conviene prenotare il tavolo.
+Il menu cambia ogni settimana in base a ciò che offre il mercato.
+La tua cartella clinica resta riservata e viene condivisa solo con il tuo consenso.
+La registrazione è gratuita e richiede appena un minuto.
+Scarica l'app per seguire il tuo ordine in tempo reale.
+Scopri il dietro le quinte di {company} nel nostro nuovo reportage.
+Per tutta l'estate i bambini sotto i dodici anni viaggiano a metà prezzo.
+I nostri consulenti rispondono in diretta a ogni domanda prima dell'ordine.
+Ogni mese, una selezione di libri scelti dai nostri librai.
+Il pagamento è sicuro e i dati della carta non vengono mai conservati.
+
+[bios]
+{first} è product designer presso {company}, dove il team progetta strumenti per le piccole imprese.
+Ingegnere del software da dieci anni, {first} oggi lavora all'infrastruttura di {company}.|Ingegnera del software da dieci anni, {first} oggi lavora all'infrastruttura di {company}.
+{first} ha fondato {company} a {city} dopo quindici anni nella ristorazione.
+Insegnante di matematica alle medie, {first} tiene anche un laboratorio di robotica il mercoledì.
+Chef in una trattoria di {city}, {first} cucina con i prodotti comprati al mercato la mattina stessa.
+{first} è ricercatore in biologia marina e passa parte dell'anno in missione in Sardegna.|{first} è ricercatrice in biologia marina e passa parte dell'anno in missione in Sardegna.
+Autore di tre romanzi, {first} scrive anche per alcune riviste culturali.|Autrice di tre romanzi, {first} scrive anche per alcune riviste culturali.
+Infermiere in pediatria a {city}, {first} si occupa anche della formazione del personale appena assunto.|Infermiera in pediatria a {city}, {first} si occupa anche della formazione del personale appena assunto.
+{first} è fotografo freelance e lavora soprattutto per marchi di moda e di arredamento.|{first} è fotografa freelance e lavora soprattutto per marchi di moda e di arredamento.
+Dopo gli studi di architettura, {first} è entrato in {company} per guidare il team di design.|Dopo gli studi di architettura, {first} è entrata in {company} per guidare il team di design.
+{first} guida l'assistenza clienti di {company} e fa in modo che ogni richiesta riceva risposta in giornata.
+Sviluppatore mobile, {first} ha lavorato ad app usate da milioni di persone.|Sviluppatrice mobile, {first} ha lavorato ad app usate da milioni di persone.
+{first} insegna graphic design all'accademia di belle arti di {city}.
+Arrivato a {city} nel 2015, {first} vi ha aperto una libreria che oggi ospita incontri ogni settimana.|Arrivata a {city} nel 2015, {first} vi ha aperto una libreria che oggi ospita incontri ogni settimana.
+{first} è data scientist presso {company} e si occupa di previsioni della domanda.
+Direttore creativo da oltre dieci anni, {first} ha lavorato per l'editoria, la musica e la pubblicità.|Direttrice creativa da oltre dieci anni, {first} ha lavorato per l'editoria, la musica e la pubblicità.
+{first} aiuta le startup di {city} a fare le prime assunzioni.
+Ex atleta professionista, {first} oggi fa il coach e tiene corsi nelle aziende.|Ex atleta professionista, {first} oggi fa la coach e tiene corsi nelle aziende.
+{first} è farmacista a {city} e partecipa alle campagne di vaccinazione del quartiere.
+Giornalista culturale, {first} segue festival e novità editoriali per un quotidiano nazionale.
+{first} è entrato in {company} come stagista e oggi guida il team di prodotto.|{first} è entrata in {company} come stagista e oggi guida il team di prodotto.
+Illustratore per l'infanzia, {first} ha pubblicato una ventina di albi tradotti in diverse lingue.|Illustratrice per l'infanzia, {first} ha pubblicato una ventina di albi tradotti in diverse lingue.
+{first} è consulente di strategia e aiuta i negozi di quartiere a vendere online.
+Appassionato di bicicletta, {first} organizza ogni estate una pedalata solidale da {city} al mare.|Appassionata di bicicletta, {first} organizza ogni estate una pedalata solidale da {city} al mare.
+{first} segue la contabilità di {company} e di alcune associazioni del quartiere.
+Agronomo di formazione, {first} affianca le aziende agricole nel passaggio al biologico.|Agronoma di formazione, {first} affianca le aziende agricole nel passaggio al biologico.
+
+[quotes]
+Uso {product} tutti i giorni e non potrei più farne a meno.
+Sono contento del servizio, la consegna è arrivata in anticipo.|Sono contenta del servizio, la consegna è arrivata in anticipo.
+Il team di {company} ha risposto a tutte le mie domande in meno di un'ora.
+Finalmente un'app della banca chiara e senza brutte sorprese.
+Da quando tutto il team usa {product} risparmiamo ore ogni settimana.
+Il soggiorno è stato perfetto, lo consiglio senza esitazioni.
+I piatti arrivano ancora caldi e le porzioni sono abbondanti.
+All'inizio ero scettico, ma {product} mi ha convinto subito.|All'inizio ero scettica, ma {product} mi ha convinta subito.
+Prenotare una visita non è mai stato così semplice.
+I miei clienti approvano le bozze con un clic, un bel risparmio di tempo.
+Sono cliente da cinque anni e non sono mai rimasto deluso.|Sono cliente da cinque anni e non sono mai rimasta delusa.
+La qualità è ottima e il prezzo resta ragionevole.
+L'assistenza mi ha aiutato a configurare tutto in un pomeriggio.|L'assistenza mi ha aiutata a configurare tutto in un pomeriggio.
+Consiglio {company} a tutti quelli che conosco.
+L'interfaccia è così semplice che la usano anche i miei genitori.
+Il reso era gratuito e il rimborso è arrivato in pochi giorni.
+Grazie a {product} so finalmente dove finiscono i miei soldi.
+Il concerto è stato indimenticabile e all'ingresso non c'era coda.
+Abbiamo prenotato tutte le vacanze con {company} ed è filato tutto liscio.
+Sono molto soddisfatto dell'acquisto, corrisponde perfettamente alla descrizione.|Sono molto soddisfatta dell'acquisto, corrisponde perfettamente alla descrizione.
+Le lezioni online mi hanno fatto tornare la voglia di allenarmi.
+Un servizio umano e attento, cosa ormai rara.
+Leggo la newsletter del mattino con il caffè, è diventato un rito.
+Da quando usiamo {product} le nostre riunioni durano la metà.
+Ordinato la sera, arrivato la mattina dopo: impeccabile.

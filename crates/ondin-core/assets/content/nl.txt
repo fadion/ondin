@@ -1,9 +1,10 @@
 # Fill with content: Dutch. `\uXXXX` in a value is that character.
+# No regulator reserves numbers for fiction here; landlines start the subscriber number with 0, which is never assigned. Mobile numbers are only well-formed.
 
 @name Dutch
 @tag nl
 @country Nederland
-@phone {area} ### ####
+@phone {area} 0## ####
 @mobile 06 ########
 @date {dd}-{mm}-{yyyy}
 @time {HH}:{MM}
@@ -17,37 +18,77 @@
 @address {street}|{postcode} {city}|{country}
 @legal B.V.|N.V.
 
-[given]
-Daan
+[given-f]
 Emma
-Sem
 Julia
-Lucas
 Tess
-Finn
 Sophie
-Levi
 Mila
-Noah
 Zoë
-Milan
 Sara
-Jesse
 Anna
-Thijs
 Lotte
-Bram
 Fleur
-Ruben
 Eva
-Lars
 Noor
-Stijn
 Isa
-Mohammed
 Yara
-Joris
 Femke
+Sanne
+Lisa
+Iris
+Lieke
+Anouk
+Marloes
+Esther
+Roos
+Maud
+Nina
+Fatima
+Imane
+Samira
+Charlotte
+Merel
+Inge
+Priya
+Demi
+Kim
+
+[given-m]
+Daan
+Sem
+Lucas
+Finn
+Levi
+Noah
+Milan
+Jesse
+Thijs
+Bram
+Ruben
+Lars
+Stijn
+Mohammed
+Joris
+Tim
+Jeroen
+Niels
+Bas
+Koen
+Wouter
+Sander
+Mark
+Rick
+Tom
+Youssef
+Ayoub
+Mehmet
+Kevin
+Jasper
+Pieter
+Vincent
+Rachid
+Dennis
 
 [family]
 de Vries
@@ -80,6 +121,30 @@ van den Berg
 Willems
 Postma
 Kuipers
+van Dijk
+Hoekstra
+de Bruijn
+van der Linden
+Prins
+Huisman
+Koster
+van Wijk
+Kramer
+Verhoeven
+Schouten
+Timmermans
+Groen
+Maas
+Bosman
+van Beek
+Wouters
+Yılmaz
+El Amrani
+Bouzid
+Kaya
+Pinas
+Biharie
+Ramdin
 
 [cities]
 # city|region|postcode|area code
@@ -95,6 +160,18 @@ Haarlem||20## @@|023
 Leiden||23## @@|071
 Maastricht||62## @@|043
 Zwolle||80## @@|038
+Delft||26## @@|015
+Amersfoort||38## @@|033
+Arnhem||68## @@|026
+Breda||48## @@|076
+'s-Hertogenbosch||52## @@|073
+Apeldoorn||73## @@|055
+Enschede||75## @@|053
+Almere||13## @@|036
+Leeuwarden||89## @@|058
+Alkmaar||18## @@|072
+Dordrecht||33## @@|078
+Zaandam||150# @@|075
 
 [streets]
 Linden
@@ -112,6 +189,22 @@ Zuid
 Oost
 Berken
 Haven
+Meidoorn
+Kastanje
+Tulpen
+Vogel
+Spoor
+Markt
+School
+Kanaal
+Water
+Esdoorn
+Vondel
+Rembrandt
+Kasteel
+Hoog
+Brink
+Nieuwe
 
 [suffixes]
 straat
@@ -151,13 +244,31 @@ Grafisch ontwerper
 Boekhouder
 Recruiter
 Productmanager
-Directeur
+Directeur|Directrice
 Office manager
 Systeembeheerder
 Communitymanager
 Financieel controller
 Inkoper
 Supportmedewerker
+Backend-developer
+Art director
+Illustrator
+Redacteur
+Fotograaf
+Architect
+Docent
+Verpleegkundige
+Kok
+Advocaat
+Huisarts
+Consultant
+Teamleider
+Content-strateeg
+Bedrijfsjurist
+Scrum master
+HR-adviseur
+Salesmanager
 
 [departments]
 Design
@@ -170,6 +281,10 @@ Inkoop
 Klantenservice
 Product
 Juridisch
+Operations
+Onderzoek
+Communicatie
+IT
 
 [company-a]
 Noord
@@ -188,6 +303,15 @@ Zon
 Rivier
 Licht
 Eik
+Zee
+Wolk
+Duin
+Ster
+Berg
+Klaver
+Groen
+Dauw
+Morgen
 
 [company-b]
 veld
@@ -206,6 +330,15 @@ huis
 bron
 bos
 kust
+stroom
+tuin
+kring
+vorm
+toren
+land
+wijk
+dal
+zicht
 
 [product-a]
 Grootboek
@@ -220,6 +353,15 @@ Kluis
 Ritme
 Agenda
 Pen
+Anker
+Loods
+Draad
+Kist
+Focus
+Podium
+Balans
+Baken
+Lamp
 
 [product-b]
 Pro
@@ -230,6 +372,11 @@ Studio
 Cloud
 Lite
 Max
+Hub
+Kit
+Neo
+Team
+Flex
 
 [headlines]
 Plan je week in vijf minuten
@@ -253,6 +400,29 @@ Laat je bedrijf met vertrouwen groeien
 Zie wat er komt
 Welkom terug
 Samen kom je verder
+Je volgende vakantie begint hier
+Vers gekookt, snel bezorgd
+De nieuwe collectie is binnen
+Vandaag besteld, morgen in huis
+Sparen zonder omwegen
+De zomertickets zijn er
+Fit de winter door
+Ontdek je stad opnieuw
+Lees wat er echt toe doet
+Fijn dat je er bent
+Je account staat klaar
+De markt aan huis
+Meer tijd voor wat telt
+Reserveer nu je tafel
+De lekkerste recepten van het seizoen
+Reizen zonder stress
+Bewegen met plezier
+Tot 30% korting in de uitverkoop
+Nieuw in de stad? Wij laten je alles zien
+Je bank op zak
+Meld je aan en doe mee
+Verhalen van onze redactie
+Afspraken makkelijk online plannen
 
 [sentences]
 Houd elk project bij met gedeelde borden en duidelijke eigenaren.
@@ -285,3 +455,100 @@ Je kunt je abonnement altijd wijzigen of opzeggen vanuit je account.
 Elk document houdt bij wie wat wanneer heeft veranderd.
 We sturen één korte e-mail per maand, en je kunt je altijd afmelden.
 Herinneringen komen binnen op je telefoon, je computer of allebei.
+Bestel voor 22.00 uur, dan heb je je pakket morgen in huis.
+Retourneren is dertig dagen gratis, zonder dat je hoeft uit te leggen waarom.
+Onze koks bereiden elk gerecht 's ochtends vers, met ingrediënten uit de buurt.
+Reserveer je tafel online en zie meteen welke tijden nog vrij zijn.
+Elke accommodatie wordt door ons team zelf bekeken voordat die online komt.
+Annuleer je reis kosteloos tot 48 uur voor vertrek.
+Met {product} zie je in één oogopslag waar je geld elke maand naartoe gaat.
+Overboekingen komen binnen een paar seconden aan, ook in het weekend.
+Het festival duurt drie dagen en heeft vier podia midden in {city}.
+Tickets zijn alleen online te koop, de deuren gaan open om 18.00 uur.
+Maak dag en nacht een afspraak bij de huisarts, zonder wachtmuziek.
+Onze cursussen zijn gemaakt voor beginners en je kunt ze altijd pauzeren.
+In het nieuwe nummer spreken we mensen die hun wijk veranderen.
+Elke vrijdag zet de redactie de vijf beste verhalen van de week voor je op een rij.
+Welkom aan boord, in een paar stappen is je account klaar.
+De nieuwe collectie is gemaakt van gerecyclede materialen en genaaid in Portugal.
+Onze winkel in {city} is van maandag tot en met zaterdag open van 10.00 tot 18.00 uur.
+Kies je favoriete gerechten en wij bezorgen de ingrediënten precies afgewogen aan huis.
+Met de klantenpas spaar je bij elke aankoop punten, die je aan de kassa inwisselt.
+De nieuwsbrief verschijnt elke zondagochtend en lees je in tien minuten.
+Alle kamers hebben een eigen badkamer, snelle wifi en een ontbijt dat de moeite waard is.
+De wandeling duurt ongeveer vier uur en is ook geschikt voor gezinnen.
+Een abonnement is maandelijks opzegbaar, zonder minimale looptijd.
+{company} steunt elk jaar buurtprojecten met een deel van de omzet.
+Je bestelling wordt CO2-neutraal verstuurd, in verpakking zonder plastic.
+Vragen over je factuur beantwoorden we via chat, e-mail of telefoon.
+Spaar automatisch door elke pinbetaling af te ronden op een hele euro.
+In de app blokkeer je je pas met één tik, en zet je hem net zo makkelijk weer aan.
+Ons team in {city} denkt graag persoonlijk met je mee, 's avonds ook via video.
+Het spreekuur is elke dinsdag, aanmelden is niet nodig.
+Laat ons weten wat je mist, want we lezen elk bericht.
+Op de zaterdagmarkt staan we met vers brood en taart.
+De koffie wordt in kleine hoeveelheden gebrand en binnen een week verstuurd.
+Wie vroeg boekt, krijgt de beste prijs en een plek op de eerste rij.
+Alle workshops worden opgenomen en blijven daarna een jaar beschikbaar.
+{product} herinnert je aan rekeningen voordat ze betaald moeten worden.
+Aanmelden duurt twee minuten, daarna kun je meteen aan de slag.
+Probeer {product} veertien dagen en beslis daarna in alle rust.
+Cadeaukaarten zijn er in elk bedrag en blijven drie jaar geldig.
+De stadswandeling start elke dag om 11.00 uur bij het stadhuis.
+Fietsen huur je per uur of per dag, en je levert ze in bij elk station.
+Deel een link met je klanten, zodat ze ontwerpen kunnen goedkeuren zonder account.
+
+[bios]
+{first} is productontwerper bij {company} in {city}.
+{first} ontwikkelt al tien jaar software en leidt nu het platformteam van {company}.
+{first} richtte {company} in 2019 op in {city} en houdt zich daar bezig met strategie en financiën.
+{first} geeft wiskunde en natuurkunde op een middelbare school in {city}.
+{first} kookte vijftien jaar in restaurants tussen Lyon en {city} en heeft nu een eigen keuken met een seizoenskaart.
+{first} doet aan een universiteit in {city} onderzoek naar batterijopslag en schrijft daarnaast voor vakbladen.
+{first} is freelance journalist en schrijft reportages over werk, wonen en de stad.
+{first} werkt als verpleegkundige op de intensive care in {city} en begeleidt nieuwe collega's.
+{first} fotografeert bruiloften, portretten en architectuur, het liefst bij daglicht.
+Bij {company} is {first} verantwoordelijk voor de marketing in Nederland en België.
+{first} is architect in {city} en ontwerpt vooral scholen en woonprojecten in hout.
+{first} leidt sinds 2021 de klantenservice van {company} en zorgt dat geen vraag blijft liggen.
+{first} is illustrator en tekent kinderboeken, posters en af en toe een tatoeage.
+{first} studeerde informatica in {city} en bouwt nu datapijplijnen voor {company}.
+{first} geeft yoga- en pilateslessen in een kleine studio in {city}.
+{first} adviseert mkb-bedrijven over belastingen en boekhouding en vindt dat cijfers verhalen vertellen.
+{first} is dierenarts in een plattelandspraktijk en kent elke boerderij binnen twintig kilometer.
+{first} werkt als UX-onderzoeker bij {company} en spreekt elke week met mensen die het product gebruiken.
+Sinds 2018 runt {first} een kleine bakkerij in {city} die bekendstaat om het zuurdesembrood.
+{first} ontwerpt lettertypes en huisstijlen voor culturele instellingen in heel Europa.
+{first} heeft een eigen fysiotherapiepraktijk in {city} en begeleidt daarnaast een roeivereniging.
+{first} leidt een basisschool in {city} en wil dat kinderen vaker buiten les krijgen.
+{first} programmeert al sinds de middelbare school en schreef twee opensourcebibliotheken voor kaartdiensten.
+{first} is oprichter van {company} en was daarvoor productmanager bij een reisplatform.
+{first} werkte twaalf jaar als werktuigbouwkundig ingenieur en is nu technisch directeur bij {company}.
+{first} vertaalt romans uit het Spaans en het Portugees en geeft les aan een vertaalopleiding in {city}.
+
+[quotes]
+Sinds we {product} gebruiken, duurt ons maandagoverleg half zo lang.
+Ik had de app op één avond ingesteld en ben sindsdien geen rekening meer vergeten.
+Eindelijk een tool die mijn hele team zonder uitleg snapt.
+De support hielp me op een zondag binnen een uur verder.
+De bezorging was precies op tijd en het eten was nog warm.
+We hebben drie andere programma's geprobeerd voordat we bij {product} bleven.
+Boeken kostte twee minuten en ter plekke klopte alles.
+Ik spaar elke maand geld zonder erover na te denken.
+{company} heeft onze winkel en webshop eindelijk bij elkaar gebracht.
+De schoenen passen perfect en ruilen was zo geregeld.
+Onze klanten merken het verschil meteen.
+Ik lees de nieuwsbrief elke zondag bij het ontbijt.
+Het beste concert van het jaar, en we stonden zo binnen.
+Sinds {product} mailen we minder en hebben we meer tijd voor het echte werk.
+Ik had nooit gedacht dat boekhouden zo weinig stress kon geven.
+De cursussen zijn helder uitgelegd en ik oefen wanneer het mij uitkomt.
+We zouden {company} iedereen aanraden.
+De kamer was rustig, schoon en had het mooiste uitzicht van de hele reis.
+Met {product} weet ik elke ochtend waar ik moet beginnen.
+Mijn afspraak bij de huisarts was in een minuut geregeld.
+Ons team zit verspreid over drie steden en voelt toch als één kantoor.
+Het advies was eerlijk, ook toen dat betekende dat ik minder moest kopen.
+Ik ben al vijf jaar klant en nog steeds enthousiast.
+Als zzp'er bespaar ik met {product} elke week een paar uur.
+Het brood smaakt zoals vroeger bij mijn oma.

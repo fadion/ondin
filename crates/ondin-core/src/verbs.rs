@@ -1228,6 +1228,10 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let (copy, main) = (a.node("node")?, a.node("main")?);
+            // The main it shows already relinks nothing, as the instance card's pick.
+            if crate::component::main_of(ctx.doc, copy) == Some(main) {
+                return Ok(Done::default());
+            }
             // An instance linked straight to a main relinks; a nested copy swaps,
             // carrying its variant values by name, as the instance card does.
             let tx = if crate::swap::can_relink(ctx.doc, copy) {

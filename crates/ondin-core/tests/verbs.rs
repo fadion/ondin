@@ -1145,6 +1145,54 @@ fn components_are_made_placed_swapped_and_detached() {
     );
 }
 
+/// `create_instance` reads `x`/`y` in its parent's space, and `swap_instance` to
+/// the main an instance shows already answers an empty edit.
+///
+/// flip: `create_instance` taking `x`/`y` as world coordinates → fails at "centred
+/// in the frame's space".
+#[test]
+fn an_instance_is_placed_in_its_parents_space_and_swapped_to_its_own_main() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, _) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    let holder = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(400.0, 400.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_transform",
+        json!({ "node": holder.to_wire(), "transform": Affine::translate((200.0, 100.0)) }),
+    );
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": holder.to_wire(), "x": 50, "y": 20 }),
+    )[0];
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(
+        res.world_bounds(inst).unwrap().center(),
+        ondin_core::kurbo::Point::new(250.0, 120.0),
+        "centred in the frame's space"
+    );
+    let same = verbs::call(
+        &mut Ctx {
+            doc: &doc,
+            res: &res,
+            ids: &mut ids,
+            images: None,
+            contrast: None,
+        },
+        "swap_instance",
+        &json!({ "node": inst.to_wire(), "main": card.to_wire() }),
+    )
+    .unwrap_or_else(|e| panic!("the main it shows: {e}"));
+    assert!(same.tx.0.is_empty());
+}
+
 /// A script commits each step with what the components owe it, so an instance
 /// follows an edit its main took in a later step.
 ///

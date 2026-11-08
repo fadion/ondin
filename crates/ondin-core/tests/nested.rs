@@ -358,6 +358,41 @@ fn a_shown_copy_carries_its_values_across_a_swap_by_name() {
     );
 }
 
+/// **The `swap_instance` verb swaps a nested copy with the carry**, as the
+/// instance card does: `r` shown at Arrow · Bold and sent to Check · Regular
+/// lands on Check · Bold; sent to the main it shows now, it answers an empty edit.
+///
+/// flip: `swap_instance` calling `variant::switch` for a nested copy as for a
+/// root → fails at "the verb carries Weight".
+#[test]
+fn the_swap_verb_carries_a_nested_copys_values() {
+    use ondin_core::verbs::{self, Ctx};
+    let mut f = fixture();
+    f.weight("Bold");
+    f.show(f.icon, true);
+    let call = |f: &mut F, main: NodeId| {
+        let res = ondin_core::Resolved::rebuild(&f.doc);
+        verbs::call(
+            &mut Ctx {
+                doc: &f.doc,
+                res: &res,
+                ids: &mut f.ids,
+                images: None,
+                contrast: None,
+            },
+            "swap_instance",
+            &serde_json::json!({ "node": f.r.to_wire(), "main": main.to_wire() }),
+        )
+        .unwrap_or_else(|e| panic!("{e}"))
+    };
+    let (c_reg, c_bold) = (f.c_reg, f.c_bold);
+    let done = call(&mut f, c_reg);
+    f.commit(done.tx.0);
+    assert_eq!(f.node(f.r).swap(), Some(c_bold), "the verb carries Weight");
+    let again = call(&mut f, c_bold);
+    assert!(again.tx.0.is_empty(), "the main it shows swaps nothing");
+}
+
 /// **By name, not by position**: every set in the fixture has
 /// one property, where the two coincide. Arrow is given a second, `Size: M`,
 /// after its `Weight`; a third set, **Tick**, holds the same two the other way

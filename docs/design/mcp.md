@@ -40,7 +40,7 @@ Phase 2 — write (1:1 with operations/composites):
 `set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
-`set_effects`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, var?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
+`set_effects`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 
@@ -52,7 +52,7 @@ Phase 3 — components, variables and styles (through the verbs, never the raw o
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's
 other collections' modes kept),
-`bind_variable(id, field, var?)`, `add_style(slot, name, value)`, `remove_style(id)`,
+`bind_variable(id, field, variable?)`, `add_style(slot, name, value)`, `remove_style(id)`,
 `rename_style(id, name)`, `set_style_value(id, value)`, `apply_style(id, slot, style?)`.
 
 Phase 4 — kits and the library (the app's own actions, some outside undo):

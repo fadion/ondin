@@ -505,11 +505,13 @@ pub fn ellipse_path(size: Size, arc: crate::node::EllipseArc) -> BezPath {
     // from a closed one. `scene::lay_stroke` fixes the wide-stroke hole itself.
     if arc.is_whole() {
         // kurbo's ellipse squares its radii, which overflows past 10¹⁵⁴ into an
-        // unbounded path; an arc round the whole of it does not.
+        // unbounded path; an arc round the whole of it does not. Both arms take
+        // the relative tolerance, or the cubic count grows with the radius.
+        let tolerance = round_tolerance(radii.x.max(radii.y));
         let mut path = match radii.x.max(radii.y) < 1e100 {
-            true => Ellipse::new(centre, radii, 0.0).to_path(TOLERANCE),
+            true => Ellipse::new(centre, radii, 0.0).to_path(tolerance),
             false => Arc::new(centre, radii, 0.0, std::f64::consts::TAU, 0.0)
-                .path_elements(round_tolerance(radii.x.max(radii.y)))
+                .path_elements(tolerance)
                 .collect(),
         };
         path.close_path();
@@ -3216,7 +3218,8 @@ mod tests {
 
     /// A circular outline of any radius comes back in a bounded number of curves.
     ///
-    /// flip: `round_tolerance` returning `TOLERANCE` → hangs at the 1e300 arc.
+    /// flip: `round_tolerance` returning `TOLERANCE` → hangs at the 1e300 arc;
+    /// `ellipse_path`'s whole-ellipse arm at `TOLERANCE` → fails at the 1e30 count.
     #[test]
     fn a_huge_radius_is_a_bounded_path() {
         let arc = local_path(&NodeKind::Arc {
@@ -3235,6 +3238,10 @@ mod tests {
         );
         assert!(wedge.elements().len() < 100, "{}", wedge.elements().len());
         let whole = ellipse_path(Size::new(1e300, 1e300), crate::node::EllipseArc::default());
+        assert!(whole.elements().len() < 100, "{}", whole.elements().len());
+        // Below the arm that switches to an arc; at the absolute tolerance this
+        // is ~150 000 cubics, and 10⁵⁰ is hundreds of millions.
+        let whole = ellipse_path(Size::new(1e30, 2e30), crate::node::EllipseArc::default());
         assert!(whole.elements().len() < 100, "{}", whole.elements().len());
     }
 }

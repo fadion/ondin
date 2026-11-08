@@ -218,13 +218,52 @@ pub fn partners(
         }
         start += n;
     }
-    let at: Vec<Option<usize>> = flat
-        .iter()
-        .map(|a| {
-            let want = reflect(a.at, vertical, c);
-            flat.iter().position(|b| (b.at - want).hypot() <= tol)
-        })
-        .collect();
+    // Pair one to one. Among anchors coincident at the image's place, take the one
+    // whose neighbours sit at the images of this one's, either way round (an end
+    // matching an end), so the two ends a split leaves pair with their own images.
+    let near = |p: Point, q: Point| (p - q).hypot() <= tol;
+    let fits = |x: Option<usize>, y: Option<usize>| match (x, y) {
+        (None, None) => 1,
+        (Some(x), Some(y)) => usize::from(near(reflect(flat[x].at, vertical, c), flat[y].at)),
+        _ => 0,
+    };
+    let score = |a: usize, b: usize| {
+        let along = fits(next[a], next[b]) + fits(prev[a], prev[b]);
+        let against = fits(next[a], prev[b]) + fits(prev[a], next[b]);
+        along.max(against)
+    };
+    // Anchors by x, so the ones at an image's place are a short range.
+    let mut by_x: Vec<usize> = (0..flat.len()).collect();
+    by_x.sort_by(|&p, &q| flat[p].at.x.total_cmp(&flat[q].at.x).then(p.cmp(&q)));
+    let mut at: Vec<Option<usize>> = vec![None; flat.len()];
+    for a in 0..flat.len() {
+        if at[a].is_some() {
+            continue;
+        }
+        let want = reflect(flat[a].at, vertical, c);
+        let lo = by_x.partition_point(|&j| flat[j].at.x < want.x - tol);
+        let mut here: Vec<usize> = by_x[lo..]
+            .iter()
+            .copied()
+            .take_while(|&j| flat[j].at.x <= want.x + tol)
+            .filter(|&b| at[b].is_none() && near(flat[b].at, want))
+            .collect();
+        here.sort_unstable();
+        let mut best: Option<(usize, usize)> = None;
+        for b in here {
+            let s = score(a, b);
+            // On a tie another anchor beats this one itself: two partners
+            // dragged onto the axis must still come apart.
+            let s = 2 * s + usize::from(b != a);
+            if best.is_none_or(|(_, bs)| s > bs) {
+                best = Some((b, s));
+            }
+        }
+        if let Some((b, _)) = best {
+            at[a] = Some(b);
+            at[b] = Some(a);
+        }
+    }
     (0..flat.len())
         .map(|a| {
             let p = at[a]?;
@@ -252,7 +291,11 @@ fn changed(a: &PenAnchor, b: &PenAnchor, eps: f64) -> bool {
 /// space. Where an anchor changed, its image takes the reflection of it; where
 /// both did, the first in order wins. An anchor on an axis stays on it, its two
 /// handles each other's image. An edit that changed how many anchors there are
-/// is left alone: the model drops the axis if it no longer holds.
+/// is left alone: the model drops the axis if it no longer holds. So is one that
+/// changed every anchor (a whole-set move, scale or turn), and one that moved each
+/// pair together and left the path symmetric about its own centre: the axis
+/// follows a symmetric result and drops from any other. A lone anchor's edit that
+/// happens to be symmetric about a new centre still takes its image along.
 pub fn symmetric_edit(
     base: &[PenSubpath],
     edited: &mut [PenSubpath],
@@ -270,14 +313,73 @@ pub fn symmetric_edit(
         .fold(0.0, f64::max);
     let tol = 1e-6 * (1.0 + size);
     let flat_base: Vec<PenAnchor> = base.iter().flat_map(|s| s.anchors.clone()).collect();
-    for (vertical, c, on) in [
+    let axes = [
         (true, at.x, mirror.vertical),
         (false, at.y, mirror.horizontal),
-    ] {
-        if !on {
-            continue;
-        }
-        let pairs = partners(base, vertical, c, tol);
+    ]
+    .map(|(vertical, c, on)| on.then(|| (vertical, c, partners(base, vertical, c, tol))));
+    let moved: Vec<bool> = flat_base
+        .iter()
+        .zip(edited.iter().flat_map(|s| &s.anchors))
+        .map(|(a, b)| changed(a, b, tol))
+        .collect();
+    let together = axes.iter().flatten().all(|(_, _, pairs)| {
+        pairs
+            .iter()
+            .enumerate()
+            .all(|(a, p)| p.is_none_or(|(p, _)| moved[a] == moved[p]))
+    });
+    if moved.iter().all(|m| *m) {
+        return;
+    }
+    if together
+        && kept(
+            &crate::edit::pen_path(edited),
+            &crate::edit::pen_radii(edited),
+            mirror,
+        ) == mirror
+    {
+        return;
+    }
+    remirror_pairs(&flat_base, edited, axes, tol);
+}
+
+/// `edited` made symmetric across `mirror`'s axes through `at` whatever the edit
+/// was: [`symmetric_edit`]'s rule without its exceptions, for a caller that changed
+/// every anchor on purpose and wants each pair's first anchor to decide.
+pub fn remirror(base: &[PenSubpath], edited: &mut [PenSubpath], mirror: PathMirror, at: Point) {
+    let shape = |s: &[PenSubpath]| s.iter().map(|s| s.anchors.len()).collect::<Vec<_>>();
+    if shape(base) != shape(edited) {
+        return;
+    }
+    let size = base
+        .iter()
+        .flat_map(|s| &s.anchors)
+        .map(|a| (a.at - at).hypot())
+        .fold(0.0, f64::max);
+    let tol = 1e-6 * (1.0 + size);
+    let flat_base: Vec<PenAnchor> = base.iter().flat_map(|s| s.anchors.clone()).collect();
+    let axes = [
+        (true, at.x, mirror.vertical),
+        (false, at.y, mirror.horizontal),
+    ]
+    .map(|(vertical, c, on)| on.then(|| (vertical, c, partners(base, vertical, c, tol))));
+    remirror_pairs(&flat_base, edited, axes, tol);
+}
+
+/// One mirrored axis: whether it is vertical, where it lies, and its [`partners`].
+type Axis = (bool, f64, Vec<Option<(usize, bool)>>);
+
+/// Each axis's pairs made each other's image again in `edited`: where one anchor
+/// changed its image takes its reflection, where both did the first wins, and an
+/// axis anchor is held to its axis.
+fn remirror_pairs(
+    flat_base: &[PenAnchor],
+    edited: &mut [PenSubpath],
+    axes: [Option<Axis>; 2],
+    tol: f64,
+) {
+    for (vertical, c, pairs) in axes.into_iter().flatten() {
         let mut flat: Vec<PenAnchor> = edited.iter().flat_map(|s| s.anchors.clone()).collect();
         let mut done = vec![false; flat.len()];
         for a in 0..flat.len() {
@@ -493,6 +595,97 @@ mod tests {
         assert_eq!(edited[0].anchors[3].out, Vec2::ZERO);
         assert_eq!(edited[0].anchors[0].back, Vec2::new(-6.0, 0.0));
         assert!(holds(&edited));
+    }
+
+    /// After *Split at point* at the diamond's right and left anchors, each new end
+    /// pairs with its own image, so dragging the two starting ends moves each by the
+    /// drag and its image with it, and the axis holds.
+    /// flip: `partners` taking the first anchor at the image's place, paired or not
+    /// → fails at "its image". Either half of the fix alone (no re-pairing, the
+    /// neighbour score) still passes: each covers this case for the other.
+    #[test]
+    fn split_ends_pair_with_their_own_images() {
+        let base = crate::edit::split_at_points(&diamond(), &[(0, 1), (0, 3)]).0;
+        let at = |subs: &[PenSubpath], s: usize, a: usize| subs[s].anchors[a].at;
+        // [R0, B, L0] and [L1, T, R1].
+        assert_eq!(at(&base, 0, 0), Point::new(10.0, 0.0));
+        assert_eq!(at(&base, 1, 0), Point::new(-10.0, 0.0));
+        let mut edited = base.clone();
+        for (s, a) in [(0, 0), (1, 0)] {
+            edited[s].anchors[a].at += Vec2::new(2.0, -2.0);
+        }
+        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
+        assert_eq!(
+            at(&edited, 0, 0),
+            Point::new(12.0, -2.0),
+            "the end dragged right moved right"
+        );
+        assert_eq!(at(&edited, 0, 2), Point::new(-12.0, -2.0), "its image");
+        assert_eq!(at(&edited, 1, 2), Point::new(8.0, -2.0));
+        assert!(holds(&edited));
+    }
+
+    /// Nudging every anchor moves the path and the axis follows; turning every
+    /// anchor turns the path, which drops the axis, rather than patching it back
+    /// onto the old one.
+    /// flip: `symmetric_edit` without its whole-set return → fails at "turned as asked".
+    #[test]
+    fn moving_every_anchor_moves_the_path() {
+        let base = diamond();
+        let mut edited = base.clone();
+        for a in &mut edited[0].anchors {
+            a.at += Vec2::new(1.0, 0.0);
+        }
+        let want = edited.clone();
+        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
+        assert_eq!(edited, want, "moved as asked");
+        assert!(holds(&edited));
+        let mut turned = base.clone();
+        for a in &mut turned[0].anchors {
+            a.at = Affine::rotate(0.5) * a.at;
+        }
+        let want = turned.clone();
+        symmetric_edit(&base, &mut turned, VERTICAL, Point::ZERO);
+        assert_eq!(turned, want, "turned as asked");
+    }
+
+    /// Two partners dragged onto the axis pair with each other, not with
+    /// themselves, so dragging one off pulls them apart again.
+    /// flip: `partners` preferring the anchor itself on a tie → fails at "pulled apart".
+    #[test]
+    fn partners_on_the_axis_can_be_pulled_apart() {
+        let mut d = run(&[(0.0, -10.0), (0.0, 0.0), (0.0, 10.0), (0.0, 0.0)]);
+        d.closed = true;
+        let base = vec![d];
+        let mut edited = base.clone();
+        edited[0].anchors[1].at = Point::new(3.0, 0.0);
+        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
+        assert_eq!(
+            edited[0].anchors[1].at,
+            Point::new(3.0, 0.0),
+            "pulled apart"
+        );
+        assert_eq!(edited[0].anchors[3].at, Point::new(-3.0, 0.0));
+        assert!(holds(&edited));
+    }
+
+    /// Moving a pair together into a shape symmetric about its new centre keeps it;
+    /// a lone anchor's drag that happens to be symmetric about a new centre still
+    /// takes its image along.
+    #[test]
+    fn a_symmetric_pair_edit_is_kept_and_a_lone_one_mirrored() {
+        let base = diamond();
+        let mut edited = base.clone();
+        edited[0].anchors[1].at = Point::new(14.0, 0.0);
+        edited[0].anchors[3].at = Point::new(-14.0, 0.0);
+        let want = edited.clone();
+        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
+        assert_eq!(edited, want);
+        let line = vec![run(&[(-10.0, 0.0), (10.0, 0.0)])];
+        let mut longer = line.clone();
+        longer[0].anchors[1].at = Point::new(20.0, 0.0);
+        symmetric_edit(&line, &mut longer, VERTICAL, Point::ZERO);
+        assert_eq!(longer[0].anchors[0].at, Point::new(-20.0, 0.0));
     }
 
     /// Both axes: one moved anchor takes all three images with it.

@@ -173,9 +173,16 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
   anchor changed its image takes its reflection; where both changed, the first in path order wins.
   An anchor on an axis is held to it and slides along it: where the run crosses the axis its two
   handles are each other's image, where the run lies along the axis both handles stay on it.
+  An edit that changed every anchor (a nudge, drag, scale or turn of the whole set) is written as
+  it is, and so is one that moved each pair together into a shape symmetric about its own centre:
+  the axis follows a symmetric result and drops from any other, rather than the edit being forced
+  back onto the old axis.
+- **Images pair one to one**: among anchors coincident at an image's place (the two ends *Split
+  at point* leaves, or two partners dragged onto the axis), an anchor pairs with the one whose
+  neighbours are its own neighbours' images.
 - **The base is what the edit started from**: the committed path for a drag
   (`edited_subpaths`), last frame's preview for a scrub's increment (`preview_subpaths`).
-- **Images pair by position** (`mirror::partners`), and which way round the run passes an image is
+- **Images pair by position** (`symmetry::partners`), and which way round the run passes an image is
   read from the anchors' neighbours, not their handles: a corner has none to tell by.
 - **Delete** takes each point's images too (`with_mirrored_points`). **Add point** inserts the
   images too (`mirrored_inserts`); on a segment that is its own image, one crossing an axis, a point

@@ -118,7 +118,7 @@ fn flat(v: Vec2) -> bool {
 ///
 /// A corner has both handles zero, so the straight case falls out of the curved
 /// one rather than being a mode.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PenAnchor {
     pub at: Point,
     /// The handle leaving this anchor, as an offset from it.
@@ -267,7 +267,7 @@ impl PenAnchor {
 /// A flattened boolean or an import holds several subpaths, each open or closed
 /// on its own, so the reader returns a list of these; one anchor run would drop
 /// everything after the first `MoveTo`.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PenSubpath {
     pub anchors: Vec<PenAnchor>,
     /// Whether the last anchor joins back to the first. The joining segment is

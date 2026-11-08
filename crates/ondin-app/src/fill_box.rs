@@ -3,7 +3,7 @@
 //! values, and its avatar shapes with initials or a pattern.
 //!
 //! The rule is `ondin_core::content_fill`'s; this module draws Clean up's box with
-//! a row each for the locale, the content, records and avatars, a preview of
+//! a row each for the locale, the content, records, emails and avatars, a preview of
 //! every layer grouped by record whose kind can be changed and value redrawn, and
 //! commits the fill as one undo step.
 
@@ -60,7 +60,7 @@ pub(crate) struct FillBox {
     /// The fill for the choices shown.
     pub(crate) plan: Plan,
     /// The fill with records and avatars on, for the counts their rows show
-    /// while off.
+    /// while off: `plan` itself while both are on, else its outline, undrawn.
     every: Plan,
     /// What `plan` was made for, since the canvas stays live under the box.
     asked: Option<(Options, NodeId, u64, Vec<NodeId>)>,
@@ -103,7 +103,7 @@ impl FillBox {
         self.plan = fill::plan(doc, &self.selection, &self.opts);
         self.every = match self.opts.records && self.opts.avatars.is_some() {
             true => self.plan.clone(),
-            false => fill::plan(
+            false => fill::outline(
                 doc,
                 &self.selection,
                 &Options {
@@ -216,6 +216,7 @@ impl OndinApp {
             opts: Options {
                 locale,
                 records: p.records,
+                example_emails: p.example_emails,
                 avatars: p.avatars.then_some(style),
                 seed: fresh_seed(),
                 ..Options::default()
@@ -236,6 +237,7 @@ impl OndinApp {
         let p = &mut self.prefs.fill_content;
         p.locale = b.opts.locale.clone();
         p.records = b.opts.records;
+        p.example_emails = b.opts.example_emails;
         p.avatars = b.opts.avatars.is_some();
         if let Some(style) = b.opts.avatars {
             p.avatar_style = style.key().to_string();
@@ -311,6 +313,7 @@ impl OndinApp {
                     locale_row(ui, &mut b);
                     content_row(ui, &mut b);
                     records_row(ui, doc, &mut b);
+                    emails_row(ui, &mut b);
                     avatars_row(ui, &mut b);
                 });
             ui.add_space(8.0);
@@ -492,6 +495,23 @@ fn records_row(ui: &mut egui::Ui, doc: &Document, b: &mut FillBox) {
     });
 }
 
+fn emails_row(ui: &mut egui::Ui, b: &mut FillBox) {
+    row(ui, "Emails", ui::CONTROL_H, |ui| {
+        if ui::switch_row_noted(
+            ui,
+            "Use example.com addresses",
+            "",
+            b.opts.example_emails,
+            ui::CONTROL_H,
+        )
+        .on_hover_text("A domain reserved for examples, which reaches no one")
+        .clicked()
+        {
+            b.opts.example_emails = !b.opts.example_emails;
+        }
+    });
+}
+
 fn avatars_row(ui: &mut egui::Ui, b: &mut FillBox) {
     let shapes = b
         .every
@@ -505,7 +525,7 @@ fn avatars_row(ui: &mut egui::Ui, b: &mut FillBox) {
             let on = b.opts.avatars.is_some();
             let label = ui::count(shapes, "shape");
             if ui::switch_row_noted(ui, &label, "", on, ui::CONTROL_H)
-                .on_hover_text("Shapes named Avatar, Photo or Picture")
+                .on_hover_text("Shapes named Avatar or Headshot, or just Photo or Profile picture")
                 .clicked()
             {
                 b.opts.avatars = match on {
@@ -749,7 +769,8 @@ fn fill_row(ui: &mut egui::Ui, doc: &Document, b: &FillBox, i: usize) -> RowOut 
         egui::pos2(inner.right() - DIE / 2.0 + 4.0, y),
         egui::vec2(DIE, DIE),
     );
-    let redrawable = over && r.kind.is_some();
+    // The locale has one country, so a Country row has nothing to redraw.
+    let redrawable = over && r.kind.is_some_and(|k| k != Kind::Country);
     let value_w = match redrawable {
         true => die.left() - 4.0 - value_x,
         false => inner.right() - value_x,

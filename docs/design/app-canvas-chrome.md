@@ -687,21 +687,34 @@ ImageSink>)` is the edit.
 
 - **Targets** (`gather`), in pre-order under the roots, children first to last: every text layer
   whose content is not bound to a variable, and every rect, ellipse, polygon, star or childless
-  frame named as an avatar (`AVATAR_WORDS`, as whole words: *avatar*, *photo*, *picture*, *pic*,
-  *profile*, *portrait*, *headshot*, *pfp*, *foto*, *bild*) or showing an image fill. A hidden layer
+  frame named as an avatar or showing an image fill. A name makes an avatar (`is_avatar_name`, whole
+  words) with *avatar*, *headshot*, *pfp* or *portrait* anywhere in it, or with *photo*, *picture*,
+  *pic*, *profile*, *foto* or *bild* when every word is one of those or a filler (*user*, *author*,
+  *member*, *person*, *account*, *image*, *img*): *Profile picture* is an avatar, *Profile header bg*
+  and *Product photo* are not. A hidden layer
   is passed over with all it holds; an effectively locked target is counted in `Plan::locked` and
   skipped. With avatars off no shape is listed. `fillable` says whether there is any target,
   stopping at the first (the doors ask it every frame a menu is open); it shares `is_shape_target`
   with `gather`.
-- **Kinds**: 24 in the groups *Person*, *Place*, *Company*, *Text*, *Numbers and dates* and *Image*
-  (`Kind::ALL`, the lists' order; `KIND_KEYS`, the verb's and prefs' spelling). A row's kind is the
-  one chosen for it (`Options::kinds`, `None` meaning *Leave as is*); else, for text, the box's
-  *Content* (`Options::content`); else what it reads as. A name is read first (`kind_from_name`:
-  `NAME_RULES`, phrases in every shipped language, most specific first, so *Job title* is a job
-  before *title* is a headline, with the generic *name* last), then the text (`kind_from_text`: an
-  email, price, percent, time, date, a phone number of seven digits or more, a number; text opening
-  *Lorem ipsum* is a paragraph). *Heading* reads as nothing, so a list's heading is left. A shape is
-  *Avatar* only by its name. What reads as nothing is left as is.
+- **Kinds**, in the groups *Person*, *Place*, *Company*, *Text*, *Numbers and dates* and *Image*
+  (`Kind::ALL`, the lists' order; `KIND_KEYS`, the verb's and prefs' spelling). *Text* holds
+  *Bio*, a third-person bio using the person's first name, and *Quote*, a first-person
+  testimonial. A row's kind is the one chosen for it (`Options::kinds`, `None` meaning *Leave as
+  is*); else, for text, the box's *Content* (`Options::content`); else what it reads as. A name is
+  read first (`kind_from_name`: `NAME_RULES`, phrases in every shipped language, most specific
+  first: *Job title* is a job before *title* a headline, *Street address* a street before
+  *address* a full one, *Product price* a price before *product*, *Team member* a full name before
+  *team* a department, a time before a date, the generic *name* last; *cell* alone is not a phone),
+  then the text (`kind_from_text`: an email, price, percent, time, date, a phone number of seven
+  digits or more, a number; text opening *Lorem ipsum* is a paragraph). *Heading* reads as
+  nothing, so a list's heading is left. A shape is *Avatar* only by its name. What reads as
+  nothing is left as is.
+- **Labels**: a text whose name only repeats its text, as importers name them (`named_like_text`),
+  may be a label. Of three words or fewer it is never read as a paragraph, sentence, bio or quote
+  (`kind_of_text_layer`: a nav's *About*, a button's *Copy link*). When its name gives a kind its
+  text does not, it reads as nothing where another layer of that kind sits beside it (same parent:
+  a field's label beside its value) or in a record nested inside its own (a table's header over
+  its rows). Otherwise it fills: *Name* in a card is a placeholder.
 - **Records** (`Options::records`): each selected frame or group is a record, and so is each child
   of a container under the selection whose container children repeat: two or more sharing a main,
   or a name stem (*Card 1*, *Card 2*) and kind (`record_roots`). A layer's record is its nearest
@@ -710,12 +723,30 @@ ImageSink>)` is the edit.
   frames with a changed row; `Plan::record_noun` their shared name stem (*row*, *card*), else
   *record*.
 - **Agreement**: a record draws one person (the names, email, username, avatar), one place
-  (street, city, postcode, full address, a phone number's area code) and one company. An email
-  takes the record's company's domain when the record has a *Company* row, else one domain the whole
-  fill shares. A redraw (`Options::redraws`) of a row drawn from one of the three redraws all of it
-  in that record, so the email follows the name; any other kind redraws only its row.
-- **Determinism**: every value comes from `Options::seed` through splitmix64, keyed by record,
-  entity, layer and redraw count, so the same seed and options fill the same values.
+  (street, city, postcode, full address, a phone number's area code) and one company. A job, bio or
+  quote takes the person's gendered form. An email is at `example.com` while
+  `Options::example_emails` is on, else at the record's company's domain when the record has a
+  *Company* row, else at one domain the whole fill shares. A redraw (`Options::redraws`) of a row
+  drawn from one of the three redraws all of it in that record, so the email follows the name; any
+  other kind redraws only its row.
+- **Determinism**: every value comes from `Options::seed` through splitmix64. A record's person,
+  place and company are keyed by the record's own seed, a hash of what it is (its frame, its loose
+  layers' parent, or its lone layer) rather than its place in the fill; a row's other draws by its
+  layer; both by redraw count. So the same seed and options fill the same values, two cards filled
+  in separate calls with one seed are two people, and changing one row's kind or the avatars switch
+  reshuffles no other record.
+- **No repeats**: records draw in order, each passing over the given and family names, cities,
+  jobs, headlines, sentences, bios and quotes earlier records took while the list has others
+  (`Rng::pick_fresh`: one draw, then the next free entry, so the stream stays in step); a company
+  or product name, a combination of two lists, is drawn again up to eight times. A city or company
+  counts as taken only where a row shows it. Departments repeat, as a real list's do. `plan` draws
+  in two passes: every record as if nothing were redrawn, then each record with a redrawn row
+  again, passing over every other record's values, so a redraw changes only its own record.
+- **Variety**: a username takes one of five forms (initial and surname, given name and surname,
+  *given.surname*, *given_initial*, given name and two digits); a number has 1 to 4 digits, each
+  length as likely; a date is in 1965–2004 when its layer's name says birthday, born or dob (or
+  another language's word), in 2022–2025 when it says created, updated, joined, since, published,
+  posted or modified, else in 2025–2027 (`date_years`).
 - **Fitting** (`room`): auto width takes the value's natural length. A one-line box (fixed under
   about 1.8 lines, or auto-height not yet wrapping) takes a value whose max-content width fits:
   up to `ATTEMPTS` draws (an entity's redrawn whole for its rows), else the first draw kept with
@@ -736,16 +767,30 @@ ImageSink>)` is the edit.
 - **Locales**, one file each in `ondin-core/assets/content/` (en-US, en-GB, de, fr, es, it, pt-BR,
   nl), `include_str!`'d uncompressed into `SOURCES`, whose order the locale list shows; each is
   named in English (*German*, *English (UK)*). A file holds `#` comments, `@key value` formats and
-  `[section]` lists, with `\uXXXX` escapes; in a pattern `#` is a digit, `@` a capital and a whole
-  `a..b` a number in that range. `@inherit` takes what a locale leaves out from another, one level
-  (en-GB from en-US). A locale is added as a file and its line in `SOURCES`. US phone numbers are
-  555-01xx and UK ones Ofcom's drama ranges; the rest are plain patterns. `locale_for(tag)` is the
-  exact tag, else the first of its language (*en* → en-US, *pt* → pt-BR). `agreed_locale` is the
-  locale the target texts that set a Language (`TextStyle::locale`) agree on; a text without one
-  says nothing, and `None` when they differ, one names no shipped locale, or none sets one.
-- **The verb** `fill_content(nodes, locale?, kind?, records?, avatars?, seed?)` runs the same plan:
-  `kind` a `KIND_KEYS` word, `avatars` *initials* (the default), *pattern* or *none*, records on and
-  seed 0 unless given; the locale is the agreed one, else en-US, and a tag not shipped is refused.
+  `[section]` lists, with `\uXXXX` escapes; in a pattern `#` is a digit, `&` a digit 1–9 (a UK
+  postcode district never reads 0), `@` a capital and a whole `a..b` a number in that range, and a
+  phone format may list alternatives split by `|`. Given names are `[given-f]` and `[given-m]`
+  (`[given]` still reads, ungendered); a `[jobs]`, `[bios]` or `[quotes]` entry may be
+  `masculine|feminine`. Every shipped locale is gendered. `@inherit` takes what a locale leaves out
+  from another, one level (en-GB from en-US). A locale is added as a file and its line in
+  `SOURCES`. Phone numbers come from blocks reserved for fiction where the country has them:
+
+  | Locale | Phone numbers |
+  | --- | --- |
+  | en-US | 555-0100 to 555-0199 |
+  | en-GB | Ofcom's drama ranges per city, else 01632 960xxx; mobile 07700 900xxx |
+  | fr | ARCEP's 01 99 00, 02 61 91, 03 53 01, 04 65 71, 05 36 49; mobile 06 39 98 |
+  | de | the Bundesnetzagentur's drama numbers for Berlin, Frankfurt, Hamburg, Köln and München, else a subscriber number starting with 0, never assigned; mobile 0171 39200xx or 0176 040690xx |
+  | nl, pt-BR | a landline's subscriber number starts with 0, never assigned; mobiles are only well-formed |
+  | es, it | only well-formed: no regulator reserves numbers |
+
+  `locale_for(tag)` is the exact tag, else the first of its language (*en* → en-US, *pt* → pt-BR).
+  `agreed_locale` is the locale the target texts that set a Language (`TextStyle::locale`) agree
+  on; a text without one says nothing, and `None` when they differ, one names no shipped locale, or
+  none sets one.
+- **The verb** `fill_content(nodes, locale?, kind?, records?, avatars?, seed?, example_emails?)`
+  runs the same plan: `kind` a `KIND_KEYS` word, `avatars` *initials* (the default), *pattern* or
+  *none*, records on, seed 0 and `example_emails` off unless given; the locale is the agreed one, else en-US, and a tag not shipped is refused.
   It draws avatars only when the caller lends a sink that draws, and fills the texts either way. It
   is an MCP Phase 2 tool (`mcp.md` §8.4).
 
@@ -759,16 +804,17 @@ ImageSink>)` is the edit.
   *Cancel* or ✕ closes it, and Escape through `OndinApp::escape`'s rung below Clean up's (an open
   kind list takes the press first). It is drawn outside the `!focus` guard.
 - **Opening**: with nothing to fill, the status line gives the reason and no box opens. The locale
-  is `agreed_locale`, else the last used; records, avatars and their style come from
-  `prefs.fill_content`; the seed is the clock's, so each opening draws anew.
+  is `agreed_locale`, else the last used; records, example emails, avatars and their style come
+  from `prefs.fill_content`; the seed is the clock's, so each opening draws anew.
 - **Rows** (batch rename's `row`): *Locale*, a combo of the locales, the current one lit with a
   check. *Content*, a combo of *By layer name* and each text kind under its group's eyebrow, its
   sample in the locale as a faint tail (`MenuRow::note`, `content_fill::sample`); picking a kind
   there drops the text rows' own choices and keeps the shapes'. *Records*, a `switch_row_noted`
-  *Keep each {noun}'s values together* noted *3 rows*. *Avatars*, a `switch_row_noted` labelled with
-  the shape count, then `ui::segmented_enabled` *Initials · Pattern*, disabled while off. Both counts
-  come from a second plan with records and avatars on, so an off switch still says what it would
-  act on.
+  *Keep each {noun}'s values together* noted *3 rows*. *Emails*, a switch *Use example.com
+  addresses*. *Avatars*, a `switch_row_noted` labelled with the shape count, then
+  `ui::segmented_enabled` *Initials · Pattern*, disabled while off. While records or avatars is
+  off, both counts come from `content_fill::outline` with both on (the rows and records, no value
+  drawn), so an off switch still says what it would act on without a second full plan.
 - **Preview**: the eyebrow *Preview*, *13 layers in 3 rows · 1 left as is* and a `DICE` button,
   *Shuffle* (*Shuffle · Draw new values for every layer*), which takes a new seed and clears the
   redraws. Rows sit under a dim head naming their record's frame, scrolling past twelve with no
@@ -777,14 +823,15 @@ ImageSink>)` is the edit.
   and *Photo* disabled with *Photos come from the assets browser*), then the value: a kept row's
   current text, faint; an overflow in warn ink with *Longer than its box: no draw fitted*; an avatar
   as its ground swatch with the initials, then the name. A hovered row with a kind shows a `DICE`
-  *Draw another*. Hovering a row rings its layer, a head its frame at a hairline
+  *Draw another*, but for a *Country* row: the locale has one country. Hovering a row rings its layer, a head its frame at a hairline
   (`canvas::draw_panel_hover`); a click selects the layer and brings it into view.
 - **Foot**: `card_foot` with *Esc closes*, *Cancel* and *Fill N layers*; dimmed as *Fill* with
   *Every layer is left as is*, or *Select text layers, or frames that hold them* when nothing is
   listed.
 - **Commit**: one undo step *Fill with content* with `FILL_CONTENT`; the status line says *Filled N
   layers · Ctrl+Z to undo*, with *· skipped K locked* before the hint when the plan skipped any.
-  Locale, records, avatars and their style are saved to `prefs.fill_content` (`FillContentPrefs`).
+  Locale, records, example emails, avatars and their style are saved to `prefs.fill_content`
+  (`FillContentPrefs`).
 - **Doors.** *Tools ▸ Fill with content…* (after *Clean up…*), dimmed with *Select text layers, or
   frames that hold them* while `content_fill::fillable` is false; the palette (`Item::FillContent`
   in the Text group, aliases *lorem*, *placeholder*, *fake*, *sample*, *dummy*, *names*, *data*, the
@@ -1202,3 +1249,6 @@ runs (`pages` names each frame's page, index for index).
   unguarded.
 - `set_private` must not write `layers_folded` or `pages_folded`: the fold is an overlay so leaving
   restores the panes as they were. `the_chord_turns_it_on_and_the_pill_says_so` pins it.
+- Fill with content's `plan` draws twice on purpose. Folding the redraws into the first pass looks
+  simpler, but a redrawn record then takes different list entries and every later record, passing
+  over them, shifts too. `a_draw_repeats_and_a_redraw_moves_only_its_record` pins it.

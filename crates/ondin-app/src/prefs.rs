@@ -261,6 +261,8 @@ pub struct FillContentPrefs {
     /// The last locale used, by `ondin_core::content_fill::Locale::tag`.
     pub locale: String,
     pub records: bool,
+    /// `ondin_core::content_fill::Options::example_emails`.
+    pub example_emails: bool,
     pub avatars: bool,
     /// `ondin_core::content_fill::AvatarStyle::key`.
     pub avatar_style: String,
@@ -271,6 +273,7 @@ impl Default for FillContentPrefs {
         Self {
             locale: "en-US".into(),
             records: true,
+            example_emails: false,
             avatars: true,
             avatar_style: "initials".into(),
         }

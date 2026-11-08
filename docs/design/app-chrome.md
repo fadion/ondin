@@ -157,7 +157,7 @@ ondin-app/src/
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)
 ├─ clean_up_box.rs  the Clean up box: a switch per rule, the preview grouped by rule, one undo step (app-canvas-chrome.md)
-├─ fill_box.rs      the Fill with content box: locale, content, records and avatars, the preview by record, one undo step (app-canvas-chrome.md)
+├─ fill_box.rs      the Fill with content box: locale, content, records, emails and avatars, the preview by record, one undo step (app-canvas-chrome.md)
 ├─ tokens_import.rs design tokens import: the review box, its commit, the linked file's watch and pill (styles-variables.md)
 ├─ find.rs          find and replace in text: the box, its list, the canvas's match marks (app-canvas-chrome.md)
 ├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)

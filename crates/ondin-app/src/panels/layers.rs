@@ -635,11 +635,13 @@ fn row_id(id: NodeId) -> egui::Id {
 /// Where the [`crate::ui::label_edit`] rename field goes on a row whose name is
 /// painted from `left`: the full row height, starting
 /// [`crate::ui::INLINE_EDIT_PAD_X`] left of the name, so the text does not shift
-/// when the rename opens.
-fn rename_field_rect(row: egui::Rect, left: f32) -> egui::Rect {
+/// when the rename opens, and ending at `right`, where the painted name's room
+/// ends ([`name_limit`]): the field has no ground to cover the row's badge, eye,
+/// lock or mark.
+fn rename_field_rect(row: egui::Rect, left: f32, right: f32) -> egui::Rect {
     egui::Rect::from_min_max(
         egui::pos2(left - crate::ui::INLINE_EDIT_PAD_X, row.top()),
-        egui::pos2(row.right() - 8.0, row.bottom()),
+        egui::pos2(right.max(left), row.bottom()),
     )
 }
 
@@ -1582,7 +1584,13 @@ impl OndinApp {
     ///
     /// Buffered, so one rename is one undo step. Enter and clicking away keep it;
     /// Escape or an empty name discards it.
-    fn layer_rename_field(&mut self, ui: &mut egui::Ui, id: NodeId, row: egui::Rect, left: f32) {
+    fn layer_rename_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        row: egui::Rect,
+        (left, right): (f32, f32),
+    ) {
         let Some((_, text)) = &self.renaming_layer else {
             return;
         };
@@ -1597,7 +1605,7 @@ impl OndinApp {
             ui.ctx().memory_mut(|m| m.request_focus(fid));
         }
         // Sits where the painted name sat — see `rename_field_rect`.
-        let field = rename_field_rect(row, left);
+        let field = rename_field_rect(row, left, right);
         let resp = crate::ui::label_edit(ui, field, &mut buf, fid);
         if let Some((_, stored)) = &mut self.renaming_layer {
             *stored = buf.clone();
@@ -2209,7 +2217,7 @@ impl OndinApp {
             // Focus is the field's business: see `layer_rename_field`.
         }
         if renaming {
-            self.layer_rename_field(ui, id, rect, icon_x + NAME_GAP);
+            self.layer_rename_field(ui, id, rect, (icon_x + NAME_GAP, name_right));
         }
 
         // The click that dismisses an open menu is spent dismissing it (R4), the
@@ -3143,6 +3151,58 @@ mod rename_layout_tests {
         assert!(!grounds, "no field ground or edge");
     }
 
+    /// The groundless rename stops short of what the row draws at its end, here a
+    /// hovered row's lock, as the painted name does.
+    /// flip: `rename_field_rect` running to the row's edge → fails at "short of the lock".
+    #[test]
+    fn a_rename_stops_short_of_the_rows_end_glyphs() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_layer(&ctx);
+        let lock_at = |out: &egui::FullOutput| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == icon::LOCK_SIMPLE_OPEN => {
+                    Some(t.pos.x + t.galley.rect.left())
+                }
+                _ => None,
+            })
+        };
+        let _ = frame(&mut app, &ctx);
+        let rest = frame(&mut app, &ctx);
+        let row_y = rest
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text().starts_with("Rect") => {
+                    Some(t.pos.y + t.galley.rect.center().y)
+                }
+                _ => None,
+            })
+            .expect("the fixture: the row's name");
+        let hover = |app: &mut OndinApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    egui::vec2(300.0, 600.0),
+                )),
+                events: vec![egui::Event::PointerMoved(egui::pos2(100.0, row_y))],
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.layers_tree(ui))
+        };
+        let _ = hover(&mut app);
+        let lock = lock_at(&hover(&mut app)).expect("the fixture: the hovered row's lock");
+        app.renaming_layer = Some((id, "A long name typed past the row's end".to_owned()));
+        let _ = hover(&mut app);
+        let _ = hover(&mut app);
+        let field = crate::ui::widget_rect(&ctx, rename_field_id(id))
+            .expect("the field")
+            .rect;
+        assert!(
+            field.right() < lock,
+            "short of the lock: {field:?} vs {lock}"
+        );
+    }
+
     /// No frame ends with focus on a widget that frame did not draw (AccessKit
     /// panics on it); the order asserted is the context menu's, drawn after the panel.
     /// flip: request focus in `OndinApp::rename_selection` → fails at the first
@@ -3212,7 +3272,7 @@ mod rename_layout_tests {
                 egui::FontId::proportional(crate::ui::CONTROL_PT),
                 egui::Color32::WHITE,
             );
-            let field = rename_field_rect(row, left);
+            let field = rename_field_rect(row, left, row.right() - 8.0);
 
             let text_left = field.left() + crate::ui::INLINE_EDIT_PAD_X;
             assert!(

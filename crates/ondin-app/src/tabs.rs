@@ -351,10 +351,15 @@ impl OndinApp {
             .collect()
     }
 
-    /// Whether closing the window would lose anything: a tab's unsaved work, or the
-    /// scratch session's when no tab holds it.
+    /// Whether closing the window would lose anything: a tab's unsaved work, the
+    /// scratch session's when no tab holds it, or text typed and not yet committed.
     pub(crate) fn any_unsaved(&self) -> bool {
-        !self.dirty_tabs().is_empty() || (self.tabs.active.is_none() && self.session.is_dirty())
+        !self.dirty_tabs().is_empty()
+            || (self.tabs.active.is_none() && self.session.is_dirty())
+            || self
+                .text
+                .as_ref()
+                .is_some_and(crate::preview::TextSession::changed)
     }
 
     /// The session of every loaded document, the one in front first: what the

@@ -6459,11 +6459,21 @@ impl OndinApp {
         if !requested {
             return;
         }
+        self.commit_text_before_closing();
         // A tab's own question gives way to the window's, which covers it.
         if self.any_unsaved() {
             self.closing_tabs.clear();
             self.confirming_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+    }
+
+    /// Commit a live, changed text session before a close puts its question: its
+    /// buffer is not in the document, so *Save* would miss it and the tab would not
+    /// be listed. An unchanged session stays open.
+    pub(crate) fn commit_text_before_closing(&mut self) {
+        if self.text.as_ref().is_some_and(TextSession::changed) {
+            self.finish_text_edit();
         }
     }
 
@@ -15073,6 +15083,60 @@ mod library_wiring_tests {
             .expect("the text node survived the save");
         assert_eq!(text, "TYPED", "the typed text reached the file");
         assert!(app.text.is_none(), "and the session ended on the way out");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Typing into a saved, clean document counts as unsaved work, so a quit or a
+    /// window close asks; the typing is committed before the question is put.
+    /// flip: `any_unsaved` without its text term → fails at "counted".
+    #[test]
+    fn a_live_text_edit_is_unsaved_work() {
+        let ctx = egui::Context::default();
+        let root = temp_root("text-quit");
+        let mut app = app_at(&ctx, root.clone());
+        let id = app.session.ids.mint();
+        let parent = app.session.doc.first_page();
+        let parts = crate::fonts::FontService::default_text_parts();
+        app.session
+            .try_commit(ondin_core::Transaction(vec![
+                ondin_core::Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind: ondin_core::NodeKind::Text {
+                        content: "hello".into(),
+                        style: Box::new(parts.style),
+                        spans: parts.spans,
+                        para_spans: parts.para_spans,
+                        paragraph: parts.paragraph,
+                        block: parts.block,
+                        sizing: parts.sizing,
+                        on_path: None,
+                        on_path_flip: false,
+                        on_path_offset: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]))
+            .expect("the fixture's text node");
+        app.save_file(false);
+        app.begin_edit_text(Some(id), None);
+        assert!(
+            !app.any_unsaved(),
+            "an untouched session is nothing to lose"
+        );
+        app.text.as_mut().unwrap().editor.insert("abc");
+        assert!(
+            !app.session.is_dirty(),
+            "the fixture: nothing committed yet"
+        );
+        assert!(app.any_unsaved(), "counted");
+        app.commit_text_before_closing();
+        assert!(
+            app.text.is_none() && app.session.is_dirty(),
+            "committed for the question"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

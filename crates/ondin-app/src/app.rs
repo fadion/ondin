@@ -6679,10 +6679,18 @@ impl OndinApp {
             });
         }
         ops.extend(self.slot_transaction(id, slot, next).0);
-        ops.extend(ondin_core::credit::dropped_by_replace(
-            &self.session.doc,
-            id,
-        ));
+        let replaced = match slot {
+            crate::panels::PaintSlot::Fill(i) => Some(ondin_core::credit::Replaced::Fill(i)),
+            crate::panels::PaintSlot::Stroke(i) => Some(ondin_core::credit::Replaced::Stroke(i)),
+            _ => None,
+        };
+        if let Some(replaced) = replaced {
+            ops.extend(ondin_core::credit::dropped_by_replace(
+                &self.session.doc,
+                id,
+                replaced,
+            ));
+        }
         self.session.name_step("Replace image", icon::IMAGE);
         if self.commit_edit(Transaction(ops)) {
             let said = self.replaced_status(image.label(), None);

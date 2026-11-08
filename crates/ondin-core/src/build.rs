@@ -3584,7 +3584,11 @@ pub fn replace_image_fill(
         });
     }
     ops.push(Operation::SetFills { id, fills });
-    ops.extend(crate::credit::dropped_by_replace(doc, id));
+    ops.extend(crate::credit::dropped_by_replace(
+        doc,
+        id,
+        crate::credit::Replaced::Fill(index),
+    ));
     Some(Transaction(ops))
 }
 

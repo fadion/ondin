@@ -258,6 +258,48 @@ fn a_flattened_icon_keeps_its_credit() {
     assert_eq!(f.doc.get(made).unwrap().credit(), Some(&icon));
 }
 
+/// Outlining one credited layer, which replaces it with a path of its own (as
+/// single-layer Flatten, Outline stroke and Warp do), keeps the credit.
+/// flip: drop the `SetCredit` push in `build::replace_with_path` → fails here.
+#[test]
+fn an_outlined_single_layer_keeps_its_credit() {
+    let mut f = F::new();
+    let a = f.add(f.root, rect());
+    let icon = credit(CreditKind::Icon);
+    f.set_credit(a, icon.clone());
+    let (tx, made) =
+        build::outline(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, a).expect("a rect outlines");
+    f.commit(tx);
+    assert_eq!(f.doc.get(made).unwrap().credit(), Some(&icon));
+}
+
+/// A copy's own credit is an override its reset puts back to the main's.
+/// flip: `reset::state_ops` without its `SetCredit` → fails at "an override".
+#[test]
+fn resetting_a_copy_puts_the_mains_credit_back() {
+    let mut f = F::new();
+    let (a, ia) = main_and_instance(&mut f);
+    let photo = credit(CreditKind::Photo);
+    commit_propagated(
+        &mut f,
+        vec![Operation::SetCredit {
+            id: a,
+            credit: Some(Box::new(photo.clone())),
+        }],
+    );
+    let mut own = credit(CreditKind::Photo);
+    own.text = "Photo by Tomás Vidal on Unsplash".into();
+    f.set_credit(ia, own);
+    let reset: Vec<Operation> = ondin_core::reset::overrides(&f.doc, ia)
+        .into_iter()
+        .map(|o| o.reset)
+        .filter(|op| matches!(op, Operation::SetCredit { .. }))
+        .collect();
+    assert_eq!(reset.len(), 1, "an override");
+    f.commit(Transaction(reset));
+    assert_eq!(f.doc.get(ia).unwrap().credit(), Some(&photo));
+}
+
 /// A credit that will not read — a missing field, a kind from a later build —
 /// is dropped on load, and the document opens.
 #[test]
@@ -297,4 +339,26 @@ fn replacing_the_picture_drops_a_photo_credit_only() {
     }
     assert_eq!(f.doc.get(photo).unwrap().credit(), None);
     assert!(f.doc.get(icon).unwrap().credit().is_some());
+}
+
+/// Replacing one picture while another stays on the layer keeps the photo
+/// credit: the credited photo may be the one still drawn.
+/// flip: `dropped_by_replace` ignoring the layer's other paints → fails at "kept".
+#[test]
+fn replacing_one_of_two_pictures_keeps_the_credit() {
+    let mut f = F::new();
+    let id = f.add(f.root, rect());
+    let picture = |name: &str| Fill {
+        brush: ondin_core::image_brush(ondin_core::ImageId(name.into())).into(),
+        visible: true,
+    };
+    f.commit(Transaction(vec![Operation::SetFills {
+        id,
+        fills: keyed_by_position([picture("sha:photo"), picture("sha:local")]),
+    }]));
+    f.set_credit(id, credit(CreditKind::Photo));
+    let other = ondin_core::ImageId("sha:other".into());
+    let tx = build::replace_image_fill(&f.doc, id, 1, &other, None).unwrap();
+    f.commit(tx);
+    assert!(f.doc.get(id).unwrap().credit().is_some(), "kept");
 }

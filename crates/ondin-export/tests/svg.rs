@@ -4785,3 +4785,47 @@ fn credits_are_written_into_svg_metadata_and_the_code_page() {
                  (Unsplash License) — https://unsplash.com/photos/abc\n-->\n";
     assert!(page.starts_with(block), "{page}");
 }
+
+/// The React and Vue pages open with the credits too, and a credit holding a
+/// comment's own closer cannot end the comment early: `*/` is broken in the
+/// `.tsx`, every `--` in the `.vue`.
+/// flip: `write_credits` without its `*/` break → fails at the `.tsx`'s opening.
+#[test]
+fn react_and_vue_pages_carry_credits_their_comments_survive() {
+    let mut f = common::fixture();
+    let credit = ondin_core::Credit {
+        kind: ondin_core::CreditKind::Photo,
+        text: "Photo */ by Ana --- Ruiz".into(),
+        author: "Ana".into(),
+        author_url: String::new(),
+        provider: "Unsplash".into(),
+        provider_url: String::new(),
+        source_url: String::new(),
+        licence: "Unsplash License".into(),
+        licence_url: String::new(),
+        required: true,
+        inserted: "2026-11-08".into(),
+    };
+    f.doc
+        .apply(&Transaction(vec![Operation::SetCredit {
+            id: f.rect,
+            credit: Some(Box::new(credit)),
+        }]))
+        .unwrap();
+    f.res = Resolved::rebuild(&f.doc);
+    let page = |target: ondin_export::code::Target, file: &str| {
+        let code = target.export(&f.doc, &f.res, &[f.artboard]);
+        String::from_utf8(code.file(file).expect(file).to_vec()).unwrap()
+    };
+    let tsx = page(ondin_export::code::Target::React, "App.tsx");
+    assert!(
+        tsx.starts_with("/*\n * Credits\n * Photo * / by Ana"),
+        "{tsx}"
+    );
+    let comment = &tsx[..tsx.find(" */\n").expect("the comment closes")];
+    assert!(!comment[2..].contains("*/"), "closed early: {tsx}");
+    let vue = page(ondin_export::code::Target::Vue, "App.vue");
+    assert!(vue.starts_with("<!--\n  Credits\n"), "{vue}");
+    let comment = &vue[4..vue.find("-->\n").expect("the comment closes")];
+    assert!(!comment.contains("--"), "no double dash: {vue}");
+}

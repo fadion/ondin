@@ -300,7 +300,20 @@ impl OndinApp {
             let overrides = ondin_core::reset::overrides(doc, *id);
             fields.push((*id, overrides.iter().map(|o| o.reset.clone()).collect()));
             for o in overrides {
-                let Some(title) = card_of(&o.reset) else {
+                // A photo credit goes with the fill that shows its picture: reset
+                // apart, it would list a photo the layer no longer draws.
+                let photo_credit = match &o.reset {
+                    Operation::SetCredit { id, .. } => doc
+                        .get(*id)
+                        .and_then(|n| n.credit())
+                        .is_some_and(|c| c.kind == ondin_core::CreditKind::Photo),
+                    _ => false,
+                };
+                let title = match photo_credit {
+                    true => Some("Fill"),
+                    false => card_of(&o.reset),
+                };
+                let Some(title) = title else {
                     continue;
                 };
                 match cards.iter_mut().find(|(t, ..)| *t == title) {
@@ -2952,6 +2965,51 @@ mod tests {
             f.app.session.doc.get(f.ir).unwrap().kind(),
             NodeKind::Rect { corner_smoothing, .. } if *corner_smoothing == 0.0
         ));
+    }
+
+    /// *Reset fill* on a copy filled with a photo takes the photo's credit back
+    /// with the picture, so no list names a photo the layer no longer draws.
+    /// flip: `gather_card_overrides` leaving `SetCredit` to `card_of` → fails at
+    /// "the credit goes with it".
+    #[test]
+    fn resetting_a_copys_photo_fill_takes_its_credit() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let main_credit = f.app.session.doc.get(f.ir).unwrap().credit().cloned();
+        let credit = ondin_core::Credit {
+            kind: ondin_core::CreditKind::Photo,
+            text: "Photo by Ana Ruiz on Unsplash".into(),
+            author: "Ana Ruiz".into(),
+            author_url: String::new(),
+            provider: "Unsplash".into(),
+            provider_url: String::new(),
+            source_url: String::new(),
+            licence: "Unsplash License".into(),
+            licence_url: String::new(),
+            required: true,
+            inserted: "2026-11-08".into(),
+        };
+        let fills = ondin_core::keyed_by_position([ondin_core::Fill {
+            brush: ondin_core::image_brush(ondin_core::ImageId("sha:p".into())).into(),
+            visible: true,
+        }]);
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills { id: f.ir, fills },
+            Operation::SetCredit {
+                id: f.ir,
+                credit: Some(Box::new(credit)),
+            },
+        ])));
+        f.app.session.selection.set_one(f.ir);
+        f.app.gather_card_overrides();
+        let (_, ops) = f.app.card_override("Fill").expect("the fill is overridden");
+        let tx = Transaction(ops.to_vec());
+        assert!(f.app.session.commit(tx));
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().credit().cloned(),
+            main_credit,
+            "the credit goes with it"
+        );
     }
 
     /// **A copy's width bound as its main's draws the chip; resized, it detaches

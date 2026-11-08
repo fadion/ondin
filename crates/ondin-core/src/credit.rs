@@ -101,14 +101,37 @@ impl Credit {
     }
 }
 
-/// The operation that drops `id`'s photo credit, when a picture of another file
-/// takes the place of the one it credits; `None` when it has none. An icon's
-/// credit stays: the picture replaced is not what it credits.
-pub fn dropped_by_replace(doc: &crate::Document, id: crate::NodeId) -> Option<crate::Operation> {
-    doc.get(id)?
-        .credit()
-        .filter(|c| c.kind == CreditKind::Photo)
-        .map(|_| crate::Operation::SetCredit { id, credit: None })
+/// Which of a layer's paints a replace writes over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Replaced {
+    Fill(usize),
+    Stroke(usize),
+}
+
+/// The operation that drops `id`'s photo credit when a picture of another file
+/// takes the place of the one it credits: when no other paint of the layer, past
+/// the `replaced` one, still shows a picture. `None` when it has no photo credit
+/// or a picture stays. An icon's credit stays: the picture replaced is not what
+/// it credits.
+pub fn dropped_by_replace(
+    doc: &crate::Document,
+    id: crate::NodeId,
+    replaced: Replaced,
+) -> Option<crate::Operation> {
+    let node = doc.get(id)?;
+    node.credit().filter(|c| c.kind == CreditKind::Photo)?;
+    let picture =
+        |b: &crate::variable::BrushSource| matches!(b.literal(), Some(crate::Brush::Image(_)));
+    let paint = node.paint();
+    let fills = paint.fills.iter().enumerate();
+    let strokes = paint.strokes.iter().enumerate();
+    let kept = fills
+        .filter(|(i, _)| replaced != Replaced::Fill(*i))
+        .any(|(_, f)| picture(&f.brush))
+        || strokes
+            .filter(|(i, _)| replaced != Replaced::Stroke(*i))
+            .any(|(_, s)| picture(&s.brush));
+    (!kept).then_some(crate::Operation::SetCredit { id, credit: None })
 }
 
 /// One credit as a list shows it: the credit, and the layers carrying it.

@@ -307,7 +307,8 @@ armed after each cut.
   cutting it would break the link without saying so.
 - **How** (`knife::pieces`): the outline is read as the boolean union reads it (holes wound
   against their ring); where the layer's fill rule reads its subpaths otherwise
-  (`boolean::filled_faces`), each face it fills is cut on its own (`parted`). The line's *chords*,
+  (`boolean::filled_faces`), the union of the faces it fills is cut instead (`parted`), so the cut
+  follows only the edges the layer draws. The line's *chords*,
   the stretches between two crossings of the outline
   that run inside it, are cut along exactly by surgery on the rings rather than by a boolean
   (flo_curves mishandles operands sharing an edge, which every piece and the cut side would). A

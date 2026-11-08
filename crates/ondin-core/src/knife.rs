@@ -400,16 +400,13 @@ fn subjects(
 ///
 /// The outline is read by the layer's fill rule: where that differs from how a
 /// boolean reads it (a same-way inner ring under non-zero is solid, a crossing
-/// under even-odd a hole), each filled face is cut on its own.
+/// under even-odd a hole), the union of its filled faces is cut instead, so the
+/// cut follows only the edges it draws.
 fn parted(doc: &Document, res: &Resolved, id: NodeId, trail: &[Point]) -> Option<Vec<BezPath>> {
-    let outline = world_outline(doc, res, id)?;
+    let mut outline = world_outline(doc, res, id)?;
     let rule = doc.get(id)?.fill_rule();
     if let Some(faces) = boolean::filled_faces(&outline, rule) {
-        let mut parts = Vec::new();
-        for face in &faces {
-            parts.extend(pieces(face, trail)?);
-        }
-        return (parts.len() > faces.len()).then_some(parts);
+        outline = boolean::evaluate(BoolOp::Union, &faces)?;
     }
     let whole = boolean::pieces(&boolean::evaluate(
         BoolOp::Union,

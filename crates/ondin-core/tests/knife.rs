@@ -343,6 +343,31 @@ fn a_cut_keeps_what_the_fill_rule_draws() {
     assert_eq!(f.covering(w(120.0, 120.0)), 1);
 }
 
+/// A non-zero solid with a same-way inner ring parts where it is drawn, not along
+/// the ring it does not draw: a line wholly inside cuts nothing, and a full cut
+/// gives two pieces.
+///
+/// flip: `parted` cutting each filled face on its own → fails at "inside" (three
+/// pieces).
+#[test]
+fn a_cut_parts_a_solid_along_its_drawn_edge_only() {
+    use ondin_core::FillRule;
+    let outer: &[(f64, f64)] = &[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
+    let inner: &[(f64, f64)] = &[(30.0, 30.0), (70.0, 30.0), (70.0, 70.0), (30.0, 70.0)];
+    let mut f = Fixture::new();
+    f.path(&[outer, inner], FillRule::NonZero);
+    let cut = f.cut(&[], &[w(50.0, 20.0), w(50.0, 80.0)]);
+    assert_eq!(cut, knife::Cut::default(), "inside");
+    assert_eq!(f.children().len(), 1);
+
+    let mut f = Fixture::new();
+    f.path(&[outer, inner], FillRule::NonZero);
+    let cut = f.cut(&[], &[w(10.0, -10.0), w(10.0, 110.0)]);
+    assert_eq!(cut.pieces, 2, "across");
+    assert_eq!(f.covering(w(50.0, 50.0)), 1, "solid");
+    assert_eq!(f.covering(w(5.0, 50.0)), 1);
+}
+
 /// A shape its parent lays out is left whole: a new piece would join the flow
 /// and move it and its siblings.
 ///

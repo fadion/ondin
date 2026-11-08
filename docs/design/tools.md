@@ -578,8 +578,11 @@ Copies of the selection turned step by step about one point, committed grouped w
   main's copies land as its instances. The group is selected; the status says *Made 11 copies around
   the origin*. One undo step, *Repeat*.
 - **Refusals** (`repeat_refusal`): nothing selected (*Select a layer first*), *This layer is
-  locked*, *A group containing this layer is locked*, *Repeat takes layers that share one parent*.
-  The card closes when the selection comes to be refused.
+  locked*, *A group containing this layer is locked*, *Repeat takes layers that share one parent*,
+  and *Repeat can't work inside an auto layout* (`repeat::in_layout`, which core's `repeat` and
+  `linked` refuse too): in a flex or grid parent the ring's group, or the preview's copies, would
+  be laid out as items, moving the original and its siblings, as the shape builder and the knife
+  refuse such a layer. The card closes when the selection comes to be refused.
 - **Doors.** The palette (`Item::RepeatAround`, group Transform, `icon::REPEAT_AROUND`, unbound) and
   the Transform card's fifth button (`inspector.md`), On while the card is up. A layer menu carries
   no Transform rows, so the card is the door.

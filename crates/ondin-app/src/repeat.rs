@@ -167,6 +167,9 @@ impl OndinApp {
         {
             return Some("Repeat takes layers that share one parent");
         }
+        if repeat::in_layout(doc, &roots) {
+            return Some(repeat::IN_LAYOUT);
+        }
         None
     }
 

@@ -68,6 +68,20 @@ pub fn centre(res: &Resolved, members: &[NodeId]) -> Option<Point> {
         .map(|b: Rect| b.center())
 }
 
+/// Why a ring is refused for a layer in an auto layout.
+pub const IN_LAYOUT: &str = "Repeat can't work inside an auto layout";
+
+/// Whether any of `members` sits in a parent that lays its children out. There the
+/// ring's group, or the copies beside the original, would be laid out as items:
+/// the original and its siblings would move and the ring would not stand round
+/// its point. Refused, as the shape builder and the knife refuse such a layer.
+pub fn in_layout(doc: &Document, members: &[NodeId]) -> bool {
+    let view = crate::resolve::DocView(doc);
+    members
+        .iter()
+        .any(|id| crate::container::parent_lays_out(&view, *id))
+}
+
 /// The name the group takes: *Tick × 12*.
 pub fn group_name(first: &str, count: usize) -> String {
     format!("{first} × {count}")
@@ -76,8 +90,8 @@ pub fn group_name(first: &str, count: usize) -> String {
 /// Repeat `selection` round `pivot` (world space) as `ring` says.
 ///
 /// Answers the edit and, under [`Place::Group`], the group made. The members must
-/// share a parent to be grouped; the originals stay first in the group, the copies
-/// below them in order round the ring.
+/// share a parent to be grouped, one that lays nothing out ([`in_layout`]); the
+/// originals stay first in the group, the copies below them in order round the ring.
 pub fn repeat(
     doc: &Document,
     res: &Resolved,
@@ -90,6 +104,9 @@ pub fn repeat(
     let members = build::in_document_order(doc, selection);
     if members.is_empty() || ring.count < 2 || ring.count > MAX_COUNT {
         return Err(OpError::MalformedSubtree);
+    }
+    if in_layout(doc, &members) {
+        return Err(OpError::InvalidParent);
     }
     let centre = centre(res, &members).ok_or(OpError::EmptyGeometry)?;
     let (mut ops, group) = match into {
@@ -221,4 +238,76 @@ pub fn linked(
     let (more, group) = repeat(&after, &laid, ids, &[main], pivot, ring, Place::Group)?;
     tx.0.extend(more.0);
     Ok((tx, group))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NodeKind;
+    use crate::container::{Display, Flex};
+    use crate::kurbo::Size;
+
+    /// A layer in a row frame is refused, as a ring, a preview or a linked ring,
+    /// so neither it nor its sibling moves; out of the row it repeats.
+    /// flip: `repeat` without its `in_layout` refusal → fails at "the ring is refused".
+    #[test]
+    fn a_layer_in_an_auto_layout_is_refused() {
+        let mut ids = IdSource::new(0x2E9);
+        let root = ids.mint();
+        let (frame, a, b) = (ids.mint(), ids.mint(), ids.mint());
+        let mut doc = Document::new(root);
+        let rect = |id, index| Operation::CreateNode {
+            id,
+            parent: frame,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 30.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 300.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            rect(a, 0),
+            rect(b, 1),
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex::default())),
+            },
+        ]))
+        .expect("the fixture");
+        let res = Resolved::rebuild(&doc);
+        assert!(in_layout(&doc, &[a]));
+        let ring = Ring::full(4, true);
+        let pivot = Point::new(40.0, 120.0);
+        for into in [Place::Group, Place::Beside { fade: 115 }] {
+            let made = repeat(&doc, &res, &mut ids, &[a], pivot, ring, into);
+            assert!(
+                matches!(made, Err(OpError::InvalidParent)),
+                "the ring is refused"
+            );
+        }
+        assert!(linked(&doc, &res, &mut ids, a, pivot, ring).is_err());
+
+        doc.apply(&Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: None,
+        }]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        assert!(repeat(&doc, &res, &mut ids, &[a], pivot, ring, Place::Group).is_ok());
+    }
 }

@@ -1039,6 +1039,11 @@ pub struct OndinApp {
     /// Whether each clipboard key's press arrived, and what was held with Ctrl
     /// (`input::witness_swallowed_presses`).
     clip_keys: crate::input::ClipWitness,
+    /// Whether this app opens the files the OS asks for (`open_event::take`). A
+    /// headless app does not: the queue is process-wide, and a test's frame would
+    /// take another test's file.
+    #[cfg(target_os = "macos")]
+    pub(crate) os_opens: bool,
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
     pub(crate) pixel_preview: bool,
@@ -1612,7 +1617,18 @@ impl OndinApp {
             ..Default::default()
         };
         CLIPBOARD_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
-        Self::with(ctx, CanvasRenderer::headless(), FontService::inert(), prefs)
+        let mut app = Self::with(ctx, CanvasRenderer::headless(), FontService::inert(), prefs);
+        app.leave_os_opens();
+        app
+    }
+
+    /// Stop this app taking the files the OS asks to open (`os_opens`).
+    #[cfg(test)]
+    fn leave_os_opens(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            self.os_opens = false;
+        }
     }
 
     /// The one field list, so the two constructors cannot drift.
@@ -1782,6 +1798,8 @@ impl OndinApp {
             peeking: false,
             peek_key: None,
             clip_keys: Default::default(),
+            #[cfg(target_os = "macos")]
+            os_opens: true,
             pixel_preview: false,
             show_layers: view.layers,
             show_history: view.history,
@@ -2002,7 +2020,7 @@ impl OndinApp {
         // Files the OS asked to open while the window runs, on either screen, as
         // `ondin <file>` opens them; a modal holds them back, as it does a drop.
         #[cfg(target_os = "macos")]
-        if !self.modal_is_up() {
+        if self.os_opens && !self.modal_is_up() {
             for path in crate::open_event::take() {
                 self.open_path(&path);
             }

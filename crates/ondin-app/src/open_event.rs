@@ -177,7 +177,7 @@ mod tests {
     /// queued".
     #[test]
     fn a_finder_open_waits_out_a_modal() {
-        let dir = std::env::temp_dir().join("ondin-open-event-test");
+        let dir = std::env::temp_dir().join(format!("ondin-open-event-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("held.ondin");
         let mut ids = ondin_core::IdSource::new(7);
@@ -186,6 +186,9 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut app = crate::app::OndinApp::headless(&ctx);
+        // The one headless app that takes the queue, so no other test's frame
+        // drains it.
+        app.os_opens = true;
         app.confirming_close = true;
         pending().push(path.clone());
         for _ in 0..3 {

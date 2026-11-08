@@ -9,7 +9,7 @@
 
 use crate::app::OndinApp;
 use crate::batch_rename::row;
-use crate::clean_up_box::layer_name;
+use crate::clean_up_box::{SWITCH_GAP, layer_name};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, MenuRow};
 use eframe::egui;
@@ -20,30 +20,28 @@ use ondin_core::{Document, NodeId, NodeKind};
 const W: f32 = 520.0;
 const GAP: f32 = 10.0;
 const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
-/// A preview row: a line of a list, a menu row's height.
-const ROW_H: f32 = ui::MENU_ROW_H;
+/// A preview row: taller than a menu row, since each holds a [`KIND_H`] combo
+/// and stacked combos with no air between them read as one column of fields.
+const ROW_H: f32 = KIND_H + 8.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 12.0;
 /// A preview row's layer path, before its kind.
 const NAME_W: f32 = 168.0;
-/// A preview row's kind combo: the toolbar scale, the control height a list
-/// row holds.
+/// A preview row's kind combo, at the toolbar scale.
 const KIND_W: f32 = 128.0;
 const KIND_H: f32 = ui::TOOLBAR_H;
 /// The open kind list: wide enough for a label and its sample, and never wider
 /// or taller once open, since an egui popup cannot grow back.
 const KIND_LIST_W: f32 = 280.0;
 const KIND_LIST_H: f32 = 340.0;
-/// The Avatars row's segmented *Initials · Pattern*.
-const STYLE_W: f32 = 160.0;
 /// The die a hovered row shows at its value's end, and its glyph.
 const DIE: f32 = 20.0;
 const DIE_PT: f32 = 14.0;
 /// An avatar's swatch in a row's value.
 const SWATCH: f32 = 16.0;
 
-/// Why the box cannot fill: the Tools row's reason, and the commit's when the
-/// selection holds nothing to fill.
+/// What the preview says, and why *Fill* is dim, while the selection holds
+/// nothing to fill.
 pub(crate) const NO_TEXT: &str = "Select text layers, or frames that hold them";
 /// The commit's reason when every row is left as it is.
 const ALL_KEPT: &str = "Every layer is left as is";
@@ -51,6 +49,9 @@ const ALL_KEPT: &str = "Every layer is left as is";
 /// The open box.
 pub(crate) struct FillBox {
     pub(crate) opts: Options,
+    /// The style an avatar shape is drawn in until one is picked on its row:
+    /// the last used, kept while the Avatars switch is off.
+    style: AvatarStyle,
     /// What the fill reads: the live selection, or [`Self::pin`]'s roots while
     /// the selection a row's click made stands.
     selection: Vec<NodeId>,
@@ -180,19 +181,11 @@ fn count_label(plan: &Plan, doc: &Document) -> String {
 }
 
 impl OndinApp {
-    /// Why *Fill with content…* cannot open on the selection, or `None`.
-    pub(crate) fn why_no_fill(&self) -> Option<&'static str> {
-        let selection = self.selected_layers();
-        (!fill::fillable(&self.session.doc, &selection)).then_some(NO_TEXT)
-    }
-
     /// *Fill with content…*: open the box on the selection, in the locale its
-    /// text agrees on, else the last one used, with a new draw.
+    /// text agrees on, else the last one used, with a new draw. It opens on any
+    /// selection, none included: the box follows the selection made after, and
+    /// says so while there is nothing to fill.
     pub(crate) fn open_fill_content(&mut self) {
-        if let Some(why) = self.why_no_fill() {
-            self.session.info(why);
-            return;
-        }
         self.palette = None;
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;
@@ -221,6 +214,7 @@ impl OndinApp {
                 seed: fresh_seed(),
                 ..Options::default()
             },
+            style,
             selection,
             pin: None,
             plan: Plan::default(),
@@ -239,8 +233,13 @@ impl OndinApp {
         p.records = b.opts.records;
         p.example_emails = b.opts.example_emails;
         p.avatars = b.opts.avatars.is_some();
-        if let Some(style) = b.opts.avatars {
-            p.avatar_style = style.key().to_string();
+        // The style last picked on a row becomes the next box's, once every
+        // shape picked agrees on it.
+        let mut picked = b.opts.styles.values();
+        if let Some(first) = picked.next()
+            && picked.all(|s| s == first)
+        {
+            p.avatar_style = first.key().to_string();
         }
         self.prefs.save();
         let mut pictures = crate::canvas::Decoded::default();
@@ -312,6 +311,9 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.y = GAP;
                     locale_row(ui, &mut b);
                     content_row(ui, &mut b);
+                    // The switches stand closer, as Clean up's do; the gap above
+                    // them was laid with the Content row.
+                    ui.spacing_mut().item_spacing.y = SWITCH_GAP;
                     records_row(ui, doc, &mut b);
                     emails_row(ui, &mut b);
                     avatars_row(ui, &mut b);
@@ -393,16 +395,28 @@ fn locale_row(ui: &mut egui::Ui, b: &mut FillBox) {
     });
 }
 
+/// What a kind list's row picks: a kind, `None` for the head row (*By layer
+/// name* or *Leave as is*), and for an avatar the style it is drawn in.
+type Pick = (Option<Kind>, Option<AvatarStyle>);
+
+/// The avatar styles a shape's list offers, one row each.
+const STYLES: [AvatarStyle; 2] = [AvatarStyle::Initials, AvatarStyle::Pattern];
+
+/// An avatar's choice as its row and its list name it: *Avatar · Pattern*.
+fn avatar_label(style: AvatarStyle) -> String {
+    format!("{} · {}", Kind::Avatar.label(), style.label())
+}
+
 /// The kinds a text row or the Content row can choose, under their groups'
-/// eyebrows, each with its sample as a faint tail. `None` is the head row's
-/// choice (*By layer name* or *Leave as is*).
+/// eyebrows, each with its sample as a faint tail; a shape's list is its avatar
+/// styles instead, `style` the one it is drawn in now.
 fn kind_list(
     ui: &mut egui::Ui,
     b: &FillBox,
     head: &str,
     current: Option<Kind>,
-    shape: bool,
-) -> Option<Option<Kind>> {
+    shape: Option<AvatarStyle>,
+) -> Option<Pick> {
     ui.set_min_width(KIND_LIST_W);
     let mut picked = None;
     if ui::menu_row(
@@ -412,28 +426,23 @@ fn kind_list(
     )
     .clicked()
     {
-        picked = Some(None);
+        picked = Some((None, None));
     }
-    if shape {
-        let on = current == Some(Kind::Avatar);
+    if let Some(style) = shape {
         let note = b.sample(Kind::Avatar);
-        if ui::menu_row(
-            ui,
-            MenuRow::new("", Kind::Avatar.label())
-                .checked(on)
-                .note(note),
-            ui::MENU_ROW_H,
-        )
-        .clicked()
-        {
-            picked = Some(Some(Kind::Avatar));
+        for s in STYLES {
+            let on = current == Some(Kind::Avatar) && style == s;
+            let label = avatar_label(s);
+            if ui::menu_row(
+                ui,
+                MenuRow::new("", &label).checked(on).note(note),
+                ui::MENU_ROW_H,
+            )
+            .clicked()
+            {
+                picked = Some((Some(Kind::Avatar), Some(s)));
+            }
         }
-        ui::menu_row(
-            ui,
-            MenuRow::new("", "Photo").checked(false).enabled(false),
-            ui::MENU_ROW_H,
-        )
-        .on_hover_text("Photos come from the assets browser");
     } else {
         let mut group: Option<Group> = None;
         for kind in Kind::ALL.into_iter().filter(|k| k.is_text()) {
@@ -450,7 +459,7 @@ fn kind_list(
                 .checked(on)
                 .note(b.sample(kind));
             if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
-                picked = Some(Some(kind));
+                picked = Some((Some(kind), None));
             }
         }
     }
@@ -469,10 +478,10 @@ fn content_row(ui: &mut egui::Ui, b: &mut FillBox) {
             "fill-content-kind",
             shown,
             "What every text layer is filled with",
-            |ui| picked = kind_list(ui, b, "By layer name", b.opts.content, false),
+            |ui| picked = kind_list(ui, b, "By layer name", b.opts.content, None),
         );
     });
-    if let Some(kind) = picked {
+    if let Some((kind, _)) = picked {
         b.opts.content = kind;
         // The box's choice is one for all: rows chosen one by one give way.
         b.opts
@@ -519,42 +528,18 @@ fn avatars_row(ui: &mut egui::Ui, b: &mut FillBox) {
         .iter()
         .filter(|r| r.shape && r.kind == Some(Kind::Avatar))
         .count();
+    // Each shape's style is picked on its own row in the preview.
     row(ui, "Avatars", ui::CONTROL_H, |ui| {
-        let switch_w = ui.available_width() - STYLE_W - GAP;
-        ui.allocate_ui(egui::vec2(switch_w, ui::CONTROL_H), |ui| {
-            let on = b.opts.avatars.is_some();
-            let label = ui::count(shapes, "shape");
-            if ui::switch_row_noted(ui, &label, "", on, ui::CONTROL_H)
-                .on_hover_text("Shapes named Avatar or Headshot, or just Photo or Profile picture")
-                .clicked()
-            {
-                b.opts.avatars = match on {
-                    true => None,
-                    false => Some(AvatarStyle::default()),
-                };
-            }
-        });
-        ui.add_space(GAP);
-        const STYLES: [AvatarStyle; 2] = [AvatarStyle::Initials, AvatarStyle::Pattern];
         let on = b.opts.avatars.is_some();
-        let lit = STYLES
-            .iter()
-            .position(|s| Some(*s) == b.opts.avatars)
-            .unwrap_or(0);
-        let picked = ui::segmented_enabled(
-            ui,
-            STYLE_W,
-            ui::SEGMENT_CELL_H,
-            STYLES.len(),
-            lit,
-            |_| on,
-            |p, i, r, sel| match on {
-                true => ui::segment_label(p, r, STYLES[i].label(), sel),
-                false => ui::segment_label_disabled(p, r, STYLES[i].label()),
-            },
-        );
-        if let Some(i) = picked {
-            b.opts.avatars = Some(STYLES[i]);
+        let label = ui::count(shapes, "shape");
+        if ui::switch_row_noted(ui, &label, "", on, ui::CONTROL_H)
+            .on_hover_text("Shapes named Avatar or Headshot, or just Photo or Profile picture")
+            .clicked()
+        {
+            b.opts.avatars = match on {
+                true => None,
+                false => Some(b.style),
+            };
         }
     });
 }
@@ -597,7 +582,7 @@ fn preview(
         theme::text::dim(),
     );
     let lines = b.lines();
-    let mut chosen: Option<(NodeId, Option<Kind>)> = None;
+    let mut chosen: Option<(NodeId, Pick)> = None;
     let mut redraw: Option<NodeId> = None;
     egui::Frame::NONE
         .inner_margin(egui::Margin {
@@ -653,8 +638,11 @@ fn preview(
                     }
                 });
         });
-    if let Some((node, kind)) = chosen {
+    if let Some((node, (kind, style))) = chosen {
         b.opts.kinds.insert(node, kind);
+        if let Some(style) = style {
+            b.opts.styles.insert(node, style);
+        }
     }
     if let Some(node) = redraw {
         *b.opts.redraws.entry(node).or_default() += 1;
@@ -682,8 +670,8 @@ fn head(ui: &mut egui::Ui, doc: &Document, root: Option<NodeId>) -> egui::Respon
 struct RowOut {
     hovered: bool,
     clicked: bool,
-    /// A kind picked from its list.
-    kind: Option<Option<Kind>>,
+    /// A kind, and an avatar's style, picked from its list.
+    kind: Option<Pick>,
     redraw: bool,
 }
 
@@ -748,20 +736,33 @@ fn fill_row(ui: &mut egui::Ui, doc: &Document, b: &FillBox, i: usize) -> RowOut 
         egui::pos2(inner.left() + NAME_W, y - KIND_H / 2.0),
         egui::vec2(KIND_W, KIND_H),
     );
-    let shown = r.kind.map_or("Leave as is", Kind::label);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(kind_rect), |ui| {
-        ui.spacing_mut().interact_size.y = KIND_H;
-        ui.spacing_mut().button_padding.y = 0.0;
-        egui::ComboBox::from_id_salt(("fill-content-row", r.node))
-            .icon(ui::combo_chevron)
-            .width(KIND_W)
-            .height(KIND_LIST_H)
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                ui::menu_rows(ui);
-                out.kind = kind_list(ui, b, "Leave as is", r.kind, r.shape);
-            });
+    // A shape's style: the one picked for it, else the box's.
+    let style = r.shape.then(|| {
+        b.opts
+            .styles
+            .get(&r.node)
+            .copied()
+            .unwrap_or_else(|| b.opts.avatars.unwrap_or(b.style))
     });
+    let shown = match (r.kind, style) {
+        (Some(Kind::Avatar), Some(s)) => avatar_label(s),
+        (kind, _) => kind.map_or("Leave as is", Kind::label).to_string(),
+    };
+    // The combo and the die go in children that do not move the list's cursor: a
+    // placed child resets it to its own bottom, above the row's, and every row
+    // under a hovered one would ride up.
+    let mut kind_ui = ui.new_child(egui::UiBuilder::new().max_rect(kind_rect));
+    kind_ui.spacing_mut().interact_size.y = KIND_H;
+    kind_ui.spacing_mut().button_padding.y = 0.0;
+    egui::ComboBox::from_id_salt(("fill-content-row", r.node))
+        .icon(ui::combo_chevron)
+        .width(KIND_W)
+        .height(KIND_LIST_H)
+        .selected_text(shown)
+        .show_ui(&mut kind_ui, |ui| {
+            ui::menu_rows(ui);
+            out.kind = kind_list(ui, b, "Leave as is", r.kind, style);
+        });
 
     // The value, and the die at its end while the row is hovered.
     let value_x = kind_rect.right() + 10.0;
@@ -825,10 +826,8 @@ fn fill_row(ui: &mut egui::Ui, doc: &Document, b: &FillBox, i: usize) -> RowOut 
         }
     }
     if redrawable {
-        let resp = ui
-            .put(die, |ui: &mut egui::Ui| {
-                ui::icon_button(ui, icon::DICE, DIE, DIE_PT, false, true)
-            })
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(die));
+        let resp = ui::icon_button(&mut child, icon::DICE, DIE, DIE_PT, false, true)
             .on_hover_text("Draw another");
         out.redraw = resp.clicked();
         out.clicked &= !out.redraw;
@@ -1000,23 +999,26 @@ mod tests {
         assert_eq!(content(&app, first), "Name", "undo puts it back");
     }
 
-    /// With nothing fillable selected the door is dim with its reason and the
-    /// box does not open; once open, a selection with no text left dims *Fill*
-    /// with the same reason. Escape closes it.
+    /// With nothing fillable selected the box still opens, *Fill* dim with its
+    /// reason, and a selection made after fills it; a selection with no text
+    /// left dims *Fill* again. Escape closes it.
     #[test]
-    fn nothing_to_fill_dims_the_door_and_the_commit() {
+    fn nothing_to_fill_opens_the_box_and_dims_the_commit() {
         let (ctx, mut app) = app();
         let page = app.session.page;
         let empty = add(&mut app, page, frame(), "Empty");
         app.session.selection.set_one(empty);
         pass(&ctx, &mut app);
-        assert_eq!(app.why_no_fill(), Some(NO_TEXT));
         app.open_fill_content();
-        assert!(app.fill_content.is_none(), "nothing to fill: no box");
+        pass(&ctx, &mut app);
+        let b = app
+            .fill_content
+            .as_ref()
+            .expect("the box opens on anything");
+        assert_eq!(b.why_not(), Some(NO_TEXT));
 
         let label = add(&mut app, page, text("Price"), "Price");
         app.session.selection.set_one(label);
-        app.open_fill_content();
         pass(&ctx, &mut app);
         assert!(app.fill_content.as_ref().unwrap().why_not().is_none());
         app.session.selection.set_one(empty);
@@ -1028,6 +1030,43 @@ mod tests {
         assert_eq!(b.why_not(), Some(NO_TEXT));
         app.escape(&ctx);
         assert!(app.fill_content.is_none(), "Escape closes it");
+    }
+
+    /// A style picked on one avatar's row draws that avatar in it and leaves the
+    /// others in the box's; a fill whose picks agree keeps the style for next time.
+    /// flip: the plan's avatar ignoring `Options::styles` → fails at "the picked one".
+    #[test]
+    fn an_avatars_style_is_picked_on_its_row() {
+        let (ctx, mut app) = app();
+        team(&mut app);
+        pass(&ctx, &mut app);
+        app.open_fill_content();
+        pass(&ctx, &mut app);
+        let b = app.fill_content.as_mut().unwrap();
+        let avatars: Vec<NodeId> = b
+            .plan
+            .rows
+            .iter()
+            .filter(|r| r.shape)
+            .map(|r| r.node)
+            .collect();
+        assert_eq!(avatars.len(), 2, "the fixture: two avatars");
+        b.opts.styles.insert(avatars[0], AvatarStyle::Pattern);
+        pass(&ctx, &mut app);
+        let b = app.fill_content.as_ref().unwrap();
+        let style = |id: NodeId| match &b.plan.rows.iter().find(|r| r.node == id).unwrap().value {
+            Value::Avatar(a) => Some(a.style),
+            _ => None,
+        };
+        assert_eq!(
+            style(avatars[0]),
+            Some(AvatarStyle::Pattern),
+            "the picked one"
+        );
+        assert_eq!(style(avatars[1]), Some(AvatarStyle::Initials), "the rest");
+        let b = app.fill_content.take().unwrap();
+        app.commit_fill_content(&b);
+        assert_eq!(app.prefs.fill_content.avatar_style, "pattern");
     }
 
     /// A kind chosen for a row wins over its name; choosing one kind for all in
@@ -1116,5 +1155,55 @@ mod tests {
         pass(&ctx, &mut app);
         let after = app.fill_content.as_ref().unwrap().plan.rows.len();
         assert_eq!(after, before + 1, "the new layer is listed");
+    }
+
+    /// Hovering a preview row, which shows its die, moves no row under it.
+    /// flip: place the die with `ui.put` in `fill_row` → fails at "rows hold still".
+    #[test]
+    fn hovering_a_row_moves_no_other_row() {
+        let (ctx, mut app) = app();
+        team(&mut app);
+        pass(&ctx, &mut app);
+        app.open_fill_content();
+        // Each preview row's layer path and where it was drawn.
+        let run = |ctx: &egui::Context, app: &mut OndinApp, at: Option<egui::Pos2>| {
+            let mut frame = eframe::Frame::_new_kittest();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events: at.map(egui::Event::PointerMoved).into_iter().collect(),
+                ..Default::default()
+            };
+            let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+            out.shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text().starts_with("Card ") => {
+                        Some((t.galley.text().to_string(), t.pos))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..3 {
+            run(&ctx, &mut app, None);
+        }
+        let before = run(&ctx, &mut app, None);
+        let (_, email) = before
+            .iter()
+            .find(|(t, _)| t == "Card 1 / Email")
+            .expect("the fixture: Card 1's email is listed")
+            .clone();
+        let mut after = Vec::new();
+        for _ in 0..4 {
+            after = run(&ctx, &mut app, Some(email + egui::vec2(5.0, 6.0)));
+        }
+        assert!(
+            app.fill_content.as_ref().unwrap().hover.0.len() == 1,
+            "the fixture: the row is hovered"
+        );
+        assert_eq!(before, after, "rows hold still");
     }
 }

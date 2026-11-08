@@ -7915,7 +7915,6 @@ impl OndinApp {
                 ToolsRow::BatchRename => {
                     crate::private::on().then_some(crate::private::DECLINE_RENAME)
                 }
-                ToolsRow::FillContent => self.why_no_fill(),
                 _ => None,
             };
             let style = crate::ui::MenuRow::new("", row.label())

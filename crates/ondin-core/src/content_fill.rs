@@ -1701,6 +1701,8 @@ pub struct Options {
     pub records: bool,
     /// How avatars are drawn, or `None` to leave avatar shapes out.
     pub avatars: Option<AvatarStyle>,
+    /// A style chosen for one avatar shape, over [`Self::avatars`]'.
+    pub styles: HashMap<NodeId, AvatarStyle>,
     /// The draw: the same seed gives the same values.
     pub seed: u64,
     /// A kind chosen for one layer, `None` meaning *Leave as is*, over the rest.
@@ -1719,6 +1721,7 @@ impl Default for Options {
             content: None,
             records: true,
             avatars: Some(AvatarStyle::Initials),
+            styles: HashMap::new(),
             seed: 0,
             kinds: HashMap::new(),
             redraws: HashMap::new(),
@@ -2257,7 +2260,11 @@ fn draw_record(
                     Value::Avatar(Avatar {
                         name: drawn.person.full(),
                         initials: drawn.person.initials(),
-                        style: opts.avatars.unwrap_or_default(),
+                        style: opts
+                            .styles
+                            .get(&row.node)
+                            .copied()
+                            .unwrap_or_else(|| opts.avatars.unwrap_or_default()),
                     }),
                     true,
                 ),
@@ -2465,28 +2472,6 @@ fn for_room(text: String, room: Room) -> String {
         Room::Line(_) if text.contains('\n') => text.replace('\n', ", "),
         _ => text,
     }
-}
-
-/// Whether anything under `roots` can be filled: a text layer, or a shape named
-/// as an avatar or showing a picture, that is shown and not locked. Stops at
-/// the first, since the doors ask every frame a menu is open.
-pub fn fillable(doc: &Document, roots: &[NodeId]) -> bool {
-    let mut stack: Vec<NodeId> = roots.to_vec();
-    while let Some(id) = stack.pop() {
-        let Some(n) = doc.get(id) else { continue };
-        if !doc.shown(id) {
-            continue;
-        }
-        let target = match n.kind() {
-            NodeKind::Text { .. } => n.text_vars()[crate::variable::TEXT_CONTENT].is_none(),
-            _ => is_shape_target(n),
-        };
-        if target && !is_effectively_locked(doc, id) {
-            return true;
-        }
-        stack.extend(n.children());
-    }
-    false
 }
 
 /// The locale the text layers under `roots` that set a Language agree on, or

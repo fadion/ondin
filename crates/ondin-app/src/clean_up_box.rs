@@ -25,8 +25,8 @@ const COL_GAP: f32 = 16.0;
 const ROW_H: f32 = ui::MENU_ROW_H;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 12.0;
-/// The space between two lines of switches.
-const SWITCH_GAP: f32 = 2.0;
+/// The space between two lines of switches, here and in Fill with content.
+pub(crate) const SWITCH_GAP: f32 = 2.0;
 /// The switches two to a line, paint rules on the left and layer rules on the right.
 const GRID: [[Rule; 2]; 3] = [
     [Rule::HiddenPaint, Rule::HiddenLayers],

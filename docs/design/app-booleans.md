@@ -219,7 +219,8 @@ plain `Path` layers.
   (`Arrangement::cutters`) fills no face of its own; each of its subpaths, followed only where it
   meets the faces' box (halved until each part misses it or is near its size, then flattened to
   0.01 units, or a ten-millionth of the box where that is coarser, so a cutter reaching 10¹² units
-  costs what one near the faces does), cuts every face it crosses through the knife's own surgery
+  costs what one near the faces does; a part still far larger than the box after 64 halvings is
+  followed by its chord), cuts every face it crosses through the knife's own surgery
   (`knife::pieces`, `cut_regions`), each piece covered as its face was. It is left as it is by every edit. Any other shown layer (text,
   pictures, frames, locked shapes) is left out, and `Arrangement::left_out` says so. The work is in
   world space, so sources under different parents cut each other as drawn. Refusals: `TooFew`

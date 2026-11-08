@@ -199,7 +199,8 @@ fn clip_segment(
         *open = false;
         return;
     }
-    if depth < 64 && b.width().max(b.height()) > 4.0 * extent {
+    let oversized = b.width().max(b.height()) > 4.0 * extent;
+    if depth < 64 && oversized {
         let (a, c) = seg.subdivide();
         clip_segment(a, reach, extent, tolerance, depth + 1, out, open);
         clip_segment(c, reach, extent, tolerance, depth + 1, out, open);
@@ -210,6 +211,12 @@ fn clip_segment(
         *open = true;
     }
     let Some(trail) = out.last_mut() else { return };
+    // Past 2⁶⁴ halvings a piece is still ~10²² units or more, and flattening it
+    // at `tolerance` hangs or overflows; its chord is all the faces can resolve.
+    if oversized {
+        trail.push(seg.end());
+        return;
+    }
     let mut piece = BezPath::new();
     piece.move_to(seg.start());
     piece.push(seg.as_path_el());
@@ -816,5 +823,26 @@ mod tests {
             .flatten()
             .any(|p| p.x.abs() < 100.0 && p.y.abs() < 100.0);
         assert!(near, "and is followed inside it");
+    }
+
+    /// A cutter too large for the halving to bring down to the faces' size still
+    /// comes back in a bounded number of points, without hanging or panicking.
+    ///
+    /// flip: `clip_segment` flattening the piece left at the depth cap → panics
+    /// with a capacity overflow inside `kurbo::flatten`.
+    #[test]
+    fn a_cutter_past_the_halving_cap_is_followed_by_its_chord() {
+        let reach = kurbo::Rect::new(-101.0, -101.0, 101.0, 101.0);
+        let s = 1e100;
+        let mut cubic = BezPath::new();
+        cubic.move_to((0.0, 0.0));
+        cubic.curve_to((s, s / 2.0), (s, -s / 2.0), (2.0 * s, 0.0));
+        let arc = crate::geometry::arc_path(Point::new(1e300, 0.0), 90.0);
+        for cutter in [cubic, arc] {
+            let trails = trail_points(&cutter, reach);
+            let points: usize = trails.iter().map(Vec::len).sum();
+            assert!(points < 10_000, "{points} points");
+            assert!(!trails.is_empty(), "the cutter starts inside the box");
+        }
     }
 }

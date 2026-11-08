@@ -567,7 +567,8 @@ fn with_a_rect(ctx: &egui::Context) -> OndinApp {
     app
 }
 
-fn text_kind(content: &str) -> NodeKind {
+/// A text layer's kind saying `content`, at the defaults; batch rename's tests too.
+pub(crate) fn text_kind(content: &str) -> NodeKind {
     NodeKind::Text {
         content: content.into(),
         style: Box::default(),

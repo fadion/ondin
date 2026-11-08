@@ -113,6 +113,12 @@ impl Order {
 struct Layer {
     id: NodeId,
     name: String,
+    /// What a text layer says, on one line, for the `[Text]` token; empty for
+    /// any other layer.
+    content: String,
+    /// A name the app wrote (`naming::generated_stem`), which *Only default
+    /// names* keeps.
+    default_name: bool,
     /// A variant in a set, whose name is made from its property values.
     variant: bool,
     /// Inside an instance, and not its root.
@@ -165,6 +171,13 @@ impl Snapshot {
                         layers.push(Layer {
                             id,
                             name: node.name().to_string(),
+                            content: match node.kind() {
+                                ondin_core::NodeKind::Text { content, .. } => {
+                                    content.split_whitespace().collect::<Vec<_>>().join(" ")
+                                }
+                                _ => String::new(),
+                            },
+                            default_name: ondin_core::naming::generated_stem(node.name()).is_some(),
                             variant: !node.variant().is_empty(),
                             in_instance: node.parent().is_some_and(|p| {
                                 ondin_core::component::instance_root(doc, p).is_some()
@@ -210,6 +223,8 @@ pub(crate) struct Settings {
     pub(crate) inside: bool,
     /// *Include layers inside instances*, at page and document scope.
     pub(crate) inside_instances: bool,
+    /// *Only default names*: leave every layer someone has named alone.
+    pub(crate) default_names: bool,
 }
 
 impl Settings {
@@ -524,7 +539,10 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
             None
         }
     };
-    let matches = |name: &str| rule.as_ref().is_some_and(|r| r.apply(name, "").is_some());
+    let matches = |l: &Layer| {
+        rule.as_ref()
+            .is_some_and(|r| r.apply(&l.name, "", &l.content).is_some())
+    };
 
     // A layer takes a number when Find matches it and its new name is usable, even
     // when that name is its own: an unmatched layer leaves no gap, and one that
@@ -538,11 +556,14 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
         }
         let mut run = Vec::new();
         for l in &page.layers {
+            if s.default_names && !l.default_name {
+                continue;
+            }
             match s.scope {
                 Scope::Selection if l.selected || (s.inside && l.under_selected) => run.push(l),
                 Scope::Selection => {}
                 _ if !s.inside_instances && l.in_instance => {
-                    if matches(&l.name) {
+                    if matches(l) {
                         part.skipped += 1;
                     }
                 }
@@ -560,7 +581,7 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
             part.searched += 1;
             let applied = rule
                 .as_ref()
-                .and_then(|r| r.apply(&l.name, &s.numbering.nth(taken)));
+                .and_then(|r| r.apply(&l.name, &s.numbering.nth(taken), &l.content));
             let (matched, new) = match applied {
                 None => (Vec::new(), New::Unchanged),
                 Some(r) if l.variant => (r.matched, New::Variant),
@@ -915,6 +936,7 @@ impl OndinApp {
             order: Order::from_key(&remembered.order),
             inside,
             inside_instances: false,
+            default_names: false,
         };
         let search = search.filter(|s| !s.trim().is_empty());
         if selection.is_empty() || search.is_some() {
@@ -1344,6 +1366,7 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
                 };
                 insert(ui, "Name", Piece::Name);
                 insert(ui, "Number", Piece::Number);
+                insert(ui, "Text", Piece::Content);
                 for k in 1..=groups.min(9) {
                     insert(ui, &format!("Group {k}"), Piece::Group(k));
                 }
@@ -1479,6 +1502,7 @@ fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
 }
 
 fn checks(ui: &mut egui::Ui, s: &mut Settings, skipped: usize) {
+    checkbox(ui, "Only default names", "", &mut s.default_names);
     match s.scope {
         Scope::Selection => checkbox(ui, "Include layers inside", "", &mut s.inside),
         Scope::Page | Scope::Document => {
@@ -1811,6 +1835,41 @@ mod tests {
         };
         assert_eq!((middle.id, &middle.new), (skip, &New::Unchanged));
         assert_eq!(count_label(bx.s.scope, &plan), "2 of 3 change");
+    }
+
+    /// `[Text]` names a text layer after what it says, on one line; *Only default
+    /// names* leaves a layer someone named alone.
+    /// flip: `plan_into` ignoring `default_names` → fails at the changes (Hero is
+    /// renamed too).
+    #[test]
+    fn text_names_a_layer_and_default_names_keeps_the_named_ones() {
+        let (ctx, mut app) = app();
+        let s = &mut app.session;
+        let label = s.ids.mint();
+        let page = s.page;
+        assert!(s.commit(Transaction(vec![Operation::CreateNode {
+            id: label,
+            parent: page,
+            index: 0,
+            kind: crate::control_audit::text_kind("Sign\nin"),
+            transform: None,
+            name: Some("Text 1".into()),
+        }])));
+        let hero = named(&mut app, "Hero");
+        app.session.selection.set(vec![label, hero]);
+        let mut bx = opened(&ctx, &mut app, "", "[Text] label");
+        bx.s.default_names = true;
+        let plan = planned(&app, &bx);
+        assert_eq!(
+            new_names(&app, &plan),
+            [("Text 1".to_string(), "Sign in label".to_string())]
+        );
+        assert!(
+            plan.rows
+                .iter()
+                .all(|r| !matches!(r, Row::Layer(l) if l.id == hero)),
+            "Hero is left"
+        );
     }
 
     /// A matched layer that already carries its number keeps it and uses it up,

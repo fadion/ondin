@@ -2,8 +2,8 @@
 //! layer's name. Which layers it runs over, and in which order they are numbered,
 //! is the app's (`batch_rename`).
 //!
-//! A template is plain text in which `[Name]`, `[Number]` and `[Group k]` are
-//! tokens. An empty find replaces the whole name and `[Name]` is that name; a
+//! A template is plain text in which `[Name]`, `[Number]`, `[Text]` and
+//! `[Group k]` are tokens. An empty find replaces the whole name and `[Name]` is that name; a
 //! filled one replaces every match, and `[Name]` is the matched text.
 
 use regex::{Regex, RegexBuilder};
@@ -20,15 +20,17 @@ pub enum Piece {
     Number,
     /// A bracketed group of a pattern, counted from 1.
     Group(usize),
+    /// What a text layer says, spelled `[Text]`; nothing for any other layer.
+    Content,
 }
 
 /// What *Rename to* holds: text and tokens.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Template(pub Vec<Piece>);
 
-/// The tokens in `src`, with their byte ranges. `[Name]`, `[Number]` and
-/// `[Group k]` are tokens in any case, and so are the typed short forms `[n]` and
-/// `[k]`; any other bracket is text.
+/// The tokens in `src`, with their byte ranges. `[Name]`, `[Number]`, `[Text]`
+/// and `[Group k]` are tokens in any case, and so are the typed short forms `[n]`
+/// and `[k]`; any other bracket is text.
 pub fn tokens(src: &str) -> Vec<(Range<usize>, Piece)> {
     let mut out = Vec::new();
     let mut at = 0;
@@ -55,6 +57,7 @@ fn token(inner: &str) -> Option<Piece> {
     match word.as_str() {
         "name" => return Some(Piece::Name),
         "n" | "number" => return Some(Piece::Number),
+        "text" => return Some(Piece::Content),
         _ => {}
     }
     let digits = word.strip_prefix("group").map_or(word.as_str(), str::trim);
@@ -95,6 +98,7 @@ impl fmt::Display for Template {
                 Piece::Name => f.write_str("[Name]")?,
                 Piece::Number => f.write_str("[Number]")?,
                 Piece::Group(k) => write!(f, "[Group {k}]")?,
+                Piece::Content => f.write_str("[Text]")?,
             }
         }
         Ok(())
@@ -237,9 +241,10 @@ impl Renamed {
 }
 
 impl Rule {
-    /// `name` renamed, with `number` for each Number token, or `None` when Find
-    /// matches nothing in it.
-    pub fn apply(&self, name: &str, number: &str) -> Option<Renamed> {
+    /// `name` renamed, with `number` for each Number token and `content` (a text
+    /// layer's words, empty for any other) for each Text token, or `None` when
+    /// Find matches nothing in it.
+    pub fn apply(&self, name: &str, number: &str, content: &str) -> Option<Renamed> {
         let mut out = Out::default();
         let Some(re) = &self.find.0 else {
             for piece in &self.template.0 {
@@ -247,6 +252,7 @@ impl Rule {
                     Piece::Text(t) => out.push(t, true),
                     Piece::Name => out.push(name, false),
                     Piece::Number => out.push(number, true),
+                    Piece::Content => out.push(content, true),
                     Piece::Group(_) => {}
                 }
             }
@@ -260,7 +266,7 @@ impl Rule {
         for caps in re.captures_iter(name) {
             let Some(m) = caps.get(0) else { continue };
             out.push(&name[at..m.start()], false);
-            for s in self.replacement(&caps, number).0 {
+            for s in self.replacement(&caps, number, content).0 {
                 out.push(&s.text, s.changed);
             }
             matched.push(m.range());
@@ -279,7 +285,7 @@ impl Rule {
     /// Every match of a filled Find in `text`, each with the text that replaces
     /// it on its own; empty when Find is empty or matches nothing. A match is
     /// found in the whole of `text`, so anchors and word boundaries see its
-    /// context.
+    /// context, and a Text token is the whole of `text`.
     pub fn replacements(&self, text: &str, number: &str) -> Vec<(Range<usize>, String)> {
         let Some(re) = &self.find.0 else {
             return Vec::new();
@@ -288,7 +294,7 @@ impl Rule {
             .filter_map(|caps| {
                 let m = caps.get(0)?;
                 let rep: String = self
-                    .replacement(&caps, number)
+                    .replacement(&caps, number, text)
                     .0
                     .iter()
                     .map(|s| s.text.as_str())
@@ -299,7 +305,7 @@ impl Rule {
     }
 
     /// The template filled in for one match, its case carried when `keep_case`.
-    fn replacement(&self, caps: &regex::Captures<'_>, number: &str) -> Out {
+    fn replacement(&self, caps: &regex::Captures<'_>, number: &str, content: &str) -> Out {
         let matched = caps.get(0).map_or("", |m| m.as_str());
         let mut rep = Out::default();
         for piece in &self.template.0 {
@@ -307,6 +313,7 @@ impl Rule {
                 Piece::Text(t) => rep.push(t, true),
                 Piece::Name => rep.push(matched, false),
                 Piece::Number => rep.push(number, true),
+                Piece::Content => rep.push(content, true),
                 Piece::Group(k) => rep.push(caps.get(*k).map_or("", |g| g.as_str()), false),
             }
         }
@@ -376,7 +383,18 @@ mod tests {
     }
 
     fn new_name(rule: &Rule, name: &str) -> Option<String> {
-        rule.apply(name, "1").map(|r| r.text())
+        rule.apply(name, "1", "").map(|r| r.text())
+    }
+
+    /// `[Text]` is a text layer's words, nothing for another layer, and reads in
+    /// any case.
+    #[test]
+    fn the_text_token_is_what_the_layer_says() {
+        let r = rule("", "Label: [text]");
+        assert_eq!(r.template.to_string(), "Label: [Text]");
+        let named = |content| r.apply("Text 3", "1", content).map(|r| r.text());
+        assert_eq!(named("Sign in").as_deref(), Some("Label: Sign in"));
+        assert_eq!(named("").as_deref(), Some("Label: "));
     }
 
     /// The typed short forms read as their tokens and print canonically; other
@@ -396,7 +414,7 @@ mod tests {
     #[test]
     fn an_empty_find_replaces_the_whole_name() {
         let r = rule("", "[Number] · [Name]");
-        let out = r.apply("Welcome", "01").unwrap();
+        let out = r.apply("Welcome", "01", "").unwrap();
         assert_eq!(out.text(), "01 · Welcome");
         assert_eq!(out.matched, vec![0..7]);
         assert_eq!(

@@ -475,8 +475,10 @@ A box that renames many layers at once: the selection, the page or every page. T
 `ondin_core::rename`'s; `batch_rename::plan_into` picks, orders and numbers the layers.
 
 The document cannot change while the box is up, so what the plan reads of it — the layers of every
-page it can reach, in tree order, with name, bounds, glyph, and whether each is a variant, inside an instance, selected
-or under the selection — is taken once at open (`Snapshot`). A worker thread plans from that copy
+page it can reach, in tree order, with name, bounds, glyph, a text layer's content (its words
+joined by single spaces, so line breaks and whitespace runs become one space), and whether each
+has a default name, is a variant, inside an instance, selected or under the selection — is taken
+once at open (`Snapshot`). A worker thread plans from that copy
 whenever a setting changes, taking only the newest request and abandoning a plan once a newer one is
 asked for, and sends the rows back in parts of 500 layers, so typing never waits on a large
 document. The preview keeps the previous plan until the new one's first part lands, its count
@@ -513,13 +515,18 @@ worded for the scope that plan was made for (`Plan::scope`).
   instance root is included); *Include layers inside instances* takes them in, and while it is off
   *· N skipped* counts the matches it leaves out. Locked and hidden layers are renamed. A variant in
   a set is never renamed, since its name comes from its property values; it is listed with *Named by
-  its properties* in amber.
+  its properties* in amber. *Only default names* (`Settings::default_names`), a tick box above the
+  scope's own, leaves out every layer whose name the app did not write (a default name is one
+  `naming::generated_stem` reads, as *Rectangle 3*, *Group*, *Text 2*): such a layer is not listed,
+  counted or numbered. It is off at open and not remembered.
 - **The rule** (`rename::Find`, `Template`, `Numbering`). An empty Find replaces the whole name and
   `[Name]` is that name; a filled one replaces every match and `[Name]` is the matched text. Matching
   ignores case unless *Aa*; *.\** reads Find as a regex (a literal Find is an escaped one). A pattern
   that does not parse shows its one-line reason under Find (*Not a pattern: …*) and renames nothing.
-  The template's tokens are `[Name]`, `[Number]` and `[Group k]`; `[n]` and `[k]` are short forms,
-  and every token reads in any case. *Keep case* (*Ab*, with Find filled) writes a replacement's new
+  The template's tokens are `[Name]`, `[Number]`, `[Text]` and `[Group k]`; `[n]` and `[k]` are
+  short forms (`[Text]` has none), and every token reads in any case. `[Text]` (`Piece::Content`)
+  is a text layer's content and nothing for any other layer; `Rule::apply(name, number, content)`
+  fills it. *Keep case* (*Ab*, with Find filled) writes a replacement's new
   text in its match's case — `BUTTON` upper, `button` lower, `Button` a capital then lower; a mixed
   case leaves it as typed.
 - **Rename to** draws each token as a pill: the canonical `[Word]` text with its brackets hidden, so
@@ -528,8 +535,8 @@ worded for the scope that plan was made for (`Plan::scope`).
   side keep 2pt of air painted between them; egui joins neighbouring glyphs of one background into
   one rectangle, so every other pill's ground is a unit of alpha lighter. A caret the arrow keys move into a pill leaves it on the side it was heading
   for, so Left and Right step pill by pill; one a click puts inside goes after it. A typed short form is rewritten to the canonical token;
-  Backspace and Delete take a pill out whole; *+ Name*, *+ Number* and one *+ Group k* per pattern
-  group insert at the caret. The field opens holding the last template (one *Name* pill the first
+  Backspace and Delete take a pill out whole; *+ Name*, *+ Number*, *+ Text* and one *+ Group k* per
+  pattern group insert at the caret. The field opens holding the last template (one *Name* pill the first
   time), all selected, so typing replaces it. An empty template with Find filled shows *Empty:
   removes the match*.
 - **Numbering.** The Number and Order rows show once the template has a Number token. Number holds
@@ -659,7 +666,7 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
 
 - **Core.** `Query::new(find, replace, match_case, whole_words, pattern, keep_case)`: the
   replacement is literal text unless `pattern` is set, when it is a rename `Template`, so `[1]`
-  inserts group 1. Whole words wrap the pattern in `\b{start-half}(?:…)\b{end-half}`
+  inserts group 1 and `[Text]` the whole of the text searched (`Rule::replacements`). Whole words wrap the pattern in `\b{start-half}(?:…)\b{end-half}`
   (`Find::with_words`): no word character just outside either end, so *C++* and *#tag* are found as
   whole words, which `\b` would refuse. `Scope` is
   `Under(roots)` (those layers and all under them), `Page(p)`, or `Pages { here }`, every page but

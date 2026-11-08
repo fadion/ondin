@@ -62,9 +62,11 @@ Part of §9.4.
   `ui::value_field_metered` with the **word** as prefix, scrubbing `Adjustment::shown_scale` (percent,
   hue in degrees) over the model's `Adjustment::range`, written through `valve_slot` (one undo step
   per scrub).
-- The meter is an accent wash across the field's ink **growing from the middle** (negative left,
-  positive right, ±1 reaching an edge; a `0..=1` amount only ever grows right). A 1pt centre tick
-  (`ui::METER_TICK_W`, from `ui::meter_wash()`) is always drawn. The number is right-aligned: signed
+- The meter (`ui::Meter`) is an accent wash across the field's ink. A two-sided amount is
+  `Meter::Signed`, **growing from the middle** (negative left, positive right, ±1 reaching an edge)
+  over a 1pt centre tick (`ui::METER_TICK_W`, from `ui::meter_wash()`) that is always drawn. A
+  `0..=1` amount (greyscale, invert, duotone) is `Meter::Amount`, **filling from the left edge
+  across the whole field**, as an opacity reads, with no tick: no half of the field is dead. The number is right-aligned: signed
   via `inspector::signed_number` for a two-sided amount (hue with a `°` suffix), unsigned for a
   `0..=1` one.
 - A per-row reset is **dimmed, not absent**, at zero; *Reset adjustments* is a `menu_action` that puts

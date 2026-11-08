@@ -8690,8 +8690,12 @@ impl OndinApp {
                                         ui,
                                         egui::vec2(field_w, CELL),
                                         Prefix::Text(k.label()),
-                                        // The signed fraction of the reachable range.
-                                        (shown / scale) as f32,
+                                        // An amount fills from the left; an offset
+                                        // grows either way from the middle.
+                                        match one_sided {
+                                            true => ui::Meter::Amount((shown / scale) as f32),
+                                            false => ui::Meter::Signed((shown / scale) as f32),
+                                        },
                                         &mut shown,
                                         Scrub::whole(0.25)
                                             .range(f64::from(lo) * scale..=f64::from(hi) * scale),
@@ -9786,7 +9790,7 @@ impl OndinApp {
                                         ui,
                                         egui::vec2(inner - CELL - COL, CELL),
                                         Prefix::Text(channel.label()),
-                                        meter,
+                                        ui::Meter::Signed(meter),
                                         &mut shown,
                                         scrub,
                                         |d| d.suffix(suffix).max_decimals(0),

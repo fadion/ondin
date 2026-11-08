@@ -2784,16 +2784,26 @@ fn meter_wash() -> egui::Color32 {
     )
 }
 
-/// A [`value_field`] with a bar painted across its ground, growing from the
-/// centre, for the image adjustments. `signed` is clamped to `-1..=1`: negative
-/// fills left, positive right. The bar sits between the ground and the content (a
-/// bar drawn after the text would tint it); the value is right-aligned so it does
-/// not read as a bar label.
+/// What a [`value_field_metered`] bar measures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Meter {
+    /// An offset either way from a neutral middle, `-1..=1`: negative fills left
+    /// of the centre, positive right, and a hairline marks zero.
+    Signed(f32),
+    /// An amount with no opposite, `0..=1`, filling from the left edge across the
+    /// whole field, as an opacity does: no half of the field is dead.
+    Amount(f32),
+}
+
+/// A [`value_field`] with a bar painted across its ground, for the image
+/// adjustments and the Filters effect ([`Meter`] says from where it grows). The
+/// bar sits between the ground and the content (a bar drawn after the text would
+/// tint it); the value is right-aligned so it does not read as a bar label.
 pub fn value_field_metered(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     prefix: Prefix,
-    signed: f32,
+    meter: Meter,
     value: &mut f64,
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
@@ -2803,7 +2813,7 @@ pub fn value_field_metered(
         size,
         prefix,
         None,
-        Some(signed),
+        Some(meter),
         None,
         value,
         scrub,
@@ -2971,7 +2981,7 @@ fn value_field_f64(
     size: egui::Vec2,
     prefix: Prefix,
     suffix: Option<Suffix<'_>>,
-    meter: Option<f32>,
+    meter: Option<Meter>,
     mark: Option<FieldMark<'_>>,
     value: &mut f64,
     scrub: Scrub,
@@ -2990,7 +3000,7 @@ fn value_field_f64_marked(
     size: egui::Vec2,
     prefix: Prefix,
     suffix: Option<Suffix<'_>>,
-    meter: Option<f32>,
+    meter: Option<Meter>,
     mark: Option<FieldMark<'_>>,
     value: &mut f64,
     scrub: Scrub,
@@ -3058,43 +3068,56 @@ fn value_field_f64_marked(
             // `Ui::id` is shared by two fields in one `horizontal`
             // (`a_row_of_value_fields_has_no_id_clash`).
             let strip = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(inset, inner_h));
-            if let (Some((tick_slot, slot)), Some(frac)) = (meter_slots, meter) {
+            if let (Some((tick_slot, slot)), Some(meter)) = (meter_slots, meter) {
                 // The ink box: the content width plus both paddings, inside the border.
                 let ink = egui::Rect::from_min_size(
                     ui.cursor().min - egui::vec2(FIELD_PAD_X, 0.0),
                     egui::vec2(full + FIELD_PAD_X * 2.0, inner_h),
                 );
-                let frac = frac.clamp(-1.0, 1.0);
-                let mid = ink.center().x;
-                let reach = mid + ink.width() / 2.0 * frac;
+                // Where the bar starts, and the fraction of the field each side it
+                // reaches: a signed bar from the middle over half the width, an
+                // amount from the left edge over all of it.
+                let (zero, reach, frac) = match meter {
+                    Meter::Signed(f) => (ink.center().x, ink.width() / 2.0, f.clamp(-1.0, 1.0)),
+                    Meter::Amount(f) => (ink.left(), ink.width(), f.clamp(0.0, 1.0)),
+                };
+                let tip = zero + reach * frac;
                 let bar = egui::Rect::from_min_max(
-                    egui::pos2(mid.min(reach), ink.top()),
-                    egui::pos2(mid.max(reach), ink.bottom()),
+                    egui::pos2(zero.min(tip), ink.top()),
+                    egui::pos2(zero.max(tip), ink.bottom()),
                 );
-                // A pair of corners rounds only when the bar reaches that end.
+                // A pair of corners rounds only when the bar reaches that end: an
+                // amount always touches the left edge.
                 let r = 5;
                 let end = |touching: bool| match touching {
                     true => r,
                     false => 0,
                 };
+                let west = match meter {
+                    Meter::Signed(_) => frac <= -1.0,
+                    Meter::Amount(_) => frac > 0.0,
+                };
                 let corner = egui::CornerRadius {
-                    nw: end(frac <= -1.0),
-                    sw: end(frac <= -1.0),
+                    nw: end(west),
+                    sw: end(west),
                     ne: end(frac >= 1.0),
                     se: end(frac >= 1.0),
                 };
-                // The zero tick, under the bar so it does not cut a line through it.
-                ui.painter().set(
-                    tick_slot,
-                    egui::epaint::RectShape::filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(mid - METER_TICK_W / 2.0, ink.top()),
-                            egui::vec2(METER_TICK_W, ink.height()),
+                // The zero tick, under the bar so it does not cut a line through
+                // it; an amount's zero is the field's own left edge.
+                if matches!(meter, Meter::Signed(_)) {
+                    ui.painter().set(
+                        tick_slot,
+                        egui::epaint::RectShape::filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(zero - METER_TICK_W / 2.0, ink.top()),
+                                egui::vec2(METER_TICK_W, ink.height()),
+                            ),
+                            egui::CornerRadius::ZERO,
+                            meter_wash(),
                         ),
-                        egui::CornerRadius::ZERO,
-                        meter_wash(),
-                    ),
-                );
+                    );
+                }
                 ui.painter().set(
                     slot,
                     egui::epaint::RectShape::filled(bar, corner, meter_wash()),
@@ -8913,10 +8936,22 @@ mod combo_height_tests {
 mod meter_tests {
     use super::*;
 
-    /// One painted `value_field_metered` as its ground, zero tick and bar rects, from `.shapes`.
+    /// One painted `value_field_metered` with a signed meter as its ground, zero
+    /// tick and bar rects, from `.shapes`.
     ///
     /// The tick and bar share a colour and are taken in paint order (the tick first).
     fn parts(frac: f32) -> (egui::Rect, egui::Rect, egui::Rect) {
+        let (ground, wash) = painted(Meter::Signed(frac));
+        assert_eq!(
+            wash.len(),
+            2,
+            "a metered field paints a tick and a bar, in that order"
+        );
+        (ground, wash[0], wash[1])
+    }
+
+    /// One painted `value_field_metered` as its ground and its wash rects, in paint order.
+    fn painted(meter: Meter) -> (egui::Rect, Vec<egui::Rect>) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
@@ -8926,7 +8961,7 @@ mod meter_tests {
                 ui,
                 egui::vec2(180.0, 26.0),
                 Prefix::Text("Contrast"),
-                frac,
+                meter,
                 &mut value,
                 Scrub::whole(0.25).range(-100.0..=100.0),
                 |d| d,
@@ -8941,20 +8976,42 @@ mod meter_tests {
                 })
                 .collect()
         };
-        let wash = rects(meter_wash());
-        assert_eq!(
-            wash.len(),
-            2,
-            "a metered field paints a tick and a bar, in that order"
-        );
         (
             rects(color::field())
                 .first()
                 .copied()
                 .expect("the field paints a ground"),
-            wash[0],
-            wash[1],
+            rects(meter_wash()),
         )
+    }
+
+    /// An amount has no tick and fills from the left edge: half at 0.5, the whole
+    /// ink at 1, nothing at 0.
+    /// flip: `Meter::Amount` measured from the middle as a signed bar is → fails at
+    /// "starts at the left edge".
+    #[test]
+    fn an_amount_fills_from_the_left_edge_across_the_whole_field() {
+        let (ground, wash) = painted(Meter::Amount(0.5));
+        let ink = ground.shrink(FIELD_BORDER_H / 2.0);
+        assert_eq!(wash.len(), 1, "an amount paints its bar and no zero tick");
+        let bar = wash[0];
+        assert!(
+            (bar.left() - ink.left()).abs() < 0.51,
+            "the bar starts at the left edge: {bar:?} in {ink:?}"
+        );
+        assert!(
+            (bar.width() - ink.width() / 2.0).abs() < 0.51,
+            "half an amount fills half the field: {} of {}",
+            bar.width(),
+            ink.width()
+        );
+        let (_, full) = painted(Meter::Amount(1.0));
+        assert!(
+            (full[0].width() - ink.width()).abs() < 0.51,
+            "all of it at 1"
+        );
+        let (_, empty) = painted(Meter::Amount(0.0));
+        assert_eq!(empty[0].width(), 0.0, "nothing at 0");
     }
 
     /// The bar grows from the middle and the two signs mirror (one sign alone also fits a left-anchored bar).
@@ -9010,7 +9067,7 @@ mod meter_tests {
                         ui,
                         size,
                         Prefix::Text("Contrast"),
-                        0.4,
+                        Meter::Signed(0.4),
                         &mut value,
                         Scrub::whole(0.25).range(-100.0..=100.0),
                         |d| d,
@@ -9121,7 +9178,7 @@ mod meter_tests {
                     ui,
                     egui::vec2(180.0, 26.0),
                     Prefix::Text("Contrast"),
-                    frac,
+                    Meter::Signed(frac),
                     &mut value,
                     Scrub::whole(0.25).range(-100.0..=100.0),
                     |d| d,

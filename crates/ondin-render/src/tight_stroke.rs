@@ -126,6 +126,11 @@ fn subpaths(path: &BezPath, tolerance: f64) -> Vec<Centreline> {
                         c.points.pop();
                         c.joins.pop();
                     }
+                    // The start is now where the closing segment meets the first:
+                    // one of the path's own corners.
+                    if let Some(j) = c.joins.first_mut() {
+                        *j = true;
+                    }
                     c.closed = true;
                 }
                 last = start;
@@ -280,10 +285,10 @@ fn lay_subpath(
     }
 }
 
-/// `path`'s flattening tolerance in its own units, so the facets stay under a
-/// tenth of a device pixel through `world`.
-pub(crate) fn tolerance_through(world: Affine, device: f64) -> f64 {
-    let scale = world.determinant().abs().sqrt();
+/// A flattening tolerance in a path's own units that keeps its facets within
+/// `device` pixels once `to_device` (local to device, camera included) maps it.
+pub(crate) fn tolerance_through(to_device: Affine, device: f64) -> f64 {
+    let scale = to_device.determinant().abs().sqrt();
     match scale > 1e-12 {
         true => device / scale,
         false => device,
@@ -348,6 +353,10 @@ mod tests {
                 assert!(w >= 0, "never negative at {x},{y}: {w}");
             }
         }
+        // Inside the bend, where the backends' fold nets to zero, and outside it.
+        for at in [(2.0, 3.0), (0.0, 3.0), (-2.0, 1.0), (14.0, 3.0)] {
+            assert!(winding(&u, Point::from(at)) > 0, "ink at {at:?}");
+        }
         let mut gentle = BezPath::new();
         gentle.move_to((0.0, 0.0));
         gentle.curve_to((100.0, 0.0), (200.0, 50.0), (300.0, 50.0));
@@ -366,5 +375,90 @@ mod tests {
             assert!(winding(&u, Point::new(104.0, 0.0)) > 0, "{cap:?}");
             assert_eq!(winding(&u, Point::new(-6.0, 0.0)), 0, "{cap:?}");
         }
+    }
+
+    /// An L turning at (100, 0), stroked 20 wide: a point in the miter's tip, one
+    /// only the round join reaches, and one inside the bevel.
+    fn corner() -> BezPath {
+        let mut l = BezPath::new();
+        l.move_to((0.0, 0.0));
+        l.line_to((100.0, 0.0));
+        l.line_to((100.0, 100.0));
+        l
+    }
+    const TIP: Point = Point::new(108.0, -8.0);
+    const ROUND: Point = Point::new(106.0, -6.0);
+    const BEVEL: Point = Point::new(103.0, -3.0);
+
+    /// A corner of the path's own takes the stroke's join, and a miter past its
+    /// limit falls back to the bevel.
+    /// flip: swapping the Miter and Bevel arms → fails at the Miter tip.
+    #[test]
+    fn a_path_corner_takes_the_strokes_join() {
+        let l = corner();
+        let at = |join: Join, limit: f64, p: Point| {
+            let mut paint = paint(20.0, Cap::Butt, join);
+            paint.miter_limit = limit;
+            winding(&union_outline(&l, &paint, 0.05), p)
+        };
+        assert!(at(Join::Miter, 4.0, TIP) > 0, "the miter reaches its tip");
+        assert!(at(Join::Round, 4.0, ROUND) > 0, "the round join");
+        assert_eq!(at(Join::Round, 4.0, TIP), 0, "the round join stops short");
+        assert!(at(Join::Bevel, 4.0, BEVEL) > 0, "the bevel");
+        assert_eq!(at(Join::Bevel, 4.0, ROUND), 0, "the bevel is flat");
+        // A right angle's miter is √2 the width: a limit of 1 bevels it.
+        assert_eq!(at(Join::Miter, 1.0, TIP), 0, "past the limit, no tip");
+        assert!(at(Join::Miter, 1.0, BEVEL) > 0, "past the limit, a bevel");
+    }
+
+    /// A vertex flattening put there is rounded whatever the join, since the
+    /// curve has no corner there.
+    /// flip: skipping `lay_subpath`'s vertex loop → fails at the wedge.
+    #[test]
+    fn a_flattening_vertex_takes_a_round_wedge() {
+        let c = Centreline {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(100.0, 0.0),
+                Point::new(100.0, 100.0),
+            ],
+            joins: vec![false, false, true],
+            closed: false,
+        };
+        let mut out = BezPath::new();
+        lay_subpath(
+            &mut out,
+            &c,
+            10.0,
+            &paint(20.0, Cap::Butt, Join::Miter),
+            0.05,
+        );
+        assert!(winding(&out, ROUND) > 0, "the wedge fills the gap");
+        assert_eq!(winding(&out, TIP), 0, "round, not mitred");
+    }
+
+    /// A closed subpath's start is one of its corners and takes the stroke's join
+    /// like the others, even inside a path read as open.
+    /// flip: `subpaths` leaving the start's join unset → fails at (−15, −15).
+    #[test]
+    fn a_closed_subpath_joins_at_its_start() {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((100.0, 0.0));
+        path.line_to((100.0, 100.0));
+        path.line_to((0.0, 100.0));
+        path.close_path();
+        path.move_to((200.0, 0.0));
+        path.curve_to((230.0, 0.0), (230.0, 30.0), (200.0, 30.0));
+        let u = union_outline(&path, &paint(40.0, Cap::Butt, Join::Miter), 0.05);
+        assert!(winding(&u, Point::new(115.0, -15.0)) > 0, "a mitred corner");
+        assert!(
+            winding(&u, Point::new(-15.0, -15.0)) > 0,
+            "the start is mitred"
+        );
+        assert!(
+            winding(&u, Point::new(-15.0, 115.0)) > 0,
+            "the closing corner"
+        );
     }
 }

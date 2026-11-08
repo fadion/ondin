@@ -1041,6 +1041,201 @@ fn an_open_shape_strokes_centred_whatever_its_alignment_says() {
     assert_eq!(r.clips.len(), 1, "no clip beyond the artboard's");
 }
 
+// --- the union stroke -----------------------------------------------------
+
+/// Every path reaching the painter, in world space: filled, and stroked.
+#[derive(Default)]
+struct Inks {
+    fills: Vec<ondin_core::kurbo::BezPath>,
+    strokes: Vec<ondin_core::kurbo::BezPath>,
+}
+
+impl ScenePainter for Inks {
+    fn has_image(&self, _id: &ondin_core::ImageId) -> bool {
+        true
+    }
+    fn fill_path(
+        &mut self,
+        t: Affine,
+        p: &ondin_core::kurbo::BezPath,
+        _b: &Brush,
+        _f: Option<ondin_core::Framing>,
+        _rule: ClipRule,
+    ) {
+        self.fills.push(t * p.clone());
+    }
+    fn stroke_path(&mut self, t: Affine, p: &ondin_core::kurbo::BezPath, _s: &StrokePaint<'_>) {
+        self.strokes.push(t * p.clone());
+    }
+    fn draw_text(&mut self, _t: Affine, _r: &TextRun<'_>) {}
+    fn push_layer(
+        &mut self,
+        _t: Affine,
+        _c: Option<&ondin_core::kurbo::BezPath>,
+        _rule: ClipRule,
+        _o: f32,
+    ) {
+    }
+    fn push_mask_layer(&mut self) {}
+    fn pop_layer(&mut self) {}
+}
+
+/// `kind` alone on an artboard, at the origin, under one solid round-capped
+/// stroke `width` wide.
+fn round_capped(kind: NodeKind, width: f64) -> (Document, Resolved, NodeId) {
+    let mut ids = IdSource::new(78);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let ab = ids.mint();
+    let shape = ids.mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: ab,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(1000.0, 1000.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((-500.0, -500.0))),
+            name: None,
+        },
+        Operation::CreateNode {
+            id: shape,
+            parent: ab,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate((500.0, 500.0))),
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: shape,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                brush: Brush::Solid(Color::BLACK).into(),
+                width,
+                width_var: None,
+                join: ondin_core::kurbo::Join::Miter,
+                cap: ondin_core::kurbo::Cap::Round,
+                dashes: Vec::new(),
+                dash_offset: 0.0,
+                sides: Default::default(),
+                miter_limit: 4.0,
+                dash_fit: false,
+                align: StrokeAlign::Center,
+                visible: true,
+            }]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    (doc, res, shape)
+}
+
+/// The scene at `zoom` device pixels per world unit, around the origin.
+fn record_inks(doc: &Document, res: &Resolved, zoom: f64) -> Inks {
+    let mut inks = Inks::default();
+    let side = 50.0;
+    let pixels = (side * zoom) as u32;
+    scene::build(
+        doc,
+        res,
+        &Viewport {
+            view: Rect::new(-side / 2.0, -side / 2.0, side / 2.0, side / 2.0),
+            pixel_size: (pixels, pixels),
+        },
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut inks,
+    );
+    inks
+}
+
+/// An open curve bending tighter than half its stroke is filled as the union of
+/// its pieces, never handed to the stroker, and the union's round cap is
+/// flattened to a tenth of a device pixel at 64×, not a tenth of a world unit.
+/// flip: `lay_stroke` taking its tolerance through `world` alone → fails at the
+/// sagitta.
+#[test]
+fn a_tight_open_curve_is_filled_flattened_in_device_pixels() {
+    use ondin_core::kurbo::{BezPath, PathEl, Point};
+    let mut curl = BezPath::new();
+    curl.move_to((0.0, 0.0));
+    curl.curve_to((8.0, 0.0), (8.0, 8.0), (0.0, 8.0));
+    let (doc, res, _) = round_capped(
+        NodeKind::Path {
+            path: curl,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        },
+        20.0,
+    );
+    let zoom = 64.0;
+    let inks = record_inks(&doc, &res, zoom);
+    assert!(inks.strokes.is_empty(), "the union is filled, not stroked");
+    let ink = inks.fills.last().expect("the stroke's ink is filled");
+    // Every facet of the start cap, a circle of radius 10 about the origin.
+    let half = 10.0;
+    let on_cap = |p: Point| (p.distance(Point::ZERO) - half).abs() < 1e-6;
+    let (mut facets, mut worst, mut last) = (0, 0.0f64, None::<Point>);
+    for el in ink.elements() {
+        let p = match *el {
+            PathEl::MoveTo(p) | PathEl::LineTo(p) => p,
+            _ => {
+                last = None;
+                continue;
+            }
+        };
+        if matches!(el, PathEl::LineTo(_))
+            && let Some(q) = last
+            && on_cap(p)
+            && on_cap(q)
+        {
+            let chord = p.distance(q);
+            worst = worst.max(half - (half * half - chord * chord / 4.0).max(0.0).sqrt());
+            facets += 1;
+        }
+        last = Some(p);
+    }
+    assert!(facets > 8, "the cap was found: {facets} facets");
+    assert!(
+        worst <= 0.1 / zoom * 1.001,
+        "sagitta {worst} world units, over a tenth of a device pixel"
+    );
+}
+
+/// A spiral stroked thicker than its innermost bend is laid along
+/// `geometry::stroked_path`'s cut, not from the very centre.
+/// flip: `lay_sides` laying `shape` → fails at "is stroked" (the whole spiral
+/// bends too tight, so it is filled as the union).
+#[test]
+fn a_thick_spiral_is_stroked_from_its_cut() {
+    let kind = NodeKind::Spiral {
+        size: Size::new(40.0, 40.0),
+        turns: 3.0,
+    };
+    let width = 6.0;
+    let (doc, res, _) = round_capped(kind.clone(), width);
+    let whole = ondin_core::geometry::local_path(&kind).unwrap();
+    let cut = ondin_core::geometry::stroked_path(&kind, &whole, width);
+    let (first, start) = (
+        whole.elements()[0].end_point().unwrap(),
+        cut.elements()[0].end_point().unwrap(),
+    );
+    assert!(
+        first.distance(start) > 0.5,
+        "the fixture cuts: {first:?} → {start:?}"
+    );
+    let inks = record_inks(&doc, &res, 1.0);
+    let laid = inks.strokes.first().expect("the cut spiral is stroked");
+    let at = laid.elements()[0].end_point().unwrap();
+    assert!(
+        at.distance(start) < 1e-9,
+        "laid from {at:?}, cut at {start:?}"
+    );
+}
+
 /// A recorder that keeps the *order* of the paints reaching the backend, and
 /// which brush each was, so a stacking test can say more than "two of them".
 #[derive(Default)]

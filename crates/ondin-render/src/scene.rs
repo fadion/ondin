@@ -1480,6 +1480,10 @@ struct Painted<'a> {
     /// device pixels ([`strokes_snap`]), with the box edges they keep their side
     /// of; `None` when they are laid as stored.
     stroke_device: Option<(Affine, &'a Edges<'a>)>,
+    /// The walk's world-to-device transform, which the painter puts in front of
+    /// every transform it is handed; strokes the walk flattens itself are
+    /// flattened through it.
+    base: Affine,
     /// `Filters` rows applied to the inks instead of the pixels
     /// ([`folded_filters`]), in order; `paint` is already through them, a text
     /// run's and a decoration's own colour are taken through them as drawn.
@@ -1755,6 +1759,7 @@ fn paint_node_pass<P: ScenePainter>(
         },
         detail: ov.level_of_detail().then(|| stretch(base * world)),
         stroke_device: strokes_snap(kind, ov, id).then(|| (base * world, edges)),
+        base,
         filters: Vec::new(),
     };
 
@@ -2062,6 +2067,7 @@ fn paint_node_pass<P: ScenePainter>(
             doc,
             painter,
             shape_world,
+            base,
             painted.kind,
             &painted.paint,
             &frame,
@@ -2785,6 +2791,7 @@ fn paint_ghost<P: ScenePainter>(
             placeholder: None,
             detail: None,
             stroke_device: strokes_snap(&ghost.kind, ov, ghost.id).then(|| (base * world, edges)),
+            base,
             filters: Vec::new(),
         },
         shape_world,
@@ -2856,6 +2863,7 @@ fn paint_ghost<P: ScenePainter>(
             doc,
             painter,
             shape_world,
+            base,
             &ghost.kind,
             &paint,
             &frame,
@@ -3235,6 +3243,7 @@ fn paint_shape<P: ScenePainter>(
                     doc,
                     painter,
                     world,
+                    painted.base,
                     painted.kind,
                     &painted.paint,
                     &outline,
@@ -3303,6 +3312,7 @@ fn paint_shape<P: ScenePainter>(
         doc,
         painter,
         world,
+        painted.base,
         painted.kind,
         &painted.paint,
         &path,
@@ -3326,12 +3336,14 @@ fn paint_shape<P: ScenePainter>(
 /// open). `frame` is what an image brush is framed in: the shape's box, not the
 /// ink's, and for outlined type the text box. `rule` is how `shape` decides its
 /// interior, as its fill reads it. `device`, when given, snaps each centred
-/// stroke's edges to device pixels ([`snapped_stroke`]).
+/// stroke's edges to device pixels ([`snapped_stroke`]). `base` is the walk's
+/// world-to-device transform ([`Painted::base`]).
 #[allow(clippy::too_many_arguments)]
 fn paint_strokes<P: ScenePainter>(
     doc: &Document,
     painter: &mut P,
     world: Affine,
+    base: Affine,
     kind: &NodeKind,
     paint: &Paint,
     shape: &BezPath,
@@ -3377,7 +3389,7 @@ fn paint_strokes<P: ScenePainter>(
                         p.fill_path(world, &ink, s.brush.drawn(), framing, ClipRule::NonZero)
                     }),
                     None => clipped(painter, world, framing, |p| {
-                        lay_sides(p, world, kind, s, shape, framing, false)
+                        lay_sides(p, (world, base), kind, s, shape, framing, false)
                     }),
                 }
             }
@@ -3395,7 +3407,7 @@ fn paint_strokes<P: ScenePainter>(
             for s in run {
                 let framing = framing_of(doc, s.brush.drawn(), frame);
                 clipped(painter, world, framing, |p| {
-                    lay_sides(p, world, kind, s, shape, framing, true)
+                    lay_sides(p, (world, base), kind, s, shape, framing, true)
                 });
             }
             painter.push_erase_layer();
@@ -3433,7 +3445,7 @@ fn paint_strokes<P: ScenePainter>(
         for s in run {
             let framing = framing_of(doc, s.brush.drawn(), frame);
             clipped(painter, world, framing, |p| {
-                lay_sides(p, world, kind, s, shape, framing, true)
+                lay_sides(p, (world, base), kind, s, shape, framing, true)
             });
         }
         painter.pop_layer();
@@ -3442,10 +3454,11 @@ fn paint_strokes<P: ScenePainter>(
 
 /// One stroke's ink: the whole outline, or one open path per side it occupies.
 ///
-/// `doubled` is the aligned construction's twice-width stroke.
+/// `doubled` is the aligned construction's twice-width stroke. `at` is the node's
+/// world transform and the walk's world-to-device base.
 fn lay_sides<P: ScenePainter>(
     painter: &mut P,
-    world: Affine,
+    at: (Affine, Affine),
     kind: &NodeKind,
     s: &Stroke,
     shape: &BezPath,
@@ -3455,14 +3468,14 @@ fn lay_sides<P: ScenePainter>(
     match geometry::effective_sides(kind, s).per_side(s.width) {
         None => {
             let laid = geometry::stroked_path(kind, shape, s.width);
-            lay_dashed(painter, world, &laid, s, s.width, framing, doubled);
+            lay_dashed(painter, at, &laid, s, s.width, framing, doubled);
         }
         Some(sides) => {
             for (side, width) in sides {
                 let Some(edge) = geometry::side_path(kind, side) else {
                     continue;
                 };
-                lay_dashed(painter, world, &edge, s, width, framing, doubled);
+                lay_dashed(painter, at, &edge, s, width, framing, doubled);
             }
         }
     }
@@ -3473,7 +3486,7 @@ fn lay_sides<P: ScenePainter>(
 /// path is laid subpath by subpath (`geometry::dash_fit_pieces`).
 fn lay_dashed<P: ScenePainter>(
     painter: &mut P,
-    world: Affine,
+    at: (Affine, Affine),
     path: &BezPath,
     s: &Stroke,
     width: f64,
@@ -3494,12 +3507,12 @@ fn lay_dashed<P: ScenePainter>(
     match geometry::dash_fit_pieces(s, width, path) {
         Some(pieces) => {
             for (sub, dashes) in pieces {
-                lay_stroke(painter, world, &sub, &paint(dashes));
+                lay_stroke(painter, at, &sub, &paint(dashes));
             }
         }
         None => {
             let dashes = geometry::resolved_dashes(s, width, path);
-            lay_stroke(painter, world, path, &paint(dashes));
+            lay_stroke(painter, at, path, &paint(dashes));
         }
     }
 }
@@ -3523,10 +3536,12 @@ fn lay_dashed<P: ScenePainter>(
 /// the union of its pieces instead (`tight_stroke`): the backend folds the inner
 /// edge there, and next to a cap a notch of ground shows through. Open only: a
 /// closed outline's band covers its own folds, and glyphs and small rounded
-/// corners under thick strokes would leave the backend's stroker for nothing.
+/// corners under thick strokes would leave the backend's stroker for nothing. The
+/// union is flattened through `base * world`, so its facets stay under a tenth of
+/// a device pixel at any zoom.
 fn lay_stroke<P: ScenePainter>(
     painter: &mut P,
-    world: Affine,
+    (world, base): (Affine, Affine),
     path: &BezPath,
     paint: &StrokePaint<'_>,
 ) {
@@ -3537,7 +3552,7 @@ fn lay_stroke<P: ScenePainter>(
             && paint.dashes.is_empty()
             && crate::tight_stroke::bends_too_tight(path, paint.width)
         {
-            let tolerance = crate::tight_stroke::tolerance_through(world, TOLERANCE);
+            let tolerance = crate::tight_stroke::tolerance_through(base * world, TOLERANCE);
             let ink = crate::tight_stroke::union_outline(path, paint, tolerance);
             painter.fill_path(world, &ink, paint.brush, paint.framing, ClipRule::NonZero);
             return;

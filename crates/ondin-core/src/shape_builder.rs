@@ -605,8 +605,9 @@ pub const DIVIDED: &str = "Divided";
 /// *Divide*: every face of `selection`'s arrangement becomes a path of its own,
 /// looking like and named after the topmost source over it, so nothing moves on
 /// screen. The paths go into a group named [`DIVIDED`] in the slot of the
-/// outermost selected layer holding the topmost source; the sources go, and so does
-/// a selected group nothing is left in.
+/// outermost selected layer holding the topmost source, or, when that would draw a
+/// face fainter, of the layer holding it under the sources' nearest common parent;
+/// the sources go, and so does a selected group nothing is left in.
 ///
 /// `arr` is [`arrange`]'s answer for the same `selection`; one path per region.
 pub fn divide(
@@ -619,15 +620,52 @@ pub fn divide(
     let outer = build::outermost(doc, selection);
     let top = *arr.sources.last().ok_or(OpError::EmptyGeometry)?;
     // The outermost selected layer the topmost source sits in, or is.
-    let holder = outer
+    let mut holder = outer
         .iter()
         .copied()
         .find(|o| within(doc, *o, top))
         .ok_or(OpError::MalformedSubtree)?;
-    let parent = doc
-        .get(holder)
-        .and_then(|n| n.parent())
-        .ok_or(OpError::CannotModifyRoot)?;
+    // A selected group left empty goes whole; any other source goes alone.
+    let consumed: rustc_hash::FxHashSet<NodeId> = arr.sources.iter().copied().collect();
+    let emptied: Vec<NodeId> = outer
+        .iter()
+        .copied()
+        .filter(|o| only_sources_in(doc, *o, &consumed))
+        .collect();
+    // One selected group that goes and held every source: *Divided* stands in for
+    // it and wears its opacity, blend, effects, mask and place in a layout.
+    let stand_in = (emptied == [holder] && arr.sources.iter().all(|s| within(doc, holder, *s)))
+        .then_some(holder);
+    // The opacity of `from` and every parent above it, but `skip`.
+    let chain = |from: Option<NodeId>, skip: Option<NodeId>| -> f64 {
+        let mut product = 1.0;
+        let mut at = from;
+        while let Some(id) = at {
+            if Some(id) != skip {
+                product *= f64::from(doc.drawn_opacity(id));
+            }
+            at = doc.get(id).and_then(|n| n.parent());
+        }
+        product
+    };
+    let parent_of = |id: NodeId| doc.get(id).and_then(|n| n.parent());
+    // A face can take on the opacity of the parents it leaves, but cannot give back
+    // more than its own: when a source would be drawn fainter under the holder's
+    // parent, *Divided* goes beside the layer holding the topmost source under the
+    // sources' nearest common parent instead, where no face gains a parent.
+    let over = chain(parent_of(holder), None);
+    let fainter = arr.sources.iter().any(|s| {
+        f64::from(doc.drawn_opacity(*s)) * chain(parent_of(*s), None) > over * (1.0 + 1e-6)
+    });
+    if stand_in.is_none() && fainter {
+        let common = std::iter::successors(parent_of(top), |a| parent_of(*a))
+            .find(|a| arr.sources.iter().all(|s| within(doc, *a, *s)))
+            .ok_or(OpError::MalformedSubtree)?;
+        holder = std::iter::successors(Some(top), |a| parent_of(*a))
+            .find(|a| parent_of(*a) == Some(common))
+            .ok_or(OpError::MalformedSubtree)?;
+    }
+    let parent = parent_of(holder).ok_or(OpError::CannotModifyRoot)?;
     let siblings = doc
         .get(parent)
         .ok_or(OpError::NoSuchNode(parent))?
@@ -653,17 +691,6 @@ pub fn divide(
             index: at + 1,
         },
     ];
-    // A selected group left empty goes whole; any other source goes alone.
-    let consumed: rustc_hash::FxHashSet<NodeId> = arr.sources.iter().copied().collect();
-    let emptied: Vec<NodeId> = outer
-        .iter()
-        .copied()
-        .filter(|o| only_sources_in(doc, *o, &consumed))
-        .collect();
-    // One selected group that goes and held every source: *Divided* stands in for
-    // it and wears its opacity, blend, effects, mask and place in a layout.
-    let stand_in = (emptied == [holder] && arr.sources.iter().all(|s| within(doc, holder, *s)))
-        .then_some(holder);
     if let Some(g) = stand_in.and_then(|g| doc.get(g)) {
         ops.extend(build::carried_look(doc, g.id(), group));
         ops.extend(build::carried_mask(g, group));
@@ -683,17 +710,6 @@ pub fn divide(
     // What the parents a face leaves composited over it, less what its new ones
     // do: opacity folds into the face. A clip or an effect on such a parent is
     // not carried.
-    let chain = |from: Option<NodeId>, skip: Option<NodeId>| -> f64 {
-        let mut product = 1.0;
-        let mut at = from;
-        while let Some(id) = at {
-            if Some(id) != skip {
-                product *= f64::from(doc.drawn_opacity(id));
-            }
-            at = doc.get(id).and_then(|n| n.parent());
-        }
-        product
-    };
     let over_group = chain(Some(parent), None);
     // Bottom first, by the topmost source over each face, so the stack reads as
     // the sources did.

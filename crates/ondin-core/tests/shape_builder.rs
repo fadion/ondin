@@ -562,6 +562,41 @@ fn divide_folds_a_left_parents_opacity_into_the_face() {
     assert!((o - 0.5).abs() < 1e-6, "{o}");
 }
 
+/// When the topmost source sits in a half-opaque group the others are not in,
+/// *Divide* puts its group beside that group rather than in it, so a face from
+/// outside is not drawn fainter.
+///
+/// flip: `divide` keeping the holder's parent whatever the folds → fails at B's
+/// face, drawn at a half.
+#[test]
+fn divide_puts_no_face_under_a_fainter_parent() {
+    let mut f = Fixture::new();
+    let b = f.circle(f.frame, 150.0, 100.0, ORANGE, "B");
+    let g = f.group(f.frame);
+    let a = f.circle(g, 100.0, 100.0, BLUE, "A");
+    f.set(Operation::SetOpacity {
+        id: g,
+        opacity: 0.5,
+    });
+    let res = f.resolved();
+    let arr = f.arrange(&[a, b]);
+    assert_eq!(arr.sources.last(), Some(&a), "A is the topmost source");
+    let (tx, divided) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[a, b], &arr).unwrap();
+    f.commit(tx);
+    let faces = f.doc.get(divided).unwrap().children().to_vec();
+    let face_at = |x: f64| {
+        faces
+            .iter()
+            .copied()
+            .find(|p| covers(&f.world(*p), at(x, 100.0)))
+            .unwrap()
+    };
+    let o = f.effective_opacity(face_at(210.0));
+    assert!((o - 1.0).abs() < 1e-6, "B's own face, {o}");
+    let o = f.effective_opacity(face_at(60.0));
+    assert!((o - 0.5).abs() < 1e-6, "A's own face, {o}");
+}
+
 /// An even-odd path of two crossing squares draws their overlap as a hole; the
 /// arrangement offers no face there, and *Divide* paints nothing there.
 ///

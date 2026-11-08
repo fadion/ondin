@@ -243,7 +243,10 @@ plain `Path` layers.
   are deleted; a selected group left with nothing goes whole. When that group held every source,
   *Divided* stands in for it and takes its opacity, blend, effects, mask and place in a layout.
   Otherwise the opacity of every parent a face leaves is folded into the face, less that of the
-  parents it lands under; a clip or an effect on such a parent is not carried. Each face takes the
+  parents it lands under; a clip or an effect on such a parent is not carried. A face cannot be
+  made more opaque than its source, so when one would land under parents fainter than its own,
+  *Divided* goes instead just above the layer holding the topmost source under the sources'
+  nearest common parent, where no face gains a parent. Each face takes the
   credit nearest it, on a source over it or a group going with that source.
 
 ### The tool (`shape_builder.rs`)

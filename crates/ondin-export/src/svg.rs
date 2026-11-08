@@ -147,7 +147,10 @@ pub(crate) fn svg_at_zero(
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
     text: ExportText,
 ) -> Export {
-    let style = Style::default();
+    let style = Style {
+        credits: false,
+        ..Style::default()
+    };
     svg_framed(doc, res, origins, linked, text, None, false, true, style)
 }
 
@@ -172,6 +175,7 @@ pub fn svg_spec(doc: &Document, res: &Resolved, node: NodeId, spec: &ExportSpec)
         current_color: spec.colour == SvgColour::CurrentColor,
         outline_strokes: spec.strokes == SvgStrokes::Outline,
         precision: spec.precision,
+        credits: true,
     };
     let linked = Default::default();
     svg_framed(
@@ -244,7 +248,9 @@ fn svg_framed(
         h = fmt(view.height()),
     );
     out.push('\n');
-    credits_metadata(&mut out, doc, origins);
+    if style.credits {
+        credits_metadata(&mut out, doc, origins);
+    }
     defs.emit(&mut out);
 
     let mut report = Report::default();
@@ -312,6 +318,11 @@ struct Style {
     current_color: bool,
     outline_strokes: bool,
     precision: u8,
+    /// Write the layers' credits at the top ([`credits_metadata`]). Off for code
+    /// export's inline pictures, whose page carries them as a comment: a
+    /// `<credits>` element is not one JSX knows, and the markup is hashed to pair
+    /// variants.
+    credits: bool,
 }
 
 impl Default for Style {
@@ -320,6 +331,7 @@ impl Default for Style {
             current_color: false,
             outline_strokes: false,
             precision: ondin_core::export::MAX_PRECISION,
+            credits: true,
         }
     }
 }
@@ -2738,8 +2750,9 @@ pub(crate) fn fmt(v: f64) -> String {
 }
 
 /// The credits of the layers under `origins` (`ondin_core::credit`), as one
-/// `<metadata>` block at the top of the file: one `<credit>` per line the Credits
-/// card would list, naming its layers. Nothing when no layer carries one. At the
+/// `<metadata>` block at the top of the file: one `<credit>` per folded line of
+/// `credits_in`, every credit whether or not its licence asks to be shown, naming
+/// its layers. Nothing when no layer carries one. At the
 /// top rather than inside each element, since a shape is written as several
 /// elements and a wrapper `<g>` would come back as a group.
 fn credits_metadata(out: &mut String, doc: &Document, origins: &[NodeId]) {
@@ -2798,6 +2811,64 @@ fn brush_color(brush: &Brush) -> Color {
     match brush {
         Brush::Solid(c) => *c,
         _ => Color::from_rgba8(128, 128, 128, 255),
+    }
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::*;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{IdSource, Operation, Transaction};
+
+    /// Code export's inline pictures carry no `<credits>` (the page's comment
+    /// does), while an export spec's file keeps them.
+    /// flip: `credits: true` in `svg_at_zero` → fails at the first assertion.
+    #[test]
+    fn inline_pictures_leave_the_credits_to_the_page() {
+        let mut ids = IdSource::new(0xC4ED);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let page = doc.first_page();
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetCredit {
+                id,
+                credit: Some(Box::new(ondin_core::Credit {
+                    kind: ondin_core::CreditKind::Icon,
+                    text: "Icons by Font Awesome, CC BY 4.0".into(),
+                    author: "Font Awesome".into(),
+                    author_url: String::new(),
+                    provider: "Font Awesome Free".into(),
+                    provider_url: String::new(),
+                    source_url: String::new(),
+                    licence: "CC BY 4.0".into(),
+                    licence_url: String::new(),
+                    required: true,
+                    inserted: String::new(),
+                })),
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let inline = svg_at_zero(&doc, &res, &[id], Default::default(), ExportText::Live);
+        assert!(!inline.svg.contains("<credits"), "{}", inline.svg);
+        let spec = ExportSpec::new(
+            ondin_core::ExportFormat::Svg,
+            ondin_core::ExportScale::Times(1.0),
+        );
+        assert!(svg_spec(&doc, &res, id, &spec).svg.contains("<credits"));
     }
 }
 

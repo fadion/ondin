@@ -36,7 +36,8 @@ pub struct Credit {
     pub provider: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub provider_url: String,
-    /// The asset's own page: a photo's, or the icon's in its set.
+    /// The asset's own page: a photo's. Empty for an icon, so one set's icons
+    /// fold into one line (`credits_in`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source_url: String,
     /// The licence's name, *CC BY 4.0*, *Unsplash License*.

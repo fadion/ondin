@@ -2392,17 +2392,32 @@ impl OndinApp {
                 MarqueeMode::Replace => None,
             });
         }
-        // Mid-drag the dragged point stays under the pointer, and the keys held
-        // no longer change the press.
-        let mods = if resting { mods } else { egui::Modifiers::NONE };
         let ctrl = mods.ctrl || mods.command;
+        // Mid-drag the badge is the drag's, with the keys it reads live: Ctrl
+        // bends a segment, Alt breaks a handle's pair.
+        match &self.drag {
+            Drag::Segment { .. } => {
+                return node_arrow(Some(if ctrl { Badge::Bend } else { Badge::Segment }));
+            }
+            Drag::Handle { .. } => {
+                return node_arrow(Some(if mods.alt { Badge::Convert } else { Badge::Dot }));
+            }
+            Drag::Points { .. } => return node_arrow(Some(Badge::Anchor)),
+            Drag::None => {}
+            _ => return node_arrow(None),
+        }
+        // At rest, in `node_press`'s order: a handle ignores Shift, and Ctrl on an
+        // anchor pulls its handles before Shift would select it.
         let grab = world.and_then(|w| self.node_grab(w));
         let badge = match grab {
-            _ if mods.shift => Some(Badge::Plus),
-            Some(NodeGrab::Anchor(_)) => Some(if ctrl { Badge::Convert } else { Badge::Anchor }),
             Some(NodeGrab::Handle(..)) => Some(if mods.alt { Badge::Convert } else { Badge::Dot }),
+            Some(NodeGrab::Anchor(_)) if ctrl => Some(Badge::Convert),
+            Some(NodeGrab::Anchor(_)) if mods.shift => Some(Badge::Plus),
+            Some(NodeGrab::Anchor(_)) => Some(Badge::Anchor),
+            Some(NodeGrab::Segment(..)) if mods.shift => Some(Badge::Plus),
             Some(NodeGrab::Segment(..)) => Some(if ctrl { Badge::Bend } else { Badge::Segment }),
             Some(NodeGrab::Box(_) | NodeGrab::BoxRotate) => None,
+            None if mods.shift => Some(Badge::Plus),
             None => mods.alt.then_some(Badge::Minus),
         };
         node_arrow(badge)
@@ -15512,6 +15527,143 @@ mod headless_app_tests {
         // The rects stay selectable, which the fourth case below needs.
         let _ = a;
         (app, id)
+    }
+
+    /// The node arrow's badge says what a press there would do with the keys
+    /// held, in `node_press`'s order, and mid-drag what the drag does with the
+    /// keys it still reads.
+    /// flip: `node_cursor` taking Shift before the grab → fails at "Shift on a
+    /// handle"; mid-drag dropping the held keys → fails at "Ctrl mid-bend".
+    #[test]
+    fn the_node_badge_follows_the_press_and_the_keys_a_drag_reads() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_two_rects(&ctx);
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to((0.0, 0.0));
+        p.curve_to((30.0, -40.0), (70.0, -40.0), (100.0, 0.0));
+        let id = ondin_core::IdSource::new(701).mint();
+        app.session
+            .try_commit(Transaction(vec![Operation::CreateNode {
+                id,
+                parent: app.session.doc.first_page(),
+                index: 2,
+                kind: NodeKind::Path {
+                    path: p,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
+                },
+                transform: Some(Affine::translate((1000.0, 1000.0))),
+                name: None,
+            }]))
+            .expect("add the path");
+        app.tool = Tool::Node;
+        app.session.selection.set_one(id);
+        // The first anchor selected, so its handle is drawn and can be grabbed.
+        app.points.set_one(id, (0, 0));
+        let at = |x: f64, y: f64| Some(Point::new(1000.0 + x, 1000.0 + y));
+        let (handle, anchor, segment, empty) = (
+            at(30.0, -40.0),
+            at(0.0, 0.0),
+            at(50.0, -30.0),
+            at(-400.0, 400.0),
+        );
+        assert!(matches!(
+            app.node_grab(handle.unwrap()),
+            Some(NodeGrab::Handle(..))
+        ));
+        assert!(matches!(
+            app.node_grab(anchor.unwrap()),
+            Some(NodeGrab::Anchor(_))
+        ));
+        assert!(matches!(
+            app.node_grab(segment.unwrap()),
+            Some(NodeGrab::Segment(..))
+        ));
+        assert!(app.node_grab(empty.unwrap()).is_none());
+
+        let node = |b: Badge| (egui::CursorIcon::Default, Some(Bitmap::Node(Some(b))));
+        let plain = (egui::CursorIcon::Default, Some(Bitmap::Node(None)));
+        let (none, shift, alt, ctrl) = (
+            egui::Modifiers::NONE,
+            egui::Modifiers::SHIFT,
+            egui::Modifiers::ALT,
+            egui::Modifiers::COMMAND,
+        );
+        let ctrl_shift = egui::Modifiers {
+            shift: true,
+            ..ctrl
+        };
+        for (world, mods, want, what) in [
+            (handle, none, node(Badge::Dot), "a handle"),
+            (handle, shift, node(Badge::Dot), "Shift on a handle"),
+            (handle, alt, node(Badge::Convert), "Alt on a handle"),
+            (anchor, none, node(Badge::Anchor), "an anchor"),
+            (anchor, shift, node(Badge::Plus), "Shift on an anchor"),
+            (anchor, ctrl, node(Badge::Convert), "Ctrl on an anchor"),
+            (
+                anchor,
+                ctrl_shift,
+                node(Badge::Convert),
+                "Ctrl first on an anchor",
+            ),
+            (segment, none, node(Badge::Segment), "a segment"),
+            (segment, shift, node(Badge::Plus), "Shift on a segment"),
+            (segment, ctrl, node(Badge::Bend), "Ctrl on a segment"),
+            (empty, none, plain, "empty canvas"),
+            (empty, shift, node(Badge::Plus), "Shift on empty canvas"),
+            (empty, alt, node(Badge::Minus), "Alt on empty canvas"),
+        ] {
+            assert_eq!(app.node_cursor(world, mods), want, "{what}");
+        }
+
+        // Mid-drag, wherever the pointer has got to.
+        app.drag = Drag::Segment {
+            id,
+            at: (0, 0),
+            t: 0.5,
+            grab: segment.unwrap(),
+        };
+        assert_eq!(
+            app.node_cursor(empty, none),
+            node(Badge::Segment),
+            "mid-move"
+        );
+        assert_eq!(
+            app.node_cursor(empty, ctrl),
+            node(Badge::Bend),
+            "Ctrl mid-bend"
+        );
+        assert_eq!(
+            app.node_cursor(empty, shift),
+            node(Badge::Segment),
+            "Shift mid-move"
+        );
+        app.drag = Drag::Handle {
+            id,
+            at: (0, 0),
+            side: Side::Out,
+        };
+        assert_eq!(
+            app.node_cursor(anchor, none),
+            node(Badge::Dot),
+            "a handle pulled"
+        );
+        assert_eq!(
+            app.node_cursor(anchor, alt),
+            node(Badge::Convert),
+            "Alt mid-pull"
+        );
+        app.drag = Drag::Points {
+            id,
+            grab: anchor.unwrap(),
+            anchor: (0, 0),
+        };
+        assert_eq!(
+            app.node_cursor(segment, ctrl),
+            node(Badge::Anchor),
+            "an anchor moved"
+        );
     }
 
     /// `pen_verb`'s four answers are distinct; over another layer it is `None`

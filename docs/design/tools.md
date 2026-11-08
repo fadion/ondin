@@ -146,7 +146,7 @@ image, and the `CursorIcon` set beside it is the stock fallback when the bitmap 
 | Create tools | `Crosshair`; `Alt` → `FromCentre` (the Text tool keeps the plain crosshair) |
 | Image tool, loaded | `Loaded`, the crosshair with the count left |
 | Pen | Close on the first anchor, Join on another open end, Continue on an open end with no path in flight, Convert while `Alt` pulls the handle |
-| Node tool | node arrow; Anchor, Segment or Dot over those; `Ctrl` on an anchor or `Alt` on a handle → Convert; `Ctrl` on a segment → Bend; `Shift` → Plus; `Alt` over empty canvas → Minus |
+| Node tool | node arrow; Anchor, Segment or Dot over those; `Ctrl` on an anchor or `Alt` on a handle → Convert; `Ctrl` on a segment → Bend; `Shift` on an anchor, a segment or empty canvas → Plus (a handle ignores it); `Alt` over empty canvas → Minus. Mid-drag the drag's own: Anchor, Segment (`Ctrl` → Bend) or Dot (`Alt` → Convert), as those keys still act |
 | Node tool, pen armed | pen with Plus (insert) on a segment, Continue, Star (new subpath) |
 | Pencil over the selected open path's end | pencil with Continue |
 | Text tool over text, and in a text edit | `IBeam`; over an outline → `TextOnPath` |

@@ -1197,13 +1197,27 @@ pub(crate) enum ClipKey {
 /// The clipboard keys, in [`ClipKey`] slot order.
 const CLIP_KEYS: [egui::Key; 3] = [egui::Key::V, egui::Key::X, egui::Key::C];
 
-/// Give a clipboard key's release the Ctrl its press was held with when that
-/// press never arrived: `egui_winit` swallows a Ctrl+V/X/C press (and pushes no
-/// `Paste` for a picture), so a key let go after Ctrl, the ordinary rolling
-/// release of a quick tap, would read as a plain key. A press that arrived marks
-/// the key [`ClipKey::Seen`] and its release is left alone; one held across a
-/// focus change is left alone too. Runs on the raw input, before every reader.
-pub(crate) fn witness_swallowed_presses(raw: &mut egui::RawInput, keys: &mut [ClipKey; 3]) {
+/// What [`witness_swallowed_presses`] carries from one raw frame to the next.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ClipWitness {
+    keys: [ClipKey; 3],
+    /// The last frame's modifiers when Ctrl was down in it, else none: what a
+    /// release in this frame was pressed with.
+    held: egui::Modifiers,
+}
+
+/// Give a clipboard key's release the modifiers its press was held with when
+/// that press never arrived: `egui_winit` swallows a Ctrl+V/X/C press whatever
+/// else is held (and pushes no `Paste` for a picture), so a key let go after
+/// Ctrl, the ordinary rolling release of a quick tap, would read as a plain key.
+/// Alt and Shift come from the last frame Ctrl was down in, so a rolling
+/// Ctrl+Alt+V stays a property paste; a tap inside one frame gets Ctrl alone. A
+/// press that arrived marks the key [`ClipKey::Seen`] and its release is left
+/// alone; one held across a focus change is left alone too. Runs on the raw
+/// input, before every reader.
+pub(crate) fn witness_swallowed_presses(raw: &mut egui::RawInput, witness: &mut ClipWitness) {
+    let held = witness.held;
+    let keys = &mut witness.keys;
     for e in &mut raw.events {
         match e {
             egui::Event::WindowFocused(_) => {
@@ -1230,6 +1244,8 @@ pub(crate) fn witness_swallowed_presses(raw: &mut egui::RawInput, keys: &mut [Cl
                             } else {
                                 modifiers.ctrl = true;
                             }
+                            modifiers.alt |= held.alt;
+                            modifiers.shift |= held.shift;
                         }
                         keys[slot] = ClipKey::Up;
                     }
@@ -1238,6 +1254,10 @@ pub(crate) fn witness_swallowed_presses(raw: &mut egui::RawInput, keys: &mut [Cl
             _ => {}
         }
     }
+    witness.held = match raw.modifiers.command {
+        true => raw.modifiers,
+        false => egui::Modifiers::NONE,
+    };
 }
 
 /// The modifiers `key` was let go with this frame, as its own release event carries
@@ -3936,7 +3956,7 @@ mod release_chord_tests {
     #[test]
     fn a_swallowed_press_lends_its_release_the_ctrl() {
         let none = egui::Modifiers::NONE;
-        let run = |events: Vec<egui::Event>, keys: &mut [ClipKey; 3]| {
+        let run = |events: Vec<egui::Event>, keys: &mut ClipWitness| {
             let mut raw = egui::RawInput {
                 events,
                 ..Default::default()
@@ -3944,7 +3964,7 @@ mod release_chord_tests {
             witness_swallowed_presses(&mut raw, keys);
             actions(Mode::Normal, raw.events, none)
         };
-        let mut keys = [ClipKey::Up; 3];
+        let mut keys = ClipWitness::default();
         let got = run(vec![release(egui::Key::V, none)], &mut keys);
         assert!(got.contains(&Action::PasteRelease), "a rolling ⌘V: {got:?}");
         let got = run(
@@ -3967,6 +3987,41 @@ mod release_chord_tests {
             !got.contains(&Action::PasteRelease),
             "across focus: {got:?}"
         );
+    }
+
+    /// A rolling Ctrl+Alt+V, every modifier up before V, stays a property paste:
+    /// the swallowed press's release takes Alt from the last frame Ctrl was down
+    /// in, and never pastes the clipboard's picture. Once Ctrl has been up a
+    /// frame, a later release takes no stale Alt.
+    /// flip: `witness_swallowed_presses` lending Ctrl alone → fails at "a rolling
+    /// Ctrl+Alt+V"; `held` kept after Ctrl comes up → fails at "no stale Alt".
+    #[test]
+    fn a_swallowed_press_lends_its_release_the_alt_held_with_ctrl() {
+        let none = egui::Modifiers::NONE;
+        let ctrl_alt = egui::Modifiers {
+            command: true,
+            ctrl: true,
+            alt: true,
+            ..Default::default()
+        };
+        let frame = |events: Vec<egui::Event>, held: egui::Modifiers, w: &mut ClipWitness| {
+            let mut raw = egui::RawInput {
+                events,
+                modifiers: held,
+                ..Default::default()
+            };
+            witness_swallowed_presses(&mut raw, w);
+            actions(Mode::Normal, raw.events, held)
+        };
+        let mut w = ClipWitness::default();
+        frame(Vec::new(), ctrl_alt, &mut w);
+        let got = frame(vec![release(egui::Key::V, none)], none, &mut w);
+        assert_eq!(got, vec![Action::PasteProperties], "a rolling Ctrl+Alt+V");
+
+        frame(Vec::new(), ctrl_alt, &mut w);
+        frame(Vec::new(), none, &mut w);
+        let got = frame(vec![release(egui::Key::V, none)], none, &mut w);
+        assert_eq!(got, vec![Action::PasteRelease], "no stale Alt");
     }
 
     /// A Ctrl+Alt+X tapped inside one slow frame, Alt already up when the frame

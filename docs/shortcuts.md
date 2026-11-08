@@ -70,7 +70,9 @@ frame's: a quick tap lets go of Ctrl in the same frame, and the frame then reads
 key let go *after* Ctrl carries no Ctrl on its release either, so the raw input is read first
 (`input::witness_swallowed_presses`, from `raw_input_hook`): a `V`, `X` or `C` release whose press
 never arrived as a key event can only follow a press `egui_winit` swallowed, which Ctrl was down
-for, and it gets that Ctrl back; one held across a focus change is left alone. The
+for, and it gets that Ctrl back, with the Alt and Shift of the last frame Ctrl was down in, so
+a rolling `Ctrl+Alt+V` stays a property paste (a tap inside one frame gets Ctrl alone); one held
+across a focus change is left alone. The
 `Cut`/`Copy`/`Paste` events, which carry no modifiers, read Alt and Shift off their key's
 release in the same frame when there is one, so a chord tapped inside one slow frame keeps them.
 

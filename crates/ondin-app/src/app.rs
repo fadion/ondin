@@ -1035,8 +1035,9 @@ pub struct OndinApp {
     /// The peek's key is down, as its own press and release events say
     /// (`canvas::peek_key_held`): egui's held state misses a release Shift spells as `|`.
     pub(crate) peek_key: bool,
-    /// Whether each clipboard key's press arrived (`input::witness_swallowed_presses`).
-    clip_keys: [crate::input::ClipKey; 3],
+    /// Whether each clipboard key's press arrived, and what was held with Ctrl
+    /// (`input::witness_swallowed_presses`).
+    clip_keys: crate::input::ClipWitness,
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
     pub(crate) pixel_preview: bool,

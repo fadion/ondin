@@ -878,7 +878,7 @@ pub(crate) fn cheatsheet_modifiers() -> egui::Modifiers {
 }
 
 /// [`keys`] for a host chosen by the caller, so both spellings are testable on any.
-fn keys_for(text: &str, mac: bool) -> std::borrow::Cow<'_, str> {
+pub(crate) fn keys_for(text: &str, mac: bool) -> std::borrow::Cow<'_, str> {
     if !text.contains('+') {
         return std::borrow::Cow::Borrowed(text);
     }
@@ -1182,6 +1182,64 @@ fn cheatsheet_pressed(i: &egui::InputState) -> bool {
     held && ((m.shift && i.key_pressed(egui::Key::Slash)) || i.key_pressed(egui::Key::Questionmark))
 }
 
+/// Where a clipboard key (`V`, `X`, `C`) stands for [`witness_swallowed_presses`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ClipKey {
+    /// Up, or pressed in a way no key event showed.
+    #[default]
+    Up,
+    /// Its press arrived as a key event: a release is read as it comes.
+    Seen,
+    /// Held across a focus change: where it was pressed is unknown.
+    Unknown,
+}
+
+/// The clipboard keys, in [`ClipKey`] slot order.
+const CLIP_KEYS: [egui::Key; 3] = [egui::Key::V, egui::Key::X, egui::Key::C];
+
+/// Give a clipboard key's release the Ctrl its press was held with when that
+/// press never arrived: `egui_winit` swallows a Ctrl+V/X/C press (and pushes no
+/// `Paste` for a picture), so a key let go after Ctrl, the ordinary rolling
+/// release of a quick tap, would read as a plain key. A press that arrived marks
+/// the key [`ClipKey::Seen`] and its release is left alone; one held across a
+/// focus change is left alone too. Runs on the raw input, before every reader.
+pub(crate) fn witness_swallowed_presses(raw: &mut egui::RawInput, keys: &mut [ClipKey; 3]) {
+    for e in &mut raw.events {
+        match e {
+            egui::Event::WindowFocused(_) => {
+                for k in keys.iter_mut().filter(|k| **k != ClipKey::Up) {
+                    *k = ClipKey::Unknown;
+                }
+            }
+            egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } => {
+                let Some(slot) = CLIP_KEYS.iter().position(|k| k == key) else {
+                    continue;
+                };
+                match pressed {
+                    true => keys[slot] = ClipKey::Seen,
+                    false => {
+                        if keys[slot] == ClipKey::Up {
+                            modifiers.command = true;
+                            if cfg!(target_os = "macos") {
+                                modifiers.mac_cmd = true;
+                            } else {
+                                modifiers.ctrl = true;
+                            }
+                        }
+                        keys[slot] = ClipKey::Up;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The modifiers `key` was let go with this frame, as its own release event carries
 /// them. A chord read off its release, because `egui_winit` swallows the press
 /// (`V`, `C`, `X` with Ctrl), checks these and never the frame's `i.modifiers`: a
@@ -1243,7 +1301,18 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         //
         // Alt is tested before Shift in the `Paste` arms, so a hand still on Shift
         // cannot turn a property paste into a paste-in-place.
+        //
+        // An event carries no modifiers, and a quick chord in one slow frame lets go
+        // of Alt or Shift before the frame's state is read; the key's own release in
+        // that frame still holds what was down, so it speaks first.
+        let held = |key: egui::Key| released_with(i, key).unwrap_or(m);
         for ev in &i.events {
+            let m = match ev {
+                egui::Event::Copy => held(egui::Key::C),
+                egui::Event::Cut => held(egui::Key::X),
+                egui::Event::Paste(_) => held(egui::Key::V),
+                _ => m,
+            };
             match ev {
                 egui::Event::Copy if m.alt => out.push(Action::CopyProperties),
                 // No Shift guard on copy or cut, deliberately: `Ctrl+Shift+C` is
@@ -3853,6 +3922,66 @@ mod release_chord_tests {
             actions(Mode::Normal, vec![release(egui::Key::V, none)], cmd).is_empty(),
             "a bare V let go while Ctrl is down is no paste"
         );
+    }
+
+    /// A V let go after Ctrl, whose press `egui_winit` swallowed, takes back the
+    /// Ctrl it was pressed with; a V whose press arrived stays a plain V, and one
+    /// held across a focus change is left alone.
+    /// flip: `witness_swallowed_presses` leaving every release as it came → fails
+    /// at "a rolling ⌘V".
+    #[test]
+    fn a_swallowed_press_lends_its_release_the_ctrl() {
+        let none = egui::Modifiers::NONE;
+        let run = |events: Vec<egui::Event>, keys: &mut [ClipKey; 3]| {
+            let mut raw = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            witness_swallowed_presses(&mut raw, keys);
+            actions(Mode::Normal, raw.events, none)
+        };
+        let mut keys = [ClipKey::Up; 3];
+        let got = run(vec![release(egui::Key::V, none)], &mut keys);
+        assert!(got.contains(&Action::PasteRelease), "a rolling ⌘V: {got:?}");
+        let got = run(
+            vec![
+                super::tests::key(egui::Key::V, none),
+                release(egui::Key::V, none),
+            ],
+            &mut keys,
+        );
+        assert!(!got.contains(&Action::PasteRelease), "a plain V: {got:?}");
+        let _ = run(vec![super::tests::key(egui::Key::V, none)], &mut keys);
+        let got = run(
+            vec![
+                egui::Event::WindowFocused(false),
+                release(egui::Key::V, none),
+            ],
+            &mut keys,
+        );
+        assert!(
+            !got.contains(&Action::PasteRelease),
+            "across focus: {got:?}"
+        );
+    }
+
+    /// A Ctrl+Alt+X tapped inside one slow frame, Alt already up when the frame
+    /// is read, is Exclude alone: the cut event reads Alt off X's release.
+    /// flip: the clipboard event arms reading the frame's modifiers → `Cut` appears.
+    #[test]
+    fn a_batched_chord_reads_alt_off_its_release() {
+        let ctrl_alt = egui::Modifiers {
+            command: true,
+            ctrl: true,
+            alt: true,
+            ..Default::default()
+        };
+        let got = actions(
+            Mode::Normal,
+            vec![egui::Event::Cut, release(egui::Key::X, ctrl_alt)],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(got, vec![Action::Boolean(ondin_core::BoolOp::Exclude)]);
     }
 }
 

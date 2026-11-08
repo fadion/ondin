@@ -1699,7 +1699,9 @@ impl EditorSession {
         match self.step_quietly(true) {
             Ok(Some((subjects, before))) => {
                 match self.follow_step(&subjects, &before) {
-                    Some(page) => self.info(format!("Undo · on {page}")),
+                    // Quoted, as every user-named thing in a toast is: `input::keys`
+                    // leaves quoted text as typed.
+                    Some(page) => self.info(format!("Undo · on “{page}”")),
                     None => self.info("Undo"),
                 }
                 true
@@ -1724,7 +1726,7 @@ impl EditorSession {
         match self.step_quietly(false) {
             Ok(Some((subjects, before))) => {
                 match self.follow_step(&subjects, &before) {
-                    Some(page) => self.info(format!("Redo · on {page}")),
+                    Some(page) => self.info(format!("Redo · on “{page}”")),
                     None => self.info("Redo"),
                 }
                 true
@@ -1817,7 +1819,7 @@ impl EditorSession {
         } else if moved > 0 {
             let mut said = format!("{verb} {}", steps(moved));
             if let Some(page) = followed {
-                said.push_str(&format!(" · on {page}"));
+                said.push_str(&format!(" · on “{page}”"));
             }
             if back {
                 said.push_str(" · Ctrl+Y to redo");
@@ -3915,5 +3917,41 @@ mod tests {
             &[rect],
             "and the step on Archive did not switch away and back on the way"
         );
+    }
+
+    /// An undo that follows its step to another page names the page quoted, so
+    /// the status line's chord spelling leaves a name like *Ctrl+K menu* as typed.
+    /// flip: `undo` writing the page unquoted → fails at the Mac spelling.
+    #[test]
+    fn an_undo_on_another_page_names_it_as_typed() {
+        let mut s = EditorSession::new();
+        let home = s.page;
+        let other = s.ids.mint();
+        assert!(s.commit(Transaction(vec![Operation::AddPage {
+            id: other,
+            index: 1,
+            name: "Ctrl+K menu".into(),
+            ground: Some(Color::WHITE),
+            draft: false,
+            modes: Vec::new(),
+        }])));
+        let away = s.ids.mint();
+        assert!(s.commit(Transaction(vec![Operation::CreateNode {
+            id: away,
+            parent: other,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }])));
+        rename(&mut s, away, "Card");
+        s.switch_page(home);
+        s.undo();
+        let said = crate::input::keys_for(&s.status().text, true);
+        assert_eq!(said, "Undo · on “Ctrl+K menu”");
     }
 }

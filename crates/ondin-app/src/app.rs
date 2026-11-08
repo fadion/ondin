@@ -1035,6 +1035,8 @@ pub struct OndinApp {
     /// The peek's key is down, as its own press and release events say
     /// (`canvas::peek_key_held`): egui's held state misses a release Shift spells as `|`.
     pub(crate) peek_key: bool,
+    /// Whether each clipboard key's press arrived (`input::witness_swallowed_presses`).
+    clip_keys: [crate::input::ClipKey; 3],
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
     pub(crate) pixel_preview: bool,
@@ -1763,6 +1765,7 @@ impl OndinApp {
             outline_view: false,
             peeking: false,
             peek_key: false,
+            clip_keys: Default::default(),
             pixel_preview: false,
             show_layers: view.layers,
             show_history: view.history,
@@ -1900,6 +1903,7 @@ impl eframe::App for OndinApp {
     /// (`OndinApp::gate_dropper_input`), and `Shift+F10` on a focused control
     /// becomes a right-click on it (`ui::menu_key_as_right_click`).
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        crate::input::witness_swallowed_presses(raw_input, &mut self.clip_keys);
         self.gate_dropper_input(ctx, raw_input);
         crate::ui::menu_key_as_right_click(ctx, raw_input);
     }
@@ -7059,17 +7063,17 @@ impl ImageRefusal {
         use ondin_render::images::{DecodeError, MAX_DECODED_BYTES, MAX_EDGE};
         match self {
             Self::NotAnImage | Self::Decode(DecodeError::Corrupt) => {
-                format!("Could not read: {name}")
+                format!("Could not read “{name}”")
             }
             Self::Decode(DecodeError::TooLarge { width, height }) => format!(
-                "{name} is {width} × {height}; the largest Ondin can draw is {MAX_EDGE} on a side"
+                "“{name}” is {width} × {height}; the largest Ondin can draw is {MAX_EDGE} on a side"
             ),
             Self::Decode(DecodeError::TooMuchPixelData {
                 width,
                 height,
                 bytes,
             }) => format!(
-                "{name} is {width} × {height}, which is {} of pixels; the limit is {}",
+                "“{name}” is {width} × {height}, which is {} of pixels; the limit is {}",
                 crate::settings::human_bytes(*bytes),
                 crate::settings::human_bytes(MAX_DECODED_BYTES)
             ),
@@ -15665,13 +15669,13 @@ mod library_wiring_tests {
         let status = app.session.status();
         assert_eq!(status.kind, crate::session::StatusKind::Error);
         assert!(
-            status.text.starts_with("Could not read: fake.png"),
+            status.text.starts_with("Could not read “fake.png”"),
             "{}",
             status.text
         );
         assert!(status.text.contains("Placed image"), "{}", status.text);
         assert!(
-            status.text.contains("Imported logo.svg — 1 layer"),
+            status.text.contains("Imported “logo.svg” — 1 layer"),
             "{}",
             status.text
         );
@@ -15811,7 +15815,7 @@ mod library_wiring_tests {
             app.session
                 .status()
                 .text
-                .contains("Imported brochure.pdf — ")
+                .contains("Imported “brochure.pdf” — ")
                 && app.session.status().text.contains(" on 2 pages"),
             "{}",
             app.session.status().text
@@ -17942,7 +17946,7 @@ mod svg_sniff_tests {
         let Err(plain) = read_picture(b"not a picture at all".to_vec(), None, None) else {
             panic!("twenty bytes of prose became a picture")
         };
-        assert_eq!(plain.message("notes.txt"), "Could not read: notes.txt");
+        assert_eq!(plain.message("notes.txt"), "Could not read “notes.txt”");
     }
 
     /// The drop door (bytes) and the paste door (a string) give one answer per file.

@@ -361,11 +361,11 @@ impl OndinApp {
             self.finish_text_first();
             self.session.name_step("Import tokens", icon::IMPORT);
             if !self.session.commit(Transaction(ops)) {
-                self.session.info(format!("{name} could not be applied"));
+                self.session.info(format!("“{name}” could not be applied"));
                 return;
             }
             said = Some(format!(
-                "Imported {} from {name} \u{b7} Ctrl+Z to undo",
+                "Imported {} from “{name}” \u{b7} Ctrl+Z to undo",
                 changes_label(n)
             ));
         }

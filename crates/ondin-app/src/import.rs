@@ -464,7 +464,7 @@ impl OndinApp {
             };
             match outcome {
                 SvgImport::Placed(made) => {
-                    said.push(format!("Imported {name} — {made}"));
+                    said.push(format!("Imported “{name}” — {made}"));
                     selected.extend_from_slice(self.session.selection.ids());
                 }
                 _ => failed.push(format!("{name} could not be read as {kind}")),
@@ -834,7 +834,7 @@ mod tests {
 
         app.start_replace_image(&ctx, notes, shape, slot, true);
         app.settle_imports();
-        assert_eq!(app.session.status().text, "Could not read: notes.txt");
+        assert_eq!(app.session.status().text, "Could not read “notes.txt”");
         assert!(!is_image(&app), "the fill stands");
 
         // The fill edited while the file reads: the picture goes nowhere, and says so.

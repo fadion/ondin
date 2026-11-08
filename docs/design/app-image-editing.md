@@ -180,7 +180,7 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   is read by `svg_in::import` through `canvas::read_svg`, the reader a pasted SVG uses too: one
   group named for the file's stem, centred on the drop point (cascaded `DROP_CASCADE` per file) or
   where a paste would land for the *Place image* dialog, which takes `.svg` and imports at once
-  rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the
+  rather than loading the Image tool. Its report (*Imported “logo.svg” — 5 layers*) follows the
   pictures' in one status, and the drop selects both.
 - A PDF (its `%PDF-` header, `pdf_in::looks_like_pdf`) comes in by the same doors, the drop pill
   saying *Import PDF* (`canvas::read_pdf`, placed by `place_pdf`). `read_pdf` has `pdf_in::import`

@@ -66,7 +66,13 @@ paste-properties and Exclude chords below.
 as an ordinary `Key { pressed: false }`. That is how Exclude (`Ctrl+Alt+X`), paste-properties
 (`Ctrl+Alt+V`), an image paste (§15 D183) and text centre-align (`Ctrl+Shift+C`, §10) are read,
 each against the modifiers **the release itself carries** (`input::released_with`), never the
-frame's: a quick tap lets go of Ctrl in the same frame, and the frame then reads it as up.
+frame's: a quick tap lets go of Ctrl in the same frame, and the frame then reads it as up. A
+key let go *after* Ctrl carries no Ctrl on its release either, so the raw input is read first
+(`input::witness_swallowed_presses`, from `raw_input_hook`): a `V`, `X` or `C` release whose press
+never arrived as a key event can only follow a press `egui_winit` swallowed, which Ctrl was down
+for, and it gets that Ctrl back; one held across a focus change is left alone. The
+`Cut`/`Copy`/`Paste` events, which carry no modifiers, read Alt and Shift off their key's
+release in the same frame when there is one, so a chord tapped inside one slow frame keeps them.
 
 ⚠️ **A binding that reads both spellings fires twice, a frame apart** (§15 D219). `Ctrl+V` over
 text emits the event on the press frame and the release later; a same-frame guard cannot see

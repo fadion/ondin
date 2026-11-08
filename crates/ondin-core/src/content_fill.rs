@@ -817,8 +817,19 @@ static PRICE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static PERCENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[+-]?\d[\d.,]*\s?\u{A0}?%$").unwrap());
-static TIME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\d{1,2}[:.]\d{2}(\s?[AaPp]\.?[Mm]\.?)?$").unwrap());
+/// A clock time: `:` between hours and minutes, or `.` only before an am/pm,
+/// since `12.50` alone reads as a decimal. The hours and minutes are checked
+/// apart ([`is_time`]).
+static TIME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\d{1,2}):(\d{2})(\s?[AaPp]\.?[Mm]\.?)?$|^(\d{1,2})\.(\d{2})(\s?[AaPp]\.?[Mm]\.?)$",
+    )
+    .unwrap()
+});
+/// A count grouped in thousands by dots or spaces, `1.250.000` or `1 250 000`,
+/// which [`PHONE`] would otherwise take. A three-digit lead reads as a phone.
+static GROUPED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{1,2}(?:[. \u{A0}\u{202F}]\d{3}){2,}$").unwrap());
 static DATE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}$|^\p{L}{3,9}\.? \d{1,2},? \d{4}$|^\d{1,2}\.? \p{L}{3,9}\.? \d{4}$",
@@ -827,6 +838,25 @@ static DATE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static PHONE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+?[\d\s().\-]{7,}$").unwrap());
 static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[+-]?\d[\d.,\s]*$").unwrap());
+
+/// Whether `t` is a clock time [`TIME`] matches whose hours and minutes are ones
+/// a clock shows: up to 23 hours, or 12 with an am/pm, and up to 59 minutes.
+fn is_time(t: &str) -> bool {
+    let Some(c) = TIME.captures(t) else {
+        return false;
+    };
+    let (h, m, ampm) = match c.get(1) {
+        Some(h) => (h, c.get(2), c.get(3).is_some()),
+        None => (c.get(4).expect("the second arm's hours"), c.get(5), true),
+    };
+    let (Ok(h), Some(Ok(m))) = (
+        h.as_str().parse::<u32>(),
+        m.map(|m| m.as_str().parse::<u32>()),
+    ) else {
+        return false;
+    };
+    m <= 59 && if ampm { (1..=12).contains(&h) } else { h <= 23 }
+}
 
 /// A text layer's kind read from what it says: `@` is an email, a currency an
 /// amount, a run of digits a phone number. `None` when it reads as none of them.
@@ -845,11 +875,11 @@ pub fn kind_from_text(text: &str) -> Option<Kind> {
         Some(Kind::Price)
     } else if PERCENT.is_match(t) {
         Some(Kind::Percent)
-    } else if TIME.is_match(t) {
+    } else if is_time(t) {
         Some(Kind::Time)
     } else if DATE.is_match(t) {
         Some(Kind::Date)
-    } else if PHONE.is_match(t) && digits >= 7 {
+    } else if PHONE.is_match(t) && digits >= 7 && !GROUPED.is_match(t) {
         Some(Kind::Phone)
     } else if NUMBER.is_match(t) {
         Some(Kind::Number)
@@ -997,16 +1027,22 @@ fn ascii_fold(s: &str) -> String {
     let mut out = String::new();
     for c in s.to_lowercase().chars() {
         let folded = match c {
-            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ą' | 'ă' => "a",
             'æ' => "ae",
-            'ç' => "c",
-            'è' | 'é' | 'ê' | 'ë' => "e",
+            'ç' | 'ć' | 'č' => "c",
+            'đ' | 'ď' => "d",
+            'è' | 'é' | 'ê' | 'ë' | 'ę' | 'ě' => "e",
+            'ğ' => "g",
             'ì' | 'í' | 'î' | 'ï' | 'ı' => "i",
-            'ñ' => "n",
-            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
+            'ñ' | 'ń' | 'ň' => "n",
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ő' => "o",
             'œ' => "oe",
-            'ù' | 'ú' | 'û' | 'ü' => "u",
+            'ř' => "r",
+            'ş' | 'ś' | 'š' | 'ș' => "s",
+            'ț' | 'ţ' | 'ť' => "t",
+            'ù' | 'ú' | 'û' | 'ü' | 'ů' | 'ű' => "u",
             'ý' | 'ÿ' => "y",
+            'ž' | 'ź' | 'ż' => "z",
             'ß' => "ss",
             'ł' => "l",
             c if c.is_ascii_alphanumeric() => {
@@ -1491,7 +1527,7 @@ fn with_text<R>(
     };
     let base = TextRef::of(kind)?;
     let spans = spans.replaced(0, content.len(), text.len(), style);
-    let para = para_spans.edited(0, content.len(), text.len(), paragraph);
+    let para = para_spans.replaced(0, content.len(), text.len(), paragraph);
     let sizing = sizing.unwrap_or(*base.sizing);
     Some(f(TextRef {
         content: text,
@@ -1816,9 +1852,10 @@ impl Plan {
     }
 
     /// The fill as one transaction. A text takes its new content styled as its
-    /// first character was; an avatar replaces the shape's fills with one picture
-    /// drawn at twice the shape's size through `pictures`, and is left out when
-    /// nothing is lent or it cannot draw.
+    /// first character and paragraph were; an avatar replaces the shape's fills
+    /// with one picture drawn at twice the shape's size through `pictures`,
+    /// dropping a photo's credit, and is left out when nothing is lent or it
+    /// cannot draw.
     pub fn transaction(
         &self,
         doc: &Document,
@@ -1845,7 +1882,7 @@ impl Plan {
                     id: row.node,
                     content: text.clone(),
                     spans: spans.replaced(0, content.len(), text.len(), style),
-                    para_spans: para_spans.edited(0, content.len(), text.len(), paragraph),
+                    para_spans: para_spans.replaced(0, content.len(), text.len(), paragraph),
                 }),
                 (Value::Avatar(avatar), kind) => {
                     let Some(sink) = pictures.as_deref_mut() else {
@@ -1870,6 +1907,12 @@ impl Plan {
                             visible: true,
                         }]),
                     });
+                    // The photo it credited is gone, as on a replace.
+                    ops.extend(crate::credit::dropped_by_replace(
+                        doc,
+                        row.node,
+                        crate::credit::Replaced::Fills,
+                    ));
                 }
                 _ => {}
             }
@@ -2519,5 +2562,33 @@ pub fn sample(kind: Kind, locale: &str) -> String {
         Kind::Avatar => drawn.person.initials(),
         Kind::Address => drawn.place.address(locale).replace('\n', ", "),
         _ => drawn.text(kind, "", &mut rng, &mut Picks::new()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every letter of every name and company word a locale ships folds to at
+    /// least one ASCII letter, so an email or handle spells the whole name.
+    ///
+    /// flip: `ascii_fold` without its `ş` arm → fails at `Ayşe` in de.
+    #[test]
+    fn every_shipped_name_folds_letter_for_letter() {
+        for locale in locales() {
+            for list in ["given-f", "given-m", "family", "company-a", "company-b"] {
+                for entry in locale.list(list) {
+                    for c in entry.chars().filter(|c| c.is_alphabetic()) {
+                        assert!(
+                            !ascii_fold(&c.to_string()).is_empty(),
+                            "{}: {entry} folds away {c}",
+                            locale.tag
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(ascii_fold("Ayşe Şahin"), "aysesahin");
+        assert_eq!(ascii_fold("Petrović"), "petrovic");
     }
 }

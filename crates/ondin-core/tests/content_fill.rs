@@ -179,6 +179,28 @@ fn a_layer_is_read_by_its_name_then_its_text() {
     assert_eq!(kind_from_text("Our team"), None);
 }
 
+/// A decimal and a count grouped in thousands read as numbers, not as a time or
+/// a phone number; a clock reads as a time only with hours and minutes a clock
+/// shows.
+///
+/// flip: `kind_from_text` taking `PHONE` without the `GROUPED` check → fails at
+/// "1.250.000".
+#[test]
+fn a_decimal_or_a_grouped_count_reads_as_a_number() {
+    for t in ["25.99", "99.99", "12.50", "4.75", "1.250.000", "1 250 000"] {
+        assert_eq!(kind_from_text(t), Some(Kind::Number), "{t}");
+    }
+    for t in ["24:30", "9:75", "13:00 PM"] {
+        assert_ne!(kind_from_text(t), Some(Kind::Time), "{t}");
+    }
+    for t in ["23:59", "7.15 p.m.", "12:00 PM", "08:05"] {
+        assert_eq!(kind_from_text(t), Some(Kind::Time), "{t}");
+    }
+    for t in ["612 345 678", "06 39 98 12 34", "+49 30 901820"] {
+        assert_eq!(kind_from_text(t), Some(Kind::Phone), "{t}");
+    }
+}
+
 /// Over the team list each row is a record: its email is built from its own
 /// name, its avatar's initials are its name's, the rows differ, and the heading
 /// is left as it is. The count names the rows after the frames.
@@ -848,4 +870,387 @@ fn every_value_is_whole() {
         let year: u32 = day.rsplit(' ').next().unwrap().parse().unwrap();
         assert!(year <= 2004, "{day}");
     }
+}
+
+/// A filled text keeps its first character's style and its first paragraph's:
+/// a bold heading over a bulleted line stays a bold heading, not a bullet.
+///
+/// flip: `Plan::transaction` re-basing the paragraph spans with `edited` → fails
+/// at "no bullet".
+#[test]
+fn a_filled_text_keeps_its_first_character_and_paragraph() {
+    let mut f = Fixture::new();
+    let NodeKind::Text {
+        style, paragraph, ..
+    } = text("x", TextSizing::Auto, None)
+    else {
+        unreachable!()
+    };
+    let content = "Features\nFast";
+    let mut spans = ondin_core::CharSpans::default();
+    spans.set(0..8, ondin_core::CharAttr::Weight(700), &style);
+    let mut para_spans = ondin_core::ParaSpans::default();
+    para_spans.set(
+        9..13,
+        ondin_core::ParaAttr::Marker(Some(ondin_core::ListMarker::Disc)),
+        &paragraph,
+    );
+    let heading = f.add(f.page, text(content, TextSizing::Auto, None), "Headline");
+    f.commit(vec![Operation::SetText {
+        id: heading,
+        content: content.into(),
+        spans,
+        para_spans,
+    }]);
+    let plan = f.plan(&[heading], &Options::default());
+    f.doc
+        .apply(&plan.transaction(&f.doc, None))
+        .expect("the fill applies");
+    let NodeKind::Text {
+        content,
+        style,
+        spans,
+        para_spans,
+        paragraph,
+        ..
+    } = f.doc.get(heading).unwrap().kind()
+    else {
+        unreachable!()
+    };
+    assert_ne!(content, "Features\nFast", "fixture: filled");
+    let len = content.len();
+    assert!(
+        spans.runs(style, len).iter().all(|r| r.1.weight == 700),
+        "bold throughout"
+    );
+    assert!(
+        para_spans
+            .runs(paragraph, len)
+            .iter()
+            .all(|r| r.1.marker.is_none()),
+        "no bullet"
+    );
+}
+
+/// An avatar drawn over a credited photo takes the photo's credit with it, as a
+/// replace does.
+///
+/// flip: `Plan::transaction` not appending `credit::dropped_by_replace` → fails
+/// at "the credit goes".
+#[test]
+fn an_avatar_over_a_credited_photo_drops_the_credit() {
+    let mut f = Fixture::new();
+    let shape = f.add(f.page, ellipse(), "Avatar");
+    let photo = ImageId("photo".into());
+    f.commit(vec![
+        Operation::AddImage {
+            id: photo.clone(),
+            entry: ImageEntry {
+                source: ImageSource::Embedded(vec![0u8; 4].into()),
+                format: ImageFormat::Png,
+                width: 4,
+                height: 4,
+            },
+        },
+        Operation::SetFills {
+            id: shape,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::image_brush(photo).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetCredit {
+            id: shape,
+            credit: Some(Box::new(ondin_core::Credit {
+                kind: ondin_core::CreditKind::Photo,
+                text: "Photo by Ana Ruiz on Unsplash".into(),
+                author: "Ana Ruiz".into(),
+                author_url: "https://unsplash.com/@ana".into(),
+                provider: "Unsplash".into(),
+                provider_url: "https://unsplash.com".into(),
+                source_url: "https://unsplash.com/photos/abc".into(),
+                licence: "Unsplash License".into(),
+                licence_url: "https://unsplash.com/license".into(),
+                required: true,
+                inserted: "2026-11-08".into(),
+            })),
+        },
+    ]);
+    let plan = f.plan(&[shape], &Options::default());
+    let tx = plan.transaction(&f.doc, Some(&mut Painter(0)));
+    f.doc.apply(&tx).expect("the fill applies");
+    assert!(
+        f.doc.get(shape).unwrap().paint().image_fill().is_some(),
+        "fixture: an avatar drawn"
+    );
+    assert_eq!(f.doc.get(shape).unwrap().credit(), None, "the credit goes");
+}
+
+/// Hidden layers, a text bound to a variable and a text under a locked frame are
+/// not filled, the last counted as locked; a shape showing a picture is listed
+/// and kept, and a frame holding layers is no avatar's place.
+///
+/// flip: `gather` without its `shown` check → fails at "nothing hidden".
+#[test]
+fn hidden_bound_and_locked_layers_are_passed_over() {
+    let mut f = Fixture::new();
+    let hidden = f.add(f.page, frame(), "Card");
+    f.add(hidden, text("Name", TextSizing::Auto, None), "Name");
+    f.commit(vec![Operation::SetVisible {
+        id: hidden,
+        visible: false,
+    }]);
+    assert!(
+        f.plan(&[hidden], &Options::default()).rows.is_empty(),
+        "nothing hidden"
+    );
+
+    let bound = f.add(f.page, text("Name", TextSizing::Auto, None), "Name");
+    let (ops, var) = ondin_core::variable::add_variable_ops(
+        f.doc.variables(),
+        &mut f.ids,
+        ondin_core::variable::CollectionId::FIRST,
+        ondin_core::VarKind::String,
+        Some("label"),
+        None,
+    )
+    .unwrap();
+    f.commit(ops);
+    let mut vars = ondin_core::TextVars::default();
+    vars[ondin_core::variable::TEXT_CONTENT] = Some(var);
+    let bind = ondin_core::bind_text_ops(&f.doc, bound, vars);
+    f.commit(bind);
+    assert!(
+        f.plan(&[bound], &Options::default()).rows.is_empty(),
+        "a bound text is its variable's"
+    );
+
+    let locked = f.add(f.page, frame(), "Card");
+    f.add(locked, text("Name", TextSizing::Auto, None), "Name");
+    f.commit(vec![Operation::SetLocked {
+        id: locked,
+        locked: true,
+    }]);
+    let plan = f.plan(&[locked], &Options::default());
+    assert!(plan.rows.is_empty());
+    assert_eq!(plan.locked, 1, "the text under the locked frame");
+
+    let pictured = f.add(f.page, ellipse(), "Shape");
+    let photo = ImageId("photo".into());
+    f.commit(vec![
+        Operation::AddImage {
+            id: photo.clone(),
+            entry: ImageEntry {
+                source: ImageSource::Embedded(vec![0u8; 4].into()),
+                format: ImageFormat::Png,
+                width: 4,
+                height: 4,
+            },
+        },
+        Operation::SetFills {
+            id: pictured,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::image_brush(photo).into(),
+                visible: true,
+            }]),
+        },
+    ]);
+    let holder = f.add(f.page, frame(), "Avatar");
+    f.add(holder, text("Hi", TextSizing::Auto, None), "Greeting");
+    let plan = f.plan(&[pictured, holder], &Options::default());
+    let row = plan
+        .rows
+        .iter()
+        .find(|r| r.node == pictured)
+        .expect("listed");
+    assert_eq!(
+        row.value,
+        Value::Kept,
+        "a picture not named an avatar is kept"
+    );
+    assert!(
+        plan.rows.iter().all(|r| r.node != holder),
+        "a frame holding layers is no avatar"
+    );
+}
+
+/// Three avatars drawn alike add their picture once.
+///
+/// flip: `Plan::transaction` adding a picture without its `added` set → fails at
+/// "one picture" (the table refuses a second `AddImage` of one id at the
+/// commit, too).
+#[test]
+fn avatars_drawn_alike_add_one_picture() {
+    let mut f = Fixture::new();
+    let (list, _) = f.team();
+    let plan = f.plan(&[list], &Options::default());
+    let tx = plan.transaction(&f.doc, Some(&mut Painter(0)));
+    let added =
+        tx.0.iter()
+            .filter(|op| matches!(op, Operation::AddImage { .. }))
+            .count();
+    assert_eq!(added, 1, "one picture");
+}
+
+/// Changing one row's kind or the avatars switch reshuffles no other record's
+/// person.
+///
+/// flip: `draw_record` seeding an entity by how many rows its record has → fails
+/// at "the avatars switch moves no name".
+#[test]
+fn a_change_to_one_row_or_the_avatars_moves_no_other_person() {
+    let mut f = Fixture::new();
+    let (list, rows) = f.team();
+    let base = f.plan(&[list], &Options::default());
+    let names = |p: &Plan| f.column(p, &rows, "Name");
+    let off = f.plan(
+        &[list],
+        &Options {
+            avatars: None,
+            ..Options::default()
+        },
+    );
+    assert_eq!(
+        names(&base),
+        names(&off),
+        "the avatars switch moves no name"
+    );
+    let mut one = Options::default();
+    one.kinds.insert(f.child(rows[0], "Role"), Some(Kind::City));
+    let changed = f.plan(&[list], &one);
+    assert_eq!(
+        names(&base)[1..],
+        names(&changed)[1..],
+        "another row's kind moves no one else"
+    );
+}
+
+/// A list longer than a table still fills every row, and repeats an entry only
+/// once the table's others are all taken.
+///
+/// flip: `Rng::pick_fresh` answering `""` once its list is used up → fails at
+/// "every row filled".
+#[test]
+fn a_list_longer_than_its_table_fills_every_row() {
+    let cities = section(include_str!("../assets/content/en-US.txt"), "cities").len();
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(60, &["Name", "City"], None);
+    let plan = f.plan(&[list], &opts("en-US"));
+    let column = f.column(&plan, &rows, "City");
+    assert!(column.iter().all(|c| !c.is_empty()), "every row filled");
+    let first: std::collections::HashSet<&String> = column[..cities].iter().collect();
+    assert_eq!(first.len(), cities, "no city twice before all are taken");
+    assert!(
+        f.column(&plan, &rows, "Name").iter().all(|n| !n.is_empty()),
+        "every name filled"
+    );
+}
+
+/// The gendered entries a locale ships agree with the person: in German and in
+/// Spanish, a bio takes the form that agrees with the name it is about.
+///
+/// flip: `Drawn::fresh_gendered` taking the masculine form always → fails at the
+/// agreement.
+#[test]
+fn a_bio_agrees_with_its_person() {
+    for (tag, source) in [
+        ("de", include_str!("../assets/content/de.txt")),
+        ("es", include_str!("../assets/content/es.txt")),
+    ] {
+        let women: std::collections::HashSet<&str> =
+            section(source, "given-f").into_iter().collect();
+        let (mut masc, mut fem) = (
+            std::collections::HashSet::new(),
+            std::collections::HashSet::new(),
+        );
+        let words = |s: &str| -> Vec<String> {
+            s.split_whitespace()
+                .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+                .collect()
+        };
+        for pair in section(source, "bios") {
+            if let Some((m, w)) = pair.split_once('|') {
+                let (mw, ww) = (words(m), words(w));
+                masc.extend(mw.iter().filter(|x| !ww.contains(x)).cloned());
+                fem.extend(ww.iter().filter(|x| !mw.contains(x)).cloned());
+            }
+        }
+        let mut f = Fixture::new();
+        let (list, rows) = f.list(40, &["Name", "Bio"], None);
+        let mut o = opts(tag);
+        for row in &rows {
+            o.kinds.insert(f.child(*row, "Bio"), Some(Kind::Bio));
+        }
+        let plan = f.plan(&[list], &o);
+        let mut gendered = 0;
+        for (name, bio) in f
+            .column(&plan, &rows, "Name")
+            .iter()
+            .zip(f.column(&plan, &rows, "Bio"))
+        {
+            let ws = words(&bio);
+            let (is_m, is_f) = (
+                ws.iter().any(|w| masc.contains(w)),
+                ws.iter().any(|w| fem.contains(w)),
+            );
+            if is_m || is_f {
+                gendered += 1;
+                let woman = women.contains(name.split(' ').next().unwrap());
+                assert_eq!(is_f, woman, "{tag}: {name}, {bio}");
+            }
+        }
+        assert!(gendered >= 4, "{tag} drew gendered bios: {gendered}");
+    }
+}
+
+/// An unshipped locale falls back to the first shipped one in a plan, a text in
+/// an unshipped Language disagrees with every shipped one, tags read without
+/// case or with `_`, and the verb refuses an unshipped locale.
+///
+/// flip: `agreed_locale` skipping a text whose Language is not shipped → fails
+/// at "an unshipped Language disagrees".
+#[test]
+fn the_locale_falls_back_and_disagrees_as_the_design_says() {
+    let mut f = Fixture::new();
+    let (list, rows) = f.list(3, &["Name", "City"], None);
+    let first = &locales()[0].tag;
+    let fallback = f.plan(&[list], &opts("ja"));
+    let shipped = f.plan(&[list], &opts(first));
+    assert_eq!(
+        f.column(&fallback, &rows, "City"),
+        f.column(&shipped, &rows, "City"),
+        "an unshipped locale draws as the first"
+    );
+
+    let de = f.add(f.page, text("x", TextSizing::Auto, Some("de")), "Datum");
+    let ja = f.add(f.page, text("x", TextSizing::Auto, Some("ja")), "Datum");
+    assert!(
+        fill::agreed_locale(&f.doc, &[de, ja]).is_none(),
+        "an unshipped Language disagrees"
+    );
+    assert_eq!(locale_for("EN-gb").unwrap().tag, "en-GB");
+    assert_eq!(locale_for("de_DE").unwrap().tag, "de");
+
+    let res = Resolved::rebuild(&f.doc);
+    let refused = verbs::call(
+        &mut Ctx {
+            doc: &f.doc,
+            res: &res,
+            ids: &mut f.ids,
+            images: None,
+            contrast: None,
+        },
+        "fill_content",
+        &json!({ "nodes": [list.to_wire()], "locale": "ja" }),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(verbs::VerbError::Invalid {
+                param: "locale",
+                ..
+            })
+        ),
+        "{refused:?}"
+    );
 }

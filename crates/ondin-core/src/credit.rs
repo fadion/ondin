@@ -106,6 +106,8 @@ impl Credit {
 pub enum Replaced {
     Fill(usize),
     Stroke(usize),
+    /// The whole fill list, as an avatar written over a shape's fills.
+    Fills,
 }
 
 /// The operation that drops `id`'s photo credit when a picture of another file
@@ -126,7 +128,7 @@ pub fn dropped_by_replace(
     let fills = paint.fills.iter().enumerate();
     let strokes = paint.strokes.iter().enumerate();
     let kept = fills
-        .filter(|(i, _)| replaced != Replaced::Fill(*i))
+        .filter(|(i, _)| replaced != Replaced::Fill(*i) && replaced != Replaced::Fills)
         .any(|(_, f)| picture(&f.brush))
         || strokes
             .filter(|(i, _)| replaced != Replaced::Stroke(*i))

@@ -714,7 +714,9 @@ ImageSink>)` is the edit.
   *address* a full one, *Product price* a price before *product*, *Team member* a full name before
   *team* a department, a time before a date, the generic *name* last; *cell* alone is not a phone),
   then the text (`kind_from_text`: an email, price, percent, time, date, a phone number of seven
-  digits or more, a number; text opening *Lorem ipsum* is a paragraph). *Heading* reads as
+  digits or more, a number; text opening *Lorem ipsum* is a paragraph). A time has hours and
+  minutes a clock shows and `.` between them only before an am/pm, so `12.50` is a number; a count
+  grouped in thousands with a one- or two-digit lead (`1.250.000`) is a number, not a phone. *Heading* reads as
   nothing, so a list's heading is left. A shape is *Avatar* only by its name. What reads as
   nothing is left as is.
 - **Labels**: a text whose name only repeats its text, as importers name them (`named_like_text`),
@@ -762,15 +764,17 @@ ImageSink>)` is the edit.
   sentences while they fit; an auto-height box that wraps takes a paragraph grown to about its
   present length.
 - **Text keeps its style**: one `SetText` per layer, its content replaced whole through
-  `Spans::replaced` and `para_spans.edited`, so the new text takes the first character's
-  attributes. Inside an instance it is an override like any edit.
+  `Spans::replaced` for both the character and the paragraph spans, so the new text takes the
+  first character's attributes and the first paragraph's: a heading over a bulleted line stays a
+  heading. Inside an instance it is an override like any edit.
 - **Avatars** (`Avatar { name, initials, style }`): *Initials*, white Inter 600 at 0.4 of the
   shorter side, or *Pattern*, three seeded shapes, on one of the eight `GROUNDS` (each at least
   4.5:1 against white), picked by a hash of the name so the same person gets the same avatar. A
   shape's style is the one picked for it (`Options::styles`), else `Options::avatars`'.
   `Avatar::art(w, h)` answers filled paths, ground first. The transaction draws it at twice the
   shape's box (clamped to 8–2048 px) through `ImageSink::draw`, adds each image once and replaces the
-  shape's fills with one image fill. `draw` is a default method answering `None`; the app's
+  shape's fills with one image fill, dropping a photo's credit as a replace does
+  (`credit::Replaced::Fills`). `draw` is a default method answering `None`; the app's
   `canvas::Decoded` and `import_files::Pictures` draw with `ondin_render::rasterize_paths` and a PNG
   encode (`canvas::art_png`). Without a sink that draws, avatars are left out.
 - **Locales**, one file each in `ondin-core/assets/content/` (en-US, en-GB, de, fr, es, it, pt-BR,

@@ -491,6 +491,9 @@ pub struct FontService {
     /// `families`, lowercased and parallel to it, so a keystroke does not
     /// re-lowercase every name.
     keys: Vec<String>,
+    /// `system_aliases` by their lowercased name, which is how a document's
+    /// family reaches [`Self::spelled`].
+    alias_keys: HashMap<String, String>,
     /// Bumped whenever `families` changes, so [`Filter`] knows to recompute.
     revision: u64,
     filter: Filter,
@@ -649,6 +652,7 @@ impl FontService {
             catalog: HashMap::new(),
             families: vec!["Inter".to_string()],
             keys: vec!["inter".to_string()],
+            alias_keys: HashMap::new(),
             revision: 0,
             filter: Filter::default(),
             state,
@@ -703,6 +707,7 @@ impl FontService {
             catalog: HashMap::new(),
             families: vec!["Inter".to_string()],
             keys: vec!["inter".to_string()],
+            alias_keys: HashMap::new(),
             revision: 0,
             filter: Filter::default(),
             state,
@@ -1185,21 +1190,26 @@ impl FontService {
         }
     }
 
-    /// `family` as the family list spells it, matched without case — a document
-    /// can name `roboto` and `document_families` lowercases — else as given.
+    /// `family` as the family list or an installed face's other name spells it,
+    /// matched without case — a document can name `roboto` and
+    /// `document_families` lowercases — else as given.
     fn spelled(&self, family: &str) -> String {
         if self
             .families
             .binary_search_by(|f| f.as_str().cmp(family))
             .is_ok()
+            || self.system_aliases.contains(family)
         {
             return family.to_string();
         }
         let lower = family.to_lowercase();
-        self.keys
-            .iter()
-            .position(|k| *k == lower)
-            .map_or_else(|| family.to_string(), |i| self.families[i].clone())
+        if let Some(i) = self.keys.iter().position(|k| *k == lower) {
+            return self.families[i].clone();
+        }
+        self.alias_keys
+            .get(&lower)
+            .cloned()
+            .unwrap_or_else(|| family.to_string())
     }
 
     fn ensure(&mut self, family: &str, want: Want, lane: Lane) {
@@ -1517,6 +1527,11 @@ impl FontService {
         }
         self.families = names.into_iter().collect();
         self.keys = self.families.iter().map(|n| n.to_lowercase()).collect();
+        self.alias_keys = self
+            .system_aliases
+            .iter()
+            .map(|a| (a.to_lowercase(), a.clone()))
+            .collect();
         self.revision += 1;
     }
 }
@@ -3115,8 +3130,9 @@ mod tests {
 
     /// A document naming an installed face by its other name (a localized one)
     /// draws in its files, registered under that name, while the picker still
-    /// lists the face once.
-    /// flip: `faces_of` without its alias branch → fails at "the alias's files".
+    /// lists the face once; a cased other name is found from its lowercased form.
+    /// flip: `faces_of` without its alias branch → fails at "the alias's files";
+    /// `spelled` without its `alias_keys` lookup → fails at "a cased other name".
     #[test]
     fn a_face_named_by_its_other_name_loads_under_it() {
         let path = PathBuf::from(concat!(
@@ -3131,6 +3147,7 @@ mod tests {
             families: vec![
                 ("Ondin Icons".into(), fontdb::Language::English_UnitedStates),
                 ("オンディン".into(), fontdb::Language::Japanese_Japan),
+                ("Système Ondin".into(), fontdb::Language::French_France),
             ],
             post_script_name: String::new(),
             style: fontdb::Style::Normal,
@@ -3154,6 +3171,17 @@ mod tests {
             specs[0].key,
             service.faces_of("Ondin Icons", Want::Full)[0].key,
             "keyed apart from the listed name's"
+        );
+
+        // A cased other name arrives lowercased, as `document_families` hands it.
+        service.ensure_loaded("système ondin");
+        assert!(
+            service
+                .state
+                .get("Système Ondin")
+                .is_some_and(|s| s.outstanding > 0),
+            "a cased other name is queued under its own spelling: {:?}",
+            service.state.keys().collect::<Vec<_>>()
         );
     }
 

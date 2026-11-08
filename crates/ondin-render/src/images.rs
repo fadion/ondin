@@ -836,15 +836,17 @@ pub fn decode(bytes: &[u8], format: ImageFormat) -> Result<ImageData, DecodeErro
 }
 
 /// One over an 8-bit channel's full scale, in the fixed point [`AdjustLut`]
-/// sums in. 16 bits of fraction keeps every term of the sum inside an `i32`.
+/// sums in.
 const FIXED_ONE: i32 = 1 << 16;
 
 /// What one input channel at one level contributes to each of the three output
 /// channels, in [`FIXED_ONE`]ths.
 ///
-/// Indexed by the input channel first: a pixel is then three loads of twelve
-/// adjacent bytes instead of nine scattered ones.
-type Contributions = Box<[[[i32; 3]; 256]; 3]>;
+/// Wide, because a duotone colour far outside 0..1 (any finite one loads) makes
+/// terms past `i32`, and saturating two of opposite sign loses their sum's sign.
+/// Indexed by the input channel first: a pixel is then three loads of adjacent
+/// bytes instead of nine scattered ones.
+type Contributions = Box<[[[i64; 3]; 256]; 3]>;
 
 /// An [`AdjustPipeline`] compiled to lookup tables.
 ///
@@ -855,7 +857,7 @@ type Contributions = Box<[[[i32; 3]; 256]; 3]>;
 struct AdjustLut {
     /// The matrix as [`Contributions`], with its fifth column beside as the
     /// per-output-channel offset.
-    matrix: Option<(Contributions, [i32; 3])>,
+    matrix: Option<(Contributions, [i64; 3])>,
     /// The tone curve at each of the 256 levels a byte has.
     curve: Option<[u8; 256]>,
 }
@@ -863,16 +865,17 @@ struct AdjustLut {
 impl AdjustLut {
     fn build(p: &AdjustPipeline) -> Self {
         let matrix = p.matrix.map(|m| {
-            let mut contrib = Box::new([[[0i32; 3]; 256]; 3]);
+            let mut contrib = Box::new([[[0i64; 3]; 256]; 3]);
+            let one = f64::from(FIXED_ONE);
             for (inp, table) in contrib.iter_mut().enumerate() {
                 for (v, cell) in table.iter_mut().enumerate() {
                     for (out, term) in cell.iter_mut().enumerate() {
-                        let k = m[out * 5 + inp];
-                        *term = (k * v as f32 / 255.0 * FIXED_ONE as f32).round() as i32;
+                        let k = f64::from(m[out * 5 + inp]);
+                        *term = (k * v as f64 / 255.0 * one).round() as i64;
                     }
                 }
             }
-            let offset = [0, 1, 2].map(|out| (m[out * 5 + 4] * FIXED_ONE as f32).round() as i32);
+            let offset = [0, 1, 2].map(|out| (f64::from(m[out * 5 + 4]) * one).round() as i64);
             (contrib, offset)
         });
         let curve = p.curve.map(|c| {
@@ -899,12 +902,10 @@ impl AdjustLut {
                 &c[2][rgb[2] as usize],
             );
             v = [0, 1, 2].map(|out| {
-                // Summed wide: a duotone colour far outside 0..1 (any finite one
-                // loads) puts terms in the matrix whose `i32` sum would wrap.
-                let sum = [cr[out], cg[out], cb[out], off[out]]
-                    .iter()
-                    .map(|t| i64::from(*t))
-                    .sum::<i64>();
+                let sum = cr[out]
+                    .saturating_add(cg[out])
+                    .saturating_add(cb[out])
+                    .saturating_add(off[out]);
                 // Clamped to `0..=1` before rounding, as `apply` does.
                 let sum = sum.clamp(0, i64::from(FIXED_ONE)) as i32;
                 ((sum * 255 + FIXED_ONE / 2) >> 16) as u8
@@ -1818,6 +1819,24 @@ mod tests {
             let want = p.apply([1.0; 3]).map(|c| (c * 255.0 + 0.5) as u8);
             assert_eq!(AdjustLut::build(&p).apply([255; 3]), want);
             assert_eq!(want[0], 255, "red clamps high");
+        }
+
+        /// Terms of opposite sign each too large for `i32` keep the sign of their
+        /// sum: a duotone from red −40 000 to +40 000 turns a green pixel's red
+        /// on, as the function and SVG do.
+        /// flip: `AdjustLut::build` making its terms as `i32` → fails at "red".
+        #[test]
+        fn an_extreme_duotone_keeps_the_sign_of_saturated_terms() {
+            let adj = ImageAdjust {
+                duotone: 1.0,
+                duotone_dark: ondin_core::peniko::Color::new([-40_000.0, 0.0, 0.0, 1.0]),
+                duotone_light: ondin_core::peniko::Color::new([40_000.0, 0.0, 0.0, 1.0]),
+                ..ImageAdjust::NEUTRAL
+            };
+            let p = adj.pipeline().expect("finite, so drawn");
+            let want = p.apply([0.0, 1.0, 0.0]).map(|c| (c * 255.0 + 0.5) as u8);
+            assert_eq!(want[0], 255, "the function turns red on");
+            assert_eq!(AdjustLut::build(&p).apply([0, 255, 0]), want, "red");
         }
 
         /// A reduction maps back onto the source's box corner to corner, at sizes

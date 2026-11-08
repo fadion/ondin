@@ -597,10 +597,26 @@ pub struct Region {
     pub covers: Vec<usize>,
 }
 
-/// The least area, in square units, a face of [`regions`] keeps. Two outlines
-/// that share an edge leave slivers along it a few flo_curves tolerances wide;
-/// a face anyone could hover or drag across is far larger.
+/// The least area, in square units, a face of [`regions`] keeps.
 const REGION_MIN_AREA: f64 = 1e-3;
+
+/// The least mean width, in world units, a face of [`regions`] keeps (twice its
+/// area over its perimeter). Two outlines that share an edge leave slivers along
+/// it, and where the edge is a curve each traces with its own control points (a
+/// circle and a turned copy of it) the slivers are hundredths of a unit wide but
+/// long enough to pass any area floor; a face anyone could hover is far wider.
+const REGION_MIN_WIDTH: f64 = 0.05;
+
+/// Whether `path` is a face too small or too thin to keep.
+fn is_sliver(path: &BezPath) -> bool {
+    use kurbo::ParamCurveArclen;
+    let area = <BezPath as kurbo::Shape>::area(path).abs();
+    if area < REGION_MIN_AREA {
+        return true;
+    }
+    let perimeter: f64 = path.segments().map(|s| s.arclen(1e-3)).sum();
+    perimeter > 0.0 && 2.0 * area / perimeter < REGION_MIN_WIDTH
+}
 
 /// The planar arrangement of `outlines`: every connected face their edges cut the
 /// covered plane into, with which outlines cover it. Each outline is read as
@@ -680,8 +696,62 @@ fn arrange(outlines: &[BezPath]) -> Vec<Region> {
                 covers: covers.clone(),
             })
         })
-        .filter(|r| <BezPath as kurbo::Shape>::area(&r.path).abs() >= REGION_MIN_AREA)
+        .filter(|r| !is_sliver(&r.path))
         .collect()
+}
+
+/// Whether `rule` fills `p` inside `outline`: a non-zero winding, or an odd one.
+pub(crate) fn fills(outline: &BezPath, rule: crate::node::FillRule, p: Point) -> bool {
+    let w = crate::geometry::winding(outline, p);
+    match rule {
+        crate::node::FillRule::NonZero => w != 0,
+        crate::node::FillRule::EvenOdd => w % 2 != 0,
+    }
+}
+
+/// `outline`'s filled faces under `rule`, when that differs from how an operand
+/// is read here (subpaths that nest read as holes, subpaths that cross as one):
+/// same-way nested subpaths under non-zero, or crossing ones under even-odd. The
+/// faces are cut by every subpath and share edges; `None` when the readings agree
+/// and the outline can be used whole.
+pub(crate) fn filled_faces(outline: &BezPath, rule: crate::node::FillRule) -> Option<Vec<BezPath>> {
+    let subs = crate::geometry::subpaths(outline);
+    // Subpaths whose boxes are apart neither nest nor cross.
+    let boxes: Vec<kurbo::Rect> = subs
+        .iter()
+        .map(<BezPath as kurbo::Shape>::bounding_box)
+        .collect();
+    let apart = boxes.iter().enumerate().all(|(i, a)| {
+        boxes[i + 1..]
+            .iter()
+            .all(|b| a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0)
+    });
+    if apart {
+        return None;
+    }
+    let faces = regions(&subs)?;
+    let read = evaluate(BoolOp::Union, std::slice::from_ref(outline));
+    let mut differs = false;
+    let mut kept = Vec::new();
+    for face in faces {
+        let Some(p) = representative_point(&face.path) else {
+            continue;
+        };
+        let filled = fills(outline, rule, p);
+        differs |= filled
+            != read
+                .as_ref()
+                .is_some_and(|r| crate::geometry::winding(r, p) != 0);
+        if filled {
+            kept.push(face.path);
+        }
+    }
+    differs.then_some(kept)
+}
+
+/// A point inside the filled area of `path`, holes and all.
+pub(crate) fn point_inside(path: &BezPath) -> Option<Point> {
+    representative_point(path)
 }
 
 /// The box round every point of `flo`, handles included, in flo_curves' space.

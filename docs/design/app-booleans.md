@@ -120,7 +120,9 @@ Mask card, and how a failed boolean draws. Part of §9.4.
 ## Flatten, Outline shape, Outline stroke, Convert to path
 
 All four share `build::replace_with_path` (*Outline stroke* only when it replaces the layer), which carries what survives being redrawn: transform,
-z-slot, paint, name, opacity, a blend mode other than Normal or Pass through, visibility, effects, **moved pivot**, **mask flag**, the **effective fill rule**
+z-slot, paint, name, opacity, a blend mode other than Normal or Pass through, visibility and its
+binding, effects, **moved pivot**, **mask flag and mode**, the fill, stroke and effects **style
+links**, **export settings**, the **credit**, the **effective fill rule**
 (derived even-odd for an `Exclude`, else stored), and the layer's place in a layout (insets when
 authored, item properties when non-default). `display` is not carried (a path has no children).
 Lock and the proportion lock are dropped deliberately. None of the four has a chord.
@@ -193,17 +195,30 @@ plain `Path` layers.
   every face so far into the part inside it and the part outside, and adds the part of itself
   nothing covered yet. Each face is split into its connected pieces (`pieces`: one outline with the
   holes directly inside it) and lists the outlines covering it in ascending order
-  (`Region::covers`), the last topmost. Faces under `REGION_MIN_AREA` (10⁻³ unit²) are dropped:
-  two outlines sharing an edge leave slivers along it. It runs under the booleans' unwind guard and
-  failure counter (`unwind_guard`, which `guarded` wraps) and refuses coordinates past
-  `MAX_BOOL_COORD`.
-- **Sources** (`shape_builder::arrange`): visible, not effectively locked, not picture-filled,
-  outside any boolean and any instance; a rect, ellipse, polygon, star, boolean, or a path whose
-  every subpath is closed. Selected groups are opened into their contents.
+  (`Region::covers`), the last topmost. Faces under `REGION_MIN_AREA` (10⁻³ unit²) or a mean width
+  (twice the area over the perimeter) under `REGION_MIN_WIDTH` (0.05 units) are dropped: two
+  outlines sharing an edge leave slivers along it, and where each traces the edge with its own
+  control points (a circle and a turned copy) the slivers pass any area floor. It runs under the
+  booleans' unwind guard and failure counter (`unwind_guard`, which `guarded` wraps) and refuses
+  coordinates past `MAX_BOOL_COORD`. Faces whose areas add up past the sources' union overlap (the
+  arithmetic can hand back a whole operand as the outside of a nearly coincident one), and
+  `arrange` refuses them as `Abandoned`.
+- **Fill rules.** A boolean operand's subpaths read as holes where they nest and as one where they
+  cross. A source whose own fill rule reads them otherwise (same-way nested subpaths under
+  non-zero, crossing ones under even-odd; `boolean::filled_faces`) enters the arrangement as its
+  subpaths, and a face keeps it only where its rule fills (`filled_regions`); a face nothing fills
+  is no face. Such a solid can come back as more than one face.
+- **Sources** (`shape_builder::arrange`): visible with every ancestor, not effectively locked, not
+  picture-filled, not a mask (it paints nothing, and a face cut from it would paint its fill and stop
+  clipping), outside any boolean, any instance and any layout (a new or reshaped layer there would
+  be laid out anew, moving it and its siblings); a rect, ellipse, polygon, star, boolean, or a path
+  whose every subpath is closed. Selected groups are opened into their contents.
 - **Cutters**: an open path, a line, an arc or a spiral under the same conditions
-  (`Arrangement::cutters`) fills no face of its own; each of its subpaths, flattened to 0.01 units,
-  cuts every face it crosses through the knife's own surgery (`knife::pieces`, `cut_regions`), each
-  piece covered as its face was. It is left as it is by every edit. Any other shown layer (text,
+  (`Arrangement::cutters`) fills no face of its own; each of its subpaths, followed only where it
+  meets the faces' box (halved until each part misses it or is near its size, then flattened to
+  0.01 units, or a ten-millionth of the box where that is coarser, so a cutter reaching 10¹² units
+  costs what one near the faces does), cuts every face it crosses through the knife's own surgery
+  (`knife::pieces`, `cut_regions`), each piece covered as its face was. It is left as it is by every edit. Any other shown layer (text,
   pictures, frames, locked shapes) is left out, and `Arrangement::left_out` says so. The work is in
   world space, so sources under different parents cut each other as drawn. Refusals: `TooFew`
   (fewer than two sources, or one and no cutter), `NoOverlap` (no face covered twice and no face
@@ -220,7 +235,11 @@ plain `Path` layers.
 - **Divide** (`shape_builder::divide`): one path per face, looking like and named after the topmost
   source over it, so nothing moves on screen, stacked by that source. They go into a new group
   named *Divided* just above the outermost selected layer holding the topmost source. The sources
-  are deleted; a selected group left with nothing goes whole.
+  are deleted; a selected group left with nothing goes whole. When that group held every source,
+  *Divided* stands in for it and takes its opacity, blend, effects, mask and place in a layout.
+  Otherwise the opacity of every parent a face leaves is folded into the face, less that of the
+  parents it lands under; a clip or an effect on such a parent is not carried. Each face takes the
+  credit nearest it, on a source over it or a group going with that source.
 
 ### The tool (`shape_builder.rs`)
 
@@ -274,16 +293,22 @@ armed after each cut.
 
 - **What it cuts** (`core::knife::cut`): the selection's closed shapes, groups opened, or with
   nothing selected every unlocked visible closed shape on the page under the line — the
-  shape builder's `takes_part`, so text, pictures, frames and open paths are left alone. A shape
-  inside an instance is not cut either: cutting it would break the link without saying so.
+  shape builder's `takes_part`, so text, pictures, frames, masks, open paths, shapes in a hidden
+  group and shapes a layout places are left alone. A shape inside an instance is not cut either:
+  cutting it would break the link without saying so.
 - **How** (`knife::pieces`): the outline is read as the boolean union reads it (holes wound
-  against their ring), and the line's *chords*, the stretches between two crossings of the outline
+  against their ring); where the layer's fill rule reads its subpaths otherwise
+  (`boolean::filled_faces`), each face it fills is cut on its own (`parted`). The line's *chords*,
+  the stretches between two crossings of the outline
   that run inside it, are cut along exactly by surgery on the rings rather than by a boolean
   (flo_curves mishandles operands sharing an edge, which every piece and the cut side would). A
   chord from a ring back to it splits it in two, each loop taking the holes inside it; a chord to
   a hole first joins the hole to the ring along it both ways (a keyhole), so a ring cut through
-  both sides comes apart. A line that stops inside a shape cuts nothing there; a chord between two
-  points of one hole is left alone.
+  both sides comes apart. A chord that crosses an earlier one is applied in parts, cut where it
+  crosses (`split_at_crossings`), so a freehand line looping back over itself cuts along both
+  passes. A line that stops inside a shape cuts nothing there; a chord between two points of one
+  hole is left alone, and so is a run along the outline itself (a line down a shape's edge or the
+  seam two shapes share), whose piece would have no area (`MIN_PIECE_AREA` drops any such piece too).
 - **What lands**: each shape the line parts keeps its id, look, name and slot for its first piece,
   as a path (a primitive becomes one, `reshaped`); the other pieces land just above it, looking
   like it and named as it is (`placed_path` with its name). One undo step, *Knife*. With a

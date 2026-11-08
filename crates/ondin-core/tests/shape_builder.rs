@@ -399,3 +399,346 @@ fn a_line_adds_faces_only_where_it_crosses() {
     assert!(shape_builder::can_arrange(&f.doc, &[lone, wide]));
     assert!(!shape_builder::can_arrange(&f.doc, &[wide]));
 }
+
+impl Fixture {
+    /// A group in `parent` at its top, holding nothing yet.
+    fn group(&mut self, parent: NodeId) -> NodeId {
+        let id = self.ids.mint();
+        let index = self.doc.get(parent).unwrap().children().len();
+        self.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        }]));
+        id
+    }
+
+    fn set(&mut self, op: Operation) {
+        self.commit(Transaction(vec![op]));
+    }
+
+    /// The opacity `id` is drawn at, its parents' multiplied in.
+    fn effective_opacity(&self, id: NodeId) -> f64 {
+        let mut product = 1.0;
+        let mut up = Some(id);
+        while let Some(n) = up.and_then(|i| self.doc.get(i)) {
+            product *= f64::from(self.doc.drawn_opacity(n.id()));
+            up = n.parent();
+        }
+        product
+    }
+}
+
+/// A mask is left out of the arrangement, so a group of a mask and the shape it
+/// clips is too few, and nothing is painted where the mask drew nothing.
+///
+/// flip: `part` taking a mask → fails at `TooFew`.
+#[test]
+fn a_mask_takes_no_part() {
+    let mut f = Fixture::new();
+    let g = f.group(f.frame);
+    let mask = f.circle(g, 100.0, 100.0, BLUE, "Mask");
+    f.circle(g, 150.0, 100.0, ORANGE, "Shown");
+    f.set(Operation::SetMask {
+        id: mask,
+        mask: true,
+    });
+    let res = f.resolved();
+    assert_eq!(
+        shape_builder::arrange(&f.doc, &res, &[g]).err(),
+        Some(Refusal::TooFew)
+    );
+}
+
+/// A locked shape and a shape in a hidden group take no part, and a picture-filled
+/// one is said as left out.
+#[test]
+fn locked_hidden_and_pictured_shapes_are_left_out() {
+    let mut f = Fixture::new();
+    let a = f.circle(f.frame, 100.0, 100.0, BLUE, "A");
+    let b = f.circle(f.frame, 150.0, 100.0, ORANGE, "B");
+    f.set(Operation::SetLocked {
+        id: b,
+        locked: true,
+    });
+    let res = f.resolved();
+    assert_eq!(
+        shape_builder::arrange(&f.doc, &res, &[a, b]).err(),
+        Some(Refusal::TooFew)
+    );
+
+    let mut f = Fixture::new();
+    let a = f.circle(f.frame, 100.0, 100.0, BLUE, "A");
+    let g = f.group(f.frame);
+    let b = f.circle(g, 150.0, 100.0, ORANGE, "B");
+    f.set(Operation::SetVisible {
+        id: g,
+        visible: false,
+    });
+    let res = f.resolved();
+    assert_eq!(
+        shape_builder::arrange(&f.doc, &res, &[a, b]).err(),
+        Some(Refusal::TooFew)
+    );
+
+    let mut f = Fixture::new();
+    let a = f.circle(f.frame, 100.0, 100.0, BLUE, "A");
+    let b = f.circle(f.frame, 150.0, 100.0, ORANGE, "B");
+    let c = f.circle(f.frame, 120.0, 140.0, GREEN, "C");
+    f.set(Operation::SetFills {
+        id: c,
+        fills: keyed_by_position([Fill {
+            brush: ondin_core::image_brush(ondin_core::ImageId("pic".into())).into(),
+            visible: true,
+        }]),
+    });
+    assert!(
+        f.arrange(&[a, b, c]).left_out,
+        "the picture is said as left out"
+    );
+}
+
+/// *Divide* on a selected half-opaque group of two circles: the group goes, and
+/// *Divided* takes its opacity, so every face still draws at half.
+///
+/// flip: `divide` without the stand-in's `carried_look` → fails at the opacity.
+#[test]
+fn divide_keeps_a_selected_groups_opacity() {
+    let mut f = Fixture::new();
+    let g = f.group(f.frame);
+    f.circle(g, 100.0, 100.0, BLUE, "A");
+    f.circle(g, 150.0, 100.0, ORANGE, "B");
+    f.set(Operation::SetOpacity {
+        id: g,
+        opacity: 0.5,
+    });
+    let res = f.resolved();
+    let arr = f.arrange(&[g]);
+    let (tx, divided) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[g], &arr).unwrap();
+    f.commit(tx);
+    assert!(!f.doc.contains(g), "the emptied group goes");
+    for face in f.doc.get(divided).unwrap().children().to_vec() {
+        let o = f.effective_opacity(face);
+        assert!((o - 0.5).abs() < 1e-6, "{o}");
+    }
+}
+
+/// A face from a source inside a half-opaque group, moved out of it by *Divide*,
+/// takes that opacity onto itself; a group holding a layer that takes no part
+/// stays.
+///
+/// flip: `divide` without the opacity fold → fails at the half.
+#[test]
+fn divide_folds_a_left_parents_opacity_into_the_face() {
+    let mut f = Fixture::new();
+    let g = f.group(f.frame);
+    let a = f.circle(g, 100.0, 100.0, BLUE, "A");
+    let hidden = f.circle(g, 400.0, 400.0, GREEN, "Hidden");
+    f.set(Operation::SetVisible {
+        id: hidden,
+        visible: false,
+    });
+    f.set(Operation::SetOpacity {
+        id: g,
+        opacity: 0.5,
+    });
+    let b = f.circle(f.frame, 150.0, 100.0, ORANGE, "B");
+    let res = f.resolved();
+    let arr = f.arrange(&[a, b]);
+    let (tx, divided) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[a, b], &arr).unwrap();
+    f.commit(tx);
+    assert!(f.doc.contains(g), "the group holding a hidden layer stays");
+    let faces = f.doc.get(divided).unwrap().children().to_vec();
+    assert_eq!(faces.len(), arr.regions.len());
+    let face = faces
+        .iter()
+        .copied()
+        .find(|p| covers(&f.world(*p), at(60.0, 100.0)))
+        .expect("A's own face");
+    let o = f.effective_opacity(face);
+    assert!((o - 0.5).abs() < 1e-6, "{o}");
+}
+
+/// An even-odd path of two crossing squares draws their overlap as a hole; the
+/// arrangement offers no face there, and *Divide* paints nothing there.
+///
+/// flip: `filled_regions` passing every outline whole → the arrangement is
+/// refused, failing at the fixture's "an arrangement".
+#[test]
+fn an_even_odd_hole_is_no_face() {
+    let mut f = Fixture::new();
+    let mut p = BezPath::new();
+    for (x, y) in [(0.0, 0.0), (50.0, 50.0)] {
+        p.move_to((x, y));
+        p.line_to((x + 100.0, y));
+        p.line_to((x + 100.0, y + 100.0));
+        p.line_to((x, y + 100.0));
+        p.close_path();
+    }
+    let path = f.ids.mint();
+    f.commit(Transaction(vec![
+        Operation::CreateNode {
+            id: path,
+            parent: f.frame,
+            index: 0,
+            kind: NodeKind::Path {
+                path: p,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: Default::default(),
+            },
+            transform: None,
+            name: Some("Squares".into()),
+        },
+        Operation::SetFillRule {
+            id: path,
+            rule: ondin_core::FillRule::EvenOdd,
+        },
+    ]));
+    let c = f.circle(f.frame, 150.0, 150.0, BLUE, "C");
+    let arr = f.arrange(&[path, c]);
+    assert_eq!(arr.region_at(at(75.0, 75.0)), None, "no face");
+    assert!(arr.region_at(at(10.0, 10.0)).is_some());
+    let res = f.resolved();
+    let (tx, divided) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[path, c], &arr).unwrap();
+    f.commit(tx);
+    for face in f.doc.get(divided).unwrap().children().to_vec() {
+        assert!(
+            !covers(&f.world(face), at(75.0, 75.0)),
+            "nothing paints the hole"
+        );
+    }
+}
+
+/// A circle and a copy of it turned about its centre trace one outline with
+/// other control points: either the arrangement refuses, or its faces are few and
+/// none overlaps another.
+///
+/// flip: `regions` keeping slivers by area alone → fails at the face count;
+/// `arrange` without `overlapping` → fails at "no face twice".
+#[test]
+fn a_turned_copy_of_a_circle_leaves_no_slivers_or_doubles() {
+    for turn in [0.3, std::f64::consts::FRAC_PI_4] {
+        let mut f = Fixture::new();
+        let a = f.circle(f.frame, 200.0, 200.0, BLUE, "A");
+        let b = f.circle(f.frame, 200.0, 200.0, ORANGE, "B");
+        let t = f.doc.get(b).unwrap().transform();
+        f.set(Operation::SetTransform {
+            id: b,
+            transform: Affine::rotate_about(turn, Point::new(200.0, 200.0)) * t,
+        });
+        let res = f.resolved();
+        match shape_builder::arrange(&f.doc, &res, &[a, b]) {
+            Err(r) => assert_eq!(r, Refusal::Abandoned, "{turn}"),
+            Ok(arr) => {
+                assert!(
+                    arr.regions.len() <= 3,
+                    "{turn}: {} faces",
+                    arr.regions.len()
+                );
+                let over_centre = arr
+                    .regions
+                    .iter()
+                    .filter(|r| covers(&r.path, at(200.0, 200.0)))
+                    .count();
+                assert_eq!(over_centre, 1, "{turn}: no face twice");
+            }
+        }
+    }
+}
+
+/// A merge whose arithmetic unwinds refuses the whole edit.
+#[test]
+fn an_unwound_merge_refuses() {
+    let mut f = Fixture::new();
+    let [a, b, c] = f.venn();
+    let arr = f.arrange(&[a, b, c]);
+    let lens = arr.region_at(at(261.0, 100.0)).unwrap();
+    let res = f.resolved();
+    ondin_core::boolean::poison_next(1);
+    let got = arr.merge(&f.doc, &res, &mut f.ids, &[lens]);
+    assert!(
+        matches!(got, Err(ondin_core::OpError::BooleanAbandoned)),
+        "{got:?}"
+    );
+}
+
+/// A turned rect losing the lens it shares with a circle is rewritten as a path
+/// that keeps the rest of it where it was drawn.
+#[test]
+fn a_turned_source_keeps_its_place() {
+    let mut f = Fixture::new();
+    let turn = Affine::rotate_about(0.5, Point::new(200.0, 150.0));
+    let r = f.ids.mint();
+    f.commit(Transaction(vec![Operation::CreateNode {
+        id: r,
+        parent: f.frame,
+        index: 0,
+        kind: NodeKind::Rect {
+            size: Size::new(200.0, 100.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(turn * Affine::translate((100.0, 100.0))),
+        name: Some("Bar".into()),
+    }]));
+    let before = f.world(r).area().abs();
+    let c = f.circle(f.frame, 300.0, 150.0, BLUE, "C");
+    let arr = f.arrange(&[r, c]);
+    let lens = (0..arr.regions.len())
+        .find(|i| arr.regions[*i].covers.len() == 2)
+        .expect("a lens");
+    let lens_area = arr.regions[lens].path.area().abs();
+    let res = f.resolved();
+    let (tx, built) = arr.remove(&f.doc, &res, &mut f.ids, &[lens]).unwrap();
+    f.commit(tx);
+    let after = f.world(built.kept[0]);
+    let want = before - lens_area;
+    assert!(
+        (after.area().abs() - want).abs() < 1.0,
+        "{after:?} against {want}"
+    );
+    let p = turn * Point::new(110.0, 150.0);
+    assert!(
+        covers(&after, at(p.x, p.y)),
+        "the far end stays where it was drawn"
+    );
+}
+
+/// *Divide* over a credited group hands each face the credit.
+///
+/// flip: `divide` without `face_credit` → fails at the first face.
+#[test]
+fn divide_keeps_an_icons_credit() {
+    let mut f = Fixture::new();
+    let g = f.group(f.frame);
+    f.circle(g, 100.0, 100.0, BLUE, "A");
+    f.circle(g, 150.0, 100.0, ORANGE, "B");
+    let credit = ondin_core::Credit {
+        kind: ondin_core::CreditKind::Icon,
+        text: "Icon by Ana".into(),
+        author: "Ana".into(),
+        author_url: String::new(),
+        provider: "Icons".into(),
+        provider_url: String::new(),
+        source_url: String::new(),
+        licence: "CC BY 4.0".into(),
+        licence_url: String::new(),
+        required: true,
+        inserted: "2026-11-08".into(),
+    };
+    f.set(Operation::SetCredit {
+        id: g,
+        credit: Some(Box::new(credit.clone())),
+    });
+    let res = f.resolved();
+    let arr = f.arrange(&[g]);
+    let (tx, divided) = shape_builder::divide(&f.doc, &res, &mut f.ids, &[g], &arr).unwrap();
+    f.commit(tx);
+    for face in f.doc.get(divided).unwrap().children().to_vec() {
+        assert_eq!(f.doc.get(face).unwrap().credit(), Some(&credit));
+    }
+}

@@ -1,7 +1,8 @@
 //! The knife: a line drawn across closed shapes cuts each into the pieces it parts.
 //!
 //! A shape's outline is first read as the boolean union reads it, so its rings are
-//! wound one way and its holes the other. The parts of the line between two
+//! wound one way and its holes the other; where the layer's fill rule reads its
+//! subpaths otherwise, each face it fills is cut on its own. The parts of the line between two
 //! crossings of the outline that run inside it are its *chords*, and each is cut
 //! along exactly, by surgery on the rings rather than by a boolean (flo_curves
 //! mishandles operands that share an edge, which every piece and the knife's own
@@ -70,7 +71,7 @@ pub fn pieces(outline: &BezPath, trail: &[Point]) -> Option<Vec<BezPath>> {
         .iter()
         .map(|p| crate::geometry::subpaths(p).iter().map(ring_of).collect())
         .collect();
-    for chord in chords(&canonical, trail) {
+    for chord in split_at_crossings(chords(&canonical, trail)) {
         let mid = chord_middle(&chord);
         let Some(k) = parts
             .iter()
@@ -82,7 +83,66 @@ pub fn pieces(outline: &BezPath, trail: &[Point]) -> Option<Vec<BezPath>> {
             parts.splice(k..=k, split);
         }
     }
-    Some(parts.iter().map(|rings| path_of(rings)).collect())
+    Some(
+        parts
+            .iter()
+            .map(|rings| path_of(rings))
+            .filter(|p| kurbo::Shape::area(p).abs() >= MIN_PIECE_AREA)
+            .collect(),
+    )
+}
+
+/// The least area, in square units, a piece keeps: a chord that runs along the
+/// outline leaves a loop of none. `chords` drops such runs too; this also catches
+/// one that strays just past `ON_RING` of it.
+const MIN_PIECE_AREA: f64 = 1e-3;
+
+/// `chords`, each cut where it crosses an earlier one. A freehand line can cross
+/// itself inside a shape; once the earlier chord has parted the piece, a later
+/// one runs from a ring to that cut and on, so it is applied part by part, each
+/// between points on the rings as they then stand.
+fn split_at_crossings(chords: Vec<Vec<Point>>) -> Vec<Vec<Point>> {
+    let mut out: Vec<Vec<Point>> = Vec::new();
+    for (n, chord) in chords.iter().enumerate() {
+        let mut cuts: Vec<(f64, Point)> = Vec::new();
+        for (k, w) in chord.windows(2).enumerate() {
+            for earlier in &chords[..n] {
+                for v in earlier.windows(2) {
+                    if let Some((t, p)) = crossing(w[0], w[1], v[0], v[1]) {
+                        cuts.push((k as f64 + t, p));
+                    }
+                }
+            }
+        }
+        cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        cuts.dedup_by(|b, a| a.1.distance(b.1) < ON_RING);
+        let mut part = vec![chord[0]];
+        let mut next = cuts.iter().peekable();
+        for (k, w) in chord.windows(2).enumerate() {
+            while let Some((_, p)) = next.next_if(|(s, _)| *s < (k + 1) as f64) {
+                part.push(*p);
+                out.push(std::mem::replace(&mut part, vec![*p]));
+            }
+            part.push(w[1]);
+        }
+        out.push(part);
+    }
+    out.retain(|c| c.len() >= 2 && c.windows(2).any(|w| w[0] != w[1]));
+    out
+}
+
+/// Where segment `a0–a1` crosses segment `b0–b1` strictly inside both: the
+/// parameter along `a` and the point.
+fn crossing(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<(f64, Point)> {
+    let (r, s) = (a1 - a0, b1 - b0);
+    let den = r.cross(s);
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let t = (b0 - a0).cross(s) / den;
+    let u = (b0 - a0).cross(r) / den;
+    let eps = 1e-9;
+    (t > eps && t < 1.0 - eps && u > eps && u < 1.0 - eps).then(|| (t, a0 + r * t))
 }
 
 /// One closed ring, as the segments it runs through in order.
@@ -140,9 +200,19 @@ fn chords(outline: &BezPath, trail: &[Point]) -> Vec<Vec<Point>> {
         let k = (s.floor() as usize).min(trail.len().saturating_sub(2));
         Line::new(trail[k], trail[k + 1]).eval(s - k as f64)
     };
+    // A run along the outline itself (a line drawn down a shape's edge) is no
+    // chord, whichever way the winding test falls on the boundary.
+    let on_outline = |p: Point| {
+        outline
+            .segments()
+            .any(|seg| seg.nearest(p, 1e-9).distance_sq <= ON_RING * ON_RING)
+    };
     crossed
         .windows(2)
-        .filter(|w| crate::geometry::winding(outline, along((w[0].0 + w[1].0) / 2.0)) != 0)
+        .filter(|w| {
+            let mid = along((w[0].0 + w[1].0) / 2.0);
+            crate::geometry::winding(outline, mid) != 0 && !on_outline(mid)
+        })
         .map(|w| {
             let mut pts = vec![w[0].1];
             let (from, to) = (w[0].0.floor() as usize + 1, w[1].0.ceil() as usize);
@@ -315,7 +385,7 @@ fn subjects(
             stack.extend(node.children().iter().copied());
         } else if group {
         } else if crate::component::instance_root(doc, id).is_some() {
-            if doc.shown(id) {
+            if doc.shown_through(id) {
                 instanced.push(id);
             }
         } else if takes_part(doc, id) {
@@ -327,8 +397,20 @@ fn subjects(
 
 /// Whether `trail` would part `id`'s outline: more pieces than it has parts.
 /// Also the pieces, in world space.
+///
+/// The outline is read by the layer's fill rule: where that differs from how a
+/// boolean reads it (a same-way inner ring under non-zero is solid, a crossing
+/// under even-odd a hole), each filled face is cut on its own.
 fn parted(doc: &Document, res: &Resolved, id: NodeId, trail: &[Point]) -> Option<Vec<BezPath>> {
     let outline = world_outline(doc, res, id)?;
+    let rule = doc.get(id)?.fill_rule();
+    if let Some(faces) = boolean::filled_faces(&outline, rule) {
+        let mut parts = Vec::new();
+        for face in &faces {
+            parts.extend(pieces(face, trail)?);
+        }
+        return (parts.len() > faces.len()).then_some(parts);
+    }
     let whole = boolean::pieces(&boolean::evaluate(
         BoolOp::Union,
         std::slice::from_ref(&outline),

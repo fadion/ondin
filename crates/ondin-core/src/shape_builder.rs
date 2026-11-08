@@ -25,6 +25,9 @@ pub struct Arrangement {
     pub sources: Vec<NodeId>,
     /// Each source's outline in world space, in [`Self::sources`]' order.
     outlines: Vec<BezPath>,
+    /// Whether each source's fill rule reads its subpaths otherwise than a boolean
+    /// operand is read, so what it fills is only the faces it covers.
+    expanded: Vec<bool>,
     /// The faces, in world space; [`Region::covers`] indexes [`Self::sources`].
     pub regions: Vec<Region>,
     /// The open paths and lines that cut the faces without filling one of their
@@ -287,7 +290,7 @@ pub fn arrange(
     }
     let (whole, expanded) = filled_regions(doc, &sources, &outlines).ok_or(Refusal::Abandoned)?;
     // The union reads each outline as an operand, which an expanded source is not.
-    if !expanded && overlapping(&whole, &outlines) {
+    if !expanded.iter().any(|e| *e) && overlapping(&whole, &outlines) {
         return Err(Refusal::Abandoned);
     }
     let before = whole.len();
@@ -298,6 +301,7 @@ pub fn arrange(
     Ok(Arrangement {
         sources,
         outlines,
+        expanded,
         regions,
         cutters,
         left_out,
@@ -308,12 +312,12 @@ pub fn arrange(
 /// that paint it under their own fill rule. A source whose rule reads its subpaths
 /// otherwise than [`boolean::regions`] does ([`boolean::filled_faces`]) enters as
 /// its subpaths, and a face keeps it only where it fills; a face nothing fills goes.
-/// Also whether any source entered so.
+/// Also which sources entered so.
 fn filled_regions(
     doc: &Document,
     sources: &[NodeId],
     outlines: &[BezPath],
-) -> Option<(Vec<Region>, bool)> {
+) -> Option<(Vec<Region>, Vec<bool>)> {
     let rule = |j: usize| {
         doc.get(sources[j])
             .map(crate::Node::fill_rule)
@@ -335,7 +339,6 @@ fn filled_regions(
         }
     }
     let faces = boolean::regions(&entries)?;
-    let any = expanded.iter().any(|e| *e);
     let faces = faces
         .into_iter()
         .filter_map(|r| {
@@ -352,7 +355,7 @@ fn filled_regions(
             })
         })
         .collect();
-    Some((faces, any))
+    Some((faces, expanded))
 }
 
 /// Whether the faces cover more than the outlines' union, so some overlap: the
@@ -455,8 +458,26 @@ impl Arrangement {
                 built.kept.push(source);
                 continue;
             }
-            // Nothing left deletes the source; an unwind refuses the whole edit.
-            let left = match evaluated(BoolOp::Subtract, &[self.outlines[j].clone(), set.clone()]) {
+            // Nothing left deletes the source; an unwind refuses the whole edit. A
+            // source whose rule a boolean would misread keeps the faces it still
+            // fills, so a hole its rule makes stays one.
+            let left = match self.expanded[j] {
+                true => {
+                    let rest: Vec<BezPath> = self
+                        .regions
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, r)| r.covers.contains(&j) && !picked.contains(i))
+                        .map(|(_, r)| r.path.clone())
+                        .collect();
+                    match rest.is_empty() {
+                        true => Err(OpError::EmptyGeometry),
+                        false => evaluated(BoolOp::Union, &rest),
+                    }
+                }
+                false => evaluated(BoolOp::Subtract, &[self.outlines[j].clone(), set.clone()]),
+            };
+            let left = match left {
                 Ok(left) => left,
                 Err(OpError::EmptyGeometry) => {
                     step(

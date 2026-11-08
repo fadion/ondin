@@ -613,6 +613,98 @@ fn an_even_odd_hole_is_no_face() {
     }
 }
 
+/// Removing a face from an even-odd source of two crossing squares leaves its
+/// crossing a hole. No flip bites here: the boolean reads a crossing's overlap as
+/// even-odd does, so subtracting from the outline keeps the hole too.
+#[test]
+fn removing_from_an_even_odd_source_keeps_its_hole() {
+    let mut f = Fixture::new();
+    let mut p = BezPath::new();
+    for (x, y) in [(0.0, 0.0), (50.0, 50.0)] {
+        p.move_to((x, y));
+        p.line_to((x + 100.0, y));
+        p.line_to((x + 100.0, y + 100.0));
+        p.line_to((x, y + 100.0));
+        p.close_path();
+    }
+    let path = f.ids.mint();
+    f.commit(Transaction(vec![
+        Operation::CreateNode {
+            id: path,
+            parent: f.frame,
+            index: 0,
+            kind: NodeKind::Path {
+                path: p,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: Default::default(),
+            },
+            transform: None,
+            name: Some("Squares".into()),
+        },
+        Operation::SetFillRule {
+            id: path,
+            rule: ondin_core::FillRule::EvenOdd,
+        },
+    ]));
+    let c = f.circle(f.frame, 150.0, 150.0, BLUE, "C");
+    let arr = f.arrange(&[path, c]);
+    let face = arr
+        .region_at(at(140.0, 140.0))
+        .expect("the squares under C");
+    let res = f.resolved();
+    let (tx, _) = arr.remove(&f.doc, &res, &mut f.ids, &[face]).unwrap();
+    f.commit(tx);
+    let left = f.world(path);
+    let filled = |q: Point| ondin_core::geometry::winding(&left, q) % 2 != 0;
+    assert!(!filled(at(75.0, 75.0)), "the hole stays");
+    assert!(filled(at(10.0, 10.0)), "the rest is kept");
+    assert!(!filled(at(140.0, 140.0)), "the face is gone");
+}
+
+/// Removing a face from a non-zero source of two nested squares wound the same
+/// way, which fills solid, leaves its middle filled: what is left is the faces it
+/// still fills, not its outline as a boolean reads it, with the inner square a hole.
+/// flip: `carve` subtracting from every source's outline → fails at "the middle stays filled".
+#[test]
+fn removing_from_a_same_wound_source_keeps_its_middle() {
+    let mut f = Fixture::new();
+    let mut p = BezPath::new();
+    for (lo, hi) in [(0.0, 120.0), (30.0, 90.0)] {
+        p.move_to((lo, lo));
+        p.line_to((hi, lo));
+        p.line_to((hi, hi));
+        p.line_to((lo, hi));
+        p.close_path();
+    }
+    let path = f.ids.mint();
+    f.commit(Transaction(vec![Operation::CreateNode {
+        id: path,
+        parent: f.frame,
+        index: 0,
+        kind: NodeKind::Path {
+            path: p,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: Default::default(),
+        },
+        transform: None,
+        name: Some("Squares".into()),
+    }]));
+    let c = f.circle(f.frame, 150.0, 150.0, BLUE, "C");
+    let arr = f.arrange(&[path, c]);
+    let face = arr
+        .region_at(at(115.0, 115.0))
+        .expect("the squares under C");
+    let res = f.resolved();
+    let (tx, _) = arr.remove(&f.doc, &res, &mut f.ids, &[face]).unwrap();
+    f.commit(tx);
+    let left = f.world(path);
+    assert!(covers(&left, at(60.0, 60.0)), "the middle stays filled");
+    assert!(covers(&left, at(10.0, 10.0)), "the rest is kept");
+    assert!(!covers(&left, at(115.0, 115.0)), "the face is gone");
+}
+
 /// A circle and a copy of it turned about its centre trace one outline with
 /// other control points: either the arrangement refuses, or its faces are few and
 /// none overlaps another.

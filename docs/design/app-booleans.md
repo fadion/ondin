@@ -225,7 +225,9 @@ plain `Path` layers.
   cut), `Abandoned`. `can_arrange` is the dim test: it counts sources and cutters and does no
   arithmetic.
 - **Merge and remove** (`Arrangement::merge`, `remove`): every source covering a picked face
-  becomes itself minus the picked faces. A path is rewritten in place; any other kind, a live
+  becomes itself minus the picked faces: its outline minus their union, or, for a source that
+  entered as its subpaths (*Fill rules*, above), the union of the faces it still fills, since its
+  outline read as an operand would fill a hole its rule makes. A path is rewritten in place; any other kind, a live
   boolean included, is replaced by a path in its slot through `build::replace_with_path`, keeping
   its name and look (undo brings the boolean back live). A source left with nothing is deleted;
   a subtraction the guard caught refuses the whole edit with `BooleanAbandoned`, deleting nothing.

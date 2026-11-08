@@ -20,9 +20,10 @@
 //! alternative, confirm-on-dirty, is blocked: `nudge_field`'s clamp moves the draft
 //! on the first frame, so it would fire on an unedited card.
 //!
-//! **Clear is the one exception:** it empties the font cache immediately and Cancel
-//! does not restore it, because a deletion cannot be staged honestly. It reports
-//! how much went, and the count beside it is the receipt.
+//! **The two Clears are the exception:** each empties its cache (web fonts, icon
+//! sets) immediately and Cancel does not restore it, because a deletion cannot be
+//! staged honestly. Each reports how much went, and the count beside it is the
+//! receipt.
 
 use crate::app::OndinApp;
 use crate::input::NudgeStep;
@@ -64,6 +65,12 @@ const BUTTON_H: f32 = FIELD_H;
 const BUTTON_PAD_X: f32 = ui::LABEL_BUTTON_PAD_X;
 /// Between two controls on one row: the inspector's.
 pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
+/// The card's title and footer together, with their gaps: what the scrolling
+/// sections leave room for.
+const CHROME_H: f32 = 120.0;
+/// The least the sections are given however short the window, so a few rows
+/// always show.
+const MIN_BODY_H: f32 = 200.0;
 /// The *Default font* dropdown: room for a long family name beside its label.
 const DEFAULT_FONT_W: f32 = 200.0;
 /// The *Canvas* section's controls beside their labels: a colour row with its
@@ -94,6 +101,13 @@ pub(crate) struct Settings {
     default_font: String,
     spell_check: bool,
     web_fonts: bool,
+    icon_sets: Vec<String>,
+    photo_services: Vec<String>,
+    photo_size: String,
+    /// The photo services' keys as typed, by service key. Filled from the
+    /// keychain once its read lands (`OndinApp::asset_keys`); written to it by
+    /// *Save changes*, a cleared field forgetting the key.
+    keys: std::collections::BTreeMap<String, String>,
 }
 
 impl Settings {
@@ -109,6 +123,10 @@ impl Settings {
             default_font: prefs.default_font.clone(),
             spell_check: prefs.spell_check,
             web_fonts: prefs.web_fonts,
+            icon_sets: prefs.assets.icon_sets.clone(),
+            photo_services: prefs.assets.photo_services.clone(),
+            photo_size: prefs.assets.photo_size.clone(),
+            keys: Default::default(),
         }
     }
 
@@ -147,6 +165,9 @@ impl Settings {
         prefs.default_font.clone_from(&self.default_font);
         prefs.spell_check = self.spell_check;
         prefs.web_fonts = self.web_fonts;
+        prefs.assets.icon_sets.clone_from(&self.icon_sets);
+        prefs.assets.photo_services.clone_from(&self.photo_services);
+        prefs.assets.photo_size.clone_from(&self.photo_size);
         web_fonts_changed
     }
 }
@@ -197,7 +218,10 @@ impl OndinApp {
             Some(_) => None,
             None => {
                 self.fonts.measure_cache(ctx);
-                Some(Settings::from_prefs(&self.prefs))
+                self.read_asset_keys(ctx);
+                let mut s = Settings::from_prefs(&self.prefs);
+                s.keys = self.asset_keys.clone().unwrap_or_default();
+                Some(s)
             }
         };
     }
@@ -211,7 +235,21 @@ impl OndinApp {
         let Some(mut draft) = self.settings.clone() else {
             return;
         };
-        let saved = Settings::from_prefs(&self.prefs);
+        // The keychain's keys, once its read lands: the form starts from them.
+        let landed = match self.asset_keys_job.as_ref().map(crate::job::Job::poll) {
+            Some(Ok(Some(keys))) => Some(keys),
+            Some(Err(())) => Some(Default::default()),
+            _ => None,
+        };
+        if let Some(keys) = landed {
+            self.asset_keys_job = None;
+            if draft.keys.is_empty() {
+                draft.keys = keys.clone();
+            }
+            self.asset_keys = Some(keys);
+        }
+        let mut saved = Settings::from_prefs(&self.prefs);
+        saved.keys = self.asset_keys.clone().unwrap_or_default();
         // A picker open on one of the form's colours takes Escape first, so the press
         // closes it rather than discarding the whole form.
         if self
@@ -235,99 +273,129 @@ impl OndinApp {
                 decision = Some(Decision::Cancel);
             }
 
-            // --- appearance --------------------------------------------
-            ui.add_space(TITLE_GAP - SECTION_AIR);
-            theme_section(ui, &mut draft.theme);
-            ui.add_space(ROW_GAP);
-            if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
-                .on_hover_text("CPU and memory in the top bar")
-                .clicked()
-            {
-                draft.resource_meter = !draft.resource_meter;
-            }
+            // The sections scroll between the title and the footer once the card
+            // would be taller than the window; no bar, as on the app's panels.
+            // ⚠️ The height is asked as a minimum: an `Area` hands a scroll area
+            // last frame's size, so a maximum alone never grows back. The minimum
+            // is the sections' own height as last measured, capped by the window.
+            let room =
+                (ctx.content_rect().height() - 2.0 * (CARD_EDGE + PAD) - CHROME_H).max(MIN_BODY_H);
+            let body_id = egui::Id::new("settings-body-h");
+            let content = ui.data(|d| d.get_temp::<f32>(body_id)).unwrap_or(room);
+            let body = egui::ScrollArea::vertical()
+                .max_height(room)
+                .min_scrolled_height(content.min(room))
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // --- appearance --------------------------------------------
+                    ui.add_space(TITLE_GAP - SECTION_AIR);
+                    theme_section(ui, &mut draft.theme);
+                    ui.add_space(ROW_GAP);
+                    if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
+                        .on_hover_text("CPU and memory in the top bar")
+                        .clicked()
+                    {
+                        draft.resource_meter = !draft.resource_meter;
+                    }
 
-            // --- nudge -------------------------------------------------
-            section(ui, "Nudge");
-            // Before the fields: `value_field` applies this frame's drag delta inside
-            // the call that reports `drag_started()`.
-            let before = draft.scrubbed();
-            let half = egui::vec2((ui.available_width() - COL_GAP) / 2.0, FIELD_H);
-            let mut dragging = ui
-                .horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = COL_GAP;
-                    let a = nudge_field(ui, half, "Step", &mut draft.nudge.small);
-                    let b = nudge_field(ui, half, "Shift", &mut draft.nudge.large);
-                    a || b
-                })
-                .inner;
+                    // --- nudge -------------------------------------------------
+                    section(ui, "Nudge");
+                    // Before the fields: `value_field` applies this frame's drag delta inside
+                    // the call that reports `drag_started()`.
+                    let before = draft.scrubbed();
+                    let half = egui::vec2((ui.available_width() - COL_GAP) / 2.0, FIELD_H);
+                    let mut dragging = ui
+                        .horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = COL_GAP;
+                            let a = nudge_field(ui, half, "Step", &mut draft.nudge.small);
+                            let b = nudge_field(ui, half, "Shift", &mut draft.nudge.large);
+                            a || b
+                        })
+                        .inner;
 
-            // --- canvas ------------------------------------------------
-            section(ui, "Canvas");
-            dragging |= self.canvas_rows(ui, &mut draft.canvas);
-            // The cancel is answered before the snapshot is armed (as in
-            // `panels::export`'s quality field): on the frame a gesture is called
-            // off, nothing may re-arm it.
-            if dragging && !self.gesture_cancelled && self.in_flight.settings_scrub.is_none() {
-                self.in_flight.settings_scrub = Some(before);
-            }
+                    // --- canvas ------------------------------------------------
+                    section(ui, "Canvas");
+                    dragging |= self.canvas_rows(ui, &mut draft.canvas);
+                    // The cancel is answered before the snapshot is armed (as in
+                    // `panels::export`'s quality field): on the frame a gesture is called
+                    // off, nothing may re-arm it.
+                    if dragging
+                        && !self.gesture_cancelled
+                        && self.in_flight.settings_scrub.is_none()
+                    {
+                        self.in_flight.settings_scrub = Some(before);
+                    }
 
-            // --- layers ------------------------------------------------
-            section(ui, "Layers");
-            if ui::switch_row(ui, "Show tree guides", draft.tree_guides, SWITCH_H)
-                .on_hover_text("Dashed lines from a frame or group down to the layers inside it")
-                .clicked()
-            {
-                draft.tree_guides = !draft.tree_guides;
-            }
-            ui.add_space(ROW_GAP);
-            if ui::switch_row(
-                ui,
-                "Collapse groups on open",
-                draft.collapse_groups_on_open,
-                SWITCH_H,
-            )
-            .on_hover_text("Opening a document folds every group and frame in the tree")
-            .clicked()
-            {
-                draft.collapse_groups_on_open = !draft.collapse_groups_on_open;
-            }
+                    // --- layers ------------------------------------------------
+                    section(ui, "Layers");
+                    if ui::switch_row(ui, "Show tree guides", draft.tree_guides, SWITCH_H)
+                        .on_hover_text(
+                            "Dashed lines from a frame or group down to the layers inside it",
+                        )
+                        .clicked()
+                    {
+                        draft.tree_guides = !draft.tree_guides;
+                    }
+                    ui.add_space(ROW_GAP);
+                    if ui::switch_row(
+                        ui,
+                        "Collapse groups on open",
+                        draft.collapse_groups_on_open,
+                        SWITCH_H,
+                    )
+                    .on_hover_text("Opening a document folds every group and frame in the tree")
+                    .clicked()
+                    {
+                        draft.collapse_groups_on_open = !draft.collapse_groups_on_open;
+                    }
 
-            // --- text --------------------------------------------------
-            section(ui, "Text");
-            if let Some(family) = self.default_font_row(ui, &draft.default_font) {
-                draft.default_font = family;
-            }
-            caption(
-                ui,
-                "New text layers start in this font, or in Inter where it is neither \
+                    // --- text --------------------------------------------------
+                    section(ui, "Text");
+                    if let Some(family) = self.default_font_row(ui, &draft.default_font) {
+                        draft.default_font = family;
+                    }
+                    caption(
+                        ui,
+                        "New text layers start in this font, or in Inter where it is neither \
                  installed nor downloadable.",
-            );
-            ui.add_space(ROW_GAP);
-            if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
-                .on_hover_text(
-                    "Underline misspelled words while editing text, in each run's language",
-                )
-                .clicked()
-            {
-                draft.spell_check = !draft.spell_check;
-            }
+                    );
+                    ui.add_space(ROW_GAP);
+                    if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
+                        .on_hover_text(
+                            "Underline misspelled words while editing text, in each run's language",
+                        )
+                        .clicked()
+                    {
+                        draft.spell_check = !draft.spell_check;
+                    }
 
-            // --- web fonts ---------------------------------------------
-            section(ui, "Web fonts");
-            if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
-                draft.web_fonts = !draft.web_fonts;
-            }
-            // A caption rather than a tooltip: the label names a capability, and
-            // "off" is chosen deliberately (metered connection, no CDN), so the
-            // sentence must be read before flipping. "No *font* request" because
-            // the update check is another network source with its own switch.
-            caption(
-                ui,
-                "Off is the fonts this machine has installed, plus Inter. \
+                    // --- web fonts ---------------------------------------------
+                    section(ui, "Web fonts");
+                    if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
+                        draft.web_fonts = !draft.web_fonts;
+                    }
+                    // A caption rather than a tooltip: the label names a capability, and
+                    // "off" is chosen deliberately (metered connection, no CDN), so the
+                    // sentence must be read before flipping. "No *font* request" because
+                    // the update check is another network source with its own switch.
+                    caption(
+                        ui,
+                        "Off is the fonts this machine has installed, plus Inter. \
                      Nothing is downloaded and no font request is made.",
-            );
-            ui.add_space(ROW_GAP);
-            self.font_cache_row(ui);
+                    );
+                    ui.add_space(ROW_GAP);
+                    self.font_cache_row(ui);
+
+                    // --- assets ------------------------------------------------
+                    // After Web fonts: both are the app's reach to the network.
+                    section(ui, "Assets");
+                    self.asset_rows(ui, &mut draft);
+                    ui::keep_focus_in_view(ui);
+                });
+            let measured = body.content_size.y;
+            ui.data_mut(|d| d.insert_temp(body_id, measured));
 
             // --- footer ------------------------------------------------
             if let Some(d) = modal_footer(ui, "Save changes", draft != saved) {
@@ -357,6 +425,7 @@ impl OndinApp {
                 if draft.apply(&mut self.prefs) {
                     self.fonts.set_web_fonts(self.prefs.web_fonts, ctx);
                 }
+                self.write_asset_keys(ctx, &draft.keys);
                 self.ensure_default_font();
                 self.prefs.save();
                 self.settings = None;
@@ -556,6 +625,180 @@ impl OndinApp {
                     );
                 });
             });
+        });
+    }
+
+    /// The *Assets* section: a switch per icon set and photo service, each noted
+    /// with its licence, the key field under a keyed service that is on, the photo
+    /// size, and the cache with *Clear*.
+    fn asset_rows(&mut self, ui: &mut egui::Ui, draft: &mut Settings) {
+        use crate::assets::photos::{PhotoSize, SERVICES};
+        use crate::assets::sets::SETS;
+        caption(
+            ui,
+            "Icon sets download once and are kept. Photos are searched online. \
+             Nothing is downloaded until a set or service is on.",
+        );
+        ui.add_space(ROW_GAP);
+        sub_heading(ui, "Icon sets");
+        for spec in SETS {
+            ui.add_space(ROW_GAP);
+            let on = draft.icon_sets.iter().any(|k| k == spec.key);
+            if ui::switch_row_noted(ui, spec.name, &spec.note(), on, SWITCH_H).clicked() {
+                toggle_key(&mut draft.icon_sets, spec.key);
+            }
+        }
+        ui.add_space(ROW_GAP * 2.0);
+        sub_heading(ui, "Photos");
+        let keys_read = self.asset_keys.is_some();
+        for svc in SERVICES {
+            ui.add_space(ROW_GAP);
+            let on = draft.photo_services.iter().any(|k| k == svc.key);
+            if ui::switch_row_noted(ui, svc.name, svc.note, on, SWITCH_H).clicked() {
+                toggle_key(&mut draft.photo_services, svc.key);
+            }
+            let Some(label) = svc.key_label.filter(|_| on) else {
+                continue;
+            };
+            ui.add_space(ROW_GAP);
+            let shown_id = ui.id().with(("asset-key-shown", svc.key));
+            let mut shown = ui.data(|d| d.get_temp::<bool>(shown_id).unwrap_or(false));
+            let mut key = draft.keys.get(svc.key).cloned().unwrap_or_default();
+            ui.add_enabled_ui(keys_read, |ui| {
+                ui::secret_field(
+                    ui,
+                    egui::vec2(ui.available_width(), FIELD_H),
+                    &mut key,
+                    &mut shown,
+                    label,
+                    ("Show key", "Hide key"),
+                )
+            })
+            .response
+            .on_disabled_hover_text("Reading the keychain…");
+            ui.data_mut(|d| d.insert_temp(shown_id, shown));
+            match key.is_empty() {
+                true => draft.keys.remove(svc.key),
+                false => draft.keys.insert(svc.key.to_string(), key),
+            };
+            caption(
+                ui,
+                &format!(
+                    "Made at {}. Sent to {} and nowhere else, and kept in the system keychain.",
+                    svc.key_home, svc.name
+                ),
+            );
+        }
+        ui.add_space(ROW_GAP * 2.0);
+        let size = PhotoSize::from_key(&draft.photo_size);
+        labelled_row(ui, "Photo size", |ui| {
+            ui.spacing_mut().button_padding.y = 0.0;
+            let mut picked = size;
+            egui::ComboBox::from_id_salt("settings-photo-size")
+                .icon(ui::combo_chevron)
+                .width(PREF_CONTROL_W)
+                .selected_text(ui::combo_text(size.label()))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    for s in PhotoSize::ALL {
+                        ui.selectable_value(&mut picked, s, s.label());
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "The size a photo is downloaded and placed at. Openverse serves only \
+                     the original",
+                );
+            if picked != size {
+                draft.photo_size = picked.key().to_string();
+            }
+        });
+        ui.add_space(ROW_GAP);
+        self.asset_cache_row(ui);
+    }
+
+    /// *`31 MB` of asset cache · Clear*, the web-font row's twin. Clearing drops
+    /// every downloaded icon set; each downloads again when next searched.
+    fn asset_cache_row(&mut self, ui: &mut egui::Ui) {
+        let (text, clearable) = match self.assets.cache_bytes() {
+            None => ("Counting the asset cache…".to_owned(), false),
+            Some(0) => ("Nothing in the asset cache".to_owned(), false),
+            Some(n) => (format!("{} of asset cache", human_bytes(n)), true),
+        };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = COL_GAP;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let clear = text_button(ui, "Clear", FieldButton::enabled_if(clearable))
+                    .on_hover_text(
+                        "Delete the downloaded icon sets. Icons already placed keep working",
+                    );
+                if clear.clicked() && clearable {
+                    let freed = self.assets.clear_cache();
+                    self.session.info(format!(
+                        "Cleared {} of cached icon sets",
+                        human_bytes(freed)
+                    ));
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(LABEL_PT)
+                            .color(theme::text::muted()),
+                    );
+                });
+            });
+        });
+    }
+
+    /// Read every photo service's key from the keychain on a worker, once a
+    /// session: each read can block on the store.
+    pub(crate) fn read_asset_keys(&mut self, ctx: &egui::Context) {
+        if self.asset_keys.is_some() || self.asset_keys_job.is_some() {
+            return;
+        }
+        self.asset_keys_job = Some(crate::job::Job::spawn("ondin-keys", ctx, || {
+            crate::assets::photos::SERVICES
+                .iter()
+                .filter(|s| s.key_label.is_some())
+                .filter_map(|s| {
+                    crate::keychain::read_account(&s.account()).map(|k| (s.key.to_string(), k))
+                })
+                .collect()
+        }));
+    }
+
+    /// Write the keys that *Save changes* changed to the keychain, on a worker; a
+    /// cleared field forgets its key. Nothing before the keychain's read landed,
+    /// whose answer this compares against.
+    fn write_asset_keys(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &std::collections::BTreeMap<String, String>,
+    ) {
+        let Some(stored) = self.asset_keys.clone() else {
+            return;
+        };
+        let changed: Vec<(String, Option<String>)> = crate::assets::photos::SERVICES
+            .iter()
+            .filter(|s| s.key_label.is_some())
+            .filter(|s| stored.get(s.key) != keys.get(s.key))
+            .map(|s| (s.account(), keys.get(s.key).map(|k| k.trim().to_string())))
+            .collect();
+        if changed.is_empty() {
+            return;
+        }
+        self.asset_keys = Some(keys.clone());
+        let _ = crate::job::Job::spawn("ondin-keys", ctx, move || {
+            for (account, key) in changed {
+                match key.filter(|k| !k.is_empty()) {
+                    Some(k) => {
+                        if let Err(e) = crate::keychain::store_account(&account, &k) {
+                            log::warn!(target: "ondin", "keeping {account}: {e}");
+                        }
+                    }
+                    None => crate::keychain::forget_account(&account),
+                }
+            }
         });
     }
 
@@ -998,6 +1241,26 @@ fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut eg
     .inner
 }
 
+/// A group's name inside a section (*Icon sets*, *Photos*): a row's label size,
+/// in the strong ink, above the rows it heads.
+fn sub_heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .size(LABEL_PT)
+            .color(theme::text::strong()),
+    );
+}
+
+/// Add `key` to `on`, or take it out if it is there.
+fn toggle_key(on: &mut Vec<String>, key: &str) {
+    match on.iter().position(|k| k == key) {
+        Some(i) => {
+            on.remove(i);
+        }
+        None => on.push(key.to_string()),
+    }
+}
+
 /// A sentence under the row above it, wrapped to the card.
 ///
 /// Closer than [`ROW_GAP`], because a caption belongs to the row above it.
@@ -1100,15 +1363,26 @@ mod tests {
     use crate::app::OndinApp;
 
     /// The window the modal centres itself in, big enough that the card is never clipped.
-    const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
+    /// Tall enough that the sections show whole, unscrolled: these tests measure
+    /// rows, and a row scrolled out of the card is not painted.
+    const SCREEN: egui::Vec2 = egui::vec2(1200.0, 2400.0);
 
     /// Every text run the open modal painted, as `(top-left, size, text)`.
     ///
     /// Three passes, because a widget's interaction state is last frame's and a
     /// single pass measures a card still converging.
     fn galleys(app: &mut OndinApp, ctx: &egui::Context) -> Vec<(egui::Pos2, egui::Vec2, String)> {
+        galleys_on(app, ctx, SCREEN)
+    }
+
+    /// [`galleys`] on a window `screen` big.
+    fn galleys_on(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        screen: egui::Vec2,
+    ) -> Vec<(egui::Pos2, egui::Vec2, String)> {
         let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+            screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), screen)),
             ..Default::default()
         };
         let mut out = Vec::new();
@@ -1172,6 +1446,43 @@ mod tests {
                     .unwrap_or_else(|| panic!("no button ground under {label:?}"))
             })
             .collect()
+    }
+
+    /// On a window shorter than the card, the sections scroll and the title and
+    /// the footer stay on screen; on a tall one the whole card shows, its last
+    /// row included.
+    /// flip: drop `min_scrolled_height` in `settings_ui` → the tall window loses
+    /// the Assets rows (the area keeps its first, scrolled height).
+    #[test]
+    fn the_sections_scroll_and_the_footer_stays_on_screen() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx);
+        let short = egui::vec2(1200.0, 700.0);
+        let runs = galleys_on(&mut app, &ctx, short);
+        let y_of = |runs: &[(egui::Pos2, egui::Vec2, String)], t: &str| {
+            runs.iter()
+                .find(|(_, _, s)| s == t)
+                .map(|(p, s, _)| (p.y, p.y + s.y))
+        };
+        let (top, _) = y_of(&runs, "Settings").expect("the title shows");
+        let (footer, bottom) = y_of(&runs, "Save changes").expect("the footer shows");
+        assert!(
+            top >= 0.0 && bottom <= short.y,
+            "{top}..{bottom} in {}",
+            short.y
+        );
+        // A row scrolled out still paints, under the clip: it lies past the footer.
+        let (row, _) = y_of(&runs, "Phosphor").expect("the row is laid out");
+        assert!(
+            row > footer,
+            "the Assets rows are scrolled below the footer"
+        );
+
+        let runs = galleys_on(&mut app, &ctx, SCREEN);
+        let (footer, _) = y_of(&runs, "Save changes").expect("the footer shows");
+        let (row, _) = y_of(&runs, "Phosphor").expect("the row is laid out");
+        assert!(row < footer, "a tall window shows the whole card");
     }
 
     /// The column is what `CARD_W` leaves, no row runs past it, and the caption
@@ -1532,6 +1843,10 @@ mod tests {
                 default_font: "Inter".into(),
                 spell_check: true,
                 web_fonts: true,
+                icon_sets: Vec::new(),
+                photo_services: Vec::new(),
+                photo_size: "regular".into(),
+                keys: Default::default(),
             },
             "the form opens showing what is saved"
         );
@@ -1555,6 +1870,11 @@ mod tests {
             default_font: "Roboto".into(),
             spell_check: false,
             web_fonts: false,
+            icon_sets: vec!["lucide".into()],
+            photo_services: vec!["openverse".into()],
+            photo_size: "full".into(),
+            // Keys go to the keychain, not the preferences.
+            keys: Default::default(),
         };
         assert!(edited != opened, "the fixture has to be a real edit");
         assert!(

@@ -108,6 +108,19 @@ impl OndinApp {
                 app.open_menu = TopMenu::None;
                 app.save_named_version();
             }
+            // *Credits…*, disabled with its reason while nothing is credited.
+            let credited = app.has_credits();
+            let row = crate::ui::MenuRow {
+                enabled: credited,
+                ..crate::ui::MenuRow::new(Item::Credits.spec().glyph, Item::Credits.spec().label)
+            };
+            let resp = crate::ui::menu_row(ui, row, H);
+            if !credited {
+                resp.on_disabled_hover_text("This document has no credits");
+            } else if resp.clicked() {
+                app.open_menu = TopMenu::None;
+                app.credits_open = true;
+            }
             crate::ui::menu_sep(ui);
             if shared {
                 // *Publish kit…*, disabled with its reason when nothing would go

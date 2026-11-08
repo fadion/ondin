@@ -1773,6 +1773,44 @@ pub fn text_field(
     })
 }
 
+/// The width of a [`secret_field`]'s eye button.
+const SECRET_EYE_W: f32 = 26.0;
+
+/// A [`text_field`] for a secret — a token or an API key — masked unless `shown`,
+/// with the eye / eye-slash button at its end that flips `shown` (`tips` are its
+/// two tooltips, show then hide). The Figma import's token and Settings' photo
+/// keys are this one field.
+pub fn secret_field(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    text: &mut String,
+    shown: &mut bool,
+    hint: &str,
+    tips: (&str, &str),
+) -> egui::Response {
+    let pt = Scale::of(size.y).text_pt();
+    field_row(ui, size, |ui| {
+        let font = egui::FontId::proportional(pt);
+        let pad = edit_frame(ui, &font, size.y - FIELD_BORDER_H, 0.0);
+        let edit = pad.add(
+            ui,
+            ui.available_width() - SECRET_EYE_W,
+            egui::TextEdit::singleline(text)
+                .password(!*shown)
+                .font(font)
+                .hint_text(egui::RichText::new(hint).size(pt)),
+        );
+        let glyph = if *shown { icon::EYE_SLASH } else { icon::EYE };
+        if icon_button(ui, glyph, 22.0, 14.0, false, true)
+            .on_hover_text(if *shown { tips.1 } else { tips.0 })
+            .clicked()
+        {
+            *shown = !*shown;
+        }
+        edit
+    })
+}
+
 /// Typing focus: the `accent_700` hairline on a text entry's own edge while it
 /// holds focus, however it got it. Every field a person types in wears it —
 /// value, text, search, rename — painted after the field, over its own hairline;

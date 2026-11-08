@@ -616,8 +616,16 @@ impl OndinApp {
             cmd.checked = Some(self.view_switch(sw));
             push(&mut out, cmd);
         }
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::Credits,
+                (!self.has_credits()).then_some("This document has no credits"),
+            ),
+        );
         for item in [
             Item::InsertPicker,
+            Item::AssetsBrowser,
             Item::VariablesBrowser,
             Item::ImportTokens,
             Item::ExportTokens,

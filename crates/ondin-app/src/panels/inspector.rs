@@ -1516,6 +1516,8 @@ impl OndinApp {
         }
         // Under the paint panels: an effect applies to the painted layer (§6.4).
         self.inspector_effects(ui, &[id]);
+        // Only on a layer that came with one, as Group shows only on a group.
+        self.inspector_credit(ui, id);
         // Last: it describes what comes out of the layer.
         self.inspector_export(ui);
     }

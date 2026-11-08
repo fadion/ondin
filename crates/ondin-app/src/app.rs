@@ -865,6 +865,19 @@ pub struct OndinApp {
     zoom_entry: Option<String>,
     /// The floating insert picker, while it is open.
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
+    /// The assets browser's providers: icon sets, photo searches, their pictures.
+    pub(crate) assets: crate::assets::Assets,
+    /// Whether the Credits card is open (`panels::credit`).
+    pub(crate) credits_open: bool,
+    /// The floating assets browser, while it is open.
+    pub(crate) asset_panel: Option<crate::assets::panel::Panel>,
+    /// The rail's assets button as last drawn, which the panel hangs beside.
+    pub(crate) asset_button: egui::Rect,
+    /// The photo services' keys as the keychain holds them, once read this
+    /// session (`OndinApp::read_asset_keys`); what Settings' key fields start from.
+    pub(crate) asset_keys: Option<std::collections::BTreeMap<String, String>>,
+    /// The keychain read in flight.
+    pub(crate) asset_keys_job: Option<crate::job::Job<std::collections::BTreeMap<String, String>>>,
     /// The revision the bound families and the text's scripts were last loaded at: a
     /// bind, a string cell, a new variable or a paste can name a family not yet
     /// requested, and an edit can add a script.
@@ -1681,6 +1694,12 @@ impl OndinApp {
             open_menu: TopMenu::None,
             zoom_entry: None,
             kit_picker: None,
+            assets: Default::default(),
+            credits_open: false,
+            asset_panel: None,
+            asset_button: egui::Rect::NOTHING,
+            asset_keys: None,
+            asset_keys_job: None,
             bound_fonts_at: None,
             font_uses: None,
             kit_placing: None,
@@ -2228,6 +2247,7 @@ impl OndinApp {
             self.path_bar(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
+            self.assets_ui(&ctx);
             self.var_browser_ui(&ctx);
             self.field_menu_ui(&ctx);
             self.var_complete_ui(&ctx);
@@ -2255,6 +2275,7 @@ impl OndinApp {
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
         self.colour_review_ui(&ctx);
+        self.credits_ui(&ctx);
         self.repeat_ui(&ctx);
         self.blend_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
@@ -2459,6 +2480,9 @@ impl OndinApp {
             Action::ExportEditable(format) => self.export_editable(format),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
+            Action::AssetsBrowser => self.toggle_assets(),
+            Action::Credits if self.has_credits() => self.credits_open = true,
+            Action::Credits => {}
             Action::VariablesBrowser => self.toggle_var_browser(),
             Action::ImportTokens => self.import_tokens_action(),
             Action::ExportTokens => self.export_tokens_action(),
@@ -2832,7 +2856,8 @@ impl OndinApp {
             || (self.session.has_gesture_preview() && !standing)
             || self.in_flight.any()
             // A component carried out of the insert picker: its drag is egui's too.
-            || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
+            || self.kit_picker.as_ref().is_some_and(|p| p.dragging())
+            || self.asset_panel.as_ref().is_some_and(|p| p.dragging());
         // A pencil stroke in flight is dropped and records nothing.
         if self.pencil.take().is_some() {
             return true;
@@ -2882,6 +2907,9 @@ impl OndinApp {
         self.in_flight.effect_drag = None;
         // `gesture_cancelled` stops the release placing it.
         if let Some(p) = self.kit_picker.as_mut() {
+            p.cancel_drag();
+        }
+        if let Some(p) = self.asset_panel.as_mut() {
             p.cancel_drag();
         }
         // A stale one would be what the next Alt-drag silently inserts.
@@ -2971,7 +2999,7 @@ impl OndinApp {
         } else if self.disarm_dropper() {
             // Above the picker it may be picking for.
         } else if self.picker.take().is_some() {
-        } else if self.kit_picker.take().is_some() {
+        } else if self.kit_picker.take().is_some() || self.asset_panel.take().is_some() {
             // A rung of its own so one press closes one thing.
         } else if let Some(b) = self.var_browser.as_mut() {
             // A cell being typed into or an open menu goes first, the browser next press.
@@ -2997,6 +3025,8 @@ impl OndinApp {
         } else if self.colour_review.open {
             // Its open menu or the name being typed goes first, the card next press.
             self.colour_review.escape();
+        } else if self.credits_open {
+            self.credits_open = false;
         } else if self.repeat.open {
             self.close_repeat();
         } else if self.blend.open {
@@ -6367,6 +6397,8 @@ impl OndinApp {
         self.pages = Default::default();
         self.picker = None;
         self.kit_picker = None;
+        self.asset_panel = None;
+        self.credits_open = false;
         self.kit_placing = None;
         self.var_browser = None;
         self.var_complete = None;
@@ -8449,6 +8481,14 @@ impl OndinApp {
                     if resp.clicked() {
                         self.toggle_kit_picker();
                     }
+                    // The assets browser's, which shares the picker's place.
+                    let open = self.asset_panel.is_some();
+                    let resp = icon_button(ui, icon::ASSETS, 30.0, 20.0, open, true)
+                        .on_hover_text("Assets");
+                    self.asset_button = resp.rect;
+                    if resp.clicked() {
+                        self.toggle_assets();
+                    }
                     // The styles and variables browser's, directly above it.
                     let open = self.var_browser.is_some();
                     let resp = icon_button(ui, icon::SWATCHES, 30.0, 20.0, open, true)
@@ -9266,9 +9306,10 @@ mod tests {
     /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 16] = [
+        let panels: [(&str, &str); 17] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
+            ("credit.rs", include_str!("panels/credit.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
             ("history.rs", include_str!("panels/history.rs")),

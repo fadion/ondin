@@ -1050,6 +1050,13 @@ pub mod icon {
     /// *Fill with content…* and its undo step: lines of text with a small die
     /// beside the last. Not [`MAGIC_WAND`], which means clean-up.
     pub const FILL_CONTENT: &str = "\u{f059}";
+    /// The assets browser — the rail's button, *Assets…*, *Insert icon*: two
+    /// pictures stacked. Not [`IMAGE`], which is *Place image…*.
+    pub const ASSETS: &str = "\u{f05a}";
+    /// A service the network cannot reach: the signal's arcs struck through.
+    pub const WIFI_SLASH: &str = "\u{f05b}";
+    /// A credit — the inspector's *Credit* and *Credits…*: two quotation marks.
+    pub const QUOTES: &str = "\u{f05c}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1384,6 +1391,9 @@ pub mod icon {
         ("toolbox", TOOLBOX),
         ("dice", DICE),
         ("fill-content", FILL_CONTENT),
+        ("assets", ASSETS),
+        ("wifi-slash", WIFI_SLASH),
+        ("quotes", QUOTES),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

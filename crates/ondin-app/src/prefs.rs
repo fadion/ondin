@@ -280,6 +280,45 @@ impl Default for FillContentPrefs {
     }
 }
 
+/// The assets browser's providers (`crate::assets`): which icon sets and photo
+/// services are on, written by Settings, and what the panel last showed.
+/// Everything starts off, so nothing is downloaded until someone asks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssetPrefs {
+    /// The icon sets switched on, by `assets::sets::SetSpec::key`.
+    pub icon_sets: Vec<String>,
+    /// The photo services switched on, by `assets::photos::ServiceSpec::key`.
+    pub photo_services: Vec<String>,
+    /// `assets::photos::PhotoSize::key`.
+    pub photo_size: String,
+    /// The panel's tab: photos when true.
+    pub photos_tab: bool,
+    /// The set the panel shows, empty for all of them.
+    pub set: String,
+    /// The variant shown, by its label, per set key.
+    pub variants: std::collections::BTreeMap<String, String>,
+    /// The size an icon is inserted at, `None` for its set's own grid.
+    pub icon_size: Option<f64>,
+    /// The service the panel searches.
+    pub service: String,
+}
+
+impl Default for AssetPrefs {
+    fn default() -> Self {
+        Self {
+            icon_sets: Vec::new(),
+            photo_services: Vec::new(),
+            photo_size: "regular".into(),
+            photos_tab: false,
+            set: String::new(),
+            variants: Default::default(),
+            icon_size: None,
+            service: String::new(),
+        }
+    }
+}
+
 /// The Settings modal's *Canvas* section: what the wheel does, and how ruler guides
 /// and the pixel grid draw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -546,6 +585,9 @@ pub struct Prefs {
     pub clean_up: CleanUpPrefs,
     /// The Fill with content box's locale, records and avatars.
     pub fill_content: FillContentPrefs,
+    /// The assets browser's providers, switched on in Settings, and the panel's
+    /// last choices.
+    pub assets: AssetPrefs,
     /// Colour review's threshold (`crate::colour_review`), kept across documents:
     /// how near counts as near is a habit, not a fact about one file.
     pub colour_review: ondin_core::color_review::Threshold,
@@ -609,6 +651,7 @@ impl Default for Prefs {
             batch_rename: BatchRenamePrefs::default(),
             clean_up: CleanUpPrefs::default(),
             fill_content: FillContentPrefs::default(),
+            assets: AssetPrefs::default(),
             colour_review: Default::default(),
         }
     }

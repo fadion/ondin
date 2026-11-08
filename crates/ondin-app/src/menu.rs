@@ -456,6 +456,8 @@ pub enum Item {
     Distribute(build::Axis),
     TidyUp,
     InsertPicker,
+    AssetsBrowser,
+    Credits,
     VariablesBrowser,
     ImportTokens,
     ExportTokens,
@@ -1163,6 +1165,8 @@ impl Item {
             ),
             Item::TidyUp => s("Tidy up", icon::TIDY_UP, None, Group::Transform),
             Item::InsertPicker => s("Insert", icon::HEXAGON, None, Group::Kits),
+            Item::AssetsBrowser => s("Assets…", icon::ASSETS, None, Group::Kits),
+            Item::Credits => s("Credits…", icon::QUOTES, None, Group::File),
             Item::VariablesBrowser => s("Styles and variables", icon::SWATCHES, None, Group::Kits),
             Item::ImportTokens => s("Import tokens…", icon::IMPORT, None, Group::Kits),
             Item::ExportTokens => s("Export tokens…", icon::EXPORT, None, Group::Kits),
@@ -1312,7 +1316,9 @@ impl Item {
             Item::Settings => &["preferences", "options"],
             Item::Save => &["version", "pin"],
             Item::CreateComponent => &["main", "symbol"],
-            Item::InsertPicker => &["component", "kit", "asset"],
+            Item::InsertPicker => &["component", "kit"],
+            Item::AssetsBrowser => &["icons", "photos", "stock", "images", "unsplash"],
+            Item::Credits => &["attribution", "licence", "license", "photographer"],
             Item::VariablesBrowser => &["tokens", "colours", "colors"],
             Item::ImportTokens | Item::ExportTokens => {
                 &["tokens", "dtcg", "json", "variables", "design tokens"]
@@ -1450,6 +1456,8 @@ impl Item {
             Item::Distribute(axis) => Action::Distribute(axis),
             Item::TidyUp => Action::TidyUp,
             Item::InsertPicker => Action::InsertPicker,
+            Item::AssetsBrowser => Action::AssetsBrowser,
+            Item::Credits => Action::Credits,
             Item::VariablesBrowser => Action::VariablesBrowser,
             Item::ImportTokens => Action::ImportTokens,
             Item::ExportTokens => Action::ExportTokens,
@@ -3649,6 +3657,8 @@ impl OndinApp {
             | Item::Distribute(_)
             | Item::TidyUp
             | Item::InsertPicker
+            | Item::AssetsBrowser
+            | Item::Credits
             | Item::VariablesBrowser
             | Item::ImportTokens
             | Item::ExportTokens

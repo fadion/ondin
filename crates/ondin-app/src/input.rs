@@ -183,6 +183,12 @@ pub enum Action {
     PlaceImage,
     /// Open or close the insert picker (`Shift+I`, and the rail's hexagon — §5.3e).
     InsertPicker,
+    /// Open or close the assets browser: the rail's button and the palette's
+    /// *Assets…*, unbound.
+    AssetsBrowser,
+    /// *Credits…*: the document's credits card, from the Document menu and the
+    /// palette.
+    Credits,
     /// Open or close the styles and variables browser (`Shift+S`, and the rail's
     /// swatches button — §5.3f).
     VariablesBrowser,

@@ -397,8 +397,9 @@ impl OndinApp {
         self.kit_picker = match self.kit_picker {
             Some(_) => None,
             None => {
-                // The variables browser shares the place (§5.3f).
+                // The variables browser and the assets browser share the place.
                 self.var_browser = None;
+                self.asset_panel = None;
                 // A rescan reads each file's first 4 KB, so a kit published since
                 // the last one — in this window or synced in — is seen at once
                 // rather than when the dashboard next looks (`kits::index`).
@@ -1063,7 +1064,7 @@ fn build_placement(
 /// The panel's whole height with its foot at `bottom`: [`H`], or less when the
 /// canvas above the button is shorter than that, never so little that the
 /// search box and a row of tiles do not fit.
-fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
+pub(crate) fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
     let floor = 2.0 * PAD + SEARCH_H + SEARCH_GAP + TILE_H + 22.0;
     H.min(bottom - canvas_top - 8.0).max(floor)
 }
@@ -1084,7 +1085,7 @@ fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
 /// comment named it among the panels until the record's reading of `bdabb66`
 /// found egui skipping it; the bar takes nothing from the pointer, so the
 /// comment was overclaiming, not the code.
-fn dropped_on_canvas(
+pub(crate) fn dropped_on_canvas(
     at: egui::Pos2,
     canvas: egui::Rect,
     panel: egui::Rect,

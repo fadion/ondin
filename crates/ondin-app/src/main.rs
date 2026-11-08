@@ -77,6 +77,7 @@
 
 mod again;
 mod app;
+mod assets;
 mod atomic;
 mod batch_rename;
 mod blend;

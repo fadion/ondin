@@ -1,37 +1,53 @@
-//! The Figma personal access token, kept in the system's own secret store when
-//! *Import files* is asked to remember it, and nowhere else: Windows' Credential
-//! Manager, the macOS keychain, the Secret Service on Linux.
+//! Secrets kept in the system's own secret store and nowhere else: Windows'
+//! Credential Manager, the macOS keychain, the Secret Service on Linux. One
+//! account each: the Figma personal access token when *Import files* is asked to
+//! remember it, and each photo service's key from Settings (`<service>-key`).
 //!
 //! macOS and Linux go through the platform's own tool (`security`, `secret-tool`)
 //! rather than a library, with the secret written to its standard input so it
 //! never appears in a process listing. Every call can block on the store, so the
 //! card makes them on a worker.
 
-/// The name the token is filed under.
+/// The service every secret is filed under, and the Figma token's account.
 const SERVICE: &str = "Ondin";
 const ACCOUNT: &str = "figma-token";
 
-/// The remembered token, if one is kept. A test build keeps none, so no test
-/// reads or writes the developer's own keychain.
+/// The remembered Figma token, if one is kept.
 pub(crate) fn read() -> Option<String> {
+    read_account(ACCOUNT)
+}
+
+/// Keep the Figma `token`, replacing one kept before.
+pub(crate) fn store(token: &str) -> Result<(), String> {
+    store_account(ACCOUNT, token)
+}
+
+/// Forget the kept Figma token, if there is one.
+pub(crate) fn forget() {
+    forget_account(ACCOUNT);
+}
+
+/// The secret kept under `account`, if any. A test build keeps none, so no test
+/// reads or writes the developer's own keychain.
+pub(crate) fn read_account(account: &str) -> Option<String> {
     if cfg!(test) {
         return None;
     }
-    os::read(ACCOUNT).filter(|t| !t.trim().is_empty())
+    os::read(account).filter(|t| !t.trim().is_empty())
 }
 
-/// Keep `token`, replacing one kept before.
-pub(crate) fn store(token: &str) -> Result<(), String> {
+/// Keep `secret` under `account`, replacing one kept before.
+pub(crate) fn store_account(account: &str, secret: &str) -> Result<(), String> {
     if cfg!(test) {
         return Ok(());
     }
-    os::store(ACCOUNT, token)
+    os::store(account, secret)
 }
 
-/// Forget the kept token, if there is one.
-pub(crate) fn forget() {
+/// Forget what `account` keeps, if anything.
+pub(crate) fn forget_account(account: &str) {
     if !cfg!(test) {
-        os::forget(ACCOUNT);
+        os::forget(account);
     }
 }
 
@@ -114,7 +130,7 @@ mod os {
             CredWriteW(&cred, 0)
         };
         if ok == 0 {
-            Err("Windows would not keep the token".into())
+            Err("Windows would not keep the secret".into())
         } else {
             Ok(())
         }
@@ -170,13 +186,13 @@ mod os {
         // `-i` reads commands from standard input, which keeps the token out of
         // the argument list; quoting is `security`'s own, so a quote is refused.
         if token.contains(['"', '\n', '\\']) {
-            return Err("The token holds characters the keychain cannot take".into());
+            return Err("That secret holds characters the keychain cannot take".into());
         }
         let command =
             format!("add-generic-password -U -s \"{SERVICE}\" -a \"{account}\" -w \"{token}\"\n");
         run("security", &["-i"], Some(&command))
             .map(|_| ())
-            .ok_or_else(|| "The keychain would not keep the token".into())
+            .ok_or_else(|| "The keychain would not keep the secret".into())
     }
 
     #[cfg(target_os = "macos")]
@@ -199,20 +215,14 @@ mod os {
 
     #[cfg(not(target_os = "macos"))]
     pub(super) fn store(account: &str, token: &str) -> Result<(), String> {
+        let label = format!("--label=Ondin {account}");
         run(
             "secret-tool",
-            &[
-                "store",
-                "--label=Ondin Figma token",
-                "service",
-                SERVICE,
-                "account",
-                account,
-            ],
+            &["store", &label, "service", SERVICE, "account", account],
             Some(token),
         )
         .map(|_| ())
-        .ok_or_else(|| "No secret store took the token (is secret-tool installed?)".into())
+        .ok_or_else(|| "No secret store took the secret (is secret-tool installed?)".into())
     }
 
     #[cfg(not(target_os = "macos"))]

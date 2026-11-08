@@ -1943,38 +1943,14 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
                 *act = Some(CardAct::Fetch);
             }
             let w = ui.available_width();
-            ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
-                let eye_w = 26.0;
-                let font = egui::FontId::proportional(ui::CONTROL_PT);
-                let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
-                #[expect(
-                    clippy::disallowed_methods,
-                    reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
-                )]
-                let _ = pad.add(
-                    ui,
-                    ui.available_width() - eye_w,
-                    egui::TextEdit::singleline(&mut card.token)
-                        .password(!card.show_token)
-                        .font(font)
-                        .hint_text(egui::RichText::new("figd_…").size(ui::CONTROL_PT)),
-                );
-                let glyph = if card.show_token {
-                    icon::EYE_SLASH
-                } else {
-                    icon::EYE
-                };
-                if ui::icon_button(ui, glyph, 22.0, 14.0, false, true)
-                    .on_hover_text(if card.show_token {
-                        "Hide token"
-                    } else {
-                        "Show token"
-                    })
-                    .clicked()
-                {
-                    card.show_token = !card.show_token;
-                }
-            });
+            ui::secret_field(
+                ui,
+                egui::vec2(w, ui::CONTROL_H),
+                &mut card.token,
+                &mut card.show_token,
+                "figd_…",
+                ("Show token", "Hide token"),
+            );
         });
     });
     settings::caption(

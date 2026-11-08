@@ -16,6 +16,19 @@ use kurbo::{
 /// Flattening tolerance for the curve→path conversions below.
 const TOLERANCE: f64 = 0.1;
 
+/// `arc`'s cubics, at a tolerance that grows with its radius past 10⁸ units:
+/// kurbo picks its subdivision count from `radius / tolerance`, so a huge radius
+/// typed or loaded as an exponent would otherwise ask for an unbounded path.
+fn arc_elements(arc: &Arc) -> impl Iterator<Item = PathEl> + use<> {
+    arc.append_iter(round_tolerance(arc.radii.x.max(arc.radii.y)))
+}
+
+/// [`TOLERANCE`] for a circular curve of `radius`, relative past 10⁸ units so the
+/// subdivision count stays bounded.
+fn round_tolerance(radius: f64) -> f64 {
+    TOLERANCE.max(radius.abs() * 1e-9)
+}
+
 /// Below this two points are the same point, and a vector is no direction.
 const EPS: f64 = 1e-9;
 
@@ -428,7 +441,7 @@ fn arc_to(out: &mut BezPath, from: Point, to: Point, corner: Point) {
     }
     let arc = Arc::new(centre, (radius, radius), start, sweep, 0.0);
     // `append_iter` emits curves only — the `MoveTo` is already down.
-    arc.append_iter(TOLERANCE).for_each(|el| match el {
+    arc_elements(&arc).for_each(|el| match el {
         PathEl::MoveTo(_) => {}
         el => out.push(el),
     });
@@ -470,7 +483,7 @@ fn smoothed_corner(out: &mut BezPath, corner: Point, u: Vec2, v: Vec2, r: f64, t
         turn * (1.0 - s) * sign,
         0.0,
     );
-    arc.append_iter(TOLERANCE).for_each(|el| match el {
+    arc_elements(&arc).for_each(|el| match el {
         PathEl::MoveTo(_) => {}
         el => out.push(el),
     });
@@ -491,7 +504,14 @@ pub fn ellipse_path(size: Size, arc: crate::node::EllipseArc) -> BezPath {
     // its ends are capped rather than joined, and a wide open expansion differs
     // from a closed one. `scene::lay_stroke` fixes the wide-stroke hole itself.
     if arc.is_whole() {
-        let mut path = Ellipse::new(centre, radii, 0.0).to_path(TOLERANCE);
+        // kurbo's ellipse squares its radii, which overflows past 10¹⁵⁴ into an
+        // unbounded path; an arc round the whole of it does not.
+        let mut path = match radii.x.max(radii.y) < 1e100 {
+            true => Ellipse::new(centre, radii, 0.0).to_path(TOLERANCE),
+            false => Arc::new(centre, radii, 0.0, std::f64::consts::TAU, 0.0)
+                .path_elements(round_tolerance(radii.x.max(radii.y)))
+                .collect(),
+        };
         path.close_path();
         return path;
     }
@@ -499,12 +519,10 @@ pub fn ellipse_path(size: Size, arc: crate::node::EllipseArc) -> BezPath {
     let sweep = arc.sweep.to_radians();
     let at = |k: f64, a: f64| centre + Vec2::new(radii.x * k * a.cos(), radii.y * k * a.sin());
     let push_arc = |path: &mut BezPath, k: f64, from: f64, by: f64| {
-        Arc::new(centre, radii * k, from, by, 0.0)
-            .append_iter(TOLERANCE)
-            .for_each(|el| match el {
-                PathEl::MoveTo(_) => {}
-                el => path.push(el),
-            });
+        arc_elements(&Arc::new(centre, radii * k, from, by, 0.0)).for_each(|el| match el {
+            PathEl::MoveTo(_) => {}
+            el => path.push(el),
+        });
     };
     let inner = arc.ratio;
     let mut path = BezPath::new();
@@ -541,7 +559,7 @@ pub fn rect_path(size: Size, radii: RoundedRectRadii, smoothing: f64) -> BezPath
     } else if smoothing > 0.0 {
         smoothed_rect(size, radii, smoothing)
     } else {
-        RoundedRect::from_rect(rect, radii).to_path(TOLERANCE)
+        RoundedRect::from_rect(rect, radii).to_path(round_tolerance(size.width.max(size.height)))
     }
 }
 
@@ -755,12 +773,17 @@ pub fn arc_path(end: Point, sweep: f64) -> BezPath {
     let right = Vec2::new(-d.y, d.x) / chord;
     let centre = Point::ZERO.midpoint(end) + right * (radius * half.cos() * half.signum());
     let start = (Point::ZERO - centre).atan2();
-    kurbo::Arc::new(centre, Vec2::new(radius, radius), start, 2.0 * half, 0.0)
-        .append_iter(TOLERANCE)
-        .for_each(|el| match el {
-            PathEl::MoveTo(_) => {}
-            el => path.push(el),
-        });
+    arc_elements(&Arc::new(
+        centre,
+        Vec2::new(radius, radius),
+        start,
+        2.0 * half,
+        0.0,
+    ))
+    .for_each(|el| match el {
+        PathEl::MoveTo(_) => {}
+        el => path.push(el),
+    });
     path
 }
 
@@ -938,7 +961,7 @@ pub fn smoothed_rect(size: Size, radii: RoundedRectRadii, smoothing: f64) -> Bez
             sweep: true,
         };
         match kurbo::Arc::from_svg_arc(&arc) {
-            Some(arc) => arc.append_iter(TOLERANCE).for_each(|el| path.push(el)),
+            Some(arc) => arc_elements(&arc).for_each(|el| path.push(el)),
             None => path.line_to(e2),
         }
         path.curve_to(
@@ -1215,7 +1238,10 @@ fn corners(size: Size, radii: RoundedRectRadii) -> [Corner; 4] {
 /// Append `arc` to `path`, opening a subpath if there is none yet and drawing a
 /// straight line to the arc's start if there is.
 fn append_arc(path: &mut BezPath, arc: &Arc) {
-    for (i, el) in arc.path_elements(TOLERANCE).enumerate() {
+    for (i, el) in arc
+        .path_elements(round_tolerance(arc.radii.x.max(arc.radii.y)))
+        .enumerate()
+    {
         match el {
             // An `Arc` leads with a `MoveTo`; mid-path that start must be
             // *reached*, not jumped to. `elements()`, not `BezPath::is_empty`,
@@ -3186,5 +3212,29 @@ mod tests {
         }
         let flat = arc_path(end, 0.0);
         assert_eq!(flat.elements().len(), 2, "the straight line");
+    }
+
+    /// A circular outline of any radius comes back in a bounded number of curves.
+    ///
+    /// flip: `round_tolerance` returning `TOLERANCE` → hangs at the 1e300 arc.
+    #[test]
+    fn a_huge_radius_is_a_bounded_path() {
+        let arc = local_path(&NodeKind::Arc {
+            end: Point::new(1e300, 0.0),
+            sweep: 90.0,
+        })
+        .expect("an arc has an outline");
+        assert!(arc.elements().len() < 100, "{}", arc.elements().len());
+        let wedge = ellipse_path(
+            Size::new(1e300, 1e300),
+            crate::node::EllipseArc {
+                start: 0.0,
+                sweep: 90.0,
+                ratio: 0.0,
+            },
+        );
+        assert!(wedge.elements().len() < 100, "{}", wedge.elements().len());
+        let whole = ellipse_path(Size::new(1e300, 1e300), crate::node::EllipseArc::default());
+        assert!(whole.elements().len() < 100, "{}", whole.elements().len());
     }
 }

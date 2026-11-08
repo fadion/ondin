@@ -55,6 +55,12 @@ pub enum Refusal {
     Parents,
     /// A shape is a mask: in the group it would stop clipping what it clips.
     Mask,
+    /// A mask stands between the two in their parent: the lower shape, moved
+    /// into the group above it, would fall under its clip.
+    MaskBetween,
+    /// The two sit in an auto layout, directly or through plain groups: moved
+    /// into the group they would leave the flow and lose what it gave them.
+    Layout,
 }
 
 impl Refusal {
@@ -73,6 +79,8 @@ impl Refusal {
             }
             Refusal::Parents => "Blend shapes needs two shapes in the same group or frame",
             Refusal::Mask => "Blend shapes can't take a mask",
+            Refusal::MaskBetween => "Blend shapes needs two shapes with no mask between them",
+            Refusal::Layout => "Blend shapes can't work inside an auto layout",
         }
     }
 }
@@ -122,8 +130,25 @@ pub fn pair(doc: &Document, selection: &[NodeId]) -> Result<(NodeId, NodeId), Re
     }
     // Grouping moves both into the upper one's parent, as `build::group` refuses
     // to across parents.
-    if doc.get(*a).and_then(|n| n.parent()) != doc.get(*b).and_then(|n| n.parent()) {
+    let parent = doc.get(*a).and_then(|n| n.parent());
+    if parent != doc.get(*b).and_then(|n| n.parent()) {
         return Err(Refusal::Parents);
+    }
+    if crate::container::lays_out_above(&crate::resolve::DocView(doc), *a) {
+        return Err(Refusal::Layout);
+    }
+    // A mask clips the siblings above it, so one between the two would start
+    // clipping the lower shape once the group above it holds that shape.
+    let siblings = parent
+        .and_then(|p| doc.get(p))
+        .map_or(&[][..], |p| p.children());
+    let at = |id: NodeId| siblings.iter().position(|c| *c == id);
+    if let (Some(i), Some(j)) = (at(*a), at(*b))
+        && siblings[i.min(j) + 1..i.max(j)]
+            .iter()
+            .any(|s| doc.get(*s).is_some_and(|n| n.mask()))
+    {
+        return Err(Refusal::MaskBetween);
     }
     Ok((*a, *b))
 }
@@ -450,6 +475,22 @@ fn look_between(
     (out, oa + (ob - oa) * t32)
 }
 
+/// The map of world space taking box `from` onto box `to`: centre onto centre,
+/// each side scaled to the other's. A side too thin to scale from or to keeps
+/// its scale, so a line's box maps without a singular transform.
+fn box_onto(from: Rect, to: Rect) -> Affine {
+    let ratio = |a: f64, b: f64| match a > 1e-9 && b > 1e-9 {
+        true => b / a,
+        false => 1.0,
+    };
+    Affine::translate(to.center().to_vec2())
+        * Affine::scale_non_uniform(
+            ratio(from.width(), to.width()),
+            ratio(from.height(), to.height()),
+        )
+        * Affine::translate(-from.center().to_vec2())
+}
+
 /// The blend of `selection`'s two shapes: the [`Operation::InsertSubtree`] that
 /// adds the *Blend* group where the upper of the two stands in its parent, then
 /// the two moved into it around the steps, first shape lowest. Answers the edit
@@ -485,14 +526,21 @@ pub fn blend(
     let to_parent = parent_world.inverse();
     // How much larger a unit of each shape draws than a unit of the steps.
     let size = |w: Affine| w.determinant().abs().sqrt();
-    let carry = |id: NodeId| -> Carry {
+    let world_box = |id: NodeId| {
         let world = res.world_transform(id).unwrap_or(Affine::IDENTITY);
+        let bounds = res.local_path(doc, id).map(|p| (world * p).bounding_box());
+        (world, bounds)
+    };
+    let (shape_a, shape_b) = (world_box(a), world_box(b));
+    // Each shape's paint into a step's space, laid over the step's world box as
+    // it lay over the shape's, so a gradient moves and sizes with the step.
+    let carry = |(world, bounds): (Affine, Option<Rect>), step: Rect| -> Carry {
+        let onto = bounds.map_or(Affine::IDENTITY, |from| box_onto(from, step));
         (
             size(world) / size(parent_world).max(1e-12),
-            to_parent * world,
+            to_parent * onto * world,
         )
     };
-    let carry = (carry(a), carry(b));
 
     // Built on a scratch document, so each node takes every default a created
     // one has, then carried over whole.
@@ -513,10 +561,12 @@ pub fn blend(
         let step = ids.mint();
         // The nearer shape's rule, so a shape with holes keeps them.
         let near = if t < 0.5 || !blend.paint { a } else { b };
-        let path = match near == b {
-            true => to_parent * between(&ra_b, &rb_b, t),
-            false => to_parent * between(&ra, &rb, t),
+        let world = match near == b {
+            true => between(&ra_b, &rb_b, t),
+            false => between(&ra, &rb, t),
         };
+        let step_box = world.bounding_box();
+        let path = to_parent * world;
         ops.push(Operation::CreateNode {
             id: step,
             parent: group,
@@ -530,6 +580,7 @@ pub fn blend(
             transform: None,
             name: Some(format!("Step {k}")),
         });
+        let carry = (carry(shape_a, step_box), carry(shape_b, step_box));
         let (paint, opacity) = look_between(doc, (a, b), t, blend.paint, carry);
         if let Some(rule) = doc.get(near).map(|n| n.fill_rule()) {
             ops.push(Operation::SetFillRule { id: step, rule });

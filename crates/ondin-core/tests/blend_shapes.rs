@@ -243,9 +243,11 @@ fn open_against_closed_is_refused_before_the_commit() {
     assert_eq!(blend::refusal(&f.doc, &res, &[f.circle, f.square]), None);
 }
 
-/// A gradient on the circle, in a frame that scales, lies over each step as it lay
-/// over the circle: its ends land in the world where the circle's did.
-/// flip: `look_between` not carrying brushes → fails at "the ramp's start".
+/// A gradient on each shape, in a frame that scales, lies over every step as it
+/// lay over the nearer shape: its ends fall at the same fractions of the step's
+/// world box as of the shape's, however far the step stands from the shape.
+/// flip: `blend` carrying each brush by the shape's own map alone, not onto the
+/// step's box (`box_onto`) → fails at step 1's ramp.
 #[test]
 fn a_gradient_is_carried_into_each_steps_space() {
     use ondin_core::peniko::{Gradient, GradientKind};
@@ -275,7 +277,7 @@ fn a_gradient_is_carried_into_each_steps_space() {
             },
         ]))
         .unwrap();
-    let before = Resolved::rebuild(&f.doc);
+    // The ramp's ends as fractions of the layer's world box.
     let ends = |doc: &Document, res: &Resolved, id: NodeId| {
         let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient");
@@ -283,25 +285,32 @@ fn a_gradient_is_carried_into_each_steps_space() {
         let GradientKind::Linear(line) = g.gradient.kind else {
             panic!("linear");
         };
-        let to_world = res.world_transform(id).unwrap() * g.transform;
-        (to_world * line.start, to_world * line.end)
+        let world = res.world_transform(id).unwrap();
+        let bounds = (world * res.local_path(doc, id).unwrap()).bounding_box();
+        let at = |p: Point| {
+            let w = world * g.transform * p;
+            Vec2::new(
+                (w.x - bounds.x0) / bounds.width(),
+                (w.y - bounds.y0) / bounds.height(),
+            )
+        };
+        (at(line.start), at(line.end))
     };
+    let before = Resolved::rebuild(&f.doc);
     let (circle, square) = (
         ends(&f.doc, &before, f.circle),
         ends(&f.doc, &before, f.square),
     );
     let group = f.blend(FIVE);
     let after = Resolved::rebuild(&f.doc);
-    let steps = steps_of(&f, group);
-    for (step, want) in [(steps[0], circle), (steps[4], square)] {
+    for (k, step) in steps_of(&f, group).into_iter().enumerate() {
+        // Steps 1 and 2 are nearer the circle, 3 to 5 the square.
+        let want = if k < 2 { circle } else { square };
         let got = ends(&f.doc, &after, step);
         assert!(
-            (got.0 - want.0).hypot() < 1e-6,
-            "the ramp's start: {got:?} vs {want:?}"
-        );
-        assert!(
-            (got.1 - want.1).hypot() < 1e-6,
-            "the ramp's end: {got:?} vs {want:?}"
+            (got.0 - want.0).hypot() < 1e-6 && (got.1 - want.1).hypot() < 1e-6,
+            "step {}'s ramp: {got:?} vs {want:?}",
+            k + 1
         );
     }
 }
@@ -565,6 +574,204 @@ fn shapes_inside_a_main_are_refused() {
     assert_eq!(
         blend::pair(&f.doc, &[f.circle, f.square]),
         Err(Refusal::Inside)
+    );
+}
+
+/// An instance, and two shapes inside one, are refused: the group would move
+/// the instance, or be a layer its main does not have.
+/// flip: `pair` without its `node.link()` test → fails at "an instance
+/// itself"; without both link tests → fails at "inside an instance" too.
+#[test]
+fn an_instance_and_shapes_inside_one_are_refused() {
+    let mut f = Fixture::new();
+    let (main, e1, e2) = (f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let dot = |id, index, x: f64| Operation::CreateNode {
+        id,
+        parent: main,
+        index,
+        kind: NodeKind::Ellipse {
+            size: Size::new(10.0, 10.0),
+            arc: Default::default(),
+        },
+        transform: Some(Affine::translate((x, 0.0))),
+        name: None,
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent: f.frame,
+                index: 2,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            dot(e1, 0, 0.0),
+            dot(e2, 1, 40.0),
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ]))
+        .unwrap();
+    let place = ondin_core::Placement {
+        nodes: f.doc.capture_subtree(main).unwrap(),
+        parent: f.frame,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+    f.doc.apply(&tx).unwrap();
+    let instance = made[0];
+    let copies = f.doc.get(instance).unwrap().children().to_vec();
+    assert!(
+        f.doc.get(instance).unwrap().link().is_some() && copies.len() == 2,
+        "the fixture: an instance of two shapes"
+    );
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, instance]),
+        Err(Refusal::Inside),
+        "an instance itself"
+    );
+    assert_eq!(
+        blend::pair(&f.doc, &copies),
+        Err(Refusal::Inside),
+        "inside an instance"
+    );
+}
+
+/// Two shapes in an auto layout are refused, directly or through a plain group:
+/// moved into the *Blend* group they would leave the flow and lose their stretch.
+/// flip: `pair` without its layout test → fails at "in a row"; asking only the
+/// direct parent → fails at "in a group in a row".
+#[test]
+fn shapes_in_an_auto_layout_are_refused() {
+    let mut f = Fixture::new();
+    let flex = Some(ondin_core::container::Display::Flex(Default::default()));
+    f.doc
+        .apply(&Transaction(vec![Operation::SetDisplay {
+            id: f.frame,
+            display: flex,
+        }]))
+        .unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Layout),
+        "in a row"
+    );
+    let res = Resolved::rebuild(&f.doc);
+    let made = blend::blend(&f.doc, &res, &mut f.ids, &[f.circle, f.square], FIVE);
+    assert_eq!(made.err(), Some(Refusal::Layout));
+
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, _) =
+        ondin_core::build::group(&f.doc, &res, &mut f.ids, &[f.circle, f.square]).unwrap();
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::Layout),
+        "in a group in a row"
+    );
+}
+
+/// A mask between the two shapes in their parent is refused: the lower shape,
+/// moved into the group above it, would fall under its clip.
+/// flip: `pair` without its test of the siblings between → fails at the refusal.
+#[test]
+fn a_mask_between_the_shapes_is_refused() {
+    let mut f = Fixture::new();
+    let mask = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: mask,
+                parent: f.frame,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetMask {
+                id: mask,
+                mask: true,
+            },
+        ]))
+        .unwrap();
+    assert_eq!(
+        f.doc.get(f.frame).unwrap().children(),
+        &[f.circle, mask, f.square],
+        "the fixture: the mask stands between"
+    );
+    assert_eq!(
+        blend::pair(&f.doc, &[f.circle, f.square]),
+        Err(Refusal::MaskBetween)
+    );
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMask {
+            id: mask,
+            mask: false,
+        }]))
+        .unwrap();
+    assert!(blend::pair(&f.doc, &[f.circle, f.square]).is_ok());
+}
+
+/// *Reverse the second shape* runs it the other way: the middle step's first
+/// anchor stays, and its second comes from the square's other side.
+/// flip: `matched` ignoring `Blend::reverse` → fails at "a different step".
+#[test]
+fn reverse_runs_the_second_shape_the_other_way() {
+    let first = |reverse: bool| {
+        let mut f = Fixture::new();
+        let group = f.blend(Blend { reverse, ..FIVE });
+        let NodeKind::Path { path, .. } = f.doc.get(steps_of(&f, group)[2]).unwrap().kind() else {
+            panic!("a path");
+        };
+        path.clone()
+    };
+    let (plain, reversed) = (first(false), first(true));
+    assert_ne!(plain, reversed, "a different step");
+    let start = |p: &ondin_core::kurbo::BezPath| match p.elements()[0] {
+        ondin_core::kurbo::PathEl::MoveTo(p) => p,
+        _ => panic!("starts with a move"),
+    };
+    assert!(
+        (start(&plain) - start(&reversed)).hypot() < 1e-6,
+        "the first anchors still pair"
+    );
+}
+
+/// Where the two shapes hold different numbers of fills, a step takes the
+/// nearer shape's list unmixed.
+/// flip: `look_between` mixing without its equal-count test → panics indexing
+/// past the shorter list (or, read with `get`, fails at the step's colour).
+#[test]
+fn fills_of_different_counts_are_not_mixed() {
+    let mut f = Fixture::new();
+    let two = keyed_by_position([ORANGE, ORANGE].map(|c| Fill {
+        brush: Brush::Solid(c).into(),
+        visible: true,
+    }));
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.square,
+            fills: two,
+        }]))
+        .unwrap();
+    let group = f.blend(FIVE);
+    let first = f.doc.get(steps_of(&f, group)[0]).unwrap();
+    let colours: Vec<_> = first
+        .paint()
+        .fills
+        .iter()
+        .map(|x| x.value.brush.literal().cloned())
+        .collect();
+    assert_eq!(
+        colours,
+        vec![Some(Brush::Solid(BLUE))],
+        "the circle's one fill"
     );
 }
 

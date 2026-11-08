@@ -71,15 +71,16 @@ pub fn centre(res: &Resolved, members: &[NodeId]) -> Option<Point> {
 /// Why a ring is refused for a layer in an auto layout.
 pub const IN_LAYOUT: &str = "Repeat can't work inside an auto layout";
 
-/// Whether any of `members` sits in a parent that lays its children out. There the
-/// ring's group, or the copies beside the original, would be laid out as items:
-/// the original and its siblings would move and the ring would not stand round
-/// its point. Refused, as the shape builder and the knife refuse such a layer.
+/// Whether any of `members` sits in a parent that lays its children out, or in
+/// plain groups inside one. There the ring's group, or the copies beside the
+/// original, would be laid out as items or grow the group that is one: the
+/// original and its siblings would move and the ring would not stand round its
+/// point. Refused, as the shape builder and the knife refuse such a layer.
 pub fn in_layout(doc: &Document, members: &[NodeId]) -> bool {
     let view = crate::resolve::DocView(doc);
     members
         .iter()
-        .any(|id| crate::container::parent_lays_out(&view, *id))
+        .any(|id| crate::container::lays_out_above(&view, *id))
 }
 
 /// The name the group takes: *Tick × 12*.
@@ -309,5 +310,57 @@ mod tests {
         .unwrap();
         let res = Resolved::rebuild(&doc);
         assert!(repeat(&doc, &res, &mut ids, &[a], pivot, ring, Place::Group).is_ok());
+    }
+
+    /// A layer in a plain group in a row is refused too: the ring would grow the
+    /// group, the row's item, and the row would move it and its siblings.
+    /// flip: `in_layout` asking only the direct parent → fails at "in a layout".
+    #[test]
+    fn a_layer_in_a_group_in_an_auto_layout_is_refused() {
+        let mut ids = IdSource::new(0x2EA);
+        let root = ids.mint();
+        let (frame, g, r, b) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let mut doc = Document::new(root);
+        let node = |id, parent, index, kind| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = NodeKind::Rect {
+            size: Size::new(40.0, 30.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        let board = NodeKind::Artboard {
+            size: Size::new(300.0, 300.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        doc.apply(&Transaction(vec![
+            node(frame, root, 0, board),
+            node(g, frame, 0, NodeKind::Group),
+            node(r, g, 0, rect.clone()),
+            node(b, frame, 1, rect),
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex::default())),
+            },
+        ]))
+        .expect("the fixture");
+        let res = Resolved::rebuild(&doc);
+        assert!(in_layout(&doc, &[r]), "in a layout");
+        let made = repeat(
+            &doc,
+            &res,
+            &mut ids,
+            &[r],
+            Point::new(20.0, 120.0),
+            Ring::full(4, true),
+            Place::Group,
+        );
+        assert!(matches!(made, Err(OpError::InvalidParent)));
     }
 }

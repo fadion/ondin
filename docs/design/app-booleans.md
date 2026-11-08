@@ -345,7 +345,11 @@ stays live.
   shapes in the same group or frame* — moved into the other's parent a shape would fall under
   that parent's clip, opacity, mode and layout, as `build::group` refuses across parents; `Mask`
   *Blend shapes can't take a mask* — in the group it would stop clipping what it clips, as
-  `build::can_outline_stroke` refuses one.
+  `build::can_outline_stroke` refuses one; `MaskBetween` *Blend shapes needs two shapes with no
+  mask between them* — the lower shape, moved into the group above that mask, would fall under its
+  clip; `Layout` *Blend shapes can't work inside an auto layout* — the parent, or one above it
+  through plain groups (`container::lays_out_above`), lays out, and the two moved into the group
+  would leave the flow and lose their stretch, as Repeat refuses.
 - **Outlines** are taken in world space (`world_transform` × `Resolved::local_path`, so a boolean
   gives its result) and split into subpaths, which pair one to one and must agree on closed or
   open; each becomes cubics. A closed second subpath is turned to run the way the first does (by
@@ -362,8 +366,10 @@ stays live.
   position is a solid colour in both, the colour is mixed channel by channel, alpha included;
   stroke widths and drawn opacity are mixed. Off, every step wears the first shape's paint and
   opacity. Stroke widths are first scaled into the steps' own units, so a stroke draws as wide as
-  it did under a scaled shape, and a gradient is carried by the shape's map into the steps' space
-  (`paint_box::carry_brush`), so it lies over each step as it lay over the shape. Each step takes
+  it did under a scaled shape, and a gradient is carried by the shape's map into the steps' space,
+  with the shape's world box mapped onto the step's (`box_onto`, centre onto centre, each side
+  scaled; `paint_box::carry_brush`), so it lies over each step as it lay over the shape wherever
+  the step stands. Each step takes
   the nearer shape's fill rule, and with it that shape's windings: a step taking the upper shape's
   rule runs each of its runs the way the upper shape's own does, undoing the turn above, so holes
   stay holes. Effects and blend mode are not carried.

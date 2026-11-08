@@ -207,7 +207,8 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
   It has no button on the tool rail: like image editing it is entered on a subject, and the path bar
   is its chrome.
 - Anchors draw as markers (square = corner, round = smooth); the selection box is hidden while they
-  are up (`canvas::chrome_hidden`, also covering a pen gesture).
+  are up (`canvas::chrome_hidden`, also covering a pen gesture). While the edit's pen draws, the
+  run it holds wears the pen's circles and every other run of the path keeps its plain markers.
 - Click selects an anchor, `Shift` adds, a drag from empty canvas marquees points, live, as a box or
   a lasso (`Shift` toggles, `Alt` removes; `app-selection.md`, *The marquee and the lasso*), dragging moves all
   selected anchors. Handles drag from their dots, or are pulled out of an anchor with `Ctrl`+drag;

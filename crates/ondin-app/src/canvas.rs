@@ -8150,13 +8150,27 @@ impl OndinApp {
         resp: &egui::Response,
     ) {
         let Some(id) = self.edited_path() else { return };
-        // A pen gesture in flight owns this path's picture.
-        if self.pen.is_some() {
-            return;
-        }
         let Some((_, subpaths)) = self.preview_subpaths(id) else {
             return;
         };
+        // A pen gesture in flight owns the run it holds: overlaid, its circles and
+        // these squares would contradict each other. The path's other runs keep
+        // their plain markers, so a new run is drawn against the points around it.
+        if let Some(pen) = &self.pen {
+            let Some(held) = pen.editing.as_ref().filter(|e| e.id == id) else {
+                return;
+            };
+            for (s, sub) in subpaths.iter().enumerate() {
+                if s == held.active {
+                    continue;
+                }
+                for an in &sub.anchors {
+                    let at = self.to_screen(an.at, rect, ppp);
+                    paint_point(painter, at, an.is_corner(), color::POINT, POINT_STROKE_PX);
+                }
+            }
+            return;
+        }
 
         // Segments first, under the points; `node_grab` decides the trace and the
         // anchor's hover fill, so the chrome offers what the press takes.
@@ -8201,7 +8215,6 @@ impl OndinApp {
         // Under the markers, since an anchor wins the press.
         self.draw_point_box(painter, rect, ppp);
 
-        let ink = egui::Stroke::new(POINT_STROKE_PX, color::SELECT);
         // A selected segment lights its two ends too (`subject_points`).
         let subject = self.subject_points(id);
         for (s, sub) in subpaths.iter().enumerate() {
@@ -8229,23 +8242,7 @@ impl OndinApp {
                     true => POINT_STROKE_HOVER_PX,
                     false => POINT_STROKE_PX,
                 };
-                let outline = egui::Stroke::new(weight, ink.color);
-                if an.is_corner() {
-                    let r = egui::Rect::from_center_size(at, egui::Vec2::splat(POINT_PX));
-                    painter.rect_filled(r, egui::CornerRadius::ZERO, fill);
-                    painter.rect_stroke(
-                        r,
-                        egui::CornerRadius::ZERO,
-                        outline,
-                        egui::StrokeKind::Inside,
-                    );
-                } else {
-                    painter.circle_filled(at, POINT_PX * 0.5, fill);
-                    // A circle has no `StrokeKind`; the tessellator reaches `r + w`,
-                    // so the radius shrinks by the whole extra weight, not half.
-                    let radius = POINT_PX * 0.5 - (weight - POINT_STROKE_PX);
-                    painter.circle_stroke(at, radius, outline);
-                }
+                paint_point(painter, at, an.is_corner(), fill, weight);
             }
         }
 
@@ -11020,6 +11017,33 @@ pub(crate) fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::
         radius,
         egui::Stroke::new(POINT_STROKE_PX, color::SELECT),
     );
+}
+
+/// The node tool's mark for a settled anchor: a square for a corner, a circle for
+/// a smooth point, [`POINT_PX`] across with a rim `weight` wide.
+fn paint_point(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    corner: bool,
+    fill: egui::Color32,
+    weight: f32,
+) {
+    let outline = egui::Stroke::new(weight, color::SELECT);
+    if corner {
+        let r = egui::Rect::from_center_size(at, egui::Vec2::splat(POINT_PX));
+        painter.rect_filled(r, egui::CornerRadius::ZERO, fill);
+        painter.rect_stroke(
+            r,
+            egui::CornerRadius::ZERO,
+            outline,
+            egui::StrokeKind::Inside,
+        );
+    } else {
+        painter.circle_filled(at, POINT_PX * 0.5, fill);
+        // A circle has no `StrokeKind`; the tessellator reaches `r + w`, so the
+        // radius shrinks by the whole extra weight, not half.
+        painter.circle_stroke(at, POINT_PX * 0.5 - (weight - POINT_STROKE_PX), outline);
+    }
 }
 
 /// The marker: one crosshair glyph, in the state [`Marker`] picks, no ground.
@@ -15748,6 +15772,39 @@ mod headless_app_tests {
             "another layer under the pointer still means *switch subject*; a pen \
              verb here would make that unreachable while the bias is on"
         );
+    }
+
+    /// A new run drawn into an edited path leaves the path's other runs their
+    /// markers; one square per anchor of the stored run.
+    /// flip: `draw_points` returning whenever a pen is in flight → fails at "markers".
+    #[test]
+    fn a_new_run_in_a_path_edit_keeps_the_other_runs_markers() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_editing_an_open_path(&ctx);
+        let at = |x: f64, y: f64| Point::new(1000.0 + x, 1000.0 + y);
+        app.pen_verb_press(id, at(-400.0, 400.0), false, PenVerb::NewSubpath);
+        assert!(
+            app.pen
+                .as_ref()
+                .and_then(|p| p.editing.as_ref())
+                .is_some_and(|e| e.minted && e.id == id),
+            "the press started a new run in the edited path"
+        );
+        let squares = ctx
+            .run_ui(Default::default(), |ui| {
+                let rect = ui.max_rect();
+                let resp = ui.allocate_rect(rect, egui::Sense::hover());
+                app.draw_points(ui.painter(), rect, 1.0, &resp);
+            })
+            .shapes
+            .into_iter()
+            .filter(|c| {
+                matches!(&c.shape, egui::Shape::Rect(r)
+                    if (r.rect.width() - POINT_PX).abs() < 0.01)
+            })
+            .count();
+        // Each square is a fill and a rim.
+        assert_eq!(squares, 2 * 3, "markers on the stored run's three corners");
     }
 
     /// Auto-scroll moves the view toward the pointer, and `autopan_total` records

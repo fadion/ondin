@@ -43,11 +43,6 @@ const ROW_H2: f32 = 42.0;
 /// How far the hover card's *Alt+click to open* sits below centre, to share the
 /// link host's baseline.
 const HINT_NUDGE: f32 = 1.0;
-/// How long the pointer rests on a tile or a result before its card shows.
-const CARD_DELAY: f64 = 0.5;
-/// The hover card's width, and its gap from the panel's edge.
-const CARD_W: f32 = 260.0;
-const CARD_GAP: f32 = 8.0;
 /// How many lines of a description the card shows before cutting it.
 const CARD_LINES: usize = 6;
 /// How many results a search shows.
@@ -72,9 +67,8 @@ pub(crate) struct Picker {
     ghost: Option<Ghost>,
     /// The panel's rect as last drawn: over it, a drag shows the tile.
     panel: Option<egui::Rect>,
-    /// What the pointer rests on and since when (`ctx` time): the hover card
-    /// shows once it has rested [`CARD_DELAY`].
-    resting: Option<(Key, f64)>,
+    /// What the pointer rests on, the hover card's timer.
+    resting: ui::Resting<Key>,
 }
 
 impl Picker {
@@ -575,25 +569,13 @@ impl OndinApp {
                 None => p.ghost = None,
             }
             // The hover card, once the pointer has rested; never during a drag.
-            let now = ctx.input(|i| i.time);
-            match hovered.as_ref().filter(|_| dragging.is_none()) {
-                Some((item, rect)) => {
-                    let key = key_of(&item.source);
-                    let since = match &p.resting {
-                        Some((k, t)) if *k == key => *t,
-                        _ => {
-                            p.resting = Some((key, now));
-                            now
-                        }
-                    };
-                    let left = CARD_DELAY - (now - since);
-                    if left > 0.0 {
-                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
-                    } else if item.has_card() {
-                        hover_card(ctx, item, panel, *rect);
-                    }
-                }
-                None => p.resting = None,
+            let resting = hovered.as_ref().filter(|_| dragging.is_none());
+            if p.resting
+                .rested(ctx, resting.map(|(item, _)| key_of(&item.source)))
+                && let Some((item, rect)) = resting
+                && item.has_card()
+            {
+                hover_card(ctx, item, panel, *rect);
             }
         }
 
@@ -1722,85 +1704,78 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
 /// under the pointer moves. In private mode only the (masked) name.
 fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Rect) {
     let private = crate::private::on();
-    egui::Area::new(egui::Id::new("kit-picker-card"))
-        .order(egui::Order::Tooltip)
-        .interactable(false)
-        .fixed_pos(egui::pos2(panel.right() + CARD_GAP, row.top()))
-        .show(ctx, |ui| {
-            ui::hover_card_frame().inner_margin(PAD).show(ui, |ui| {
-                ui.set_width(CARD_W - 2.0 * PAD);
-                ui.spacing_mut().item_spacing.y = 8.0;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    let glyph = if item.set {
-                        icon::VARIANT_SET
-                    } else {
-                        icon::HEXAGON_FILL
+    ui::rail_hover_card(ctx, egui::Id::new("kit-picker-card"), panel, row, |ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 7.0;
+            let glyph = if item.set {
+                icon::VARIANT_SET
+            } else {
+                icon::HEXAGON_FILL
+            };
+            ui.label(
+                egui::RichText::new(glyph)
+                    .font(theme::icon_font(14.0))
+                    .color(color::accent_300()),
+            );
+            ui.label(
+                egui::RichText::new(&item.name)
+                    .size(ui::CONTROL_PT)
+                    .color(theme::text::strong()),
+            );
+            if item.variants > 0 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let n = match item.variants {
+                        1 => "1 variant".to_string(),
+                        n => format!("{n} variants"),
                     };
                     ui.label(
-                        egui::RichText::new(glyph)
-                            .font(theme::icon_font(14.0))
-                            .color(color::accent_300()),
+                        egui::RichText::new(n)
+                            .size(ui::CAPTION_PT)
+                            .color(theme::text::faint()),
                     );
-                    ui.label(
-                        egui::RichText::new(&item.name)
-                            .size(ui::CONTROL_PT)
-                            .color(theme::text::strong()),
-                    );
-                    if item.variants > 0 {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let n = match item.variants {
-                                1 => "1 variant".to_string(),
-                                n => format!("{n} variants"),
-                            };
-                            ui.label(
-                                egui::RichText::new(n)
-                                    .size(ui::CAPTION_PT)
-                                    .color(theme::text::faint()),
-                            );
-                        });
-                    }
                 });
-                if private {
-                    return;
-                }
-                if !item.about.is_empty() {
-                    let mut job = egui::text::LayoutJob::simple(
-                        item.about.clone(),
-                        egui::FontId::proportional(ui::SMALL_PT),
-                        theme::text::muted(),
-                        ui.available_width(),
-                    );
-                    job.wrap.max_rows = CARD_LINES;
-                    ui.label(job);
-                }
-                if !item.docs.is_empty() {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        ui.label(
-                            egui::RichText::new(icon::GLOBE)
-                                .font(theme::icon_font(13.0))
-                                .color(theme::text::faint()),
-                        );
-                        let host = ui.label(
-                            egui::RichText::new(ondin_core::link_host(&item.docs))
-                                .size(ui::SMALL_PT)
-                                .color(theme::text::dim()),
-                        );
-                        // Painted against the host rather than laid out: the
-                        // card's width is fixed, and centred the smaller
-                        // hint's baseline sits above the host's.
-                        ui.painter().text(
-                            egui::pos2(ui.max_rect().right(), host.rect.center().y + HINT_NUDGE),
-                            egui::Align2::RIGHT_CENTER,
-                            crate::input::keys("Alt+click to open"),
-                            egui::FontId::proportional(ui::CAPTION_PT),
-                            theme::text::faint(),
-                        );
-                    });
-                }
-            });
+            }
         });
+        if private {
+            return;
+        }
+        if !item.about.is_empty() {
+            let mut job = egui::text::LayoutJob::simple(
+                item.about.clone(),
+                egui::FontId::proportional(ui::SMALL_PT),
+                theme::text::muted(),
+                ui.available_width(),
+            );
+            job.wrap.max_rows = CARD_LINES;
+            ui.label(job);
+        }
+        if !item.docs.is_empty() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(
+                    egui::RichText::new(icon::GLOBE)
+                        .font(theme::icon_font(13.0))
+                        .color(theme::text::faint()),
+                );
+                let host = ui.label(
+                    egui::RichText::new(ondin_core::link_host(&item.docs))
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::dim()),
+                );
+                // Painted against the host rather than laid out: the
+                // card's width is fixed, and centred the smaller
+                // hint's baseline sits above the host's.
+                ui.painter().text(
+                    egui::pos2(ui.max_rect().right(), host.rect.center().y + HINT_NUDGE),
+                    egui::Align2::RIGHT_CENTER,
+                    crate::input::keys("Alt+click to open"),
+                    egui::FontId::proportional(ui::CAPTION_PT),
+                    theme::text::faint(),
+                );
+            });
+        }
+    });
 }
 
 /// A description's first line, for a result's second line, which cuts it to the
@@ -3652,7 +3627,7 @@ pub(crate) mod tests {
     /// a second, is after; the `Alt`+click asks egui to open the address and
     /// starts no placement.
     ///
-    /// flip: `CARD_DELAY` at 0 → fails at "not before it has rested".
+    /// flip: `ui::RAIL_CARD_DELAY` at 0 → fails at "not before it has rested".
     #[test]
     fn a_resting_pointer_shows_the_card_and_alt_click_opens_the_link() {
         let ctx = egui::Context::default();

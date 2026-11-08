@@ -124,6 +124,70 @@ pub fn hover_card_frame() -> egui::Frame {
         .stroke(egui::Stroke::new(1.0, color::text_a(20)))
 }
 
+/// How long the pointer rests on a rail panel's item before its hover card shows.
+pub const RAIL_CARD_DELAY: f64 = 0.5;
+/// A rail panel's hover card's width, and its gap from the panel's edge.
+pub const RAIL_CARD_W: f32 = 260.0;
+pub const RAIL_CARD_GAP: f32 = 8.0;
+
+/// What a rail panel's pointer rests on, and since when (`ctx` time): the timer
+/// its hover card waits [`RAIL_CARD_DELAY`] on.
+pub struct Resting<K>(Option<(K, f64)>);
+
+impl<K> Default for Resting<K> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<K: PartialEq> Resting<K> {
+    /// Note the pointer over `key` this frame, or over nothing; true once it has
+    /// rested there [`RAIL_CARD_DELAY`], else a frame is asked for at that moment.
+    pub fn rested(&mut self, ctx: &egui::Context, key: Option<K>) -> bool {
+        let Some(key) = key else {
+            self.0 = None;
+            return false;
+        };
+        let now = ctx.input(|i| i.time);
+        let since = match &self.0 {
+            Some((k, t)) if *k == key => *t,
+            _ => {
+                self.0 = Some((key, now));
+                now
+            }
+        };
+        let left = RAIL_CARD_DELAY - (now - since);
+        if left > 0.0 {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+        }
+        left <= 0.0
+    }
+}
+
+/// A rail panel's hover card: beside `panel` at `row`'s top, on
+/// [`hover_card_frame`] inset by [`RAIL_POPUP_PAD`], [`RAIL_CARD_W`] wide,
+/// above everything and never taking the pointer, so nothing under it moves.
+pub fn rail_hover_card(
+    ctx: &egui::Context,
+    id: egui::Id,
+    panel: egui::Rect,
+    row: egui::Rect,
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Area::new(id)
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(egui::pos2(panel.right() + RAIL_CARD_GAP, row.top()))
+        .show(ctx, |ui| {
+            hover_card_frame()
+                .inner_margin(RAIL_POPUP_PAD)
+                .show(ui, |ui| {
+                    ui.set_width(RAIL_CARD_W - 2.0 * RAIL_POPUP_PAD);
+                    body(ui);
+                });
+        });
+}
+
 /// The ground of a card floating over everything (a popup over the canvas, a
 /// modal, Find, the variables browser and the insert picker): the card's fill,
 /// a `color::divider()` hairline, a 10pt corner and a shadow deeper than a

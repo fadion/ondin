@@ -46,10 +46,6 @@ const FOOT_H: f32 = 22.0;
 const VARIANT_W: f32 = 92.0;
 const ORIENT_W: f32 = 124.0;
 const SIZE_W: f32 = 58.0;
-/// The hover card, as the insert picker's.
-const CARD_DELAY: f64 = 0.5;
-const CARD_W: f32 = 260.0;
-const CARD_GAP: f32 = 8.0;
 /// How long typing rests before a photo search goes out.
 const TYPE_PAUSE: f64 = 0.4;
 /// The search field's id, read to know whether it holds the keyboard.
@@ -148,7 +144,7 @@ pub(crate) struct Panel {
     orientation: Orientation,
     /// The last page of photos asked for.
     page: u32,
-    resting: Option<(String, f64)>,
+    resting: ui::Resting<String>,
     rect: Option<egui::Rect>,
     dragging: Option<Item>,
 }
@@ -540,26 +536,12 @@ impl OndinApp {
         if let Some(p) = self.asset_panel.as_mut() {
             p.rect = Some(rect);
             p.dragging = dragging.clone();
-            let now = ctx.input(|i| i.time);
-            match hovered.as_ref().filter(|_| dragging.is_none()) {
-                Some((item, at)) => {
-                    let key = item.key();
-                    let since = match &p.resting {
-                        Some((k, t)) if *k == key => *t,
-                        _ => {
-                            p.resting = Some((key, now));
-                            now
-                        }
-                    };
-                    let left = CARD_DELAY - (now - since);
-                    if left > 0.0 {
-                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
-                    } else {
-                        let size_px = PhotoSize::from_key(&self.prefs.assets.photo_size);
-                        hover_card(ctx, item, rect, *at, size, size_px, !targets.is_empty());
-                    }
-                }
-                None => p.resting = None,
+            let resting = hovered.as_ref().filter(|_| dragging.is_none());
+            if p.resting.rested(ctx, resting.map(|(item, _)| item.key()))
+                && let Some((item, at)) = resting
+            {
+                let size_px = PhotoSize::from_key(&self.prefs.assets.photo_size);
+                hover_card(ctx, item, rect, *at, size, size_px, !targets.is_empty());
             }
         }
         if let Some(item) = &dragging
@@ -1509,71 +1491,64 @@ fn hover_card(
     photo_size: PhotoSize,
     fills: bool,
 ) {
-    egui::Area::new(egui::Id::new("assets-card"))
-        .order(egui::Order::Tooltip)
-        .interactable(false)
-        .fixed_pos(egui::pos2(panel.right() + CARD_GAP, row.top()))
-        .show(ctx, |ui| {
-            ui::hover_card_frame().inner_margin(PAD).show(ui, |ui| {
-                ui.set_width(CARD_W - 2.0 * PAD);
-                ui.spacing_mut().item_spacing.y = 5.0;
-                let line = |ui: &mut egui::Ui, text: &str| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(text)
-                                .size(ui::SMALL_PT)
-                                .color(theme::text::dim()),
-                        )
-                        .wrap(),
-                    );
-                };
-                match item {
-                    Item::Icon(h) => {
-                        let icon = h.icon();
-                        ui.label(
-                            egui::RichText::new(&icon.name)
-                                .size(ui::CONTROL_PT)
-                                .color(theme::text::strong()),
-                        );
-                        line(
-                            ui,
-                            &format!(
-                                "{} · {} · {icon_size:.0} px",
-                                h.spec.name, h.spec.variants[icon.variant].label
-                            ),
-                        );
-                        if !icon.aliases.is_empty() {
-                            line(ui, &format!("Also: {}", icon.aliases.join(", ")));
-                        }
-                        line(ui, &format!("Licence: {}", h.spec.licence));
-                        line(ui, "Click to place · drag to drop");
-                    }
-                    Item::Photo(p) => {
-                        if !p.title.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&p.title)
-                                    .size(ui::CONTROL_PT)
-                                    .color(theme::text::strong()),
-                            );
-                        }
-                        line(ui, &p.credit("").text);
-                        let at = match (photo_size, p.service) {
-                            (_, "openverse") | (PhotoSize::Full, _) => "full size".to_string(),
-                            (PhotoSize::Small, _) => "400 px wide".to_string(),
-                            (PhotoSize::Regular, _) => "1080 px wide".to_string(),
-                        };
-                        line(ui, &format!("Comes in at {at} · {}", p.licence));
-                        line(
-                            ui,
-                            match fills {
-                                true => "Click to fill · Alt-click to place · drag to drop",
-                                false => "Click to place · drag to drop",
-                            },
-                        );
-                    }
+    ui::rail_hover_card(ctx, egui::Id::new("assets-card"), panel, row, |ui| {
+        ui.spacing_mut().item_spacing.y = 5.0;
+        let line = |ui: &mut egui::Ui, text: &str| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::dim()),
+                )
+                .wrap(),
+            );
+        };
+        match item {
+            Item::Icon(h) => {
+                let icon = h.icon();
+                ui.label(
+                    egui::RichText::new(&icon.name)
+                        .size(ui::CONTROL_PT)
+                        .color(theme::text::strong()),
+                );
+                line(
+                    ui,
+                    &format!(
+                        "{} · {} · {icon_size:.0} px",
+                        h.spec.name, h.spec.variants[icon.variant].label
+                    ),
+                );
+                if !icon.aliases.is_empty() {
+                    line(ui, &format!("Also: {}", icon.aliases.join(", ")));
                 }
-            });
-        });
+                line(ui, &format!("Licence: {}", h.spec.licence));
+                line(ui, "Click to place · drag to drop");
+            }
+            Item::Photo(p) => {
+                if !p.title.is_empty() {
+                    ui.label(
+                        egui::RichText::new(&p.title)
+                            .size(ui::CONTROL_PT)
+                            .color(theme::text::strong()),
+                    );
+                }
+                line(ui, &p.credit("").text);
+                let at = match (photo_size, p.service) {
+                    (_, "openverse") | (PhotoSize::Full, _) => "full size".to_string(),
+                    (PhotoSize::Small, _) => "400 px wide".to_string(),
+                    (PhotoSize::Regular, _) => "1080 px wide".to_string(),
+                };
+                line(ui, &format!("Comes in at {at} · {}", p.licence));
+                line(
+                    ui,
+                    match fills {
+                        true => "Click to fill · Alt-click to place · drag to drop",
+                        false => "Click to place · drag to drop",
+                    },
+                );
+            }
+        }
+    });
 }
 
 #[cfg(test)]

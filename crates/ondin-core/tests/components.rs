@@ -282,6 +282,75 @@ fn a_main_cannot_contain_an_instance_of_itself() {
     assert_eq!(rule, LinkRule::ComponentCycle);
 }
 
+/// A new instance of a main is refused only where it would close a cycle:
+/// inside the main itself, or in a main it reaches through instances, directly
+/// or a level down; an unrelated main and a frame outside every main take it.
+/// flip: `component::can_hold_instance_of` without its walk of what `main` uses
+/// → fails at "inside the main it uses".
+#[test]
+fn an_instance_of_a_main_cannot_land_where_it_would_close_a_cycle() {
+    use ondin_core::component::can_hold_instance_of;
+    let mut f = fixture();
+    let card = f.m;
+    let [mid, chip, other, plain] = [(); 4].map(|_| f.ids.mint());
+    f.doc
+        .apply(&Transaction(vec![
+            create(mid, f.root, 2, frame()),
+            create(chip, f.root, 3, frame()),
+            create(other, f.root, 4, frame()),
+            create(plain, f.root, 5, frame()),
+        ]))
+        .unwrap();
+    f.doc
+        .apply(&Transaction(
+            [mid, chip, other]
+                .map(|id| Operation::SetComponent {
+                    id,
+                    component: true,
+                })
+                .to_vec(),
+        ))
+        .unwrap();
+    // Mid holds an instance of Card, and Chip an instance of Mid.
+    for (main, into) in [(card, mid), (mid, chip)] {
+        let place = ondin_core::Placement {
+            nodes: f.doc.capture_subtree(main).unwrap(),
+            parent: into,
+            index: None,
+        };
+        let (tx, made) =
+            ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+        f.doc.apply(&tx).expect("an instance lands");
+        assert_eq!(
+            f.doc.get(made[0]).unwrap().link(),
+            Some(main),
+            "the fixture: an instance"
+        );
+    }
+    assert!(
+        !can_hold_instance_of(&f.doc, card, mid),
+        "inside the main it uses"
+    );
+    assert!(!can_hold_instance_of(&f.doc, card, chip), "a level down");
+    assert!(
+        !can_hold_instance_of(&f.doc, f.a, chip),
+        "on a layer inside it"
+    );
+    assert!(!can_hold_instance_of(&f.doc, chip, chip), "inside itself");
+    assert!(
+        can_hold_instance_of(&f.doc, other, chip),
+        "an unrelated main"
+    );
+    assert!(
+        can_hold_instance_of(&f.doc, plain, chip),
+        "outside every main"
+    );
+    assert!(
+        can_hold_instance_of(&f.doc, mid, card),
+        "a main it does not use"
+    );
+}
+
 /// `n` mains `M0…M(n-1)` under the root, each `Mk` holding one frame linked to
 /// `M(k+1)` — and, with `closed`, the last holding one linked back to `M0`. A
 /// valid chain is only two levels deep, so `io::MAX_TREE_DEPTH` never trips

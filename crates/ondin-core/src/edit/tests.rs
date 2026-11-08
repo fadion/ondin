@@ -4702,6 +4702,36 @@ fn twins_and_straight_middles_are_redundant() {
     assert_eq!(gone, vec![Point::new(0.0, 0.0), Point::new(50.0, 0.0)]);
 }
 
+/// A closed run whose first anchor is the middle of a straight side, as an
+/// import starting mid-edge has, loses that anchor at the seam.
+/// flip: `redundant_points` without its seam's first-anchor arm → fails at "the
+/// first anchor goes".
+#[test]
+fn a_redundant_first_anchor_goes_at_the_seam() {
+    let corner = |x, y| PenAnchor::corner(Point::new(x, y));
+    let square = vec![PenSubpath {
+        anchors: vec![
+            corner(50.0, 0.0),
+            corner(100.0, 0.0),
+            corner(100.0, 100.0),
+            corner(0.0, 100.0),
+            corner(0.0, 0.0),
+        ],
+        closed: true,
+    }];
+    let (left, gone) = redundant_points(&square);
+    assert_eq!(gone, vec![Point::new(50.0, 0.0)], "the first anchor goes");
+    let at: Vec<Point> = left[0].anchors.iter().map(|a| a.at).collect();
+    assert_eq!(
+        at,
+        [(100.0, 0.0), (100.0, 100.0), (0.0, 100.0), (0.0, 0.0)].map(|(x, y)| Point::new(x, y))
+    );
+    assert_same_shape(
+        &pen_outline(&square[0].anchors, true),
+        &pen_outline(&left[0].anchors, true),
+    );
+}
+
 /// *Smooth selected* moves a corner's handles the amount of the way to fresh
 /// smooth ones, and leaves the anchors it was not given.
 #[test]

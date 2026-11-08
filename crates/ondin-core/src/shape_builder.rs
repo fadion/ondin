@@ -296,8 +296,22 @@ pub fn arrange(
         return Err(Refusal::TooFew);
     }
     let (whole, expanded) = filled_regions(doc, &sources, &outlines).ok_or(Refusal::Abandoned)?;
-    // The union reads each outline as an operand, which an expanded source is not.
-    if !expanded.iter().any(|e| *e) && overlapping(&whole, &outlines) {
+    // The union reads each outline as an operand, which an expanded source is not:
+    // it enters as the faces its rule fills.
+    let operands: Vec<BezPath> = outlines
+        .iter()
+        .zip(&sources)
+        .zip(&expanded)
+        .flat_map(|((outline, id), e)| {
+            let rule = doc.get(*id).map(crate::Node::fill_rule).unwrap_or_default();
+            match *e {
+                true => boolean::filled_faces(outline, rule),
+                false => None,
+            }
+            .unwrap_or_else(|| vec![outline.clone()])
+        })
+        .collect();
+    if overlapping(&whole, &operands) {
         return Err(Refusal::Abandoned);
     }
     let before = whole.len();
@@ -365,7 +379,8 @@ fn filled_regions(
     Some((faces, expanded))
 }
 
-/// Whether the faces cover more than the outlines' union, so some overlap: the
+/// Whether the faces cover more than the union of `outlines`, the sources' filled
+/// areas as operands, so some overlap: the
 /// arithmetic can hand back a whole operand as the outside of a nearly coincident
 /// one, and a face offered twice would be painted twice by *Divide*.
 fn overlapping(faces: &[Region], outlines: &[BezPath]) -> bool {

@@ -777,6 +777,59 @@ fn a_turned_copy_of_a_circle_leaves_no_slivers_or_doubles() {
     }
 }
 
+/// The overlap check still runs when another source is read by its fill rule: a
+/// non-zero path of two same-way nested squares beside the turned circle.
+///
+/// flip: `arrange` skipping `overlapping` whenever a source is expanded → fails
+/// at "no face twice".
+#[test]
+fn an_expanded_source_keeps_the_overlap_check() {
+    for turn in [0.3, std::f64::consts::FRAC_PI_4] {
+        let mut f = Fixture::new();
+        let a = f.circle(f.frame, 200.0, 200.0, BLUE, "A");
+        let b = f.circle(f.frame, 200.0, 200.0, ORANGE, "B");
+        let t = f.doc.get(b).unwrap().transform();
+        f.set(Operation::SetTransform {
+            id: b,
+            transform: Affine::rotate_about(turn, Point::new(200.0, 200.0)) * t,
+        });
+        let mut p = BezPath::new();
+        for (lo, hi) in [(500.0, 600.0), (530.0, 570.0)] {
+            p.move_to((lo, lo));
+            p.line_to((hi, lo));
+            p.line_to((hi, hi));
+            p.line_to((lo, hi));
+            p.close_path();
+        }
+        let squares = f.ids.mint();
+        f.commit(Transaction(vec![Operation::CreateNode {
+            id: squares,
+            parent: f.frame,
+            index: 0,
+            kind: NodeKind::Path {
+                path: p,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: Default::default(),
+            },
+            transform: None,
+            name: Some("Squares".into()),
+        }]));
+        let res = f.resolved();
+        match shape_builder::arrange(&f.doc, &res, &[squares, a, b]) {
+            Err(r) => assert_eq!(r, Refusal::Abandoned, "{turn}"),
+            Ok(arr) => {
+                let over_centre = arr
+                    .regions
+                    .iter()
+                    .filter(|r| covers(&r.path, at(200.0, 200.0)))
+                    .count();
+                assert_eq!(over_centre, 1, "{turn}: no face twice");
+            }
+        }
+    }
+}
+
 /// A merge whose arithmetic unwinds refuses the whole edit.
 #[test]
 fn an_unwound_merge_refuses() {

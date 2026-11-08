@@ -202,7 +202,8 @@ plain `Path` layers.
   outlines sharing an edge leave slivers along it, and where each traces the edge with its own
   control points (a circle and a turned copy) the slivers pass any area floor. It runs under the
   booleans' unwind guard and failure counter (`unwind_guard`, which `guarded` wraps) and refuses
-  coordinates past `MAX_BOOL_COORD`. Faces whose areas add up past the sources' union overlap (the
+  coordinates past `MAX_BOOL_COORD`. Faces whose areas add up past the union of what the sources
+  fill (a source read by its fill rule entering as its filled faces) overlap (the
   arithmetic can hand back a whole operand as the outside of a nearly coincident one), and
   `arrange` refuses them as `Abandoned`.
 - **Fill rules.** A boolean operand's subpaths read as holes where they nest and as one where they

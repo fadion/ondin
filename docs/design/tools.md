@@ -620,7 +620,10 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
 ### Warp (`warp.rs`, `ondin_core::warp`)
 
 An envelope round the selection's world box, bent on the canvas and baked into plain paths. Nothing
-stays live.
+stays live. The box (`warp::bounds`) is the union of the outlines that are warped, not of the
+layers' bounds: a boolean's box is its result's, smaller than the operands the warp carries, and a
+point outside the box would be extrapolated past a perspective map's horizon or round an arc's
+centre.
 
 - **Envelopes** (`warp::Envelope`). *Free distort* (`Free([Point; 4])`) is a perspective map of the
   box onto four dragged corners, so straight lines stay straight. The presets (`Preset { preset,
@@ -634,8 +637,12 @@ stays live.
 
 - **Refit.** Each outline is carried through the map in world space and refitted with cubics whose
   handles are the original handles carried by the map's derivative, halved until the fit is within
-  `warp::TOLERANCE` (0.05 world units) of the true image. Under *Free distort* a line stays a line.
-- **Subjects** (`warp::subjects`) open groups and booleans down to their leaves. Refusals
+  `warp::TOLERANCE` (0.05 world units) of the true image, or of the coordinates' own rounding
+  where the box lies so far out that it is coarser (16 ε times its distance from the origin), so a
+  far-off selection never halves every curve to the depth cap. Under *Free distort* a line stays a
+  line.
+- **Subjects** (`warp::subjects`) open groups and booleans down to their leaves; a slice draws
+  nothing and is left as it is. Refusals
   (`Refusal::says`), which both the dimmed row and a refused commit give: *Select layers to warp*
   (nothing selected, or nothing with an outline), *Pictures can't be warped; trace it first*,
   *Frames can't be warped; warp the layers inside*, *A layer to warp is locked* (anywhere under the
@@ -648,8 +655,9 @@ stays live.
   status says *Warped*. An envelope left square commits nothing.
 - **The preview** (`warp::preview`) cannot be the commit, since a render preview refuses
   `DeleteNode`: a path takes its warped outline, and every other shown leaf is hidden
-  (`SetVisible false`) under a stand-in path at its index wearing its look (`build::carried_look`);
-  a hidden leaf gets none. Stand-ins are minted from a copy of the id counter, so the preview spends
+  (`SetVisible false`) under a stand-in path directly beneath it, wearing its look
+  (`build::carried_look`) and, for a mask, its mask flag and mode (`build::carried_mask`); a hidden
+  leaf gets none. Stand-ins are minted from a copy of the id counter, so the preview spends
   no ids. It is rebuilt when the envelope changes and put back when another preview cleared it.
 
 **The session** (`WarpSession` on `OndinApp::warp`).

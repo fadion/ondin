@@ -96,7 +96,7 @@ impl OndinApp {
         if let Err(r) = warp::subjects(&self.session.doc, ids) {
             return Some(r.says());
         }
-        warp::bounds(&self.session.resolved, ids)
+        warp::bounds(&self.session.doc, &self.session.resolved, ids)
             .is_none()
             .then(|| warp::Refusal::Nothing.says())
     }
@@ -107,7 +107,8 @@ impl OndinApp {
             return self.session.info(why);
         }
         let selection = self.session.selection.ids().to_vec();
-        let Some(bounds) = warp::bounds(&self.session.resolved, &selection) else {
+        let Some(bounds) = warp::bounds(&self.session.doc, &self.session.resolved, &selection)
+        else {
             return;
         };
         // Points editing and the pen would fight it for the canvas and the bar.
@@ -548,7 +549,12 @@ mod tests {
             let node = app.session.doc.get(id).expect("selected");
             assert!(matches!(node.kind(), NodeKind::Path { .. }));
         }
-        let bounds = warp::bounds(&app.session.resolved, app.session.selection.ids()).unwrap();
+        let bounds = warp::bounds(
+            &app.session.doc,
+            &app.session.resolved,
+            app.session.selection.ids(),
+        )
+        .unwrap();
         assert!((bounds.x1 - 240.0).abs() < 1e-6 && (bounds.y0 + 30.0).abs() < 1e-6);
     }
 

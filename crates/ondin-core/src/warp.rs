@@ -91,9 +91,24 @@ impl Warp {
         }
     }
 
+    /// How far from the origin the box reaches, which sets the rounding error of
+    /// every mapped point.
+    fn magnitude(&self) -> f64 {
+        let b = self.bounds;
+        b.x0.abs().max(b.x1.abs()).max(b.y0.abs()).max(b.y1.abs())
+    }
+
+    /// [`TOLERANCE`], or the rounding of coordinates this far out where that is
+    /// coarser: a fit judged under the noise would halve to `MAX_DEPTH` every time.
+    fn tolerance(&self) -> f64 {
+        TOLERANCE.max(16.0 * f64::EPSILON * self.magnitude())
+    }
+
     /// The map's derivative at `p`, as the images of a unit step along x and y.
     fn jacobian(&self, p: Point) -> (Vec2, Vec2) {
-        let e = 1e-5 * self.bounds.width().max(self.bounds.height()).max(1.0);
+        // A step the coordinates can still resolve, however far out the box is.
+        let e = (1e-5 * self.bounds.width().max(self.bounds.height()).max(1.0))
+            .max(1e3 * f64::EPSILON * self.magnitude());
         let dx = (self.map(p + Vec2::new(e, 0.0)) - self.map(p - Vec2::new(e, 0.0))) / (2.0 * e);
         let dy = (self.map(p + Vec2::new(0.0, e)) - self.map(p - Vec2::new(0.0, e))) / (2.0 * e);
         (dx, dy)
@@ -173,7 +188,7 @@ impl Warp {
 
     /// One cubic carried through the map: the cubic through the mapped ends whose
     /// handles are the original handles carried by the map's derivative, halved
-    /// until it stays within [`TOLERANCE`] of the true image.
+    /// until it stays within [`Self::tolerance`] of the true image.
     fn cubic(&self, c: CubicBez, out: &mut BezPath, depth: u32) {
         let (p0, p3) = (self.map(c.p0), self.map(c.p3));
         let along = |at: Point, d: Vec2| {
@@ -186,9 +201,10 @@ impl Warp {
             p3 + along(c.p3, c.p2 - c.p3),
             p3,
         );
+        let tolerance = self.tolerance();
         let close = [0.25, 0.5, 0.75]
             .iter()
-            .all(|t| fit.eval(*t).distance(self.map(c.eval(*t))) <= TOLERANCE);
+            .all(|t| fit.eval(*t).distance(self.map(c.eval(*t))) <= tolerance);
         if close || depth >= MAX_DEPTH {
             out.curve_to(fit.p1, fit.p2, fit.p3);
         } else {
@@ -442,7 +458,9 @@ fn collect(doc: &Document, id: NodeId, leaves: &mut Vec<NodeId>) -> Result<(), R
             }
         }
         NodeKind::Artboard { .. } => return Err(Refusal::Frame),
-        NodeKind::Root | NodeKind::Slice { .. } => return Err(Refusal::Nothing),
+        NodeKind::Root => return Err(Refusal::Nothing),
+        // A slice draws nothing and is laid over the art, so it is left as it is.
+        NodeKind::Slice { .. } => {}
         NodeKind::Rect { .. }
         | NodeKind::Ellipse { .. }
         | NodeKind::Polygon { .. }
@@ -456,13 +474,37 @@ fn collect(doc: &Document, id: NodeId, leaves: &mut Vec<NodeId>) -> Result<(), R
     Ok(())
 }
 
-/// The world box the envelope wraps: the union of the selection's bounds.
-pub fn bounds(res: &Resolved, selection: &[NodeId]) -> Option<Rect> {
-    selection
-        .iter()
-        .filter_map(|id| res.world_bounds(*id))
+/// The world box the envelope wraps: the union of the outlines it carries, which is
+/// where the map is defined. Not the layers' bounds: a boolean's box is its
+/// result's, smaller than the operands that are warped, and a point outside the box
+/// is extrapolated (across a perspective map's horizon, or round an arc's centre).
+pub fn bounds(doc: &Document, res: &Resolved, selection: &[NodeId]) -> Option<Rect> {
+    subjects(doc, selection)
+        .ok()?
+        .into_iter()
+        .filter_map(|leaf| leaf_outline(doc, res, leaf))
+        .map(|(world, local)| crate::kurbo::Shape::bounding_box(&(world * local)))
         .reduce(|a, b| a.union(b))
         .filter(|b| b.width() > 1e-9 || b.height() > 1e-9)
+}
+
+/// `leaf`'s world transform and its outline in its own space (a text's glyphs), or
+/// `None` with nothing to warp.
+fn leaf_outline(
+    doc: &Document,
+    res: &Resolved,
+    leaf: NodeId,
+) -> Option<(crate::kurbo::Affine, BezPath)> {
+    let node = doc.get(leaf)?;
+    let local = match node.kind() {
+        NodeKind::Text { .. } => res.text_layout(leaf).map(crate::text::outline),
+        _ => res.local_path(doc, leaf),
+    };
+    let local = local.filter(|p| !p.elements().is_empty())?;
+    let world = res
+        .world_transform(leaf)
+        .filter(|w| w.determinant().abs() > 1e-12)?;
+    Some((world, local))
 }
 
 /// One leaf's outline carried through the warp, in the leaf's own space.
@@ -479,18 +521,7 @@ fn warped(
 ) -> Result<Vec<Warped>, Refusal> {
     let mut out = Vec::new();
     for leaf in subjects(doc, selection)? {
-        let node = doc.get(leaf).ok_or(Refusal::Nothing)?;
-        let local = match node.kind() {
-            NodeKind::Text { .. } => res.text_layout(leaf).map(crate::text::outline),
-            _ => res.local_path(doc, leaf),
-        };
-        let Some(local) = local.filter(|p| !p.elements().is_empty()) else {
-            continue;
-        };
-        let Some(world) = res
-            .world_transform(leaf)
-            .filter(|w| w.determinant().abs() > 1e-12)
-        else {
+        let Some((world, local)) = leaf_outline(doc, res, leaf) else {
             continue;
         };
         let path = world.inverse() * warp.path(&(world * local));
@@ -545,6 +576,9 @@ pub fn preview(
     warp: &Warp,
 ) -> Result<Transaction, Refusal> {
     let mut ops = Vec::new();
+    // Each stand-in placed so far, by its parent and the index it was put at in
+    // `doc`: every one at or below a leaf's index has moved that leaf up by one.
+    let mut placed: Vec<(NodeId, usize)> = Vec::new();
     for Warped { leaf, path } in warped(doc, res, selection, warp)? {
         let node = doc.get(leaf).ok_or(Refusal::Nothing)?;
         if matches!(node.kind(), NodeKind::Path { .. }) {
@@ -556,10 +590,16 @@ pub fn preview(
             continue;
         }
         let parent = node.parent().ok_or(Refusal::Nothing)?;
-        let index = doc
+        let at = doc
             .get(parent)
             .and_then(|p| p.children().iter().position(|c| *c == leaf))
             .ok_or(Refusal::Nothing)?;
+        let index = at
+            + placed
+                .iter()
+                .filter(|(p, j)| *p == parent && *j <= at)
+                .count();
+        placed.push((parent, at));
         let ghost = ids.mint();
         ops.push(Operation::CreateNode {
             id: ghost,
@@ -575,6 +615,8 @@ pub fn preview(
             name: None,
         });
         ops.extend(build::carried_look(doc, leaf, ghost));
+        // A mask stays a mask, or the run above it would draw unclipped meanwhile.
+        ops.extend(build::carried_mask(node, ghost));
         // Its place in a layout, so in a flex or grid parent the stand-in takes the
         // hidden layer's slot rather than flowing as a new child.
         if node.insets().is_authored() {
@@ -878,7 +920,7 @@ mod tests {
         ]))
         .expect("the fixture");
         let res = Resolved::rebuild(&doc);
-        let bounds = bounds(&res, &[group]).expect("a box");
+        let bounds = bounds(&doc, &res, &[group]).expect("a box");
         let w = Warp {
             bounds,
             envelope: Envelope::Preset {
@@ -942,5 +984,195 @@ mod tests {
             .unwrap();
         assert_eq!(subjects(&picture, &[group]), Err(Refusal::Picture));
         assert_eq!(subjects(&doc, &[]), Err(Refusal::Nothing));
+    }
+
+    /// A page of `kinds`, each created with its transform; answers the document and
+    /// the ids in order. A kind's parent is the page, or the id at the index given.
+    fn fixture(
+        nodes: &[(NodeKind, crate::kurbo::Affine, Option<usize>)],
+    ) -> (Document, Vec<NodeId>) {
+        let mut ids = IdSource::new(5);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let page = doc.first_page();
+        let mut made: Vec<NodeId> = Vec::new();
+        for (kind, at, parent) in nodes {
+            let id = ids.mint();
+            let parent = parent.map_or(page, |i| made[i]);
+            let index = doc.get(parent).unwrap().children().len();
+            doc.apply(&Transaction(vec![Operation::CreateNode {
+                id,
+                parent,
+                index,
+                kind: kind.clone(),
+                transform: Some(*at),
+                name: None,
+            }]))
+            .expect("the fixture");
+            made.push(id);
+        }
+        (doc, made)
+    }
+
+    fn rect(w: f64, h: f64) -> NodeKind {
+        NodeKind::Rect {
+            size: crate::kurbo::Size::new(w, h),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        }
+    }
+
+    /// The envelope wraps the operands of an Intersect, not its small result, so a
+    /// perspective map carries both and the result is the warped lens.
+    ///
+    /// flip: `bounds` from `res.world_bounds` of the selection → fails at "the
+    /// operands' box".
+    #[test]
+    fn a_boolean_is_wrapped_by_its_operands() {
+        use crate::kurbo::{Affine, Size};
+        let circle = NodeKind::Ellipse {
+            size: Size::new(400.0, 400.0),
+            arc: Default::default(),
+        };
+        let (doc, ids) = fixture(&[
+            (
+                NodeKind::Boolean {
+                    op: crate::node::BoolOp::Intersect,
+                },
+                Affine::IDENTITY,
+                None,
+            ),
+            (circle.clone(), Affine::IDENTITY, Some(0)),
+            (circle, Affine::translate((380.0, 0.0)), Some(0)),
+        ]);
+        let res = Resolved::rebuild(&doc);
+        let lens = res.world_bounds(ids[0]).expect("a lens");
+        let b = bounds(&doc, &res, &[ids[0]]).expect("a box");
+        assert!(b.x0 < 1.0 && b.x1 > 779.0, "the operands' box: {b:?}");
+        let mut q = corners(b);
+        q[1].x += b.width();
+        q[2].x += b.width();
+        let w = Warp {
+            bounds: b,
+            envelope: Envelope::Free(q),
+        };
+        assert!(!w.folds());
+        let (tx, _) = warp(&doc, &res, &mut IdSource::new(77), &[ids[0]], &w).expect("warped");
+        let mut after = doc.clone();
+        after.apply(&tx).unwrap();
+        let res = Resolved::rebuild(&after);
+        let got = res.world_bounds(ids[0]).expect("the result survives");
+        let want = Shape::bounding_box(&w.path(&lens.to_path(0.1)));
+        assert!(
+            got.x0 > want.x0 - 5.0 && got.x1 < want.x1 + 5.0,
+            "{got:?} within {want:?}"
+        );
+    }
+
+    /// While the envelope is open, a mask's stand-in is a mask with its mode, and a
+    /// later stand-in sits directly under its own layer, over the path below it.
+    ///
+    /// flip: `preview` without `carried_mask` → fails at "a mask"; reading the
+    /// index from `doc` alone → fails at "above the path".
+    #[test]
+    fn a_preview_keeps_masks_and_the_stack() {
+        use crate::kurbo::Affine;
+        let mut line = BezPath::new();
+        line.move_to((0.0, 0.0));
+        line.line_to((80.0, 30.0));
+        let (mut doc, ids) = fixture(&[
+            (NodeKind::Group, Affine::IDENTITY, None),
+            (rect(100.0, 100.0), Affine::IDENTITY, Some(0)),
+            (
+                NodeKind::Path {
+                    path: line,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                    mirror: crate::symmetry::PathMirror::NONE,
+                },
+                Affine::IDENTITY,
+                Some(0),
+            ),
+            (rect(50.0, 50.0), Affine::translate((10.0, 10.0)), Some(0)),
+        ]);
+        let (group, mask, path, top) = (ids[0], ids[1], ids[2], ids[3]);
+        doc.apply(&Transaction(vec![
+            Operation::SetMask {
+                id: mask,
+                mask: true,
+            },
+            Operation::SetMaskMode {
+                id: mask,
+                mode: crate::node::MaskMode::Alpha,
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let w = Warp {
+            bounds: bounds(&doc, &res, &[group]).unwrap(),
+            envelope: Envelope::Preset {
+                preset: Preset::Bulge,
+                bend: 0.3,
+                vertical: false,
+            },
+        };
+        let tx = preview(&doc, &res, &mut IdSource::new(90), &[group], &w).unwrap();
+        let mut shown = doc.clone();
+        shown.apply(&tx).unwrap();
+        let kids = shown.get(group).unwrap().children().to_vec();
+        let ghost_of = |leaf: NodeId| kids[kids.iter().position(|k| *k == leaf).unwrap() - 1];
+        let ghost = shown.get(ghost_of(mask)).unwrap();
+        assert!(ghost.mask(), "a mask");
+        assert_eq!(ghost.mask_mode(), crate::node::MaskMode::Alpha);
+        let (p, g) = (
+            kids.iter().position(|k| *k == path).unwrap(),
+            kids.iter().position(|k| *k == ghost_of(top)).unwrap(),
+        );
+        assert!(g > p, "above the path: {kids:?}");
+    }
+
+    /// A slice under the selection is left alone, not a refusal.
+    #[test]
+    fn a_slice_in_a_group_is_left_out() {
+        use crate::kurbo::{Affine, Size};
+        let (doc, ids) = fixture(&[
+            (NodeKind::Group, Affine::IDENTITY, None),
+            (rect(100.0, 40.0), Affine::IDENTITY, Some(0)),
+            (
+                NodeKind::Slice {
+                    size: Size::new(30.0, 30.0),
+                },
+                Affine::IDENTITY,
+                Some(0),
+            ),
+        ]);
+        assert_eq!(subjects(&doc, &[ids[0]]), Ok(vec![ids[1]]));
+        assert_eq!(subjects(&doc, &[ids[2]]), Err(Refusal::Nothing));
+    }
+
+    /// Far from the origin, where the coordinates' own rounding passes the
+    /// tolerance, a warp still fits each curve in a few cubics.
+    ///
+    /// flip: `tolerance` returning `TOLERANCE` → fails at the element count.
+    #[test]
+    fn a_far_off_outline_warps_in_bounded_work() {
+        let far = 1e15;
+        let mut shape = BezPath::new();
+        for i in 0..20 {
+            let c = crate::kurbo::Circle::new((far + f64::from(i) * 50.0, far), 20.0);
+            shape.extend(c.path_elements(0.1));
+        }
+        let b = Shape::bounding_box(&shape);
+        let w = Warp {
+            bounds: b,
+            envelope: Envelope::Preset {
+                preset: Preset::Arc,
+                bend: 0.5,
+                vertical: false,
+            },
+        };
+        let input = shape.elements().len();
+        let out = w.path(&shape).elements().len();
+        assert!(out < input * 64, "{input} elements became {out}");
     }
 }

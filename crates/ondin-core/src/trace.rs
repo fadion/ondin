@@ -283,9 +283,14 @@ fn variance_cut(px: &[[f64; 3]], count: usize) -> Vec<[f64; 3]> {
 }
 
 /// Merge every region of fewer than `speck²` pixels into the neighbouring region
-/// it shares the most edge with, the smallest first. A merged region's pixels join
-/// the host's, so when a small host is merged in turn its speck goes with it.
-/// An empty region inside a colour counts too: small holes close.
+/// it shares the most edge with (the larger on a tie), the smallest first. A
+/// merged region joins its host, and with it every region of the host's colour it
+/// touched, since they are now one connected region: a shape split by a seam is
+/// counted whole once the seam goes. An empty region inside a colour counts too:
+/// small holes close.
+///
+/// Regions are sets in a union-find, each keeping the edges it shares with its
+/// neighbours, so a merge never re-reads a region's pixels.
 fn despeckle(l: &mut Labels, speck: f64) {
     let min = (speck.max(0.0) * speck.max(0.0)).ceil() as usize;
     if min <= 1 {
@@ -293,58 +298,113 @@ fn despeckle(l: &mut Labels, speck: f64) {
     }
     let (w, h) = (l.width, l.height);
     let mut region = vec![usize::MAX; w * h];
-    let mut regions: Vec<Vec<usize>> = Vec::new();
+    let (mut size, mut colour): (Vec<usize>, Vec<u16>) = (Vec::new(), Vec::new());
+    let mut stack = Vec::new();
     for start in 0..w * h {
         if region[start] != usize::MAX {
             continue;
         }
-        let r = regions.len();
-        let mut members = vec![start];
+        let r = size.len();
         region[start] = r;
-        let mut k = 0;
-        while k < members.len() {
-            let i = members[k];
-            k += 1;
+        stack.push(start);
+        let mut n = 0;
+        while let Some(i) = stack.pop() {
+            n += 1;
             for j in neighbours(i, w, h) {
                 if region[j] == usize::MAX && l.index[j] == l.index[start] {
                     region[j] = r;
-                    members.push(j);
+                    stack.push(j);
                 }
             }
         }
-        regions.push(members);
+        size.push(n);
+        colour.push(l.index[start]);
     }
-    let mut order: Vec<usize> = (0..regions.len())
-        .filter(|r| regions[*r].len() < min)
+    // The edges each region shares, by a neighbour's original region and a count;
+    // read through `find`, and compacted whenever a region votes.
+    let mut edges: Vec<Vec<(usize, u32)>> = vec![Vec::new(); size.len()];
+    for i in 0..w * h {
+        let x = i % w;
+        for j in [(x + 1 < w).then(|| i + 1), (i + w < w * h).then(|| i + w)]
+            .into_iter()
+            .flatten()
+        {
+            let (a, b) = (region[i], region[j]);
+            if a != b {
+                edges[a].push((b, 1));
+                edges[b].push((a, 1));
+            }
+        }
+    }
+    let mut parent: Vec<usize> = (0..size.len()).collect();
+    fn find(parent: &mut [usize], mut r: usize) -> usize {
+        while parent[r] != r {
+            parent[r] = parent[parent[r]];
+            r = parent[r];
+        }
+        r
+    }
+    let mut queue: std::collections::BinaryHeap<std::cmp::Reverse<(usize, usize)>> = (0..size
+        .len())
+        .filter(|r| size[*r] < min)
+        .map(|r| std::cmp::Reverse((size[r], r)))
         .collect();
-    order.sort_by_key(|r| regions[*r].len());
-    for r in order {
-        // Grown past the floor by the specks merged into it already.
-        if regions[r].is_empty() || regions[r].len() >= min {
+    while let Some(std::cmp::Reverse((n, r))) = queue.pop() {
+        // Merged away, or grown since it was queued.
+        if parent[r] != r || size[r] != n {
             continue;
         }
-        let mut votes: Vec<(usize, usize)> = Vec::new();
-        for &i in &regions[r] {
-            for j in neighbours(i, w, h) {
-                let v = region[j];
-                if v != r {
-                    match votes.iter_mut().find(|(x, _)| *x == v) {
-                        Some((_, n)) => *n += 1,
-                        None => votes.push((v, 1)),
-                    }
-                }
+        let mut votes: Vec<(usize, u32)> = std::mem::take(&mut edges[r])
+            .into_iter()
+            .map(|(x, c)| (find(&mut parent, x), c))
+            .filter(|(x, _)| *x != r)
+            .collect();
+        votes.sort_unstable_by_key(|v| v.0);
+        votes.dedup_by(|b, a| {
+            let same = a.0 == b.0;
+            if same {
+                a.1 += b.1;
             }
-        }
-        let Some((host, _)) = votes.into_iter().max_by_key(|(_, n)| *n) else {
+            same
+        });
+        let Some(host) = votes
+            .iter()
+            .max_by(|a, b| {
+                (a.1.cmp(&b.1))
+                    .then(size[a.0].cmp(&size[b.0]))
+                    .then(b.0.cmp(&a.0))
+            })
+            .map(|v| v.0)
+        else {
             continue;
         };
-        let to = l.index[regions[host][0]];
-        let members = std::mem::take(&mut regions[r]);
-        for &i in &members {
-            l.index[i] = to;
-            region[i] = host;
+        let to = colour[host];
+        let joining: Vec<usize> = votes
+            .iter()
+            .map(|v| v.0)
+            .filter(|x| *x != host && colour[*x] == to)
+            .collect();
+        edges[r] = votes;
+        let mut root = host;
+        for x in std::iter::once(r).chain(joining) {
+            // The larger edge list stays put; the smaller is moved onto it.
+            let (keep, gone) = match edges[root].len() >= edges[x].len() {
+                true => (root, x),
+                false => (x, root),
+            };
+            parent[gone] = keep;
+            size[keep] += size[gone];
+            let moved = std::mem::take(&mut edges[gone]);
+            edges[keep].extend(moved);
+            root = keep;
         }
-        regions[host].extend(members);
+        colour[root] = to;
+        if size[root] < min {
+            queue.push(std::cmp::Reverse((size[root], root)));
+        }
+    }
+    for i in 0..w * h {
+        l.index[i] = colour[find(&mut parent, region[i])];
     }
 }
 
@@ -510,6 +570,21 @@ fn paths_of(loops: &[Loop], s: &Settings) -> Vec<BezPath> {
             (b, area2(o))
         })
         .collect();
+    // And a grid of cells, each listing the outer loops whose box reaches it, so a
+    // hole looks only at the loops near it rather than scanning them all.
+    const CELL: i32 = 32;
+    let (gw, gh) = boxes.iter().fold((1, 1), |(gw, gh), ((_, _, x1, y1), _)| {
+        (gw.max(x1 / CELL + 1), gh.max(y1 / CELL + 1))
+    });
+    let (gw, gh) = (gw.max(1) as usize, gh.max(1) as usize);
+    let mut grid: Vec<Vec<u32>> = vec![Vec::new(); gw * gh];
+    for (i, ((x0, y0, x1, y1), _)) in boxes.iter().enumerate() {
+        for cy in (y0 / CELL).max(0)..=y1 / CELL {
+            for cx in (x0 / CELL).max(0)..=x1 / CELL {
+                grid[cy as usize * gw + cx as usize].push(i as u32);
+            }
+        }
+    }
     for hole in holes {
         // The middle of its first edge is on the hole, inside its outer loop.
         let (a, b) = (hole[0], hole[1 % hole.len()]);
@@ -520,13 +595,15 @@ fn paths_of(loops: &[Loop], s: &Settings) -> Vec<BezPath> {
                 && p.1 >= f64::from(y0)
                 && p.1 <= f64::from(y1)
         };
-        let host = outer
+        let (cx, cy) = (p.0 as usize / CELL as usize, p.1 as usize / CELL as usize);
+        let near = grid
+            .get(cy.min(gh - 1) * gw + cx.min(gw - 1))
+            .map_or(&[][..], Vec::as_slice);
+        let host = near
             .iter()
-            .zip(&boxes)
-            .enumerate()
-            .filter(|(_, (o, (b, _)))| in_box(*b) && contains(o, p))
-            .min_by_key(|(_, (_, (_, area)))| *area)
-            .map(|(i, _)| i);
+            .map(|&i| i as usize)
+            .filter(|&i| in_box(boxes[i].0) && contains(outer[i], p))
+            .min_by_key(|&i| (boxes[i].1, i));
         if let Some(i) = host {
             owned[i].push(hole);
         }
@@ -623,6 +700,8 @@ pub fn place(
         index: at + 1,
     }];
     if !keep {
+        // The trace is still the credited picture, adapted.
+        ops.extend(crate::build::carried_credit(doc, &[picture], group));
         ops.push(Operation::DeleteNode { id: picture });
     }
     Ok((crate::Transaction(ops), group))
@@ -892,5 +971,95 @@ mod tests {
         });
         let t = bw(&px, 20, 20, &Settings::default());
         assert_eq!(t.paths(), 0, "nothing left");
+    }
+
+    /// Two black squares under the speck size, joined by a red seam: once the seam
+    /// goes they are one bar over it, and the bar stays.
+    ///
+    /// flip: `despeckle` not joining the host's colour neighbours of a merged
+    /// region → fails at "the bar stays".
+    #[test]
+    fn a_shape_split_by_a_seam_is_counted_whole() {
+        let px = raster(20, 9, |x, y| {
+            match ((2..9).contains(&x), (3..6).contains(&y)) {
+                (true, true) if x == 5 => RED,
+                (true, true) => BLACK,
+                _ => WHITE,
+            }
+        });
+        let s = Settings {
+            mode: Mode::Colours { count: 3 },
+            ..Settings::default()
+        };
+        let l = label(
+            Bitmap {
+                rgba: &px,
+                width: 20,
+                height: 9,
+            },
+            &s,
+        );
+        let black = l.index.iter().filter(|i| **i == 0).count();
+        assert_eq!(black, 21, "the bar stays");
+    }
+
+    /// A one-pixel checkerboard at a large speck merges into one colour in
+    /// bounded time: each merge reads a region's edges, never its pixels again.
+    ///
+    /// flip: `despeckle` rescanning each region's pixels to vote, handing its
+    /// member list on to its host → fails at the time bound.
+    #[test]
+    fn a_halftone_despeckles_quickly() {
+        let n = 400;
+        let px = raster(n, n, |x, y| if (x + y) % 2 == 0 { BLACK } else { WHITE });
+        let start = std::time::Instant::now();
+        let l = label(
+            Bitmap {
+                rgba: &px,
+                width: n,
+                height: n,
+            },
+            &Settings {
+                speck: 200.0,
+                ..Settings::default()
+            },
+        );
+        assert!(start.elapsed().as_secs() < 20, "{:?}", start.elapsed());
+        assert!(l.index.iter().all(|i| *i == l.index[0]), "one colour");
+    }
+
+    /// Holes find their outer loops among many, each inside the smallest outer
+    /// loop holding it, through the grid of loop boxes.
+    ///
+    /// flip: `paths_of` looking up the grid cell one column over → fails at "each
+    /// ring holds its own hole".
+    #[test]
+    fn holes_find_their_loops_in_a_crowd() {
+        let n = 96;
+        let px = raster(n, n, |x, y| {
+            let (cx, cy) = (x % 12, y % 12);
+            let ring = (2..10).contains(&cx) && (2..10).contains(&cy);
+            let hole = (4..8).contains(&cx) && (4..8).contains(&cy);
+            if ring && !hole { BLACK } else { WHITE }
+        });
+        let t = bw(
+            &px,
+            n,
+            n,
+            &Settings {
+                speck: 0.0,
+                ..Settings::default()
+            },
+        );
+        let black = t.layers.iter().find(|l| l.colour == Color::BLACK).unwrap();
+        assert_eq!(black.paths.len(), 64, "one path per ring");
+        for path in &black.paths {
+            let rings = path
+                .elements()
+                .iter()
+                .filter(|e| matches!(e, PathEl::MoveTo(_)))
+                .count();
+            assert_eq!(rings, 2, "each ring holds its own hole");
+        }
     }
 }

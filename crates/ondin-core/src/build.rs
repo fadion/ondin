@@ -972,6 +972,15 @@ pub fn convert_container(
         }
     }
     ops.extend(carried_settings(node, new, to_frame));
+    // The credit stays with the asset: on a frame's picture when it goes onto the
+    // background rectangle, else on the new container.
+    if let Some(credit) = &node.credit {
+        let picture = backing.filter(|_| paint.image_fill().is_some());
+        ops.push(Operation::SetCredit {
+            id: picture.unwrap_or(new),
+            credit: Some(credit.clone()),
+        });
+    }
     if pivot.is_some() {
         ops.push(Operation::SetPivot { id: new, pivot });
     }
@@ -1090,18 +1099,7 @@ fn carried_settings(node: &crate::Node, new: NodeId, to_frame: bool) -> Vec<Oper
             exports: node.exports().to_vec(),
         });
     }
-    if node.mask() {
-        ops.push(Operation::SetMask {
-            id: new,
-            mask: true,
-        });
-        if node.mask_mode() != Default::default() {
-            ops.push(Operation::SetMaskMode {
-                id: new,
-                mode: node.mask_mode(),
-            });
-        }
-    }
+    ops.extend(carried_mask(node, new));
     ops
 }
 
@@ -2424,6 +2422,8 @@ pub fn outline_stroke(
             strokes: Vec::new(),
         });
     } else {
+        // The stroke paths are the same asset, so the group takes the credit.
+        tx.0.extend(carried_credit(doc, &[id], g));
         tx.0.push(Operation::DeleteNode { id });
     }
     Ok((tx, g))
@@ -2898,11 +2898,38 @@ pub(crate) fn replace_with_path(
             pivot: Some(pivot),
         });
     }
-    // A mask: dropping it would release the mask as a side effect.
-    if node.mask() {
-        ops.push(Operation::SetMask {
+    if let Some(var) = node.visible_var() {
+        ops.push(Operation::SetVisibleVar {
             id: new,
-            mask: true,
+            var: Some(var),
+        });
+    }
+    // A mask, with its mode: dropping it would release the mask as a side effect.
+    ops.extend(carried_mask(node, new));
+    // The style links, so a later edit to a style still reaches the path.
+    let styles = node.styles();
+    if styles.fills.is_some() {
+        ops.push(Operation::SetFillStyle {
+            id: new,
+            style: styles.fills,
+        });
+    }
+    if styles.strokes.is_some() {
+        ops.push(Operation::SetStrokeStyle {
+            id: new,
+            style: styles.strokes,
+        });
+    }
+    if styles.effects.is_some() {
+        ops.push(Operation::SetEffectsStyle {
+            id: new,
+            style: styles.effects,
+        });
+    }
+    if !node.exports().is_empty() {
+        ops.push(Operation::SetExports {
+            id: new,
+            exports: node.exports().to_vec(),
         });
     }
     // `Node::fill_rule` derives even-odd for an `Exclude` from the operation, which
@@ -2928,12 +2955,7 @@ pub(crate) fn replace_with_path(
     }
     // The path is the same asset, so it owes the same credit: the layer's own, or
     // a flattened boolean's operands'.
-    if let Some(listed) = crate::credit::credits_in(doc, &[id]).into_iter().next() {
-        ops.push(Operation::SetCredit {
-            id: new,
-            credit: Some(Box::new(listed.credit)),
-        });
-    }
+    ops.extend(carried_credit(doc, &[id], new));
     // Not carried: *Lock* (it would refuse the tidying that follows) and the
     // proportion lock (a path has no authored box).
     ops.push(Operation::DeleteNode { id });
@@ -3018,12 +3040,7 @@ fn flatten_union(
     ops.extend(carried_paint(base, new));
     // An icon's parts flattened are still the icon: the first credit among them
     // goes on the union, the one a CC BY set's licence asks to keep.
-    if let Some(listed) = crate::credit::credits_in(doc, &ordered).into_iter().next() {
-        ops.push(Operation::SetCredit {
-            id: new,
-            credit: Some(Box::new(listed.credit)),
-        });
-    }
+    ops.extend(carried_credit(doc, &ordered, new));
     for member in &ordered {
         ops.push(Operation::DeleteNode { id: *member });
     }
@@ -3032,6 +3049,41 @@ fn flatten_union(
         index: final_index,
     });
     Ok((Transaction(ops), new))
+}
+
+/// The first credit among `consumed` and everything inside them, set on `new`: what
+/// an edit that replaces layers with a new one and deletes them owes, since the new
+/// layer is still the credited asset.
+pub(crate) fn carried_credit(
+    doc: &Document,
+    consumed: &[NodeId],
+    new: NodeId,
+) -> Option<Operation> {
+    let listed = crate::credit::credits_in(doc, consumed)
+        .into_iter()
+        .next()?;
+    Some(Operation::SetCredit {
+        id: new,
+        credit: Some(Box::new(listed.credit)),
+    })
+}
+
+/// `node`'s mask flag and mode, set on `new`, which draws in its place.
+pub(crate) fn carried_mask(node: &Node, new: NodeId) -> Vec<Operation> {
+    let mut ops = Vec::new();
+    if node.mask() {
+        ops.push(Operation::SetMask {
+            id: new,
+            mask: true,
+        });
+        if node.mask_mode() != Default::default() {
+            ops.push(Operation::SetMaskMode {
+                id: new,
+                mode: node.mask_mode(),
+            });
+        }
+    }
+    ops
 }
 
 /// How layer `from` looks, for a new layer `to` that draws in its place: its paint,

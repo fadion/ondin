@@ -374,7 +374,9 @@ impl OndinApp {
         if scrubbing && !cancelled && self.in_flight.trace_scrub.is_none() {
             self.in_flight.trace_scrub = Some(before);
         }
-        if enter && matches!(act, Act::None) {
+        // Enter does what *Trace* does, so not while it is disabled for want of a
+        // render.
+        if enter && card.shot.is_some() && matches!(act, Act::None) {
             act = Act::Trace;
         }
         match act {
@@ -631,7 +633,6 @@ mod tests {
     /// of a black disc of radius 10 on white, so the disc lands at (140, 80) with
     /// radius 20.
     fn app_with_a_disc(ctx: &egui::Context) -> (OndinApp, NodeId) {
-        let mut app = OndinApp::headless(ctx);
         let (w, h) = (40u32, 30u32);
         let rgba: Vec<u8> = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
@@ -644,7 +645,13 @@ mod tests {
                 }
             })
             .collect();
-        let bytes = ondin_export::png::encode_rgba8(&rgba, w, h);
+        app_with_picture(ctx, ondin_export::png::encode_rgba8(&rgba, w, h), w, h)
+    }
+
+    /// A headless app holding an 80×60 rect at (100, 50) filled with the `w`×`h`
+    /// picture `bytes` claim to be, selected.
+    fn app_with_picture(ctx: &egui::Context, bytes: Vec<u8>, w: u32, h: u32) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0x7A);
         let root = ids.mint();
         let mut doc = Document::new(root);
@@ -831,6 +838,31 @@ mod tests {
         );
         let card = app.trace.as_ref().expect("the right-click closed nothing");
         assert_eq!(card.settings.detail, before, "the detail is back");
+    }
+
+    /// Enter does nothing while *Trace* is disabled for want of a render: the card
+    /// stays open rather than tracing nothing.
+    ///
+    /// flip: `trace_ui` turning Enter into *Trace* without a render → fails at
+    /// "the card stays".
+    #[test]
+    fn enter_waits_for_the_render() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_disc(&ctx);
+        app.open_trace();
+        let card = app.trace.as_mut().expect("opened");
+        // A render that never lands: the card goes on reading the picture.
+        drop(card.shooting.take().expect("the render is asked for"));
+        assert!(card.shot.is_none(), "the fixture: no render");
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        crate::repeat::tests::pass(&ctx, &mut app, vec![enter]);
+        assert!(app.trace.is_some(), "the card stays");
     }
 
     /// Without *Keep the picture*, the trace takes the picture's place.

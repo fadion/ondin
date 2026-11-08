@@ -300,6 +300,128 @@ fn resetting_a_copy_puts_the_mains_credit_back() {
     assert_eq!(f.doc.get(ia).unwrap().credit(), Some(&photo));
 }
 
+/// *Convert to frame* and back keep a credited container's credit.
+/// flip: drop the credit push in `build::convert_container` → fails at "to a frame".
+#[test]
+fn converting_a_container_keeps_its_credit() {
+    let mut f = F::new();
+    let a = f.add(f.root, rect());
+    let b = f.add(f.root, rect());
+    let (tx, g) = build::group(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, &[a, b]).unwrap();
+    f.commit(tx);
+    let icon = credit(CreditKind::Icon);
+    f.set_credit(g, icon.clone());
+    let (tx, frame) =
+        build::convert_container(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    assert_eq!(
+        f.doc.get(frame).unwrap().credit(),
+        Some(&icon),
+        "to a frame"
+    );
+    let (tx, back) =
+        build::convert_container(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, frame).unwrap();
+    f.commit(tx);
+    assert_eq!(f.doc.get(back).unwrap().credit(), Some(&icon), "and back");
+}
+
+/// Outlining two strokes of a credited, unfilled path makes a group of stroke
+/// paths that keeps the credit.
+/// flip: drop `carried_credit` in `build::outline_stroke`'s group branch → fails here.
+#[test]
+fn outlined_strokes_keep_the_credit() {
+    let mut f = F::new();
+    let mut line = ondin_core::kurbo::BezPath::new();
+    line.move_to((0.0, 0.0));
+    line.line_to((80.0, 0.0));
+    let p = f.add(
+        f.root,
+        NodeKind::Path {
+            path: line,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: Default::default(),
+        },
+    );
+    let stroke = |width: f64| ondin_core::Stroke {
+        width,
+        ..Default::default()
+    };
+    f.commit(Transaction(vec![Operation::SetStrokes {
+        id: p,
+        strokes: keyed_by_position([stroke(4.0), stroke(1.0)]),
+    }]));
+    let icon = credit(CreditKind::Icon);
+    f.set_credit(p, icon.clone());
+    let (tx, made) =
+        build::outline_stroke(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, p).unwrap();
+    f.commit(tx);
+    assert!(f.doc.get(p).is_none(), "the fixture: the path was replaced");
+    assert_eq!(f.doc.get(made).unwrap().credit(), Some(&icon));
+}
+
+/// A path replacing a layer keeps its mask mode, style links, exports and
+/// visibility binding with its credit.
+/// flip: drop `carried_mask`'s mode in `build::replace_with_path` → fails at the mode.
+#[test]
+fn a_replaced_layer_keeps_what_is_not_its_geometry() {
+    let mut f = F::new();
+    let a = f.add(f.root, rect());
+    f.commit(Transaction(vec![
+        Operation::SetMask { id: a, mask: true },
+        Operation::SetMaskMode {
+            id: a,
+            mode: ondin_core::MaskMode::Alpha,
+        },
+        Operation::SetExports {
+            id: a,
+            exports: keyed_by_position([ondin_core::ExportSpec::new(
+                ondin_core::ExportFormat::Png,
+                ondin_core::ExportScale::Times(1.0),
+            )]),
+        },
+    ]));
+    let icon = credit(CreditKind::Icon);
+    f.set_credit(a, icon.clone());
+    let (tx, made) = build::outline(&f.doc, &Resolved::rebuild(&f.doc), &mut f.ids, a).unwrap();
+    f.commit(tx);
+    let n = f.doc.get(made).unwrap();
+    assert!(n.mask());
+    assert_eq!(n.mask_mode(), ondin_core::MaskMode::Alpha, "the mode");
+    assert_eq!(n.exports().len(), 1, "the exports");
+    assert_eq!(n.credit(), Some(&icon));
+}
+
+/// Tracing a credited picture without keeping it hands the *Trace* group its
+/// credit.
+/// flip: drop `carried_credit` in `trace::place` → fails here.
+#[test]
+fn a_trace_that_replaces_its_picture_keeps_the_credit() {
+    use ondin_core::trace;
+    let mut f = F::new();
+    let pic = f.add(f.root, rect());
+    let photo = credit(CreditKind::Photo);
+    f.set_credit(pic, photo.clone());
+    let mut square = ondin_core::kurbo::BezPath::new();
+    square.move_to((0.0, 0.0));
+    square.line_to((4.0, 0.0));
+    square.line_to((4.0, 4.0));
+    square.close_path();
+    let traced = trace::Traced {
+        layers: vec![trace::Layer {
+            colour: Color::from_rgba8(0, 0, 0, 255),
+            paths: vec![square],
+        }],
+    };
+    let frame = ondin_core::kurbo::Rect::new(5.0, 5.0, 15.0, 15.0);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, group) =
+        trace::place(&f.doc, &res, &mut f.ids, pic, &traced, frame, 1.0, false).unwrap();
+    f.commit(tx);
+    assert!(f.doc.get(pic).is_none(), "the fixture: the picture went");
+    assert_eq!(f.doc.get(group).unwrap().credit(), Some(&photo));
+}
+
 /// A credit that will not read — a missing field, a kind from a later build —
 /// is dropped on load, and the document opens.
 #[test]

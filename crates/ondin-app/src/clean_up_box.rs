@@ -4,8 +4,8 @@
 //!
 //! The rule is `ondin_core::clean_up`'s; this module draws batch rename's box with
 //! a switch per rule, a preview grouped by rule, and commits the plan as one undo
-//! step. The document cannot change while the box is up, so a plan is made only
-//! when the scope or a switch changes.
+//! step. The canvas stays live under the box, so a plan is made again whenever
+//! the scope, a switch, the page, the document or the selection changes.
 
 use crate::app::OndinApp;
 use crate::batch_rename::{Scope, row, scope_segments};
@@ -164,6 +164,10 @@ impl OndinApp {
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;
         self.picker = None;
+        // Already up: its scope and switches stay as they were set.
+        if self.clean_up.is_some() {
+            return;
+        }
         // The path bar's card is the same act on one path's points; the two
         // never show together.
         self.cleanup = None;
@@ -239,6 +243,9 @@ impl OndinApp {
         if b.selection.is_empty() && b.scope == Scope::Selection {
             b.scope = Scope::Page;
         }
+        // The view's guide lock can change under the box; the rules are part of
+        // what a plan was made for, so this replans.
+        b.rules.guides_locked = self.lock_guides;
         // A row clicked last frame on another page: its page is shown now.
         if let Some(id) = b.reveal
             && self.session.doc.page_of(id) == Some(self.session.page)
@@ -315,7 +322,11 @@ impl OndinApp {
             self.go_to_page(page);
         }
         if select {
-            b.pin = Some((b.selection.clone(), vec![target]));
+            // Only *Selection* would narrow to the clicked layer; elsewhere the
+            // selection it makes is the selection.
+            if b.scope == Scope::Selection && b.selection != [target] {
+                b.pin = Some((b.selection.clone(), vec![target]));
+            }
             self.session.selection.set_one(target);
         }
         // Revealed next frame, once the page switch has been drawn; a page's own
@@ -884,5 +895,107 @@ mod tests {
             found(&app, empty),
             "a layer made under the box is found once it is drawn"
         );
+    }
+
+    /// Choosing *Clean up…* with the box up leaves its scope and switches as set.
+    /// flip: `open_clean_up` without its already-up guard → fails at "the
+    /// switch stays".
+    #[test]
+    fn reopening_the_box_keeps_what_was_set() {
+        let (ctx, mut app) = app();
+        rect(&mut app, true);
+        pass(&ctx, &mut app, Vec::new());
+        app.dispatch(&ctx, crate::input::Action::CleanUp);
+        let b = app.clean_up.as_mut().expect("the box opened");
+        b.rules.set(Rule::Guides, true);
+        b.scope = Scope::Document;
+        pass(&ctx, &mut app, Vec::new());
+        app.dispatch(&ctx, crate::input::Action::CleanUp);
+        let b = app.clean_up.as_ref().expect("still open");
+        assert!(b.rules.is_on(Rule::Guides), "the switch stays");
+        assert_eq!(b.scope, Scope::Document);
+    }
+
+    /// A row's click pins *Selection* only at *Selection*: shown from the page,
+    /// the clicked layer is what *Selection* then means.
+    /// flip: `show_finding` pinning at every scope → fails at "the clicked layer".
+    #[test]
+    fn a_row_shown_from_the_page_does_not_pin_the_selection() {
+        let (ctx, mut app) = app();
+        let painted = rect(&mut app, true);
+        let empty = rect(&mut app, false);
+        app.session.selection.set(vec![painted]);
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        app.clean_up.as_mut().unwrap().scope = Scope::Page;
+        pass(&ctx, &mut app, Vec::new());
+        let mut b = app.clean_up.take().unwrap();
+        app.show_finding(&mut b, Subject::Layer(empty));
+        b.scope = Scope::Selection;
+        app.clean_up = Some(b);
+        pass(&ctx, &mut app, Vec::new());
+        assert_eq!(app.session.selection.ids(), [empty], "fixture: selected");
+        assert_eq!(
+            app.clean_up.as_ref().unwrap().selection,
+            [empty],
+            "the clicked layer"
+        );
+    }
+
+    /// Guides locked with the box up are kept from then on, as at opening.
+    /// flip: `clean_up_ui` not reading `lock_guides` → fails at "kept as locked".
+    #[test]
+    fn guides_locked_under_the_box_are_kept() {
+        let (ctx, mut app) = app();
+        let page = app.session.page;
+        let id = ondin_core::GuideId(app.session.ids.mint());
+        assert!(app.session.commit(Transaction(vec![Operation::AddGuide {
+            guide: ondin_core::Guide {
+                id,
+                axis: GuideAxis::Horizontal,
+                position: 40.0,
+                color: None,
+                owner: page,
+            },
+        }])));
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        app.clean_up.as_mut().unwrap().rules.set(Rule::Guides, true);
+        pass(&ctx, &mut app, Vec::new());
+        let guide_kept = |app: &OndinApp| {
+            app.clean_up
+                .as_ref()
+                .unwrap()
+                .plan
+                .findings
+                .iter()
+                .find_map(|f| matches!(f.subject, Subject::Guide { .. }).then_some(f.kept))
+        };
+        assert_eq!(guide_kept(&app), Some(None), "fixture: the guide is taken");
+        app.lock_guides = true;
+        pass(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            guide_kept(&app),
+            Some(Some(clean_up::Kept::Locked)),
+            "kept as locked"
+        );
+    }
+
+    /// The path bar's *Clean up* card and the box never show together: opening
+    /// either closes the other.
+    /// flip: `toggle_cleanup` leaving `clean_up` → fails at "the card closes the
+    /// box".
+    #[test]
+    fn the_path_bar_card_and_the_box_close_each_other() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = crate::path_bar::tests::app_with_a_ring(&ctx);
+        pass(&ctx, &mut app, Vec::new());
+        app.open_clean_up();
+        assert!(app.clean_up.is_some(), "fixture: the box opened");
+        app.toggle_cleanup(id);
+        assert!(app.cleanup.is_some(), "fixture: the card opened");
+        assert!(app.clean_up.is_none(), "the card closes the box");
+        app.open_clean_up();
+        assert!(app.cleanup.is_none(), "the box closes the card");
     }
 }

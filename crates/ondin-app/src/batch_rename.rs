@@ -5,9 +5,10 @@
 //! and numbers them ([`plan_into`]), draws the box with its preview, and commits
 //! every new name as one undo step. Nothing changes on the canvas until then.
 //!
-//! The document cannot change while the box is up, so what the plan reads of it
-//! is taken once, at open ([`Snapshot`]), and a worker plans from that copy each
-//! time a setting changes, sending the rows back in parts as it goes.
+//! What the plan reads of the document is a copy ([`Snapshot`]), taken again
+//! whenever the document, the page or the selection moves under the open box. A
+//! worker plans from the copy each time it or a setting changes, sending the rows
+//! back in parts as it goes.
 
 use crate::app::OndinApp;
 use crate::panels::layers::GlyphInk;
@@ -108,7 +109,26 @@ impl Order {
     }
 }
 
-/// One layer as the plan reads it, taken when the box opens.
+/// Names the app writes beyond `naming::generated_stem`'s table, which stays
+/// strict because a boolean's relabelling reads it: a placed picture, a blend's
+/// and a trace's group, a combined set's fallback, an imported mask or clip.
+const APP_NAMES: [&str; 6] = [
+    "Image",
+    ondin_core::blend::GROUP_NAME,
+    ondin_core::trace::GROUP_NAME,
+    "Component",
+    "Mask",
+    "Clip",
+];
+
+/// Whether the app wrote `name`, numbered or not: what *Only default names* keeps.
+fn app_named(name: &str) -> bool {
+    use ondin_core::naming::{generated_stem, numbered};
+    generated_stem(name).is_some()
+        || APP_NAMES.contains(&numbered(name).map_or(name, |(stem, _)| stem))
+}
+
+/// One layer as the plan reads it, as of the snapshot.
 #[derive(Clone, Debug)]
 struct Layer {
     id: NodeId,
@@ -116,14 +136,13 @@ struct Layer {
     /// What a text layer says, on one line, for the `[Text]` token; empty for
     /// any other layer.
     content: String,
-    /// A name the app wrote (`naming::generated_stem`), which *Only default
-    /// names* keeps.
+    /// A name the app wrote ([`app_named`]), which *Only default names* keeps.
     default_name: bool,
     /// A variant in a set, whose name is made from its property values.
     variant: bool,
     /// Inside an instance, and not its root.
     in_instance: bool,
-    /// Selected when the box opened.
+    /// Selected when the snapshot was taken.
     selected: bool,
     /// Under a layer that was.
     under_selected: bool,
@@ -171,13 +190,14 @@ impl Snapshot {
                         layers.push(Layer {
                             id,
                             name: node.name().to_string(),
-                            content: match node.kind() {
-                                ondin_core::NodeKind::Text { content, .. } => {
+                            // The drawn content: a bound text's literal is empty.
+                            content: match doc.resolved_kind(id).as_deref() {
+                                Some(ondin_core::NodeKind::Text { content, .. }) => {
                                     content.split_whitespace().collect::<Vec<_>>().join(" ")
                                 }
                                 _ => String::new(),
                             },
-                            default_name: ondin_core::naming::generated_stem(node.name()).is_some(),
+                            default_name: app_named(node.name()),
                             variant: !node.variant().is_empty(),
                             in_instance: node.parent().is_some_and(|p| {
                                 ondin_core::component::instance_root(doc, p).is_some()
@@ -910,6 +930,17 @@ impl OndinApp {
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;
         self.picker = None;
+        let search = search.filter(|s| !s.trim().is_empty());
+        // Already up: what was typed stays, and only the tree's search is taken.
+        if let Some(b) = self.batch_rename.as_mut() {
+            if let Some(text) = search {
+                b.s.set_scope(Scope::Page);
+                b.s.find = text.trim().to_string();
+                b.s.match_case = false;
+                b.s.pattern = false;
+            }
+            return;
+        }
         let selection = self.selected_layers();
         let doc = &self.session.doc;
         let remembered = self.prefs.batch_rename.clone();
@@ -938,7 +969,6 @@ impl OndinApp {
             inside_instances: false,
             default_names: false,
         };
-        let search = search.filter(|s| !s.trim().is_empty());
         if selection.is_empty() || search.is_some() {
             s.set_scope(Scope::Page);
         }
@@ -1913,6 +1943,84 @@ mod tests {
                 .iter()
                 .all(|r| !matches!(r, Row::Layer(l) if l.id == hero)),
             "Hero is left"
+        );
+    }
+
+    /// *Only default names* keeps every name the app writes, including those
+    /// outside core's generated table, and leaves a typed one.
+    /// flip: `app_named` reading `generated_stem` alone → fails at *Image 2*.
+    #[test]
+    fn default_names_are_every_name_the_app_writes() {
+        for name in [
+            "Rectangle 3",
+            "Image 2",
+            "Blend",
+            "Trace",
+            "Component",
+            "Mask 2",
+        ] {
+            assert!(app_named(name), "{name}");
+        }
+        for name in ["Hero", "Image 02", "Badge 2"] {
+            assert!(!app_named(name), "{name}");
+        }
+    }
+
+    /// Choosing *Batch rename…* with the box up keeps what was typed; the layers
+    /// tree's search, handed in, is the one thing taken.
+    /// flip: `open_batch_rename` without its already-up guard → fails at "what
+    /// was typed stays".
+    #[test]
+    fn reopening_the_box_keeps_what_was_typed() {
+        let (ctx, mut app) = app();
+        let a = named(&mut app, "Rect a");
+        app.session.selection.set(vec![a]);
+        let mut b = opened(&ctx, &mut app, "Btn", "Button [Number]");
+        b.s.default_names = true;
+        app.batch_rename = Some(b);
+        app.dispatch(&ctx, crate::input::Action::BatchRename);
+        let s = &app.batch_rename.as_ref().expect("still open").s;
+        assert_eq!(
+            (s.find.as_str(), s.template.as_str(), s.default_names),
+            ("Btn", "Button [Number]", true),
+            "what was typed stays"
+        );
+        app.open_batch_rename(&ctx, Some("Rect".into()));
+        let s = &app.batch_rename.as_ref().unwrap().s;
+        assert_eq!((s.find.as_str(), s.scope), ("Rect", Scope::Page));
+        assert_eq!(s.template, "Button [Number]");
+    }
+
+    /// `[Text]` reads a text bound to a string variable as it draws, not its
+    /// literal, which the binding leaves empty.
+    /// flip: `Snapshot::take` reading `node.kind()` → fails at the changes.
+    #[test]
+    fn text_reads_a_bound_text_as_it_draws() {
+        use serde_json::json;
+        let (ctx, mut app) = app();
+        let mut doc = app.session.doc.clone();
+        let page = app.session.page.to_wire();
+        let words = serde_json::to_value(ondin_core::Cell::String("Sign in".into())).unwrap();
+        let made = ondin_core::verbs::run_script(
+            &mut doc,
+            &mut app.session.ids,
+            ondin_core::verbs::Lent::default(),
+            &json!([
+                { "verb": "add_variable", "args": { "kind": "string", "value": words }, "as": "v" },
+                { "verb": "create_text", "args": { "parent": page, "text": "Old" }, "as": "t" },
+                { "verb": "set_name", "args": { "node": "@t", "name": "Text 1" } },
+                { "verb": "bind_variable", "args": { "nodes": ["@t"], "field": "content", "variable": "@v" } },
+            ]),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let label = NodeId::from_wire(&made[1][0]).unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![label]);
+        let bx = opened(&ctx, &mut app, "", "[Text] label");
+        let plan = planned(&app, &bx);
+        assert_eq!(
+            new_names(&app, &plan),
+            [("Text 1".to_string(), "Sign in label".to_string())]
         );
     }
 

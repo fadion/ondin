@@ -263,7 +263,8 @@ of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`; ev
   flyout and the two cards close (`path_bar::warp_bar`, `tools.md` *Warp*).
 
 - **The Clean up card** (`crate::cleanup`) hangs beside the bar, its top on the wand's, as the
-  Offset card does, and the two replace each other. It is a popover (`ui::menu_frame`,
+  Offset card does, and the two replace each other; opening it closes the *Clean up* and *Fill with
+  content* boxes, which close it. It is a popover (`ui::menu_frame`,
   `popover_head` *Clean up* with its ×) of four `ui::labelled` rows, each a field and a word button
   of one width: *Simplify* (accuracy in px, from `SIMPLIFY_MIN_ACCURACY` to 20, *Apply*, with
   *64 points → 9* under it, which keeps the last count while a refit is in flight and says

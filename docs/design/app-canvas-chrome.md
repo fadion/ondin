@@ -504,7 +504,8 @@ worded for the scope that plan was made for (`Plan::scope`).
   its input and the layers can be selected, edited and panned under it, as with Find and Colour
   review. Opening it closes the palette, the context menu, the top-bar menu, the colour picker and
   the other cards over the canvas's top (Find, Colour review, Clean up, Fill with content); opening any of those
-  closes it. Enter renames from Find or *Rename to* (with the order list open it does nothing);
+  closes it. Choosing it again while it is up keeps what was typed and takes only a search the
+  Layers header hands it. Enter renames from Find or *Rename to* (with the order list open it does nothing);
   anywhere else it is the canvas's. The *Rename* button renames; *Cancel* or ✕ closes it, and
   Escape closes it through `OndinApp::escape`'s rung below Find's (the order list, open, takes the
   press first). It is drawn outside the `!focus` guard, so it works in focus mode.
@@ -525,8 +526,9 @@ worded for the scope that plan was made for (`Plan::scope`).
   a set is never renamed, since its name comes from its property values; it is listed with *Named by
   its properties* in amber. *Only default names* (`Settings::default_names`), a tick box above the
   scope's own, leaves out every layer whose name the app did not write (a default name is one
-  `naming::generated_stem` reads, as *Rectangle 3*, *Group*, *Text 2*): such a layer is not listed,
-  counted or numbered. It is off at open and not remembered.
+  `naming::generated_stem` reads, as *Rectangle 3*, *Group*, *Text 2*, or one the app writes outside
+  that table, *Image 2*, *Blend*, *Trace*, *Component*, *Mask*, *Clip*: `batch_rename::app_named`):
+  such a layer is not listed, counted or numbered. It is off at open and not remembered.
 - **The rule** (`rename::Find`, `Template`, `Numbering`). An empty Find replaces the whole name and
   `[Name]` is that name; a filled one replaces every match and `[Name]` is the matched text. Matching
   ignores case unless *Aa*; *.\** reads Find as a regex (a literal Find is an escaped one). A pattern
@@ -592,7 +594,7 @@ worded for the scope that plan was made for (`Plan::scope`).
 A box that takes away what a design no longer shows, in the selection, the page or every page, as
 one undo step. *Clean up* is also the path bar's card (`cleanup.rs`, `app-pen-and-nodes.md`): the
 same act at the scale of one path's points, so the two share the name and `MAGIC_WAND`. Opening
-the box closes that card, so the two never show together.
+either closes the other, so the two never show together.
 
 ### The rule (`clean_up::plan`)
 
@@ -638,15 +640,16 @@ a `Finding` with `kept: Some(Kept)` and its reason.
 
 - **Built as batch rename's**: `settings::canvas_card`, 520 wide, `CardHold::Open`, so the canvas
   stays live under it as under Find. Opening it closes the palette, the context menu, the top-bar
-  menu, the colour picker and the other cards over the canvas's top. The commit button cleans up;
+  menu, the colour picker and the other cards over the canvas's top; choosing it again while it is
+  up leaves its scope and switches as set. The commit button cleans up;
   Enter stays the canvas's (the box has no field to type in). *Cancel* or ✕ closes it, and Escape
   through `OndinApp::escape`'s rung below batch rename's. The foot's note reads *Esc closes*. It is
   drawn outside the `!focus` guard.
 - **Head and scope.** `card_head` *Clean up*. The *In* row is batch rename's `scope_segments`,
   opening on *Selection* when something is selected, else on *This page*. *Selection* is the live
-  selection (`OndinApp::selected_layers`), except that a row's click, which selects that row's
-  layer, pins the roots it looked under until the selection changes again, as Find's double-click
-  does; a selection emptied under the box moves it to *This page*. *All pages* leaves drafts out
+  selection (`OndinApp::selected_layers`), except that at *Selection* a row's click, which selects
+  that row's layer, pins the roots it looked under until the selection changes again, as Find's
+  double-click does; a selection emptied under the box moves it to *This page*. *All pages* leaves drafts out
   but keeps the current page.
 - **Remove**: the six rules as `ui::switch_row_noted`, two to a line (left *Hidden paint*, *Covered
   fills*, *One-layer groups*; right *Hidden layers*, *Empty layers*, *Guides*), each noted with its
@@ -655,7 +658,8 @@ a `Finding` with `kept: Some(Kept)` and its reason.
   *Remove* label sits level with the first line (`batch_rename::row` puts its label on a tall row's
   first control-height line).
 - **Planning** is synchronous, and only when the scope, a switch, the page, the document's revision
-  or the selection *Selection* reads changes (`CleanUpBox::replan`), as Find searches again. A drag
+  or the selection *Selection* reads changes (`CleanUpBox::replan`), as Find searches again; the
+  view's guide lock is read into the switches every frame, so locking guides replans too. A drag
   previews without committing, so a gesture replans once, at its end.
 - **Preview**: the eyebrow *Preview* and *N items on M layers*, with *· K kept* when amber rows
   show. Rows are grouped by rule in `Rule::ALL` order, each under a heading row with the rule's
@@ -670,7 +674,7 @@ a `Finding` with `kept: Some(Kept)` and its reason.
   that owns it and selects nothing. The box stays open.
 - **Empty**: *Nothing to clean up in the selection / on this page / on any page*, then, when a
   switched-off rule would find something, *Turned off: Hidden layers 3 · Guides 2*.
-- **Foot**: `card_foot` with *Enter clean up · Esc cancel*, *Cancel* and *Clean up N items*; with
+- **Foot**: `card_foot` with *Esc closes*, *Cancel* and *Clean up N items*; with
   nothing to take the button reads *Clean up*, dimmed, its tooltip *Nothing to clean up*.
 - **Commit**: one undo step *Clean up* with `MAGIC_WAND`; the status line says *Cleaned up N items ·
   Ctrl+Z to undo*; the selection keeps only what still exists. The switches are saved to

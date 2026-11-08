@@ -158,7 +158,8 @@ fn anchors_in(path: &BezPath) -> usize {
 
 impl OndinApp {
     /// Open the Clean up card on `id`, or close it. The Offset card, which hangs in
-    /// the same place, closes.
+    /// the same place, closes, and so do the Clean up and Fill with content boxes,
+    /// which close this card when they open.
     pub(crate) fn toggle_cleanup(&mut self, id: NodeId) {
         if self.cleanup.is_some() {
             return self.close_cleanup();
@@ -167,6 +168,8 @@ impl OndinApp {
         let Some(card) = self.read_cleanup(id) else {
             return;
         };
+        self.clean_up = None;
+        self.fill_content = None;
         self.cleanup = Some(CleanupCard {
             focus_apply: true,
             ..card

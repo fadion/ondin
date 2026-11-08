@@ -15130,7 +15130,9 @@ mod library_wiring_tests {
 
     /// Typing into a saved, clean document counts as unsaved work, so a quit or a
     /// window close asks; the typing is committed before the question is put.
-    /// flip: `any_unsaved` without its text term → fails at "counted".
+    /// flip: `any_unsaved` without its text term → fails at "counted";
+    /// `handle_close_request` without `commit_text_before_closing` → fails at
+    /// "committed for the question".
     #[test]
     fn a_live_text_edit_is_unsaved_work() {
         let ctx = egui::Context::default();
@@ -15174,10 +15176,22 @@ mod library_wiring_tests {
             "the fixture: nothing committed yet"
         );
         assert!(app.any_unsaved(), "counted");
-        app.commit_text_before_closing();
+        // The OS asks the window to close.
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events = vec![egui::ViewportEvent::Close];
+        let _ = ctx.run_ui(input, |ui| app.handle_close_request(ui.ctx()));
         assert!(
             app.text.is_none() && app.session.is_dirty(),
             "committed for the question"
+        );
+        assert!(app.confirming_close, "the question is put");
+        assert!(
+            app.tab_infos().iter().any(|t| t.dirty),
+            "the card lists the document"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

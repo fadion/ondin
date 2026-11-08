@@ -1625,6 +1625,60 @@ fn styles_are_added_changed_applied_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// A fill style given a group styles the group's shapes, as the Fill card's
+/// picker does, by `add_style` and by `apply_style`; detaching the group
+/// detaches them.
+///
+/// flip: `style::targets` answering the ids as given → fails at the script's
+/// `add_style` step, `op_set_fills` refusing the group.
+#[test]
+fn a_paint_style_given_a_group_styles_its_shapes() {
+    let (mut doc, mut ids, _) = blank();
+    let fills = |r: u8| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(Color::from_rgb8(r, 0, 0)).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    let script = json!([
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "a" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0) }, "as": "b" },
+        { "verb": "group", "args": { "nodes": ["@a", "@b"] }, "as": "g" },
+        { "verb": "add_style", "args": { "value": { "fills": fills(100) }, "nodes": ["@g"] }, "as": "s" },
+        { "verb": "add_style", "args": { "value": { "fills": fills(50) } }, "as": "t" },
+        { "verb": "apply_style", "args": { "nodes": ["@g"], "style": "@t" } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let shapes = [made[0][0].clone(), made[1][0].clone()].map(|w| NodeId::from_wire(&w).unwrap());
+    let t: ondin_core::style::StyleId = serde_json::from_value(json!(made[4][0])).unwrap();
+    for s in shapes {
+        let node = doc.get(s).unwrap();
+        assert_eq!(
+            node.styles().get(ondin_core::style::StyleSlot::Fills),
+            Some(t),
+            "each shape applies the last style"
+        );
+        assert_eq!(
+            node.paint().fills[0].brush.literal(),
+            Some(&Brush::Solid(Color::from_rgb8(50, 0, 0)))
+        );
+    }
+
+    let detach =
+        json!([{ "verb": "apply_style", "args": { "nodes": [made[2][0]], "slot": "fills" } }]);
+    verbs::run_script(&mut doc, &mut ids, Lent::default(), &detach)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(shapes.iter().all(|s| {
+        doc.get(*s)
+            .unwrap()
+            .styles()
+            .get(ondin_core::style::StyleSlot::Fills)
+            .is_none()
+    }));
+}
+
 /// `define_property` binds a main's text and rectangle to a text and a boolean
 /// property, a named one and one named for its layer, and `set_instance_property`
 /// sets each on an instance by name; a value of the wrong kind is refused.

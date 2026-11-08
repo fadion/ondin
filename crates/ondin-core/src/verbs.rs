@@ -1739,7 +1739,7 @@ pub static VERBS: &[Verb] = &[
             let mut ops = vec![crate::style::add_op(id, &name, value)];
             if a.get("nodes").is_some() {
                 ops.extend(
-                    a.nodes("nodes")?
+                    crate::style::targets(ctx.doc, &a.nodes("nodes")?, slot)
                         .into_iter()
                         .map(|n| crate::style::bind_op(n, slot, Some(id))),
                 );
@@ -1833,7 +1833,7 @@ pub static VERBS: &[Verb] = &[
                     (None, slot)
                 }
             };
-            let ops = nodes
+            let ops = crate::style::targets(ctx.doc, &nodes, slot)
                 .into_iter()
                 .filter(|n| {
                     style.is_some()

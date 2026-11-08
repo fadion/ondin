@@ -484,6 +484,16 @@ pub fn bind_op(id: NodeId, slot: StyleSlot, style: Option<StyleId>) -> Operation
     }
 }
 
+/// The layers a style in `slot` given `ids` binds: a paint slot passes through
+/// groups to their shapes, as a paint edit does ([`crate::build::paint_targets`]);
+/// any other slot binds `ids` as given.
+pub fn targets(doc: &crate::Document, ids: &[NodeId], slot: StyleSlot) -> Vec<NodeId> {
+    match slot {
+        StyleSlot::Fills | StyleSlot::Strokes => crate::build::paint_targets(doc, ids),
+        StyleSlot::Effects | StyleSlot::Text | StyleSlot::Layout => ids.to_vec(),
+    }
+}
+
 /// The slot an operation **writes the values of**, with its node — `SetFills`,
 /// `SetStrokes`, `SetEffects`, and `SetTextStyle` for the type — or `None`.
 ///

@@ -1156,12 +1156,15 @@ fn space_down(ui: &egui::Ui) -> bool {
     !control && ui.input(|i| i.key_down(egui::Key::Space))
 }
 
-/// Whether `\` is held for the canvas's peek, from `was` and this frame's key
-/// events. A press counts with no Ctrl or Cmd (those are the panel toggles' `\`);
-/// Option is allowed, which some Mac layouts type `\` with. The release counts
-/// however the held modifiers spell it (`|` under Shift) and on the physical key,
-/// so a peek never sticks on; an unfocused window drops it, its release lost.
-fn peek_key_held(ui: &egui::Ui, was: bool) -> bool {
+/// The key holding the canvas's peek, from `was` and this frame's key events:
+/// the physical key of the press that started it (its logical key when the
+/// platform gives none). A press counts when it types `\` (or `|` on the `\` key
+/// under Shift) with no Ctrl or Cmd (those are the panel toggles' `\`); Option is
+/// allowed, which some Mac layouts type `\` with, and an ISO `#` on the `\` key
+/// is not a peek. The release counts on that same physical key however the
+/// modifiers left held spell it (`/` once Option is up), so a peek never sticks
+/// on; an unfocused window drops it, its release lost.
+fn peek_key_held(ui: &egui::Ui, was: Option<egui::Key>) -> Option<egui::Key> {
     ui.input(|i| {
         let mut held = was;
         for e in &i.events {
@@ -1173,32 +1176,29 @@ fn peek_key_held(ui: &egui::Ui, was: bool) -> bool {
                     modifiers,
                     ..
                 } => {
-                    let physical = *physical_key == Some(egui::Key::Backslash);
+                    let on = physical_key.unwrap_or(*key);
+                    let types = *key == egui::Key::Backslash
+                        || (*key == egui::Key::Pipe && on == egui::Key::Backslash);
                     match pressed {
-                        true if *key == egui::Key::Backslash || physical => {
-                            held = !(modifiers.command || modifiers.ctrl);
+                        true if types => {
+                            held = (!(modifiers.command || modifiers.ctrl)).then_some(on);
                         }
-                        false
-                            if matches!(key, egui::Key::Backslash | egui::Key::Pipe)
-                                || physical =>
-                        {
-                            held = false;
-                        }
+                        false if held == Some(on) || types => held = None,
                         _ => {}
                     }
                 }
-                egui::Event::WindowFocused(false) => held = false,
+                egui::Event::WindowFocused(false) => held = None,
                 _ => {}
             }
         }
-        held && i.focused
+        held.filter(|_| i.focused)
     })
 }
 
 /// Whether the peek's key is held for the canvas: never while a control holds
 /// the keyboard, whose `\` it is.
-fn peek_held(ui: &egui::Ui, key: bool) -> bool {
-    key && ui.ctx().memory(|m| m.focused()).is_none()
+fn peek_held(ui: &egui::Ui, key: Option<egui::Key>) -> bool {
+    key.is_some() && ui.ctx().memory(|m| m.focused()).is_none()
 }
 
 #[cfg(test)]
@@ -1310,6 +1310,62 @@ mod peek_tests {
         frame(&mut app, vec![pipe_up], shift);
         frame(&mut app, Vec::new(), egui::Modifiers::NONE);
         assert!(!app.peeking, "ended by the `|` release");
+    }
+
+    /// A `\` typed with Shift+Option+7 (a German Mac) ends on its own key's
+    /// release, which arrives as `/` once Option is up; the `#` an ISO layout
+    /// types on the `\` key starts no peek.
+    /// flip: `peek_key_held` ending only on a `\`/`|` release → fails at "ended by
+    /// the 7's release"; starting on the physical `\` key → fails at "no peek".
+    #[test]
+    fn an_option_typed_backslash_ends_on_its_own_key() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>, m: egui::Modifiers| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    events,
+                    modifiers: m,
+                    ..Default::default()
+                },
+                |ui| app.canvas_ui(ui),
+            );
+        };
+        let key = |key, physical, pressed, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(physical),
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let shift = egui::Modifiers::SHIFT;
+        let shift_alt = egui::Modifiers { alt: true, ..shift };
+        let seven = egui::Key::Num7;
+        frame(
+            &mut app,
+            vec![key(egui::Key::Backslash, seven, true, shift_alt)],
+            shift_alt,
+        );
+        assert!(app.peeking, "the fixture: peeking");
+        frame(
+            &mut app,
+            vec![key(egui::Key::Slash, seven, false, shift)],
+            shift,
+        );
+        frame(&mut app, Vec::new(), egui::Modifiers::NONE);
+        assert!(!app.peeking, "ended by the 7's release");
+
+        // An ISO `#` on the `\` key: no `Key` of its own, so egui names the
+        // physical key's unshifted character, which is not `\`'s.
+        let hash = egui::Key::Backslash;
+        frame(
+            &mut app,
+            vec![key(egui::Key::Num3, hash, true, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        assert!(!app.peeking, "no peek");
     }
 }
 

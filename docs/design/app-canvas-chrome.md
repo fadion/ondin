@@ -1183,8 +1183,10 @@ not toggled: a live selection that cannot be seen would take a nudge.
 - **The key** (`canvas::peek_key_held`, `peek_held`): held from the key's own press to its own
   release, kept in `OndinApp::peek_key`, so auto-repeat changes nothing. The press counts without
   `Ctrl`/`Cmd` (those spell the panel toggles' `\`); `Alt` is allowed, which some Mac layouts type
-  `\` with. The release counts however the held modifiers spell it (`|` under `Shift`) and on the
-  physical key, so a peek never sticks on. Not while a control holds the keyboard; a window that
+  `\` with. The press must type `\` (or `|` on the `\` key), so an ISO layout's `#` on that key is
+  no peek. `peek_key` keeps the press's physical key, and the release counts on it however the
+  modifiers left held spell it (`|` under `Shift`, `/` once `Option` is up), so a peek never sticks
+  on. Not while a control holds the keyboard; a window that
   loses focus ends it, whose release would never arrive. Where `\` needs `AltGr` (`Ctrl+Alt` on
   Windows) the chord is *Show/hide layers* instead, and there is no peek: §12's `AltGr` question.
 - **A press made during the peek** sits out to its release (`gesture_cancelled`), so it does not

@@ -1032,9 +1032,10 @@ pub struct OndinApp {
     /// Bare `\` is held over the canvas: the canvas chrome is hidden and presses do
     /// nothing (`canvas::peek_held`). Set by `canvas_ui` each frame.
     pub(crate) peeking: bool,
-    /// The peek's key is down, as its own press and release events say
-    /// (`canvas::peek_key_held`): egui's held state misses a release Shift spells as `|`.
-    pub(crate) peek_key: bool,
+    /// The physical key holding the peek, as its own press and release events say
+    /// (`canvas::peek_key_held`): egui's held state misses a release the modifiers
+    /// left held spell otherwise (`|` under Shift, `/` once Option is up).
+    pub(crate) peek_key: Option<egui::Key>,
     /// Whether each clipboard key's press arrived, and what was held with Ctrl
     /// (`input::witness_swallowed_presses`).
     clip_keys: crate::input::ClipWitness,
@@ -1779,7 +1780,7 @@ impl OndinApp {
             show_layout_grids: view.layout_grids,
             outline_view: false,
             peeking: false,
-            peek_key: false,
+            peek_key: None,
             clip_keys: Default::default(),
             pixel_preview: false,
             show_layers: view.layers,

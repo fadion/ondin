@@ -6633,6 +6633,10 @@ impl OndinApp {
             });
         }
         ops.extend(self.slot_transaction(id, slot, next).0);
+        ops.extend(ondin_core::credit::dropped_by_replace(
+            &self.session.doc,
+            id,
+        ));
         self.session.name_step("Replace image", icon::IMAGE);
         if self.commit_edit(Transaction(ops)) {
             let said = self.replaced_status(image.label(), None);

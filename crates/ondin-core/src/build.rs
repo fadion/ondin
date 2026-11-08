@@ -3106,6 +3106,15 @@ pub fn ungroup(doc: &Document, res: &Resolved, id: NodeId) -> Result<Transaction
             new_parent: parent,
             index: at + i,
         });
+        // An ungrouped icon's parts each keep its credit; a child's own wins.
+        if let Some(credit) = &node.credit
+            && doc.get(*child).is_some_and(|c| c.credit.is_none())
+        {
+            ops.push(Operation::SetCredit {
+                id: *child,
+                credit: Some(credit.clone()),
+            });
+        }
     }
     ops.push(Operation::DeleteNode { id });
     Ok(Transaction(ops))
@@ -3559,6 +3568,7 @@ pub fn replace_image_fill(
         });
     }
     ops.push(Operation::SetFills { id, fills });
+    ops.extend(crate::credit::dropped_by_replace(doc, id));
     Some(Transaction(ops))
 }
 

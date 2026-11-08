@@ -173,6 +173,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         props: Vec::new(),
         description: String::new(),
         doc_link: String::new(),
+        credit: None,
         origin: None,
         modes: Vec::new(),
         corner_vars: Default::default(),
@@ -1819,6 +1820,18 @@ impl Document {
                 let old = std::mem::replace(&mut node.doc_link, url.clone());
                 Ok(Operation::SetDocLink { id: *id, url: old })
             }
+            // Nor by a credit, which is never drawn.
+            Operation::SetCredit { id, credit } => {
+                if credit.as_ref().is_some_and(|c| !c.is_well_formed()) {
+                    return Err(OpError::BadCredit);
+                }
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.credit, credit.clone());
+                Ok(Operation::SetCredit {
+                    id: *id,
+                    credit: old,
+                })
+            }
             Operation::SetStyleValue { id, value } => {
                 if !crate::style::survives_save(value) {
                     return Err(OpError::NonFinite);
@@ -2164,6 +2177,7 @@ impl Document {
             props: Vec::new(),
             description: String::new(),
             doc_link: String::new(),
+            credit: None,
             origin: None,
             modes: Vec::new(),
             corner_vars: Default::default(),
@@ -3683,6 +3697,8 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                 .collect(),
             description: n.description.clone(),
             doc_link: n.doc_link.clone(),
+            // An asset's credit travels with every copy of it.
+            credit: n.credit.clone(),
             // **Never carried** (§15 D1012): a copy of a vendored node does not live
             // in the vault, and `kit::check` refuses an origin outside it. The kit
             // verbs write the origin after minting their copies here.
@@ -3957,6 +3973,7 @@ mod tests {
             props: Vec::new(),
             description: String::new(),
             doc_link: String::new(),
+            credit: None,
             origin: None,
             modes: Vec::new(),
             corner_vars: Default::default(),

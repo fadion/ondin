@@ -155,7 +155,9 @@ fn mode(op: &Operation) -> Mode {
         // A main's description is the main's; an instance reads it through its
         // link, and so is its documentation address.
         | Operation::SetDescription { .. }
-        | Operation::SetDocLink { .. } => Mode::Skip,
+        | Operation::SetDocLink { .. }
+        // A credit is written on main and copy alike when it is written at all.
+        | Operation::SetCredit { .. } => Mode::Skip,
     }
 }
 

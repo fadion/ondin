@@ -29,6 +29,7 @@ pub mod component;
 pub mod container;
 pub mod content_fill;
 pub mod contrast;
+pub mod credit;
 pub mod diff;
 pub mod document;
 pub mod edit;
@@ -108,6 +109,7 @@ pub use build::{
     shared_over_fills, shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
 };
 pub use container::{AutoMargins, Insets, LengthPct};
+pub use credit::{Credit, CreditKind};
 pub use document::{DEFAULT_CANVAS_BACKGROUND, Document, remap_subtree, reserve_existing_ids};
 pub use effect::{
     BLUR_CUTOFF, BLUR_DEVIATION, DEFAULT_BLUR_RADIUS, EFFECT_BLUR, EFFECT_SPREAD, EFFECT_X,

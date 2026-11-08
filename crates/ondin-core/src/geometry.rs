@@ -2082,6 +2082,7 @@ mod tests {
             props: Vec::new(),
             description: String::new(),
             doc_link: String::new(),
+            credit: None,
             origin: None,
             modes: Vec::new(),
             corner_vars: Default::default(),

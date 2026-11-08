@@ -132,6 +132,9 @@ pub struct Node {
     /// in [`web_link`]'s form, empty for none. A copy never keeps it, as with
     /// [`Self::description`].
     pub(crate) doc_link: String,
+    /// Where an inserted icon or photo came from and what its licence asks
+    /// for (`crate::credit`). Every copy keeps it; never drawn.
+    pub(crate) credit: Option<Box<crate::credit::Credit>>,
     /// Where this node was **vendored from**, when part of a kit main in the
     /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
     /// the kit verbs write one (`crate::kit::check`).
@@ -207,6 +210,10 @@ impl Node {
     /// This main's or set's documentation address; empty is none.
     pub fn doc_link(&self) -> &str {
         &self.doc_link
+    }
+    /// The credit this layer came with from the assets browser, if any.
+    pub fn credit(&self) -> Option<&crate::credit::Credit> {
+        self.credit.as_deref()
     }
     /// The variant properties, if this frame is a component set.
     pub fn set(&self) -> Option<&crate::variant::VariantSet> {

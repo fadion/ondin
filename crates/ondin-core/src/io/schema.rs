@@ -347,6 +347,11 @@ pub(crate) struct NodeDto {
     /// in v13. One not in `web_link`'s form is dropped on load, never refused.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc_link: String,
+    /// An inserted asset's credit (`crate::credit`), absent on every other
+    /// layer. Additive: an older build ignores it. An address not in `web_link`'s
+    /// form is emptied on load, never refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit: Option<Box<crate::credit::Credit>>,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -477,6 +482,7 @@ impl NodeDto {
             props: n.props().to_vec(),
             description: n.description().to_string(),
             doc_link: n.doc_link().to_string(),
+            credit: n.credit.clone(),
             origin: n.origin().map(|o| OriginDto {
                 kit: o.kit.clone(),
                 node: o.node.to_wire(),
@@ -589,6 +595,7 @@ impl NodeDto {
                 .ok()
                 .filter(|l| *l == self.doc_link)
                 .unwrap_or_default(),
+            credit: self.credit.map(|c| Box::new(c.normalized())),
             origin: self
                 .origin
                 .map(|o| -> Result<_, IoError> {

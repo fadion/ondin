@@ -1310,7 +1310,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         // A main's description and link are the main's, never an instance's
         // override.
         | O::SetDescription { .. }
-        | O::SetDocLink { .. } => None,
+        | O::SetDocLink { .. }
+        | O::SetCredit { .. } => None,
     }
 }
 

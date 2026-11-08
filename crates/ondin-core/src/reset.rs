@@ -83,6 +83,8 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         props: _,
         description: _,
         doc_link: _,
+        // Written once at insert; a copy keeps its own, never an override.
+        credit: _,
         // A vendored node's provenance (§15 D1012) — never on a copy, so never an
         // override.
         origin: _,

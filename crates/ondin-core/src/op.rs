@@ -280,6 +280,12 @@ pub enum Operation {
         id: NodeId,
         url: String,
     },
+    /// A layer's credit (`crate::credit`), never drawn; `None` drops it. Refused
+    /// unless every address is in [`crate::web_link`]'s form.
+    SetCredit {
+        id: NodeId,
+        credit: Option<Box<crate::credit::Credit>>,
+    },
     /// The ground behind and around a page's frames (`crate::page`). A solid
     /// colour, not a `Brush`: nothing lies behind it for a gradient or an alpha
     /// to act on. `None` clears the page's own colour, so it is drawn on the
@@ -679,7 +685,9 @@ impl Operation {
             // A description is text beside the thing, never a field a copy
             // follows or an edit merges on; so is a link.
             | Operation::SetDescription { .. }
-            | Operation::SetDocLink { .. } => None,
+            | Operation::SetDocLink { .. }
+            // A credit is written once, at insert, onto main and copy alike.
+            | Operation::SetCredit { .. } => None,
         }
     }
 
@@ -858,6 +866,7 @@ impl Operation {
             | Operation::SetStyleOrigin { .. }
             | Operation::SetDescription { .. }
             | Operation::SetDocLink { .. }
+            | Operation::SetCredit { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. }
@@ -1013,6 +1022,7 @@ impl Operation {
                     .is_some_and(|v| v.description == *text),
             },
             Operation::SetDocLink { id, url } => node(id).is_some_and(|n| n.doc_link == *url),
+            Operation::SetCredit { id, credit } => node(id).is_some_and(|n| n.credit == *credit),
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)
             }
@@ -1516,6 +1526,9 @@ pub enum OpError {
     /// A documentation link not in [`crate::web_link`]'s form.
     #[error("a documentation link must be an http or https address")]
     BadDocLink,
+    /// A credit holding an address not in [`crate::web_link`]'s form.
+    #[error("a credit's links must be http or https addresses")]
+    BadCredit,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside
     /// frames and groups (§5.3, §15 D870) but not off a shape or inside a boolean
     /// or a mask (§15 D876). Also the answer to turning a group that holds a
@@ -1777,8 +1790,9 @@ mod changes_ink_tests {
                 id,
                 url: "https://d".into(),
             },
+            Operation::SetCredit { id, credit: None },
         ];
-        assert_eq!(invisible.len(), 39, "the whole false arm");
+        assert_eq!(invisible.len(), 40, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

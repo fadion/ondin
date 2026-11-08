@@ -96,3 +96,63 @@ fn the_arc_ladder_crosses_over_through_five_degrees() {
     assert_eq!(&sweeps[mid - 2..mid + 2], &[-15.0, -5.0, 5.0, 15.0]);
     assert_eq!(arc_sweep(ARC_DEFAULT_STEPS), 90.0, "a quarter to begin");
 }
+
+/// Resizing an arc by a side handle of its box holds the opposite edge and brings
+/// the dragged one to the pointer, the arc growing evenly since a circle cannot
+/// stretch.
+/// flip: `resize_geometry` not forcing an even scale on an arc → fails at "the
+/// dragged edge reaches the pointer".
+#[test]
+fn an_arc_resized_by_its_box_follows_the_drag() {
+    let mut ids = crate::IdSource::new(0xA2C);
+    let root = ids.mint();
+    let arc = ids.mint();
+    let mut doc = Document::new(root);
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: arc,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Arc {
+            end: Point::new(100.0, 0.0),
+            sweep: 180.0,
+        },
+        transform: Some(Affine::translate((20.0, 300.0))),
+        name: None,
+    }]))
+    .expect("an arc");
+    let res = Resolved::rebuild(&doc);
+    let local = crate::local_box(&doc, &res, arc).expect("a box");
+    let was = res.world_bounds(arc).expect("placed");
+    for (handle, pointer) in [
+        (Handle::Top, Point::new(70.0, was.y1 - 2.0 * was.height())),
+        (
+            Handle::Bottom,
+            Point::new(70.0, was.y0 + 2.0 * was.height()),
+        ),
+    ] {
+        let tx = resize_geometry(
+            &doc,
+            &res,
+            arc,
+            local,
+            handle,
+            pointer,
+            Resize::geometry(false, false),
+        );
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the resize applies");
+        let now = Resolved::rebuild(&after).world_bounds(arc).expect("placed");
+        let (held, dragged) = match handle {
+            Handle::Top => ((now.y1, was.y1), (now.y0, pointer.y)),
+            _ => ((now.y0, was.y0), (now.y1, pointer.y)),
+        };
+        assert!(
+            (held.0 - held.1).abs() < 1e-6,
+            "{handle:?}: the held edge stays: {now:?}"
+        );
+        assert!(
+            (dragged.0 - dragged.1).abs() < 1e-6,
+            "{handle:?}: the dragged edge reaches the pointer: {now:?}"
+        );
+    }
+}

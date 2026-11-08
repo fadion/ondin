@@ -268,7 +268,11 @@ selection is exactly one `Line`; `canvas::line_ends` places the ends.
 
 - Dragging an end (`Drag::LineEnd { id, which }`, `edit::move_line_end`) moves that point. Shift constrains to eighths of a turn about the other end (`axial_corner`); snapping applies to the unshifted case, on both axes. The two ends behave asymmetrically, because of the model (§15 D99).
 - `canvas::selection_handles` returns `None` on `lone_line` (not on `line_ends`, so an unresolvable transform cannot fall through to the box), suppressing corners, side bands, skew, the rotate ring and their cursors. `draw_size_badge` returns early.
-- The panel shows X/Y as the start point, rotation as the start→end angle, and `L` (length) across the full row where W/H would be. An `Arc` shows the same fields, `L` being its chord, but keeps the selection box: `lone_line` answers only for a `Line`.
+- The panel shows X/Y as the start point, rotation as the start→end angle, and `L` (length) across the full row where W/H would be. An `Arc` shows the same fields, `L` being its chord, but keeps the selection box: `lone_line` answers only for a `Line`. Dragged
+  by a handle of that box, an arc alone always scales evenly (`edit::resize_geometry`), as if Shift
+  were held: a circle cannot stretch, and the box holds its bulge, so only an even scale keeps the
+  held edge still and brings the dragged one to the pointer. Inside a group or a multi-selection
+  an uneven resize scales its two ends and keeps its sweep.
 
 **A selected text node gets two boxes.** New text uses `BoxTrim::CapToBaseline` (§5.4); every gesture
 and number reads the trimmed box. `canvas::draw_text_line_boxes` also outlines the untrimmed box

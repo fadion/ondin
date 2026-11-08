@@ -597,11 +597,14 @@ pub fn resize_geometry(
     let Some(node) = doc.get(id) else {
         return Transaction(vec![]);
     };
+    // A circle cannot stretch, and an arc's box holds its bulge: only an even scale
+    // keeps the held edge still and brings the dragged one to the pointer.
+    let arc = matches!(res.used_kind_of(node), NodeKind::Arc { .. });
     let (sx, sy, anchor) = resize_factors(
         local,
         handle,
         world.inverse() * pointer_world,
-        opts.keep_ratio,
+        opts.keep_ratio || arc,
         opts.symmetric,
     );
     // Cannot overflow here (identity basis, capped factors); a refusal is an empty edit.

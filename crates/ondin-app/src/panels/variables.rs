@@ -32,10 +32,10 @@ use std::collections::{BTreeMap, HashSet};
 /// mode, 436 with two, 532 with three, the cap.
 const NAME_W: f32 = 220.0;
 const MODE_W: f32 = 96.0;
-const PAD: f32 = 12.0;
+const PAD: f32 = ui::RAIL_POPUP_PAD;
 const MAX_COLS: usize = 3;
-/// The panel's height, as the insert picker's (the two swap in place, so neither
-/// jumps), shorter only when the canvas has less room above the button.
+/// The panel's height, the insert picker's and the assets browser's, shorter
+/// only when the canvas has less room above the button.
 const H: f32 = 460.0;
 const SEARCH_H: f32 = 28.0;
 const HEAD_H: f32 = 24.0;
@@ -442,14 +442,7 @@ impl OndinApp {
             .map(|c| c.modes.clone())
             .unwrap_or_default();
         let widths = table.collection(shown).and_then(|c| c.breakpoints.clone());
-        let anchor = if self.var_button.is_finite() && self.show_toolbar {
-            egui::pos2(
-                self.var_button.right() + 8.0,
-                self.kit_button.bottom().max(self.var_button.bottom()),
-            )
-        } else {
-            self.canvas_rect.left_bottom() + egui::vec2(8.0, -8.0)
-        };
+        let anchor = self.rail_popup_anchor(self.var_button);
         let height = H.min((anchor.y - self.canvas_rect.top() - 8.0).max(160.0));
         let w = width(modes.len());
         b.inner_w = w - 2.0 * PAD;
@@ -523,178 +516,162 @@ impl OndinApp {
         });
 
         let mut acts: Vec<Act> = Vec::new();
-        let panel = egui::Area::new(egui::Id::new("var-browser"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(anchor - egui::vec2(0.0, height))
-            .show(ctx, |ui| {
-                ui::hold_tab(ui);
-                ui::card_frame()
-                    .inner_margin(PAD)
-                    .show(ui, |ui| {
-                        ui.set_width(w - 2.0 * PAD);
-                        ui.set_height(height - 2.0 * PAD);
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 10.0);
-                        tabs(ui, &mut b.tab);
-                        search_row(ui, doc, shown, &mut b, &mut acts);
-                        if let Some(link) = doc.tokens_link()
-                            && linked_line(ui, &link.path, self.tokens_watch.changes)
-                        {
-                            acts.push(Act::LinkedTokens);
-                        }
-                        if let Some(line) = &selection_line {
-                            // Two points further off the search row than it
-                            // sat, at the maintainer's look (§15 D1086).
-                            ui.add_space(-6.0);
-                            ui.label(
-                                egui::RichText::new(line)
-                                    .size(ui::CAPTION_PT)
-                                    .color(theme::text::dim()),
-                            );
-                        }
-                        if b.unused && matches!(b.tab, Tab::Styles) {
-                            // What the list shows, so the button takes no style the
-                            // search or *In selection* hides.
-                            let shown: Vec<StyleId> = unused
-                                .iter()
-                                .copied()
-                                .filter(|id| style_picked.as_ref().is_none_or(|p| p.contains(id)))
-                                .filter(|id| {
-                                    query.is_empty()
-                                        || doc
-                                            .styles()
-                                            .get(*id)
-                                            .is_some_and(|s| s.name.to_lowercase().contains(&query))
-                                })
-                                .collect();
-                            ui.add_space(-6.0);
-                            if unused_line(ui, shown.len()) {
-                                let name = ui::count(shown.len(), "unused style");
-                                acts.push(Act::DeleteStyles(shown, name));
-                            }
-                        }
-                        if let Some(why) = &b.refusal {
-                            ui.add_space(-6.0);
-                            ui.label(
-                                egui::RichText::new(why)
-                                    .size(ui::SMALL_PT)
-                                    .color(theme::text::muted()),
-                            );
-                        }
-                        match b.tab {
-                            Tab::Styles if doc.styles().is_empty() => empty(
-                                ui,
-                                "No styles yet",
-                                "Use the … menu on any inspector card and choose Create style…",
-                            ),
-                            Tab::Styles => styles_tab(
-                                ui,
-                                doc,
-                                &style_users,
-                                style_picked.as_ref(),
-                                &query,
-                                &mut b,
-                                &mut acts,
-                            ),
-                            Tab::Variables if table.iter().next().is_none() => empty(
-                                ui,
-                                "No variables yet",
-                                "Add a colour or a number with + above, then type -- in a field to bind it.",
-                            ),
-                            Tab::Variables if lines.is_empty() && query.is_empty() && !b.in_selection => empty(
-                                ui,
-                                "No variables in this collection",
-                                "Add one with + above, or move one here from its menu.",
-                            ),
-                            Tab::Variables if lines.is_empty() => empty(
-                                ui,
-                                "No variables match",
-                                if b.in_selection {
-                                    "Turn off In selection to see them all."
-                                } else {
-                                    "Try another name."
-                                },
-                            ),
-                            Tab::Variables => {
-                                ui.spacing_mut().item_spacing.y = 0.0;
-                                // Spanning, each collection heads its own rows,
-                                // so the columns are never shared across them.
-                                if !across {
-                                    header(ui, &modes, widths.as_ref(), &mut b, &mut acts);
+        let panel = ui::rail_popup(ctx, "var-browser", anchor, height, |ui| {
+            ui.set_width(w - 2.0 * PAD);
+            ui.set_height(height - 2.0 * PAD);
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 10.0);
+            tabs(ui, &mut b.tab);
+            search_row(ui, doc, shown, &mut b, &mut acts);
+            if let Some(link) = doc.tokens_link()
+                && linked_line(ui, &link.path, self.tokens_watch.changes)
+            {
+                acts.push(Act::LinkedTokens);
+            }
+            if let Some(line) = &selection_line {
+                // Two points further off the search row than it
+                // sat, at the maintainer's look (§15 D1086).
+                ui.add_space(-6.0);
+                ui.label(
+                    egui::RichText::new(line)
+                        .size(ui::CAPTION_PT)
+                        .color(theme::text::dim()),
+                );
+            }
+            if b.unused && matches!(b.tab, Tab::Styles) {
+                // What the list shows, so the button takes no style the
+                // search or *In selection* hides.
+                let shown: Vec<StyleId> = unused
+                    .iter()
+                    .copied()
+                    .filter(|id| style_picked.as_ref().is_none_or(|p| p.contains(id)))
+                    .filter(|id| {
+                        query.is_empty()
+                            || doc
+                                .styles()
+                                .get(*id)
+                                .is_some_and(|s| s.name.to_lowercase().contains(&query))
+                    })
+                    .collect();
+                ui.add_space(-6.0);
+                if unused_line(ui, shown.len()) {
+                    let name = ui::count(shown.len(), "unused style");
+                    acts.push(Act::DeleteStyles(shown, name));
+                }
+            }
+            if let Some(why) = &b.refusal {
+                ui.add_space(-6.0);
+                ui.label(
+                    egui::RichText::new(why)
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::muted()),
+                );
+            }
+            match b.tab {
+                Tab::Styles if doc.styles().is_empty() => empty(
+                    ui,
+                    "No styles yet",
+                    "Use the … menu on any inspector card and choose Create style…",
+                ),
+                Tab::Styles => styles_tab(
+                    ui,
+                    doc,
+                    &style_users,
+                    style_picked.as_ref(),
+                    &query,
+                    &mut b,
+                    &mut acts,
+                ),
+                Tab::Variables if table.iter().next().is_none() => empty(
+                    ui,
+                    "No variables yet",
+                    "Add a colour or a number with + above, then type -- in a field to bind it.",
+                ),
+                Tab::Variables if lines.is_empty() && query.is_empty() && !b.in_selection => empty(
+                    ui,
+                    "No variables in this collection",
+                    "Add one with + above, or move one here from its menu.",
+                ),
+                Tab::Variables if lines.is_empty() => empty(
+                    ui,
+                    "No variables match",
+                    if b.in_selection {
+                        "Turn off In selection to see them all."
+                    } else {
+                        "Try another name."
+                    },
+                ),
+                Tab::Variables => {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // Spanning, each collection heads its own rows,
+                    // so the columns are never shared across them.
+                    if !across {
+                        header(ui, &modes, widths.as_ref(), &mut b, &mut acts);
+                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.add_space(4.0);
+                            let mut row_modes: &[Mode] = &modes;
+                            for line in &lines {
+                                match line {
+                                    Line::Collection(c) => {
+                                        row_modes = &c.modes;
+                                        collection_row(ui, c);
+                                        continue;
+                                    }
+                                    Line::Kit(_) => row_modes = &modes,
+                                    _ => {}
                                 }
-                                egui::ScrollArea::vertical()
-                                    .auto_shrink([false, false])
-                                    .scroll_bar_visibility(
-                                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                                    )
-                                    .show(ui, |ui| {
-                                        ui.spacing_mut().item_spacing.y = 1.0;
-                                        ui.add_space(4.0);
-                                        let mut row_modes: &[Mode] = &modes;
-                                        for line in &lines {
-                                            match line {
-                                                Line::Collection(c) => {
-                                                    row_modes = &c.modes;
-                                                    collection_row(ui, c);
-                                                    continue;
-                                                }
-                                                Line::Kit(_) => row_modes = &modes,
-                                                _ => {}
-                                            }
-                                            let modes = row_modes;
-                                            match line {
-                                                Line::Collection(_) => {}
-                                                Line::Group {
-                                                    path,
-                                                    shown,
-                                                    total,
-                                                    of,
-                                                } => group_row(
-                                                    ui,
-                                                    path,
-                                                    *of,
-                                                    *shown,
-                                                    *total,
-                                                    picked.is_some(),
-                                                    &mut b,
-                                                    &mut acts,
-                                                ),
-                                                Line::Var(v) if v.origin.is_some() => {
-                                                    kit_var_row(
-                                                        ui,
-                                                        doc,
-                                                        v,
-                                                        modes,
-                                                        &users[&v.id],
-                                                        &b,
-                                                        &mut acts,
-                                                    )
-                                                }
-                                                Line::Var(v) => var_row(
-                                                    ui, doc, v, modes, &users[&v.id], &mut b,
-                                                    &mut acts, pending,
-                                                ),
-                                                Line::Kit(k) => kit_row(
-                                                    ui,
-                                                    doc,
-                                                    k,
-                                                    modes,
-                                                    waiting
-                                                        .iter()
-                                                        .find(|w| w.0 == *k)
-                                                        .map(|w| (w.1, w.2)),
-                                                    &b,
-                                                    &mut acts,
-                                                ),
-                                            }
-                                        }
-                                        ui::keep_focus_in_view(ui);
-                                    });
+                                let modes = row_modes;
+                                match line {
+                                    Line::Collection(_) => {}
+                                    Line::Group {
+                                        path,
+                                        shown,
+                                        total,
+                                        of,
+                                    } => group_row(
+                                        ui,
+                                        path,
+                                        *of,
+                                        *shown,
+                                        *total,
+                                        picked.is_some(),
+                                        &mut b,
+                                        &mut acts,
+                                    ),
+                                    Line::Var(v) if v.origin.is_some() => {
+                                        kit_var_row(ui, doc, v, modes, &users[&v.id], &b, &mut acts)
+                                    }
+                                    Line::Var(v) => var_row(
+                                        ui,
+                                        doc,
+                                        v,
+                                        modes,
+                                        &users[&v.id],
+                                        &mut b,
+                                        &mut acts,
+                                        pending,
+                                    ),
+                                    Line::Kit(k) => kit_row(
+                                        ui,
+                                        doc,
+                                        k,
+                                        modes,
+                                        waiting.iter().find(|w| w.0 == *k).map(|w| (w.1, w.2)),
+                                        &b,
+                                        &mut acts,
+                                    ),
+                                }
                             }
-                        }
-                    });
-            })
-            .response
-            .rect;
+                            ui::keep_focus_in_view(ui);
+                        });
+                }
+            }
+        })
+        .rect;
         b.panel = Some(panel);
 
         // Past three modes the columns scroll sideways under the fixed name

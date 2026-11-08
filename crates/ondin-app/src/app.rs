@@ -8485,14 +8485,6 @@ impl OndinApp {
                     if resp.clicked() {
                         self.toggle_kit_picker();
                     }
-                    // The assets browser's, which shares the picker's place.
-                    let open = self.asset_panel.is_some();
-                    let resp = icon_button(ui, icon::ASSETS, 30.0, 20.0, open, true)
-                        .on_hover_text("Assets");
-                    self.asset_button = resp.rect;
-                    if resp.clicked() {
-                        self.toggle_assets();
-                    }
                     // The styles and variables browser's, directly above it.
                     let open = self.var_browser.is_some();
                     let resp = icon_button(ui, icon::SWATCHES, 30.0, 20.0, open, true)
@@ -8501,9 +8493,29 @@ impl OndinApp {
                     if resp.clicked() {
                         self.toggle_var_browser();
                     }
+                    // The assets browser's, at the top of the three; it shares the
+                    // picker's place.
+                    let open = self.asset_panel.is_some();
+                    let resp = icon_button(ui, icon::ASSETS, 30.0, 20.0, open, true)
+                        .on_hover_text("Assets");
+                    self.asset_button = resp.rect;
+                    if resp.clicked() {
+                        self.toggle_assets();
+                    }
                 });
             });
         self.rail_flyout(ui.ctx());
+    }
+
+    /// Where a [`crate::ui::rail_popup`] opened from `button` puts its bottom-left: beside
+    /// the rail, bottom-aligned with its own button; with the toolbar hidden, at
+    /// the canvas's bottom-left.
+    pub(crate) fn rail_popup_anchor(&self, button: egui::Rect) -> egui::Pos2 {
+        if button.is_finite() && self.show_toolbar {
+            egui::pos2(button.right() + 8.0, button.bottom())
+        } else {
+            self.canvas_rect.left_bottom() + egui::vec2(8.0, -8.0)
+        }
     }
 
     /// The layers panel: header + the node tree, resizable within

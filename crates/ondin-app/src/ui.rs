@@ -143,6 +143,31 @@ pub fn card_frame() -> egui::Frame {
         })
 }
 
+/// The inset of a [`rail_popup`]'s content.
+pub const RAIL_POPUP_PAD: f32 = 12.0;
+
+/// A panel the rail's foot opens (*Insert components*, *Assets*, *Styles and
+/// variables*): a [`card_frame`] `height` tall whose bottom-left is `anchor`,
+/// holding `Tab`. Placed by its top-left, not pivoted on its bottom: a pivot
+/// places the area by *last* frame's size, and with the height fixed the top
+/// edge is known before the frame starts. Answers the card's response.
+pub fn rail_popup(
+    ctx: &egui::Context,
+    id: &str,
+    anchor: egui::Pos2,
+    height: f32,
+    body: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    egui::Area::new(egui::Id::new(id))
+        .order(egui::Order::Foreground)
+        .fixed_pos(anchor - egui::vec2(0.0, height))
+        .show(ctx, |ui| {
+            hold_tab(ui);
+            card_frame().inner_margin(RAIL_POPUP_PAD).show(ui, body);
+        })
+        .response
+}
+
 /// A hairline across a floating card or a pane, between its sections: one
 /// point of `color::divider()` the available width, on the device grid.
 /// Answers its rect, for a divider that also drags.

@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 /// The panel: the insert picker's width, padding and height.
 const W: f32 = 340.0;
-const PAD: f32 = 12.0;
+const PAD: f32 = ui::RAIL_POPUP_PAD;
 /// Between the panel's rows of controls.
 const ROW_GAP: f32 = 8.0;
 /// The icon grid: six to a row, 44 tall, 6 apart.
@@ -374,12 +374,7 @@ impl OndinApp {
         let keys = self.asset_keys.clone();
         let now = ctx.input(|i| i.time);
 
-        // Beside the toolbar, bottom-aligned with its button, as the insert picker.
-        let anchor = if self.asset_button.is_finite() && self.show_toolbar {
-            egui::pos2(self.asset_button.right() + 8.0, self.asset_button.bottom())
-        } else {
-            self.canvas_rect.left_bottom() + egui::vec2(8.0, -8.0)
-        };
+        let anchor = self.rail_popup_anchor(self.asset_button);
         let height = crate::kits::picker::panel_height(anchor.y, self.canvas_rect.top());
 
         // The chosen set, its variant and the size.
@@ -468,52 +463,45 @@ impl OndinApp {
             }
         }
 
-        let area = egui::Area::new(egui::Id::new("assets-panel"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(anchor - egui::vec2(0.0, height))
-            .show(ctx, |ui| {
-                ui::hold_tab(ui);
-                ui::card_frame().inner_margin(PAD).show(ui, |ui| {
-                    let inner = W - 2.0 * PAD;
-                    ui.set_width(inner);
-                    ui.set_height(height - 2.0 * PAD - 2.0);
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let tab = usize::from(photos_tab);
-                    let picked =
-                        ui::segmented(ui, inner, ui::SEGMENT_CELL_H, 2, tab, |p, i, r, on| {
-                            ui::segment_label(p, r, ["Icons", "Photos"][i], on);
-                        });
-                    if let Some(i) = picked.filter(|i| *i != tab) {
-                        out.act = Some(Act::Tab(i == 1));
-                    }
-                    ui.add_space(ROW_GAP);
-                    let bottom = ui.max_rect().bottom();
-                    match photos_tab {
-                        false => {
-                            let view = IconsView {
-                                on: &on_sets,
-                                set,
-                                variant,
-                                size,
-                                ready: &ready,
-                                loading: &loading,
-                                failed: &failed,
-                            };
-                            icons_body(ui, panel, &view, bottom, now, &mut out);
-                        }
-                        true => {
-                            let view = PhotosView {
-                                on: &on_services,
-                                service,
-                                key_missing,
-                                fill_names: &fill_names,
-                            };
-                            photos_body(ui, panel, &view, bottom, now, &mut out);
-                        }
-                    }
-                });
+        let area = ui::rail_popup(ctx, "assets-panel", anchor, height, |ui| {
+            let inner = W - 2.0 * PAD;
+            ui.set_width(inner);
+            ui.set_height(height - 2.0 * PAD - 2.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let tab = usize::from(photos_tab);
+            let picked = ui::segmented(ui, inner, ui::SEGMENT_CELL_H, 2, tab, |p, i, r, on| {
+                ui::segment_label(p, r, ["Icons", "Photos"][i], on);
             });
-        let rect = area.response.rect;
+            if let Some(i) = picked.filter(|i| *i != tab) {
+                out.act = Some(Act::Tab(i == 1));
+            }
+            ui.add_space(ROW_GAP);
+            let bottom = ui.max_rect().bottom();
+            match photos_tab {
+                false => {
+                    let view = IconsView {
+                        on: &on_sets,
+                        set,
+                        variant,
+                        size,
+                        ready: &ready,
+                        loading: &loading,
+                        failed: &failed,
+                    };
+                    icons_body(ui, panel, &view, bottom, now, &mut out);
+                }
+                true => {
+                    let view = PhotosView {
+                        on: &on_services,
+                        service,
+                        key_missing,
+                        fill_names: &fill_names,
+                    };
+                    photos_body(ui, panel, &view, bottom, now, &mut out);
+                }
+            }
+        });
+        let rect = area.rect;
         let Out {
             act,
             hovered,

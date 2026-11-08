@@ -23,7 +23,7 @@ use std::sync::{Arc, mpsc};
 
 /// The panel's width and padding.
 const W: f32 = 340.0;
-const PAD: f32 = 12.0;
+const PAD: f32 = ui::RAIL_POPUP_PAD;
 /// The panel's height, whatever it holds: it does not grow as
 /// a kit opens or shrink as a search narrows, so nothing under the pointer jumps.
 /// Shorter only when the canvas has less room above the button than this.
@@ -446,6 +446,7 @@ impl OndinApp {
             .collect();
         let rev = self.session.revision();
         let zoom = self.session.camera.zoom;
+        let anchor = self.rail_popup_anchor(self.kit_button);
 
         let picker = self.kit_picker.as_mut().expect("checked above");
         picker.local.pass(ctx, &self.session.doc, rev, &tops);
@@ -465,13 +466,6 @@ impl OndinApp {
             }
         }
 
-        // Beside the toolbar, bottom-aligned with the button; with the
-        // toolbar hidden, at the canvas's bottom-left.
-        let anchor = if self.kit_button.is_finite() && self.show_toolbar {
-            egui::pos2(self.kit_button.right() + 8.0, self.kit_button.bottom())
-        } else {
-            self.canvas_rect.left_bottom() + egui::vec2(8.0, -8.0)
-        };
         let height = panel_height(anchor.y, self.canvas_rect.top());
         let mut act: Option<Act> = None;
         // The item a tile or a result is being dragged from this frame.
@@ -511,58 +505,48 @@ impl OndinApp {
             }
         }
 
-        // Placed by its top-left, not pivoted on its bottom: a pivot places the
-        // area by *last* frame's size, and with the height fixed the top edge is
-        // known before the frame starts.
-        let panel = egui::Area::new(egui::Id::new("kit-picker"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(anchor - egui::vec2(0.0, height))
-            .show(ctx, |ui| {
-                ui::hold_tab(ui);
-                ui::card_frame().inner_margin(PAD).show(ui, |ui| {
-                    ui.set_width(W - 2.0 * PAD);
-                    // The gaps are the constants `list_height` counts, so the
-                    // panel comes out exactly `height` tall.
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    if search_field(ui, &mut picker.query, &mut picker.focus) {
-                        picker.highlight = 0;
+        let panel = ui::rail_popup(ctx, "kit-picker", anchor, height, |ui| {
+            ui.set_width(W - 2.0 * PAD);
+            // The gaps are the constants `list_height` counts, so the
+            // panel comes out exactly `height` tall.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if search_field(ui, &mut picker.query, &mut picker.focus) {
+                picker.highlight = 0;
+            }
+            ui.add_space(SEARCH_GAP);
+            // Not shrunk to its content in either axis: the list's
+            // height is the panel's, empty or full. ⚠️ **The minimum
+            // is load-bearing**: an `Area`'s `max_rect` is *last*
+            // frame's size, so a list asking only for room up to a
+            // maximum gets what the panel had before — which is how
+            // it stayed at its first height as kits opened. Only
+            // `min_scrolled_height` is taken whatever is available.
+            let list = list_height(height);
+            let mut out = Out {
+                act: &mut act,
+                dragging: &mut dragging,
+                busy: busy.as_ref(),
+                cancelled,
+                hovered: &mut hovered,
+            };
+            egui::ScrollArea::vertical()
+                .max_height(list)
+                .min_scrolled_height(list)
+                .auto_shrink([false, false])
+                // No bar, as on the app's other panels (§15 D1028):
+                // the wheel and a drag still scroll it.
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if !query.is_empty() {
+                        results_list(ui, &results, picker.highlight, &mut out);
+                    } else {
+                        browse(ui, &local, &shown, &picker.open, &mut out);
                     }
-                    ui.add_space(SEARCH_GAP);
-                    // Not shrunk to its content in either axis: the list's
-                    // height is the panel's, empty or full. ⚠️ **The minimum
-                    // is load-bearing**: an `Area`'s `max_rect` is *last*
-                    // frame's size, so a list asking only for room up to a
-                    // maximum gets what the panel had before — which is how
-                    // it stayed at its first height as kits opened. Only
-                    // `min_scrolled_height` is taken whatever is available.
-                    let list = list_height(height);
-                    let mut out = Out {
-                        act: &mut act,
-                        dragging: &mut dragging,
-                        busy: busy.as_ref(),
-                        cancelled,
-                        hovered: &mut hovered,
-                    };
-                    egui::ScrollArea::vertical()
-                        .max_height(list)
-                        .min_scrolled_height(list)
-                        .auto_shrink([false, false])
-                        // No bar, as on the app's other panels (§15 D1028):
-                        // the wheel and a drag still scroll it.
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.y = 4.0;
-                            if !query.is_empty() {
-                                results_list(ui, &results, picker.highlight, &mut out);
-                            } else {
-                                browse(ui, &local, &shown, &picker.open, &mut out);
-                            }
-                            ui::keep_focus_in_view(ui);
-                        });
+                    ui::keep_focus_in_view(ui);
                 });
-            })
-            .response
-            .rect;
+        })
+        .rect;
 
         let ppp = ctx.pixels_per_point();
         let canvas = self.canvas_rect;

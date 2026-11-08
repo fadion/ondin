@@ -22,6 +22,10 @@ use crate::app::OndinApp;
 use crate::job::Job;
 use crate::theme::{self, color, icon};
 
+/// What turning the check off is called while it is on: the bar's ✕, the Tools
+/// row and the palette row.
+pub(crate) const STOP_CONTRAST: &str = "Stop checking contrast";
+
 /// How long the document must sit still after an edit before it is measured
 /// again, so a run of nudges measures once.
 const SETTLE: f64 = 0.15;
@@ -852,7 +856,7 @@ impl OndinApp {
                             }
                         }
                         if crate::ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
-                            .on_hover_text("Stop checking contrast")
+                            .on_hover_text(STOP_CONTRAST)
                             .clicked()
                         {
                             act = Some(BarAct::Close);

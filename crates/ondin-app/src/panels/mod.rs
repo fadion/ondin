@@ -6,7 +6,7 @@
 
 pub(crate) mod binding;
 mod component;
-mod credit;
+pub(crate) mod credit;
 pub(crate) mod dashboard;
 mod export;
 pub(crate) mod history;

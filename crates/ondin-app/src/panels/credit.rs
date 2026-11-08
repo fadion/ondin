@@ -14,7 +14,7 @@ const W: f32 = 440.0;
 /// A list row's height: a menu row's.
 const ROW_H: f32 = ui::MENU_ROW_H;
 /// The card's words when every credit is one its licence does not ask to show.
-const NOTHING_OWED: &str = "Nothing here asks to be credited";
+pub(crate) const NOTHING_OWED: &str = "Nothing here asks to be credited";
 
 /// `2026-11-08` as *8 Nov 2026*; anything else as it is.
 fn day(iso: &str) -> String {

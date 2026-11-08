@@ -620,7 +620,7 @@ impl OndinApp {
             &mut out,
             Cmd::verb(
                 Item::Credits,
-                (!self.has_credits()).then_some("This document has no credits"),
+                (!self.has_credits()).then_some(crate::panels::credit::NOTHING_OWED),
             ),
         );
         for item in [
@@ -748,12 +748,12 @@ impl OndinApp {
         );
         let mut contrast = Cmd::verb(Item::CheckContrast, None);
         if self.contrast.is_some() {
-            contrast.label = "Stop checking contrast".into();
+            contrast.label = crate::contrast::STOP_CONTRAST.into();
         }
         push(&mut out, contrast);
         let mut vision = Cmd::verb(Item::SimulateVision, None);
         if self.vision.is_some() {
-            vision.label = "Stop simulating vision".into();
+            vision.label = crate::vision::STOP_VISION.into();
         }
         push(&mut out, vision);
         push(&mut out, Cmd::verb(Item::ColourReview, None));

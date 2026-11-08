@@ -295,7 +295,9 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   document. Verbs on the selection stay in the context menu, document-level rows in the Document
   menu, view modes in View, inserting in the insert picker.
   - the checks, which change nothing: *Check contrast* and *Simulate vision*, each toggling its
-    mode (never remembered), then *Colour review…*, opening its card;
+    mode (never remembered) and named *Stop checking contrast* / *Stop simulating vision* while on,
+    the palette's and the bar ✕'s words (`contrast::STOP_CONTRAST`, `vision::STOP_VISION`), then
+    *Colour review…*, opening its card;
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
     `Action::FindText { replace: false }`), *Batch rename…* (`Ctrl+Shift+R`; dimmed with
     `private::DECLINE_RENAME` in private mode), *Clean up…* (no chord) and *Fill with content…* (no
@@ -929,7 +931,7 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
 - **Credits…** (`icon::QUOTES`) is offered while the card would list something
   (`OndinApp::has_credits`: a layer carries a credit whose licence asks to be shown). The Document
   menu hides it otherwise, since most documents never carry a credit; the palette lists it disabled
-  with *This document has no credits*. It opens a `settings::canvas_card` listing every page's
+  with the card's own words, *Nothing here asks to be credited* (`credit::NOTHING_OWED`). It opens a `settings::canvas_card` listing every page's
   credits whose licence asks for them (`Credit::required`), photos first: a photo a line, an icon
   set's one sentence a line for all its layers, each naming its layer (masked in private mode) or
   counting them as a `MenuRow::note`. A row's click selects its layers, going to their page when

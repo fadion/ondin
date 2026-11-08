@@ -17,6 +17,10 @@ use crate::app::OndinApp;
 use crate::contrast::{BAR_H, bar_frame, cell, scope_chip, separator, top_level};
 use crate::theme::{self, color, icon};
 
+/// What turning the simulation off is called while it is on: the bar's ✕, the
+/// Tools row and the palette row.
+pub(crate) const STOP_VISION: &str = "Stop simulating vision";
+
 /// The severity slider's width in the bar.
 const SLIDER_W: f32 = 88.0;
 /// The condition menu's width: room for *Blurred vision · Out of focus*.
@@ -231,7 +235,7 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing.x = 10.0;
                         separator(ui);
                         if crate::ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
-                            .on_hover_text("Stop simulating vision")
+                            .on_hover_text(STOP_VISION)
                             .clicked()
                         {
                             act = Some(Act::Close);

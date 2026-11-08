@@ -7951,7 +7951,15 @@ impl OndinApp {
                 }
                 _ => None,
             };
-            let style = crate::ui::MenuRow::new("", row.label())
+            // A check that is on is named by what the click does, as the palette names it.
+            let label = match row {
+                ToolsRow::CheckContrast if self.contrast.is_some() => {
+                    crate::contrast::STOP_CONTRAST
+                }
+                ToolsRow::SimulateVision if self.vision.is_some() => crate::vision::STOP_VISION,
+                _ => row.label(),
+            };
+            let style = crate::ui::MenuRow::new("", label)
                 .accel(row.accel())
                 .enabled(dim.is_none());
             let resp = crate::ui::menu_row(ui, style, crate::ui::MENU_ROW_H);
@@ -14674,6 +14682,15 @@ mod library_wiring_tests {
         frame(&mut app, vec![press(false)]);
         assert!(app.contrast.is_some(), "the pick acts");
         assert_eq!(app.open_menu, TopMenu::None, "and closes the menu");
+
+        // On, the row is named by what a click now does, as the palette's is.
+        app.open_menu = TopMenu::Tools;
+        frame(&mut app, Vec::new());
+        let shapes = frame(&mut app, Vec::new());
+        assert!(
+            text(&shapes, crate::contrast::STOP_CONTRAST).is_some(),
+            "the row says it stops the check"
+        );
     }
 
     /// The View menu's *Panels ▸* opens its list on hover, a click there toggles

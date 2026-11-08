@@ -917,7 +917,7 @@ fn adjust_def(name: &str, p: &ondin_core::AdjustPipeline) -> String {
     if let Some(m) = &p.matrix {
         let values = m
             .iter()
-            .map(|v| fmt(*v as f64))
+            .map(|v| fmt_unit(*v as f64))
             .collect::<Vec<_>>()
             .join(" ");
         let _ = writeln!(
@@ -928,7 +928,7 @@ fn adjust_def(name: &str, p: &ondin_core::AdjustPipeline) -> String {
     if let Some(c) = &p.curve {
         let table = c
             .iter()
-            .map(|v| fmt(*v as f64))
+            .map(|v| fmt_unit(*v as f64))
             .collect::<Vec<_>>()
             .join(" ");
         out.push_str("      <feComponentTransfer>\n");
@@ -1125,16 +1125,8 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
     let xform = if brush.transform == ondin_core::kurbo::Affine::IDENTITY {
         String::new()
     } else {
-        let [a, b, c, d, e, f] = brush.transform.as_coeffs();
-        format!(
-            r#" gradientTransform="matrix({} {} {} {} {} {})""#,
-            fmt_unit(a),
-            fmt_unit(b),
-            fmt_unit(c),
-            fmt_unit(d),
-            fmt_unit(e),
-            fmt_unit(f)
-        )
+        let [a, b, c, d, e, f] = fmt_matrix(brush.transform);
+        format!(r#" gradientTransform="matrix({a} {b} {c} {d} {e} {f})""#)
     };
     // Nothing clamps a descending ramp on load; the canvas clamps via
     // `color::brush_to_backend`, so clamp here too or a browser draws a flat fill.
@@ -2258,7 +2250,7 @@ fn write_element(
                     _ => (0.0, ""),
                 };
                 let anchor = anchored.1;
-                let offset = format!("{}%", fmt(anchored.0 + parts.on_path_offset * 100.0));
+                let offset = format!("{}%", fmt_unit(anchored.0 + parts.on_path_offset * 100.0));
                 let _ = writeln!(
                     out,
                     // `r##`, because `href="#` contains the `"#` that would close
@@ -2521,7 +2513,7 @@ fn name_attr(node: &Node) -> String {
 /// says nothing. Identity is judged on the printed form: a rounded rect's box top
 /// is `-8.88e-16` (see [`fmt`]), a hair from identity yet printing as one.
 fn matrix_attr(name: &str, a: Affine) -> String {
-    let [m0, m1, m2, m3, m4, m5] = a.as_coeffs().map(fmt_unit);
+    let [m0, m1, m2, m3, m4, m5] = fmt_matrix(a);
     if [&m0, &m1, &m2, &m3, &m4, &m5] == ["1", "0", "0", "1", "0", "0"] {
         return String::new();
     }
@@ -2623,7 +2615,7 @@ fn stroke_attr(
     };
     // Only when not the default, which SVG puts at 4, as kurbo does.
     let miter = if s.join == ondin_core::kurbo::Join::Miter && s.miter_limit != 4.0 {
-        format!(r#" stroke-miterlimit="{}""#, fmt(s.miter_limit))
+        format!(r#" stroke-miterlimit="{}""#, fmt_unit(s.miter_limit))
     } else {
         String::new()
     };
@@ -2778,16 +2770,41 @@ pub(crate) fn fmt(v: f64) -> String {
 }
 
 /// [`fmt`] at [`MAX_PRECISION`](ondin_core::export::MAX_PRECISION) whatever the
-/// spec's precision: for unitless numbers (matrix coefficients, opacities, stop
-/// offsets, colour matrices), where a rounding error scales with what they multiply.
+/// spec's precision: for unitless numbers (opacities, stop offsets, colour
+/// matrices, a miter limit, a text path's offset), where a rounding error scales
+/// with what they multiply.
 fn fmt_unit(v: f64) -> String {
+    fmt_fixed(v, ondin_core::export::MAX_PRECISION as usize)
+}
+
+/// Significant digits [`fmt_matrix`] keeps of a matrix's largest scale term.
+const MATRIX_DIGITS: i32 = 7;
+
+/// An affine's six coefficients as [`fmt_unit`] writes them, but with at least
+/// [`MATRIX_DIGITS`] significant digits of its largest scale term: a large
+/// picture's pattern scale is a small number multiplying thousands of pixels,
+/// and four places leave its far edge a visible fraction of a unit short.
+fn fmt_matrix(a: Affine) -> [String; 6] {
+    let coeffs = a.as_coeffs();
+    let scale = coeffs[..4].iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    let floor = ondin_core::export::MAX_PRECISION as i32;
+    let places = match scale.is_finite() && scale > 0.0 {
+        // Capped so a degenerate scale cannot ask for hundreds of places.
+        true => (MATRIX_DIGITS - 1 - scale.log10().floor() as i32).clamp(floor, 17),
+        false => floor,
+    };
+    coeffs.map(|v| fmt_fixed(v, places as usize))
+}
+
+/// `v` at `places` decimals, whole numbers bare and a non-finite number `0`.
+fn fmt_fixed(v: f64, places: usize) -> String {
     if !v.is_finite() {
         return "0".to_string();
     }
     if v.fract() == 0.0 && v.abs() < 1e15 {
         return format!("{}", v as i64);
     }
-    fmt_places(v, ondin_core::export::MAX_PRECISION as usize)
+    fmt_places(v, places)
 }
 
 /// `v` at `places` decimals, trailing zeros trimmed only after a decimal point:

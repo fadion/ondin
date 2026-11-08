@@ -158,17 +158,33 @@ fn numbers_round_to_the_specs_places() {
     );
 }
 
-/// At no places, unitless numbers keep four places: the 40% fill and a 30° turn's
-/// matrix, whose translation is no length to round.
-/// flip: `alpha_attr` through `fmt` → fails at "the opacity".
+/// At no places, unitless numbers keep their own precision: the 40% fill and a
+/// 45° miter limit at four places, and a 30° turn's matrix, whose translation is
+/// no length to round, at seven significant digits.
+/// flip: `alpha_attr` through `fmt` → fails at "the opacity"; `stroke_attr`'s
+/// miter limit through `fmt` → fails at "the miter limit".
 #[test]
 fn no_places_keeps_whole_numbers_and_unitless_numbers_keep_four() {
     let (mut doc, _, frame) = icon();
-    let dot = doc.get(frame).unwrap().children()[1];
-    doc.apply(&Transaction(vec![Operation::SetTransform {
-        id: dot,
-        transform: Affine::translate((19.7, 0.0)) * Affine::rotate(30f64.to_radians()),
-    }]))
+    let [arrow, dot] = doc.get(frame).unwrap().children()[..] else {
+        panic!("the arrow and the dot");
+    };
+    doc.apply(&Transaction(vec![
+        Operation::SetTransform {
+            id: dot,
+            transform: Affine::translate((19.7, 0.0)) * Affine::rotate(30f64.to_radians()),
+        },
+        Operation::SetStrokes {
+            id: arrow,
+            strokes: keyed_by_position([Stroke {
+                brush: Brush::Solid(INK).into(),
+                width: 2.0,
+                join: ondin_core::kurbo::Join::Miter,
+                miter_limit: 2.6131,
+                ..Default::default()
+            }]),
+        },
+    ]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
     let spec = ExportSpec {
@@ -178,8 +194,12 @@ fn no_places_keeps_whole_numbers_and_unitless_numbers_keep_four() {
     let out = svg_spec(&doc, &res, frame, &spec).svg;
     assert!(out.contains(r#"fill-opacity="0.4""#), "the opacity: {out}");
     assert!(
-        out.contains("matrix(0.866 0.5 -0.5 0.866 19.7 0)"),
+        out.contains("matrix(0.8660254 0.5 -0.5 0.8660254 19.7 0)"),
         "the turn: {out}"
+    );
+    assert!(
+        out.contains(r#"stroke-miterlimit="2.6131""#),
+        "the miter limit: {out}"
     );
     assert!(!out.contains(r#"="""#), "no empty attribute: {out}");
 }

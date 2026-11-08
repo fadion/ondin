@@ -2209,6 +2209,16 @@ fn image_fixture_adjusted(
     fit: ondin_core::ImageFit,
     adjust: ondin_core::ImageAdjust,
 ) -> common::Fixture {
+    image_fixture_sized(fit, adjust, 200, 200)
+}
+
+/// `image_fixture_adjusted` with a picture of `width` × `height` pixels.
+fn image_fixture_sized(
+    fit: ondin_core::ImageFit,
+    adjust: ondin_core::ImageAdjust,
+    width: u32,
+    height: u32,
+) -> common::Fixture {
     use ondin_core::{
         Fill, ImageEntry, ImageFormat, ImageId, ImageRef, ImageSource, Operation, Resolved,
         Transaction,
@@ -2222,8 +2232,8 @@ fn image_fixture_adjusted(
                 entry: ImageEntry {
                     source: ImageSource::Embedded(vec![1, 2, 3].into()),
                     format: ImageFormat::Png,
-                    width: 200,
-                    height: 200,
+                    width,
+                    height,
                 },
             },
             Operation::SetFills {
@@ -2306,6 +2316,25 @@ fn the_framing_mode_is_carried_by_the_pattern_transform() {
     let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let m = pattern_matrix(&out);
     assert_eq!(m, [0.4, 0.0, 0.0, 0.4, 0.0, -20.0], "cover:\n{out}");
+}
+
+/// A large photo's pattern scale is written finely enough that the picture
+/// covers the shape: a 6000-pixel picture covering the 80-wide rect is drawn
+/// within a hundredth of 80 wide, or the tile's far edge shows as a seam.
+///
+/// flip: `matrix_attr` at four fixed places → fails at the drawn width (79.8).
+#[test]
+fn a_large_pictures_pattern_scale_keeps_its_width() {
+    let f = image_fixture_sized(
+        ondin_core::ImageFit::Fill,
+        ondin_core::ImageAdjust::NEUTRAL,
+        6000,
+        4000,
+    );
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
+    let m = pattern_matrix(&out);
+    let drawn = m[0] * 6000.0;
+    assert!((drawn - 80.0).abs() < 0.01, "drawn {drawn} wide:\n{out}");
 }
 
 /// **A contained picture is cut to its own rectangle**, which is the one thing
@@ -2734,6 +2763,40 @@ fn the_filters_numbers_paint_the_picture_the_canvas_paints() {
     // The alpha row is the identity and nothing writes into it, so the filter
     // cannot change a picture's transparency.
     assert_eq!(&m[15..20], &[0.0, 0.0, 0.0, 1.0, 0.0]);
+}
+
+/// An export spec at no places still writes a picture's colour matrix and tone
+/// curve at four: they are unitless, and at whole numbers the curve is a hard
+/// posterise.
+///
+/// flip: `adjust_def` writing through `fmt` → fails at the matrix.
+#[test]
+fn a_specs_places_leave_the_adjustment_numbers_alone() {
+    let adjust = ondin_core::ImageAdjust {
+        saturation: 0.5,
+        shadows: 0.3,
+        ..ondin_core::ImageAdjust::NEUTRAL
+    };
+    let f = image_fixture_adjusted(ondin_core::ImageFit::Fill, adjust);
+    let spec = ondin_core::ExportSpec {
+        precision: 0,
+        ..ondin_core::ExportSpec::new(
+            ondin_core::ExportFormat::Svg,
+            ondin_core::ExportScale::Times(1.0),
+        )
+    };
+    let out = ondin_export::svg::svg_spec(&f.doc, &f.res, f.artboard, &spec).svg;
+    let pipeline = adjust.pipeline().expect("two moved sliders");
+    let close = |file: &[f32], canvas: &[f32]| {
+        file.len() == canvas.len() && file.iter().zip(canvas).all(|(a, b)| (a - b).abs() < 1e-4)
+    };
+    let m = numbers(&out, r#"values=""#);
+    assert!(close(&m, &pipeline.matrix.unwrap()), "the matrix: {m:?}");
+    let table = numbers(&out, r#"tableValues=""#);
+    assert!(
+        close(&table, &pipeline.curve.unwrap()),
+        "the curve: {table:?}"
+    );
 }
 
 /// **A frame's background and a stroke are adjusted too**, which is the half of

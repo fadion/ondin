@@ -1298,6 +1298,68 @@ fn sweep_on(theme: Theme) {
     let found = opened(&ctx, &mut app, |_, a| a.open_tokens_import(file, false));
     assert!(app.tokens_import.is_some(), "the tokens review opened");
     check("tokens import", app, found);
+    // The assets browser with nothing switched on: its tabs, search and the
+    // empty state's button.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| a.toggle_assets());
+    assert!(app.asset_panel.is_some(), "the assets browser opened");
+    check("assets browser", app, found);
+    // The Credits card over a layer carrying a CC BY icon's credit and one
+    // carrying a photo's, with its links.
+    let mut app = with_a_rect(&ctx);
+    {
+        let id = app.session.selection.ids()[0];
+        let spec = crate::assets::sets::SetSpec::by_key("font-awesome").unwrap();
+        let icon = crate::assets::panel::icon_credit(spec, "2026-11-08");
+        let photo = ondin_core::Credit {
+            kind: ondin_core::CreditKind::Photo,
+            text: "Photo by Ana Ruiz on Unsplash".into(),
+            author: "Ana Ruiz".into(),
+            author_url: "https://unsplash.com/@ana".into(),
+            provider: "Unsplash".into(),
+            provider_url: "https://unsplash.com".into(),
+            source_url: "https://unsplash.com/photos/abc".into(),
+            licence: "Unsplash License".into(),
+            licence_url: "https://unsplash.com/license".into(),
+            required: true,
+            inserted: "2026-11-08".into(),
+        };
+        let other = app.session.ids.mint();
+        let page = app.session.page;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetCredit {
+                id,
+                credit: Some(Box::new(icon)),
+            },
+            Operation::CreateNode {
+                id: other,
+                parent: page,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(20.0, 20.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Hero".into()),
+            },
+            Operation::SetCredit {
+                id: other,
+                credit: Some(Box::new(photo)),
+            },
+        ])));
+    }
+    let found = opened(&ctx, &mut app, |_, a| a.credits_open = true);
+    assert!(app.has_credits(), "the fixture: a credit the card lists");
+    // Two grounds at rest, the footer's *Close* and *Copy all*: its rows are
+    // links, so audited directly rather than against the list's floor of three.
+    let at_rest = audit("credits", &found, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "credits", &found, &mut faults);
+    assert!(
+        at_rest >= 2 && hovered >= 1,
+        "credits: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds and hovered {hovered}"
+    );
     // The top bar's pill for a linked tokens file that changed since it was
     // applied: one ground, so audited directly, as Version history is.
     let mut app = with_a_rect(&ctx);

@@ -203,6 +203,26 @@ pub fn rasterize_glyph_run(
     Some(color::straight_rgba8_from_premul(pixmap.data_as_u8_slice()))
 }
 
+/// Fill `art`'s paths, bottom first, into a straight-alpha RGBA8 buffer `w`×`h`
+/// pixels, one pixel per unit — a picture drawn from vector art, as *Fill with
+/// content*'s avatars are. `None` for a size this backend cannot hold.
+pub fn rasterize_paths(w: u32, h: u32, art: &[(BezPath, Color)]) -> Option<Vec<u8>> {
+    if w == 0 || h == 0 || w > MAX_RASTER_SIDE || h > MAX_RASTER_SIDE {
+        return None;
+    }
+    let (w, h) = (w as u16, h as u16);
+    let mut ctx = RenderContext::new_with(w, h, export_settings());
+    let mut resources = Resources::new();
+    for (path, colour) in art {
+        ctx.set_paint(*colour);
+        ctx.fill_path(path);
+    }
+    ctx.flush();
+    let mut pixmap = Pixmap::new(w, h);
+    ctx.render_with(&mut pixmap, &mut resources, raster_settings());
+    Some(color::straight_rgba8_from_premul(pixmap.data_as_u8_slice()))
+}
+
 struct CpuPainter<'a> {
     /// Decoded images, keyed by the id a fill refers to.
     images: &'a ImageStore,

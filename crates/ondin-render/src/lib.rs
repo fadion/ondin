@@ -26,7 +26,7 @@ pub mod scene;
 mod tight_stroke;
 pub mod vision;
 
-pub use cpu::{MAX_RASTER_SIDE, VelloCpuRenderer, rasterize_glyph_run};
+pub use cpu::{MAX_RASTER_SIDE, VelloCpuRenderer, rasterize_glyph_run, rasterize_paths};
 pub use gpu::VelloGpuRenderer;
 pub use images::{
     ADJUSTED_BYTES, DECODED_BYTES, DecodeError, ImageStore, PREVIEW_EDGE, Pixels, THUMB_BASE,

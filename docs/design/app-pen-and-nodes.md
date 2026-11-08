@@ -174,7 +174,9 @@ row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and
   An anchor on an axis is held to it and slides along it: where the run crosses the axis its two
   handles are each other's image, where the run lies along the axis both handles stay on it.
   An edit that changed every anchor (a nudge, drag, scale or turn of the whole set) is written as
-  it is, and so is one that moved each pair together into a shape symmetric about its own centre:
+  it is, as is one that maps every anchor and handle by one affine map over anchors spanning both
+  directions (`symmetry::one_map`: a point-box side scale holds its edge's anchors still), and so
+  is one that moved each pair together into a shape symmetric about its own centre:
   the axis follows a symmetric result and drops from any other, rather than the edit being forced
   back onto the old axis.
 - **Images pair one to one**: among anchors coincident at an image's place (the two ends *Split

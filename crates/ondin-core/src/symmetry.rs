@@ -9,7 +9,7 @@
 
 use crate::edit::{PenAnchor, PenSubpath};
 use crate::geometry::anchor_runs;
-use kurbo::{BezPath, PathSeg, Point, Vec2};
+use kurbo::{Affine, BezPath, PathSeg, Point, Vec2};
 use serde::{Deserialize, Serialize};
 
 /// Which of a path's own axes it is mirrored across: the vertical line through
@@ -292,7 +292,8 @@ fn changed(a: &PenAnchor, b: &PenAnchor, eps: f64) -> bool {
 /// both did, the first in order wins. An anchor on an axis stays on it, its two
 /// handles each other's image. An edit that changed how many anchors there are
 /// is left alone: the model drops the axis if it no longer holds. So is one that
-/// changed every anchor (a whole-set move, scale or turn), and one that moved each
+/// changed every anchor, or mapped them all by one affine map ([`one_map`]: a
+/// point-box scale holding an edge still), and one that moved each
 /// pair together and left the path symmetric about its own centre: the axis
 /// follows a symmetric result and drops from any other. A lone anchor's edit that
 /// happens to be symmetric about a new centre still takes its image along.
@@ -329,7 +330,8 @@ pub fn symmetric_edit(
             .enumerate()
             .all(|(a, p)| p.is_none_or(|(p, _)| moved[a] == moved[p]))
     });
-    if moved.iter().all(|m| *m) {
+    let flat_edited: Vec<PenAnchor> = edited.iter().flat_map(|s| s.anchors.clone()).collect();
+    if moved.iter().all(|m| *m) || one_map(&flat_base, &flat_edited, tol) {
         return;
     }
     if together
@@ -342,6 +344,43 @@ pub fn symmetric_edit(
         return;
     }
     remirror_pairs(&flat_base, edited, axes, tol);
+}
+
+/// Whether `edited` is `base` under one affine map, anchors and handles alike and
+/// no radius changed, with `base` spanning both directions: a point-box scale or turn of every point,
+/// which may hold one edge still and so not move every anchor. A base on one line
+/// fixes no map, so a lone anchor's drag along it is not taken for one.
+fn one_map(base: &[PenAnchor], edited: &[PenAnchor], tol: f64) -> bool {
+    let Some(p0) = base.first().map(|a| a.at) else {
+        return false;
+    };
+    let far = |key: &dyn Fn(Point) -> f64| {
+        (0..base.len()).max_by(|i, j| key(base[*i].at).total_cmp(&key(base[*j].at)))
+    };
+    let Some(i1) = far(&|p| (p - p0).hypot2()) else {
+        return false;
+    };
+    let u = base[i1].at - p0;
+    let Some(i2) = far(&|p| u.cross(p - p0).abs()) else {
+        return false;
+    };
+    let v = base[i2].at - p0;
+    let det = u.cross(v);
+    if det.abs() <= tol * (1.0 + u.hypot()) {
+        return false;
+    }
+    let q0 = edited[0].at;
+    let (eu, ev) = (edited[i1].at - q0, edited[i2].at - q0);
+    // The linear part takes `u` to `eu` and `v` to `ev`.
+    let inv = Affine::new([v.y / det, -u.y / det, -v.x / det, u.x / det, 0.0, 0.0]);
+    let linear = Affine::new([eu.x, eu.y, ev.x, ev.y, 0.0, 0.0]) * inv;
+    let map = Affine::translate(q0.to_vec2()) * linear * Affine::translate(-p0.to_vec2());
+    base.iter().zip(edited).all(|(a, b)| {
+        (map * a.at - b.at).hypot() <= tol
+            && (a.radius - b.radius).abs() <= tol
+            && (linear * a.out.to_point() - b.out.to_point()).hypot() <= tol
+            && (linear * a.back.to_point() - b.back.to_point()).hypot() <= tol
+    })
 }
 
 /// `edited` made symmetric across `mirror`'s axes through `at` whatever the edit
@@ -449,7 +488,6 @@ fn on_axis(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kurbo::Affine;
 
     const BOTH: PathMirror = PathMirror {
         vertical: true,
@@ -686,6 +724,43 @@ mod tests {
         longer[0].anchors[1].at = Point::new(20.0, 0.0);
         symmetric_edit(&line, &mut longer, VERTICAL, Point::ZERO);
         assert_eq!(longer[0].anchors[0].at, Point::new(-20.0, 0.0));
+    }
+
+    /// Every point scaled from a side handle of the point box is one map of the
+    /// whole set, so it is kept: the held edge stays and the far one moves by the
+    /// drag, rather than the far one's image moving the held edge.
+    /// flip: `symmetric_edit` without its `one_map` return → fails at "the held
+    /// edge stays".
+    #[test]
+    fn scaling_every_point_from_a_side_keeps_the_held_edge() {
+        let base = diamond();
+        let scale = Affine::translate((-10.0, 0.0))
+            * Affine::scale_non_uniform(1.5, 1.0)
+            * Affine::translate((10.0, 0.0));
+        let mut edited = base.clone();
+        for a in &mut edited[0].anchors {
+            a.at = scale * a.at;
+        }
+        let want = edited.clone();
+        symmetric_edit(&base, &mut edited, VERTICAL, Point::ZERO);
+        assert_eq!(
+            edited[0].anchors[3].at,
+            Point::new(-10.0, 0.0),
+            "the held edge stays"
+        );
+        assert_eq!(edited, want, "scaled as asked");
+        assert!(holds(&edited), "symmetric about its new centre");
+
+        let tall = Affine::translate((0.0, -10.0))
+            * Affine::scale_non_uniform(1.0, 2.0)
+            * Affine::translate((0.0, 10.0));
+        let mut edited = base.clone();
+        for a in &mut edited[0].anchors {
+            a.at = tall * a.at;
+        }
+        let want = edited.clone();
+        symmetric_edit(&base, &mut edited, BOTH, Point::ZERO);
+        assert_eq!(edited, want, "both axes: scaled as asked");
     }
 
     /// Both axes: one moved anchor takes all three images with it.

@@ -1530,7 +1530,13 @@ impl OndinApp {
                 if ids.is_empty() {
                     return;
                 }
-                let mut who: Vec<NodeId> = ids.iter().flat_map(|s| sty::users(doc, *s)).collect();
+                // Counted as the browser counts users: a kit's frozen mains are the
+                // kit's, never a layer of this document's to report.
+                let mut who: Vec<NodeId> = ids
+                    .iter()
+                    .flat_map(|s| sty::users(doc, *s))
+                    .filter(|u| !doc.in_vault(*u))
+                    .collect();
                 who.sort();
                 who.dedup();
                 let n = who.len();

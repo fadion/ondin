@@ -731,7 +731,7 @@ ImageSink>)` is the edit.
   record ancestor. Loose layers under one parent are one record unless two of them want the same
   kind, when each is its own. Off, every layer is its own. `Plan::filled_records` is the record
   frames with a changed row; `Plan::record_noun` their shared name stem (*row*, *card*), else
-  *record*.
+  *record*. The box says *record* while private mode masks names, since the stem is one.
 - **Agreement**: a record draws one person (the names, email, username, avatar), one place
   (street, city, postcode, full address, a phone number's area code) and one company. A job, bio or
   quote takes the person's gendered form. An email is at `example.com` while
@@ -757,7 +757,10 @@ ImageSink>)` is the edit.
   length as likely; a date is in 1965–2004 when its layer's name says birthday, born or dob (or
   another language's word), in 2022–2025 when it says created, updated, joined, since, published,
   posted or modified, else in 2025–2027 (`date_years`).
-- **Fitting** (`room`): auto width takes the value's natural length. A one-line box (fixed under
+- **Fitting** (`room`), measured on the kind the text is drawn at (`Resolved::used_kind`: grown or
+  stretched by a layout, its size bound to a variable), which `plan` and `Plan::transaction` take
+  a `Resolved` for; an avatar is drawn at its drawn box too. Auto width takes the value's natural
+  length. A one-line box (fixed under
   about 1.8 lines, or auto-height not yet wrapping) takes a value whose max-content width fits:
   up to `ATTEMPTS` draws (an entity's redrawn whole for its rows), else the first draw kept with
   `Row::fits` false; a full address there has its lines joined with *, * (`for_room`). A fixed box at least about 1.8 lines tall is an area, where a paragraph adds
@@ -818,9 +821,13 @@ ImageSink>)` is the edit.
   kind list takes the press first). It is drawn outside the `!focus` guard.
 - **Opening**: the box opens on any selection, none included, and follows the selection made
   after; while nothing is fillable the preview says *Select text layers, or frames that hold them*.
-  The locale is `agreed_locale`, else the last used; records, example emails, avatars and the
-  default avatar style come from `prefs.fill_content`; the seed is the clock's, so each opening
-  draws anew.
+  The locale is `agreed_locale`, else the last used, read again each time the selection changes
+  until a locale is picked in the row, which holds it (`FillBox::locale_picked`); records, example
+  emails, avatars and the default avatar style come from `prefs.fill_content`; the seed is the
+  clock's, so each opening draws anew.
+- **Fill** ends a live text session first (`OndinApp::finish_text_first`) and plans again on what
+  that leaves: the session's buffer predates the fill, and its commit when the session ended would
+  write over the value filled.
 - **Rows** (batch rename's `row`): *Locale*, a combo of the locales, the current one lit with a
   check. *Content*, a combo of *By layer name* and each text kind under its group's eyebrow, its
   sample in the locale as a faint tail (`MenuRow::note`, `content_fill::sample`); picking a kind

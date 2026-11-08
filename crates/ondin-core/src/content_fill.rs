@@ -1853,12 +1853,13 @@ impl Plan {
 
     /// The fill as one transaction. A text takes its new content styled as its
     /// first character and paragraph were; an avatar replaces the shape's fills
-    /// with one picture drawn at twice the shape's size through `pictures`,
-    /// dropping a photo's credit, and is left out when nothing is lent or it
-    /// cannot draw.
+    /// with one picture drawn at twice the size `res` draws the shape at, through
+    /// `pictures`, dropping a photo's credit, and is left out when nothing is
+    /// lent or it cannot draw.
     pub fn transaction(
         &self,
         doc: &Document,
+        res: &crate::Resolved,
         mut pictures: Option<&mut (dyn ImageSink + '_)>,
     ) -> Transaction {
         let mut ops = Vec::new();
@@ -1884,11 +1885,14 @@ impl Plan {
                     spans: spans.replaced(0, content.len(), text.len(), style),
                     para_spans: para_spans.replaced(0, content.len(), text.len(), paragraph),
                 }),
-                (Value::Avatar(avatar), kind) => {
+                (Value::Avatar(avatar), _) => {
                     let Some(sink) = pictures.as_deref_mut() else {
                         continue;
                     };
-                    let size = kind.box_size().unwrap_or(kurbo::Size::new(32.0, 32.0));
+                    let size = res
+                        .used_kind_of(node)
+                        .box_size()
+                        .unwrap_or(kurbo::Size::new(32.0, 32.0));
                     let px = |v: f64| (v * 2.0).ceil().clamp(8.0, 2048.0);
                     let (w, h) = (px(size.width), px(size.height));
                     let Some((id, entry)) = sink.draw(w as u32, h as u32, &avatar.art(w, h)) else {
@@ -2176,6 +2180,9 @@ fn layout(doc: &Document, roots: &[NodeId], opts: &Options) -> Layout {
 /// What [`plan`] draws a record with, beside the record itself.
 struct Draw<'a> {
     doc: &'a Document,
+    /// What a text is measured as: the kind it is drawn at, grown by a layout
+    /// or sized by a variable, not the one the document stores.
+    res: &'a crate::Resolved,
     opts: &'a Options,
     locale: &'a Locale,
     /// The domain the fill's emails share when a record names no company.
@@ -2205,7 +2212,7 @@ fn draw_record(
     redrawn: bool,
     taken: &Taken,
 ) -> RecordDraw {
-    let (doc, opts, locale) = (d.doc, d.opts, d.locale);
+    let (doc, res, opts, locale) = (d.doc, d.res, d.opts, d.locale);
     let redraws = |id: NodeId| match redrawn {
         true => opts.redraws.get(&id).copied().unwrap_or(0),
         false => 0,
@@ -2226,7 +2233,7 @@ fn draw_record(
         .iter()
         .map(|i| {
             doc.get(rows[*i].node)
-                .map_or(Room::Free, |n| room(n.kind()))
+                .map_or(Room::Free, |n| room(res.used_kind_of(n)))
         })
         .collect();
     let entity_rng =
@@ -2262,7 +2269,7 @@ fn draw_record(
                             0,
                         ]);
                         let text = drawn.text(k, n.name(), &mut rng, &mut Picks::new());
-                        fits(n.kind(), *room, &for_room(text, *room))
+                        fits(res.used_kind_of(n), *room, &for_room(text, *room))
                     }),
                     None => true,
                 }
@@ -2321,10 +2328,12 @@ fn draw_record(
                 let mut rng = Rng::new(&[opts.seed, node_seed, redraws(row.node), attempt]);
                 let mut trial = picks.clone();
                 let text = match kind {
-                    Kind::Paragraph => paragraph(&drawn, node.kind(), room, &mut rng, &mut trial),
+                    Kind::Paragraph => {
+                        paragraph(&drawn, res.used_kind_of(node), room, &mut rng, &mut trial)
+                    }
                     _ => for_room(drawn.text(kind, node.name(), &mut rng, &mut trial), room),
                 };
-                let ok = fits(node.kind(), room, &text);
+                let ok = fits(res.used_kind_of(node), room, &text);
                 if best.is_none() || ok {
                     best = Some((text, ok, trial));
                 }
@@ -2349,8 +2358,9 @@ fn draw_record(
 /// Every record is drawn first as if nothing were redrawn, each passing over
 /// the names, cities, jobs and lines the records before it took. A record with
 /// a redrawn row is then drawn again, passing over every other record's values,
-/// so a redraw changes its own record and no other.
-pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
+/// so a redraw changes its own record and no other. A value is fitted to the
+/// box `res` draws its text in.
+pub fn plan(doc: &Document, res: &crate::Resolved, roots: &[NodeId], opts: &Options) -> Plan {
     let Some(locale) = locale_for(&opts.locale).or_else(|| locales().first()) else {
         return Plan::default();
     };
@@ -2363,6 +2373,7 @@ pub fn plan(doc: &Document, roots: &[NodeId], opts: &Options) -> Plan {
     let shared = Firm::draw(locale, &mut Rng::new(&[opts.seed, 0xF1]), &Taken::new());
     let d = Draw {
         doc,
+        res,
         opts,
         locale,
         shared: &shared.domain,

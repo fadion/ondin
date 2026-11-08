@@ -2653,10 +2653,12 @@ pub static VERBS: &[Verb] = &[
                 example_emails: a.bool("example_emails").unwrap_or(false),
                 ..Options::default()
             };
-            let plan = fill::plan(ctx.doc, &nodes, &opts);
-            Ok(Done::edit(
-                plan.transaction(ctx.doc, ctx.images.as_deref_mut()),
-            ))
+            let plan = fill::plan(ctx.doc, ctx.res, &nodes, &opts);
+            Ok(Done::edit(plan.transaction(
+                ctx.doc,
+                ctx.res,
+                ctx.images.as_deref_mut(),
+            )))
         },
     },
     // --- layout -------------------------------------------------------------

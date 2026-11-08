@@ -49,6 +49,12 @@ const ALL_KEPT: &str = "Every layer is left as is";
 /// The open box.
 pub(crate) struct FillBox {
     pub(crate) opts: Options,
+    /// The locale the box opened in, the last used: what a selection whose text
+    /// agrees on no Language fills in until one is picked.
+    opened_locale: String,
+    /// Whether a locale was picked in the Locale row, which latches it; until
+    /// then each new selection is filled in the locale its text agrees on.
+    locale_picked: bool,
     /// The style an avatar shape is drawn in until one is picked on its row:
     /// the last used, kept while the Avatars switch is off.
     style: AvatarStyle,
@@ -96,12 +102,23 @@ impl FillBox {
 
     /// Plan again when a choice, the page, the document or the selection has
     /// changed since the last plan, as Clean up does.
-    pub(crate) fn replan(&mut self, doc: &Document, page: NodeId, rev: u64) {
+    pub(crate) fn replan(
+        &mut self,
+        doc: &Document,
+        res: &ondin_core::Resolved,
+        page: NodeId,
+        rev: u64,
+    ) {
+        let moved = self.asked.as_ref().is_none_or(|a| a.3 != self.selection);
+        if moved && !self.locale_picked {
+            self.opts.locale = fill::agreed_locale(doc, &self.selection)
+                .map_or_else(|| self.opened_locale.clone(), |l| l.tag.clone());
+        }
         let now = (self.opts.clone(), page, rev, self.selection.clone());
         if self.asked.as_ref() == Some(&now) {
             return;
         }
-        self.plan = fill::plan(doc, &self.selection, &self.opts);
+        self.plan = fill::plan(doc, res, &self.selection, &self.opts);
         self.every = match self.opts.records && self.opts.avatars.is_some() {
             true => self.plan.clone(),
             false => fill::outline(
@@ -162,10 +179,19 @@ impl FillBox {
     }
 }
 
+/// What `plan`'s records are called: the frames' shared name, or *record* while
+/// private mode masks names, since the noun is one.
+fn record_noun(plan: &Plan, doc: &Document) -> String {
+    match crate::private::on() {
+        true => "record".to_string(),
+        false => plan.record_noun(doc),
+    }
+}
+
 /// How many records `plan` fills, and the word for them: *3 rows*.
 fn records_label(plan: &Plan, doc: &Document) -> Option<String> {
     let n = plan.filled_records().len();
-    (n > 0).then(|| ui::count(n, &plan.record_noun(doc)))
+    (n > 0).then(|| ui::count(n, &record_noun(plan, doc)))
 }
 
 /// The preview's count: *13 layers in 3 rows · 1 left as is*.
@@ -198,9 +224,10 @@ impl OndinApp {
         self.clean_up = None;
         let selection = self.selected_layers();
         let p = &self.prefs.fill_content;
+        let last =
+            fill::locale_for(&p.locale).map_or_else(|| "en-US".to_string(), |l| l.tag.clone());
         let locale = fill::agreed_locale(&self.session.doc, &selection)
-            .or_else(|| fill::locale_for(&p.locale))
-            .map_or_else(|| "en-US".to_string(), |l| l.tag.clone());
+            .map_or_else(|| last.clone(), |l| l.tag.clone());
         let style = match p.avatar_style.as_str() {
             "pattern" => AvatarStyle::Pattern,
             _ => AvatarStyle::Initials,
@@ -214,6 +241,8 @@ impl OndinApp {
                 seed: fresh_seed(),
                 ..Options::default()
             },
+            opened_locale: last,
+            locale_picked: false,
             style,
             selection,
             pin: None,
@@ -224,6 +253,25 @@ impl OndinApp {
             hover: (Vec::new(), false),
             reveal: None,
         });
+    }
+
+    /// *Fill*: end a live text session first, since its buffer predates the fill
+    /// and its commit when the session ended would write over the value filled;
+    /// plan again on what that leaves, and write it. The box stays open when
+    /// nothing is left to fill.
+    fn run_fill_content(&mut self, mut b: FillBox) {
+        self.finish_text_first();
+        let rev = self.session.revision();
+        b.replan(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.page,
+            rev,
+        );
+        match b.why_not() {
+            None => self.commit_fill_content(&b),
+            Some(_) => self.fill_content = Some(b),
+        }
     }
 
     /// Write the fill as one undo step and remember the choices.
@@ -243,7 +291,11 @@ impl OndinApp {
         }
         self.prefs.save();
         let mut pictures = crate::canvas::Decoded::default();
-        let tx = b.plan.transaction(&self.session.doc, Some(&mut pictures));
+        let tx = b.plan.transaction(
+            &self.session.doc,
+            &self.session.resolved,
+            Some(&mut pictures),
+        );
         self.adopt_decoded(pictures);
         // Counted from the edit: an avatar the sink could not draw is left out.
         let changed = tx
@@ -289,7 +341,12 @@ impl OndinApp {
             self.reveal(bounds);
         }
         let rev = self.session.revision();
-        b.replan(&self.session.doc, self.session.page, rev);
+        b.replan(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.page,
+            rev,
+        );
         let why_not = b.why_not();
         let mut act = Act::None;
         let mut hover: (Vec<NodeId>, bool) = (Vec::new(), false);
@@ -335,7 +392,7 @@ impl OndinApp {
         match act {
             Act::Cancel => {}
             Act::Run if why_not.is_none() => {
-                self.commit_fill_content(&b);
+                self.run_fill_content(b);
                 ctx.request_repaint();
             }
             _ => self.fill_content = Some(b),
@@ -387,6 +444,7 @@ fn locale_row(ui: &mut egui::Ui, b: &mut FillBox) {
                         .clicked()
                     {
                         b.opts.locale = l.tag.clone();
+                        b.locale_picked = true;
                         ui.close();
                     }
                 }
@@ -491,7 +549,7 @@ fn content_row(ui: &mut egui::Ui, b: &mut FillBox) {
 }
 
 fn records_row(ui: &mut egui::Ui, doc: &Document, b: &mut FillBox) {
-    let noun = b.every.record_noun(doc);
+    let noun = record_noun(&b.every, doc);
     let note = records_label(&b.every, doc).unwrap_or_default();
     row(ui, "Records", ui::CONTROL_H, |ui| {
         let label = format!("Keep each {noun}'s values together");
@@ -967,7 +1025,12 @@ mod tests {
         let b = app.fill_content.take().unwrap();
         pass(&ctx, &mut app);
         let mut b = b;
-        b.replan(&app.session.doc, app.session.page, app.session.revision());
+        b.replan(
+            &app.session.doc,
+            &app.session.resolved,
+            app.session.page,
+            app.session.revision(),
+        );
         app.commit_fill_content(&b);
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
         let name = |row: NodeId, n: &str| {
@@ -1205,5 +1268,124 @@ mod tests {
             "the fixture: the row is hovered"
         );
         assert_eq!(before, after, "rows hold still");
+    }
+
+    /// *Fill* ends a live text session first, so the session's buffer, which
+    /// predates the fill, does not write over the value filled when it ends.
+    /// flip: `run_fill_content` without `finish_text_first` → fails at "the fill
+    /// stands".
+    #[test]
+    fn fill_ends_a_live_text_session_first() {
+        let (ctx, mut app) = app();
+        let page = app.session.page;
+        let name = add(&mut app, page, text("Name"), "Name");
+        app.session.selection.set_one(name);
+        pass(&ctx, &mut app);
+        app.open_fill_content();
+        pass(&ctx, &mut app);
+        app.begin_edit_text(Some(name), None);
+        app.text.as_mut().expect("editing").editor.insert("X");
+        let depth = app.session.history.undo_depth();
+        let b = app.fill_content.take().expect("the box is open");
+        app.run_fill_content(b);
+        let filled = content(&app, name);
+        assert!(
+            !filled.contains('X'),
+            "fixture: filled over the typing: {filled}"
+        );
+        app.finish_text_first();
+        assert_eq!(content(&app, name), filled, "the fill stands");
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth + 2,
+            "the typing, then the fill"
+        );
+    }
+
+    /// Opened on nothing, the box fills a selection made after in the locale its
+    /// text agrees on; a locale picked in the row holds over later selections.
+    /// flip: `FillBox::replan` not reading `agreed_locale` again → fails at
+    /// "German text fills in German".
+    #[test]
+    fn the_locale_follows_the_selection_until_one_is_picked() {
+        let (ctx, mut app) = app();
+        app.prefs.fill_content.locale = "en-US".into();
+        let page = app.session.page;
+        let in_lang = |tag: &str| {
+            let NodeKind::Text {
+                content,
+                spans,
+                para_spans,
+                paragraph,
+                block,
+                sizing,
+                ..
+            } = text("Name")
+            else {
+                unreachable!()
+            };
+            NodeKind::Text {
+                content,
+                style: Box::new(TextStyle {
+                    locale: Some(tag.into()),
+                    ..Default::default()
+                }),
+                spans,
+                para_spans,
+                paragraph,
+                block,
+                sizing,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            }
+        };
+        let de = add(&mut app, page, in_lang("de"), "Name");
+        let fr = add(&mut app, page, in_lang("fr"), "Name");
+        app.session.selection.clear();
+        pass(&ctx, &mut app);
+        app.open_fill_content();
+        pass(&ctx, &mut app);
+        let locale = |app: &OndinApp| app.fill_content.as_ref().unwrap().opts.locale.clone();
+        assert_eq!(
+            locale(&app),
+            "en-US",
+            "the last used, with nothing selected"
+        );
+        app.session.selection.set_one(de);
+        pass(&ctx, &mut app);
+        assert_eq!(locale(&app), "de", "German text fills in German");
+        app.session.selection.set_one(fr);
+        pass(&ctx, &mut app);
+        assert_eq!(locale(&app), "fr");
+        let b = app.fill_content.as_mut().unwrap();
+        b.opts.locale = "it".into();
+        b.locale_picked = true;
+        app.session.selection.set_one(de);
+        pass(&ctx, &mut app);
+        assert_eq!(locale(&app), "it", "a pick holds");
+    }
+
+    /// In private mode the records are counted as *records*, not by the frames'
+    /// name.
+    /// flip: `records_label` asking `Plan::record_noun` itself → fails at "2
+    /// records".
+    #[test]
+    fn private_mode_counts_records_by_no_name() {
+        let (ctx, mut app) = app();
+        team(&mut app);
+        pass(&ctx, &mut app);
+        app.open_fill_content();
+        pass(&ctx, &mut app);
+        let b = app.fill_content.as_ref().unwrap();
+        crate::private::set(true);
+        let label = records_label(&b.plan, &app.session.doc);
+        crate::private::set(false);
+        assert_eq!(label.as_deref(), Some("2 records"));
+        assert_eq!(
+            records_label(&b.plan, &app.session.doc).as_deref(),
+            Some("2 cards"),
+            "control: named while private mode is off"
+        );
     }
 }

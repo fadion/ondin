@@ -108,7 +108,12 @@ impl Fixture {
     }
 
     fn plan(&self, roots: &[NodeId], opts: &Options) -> Plan {
-        fill::plan(&self.doc, roots, opts)
+        fill::plan(&self.doc, &Resolved::rebuild(&self.doc), roots, opts)
+    }
+
+    /// `plan`'s edit, with avatars drawn through `pictures`.
+    fn transaction(&self, plan: &Plan, pictures: Option<&mut dyn ImageSink>) -> Transaction {
+        plan.transaction(&self.doc, &Resolved::rebuild(&self.doc), pictures)
     }
 
     fn text_of(plan: &Plan, node: NodeId) -> String {
@@ -450,7 +455,7 @@ fn the_edit_writes_texts_and_draws_avatars_at_twice_their_size() {
     let (list, _) = f.team();
     let plan = f.plan(&[list], &Options::default());
     let mut painter = Painter(0);
-    let tx = plan.transaction(&f.doc, Some(&mut painter));
+    let tx = f.transaction(&plan, Some(&mut painter));
     let texts =
         tx.0.iter()
             .filter(|op| matches!(op, Operation::SetText { .. }))
@@ -464,7 +469,7 @@ fn the_edit_writes_texts_and_draws_avatars_at_twice_their_size() {
     f.doc.apply(&tx).expect("the fill applies");
 
     let plan = f.plan(&[list], &Options::default());
-    let tx = plan.transaction(&f.doc, Some(&mut NoPainter));
+    let tx = f.transaction(&plan, Some(&mut NoPainter));
     assert!(
         !tx.0
             .iter()
@@ -903,9 +908,8 @@ fn a_filled_text_keeps_its_first_character_and_paragraph() {
         para_spans,
     }]);
     let plan = f.plan(&[heading], &Options::default());
-    f.doc
-        .apply(&plan.transaction(&f.doc, None))
-        .expect("the fill applies");
+    let tx = f.transaction(&plan, None);
+    f.doc.apply(&tx).expect("the fill applies");
     let NodeKind::Text {
         content,
         style,
@@ -977,7 +981,7 @@ fn an_avatar_over_a_credited_photo_drops_the_credit() {
         },
     ]);
     let plan = f.plan(&[shape], &Options::default());
-    let tx = plan.transaction(&f.doc, Some(&mut Painter(0)));
+    let tx = f.transaction(&plan, Some(&mut Painter(0)));
     f.doc.apply(&tx).expect("the fill applies");
     assert!(
         f.doc.get(shape).unwrap().paint().image_fill().is_some(),
@@ -1084,7 +1088,7 @@ fn avatars_drawn_alike_add_one_picture() {
     let mut f = Fixture::new();
     let (list, _) = f.team();
     let plan = f.plan(&[list], &Options::default());
-    let tx = plan.transaction(&f.doc, Some(&mut Painter(0)));
+    let tx = f.transaction(&plan, Some(&mut Painter(0)));
     let added =
         tx.0.iter()
             .filter(|op| matches!(op, Operation::AddImage { .. }))
@@ -1253,4 +1257,73 @@ fn the_locale_falls_back_and_disagrees_as_the_design_says() {
         ),
         "{refused:?}"
     );
+}
+
+/// A text its frame's layout grows is fitted to the width it is drawn at, not
+/// the width the document stores.
+///
+/// flip: `draw_record` measuring the document's kind rather than the used one →
+/// fails at "fits the drawn width".
+#[test]
+fn a_grown_text_is_fitted_to_the_width_it_is_drawn_at() {
+    use ondin_core::container::{Display, Flex, LayoutItem};
+    let mut f = Fixture::new();
+    let card = f.add(
+        f.page,
+        NodeKind::Artboard {
+            size: Size::new(400.0, 80.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        "Card",
+    );
+    let name = f.add(
+        card,
+        text("Name", TextSizing::AutoHeight(40.0), None),
+        "Full name",
+    );
+    f.commit(vec![
+        Operation::SetDisplay {
+            id: card,
+            display: Some(Display::Flex(Flex {
+                padding: [20.0; 4],
+                ..Default::default()
+            })),
+        },
+        Operation::SetLayoutItem {
+            id: name,
+            item: LayoutItem {
+                grow: 1.0,
+                ..Default::default()
+            },
+        },
+    ]);
+    let res = Resolved::rebuild(&f.doc);
+    let drawn = match res.used_kind(&f.doc, name) {
+        Some(NodeKind::Text {
+            sizing: TextSizing::AutoHeight(w),
+            ..
+        }) => *w,
+        Some(NodeKind::Text {
+            sizing: TextSizing::Fixed(s),
+            ..
+        }) => s.width,
+        other => panic!("{other:?}"),
+    };
+    assert!(drawn > 300.0, "fixture: grown to {drawn}");
+    for seed in 0..5 {
+        let plan = f.plan(
+            &[card],
+            &Options {
+                seed,
+                ..Options::default()
+            },
+        );
+        let row = plan.rows.iter().find(|r| r.node == name).unwrap();
+        assert!(
+            row.fits,
+            "seed {seed} fits the drawn width: {:?}",
+            row.value
+        );
+    }
 }

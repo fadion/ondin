@@ -116,7 +116,9 @@ axis, a horizontal one or both (`crate::mirror`).
 
   An already-closed run gets its image as a second subpath, run backwards so the two wind alike and
   a fill covers their overlap (an open run's image with neither end on the axis too); a closed run
-  that is already its own image (*Both axes* after the vertical rule closed it) gets none. At a join the anchor keeps the drawn
+  that is already exactly its own image, anchor for anchor with its handles (*Both axes* after the
+  vertical rule closed it), gets none; one only within the snapping reach of its image still gets
+  it. At a join the anchor keeps the drawn
   handle on one side and takes its mirror on the other, so the path is as smooth across the axis as
   it was drawn. *Both axes* applies the vertical rule, then the horizontal one over what that made,
   so a quarter drawn from axis to axis closes into a whole.

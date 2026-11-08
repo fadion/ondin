@@ -177,13 +177,31 @@ fn across(mut s: PenSubpath, vertical: bool, c: f64, tol: f64) -> Vec<PenSubpath
     // A reflection turns the winding, so a closed image runs backwards to wind
     // with the run: opposite windings cancel a fill where the two overlap. One
     // already its own image (Both axes after the vertical rule closed it) adds
-    // nothing but a coincident twin.
+    // nothing but a coincident twin. Only an exact image counts, one to one with
+    // handles: `tol` is the snapping reach, and a run merely within it of its image
+    // is not symmetric, so it still takes the image.
     if s.closed {
         let mut m = image(&s);
+        let size = s
+            .anchors
+            .iter()
+            .map(|a| a.at.x.abs().max(a.at.y.abs()))
+            .fold(0.0, f64::max);
+        let exact = 1e-6 * (1.0 + size);
+        let near =
+            |u: ondin_core::kurbo::Vec2, v: ondin_core::kurbo::Vec2| (u - v).hypot() <= exact;
+        let mut used = vec![false; n];
         let own = m.anchors.len() == n
-            && m.anchors
-                .iter()
-                .all(|a| s.anchors.iter().any(|b| (a.at - b.at).hypot() <= tol));
+            && m.anchors.iter().all(|a| {
+                let twin = (0..n).find(|j| {
+                    let b = &s.anchors[*j];
+                    !used[*j]
+                        && (a.at - b.at).hypot() <= exact
+                        && ((near(a.out, b.out) && near(a.back, b.back))
+                            || (near(a.out, b.back) && near(a.back, b.out)))
+                });
+                twin.inspect(|j| used[*j] = true).is_some()
+            });
         if own {
             return vec![s];
         }
@@ -1027,6 +1045,23 @@ mod tests {
         assert_eq!(got.len(), 1, "no coincident twin");
         let path = ondin_core::edit::pen_path(&got);
         assert_ne!(path.winding(Point::new(100.0, 100.0)), 0);
+    }
+
+    /// A closed run only roughly its own image, each anchor's image within the
+    /// snapping reach of one of its anchors, still gets its image: only an exact
+    /// one adds nothing.
+    /// flip: `across` asking `own` within `tol` → fails at "an image".
+    #[test]
+    fn a_roughly_symmetric_closed_run_gets_its_image() {
+        let mut kite = run(&[(100.0, 0.0), (130.0, 30.0), (100.0, 60.0), (75.0, 30.0)]);
+        kite.closed = true;
+        let got = mirrored(kite, Axes::Vertical, Point::new(100.0, 0.0), 8.0);
+        assert_eq!(got.len(), 2, "an image");
+        let image = ats(&got[1]);
+        assert!(
+            image.contains(&(70.0, 30.0)) && image.contains(&(125.0, 30.0)),
+            "{image:?}"
+        );
     }
 
     /// Both axes: a quarter drawn from one axis to the other closes into a whole.

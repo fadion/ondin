@@ -283,7 +283,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 
 `snapshot(doc, res) -> Snapshot`, serde-serializable and **distinct from the save schema**. It describes every page: `Snapshot::pages` lists them in order (`id`, `name`, `ground` as `#rrggbb` through `Document::ground`, so a page with no colour of its own reports the default, `draft`, `mode` by id), each page's root is also a node of kind `Root`, and every node names its `page`. Node content: id, kind, name, page, local and world transform, world bounds, paint summary (gradients as kind and stops; images by content-hash id, framing mode, alpha, non-rest adjustments), full text style, children ids, artboard membership, and a `warnings` list (missing font families).
 
-- `snapshot_version` is currently **15**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
+- `snapshot_version` is currently **16**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
 
 | Version | Change |
 | --- | --- |

@@ -105,9 +105,9 @@ or the release, not the press.**
 
 ## 1. Tools
 
-Single key, `plain && !shift`, Normal mode only. The Shift chords, the pencil's `Shift+P`, the
-shape builder's `Shift+M` and the slice's `Shift+F`, are read after the letters under
-`plain && m.shift`.
+Single key, Normal mode only: each a `BINDINGS` row held with no modifier, so the letter with Ctrl,
+Alt or Shift down is not the tool. The Shift chords, the pencil's `Shift+P`, the shape builder's
+`Shift+M`, the slice's `Shift+F` and the spiral's `Shift+L`, are rows held with exactly Shift.
 
 | Key | Tool | |
 |---|---|---|
@@ -186,8 +186,8 @@ step named *Blend · <Mode>*; the status line names the mode, with *· N layers*
 `ZoomSelection` exists because `ZoomFit` used to fall back to the selection, making "fit
 everything" unreachable while anything was selected. `document_bounds` and `selection_bounds` are
 separate; the zoom dropdown has a *Fit selection* row; `reveal_selection` reads
-`selection_bounds`. `ZoomIn` is the one arm that must not exclude Shift (`Plus` cannot be made
-without it); the `!m.shift` sits on `Equals` only.
+`selection_bounds`. `Ctrl+=` is a `BINDINGS` row, Shift up; `Ctrl` `+` is a shifted-character
+arm in code that takes Shift either way, since `Plus` cannot be made without it.
 
 ⚠️ Adobe's `Ctrl+0`/`Ctrl+1` are the reverse (see *Unresolvable*).
 
@@ -219,8 +219,9 @@ is not in a panel and opens there.
 
 **`Ctrl+R` is rename, not rulers** (Illustrator/Photoshop). Rulers keep `Shift+R` and `Ctrl+R` is
 not aliased to them. It means the same on the library screen (§8a): a chord spent on rename
-everywhere beats one spent in the editor only. `Shift+H`/`V` are safe because the tool block is
-gated on `!m.shift` (`shift_r_toggles_rulers_without_stealing_the_rect_tool` is the pattern).
+everywhere beats one spent in the editor only. `Shift+H`/`V` are safe because a binding answers only to its exact
+modifiers, and the tool rows hold none (`shift_r_toggles_rulers_without_stealing_the_rect_tool` is
+the pattern).
 
 ## 5. Align and distribute
 
@@ -257,7 +258,7 @@ one is designated (§15 D113).
 | `Ctrl+Shift+N` | private mode | ✅ **invented** — a browser's private-window chord (Chrome's incognito); `Ctrl+N` is new document, kept apart by Shift. The library answers it too |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | — | show history | **unbound**: a list few people keep open |
-| `Ctrl+Shift+M` | minimap | ✅ `cmd_only && shift`; `Ctrl+Alt+M` stays the mask chord. `ctrl_shift_m_toggles_the_minimap` |
+| `Ctrl+Shift+M` | minimap | ✅ exactly Ctrl and Shift; `Ctrl+Alt+M` stays the mask chord. `ctrl_shift_m_toggles_the_minimap` |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show messages | **unbound** (§15 D1025) |
 
@@ -295,14 +296,14 @@ there would restore L2's cut.
 **`Ctrl+Alt+V` is read from the release** (§15 D257): `Event::Paste` exists only when the OS
 clipboard holds text, and a property paste has nothing to do with it, so the chord would work only
 when a sentence happened to be copied elsewhere. The event arm only silences the chord.
-`cmd_only` excludes Alt, so the release arm cannot double `PasteRelease`.
+`PasteRelease` is read off a release with Alt up, so the two release arms cannot double.
 
 ## 8. File and discovery
 
 | Key | Action | |
 |---|---|---|
 | `Ctrl+S` | **save and pin a version** | ✅ writes *and* copies into `.versions/<document id>/<unix seconds>.ondin`, keyed on the id so a rename cannot orphan history (§15 D364); a save of nothing new since the newest version pins none. Autosave runs every thirty seconds, so bare save meant nothing. The top bar's disk button is the same action |
-| `Ctrl+Shift+S` | ~~save as~~ | ⛔ every document lives in the base folder (§9.5); *Duplicate* in the dashboard mints a new id. ⚠️ The `!m.shift` on `Save` is all that keeps it unbound; `save_takes_the_bare_chord_and_the_shifted_one_is_free` asserts the **empty** result |
+| `Ctrl+Shift+S` | ~~save as~~ | ⛔ every document lives in the base folder (§9.5); *Duplicate* in the dashboard mints a new id. ⚠️ Exact matching is all that keeps it unbound: `Save`'s row holds Ctrl alone; `save_takes_the_bare_chord_and_the_shifted_one_is_free` asserts the **empty** result |
 | `Ctrl+O` | **the library** | ✅ the library tab: `go_to_dashboard`, which saves the document in front; its tab stays open. No file dialog exists |
 | `Ctrl+K` / `Ctrl+P` | **search files and projects** | ✅ **dashboard only**, read in `search_field` because `input::resolve` does not run while the library is up. `Enter` takes the first document match, never a project: most recently edited, ties by name (§15 D967). **`Ctrl` without Alt and Shift** (§15 D712) |
 | `Ctrl+N` | **new document** | ✅ the dashboard's *New file*, from both screens, in a new tab; the strip's `+` is the same. **The project is computed at the door**: the library reads the nav being viewed, the editor the open document's project — *the project in front of you*. Unfiled at the root from *Recent*, *All files*, *Starred*, the trash, or a session not in the library (§15 D383) |
@@ -310,10 +311,10 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+Shift+T` | **reopen the closed tab** | ✅ the browser's: the last closed, at its old place in the strip |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` · ⌃⇥ / ⌃⇧⇥ on macOS | **next / previous tab** | ✅ wrapping, the library's tab counted. Both screens (`tabs::read_keys`, read before the keymap) |
 | `Alt+1`…`Alt+8`, `Alt+9` | **that tab**, **the last tab** | ✅ the library's tab is 1. On `Alt` because `Ctrl+1`/`Ctrl+2` are zoom and `Ctrl+PageUp`/`PageDown` step pages. Read with `!command && !shift` |
-| `Ctrl+Shift+E` | ~~export~~ | ⛔ *Export as…* was removed when the inspector's Export panel (§15 D274) answered where, format and size from the layer. ⚠️ **Unbound but not free**: plain `Ctrl+E` is *Flatten*, so `!m.shift` on that arm is all that stands between a stray hand and a dissolved selection. `a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening` pins it |
+| `Ctrl+Shift+E` | ~~export~~ | ⛔ *Export as…* was removed when the inspector's Export panel (§15 D274) answered where, format and size from the layer. ⚠️ **Unbound but not free**: plain `Ctrl+E` is *Flatten*, so its row's exact modifiers (Ctrl alone) are all that stand between a stray hand and a dissolved selection. `a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening` pins it |
 | `Ctrl+Alt+E` | export all | ✅ not Figma's. Re-runs every layer's saved export settings into the last export folder, asking only the first time (`architecture.md` §7). Alt **and** not-Shift: `Ctrl+Alt+Shift+E` is neither this nor `Ctrl+Shift+E` |
-| `Ctrl+Alt+Enter` | **present** | ✅ Figma's. `Action::Present`, normal mode only, `cmd && alt && !shift`; plain `Ctrl+Enter` stays unbound. Present mode reads only its own keys (§8b) |
-| `Ctrl+,` | **settings** | ✅ VS Code's; `,` was unspent. ⚠️ **Opens, cannot close**: `resolve` is not called while a modal is up (`Action::OpenSettings` is named for that). Escape, ✕, *Cancel*, backdrop close it. `cmd_only && !m.shift` |
+| `Ctrl+Alt+Enter` | **present** | ✅ Figma's. `Action::Present`, normal mode only, exactly Ctrl and Alt; plain `Ctrl+Enter` stays unbound. Present mode reads only its own keys (§8b) |
+| `Ctrl+,` | **settings** | ✅ VS Code's; `,` was unspent. ⚠️ **Opens, cannot close**: `resolve` is not called while a modal is up (`Action::OpenSettings` is named for that). Escape, ✕, *Cancel*, backdrop close it. Ctrl alone |
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
 | `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, a `BINDINGS` row read in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
 | `Ctrl+/` | **command palette** | ✅ Figma's quick actions, alias; Shift up, so it never reads as `Ctrl+Shift+/` |
@@ -521,7 +522,7 @@ combinations asserts the two **partition** the space.
 | `Ctrl+A` | select all | ✅ the current page's layers |
 | `Ctrl+PageDown` / `Ctrl+PageUp` | next / previous page | ✅ as a browser steps tabs; stops at either end (`Action::StepPage`). Plain `Page Down`/`Page Up` stay present mode's |
 | `Ctrl+G` / `Ctrl+Shift+G` | group / ungroup | ✅ |
-| `Ctrl+Alt+G` | frame selection | ✅ Figma (§15 D987); free because the group chords are `cmd_only`. `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` |
+| `Ctrl+Alt+G` | frame selection | ✅ Figma (§15 D987); free because the group chords' rows hold no Alt. `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` |
 | `Shift+A` | add flex layout, read from where the children sit; a loose selection is framed first | ✅ Figma's chord. Plain `A` is the Node tool, read with no Shift. `shift_a_adds_a_layout_and_leaves_a_alone` |
 | `Ctrl+E` | flatten | ✅ Figma |
 | `Ctrl+Alt+M` | use as mask / release | ✅ Figma (§15 D286). `M` is otherwise spent only by `Ctrl+Shift+M` (minimap, §6); `masking_is_a_chord_and_the_bare_letter_is_still_unspent` keeps plain `M` and `Ctrl+M` free |
@@ -543,10 +544,10 @@ code rather than editing this sentence:
 focus mode → a bindable field's menu / `--` list / mode menu → a style card's menu, picker, name
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
-insert picker (`kit_picker`) → the
+insert picker (`kit_picker`) or the assets browser (`asset_panel`) → the
 variables browser (inner rungs first) → a text session → the find box → batch rename (its open
 order list first) → the Clean up box → the Fill with content box (an open kind list first) → colour review (its own
-inner rungs first) → the Repeat around origin card → the Blend shapes card → an open warp envelope → the path bar's mirror flyout → a compare →
+inner rungs first) → the Credits card (`credits_open`) → the Repeat around origin card → the Blend shapes card → an open warp envelope → the path bar's mirror flyout → a compare →
 the pen →
 **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
@@ -605,7 +606,7 @@ here.
 | Key | Action | |
 |---|---|---|
 | `Shift+I` | open the insert picker | ✅ `Action::InsertPicker` (§15 D1014): the floating picker at the foot of the vertical toolbar, toggled with the rail's hexagon. Plain `I` is the eyedropper (§3); `Ctrl+Alt+I` is Intersect. ⚠️ **It closes the picker only while the search field does not hold the keyboard**: the field takes it once on opening and a focused widget silences the keymap, so `Shift+I` right after opening types a capital *I*. `Escape` and the button close it either way (`toggle_kit_picker`) |
-| `Ctrl+Alt+P` | publish kit… | ✅ `Action::PublishKit` (`cmd && alt && !shift && P`, §15 D1015). In a kit only; otherwise the status line says why. `the_kit_chords_land_and_leave_their_neighbours_alone`. ⚠️ The dashboard's `Ctrl+Alt+P` is deliberately inert (§15 D712) |
+| `Ctrl+Alt+P` | publish kit… | ✅ `Action::PublishKit` (exactly Ctrl and Alt, §15 D1015). In a kit only; otherwise the status line says why. `the_kit_chords_land_and_leave_their_neighbours_alone`. ⚠️ The dashboard's `Ctrl+Alt+P` is deliberately inert (§15 D712) |
 
 The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` is one more chord for
 §12's `AltGr` question.
@@ -614,7 +615,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 | Key | Action | |
 |---|---|---|
-| `Shift+S` | open the styles and variables browser | ✅ `Action::VariablesBrowser` (`plain && m.shift && S`, §15 D1040), beside `Shift+I`: it, the insert picker and the assets browser (no chord) swap in place at the foot of the vertical toolbar, one at a time; also toggled by the rail's swatches button. Free: §1's `S` is read with no Shift; `Alt+S` and `Ctrl+Alt+S` need Alt; `Ctrl+Shift+S` is inert. `shift_s_opens_the_variables_browser_and_leaves_s_alone`. ⚠️ `Shift+I`'s caveat holds: right after opening, the chord types a capital *S* in the search |
+| `Shift+S` | open the styles and variables browser | ✅ `Action::VariablesBrowser` (exactly Shift, §15 D1040), beside `Shift+I`: it, the insert picker and the assets browser (no chord) swap in place at the foot of the vertical toolbar, one at a time; also toggled by the rail's swatches button. Free: §1's `S` is read with no Shift; `Alt+S` and `Ctrl+Alt+S` need Alt; `Ctrl+Shift+S` is inert. `shift_s_opens_the_variables_browser_and_leaves_s_alone`. ⚠️ `Shift+I`'s caveat holds: right after opening, the chord types a capital *S* in the search |
 
 ---
 
@@ -644,8 +645,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   `Tab` is egui's focus key and costs a frame to claim (§15 D123): the last key worth a second
   meaning. The TextInsert nesting meaning (§10) is affordable because the two live in different
   `Mode`s; a global toggle would have to out-rank both.
-- **`Ctrl+Shift`+ the key of a bound `Ctrl` chord** — never a second spelling, guarded since
-  §15 D710. **A chord that does nothing is the honest state for one whose action was removed or
+- **`Ctrl+Shift`+ the key of a bound `Ctrl` chord** — never a second spelling (§15 D710); a
+  `BINDINGS` row answers only to its exact modifiers, so none is one by accident. **A chord that does nothing is the honest state for one whose action was removed or
   never bound**; it leaves the combination available. Eight `normal_mode` arms answered the shifted
   spelling silently (`Ctrl+Shift`+ `O`, `A`, `D`, `Y`, `−`, `0`, `1`, `2`); `Ctrl+Shift+D` was a
   document edit one modifier from `Shift+D`.
@@ -653,7 +654,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   - ⚠️ **Four Shift readings are load-bearing; do not sweep them up.** `Ctrl+Shift+=` is the primary
     `Ctrl` `+` (§3). `Ctrl+Shift+C`/`X` must still copy and cut: the centre-align they would
     collide with is the text session's. `Ctrl+Alt+Shift+V` must stay a property paste (Alt beats
-    Shift, §7). `Ctrl+Shift+Z` is Redo, so only the `Ctrl+Y` half took the guard.
+    Shift, §7). `Ctrl+Shift+Z` is Redo's own row, not a second spelling of `Ctrl+Z`.
   - 🚨 **The rule is kept twice: the dashboard is a second keymap** (§15 D712). `input::resolve`
     does not run there, so `search_field` once answered `Ctrl+Shift+K`, `Ctrl+Alt+K`,
     `Ctrl+Shift+P` and `Ctrl+Alt+P` with *search*, while `dashboard_keys` beside it spelled the rule

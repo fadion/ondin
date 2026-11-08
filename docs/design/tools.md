@@ -607,7 +607,7 @@ raises it (`show_pivot`); closing or committing puts it back down only if the ca
   its height as the switch and the selection change the words; foot `settings::footer_row`, *Cancel* then primary *Repeat*. Its settings
   outlive a close, so it reopens on the ring last made.
 - **Keys.** `Enter` repeats (`dispatch` hands `Action::Enter` to the card while it is open); `Escape`
-  cancels, the rung after Colour review. The card closes when another document comes to the front.
+  cancels, the rung after the Credits card. The card closes when another document comes to the front.
 - **A right-click cancels a scrub** of *Count* or *Step* wherever the pointer is: `InFlight::repeat_scrub`
   holds both as they were, armed while a field is dragged, put back by `cancel_gesture` and cleared at
   the frame's end once no button is down, as `settings_scrub` is.

@@ -745,9 +745,8 @@ pub mod icon {
     pub const COLUMNS: &str = "\u{e546}";
     pub const ROWS: &str = "\u{e5a2}";
     pub const RULER: &str = "\u{e6b8}"; // a guide, named for where it comes from
-    /// Dragging a guide back onto its ruler throws it away; rasterized by
-    /// `cursor.rs` as the cursor that says so. The plain bin rather than `trash`,
-    /// whose lid and handle collapse into noise at a cursor's 19pt.
+    /// The library's trash: its sidebar row and its empty state. The guide
+    /// cursor's bin is not this glyph but path data in `cursor.rs`.
     pub const TRASH_SIMPLE: &str = "\u{e4a8}";
     pub const CHECK: &str = "\u{e182}"; // a checked row in the View/Snap menus
     /// A binding, wherever one is made: *Bind to variable…*, *Bind property*, a
@@ -1057,7 +1056,7 @@ pub mod icon {
     /// A credit — the inspector's *Credit* and *Credits…*: two quotation marks.
     pub const QUOTES: &str = "\u{f05c}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
-    /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
+    /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
     /// *Show grid*, the pixel grid. A layout grid is [`COLUMNS`] / [`ROWS`] and a
     /// CSS grid [`GRID_LAYOUT`].

@@ -301,7 +301,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   - a hairline, then the bulk edits, each opening its box: *Find and replace…* (`Ctrl+F`,
     `Action::FindText { replace: false }`), *Batch rename…* (`Ctrl+Shift+R`; dimmed with
     `private::DECLINE_RENAME` in private mode), *Clean up…* (no chord) and *Fill with content…* (no
-    chord; dimmed with its reason when the selection holds nothing to fill).
+    chord; never dimmed: with nothing to fill the box opens and says what to select).
 
   Every row is a bare `ui::menu_row` (an empty glyph, never checked), its label at the row's own
   inset: nothing in the menu ticks, and a check that is on says so in its own bar over the canvas.
@@ -369,7 +369,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - The sections scroll between the title and the footer once the card would be taller than the
   window, with no bar. The scroll area takes the sections' height as last measured, capped by the
   window, as `min_scrolled_height`: an `Area` hands a scroll area last frame's size, so a
-  `max_height` alone shrinks and never grows back. No test pins it.
+  `max_height` alone shrinks and never grows back
+  (`settings::the_sections_scroll_and_the_footer_stays_on_screen`).
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export
   popover, written on the spot).
 - There is no *Share* button (local file editor; nothing to share).

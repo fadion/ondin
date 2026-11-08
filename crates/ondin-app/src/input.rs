@@ -1331,8 +1331,9 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         }
         // `Ctrl+Alt+V` is read off the release, not the event: a property paste
         // has nothing to do with the OS clipboard, and `Event::Paste` fires only
-        // when it holds text, so the chord would work intermittently. `cmd_only`
-        // excludes Alt, so it cannot double with [`Action::PasteRelease`].
+        // when it holds text, so the chord would work intermittently. It needs
+        // Alt on the release and [`Action::PasteRelease`] needs it up, so the two
+        // cannot double.
         // No `!m.shift` here, deliberately: Alt beats Shift on a paste
         // (`a_property_paste_is_not_also_a_paste_in_place`).
         let v_up = released_with(i, egui::Key::V);

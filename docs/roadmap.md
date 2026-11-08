@@ -108,7 +108,10 @@ Ideas worth weighing, not yet decided or scheduled.
 - **PNG goldens** — wait on an aarch64/NEON measurement (§15 D304); per-`vello_cpu` too (D414).
   `num_threads` is still a default.
 - **Layers panel `MIN_W = 210`** rests on one reading, not two (§15 D444): re-tighten or amend its prose.
-- **Chrome hairline base** in `rulers::snap_across_axis` (guides and pixel grid) is unruled (§15 D479).
+- **Chrome hairline base** in `rulers::snap_across_axis` (guides) is unruled (§15 D479). The pixel
+  grid no longer calls it: it places lines from its lattice, which
+  `the_lattice_picks_the_pixels_the_snapped_lines_did` holds to the pixels `snap_across_axis` picks,
+  so ruling the base means moving the lattice with it.
 - **The Type panel's four `%` caps** are 200, inherited, not chosen (§15 D861).
 - **Dashboard virtualisation** — deferred (§15 D862); not a one-line `show_rows` (rename field, ⋮ menu,
   `follow_selection` depend on drawn cards).

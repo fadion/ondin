@@ -356,7 +356,7 @@ Phases 2 and 3 ship.
 
 The split that survives contact with an agent:
 
-- **Reads stay typed tools.** The snapshot (`ondin-export/src/snapshot.rs`, `SNAPSHOT_VERSION = 3`) is
+- **Reads stay typed tools.** The snapshot (`ondin-export/src/snapshot.rs`, `SNAPSHOT_VERSION`) is
   how an agent sees the document, and a language does nothing for that. Keep `get_document`,
   `get_node`, `get_selection`, `hit_test`, `get_bounds`.
 - **Single edits stay typed tools**, because a typed call gives validated arguments and per-call error

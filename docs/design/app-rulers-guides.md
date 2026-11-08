@@ -101,7 +101,7 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 - A frame-scoped guide shows a dotted continuation beyond its frame on hover/selection, same width and
   colour; none for page-wide guides or guides in rotated frames (`rulers::upright`). The solid segment is
   clipped by the frame, the dotted one by the viewport.
-- **Cursors** (`tools.md`, *Canvas cursors*): a ruler bar (every tool), a guide line (Select only)
+- **Cursors** (`tools.md`, *Canvas cursors*): a ruler bar (every tool), a guide line (Select and Scale)
   and a guide drag show `Bitmap::Guide` across the line's axis (`axis_cursor`); `Alt` during the drag
   of an existing guide shows `CopyGuide`. Dragging a guide back onto its ruler shows `Discard`, a bin
   (fallback `CursorIcon::NoDrop`), from `GuideDrag::announces_discard()` = `discarding &&

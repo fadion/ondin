@@ -203,7 +203,7 @@ comes from the committed document.
 | Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them, above a frame's Clip content |
 | Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row. A polygon's Sides takes the whole count row; a star's Points lines up under opacity and Inner ratio takes the rest |
 | Ellipse | a 2 × 2 grid of equal fields: opacity and Sweep, then Start and Ratio; icons only (pie slice, arc start, dashed circle), no labels, the polygon's pattern |
-| Spiral, arc | opacity the full width, then one full-width field under it: a spiral's *Turns* (`SPIRAL` glyph, two decimals) or an arc's *Sweep* (`ARC` glyph, signed degrees, negative bulging the other way) |
+| Spiral, arc | one row of two equal fields: opacity, then a spiral's *Turns* (`SPIRAL` glyph, two decimals) or an arc's *Sweep* (`ARC` glyph, signed degrees, negative bulging the other way) |
 | Group, text, line, boolean | opacity alone, the full width |
 | Path | the per-corner button (inert: a path's radius is per anchor), then the smoothing button; the smoothing field opens under them |
 

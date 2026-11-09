@@ -7807,6 +7807,56 @@ mod tests {
         }
     }
 
+    /// A popover card of a `fit_scroll` list and a footer row shrinks with its
+    /// list and grows back: the kit update popover's folds.
+    /// flip: `footer_row_noted` laid in `with_layout` (the height left) → fails
+    /// at "shrinks".
+    #[test]
+    fn a_fitted_popover_shrinks_and_grows_with_its_list() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let card = |rows: usize| {
+            let mut h = 0.0;
+            for _ in 0..4 {
+                let _ = ctx.run_ui(Default::default(), |ui| {
+                    h = egui::Area::new(egui::Id::new("fit-card"))
+                        .fixed_pos(egui::pos2(10.0, 10.0))
+                        .show(ui.ctx(), |ui| {
+                            menu_frame(POPOVER_PAD).show(ui, |ui| {
+                                ui.set_width(300.0);
+                                fit_scroll(ui, "fit-list", 400.0, |ui| {
+                                    for _ in 0..rows {
+                                        ui.allocate_exact_size(
+                                            egui::vec2(300.0, MENU_ROW_H),
+                                            egui::Sense::hover(),
+                                        );
+                                    }
+                                });
+                                let buttons = [("Later", FieldButton::Off)];
+                                crate::settings::footer_row(ui, &buttons);
+                            });
+                        })
+                        .response
+                        .rect
+                        .height();
+                });
+            }
+            h
+        };
+        let tall = card(10);
+        let short = card(2);
+        assert!(
+            short < tall - 7.0 * MENU_ROW_H,
+            "shrinks: {short:.1} after {tall:.1}"
+        );
+        let again = card(10);
+        assert!(
+            (again - tall).abs() < 1.0,
+            "grows back: {again:.1}, was {tall:.1}"
+        );
+    }
+
     /// A `tick_row` name too long for the row is elided and ends short of the tail.
     /// flip: `tick_row`'s name laid out with no `max_width` → fails at "elided".
     #[test]

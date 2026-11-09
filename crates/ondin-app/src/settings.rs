@@ -1173,8 +1173,12 @@ pub(crate) fn footer_row_noted(
     let mut pressed = None;
     let row = footer_row_w(ui, buttons);
     // Laid left to right after the slack, not right to left: `Tab` follows the
-    // order controls are added in, and it must read the way out first.
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    // order controls are added in, and it must read the way out first. One
+    // button high, not the height left: in a popover sized to its content that
+    // height is last frame's, and a centred row would hold the card at it.
+    let size = egui::vec2(ui.available_width(), BUTTON_H);
+    let layout = egui::Layout::left_to_right(egui::Align::Center);
+    ui.allocate_ui_with_layout(size, layout, |ui| {
         ui.spacing_mut().item_spacing.x = FOOTER_ROW_GAP;
         ui.add_space((ui.available_width() - row).max(0.0));
         for (i, (label, state)) in buttons.iter().enumerate() {

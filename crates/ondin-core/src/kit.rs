@@ -978,6 +978,7 @@ pub fn vendor(
         },
         &templates,
         None,
+        &crate::tokens::Kept::default(),
     )?;
     for copy in &mut copies {
         copy.iter_mut().for_each(|n| tokens.apply(n));
@@ -1359,6 +1360,11 @@ pub struct Update {
     /// The same for the kits' styles.
     pub styles_changed: Vec<crate::style::StyleId>,
     pub styles_removed: Vec<crate::style::StyleId>,
+    /// Pairs `(a, b)` of vault tops this update changes, where
+    /// `a` as the update leaves it reaches into `b` — a nested instance, a swap,
+    /// a bound layer. Taking `a` without `b` would point `a`'s new version at
+    /// `b`'s old one, so a review that holds `b` back holds `a` too.
+    pub needs: Vec<(NodeId, NodeId)>,
 }
 
 /// Bring every main this document vendored from `kit` up to `published`, at
@@ -1402,6 +1408,25 @@ pub fn update_all(
     page: NodeId,
     kits: &[(&str, u32, &Published)],
 ) -> Result<Update, KitError> {
+    update_holding(doc, ids, page, kits, &[])
+}
+
+/// [`update_all`] with the vault tops in `held` left as they are — the kit
+/// update review's unticked components. A held top is neither synced nor made
+/// local, keeps its version (so its kit stays offered), and a variable or style
+/// the publish removes stays while a held top reads it. The kits' variables and
+/// styles are otherwise taken whole. Holding a top that another accepted top
+/// needs ([`Update::needs`]) is the caller's to prevent: the accepted one would
+/// reach the held one's old version, or fail as [`KitError::NeedsUpdate`].
+pub fn update_holding(
+    doc: &Document,
+    ids: &mut IdSource,
+    page: NodeId,
+    kits: &[(&str, u32, &Published)],
+    held: &[NodeId],
+) -> Result<Update, KitError> {
+    let held: FxHashSet<NodeId> = held.iter().copied().collect();
+    let held = &held;
     // 🚨 **A kit carrying a third kit's newer modes waits for that kit's
     // update when both are accepted** (§15 D1064): each kit is planned against
     // what the ones before it leave, so `[A, B]` with A carrying B's new mode
@@ -1410,7 +1435,7 @@ pub fn update_all(
     // spend ids and leave gaps, nothing else.
     let mut order: Vec<(&str, u32, &Published)> = kits.to_vec();
     for _ in 0..kits.len() {
-        match update_in_order(doc, ids, page, &order) {
+        match update_in_order(doc, ids, page, &order, held) {
             Err(KitError::Modes(k)) => match order.iter().position(|(id, _, _)| *id == k) {
                 Some(at) if at > 0 => {
                     let moved = order.remove(at);
@@ -1421,7 +1446,7 @@ pub fn update_all(
             other => return other,
         }
     }
-    update_in_order(doc, ids, page, &order)
+    update_in_order(doc, ids, page, &order, held)
 }
 
 /// `from`'s entries appended to `to`, each once, in the order first met.
@@ -1439,7 +1464,24 @@ fn update_in_order(
     ids: &mut IdSource,
     page: NodeId,
     kits: &[(&str, u32, &Published)],
+    held: &FxHashSet<NodeId>,
 ) -> Result<Update, KitError> {
+    // Every node of a held top, and what they read: nothing in them is
+    // synced, moved or forked, and the removals spare what they read.
+    let held_nodes: Vec<Node> = held
+        .iter()
+        .filter(|t| doc.in_vault(**t))
+        .flat_map(|t| doc.capture_subtree(*t).unwrap_or_default())
+        .collect();
+    let in_held: FxHashSet<NodeId> = held_nodes.iter().map(|n| n.id).collect();
+    let keep = {
+        let (vars, styles) =
+            crate::tokens::reached(doc.variables(), doc.styles(), held_nodes.iter());
+        crate::tokens::Kept {
+            vars: vars.into_iter().collect(),
+            styles: styles.into_iter().collect(),
+        }
+    };
     let Some(&(kit0, version0, published0)) = kits.first() else {
         return Ok(Update {
             tx: Transaction(Vec::new()),
@@ -1451,6 +1493,7 @@ fn update_in_order(
             vars_removed: Vec::new(),
             styles_changed: Vec::new(),
             styles_removed: Vec::new(),
+            needs: Vec::new(),
         });
     };
     let mut b = Builder {
@@ -1488,6 +1531,7 @@ fn update_in_order(
             .map(|v| v.children.clone())
             .unwrap_or_default()
             .into_iter()
+            .filter(|t| !held.contains(t))
             .filter(|t| {
                 b.scratch
                     .get(*t)
@@ -1520,6 +1564,7 @@ fn update_in_order(
             },
             src.node_map().values(),
             Some(kit),
+            &keep,
         )?;
         for op in tokens.ops.iter().cloned() {
             b.push(op)?;
@@ -1538,6 +1583,7 @@ fn update_in_order(
             .map(|v| v.children.clone())
             .unwrap_or_default()
             .into_iter()
+            .filter(|t| !held.contains(t))
             .filter(|t| {
                 b.scratch
                     .get(*t)
@@ -1557,6 +1603,7 @@ fn update_in_order(
         if let Some(v) = b.scratch.vault() {
             for &p in published.tops() {
                 if let Some(h) = b.here(p)
+                    && !in_held.contains(&h)
                     && b.scratch.get(h).and_then(|n| n.parent) != Some(v)
                 {
                     let index = b.scratch.get(v).map_or(0, |n| n.children.len());
@@ -1722,6 +1769,20 @@ fn update_in_order(
             changed.push(t);
         }
     }
+    // What each changed top reaches of another, read off the synced scratch.
+    let mut needs: Vec<(NodeId, NodeId)> = Vec::new();
+    for &t in &changed {
+        let nodes = b.scratch.capture_subtree(t).unwrap_or_default();
+        for r in refs_out(&nodes) {
+            if let Some(u) = top_of(&b.scratch, r)
+                && u != t
+                && changed.contains(&u)
+                && !needs.contains(&(t, u))
+            {
+                needs.push((t, u));
+            }
+        }
+    }
     for op in make_local(&b.scratch, ids, page, &made_local).0 {
         b.push(op)?;
     }
@@ -1755,6 +1816,7 @@ fn update_in_order(
         vars_removed,
         styles_changed,
         styles_removed,
+        needs,
     })
 }
 

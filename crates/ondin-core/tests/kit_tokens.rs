@@ -506,6 +506,83 @@ fn an_update_rewrites_the_kits_variables_and_removes_what_it_dropped() {
     );
 }
 
+/// **A variable the publish removes stays while a held-back main reads it**
+/// (`kit::update_holding`): L draws Icon's dot and Badge in literals, so
+/// `brand` no longer travels. Holding Icon back takes Badge alone and keeps
+/// `brand`, which Icon's dot still reads; the full update removes it.
+///
+/// flip: `update_in_order` passing an empty `Kept` to `tokens::plan` → fails
+/// at "kept for Icon".
+#[test]
+fn a_removed_variable_stays_while_a_held_main_reads_it() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let held_var = d.variables().iter().next().unwrap().id;
+    let white = || {
+        keyed_by_position([Fill {
+            brush: WHITE.into(),
+            visible: true,
+        }])
+    };
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: k.dot,
+                fills: white(),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: white(),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let vault: Vec<NodeId> = d.get(d.vault().unwrap()).unwrap().children().to_vec();
+    let of = |n: NodeId| {
+        *vault
+            .iter()
+            .find(|t| d.get(**t).unwrap().origin().unwrap().node == n)
+            .unwrap()
+    };
+    let (icon_d, badge_d) = (of(k.icon), of(k.badge));
+    let all = kit::update_all(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version(&k), published(&k))],
+    )
+    .unwrap();
+    assert_eq!(
+        all.vars_removed,
+        vec![held_var],
+        "the full update removes it"
+    );
+
+    let u = kit::update_holding(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version(&k), published(&k))],
+        &[icon_d],
+    )
+    .unwrap();
+    assert!(u.vars_removed.is_empty(), "kept for Icon");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("a partial update commits");
+    assert!(d.variables().get(held_var).is_some());
+    assert_eq!(drawn(&d, badge_d), Brush::Solid(WHITE), "Badge is taken");
+    assert_eq!(
+        d.get(first_child(&d, icon_d)).unwrap().paint().fills[0]
+            .brush
+            .var(),
+        Some(held_var),
+        "Icon's dot still reads it"
+    );
+}
+
 /// **A main from a newer publish whose kit gained a mode is refused until the
 /// update** (`KitError::Modes`): D's copy of `brand` has no cell in it.
 #[test]

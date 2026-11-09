@@ -66,6 +66,13 @@ impl Tokens {
     }
 }
 
+/// The variables and styles an update's removals spare ([`plan`]'s `keep`).
+#[derive(Debug, Default)]
+pub(crate) struct Kept {
+    pub vars: FxHashSet<VarId>,
+    pub styles: FxHashSet<StyleId>,
+}
+
 /// Every variable id a node's own fields read.
 pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
     n.paint
@@ -392,12 +399,16 @@ impl Plan {
 /// detached from its users and removed. Without `sync`, a kit whose modes `doc`
 /// holds otherwise than the source is [`KitError::Modes`]: the consumer's
 /// variables of it have no cell in a mode it lacks, and an update comes first.
+///
+/// `keep` is what an update's removals spare: the variables and styles a main
+/// held back from it still reads (`crate::kit::update_holding`).
 pub(crate) fn plan<'a>(
     doc: &Document,
     ids: &mut IdSource,
     src: &Source<'_>,
     nodes: impl IntoIterator<Item = &'a Node>,
     sync: Option<&str>,
+    keep: &Kept,
 ) -> Result<Plan, KitError> {
     let nodes: Vec<&Node> = nodes.into_iter().collect();
     let (mut want_vars, mut want_styles) = reached(src.vars, src.styles, nodes.iter().copied());
@@ -503,7 +514,7 @@ pub(crate) fn plan<'a>(
         let record = match held {
             Some(h) if covers && sync != Some(kit.as_str()) => h.clone(),
             Some(h) if sync == Some(kit.as_str()) => {
-                let modes: Vec<KitMode> = src_modes
+                let mut modes: Vec<KitMode> = src_modes
                     .iter()
                     .map(|(_, from, nm, c)| KitMode {
                         id: h
@@ -516,6 +527,15 @@ pub(crate) fn plan<'a>(
                         collection: c.clone(),
                     })
                     .collect();
+                // A variable kept for a held-back main keeps the modes its
+                // cells are in, though the publish dropped them.
+                if t.of_kit(kit).any(|v| keep.vars.contains(&v.id)) {
+                    for m in &h.modes {
+                        if !modes.iter().any(|x| x.from == m.from) {
+                            modes.push(m.clone());
+                        }
+                    }
+                }
                 let map = h
                     .map
                     .iter()
@@ -772,7 +792,7 @@ pub(crate) fn plan<'a>(
         plan.removed_vars = t
             .of_kit(kit)
             .map(|v| v.id)
-            .filter(|v| !kept_v.contains(v))
+            .filter(|v| !kept_v.contains(v) && !keep.vars.contains(v))
             .collect();
         let kept_s: FxHashSet<StyleId> = plan.styles.values().copied().collect();
         plan.removed_styles = doc
@@ -780,7 +800,7 @@ pub(crate) fn plan<'a>(
             .iter()
             .filter(|s| s.origin.as_ref().is_some_and(|o| o.kit == kit))
             .map(|s| s.id)
-            .filter(|s| !kept_s.contains(s))
+            .filter(|s| !kept_s.contains(s) && !keep.styles.contains(s))
             .collect();
     }
 
@@ -977,6 +997,7 @@ pub(crate) fn plan_carried<'a>(
         },
         nodes,
         None,
+        &Kept::default(),
     )
 }
 

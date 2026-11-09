@@ -2690,3 +2690,78 @@ fn an_import_without_components_closes_the_vault() {
     let bytes = ondin_core::io::save(&d).unwrap();
     ondin_core::io::load(&bytes).expect("the trimmed document loads");
 }
+
+/// The vault top of `d` copied from kit node `of`.
+fn copy_of(d: &Document, of: NodeId) -> NodeId {
+    vault_children(d)
+        .into_iter()
+        .find(|t| {
+            d.get(*t)
+                .and_then(|n| n.origin())
+                .is_some_and(|o| o.node == of)
+        })
+        .expect("the vault holds a copy")
+}
+
+/// **A held-back main keeps its version, and what reaches a changed main
+/// says so** (`kit::update_holding`, `Update::needs`). The kit grows Icon a
+/// layer and widens Card, which nests Icon; the full dry run names Card as
+/// needing Icon. Holding Card back takes Icon alone: Card keeps v4 and its old
+/// width, so the kit stays offered.
+///
+/// flip: drop `update_in_order`'s held filter on the vault tops → fails at
+/// "Icon alone is taken".
+#[test]
+fn a_held_back_main_keeps_its_version_and_needs_are_named() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.card);
+    let (icon, card) = (k.icon, k.card);
+    let ring = IdSource::new(0xAF).mint();
+    edit_and_publish(
+        &mut k,
+        vec![
+            create(ring, icon, 1, rect(), "Ring"),
+            Operation::SetGeometry {
+                id: card,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(240.0, 100.0)),
+            },
+        ],
+    );
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let (icon_d, card_d) = (copy_of(&d, icon), copy_of(&d, card));
+    let all = kit::update_all(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version, published(&k))],
+    )
+    .unwrap();
+    assert!(all.changed.contains(&icon_d) && all.changed.contains(&card_d));
+    assert_eq!(
+        all.needs,
+        vec![(card_d, icon_d)],
+        "Card's new version nests Icon"
+    );
+
+    let u = kit::update_holding(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version, published(&k))],
+        &[card_d],
+    )
+    .unwrap();
+    assert_eq!(u.changed, vec![icon_d], "Icon alone is taken");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("a partial update commits");
+    let v = |id: NodeId| d.get(id).unwrap().origin().unwrap().version;
+    assert_eq!(v(icon_d), version, "Icon is at the new version");
+    assert_eq!(v(card_d), 4, "Card keeps its version");
+    assert_eq!(
+        d.get(card_d).unwrap().kind().box_size().map(|s| s.width),
+        Some(200.0),
+        "and its old width"
+    );
+}

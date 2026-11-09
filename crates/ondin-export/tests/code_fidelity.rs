@@ -1906,6 +1906,94 @@ fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
     }
 }
 
+/// **A frame with a width query is written as a CSS container query**: the
+/// frame names its query in `data-query`, `tokens.css` makes it a container of
+/// its inline size, gives its children the first mode, each other mode under
+/// `@container (min-width: …)`, and a pin on the frame after them. Read from the
+/// files alone; no browser runs.
+///
+/// flip: `Tokens::css` without `query_blocks` → "lacks the container".
+#[test]
+fn a_width_query_is_written_as_a_container_query() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (compact, wide) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (index, (id, name)) in [(compact, "Compact"), (wide, "Wide")]
+        .into_iter()
+        .enumerate()
+    {
+        d.apply(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let ink = d.ids.mint_var();
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: ink,
+            name: "ink".into(),
+            kind: VarKind::Color,
+            cells: [
+                (compact, Cell::Color(Color::from_rgba8(230, 70, 50, 255))),
+                (wide, Cell::Color(Color::from_rgba8(60, 120, 240, 255))),
+            ]
+            .into_iter()
+            .collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
+    let card = d.frame(None, 0.0, 0.0, 400.0, 120.0, "Card");
+    let r = d.rect(card, 10.0, 10.0, 60.0, 60.0, 0.0);
+    d.apply(vec![
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: ink,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+        Operation::SetQueries {
+            id: card,
+            queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+        },
+    ]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[card]);
+    let tokens =
+        String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    assert!(
+        tokens.contains("[data-query~=\"card-variables\"] {\n  container-type: inline-size;\n}"),
+        "tokens.css lacks the container:\n{tokens}"
+    );
+    assert!(
+        tokens.contains(
+            "@container (min-width: 320px) {\n  :where([data-query~=\"card-variables\"]) > * {"
+        ),
+        "tokens.css lacks the wide block:\n{tokens}"
+    );
+    assert!(
+        tokens.contains("[data-mode=\"wide\"] > [data-query~=\"card-variables\"] > *"),
+        "tokens.css lacks the pin:\n{tokens}"
+    );
+    let marked = export
+        .files
+        .iter()
+        .any(|f| String::from_utf8_lossy(&f.bytes).contains("data-query=\"card-variables\""));
+    assert!(marked, "no file marks the frame with its query");
+}
+
 /// A text's bound type numbers write their variables in the unit each literal
 /// holds — a size and a paragraph spacing in px, a weight bare, a `%` line height
 /// as a multiple and a `%` letter spacing in hundredths of an em — and draw as

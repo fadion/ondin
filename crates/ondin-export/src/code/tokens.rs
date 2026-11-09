@@ -35,6 +35,9 @@ pub(crate) struct Tokens {
     /// The hidden tokens [`Self::shown_in`] made: each one's variable, name,
     /// collection, and the modes it shows in.
     hidden: Vec<(VarId, String, variable::CollectionId, Vec<ModeId>)>,
+    /// The width queries [`Self::query_attr`] named: each `data-query` word,
+    /// its collection and its widths — one container query apiece.
+    queries: Vec<(String, variable::CollectionId, variable::Breakpoints)>,
 }
 
 impl Tokens {
@@ -111,6 +114,86 @@ impl Tokens {
             used: BTreeSet::new(),
             taken: names_taken,
             hidden: Vec::new(),
+            queries: Vec::new(),
+        }
+    }
+
+    /// The `data-query` a frame with width `queries` writes, `None` for none:
+    /// one word per query over a collection of the document's, named after
+    /// `scope` (the component it belongs to) and the collection, and shared by
+    /// every frame querying that collection at the same widths. A kit's
+    /// collection is never queried in the export.
+    pub fn query_attr(
+        &mut self,
+        t: &Variables,
+        scope: &str,
+        queries: &[variable::Breakpoints],
+    ) -> Option<String> {
+        let mut words = Vec::new();
+        for q in queries {
+            let Some(c) = q.keys().find_map(|m| t.collection_of_mode(*m)) else {
+                continue;
+            };
+            if let Some((word, ..)) = self
+                .queries
+                .iter()
+                .find(|(_, of, widths)| *of == c.id && widths == q)
+            {
+                words.push(word.clone());
+                continue;
+            }
+            let base = format!("{}-{}", slug(scope), slug(&c.name)).replace(' ', "-");
+            let mut word = base.clone();
+            let mut n = 1;
+            while self.queries.iter().any(|(w, ..)| *w == word) {
+                n += 1;
+                word = format!("{base}-{n}");
+            }
+            self.queries.push((word.clone(), c.id, q.clone()));
+            words.push(word);
+        }
+        (!words.is_empty()).then(|| words.join(" "))
+    }
+
+    /// Each width query's blocks (§5.3f, CSS's container query): the frame a
+    /// container of its inline size, and its children — never itself, which a
+    /// container cannot query — given its first mode, then each other mode
+    /// under `@container (min-width: …)`, then each mode pinned on the frame or
+    /// the element around it, after them all so a pin wins. The children's own
+    /// blocks are `:where()`, of no weight, so a child pinning a mode of its own
+    /// keeps it.
+    fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
+        for (word, c, widths) in &self.queries {
+            let Some(col) = t.collection(*c) else {
+                continue;
+            };
+            let at = format!("[data-query~=\"{word}\"]");
+            out.push_str(&format!("{at} {{\n  container-type: inline-size;\n}}\n"));
+            let kids = format!(":where({at}) > *");
+            let mut held: Vec<(ModeId, f64)> = col
+                .modes
+                .iter()
+                .filter_map(|m| Some((m.id, *widths.get(&m.id)?)))
+                .collect();
+            held.sort_by(|a, b| a.1.total_cmp(&b.1));
+            for (i, (m, min)) in held.iter().enumerate() {
+                if i == 0 {
+                    self.mode_block(t, shaken, col, kids.clone(), Some(*m), out);
+                    continue;
+                }
+                let mut inner = String::new();
+                self.mode_block(t, shaken, col, kids.clone(), Some(*m), &mut inner);
+                out.push_str(&format!("@container (min-width: {}px) {{\n", fmt(*min)));
+                for line in inner.lines() {
+                    out.push_str(&format!("  {line}\n"));
+                }
+                out.push_str("}\n");
+            }
+            for m in &col.modes {
+                let pin = format!("[data-mode{eq}\"{}\"]", self.mode(m.id).unwrap_or_default());
+                let selector = format!("{pin} > {at} > *, {pin}{at} > *");
+                self.mode_block(t, shaken, col, selector, Some(m.id), out);
+            }
         }
     }
 
@@ -275,6 +358,9 @@ impl Tokens {
                 self.mode_block(t, &shaken, c, selector, *mode, &mut out);
             }
         }
+        // After every collection's blocks, so a container's pick beats the
+        // modes its children inherit from around it.
+        self.query_blocks(t, &shaken, eq, &mut out);
         for km in t.kits().values() {
             for m in &km.modes {
                 let vars: Vec<VarId> = shaken

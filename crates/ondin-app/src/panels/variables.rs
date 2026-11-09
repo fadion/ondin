@@ -4306,9 +4306,9 @@ pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
 }
 
 /// The mode of collection `c` frame `id` inherits when it sets none of it — the
-/// nearest ancestor frame's that sets one or picks one by its width, and that
-/// frame, else the collection's default. What `id` would pick by its
-/// own width is [`width_inherits`]'s.
+/// nearest ancestor frame's that sets one, picks one by its width or has its
+/// contents pick one by a width query, and that frame, else the collection's
+/// default. What `id` would pick by its own width is [`width_inherits`]'s.
 pub(crate) fn inherited_mode(
     doc: &Document,
     id: NodeId,
@@ -4318,10 +4318,12 @@ pub(crate) fn inherited_mode(
     let mut at = doc.get(id)?.parent();
     while let Some(p) = at {
         let n = doc.get(p)?;
+        let queried = n.queries().iter().filter_map(|q| doc.query_pick(p, q));
         if let Some(m) = n
             .modes()
             .iter()
             .copied()
+            .chain(queried)
             .chain(doc.width_pick(p))
             .find(|m| col.has(*m))
         {
@@ -4349,6 +4351,11 @@ pub(crate) fn width_inherits(doc: &Document, id: NodeId, c: CollectionId) -> boo
             .and_then(|n| n.parent())
             .and_then(|p| doc.get(p))
             .is_some_and(|page| !page.modes().iter().any(|m| col.has(*m)))
+}
+
+/// Whether `id` is a main, whose mode rows offer *By width* beside *Inherit*.
+pub(crate) fn node_is_main(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| n.component())
 }
 
 /// The collections a frame's identity card gives a mode row: the one a
@@ -4415,8 +4422,17 @@ impl OndinApp {
         let table = doc.variables();
         let owner = var::ModeOwner::Collection(c);
         let by_width = width_inherits(doc, id, c);
+        // A width query over `c` on this frame: its contents pick by its width.
+        let query = node.query_of(table, owner).cloned();
         let (value, suffix, set) = match node.mode_of(table, owner).and_then(|m| table.mode(m)) {
             Some(m) => (m.name.clone(), None, true),
+            None if query.is_some() => {
+                let picked = query.as_ref().and_then(|q| doc.query_pick(id, q));
+                let Some(m) = picked.and_then(|m| table.mode(m)) else {
+                    return;
+                };
+                (m.name.clone(), Some("· by width".to_string()), false)
+            }
             // A page has no width: each of its top-level frames picks its own.
             None if by_width && page => ("By width".to_string(), None, false),
             None if by_width => {
@@ -4547,6 +4563,9 @@ impl OndinApp {
                 ui::combo_chevron_ink(),
             );
             let resp = resp.on_hover_text(match (page, set) {
+                (false, false) if query.is_some() => {
+                    "Picked by this component's width — each instance picks by its own"
+                }
                 (false, false) if by_width => {
                     "Picked by this frame's width — pick a mode to set one whatever its width"
                 }
@@ -4569,6 +4588,118 @@ impl OndinApp {
             }
         });
         self.reset_marked(reset, &mark);
+        if let Some(q) = query {
+            // Measured empty, as CSS measures a container: a width from its
+            // content is only its padding, rarely what was meant.
+            let hugs =
+                self.session.doc.get(id).is_some_and(|n| {
+                    n.item().width == ondin_core::container::Dimension::FitContent
+                });
+            if hugs {
+                ui.label(
+                    egui::RichText::new("Measured empty, so its width is only its padding")
+                        .size(ui::SMALL_PT)
+                        .color(color::warn()),
+                );
+            }
+            if node_is_main(&self.session.doc, id) {
+                self.widths_fold(ui, id, c, &q);
+            }
+        }
+    }
+
+    /// The *Widths* fold under a main's mode row while it picks by width (R1): a
+    /// field per mode after the first, its minimum width, labelled with the
+    /// mode's name. A drag holds a draft committed when it ends; a typed width
+    /// lands on `Enter` or defocus, one step *Breakpoint*; a refusal is said on
+    /// the status line.
+    fn widths_fold(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        c: CollectionId,
+        q: &var::Breakpoints,
+    ) {
+        let key = (id, c);
+        let open = !self.widths_folded.contains(&key);
+        let (head, _) = ui::fold_head(ui, "Widths", open);
+        if head.clicked() {
+            match open {
+                true => self.widths_folded.insert(key),
+                false => self.widths_folded.remove(&key),
+            };
+        }
+        if !open {
+            return;
+        }
+        let modes: Vec<Mode> = self
+            .session
+            .doc
+            .variables()
+            .collection(c)
+            .map(|c| c.modes.clone())
+            .unwrap_or_default();
+        let Some(first) = modes.first() else { return };
+        ui.label(
+            egui::RichText::new(format!("{} below {}", first.name, {
+                modes
+                    .get(1)
+                    .and_then(|m| q.get(&m.id))
+                    .map_or_else(String::new, |w| var::px(*w))
+            }))
+            .size(ui::SMALL_PT)
+            .color(theme::text::dim()),
+        );
+        let cancelled = self.gesture_cancelled;
+        if cancelled {
+            self.query_draft = None;
+        }
+        let mut commit: Option<(ModeId, f64)> = None;
+        for m in &modes[1..] {
+            let Some(min) = q.get(&m.id).copied() else {
+                continue;
+            };
+            let mut w = match self.query_draft {
+                Some((n, mode, w)) if n == id && mode == m.id => w,
+                _ => min,
+            };
+            let done = ui::labelled(ui, &m.name, |ui| {
+                let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+                let (resp, _) = ui::value_field_suffixed(
+                    ui,
+                    size,
+                    ui::Prefix::Icon(icon::DEVICES),
+                    Some(ui::Suffix {
+                        text: "px",
+                        clickable: false,
+                        tooltip: "",
+                    }),
+                    &mut w,
+                    ui::Scrub::whole(0.5).range(0.0..=f64::from(u16::MAX)),
+                    |d| d.custom_formatter(ui::number(2)),
+                );
+                let resp = resp.on_hover_text(format!("{} from this width up", m.name));
+                let done = (resp.changed() && !resp.dragged()) || resp.drag_stopped();
+                if !done && resp.changed() {
+                    self.query_draft = Some((id, m.id, w));
+                }
+                done
+            });
+            if done && !cancelled {
+                self.query_draft = None;
+                commit = Some((m.id, w));
+            }
+        }
+        if let Some((mode, w)) = commit {
+            match var::query_width_ops(&self.session.doc, id, mode, w) {
+                Ok(ops) if ops.is_empty() => {}
+                Ok(ops) => {
+                    self.session.name_step("Breakpoint", icon::DEVICES);
+                    self.commit_edit(Transaction(ops));
+                }
+                Err(why) => self.session.info(why),
+            }
+        }
     }
 
     /// The *Mode* menu of one collection: *Inherit* with the mode it would
@@ -4601,19 +4732,41 @@ impl OndinApp {
         }
         .and_then(|m| table.mode(m))
         .map(|m| m.name.clone());
+        // A width query over `c` on this frame — a main's own, or its instance's
+        // following it — and whether this frame is the main that sets one.
+        let query = node.query_of(table, owner).cloned();
+        let main = node.component();
+        let refusal = var::why_no_query(doc, id);
+        let picked = query
+            .as_ref()
+            .and_then(|q| doc.query_pick(id, q))
+            .and_then(|m| table.mode(m))
+            .map(|m| m.name.clone());
+        // The accelerators: this frame's own widths while it queries, else the
+        // collection's; the first mode has none.
         let widths: Vec<Option<String>> = modes
             .iter()
             .map(|m| {
-                col.min_width(m.id)
-                    .filter(|w| *w > 0.0)
-                    .map(|w| format!("≥{}", var::px(w)))
+                match &query {
+                    Some(q) => q.get(&m.id).copied(),
+                    None => col.min_width(m.id),
+                }
+                .filter(|w| *w > 0.0)
+                .map(|w| format!("≥{}", var::px(w)))
             })
             .collect();
         let w = under.width().max(200.0);
-        // *Inherit* or *By width*, a rule, then one row per mode.
-        let size = egui::vec2(w, ui::menu_height(modes.len() + 1, 1));
+        // *Inherit*, *By width* or both, a rule, then one row per mode.
+        let heads = if main { 2 } else { 1 };
+        let size = egui::vec2(w, ui::menu_height(modes.len() + heads, 1));
         let pos = ui::dropdown_place(ctx, under, size, 4.0);
-        let mut pick: Option<Option<ModeId>> = None;
+        /// What a row of this menu picks.
+        enum Pick {
+            Inherit,
+            ByWidth,
+            Mode(ModeId),
+        }
+        let mut pick: Option<Pick> = None;
         let rect = egui::Area::new(egui::Id::new("frame-mode-menu"))
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
@@ -4621,14 +4774,45 @@ impl OndinApp {
                 ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
                     ui.set_width(ui::menu_inner_w(w, ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let inherit = match by_width {
-                        true => ui::MenuRow::new(icon::DEVICES, "By width"),
-                        false => ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit"),
-                    }
-                    .accel(inherits.as_deref())
-                    .checked(current.is_none());
-                    if ui::menu_row(ui, inherit, MENU_ROW_H).clicked() {
-                        pick = Some(None);
+                    if main {
+                        // A main keeps both: inheriting from around it is still a
+                        // real choice there.
+                        let inherit = ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit")
+                            .accel(inherits.as_deref())
+                            .checked(current.is_none() && query.is_none());
+                        if ui::menu_row(ui, inherit, MENU_ROW_H).clicked() {
+                            pick = Some(Pick::Inherit);
+                        }
+                        let row = ui::MenuRow::new(icon::DEVICES, "By width")
+                            .accel(picked.as_deref())
+                            .checked(current.is_none() && query.is_some())
+                            .enabled(refusal.is_none());
+                        let resp = ui::menu_row(ui, row, MENU_ROW_H);
+                        let resp = match refusal {
+                            Some(why) => resp.on_disabled_hover_text(why),
+                            None => resp.on_hover_text(
+                                "Picked by this component's width — each instance picks by its own",
+                            ),
+                        };
+                        if refusal.is_none() && resp.clicked() {
+                            pick = Some(Pick::ByWidth);
+                        }
+                    } else {
+                        let row = match (query.is_some(), by_width) {
+                            (true, _) => {
+                                ui::MenuRow::new(icon::DEVICES, "By width").accel(picked.as_deref())
+                            }
+                            (false, true) => ui::MenuRow::new(icon::DEVICES, "By width")
+                                .accel(inherits.as_deref()),
+                            (false, false) => {
+                                ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit")
+                                    .accel(inherits.as_deref())
+                            }
+                        }
+                        .checked(current.is_none());
+                        if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
+                            pick = Some(Pick::Inherit);
+                        }
                     }
                     ui::menu_sep(ui);
                     for (m, width) in modes.iter().zip(&widths) {
@@ -4636,19 +4820,46 @@ impl OndinApp {
                             .accel(width.as_deref())
                             .checked(current == Some(m.id));
                         if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
-                            pick = Some(Some(m.id));
+                            pick = Some(Pick::Mode(m.id));
                         }
                     }
                 });
             })
             .response
             .rect;
-        if let Some(mode) = pick {
+        if let Some(pick) = pick {
             self.mode_menu = None;
-            if mode != current {
-                let modes = var::with_mode(self.session.doc.variables(), &set, owner, mode);
-                self.session.name_step("Mode", icon::MODE);
-                self.commit_edit(Transaction(vec![Operation::SetModes { id, modes }]));
+            let doc = &self.session.doc;
+            let t = doc.variables();
+            let pin = |mode: Option<ModeId>| -> Vec<Operation> {
+                match mode == current {
+                    true => Vec::new(),
+                    false => vec![Operation::SetModes {
+                        id,
+                        modes: var::with_mode(t, &set, owner, mode),
+                    }],
+                }
+            };
+            // On a main, *Inherit* and a mode each end the query; on any other
+            // frame the query, an instance's following its main, is left alone.
+            let unquery = || match main {
+                true => var::query_ops(doc, id, owner, false).unwrap_or_default(),
+                false => Vec::new(),
+            };
+            let (ops, step) = match pick {
+                Pick::Inherit => ([pin(None), unquery()].concat(), ("Mode", icon::MODE)),
+                Pick::Mode(m) => ([pin(Some(m)), unquery()].concat(), ("Mode", icon::MODE)),
+                Pick::ByWidth => match var::query_ops(doc, id, owner, true) {
+                    Ok(ops) => (ops, ("By width", icon::DEVICES)),
+                    Err(why) => {
+                        self.session.info(why);
+                        return;
+                    }
+                },
+            };
+            if !ops.is_empty() {
+                self.session.name_step(step.0, step.1);
+                self.commit_edit(Transaction(ops));
             }
             return;
         }
@@ -6705,6 +6916,121 @@ mod tests {
         assert!(!doc.variables().first_collection().by_width());
         assert_eq!(doc.get(home).unwrap().modes(), [modes[1]]);
         assert!(!width_inherits(doc, home, c));
+    }
+
+    /// **Modes by a main's width, through the mode row** (R1, R2): a main's menu
+    /// offers *Inherit* and *By width* both, sized for both; picking by width,
+    /// the main's row and its instance's read the mode the width picks *· by
+    /// width*; the instance's menu has *By width* in *Inherit*'s place with the
+    /// main's own widths; and a main hugging its content offers no *By width*.
+    ///
+    /// flip: `collection_mode_row` without its query arm → fails at the main's
+    /// row, which reads *· default*.
+    #[test]
+    fn a_main_picks_by_its_width_through_the_mode_row() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        app.var_act(Act::NewMode);
+        app.var_act(Act::NewMode);
+        let c = CollectionId::FIRST;
+        let modes = app.session.doc.variables().first_collection().modes.clone();
+        let (card, inner) = (app.session.ids.mint(), app.session.ids.mint());
+        let root = app.session.doc.first_page();
+        let frame = |id, parent, w| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: ondin_core::NodeKind::Artboard {
+                size: Size::new(w, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Card".into()),
+        };
+        assert!(app.commit_edit(Transaction(vec![
+            frame(card, root, 300.0),
+            frame(inner, card, 100.0),
+            Operation::SetComponent {
+                id: card,
+                component: true,
+            },
+        ])));
+        let place = egui::Rect::from_min_size(egui::pos2(400.0, 100.0), egui::vec2(200.0, 28.0));
+        app.mode_menu = Some((card, c, place));
+        let menu = texts(&ctx, |_| app.mode_menu_ui(&ctx));
+        assert!(menu.iter().any(|t| t == "Inherit"), "{menu:?}");
+        assert!(menu.iter().any(|t| t == "By width"), "{menu:?}");
+        let painted = ui::painted_size(&ctx, egui::Id::new("frame-mode-menu"))
+            .expect("the menu painted")
+            .y;
+        let computed = ui::menu_height(modes.len() + 2, 1);
+        assert!((painted - computed).abs() < 0.01, "{computed} vs {painted}");
+        app.mode_menu = None;
+
+        let ops = var::query_ops(&app.session.doc, card, var::ModeOwner::Collection(c), true)
+            .expect("a main 300 wide picks by width");
+        assert!(app.commit_edit(Transaction(ops)));
+        let instance = {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(card).unwrap(),
+                    parent: root,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.commit_edit(tx));
+            made[0]
+        };
+        assert!(app.commit_edit(Transaction(vec![Operation::SetGeometry {
+            id: instance,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(700.0, 200.0)),
+        }])));
+        let row = |app: &mut OndinApp, id| {
+            let mut shown = Vec::new();
+            for _ in 0..2 {
+                let out = ctx.run_ui(Default::default(), |ui| app.frame_mode_row(ui, id));
+                shown = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            shown
+        };
+        let main_row = row(&mut app, card);
+        assert!(main_row.iter().any(|t| t == "· by width"), "{main_row:?}");
+        assert!(
+            main_row.iter().any(|t| t == "WIDTHS"),
+            "the fold: {main_row:?}"
+        );
+        let i_row = row(&mut app, instance);
+        assert!(
+            i_row.iter().any(|t| t == &modes[2].name) && i_row.iter().any(|t| t == "· by width"),
+            "the instance reads by width: {i_row:?}"
+        );
+        app.mode_menu = Some((instance, c, place));
+        let menu = texts(&ctx, |_| app.mode_menu_ui(&ctx));
+        assert!(menu.iter().any(|t| t == "By width"), "{menu:?}");
+        assert!(!menu.iter().any(|t| t == "Inherit"), "{menu:?}");
+        assert!(menu.iter().any(|t| t == "≥320"), "{menu:?}");
+        app.mode_menu = None;
+
+        let mut item = *app.session.doc.get(card).unwrap().item();
+        item.width = ondin_core::container::Dimension::FitContent;
+        assert!(app.commit_edit(Transaction(vec![Operation::SetLayoutItem {
+            id: card,
+            item
+        }])));
+        assert!(var::why_no_query(&app.session.doc, card).is_some());
     }
 
     /// A right-click cancelling the mode menu's breakpoint scrub drops the draft,

@@ -1502,6 +1502,22 @@ impl Walk<'_> {
         if let Some(mode) = self.tokens.modes_attr(node.modes().iter().copied()) {
             el.attrs.push(("data-mode", mode));
         }
+        // A frame whose contents pick modes by its width: a container, named
+        // after the component whose widths these are.
+        if !node.queries().is_empty() {
+            let scope = match node.component() {
+                true => node.name().to_string(),
+                false => ondin_core::component::main_of(doc, id)
+                    .and_then(|m| doc.get(m))
+                    .map_or_else(|| node.name().to_string(), |m| m.name().to_string()),
+            };
+            if let Some(words) = self
+                .tokens
+                .query_attr(doc.variables(), &scope, node.queries())
+            {
+                el.attrs.push(("data-query", words));
+            }
+        }
         if let Some(var) = node.opacity_var() {
             el.set("opacity", self.tokens.opacity(var));
         } else {

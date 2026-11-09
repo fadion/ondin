@@ -948,6 +948,12 @@ pub struct OndinApp {
     pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
     /// A frame's *Mode* menu, open under its row.
     pub(crate) mode_menu: Option<(NodeId, ondin_core::variable::CollectionId, egui::Rect)>,
+    /// A main's *Widths* fold under its mode row, folded shut, by frame and
+    /// collection: open unless here.
+    pub(crate) widths_folded:
+        std::collections::HashSet<(NodeId, ondin_core::variable::CollectionId)>,
+    /// A width being dragged in a *Widths* fold, committed when the drag ends.
+    pub(crate) query_draft: Option<(NodeId, ondin_core::ModeId, f64)>,
     /// A style slot card's `⋯` menu.
     pub(crate) style_menu: Option<crate::panels::styles::StyleMenu>,
     /// *Apply style…*'s picker.
@@ -1767,6 +1773,8 @@ impl OndinApp {
             var_retype: None,
             field_menu: None,
             mode_menu: None,
+            widths_folded: Default::default(),
+            query_draft: None,
             style_menu: None,
             style_picker: None,
             style_naming: None,

@@ -11566,13 +11566,36 @@ fn size_label(box_: KRect) -> String {
 }
 
 /// The name of the mode frame `id` picks at `width`, while it picks one by its
-/// width (`Document::width_pick`); `None` otherwise — a pin names nothing here,
-/// the frame tag does.
+/// width (`Document::width_pick`) or its contents do by a width query of its
+/// own (the first one it pins no mode of); `None` otherwise — a pin names
+/// nothing here, the frame tag does.
 fn width_mode_label(doc: &ondin_core::Document, id: NodeId, width: f64) -> Option<String> {
+    let t = doc.variables();
+    if let Some(n) = doc.get(id)
+        && let Some(m) = n
+            .queries()
+            .iter()
+            .filter(|q| {
+                !q.keys()
+                    .next()
+                    .is_some_and(|k| n.modes().iter().any(|m| var_same(t, *m, *k)))
+            })
+            .find_map(|q| ondin_core::variable::query_mode(t, q, width))
+    {
+        return t
+            .mode(m)
+            .map(|m| m.name.clone())
+            .or_else(|| t.kit_mode_of(m).map(|(_, k)| k.name.clone()));
+    }
     doc.width_pick(id)?;
     let c = doc.variables().by_width()?;
     let m = c.mode_for_width(width)?;
     Some(doc.variables().mode(m)?.name.clone())
+}
+
+/// Whether two modes are of one collection (`variable::same_collection`).
+fn var_same(t: &ondin_core::Variables, a: ondin_core::ModeId, b: ondin_core::ModeId) -> bool {
+    ondin_core::variable::same_collection(t, a, b)
 }
 
 /// The segment the pen's readout quotes, in world space: from the last anchor to

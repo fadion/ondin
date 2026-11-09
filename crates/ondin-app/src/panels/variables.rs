@@ -43,6 +43,9 @@ const GROUP_H: f32 = 26.0;
 const ROW_H: f32 = 28.0;
 /// A variable row's name indent past its group's caret.
 const INDENT: f32 = 23.0;
+/// The *Name* header's inset, and an ungrouped variable's name's, which has no
+/// caret to clear.
+const LEAD: f32 = 6.0;
 const SEARCH_ID: &str = "var-browser-search";
 
 /// The panel's width for `modes` modes.
@@ -2424,10 +2427,10 @@ impl OndinApp {
                             ui::RowMark::Glyph(glyph),
                             &crate::private::layer(doc, id),
                             ui::RowTail::Text(u.tail.clone()),
+                            u.why_not.as_deref(),
                         );
                         // Outlined only where the canvas shows it.
                         if resp.hovered() && doc.page_of(id) == Some(self.session.page) {
-                            u.why_not.as_deref(),
                             hover = Some(id);
                         }
                         if u.why_not.is_some() {
@@ -2711,8 +2714,10 @@ fn offer_line(
         n,
         if n == 1 { "field uses" } else { "fields use" }
     );
-    let text =
-        egui::Rect::from_x_y_ranges(rect.left() + INDENT..=button.left() - 8.0, rect.y_range());
+    let text = egui::Rect::from_x_y_ranges(
+        rect.left() + name_indent(v)..=button.left() - 8.0,
+        rect.y_range(),
+    );
     ui.painter().with_clip_rect(text).text(
         text.left_center(),
         egui::Align2::LEFT_CENTER,
@@ -3732,7 +3737,7 @@ fn header(
     );
     ui::paint_eyebrow(
         ui.painter(),
-        egui::pos2(rect.left() + 6.0, rect.center().y),
+        egui::pos2(rect.left() + LEAD, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "Name",
     );
@@ -3913,6 +3918,15 @@ fn group_row(
     }
 }
 
+/// Where a variable row's name starts: past its group's caret, or at the
+/// header's inset when it is in no group.
+fn name_indent(v: &Variable) -> f32 {
+    match var::split_name(&v.name).0.is_empty() {
+        true => LEAD,
+        false => INDENT,
+    }
+}
+
 /// A variable's row: its leaf name and usage count, then a cell per mode.
 #[allow(clippy::too_many_arguments)]
 fn var_row(
@@ -3928,6 +3942,7 @@ fn var_row(
     let table = doc.variables();
     let w = b.inner_w;
     let id = ui.id().with(("var-row", v.id));
+    let indent = name_indent(v);
     // The bare flag: the name and the cells are the row's tab stops.
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::CLICK);
     let menu_open = matches!(&b.menu, Some((Menu::Var(m), _)) if *m == v.id);
@@ -3942,7 +3957,7 @@ fn var_row(
     // From where the rename field starts, across the cells: a variable's name
     // column is too narrow for a sentence.
     let field = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + INDENT - 6.0, rect.top() + 3.0),
+        egui::pos2(rect.left() + indent - 6.0, rect.top() + 3.0),
         egui::pos2(rect.right() - 6.0, rect.bottom() - 3.0),
     );
     if describe_row(ui, field, Described::Variable(v.id), b, acts) {
@@ -3955,8 +3970,8 @@ fn var_row(
     let refused = b.refused.clone();
     if let Some(Edit::Name { var: _, text }) = b.edit.as_mut().filter(|_| editing_name) {
         let r = egui::Rect::from_min_size(
-            rect.min + egui::vec2(INDENT - 6.0, 3.0),
-            egui::vec2(NAME_W - INDENT, ROW_H - 6.0),
+            rect.min + egui::vec2(indent - 6.0, 3.0),
+            egui::vec2(NAME_W - indent, ROW_H - 6.0),
         );
         let field = edit_field(
             ui,
@@ -3992,7 +4007,7 @@ fn var_row(
             ),
             count_galley.size(),
         );
-        let leaf_w = count_rect.left() - (rect.left() + INDENT) - 6.0;
+        let leaf_w = count_rect.left() - (rect.left() + indent) - 6.0;
         let galley = p.layout(
             leaf.to_string(),
             egui::FontId::proportional(ui::SMALL_PT),
@@ -4000,12 +4015,12 @@ fn var_row(
             f32::INFINITY,
         );
         let clip = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + INDENT, rect.top()),
+            egui::pos2(rect.left() + indent, rect.top()),
             egui::vec2(leaf_w.max(0.0), ROW_H),
         );
         p.with_clip_rect(clip).galley(
             egui::pos2(
-                rect.left() + INDENT,
+                rect.left() + indent,
                 rect.center().y - galley.size().y / 2.0,
             ),
             galley,

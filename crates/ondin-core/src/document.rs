@@ -478,8 +478,14 @@ impl Document {
             }
             // A frame's width queries answer for what is inside it, after its own
             // pins and before anything around it; never for the frame itself.
+            // Kit queries first, as kit pins are: a kit's own pick beats the
+            // mapping from a document query on the same frame.
             if n.id != id {
-                for q in &n.queries {
+                let (kits, ours): (Vec<_>, Vec<_>) = n
+                    .queries
+                    .iter()
+                    .partition(|q| q.keys().any(|m| t.kit_mode_of(*m).is_some()));
+                for q in kits.into_iter().chain(ours) {
                     if let Some(m) = self.query_pick_in(t, n.id, q)
                         && !out
                             .iter()

@@ -448,3 +448,60 @@ fn a_nested_query_settles_after_the_one_around_it() {
     assert_eq!(size.width, 700.0, "the inner Card reads Wide's width");
     assert_eq!(f.inside(inner), Some(f.wide), "and then picks Wide itself");
 }
+
+/// A frame querying both Density and a kit's Density mapped onto it: the kit's
+/// own pick answers for the kit, whatever the queries' order. At 700 the
+/// document query picks Wide, which maps to the kit's Wide; the kit query, Wide
+/// only from 1000, picks the kit's Compact. Flip: `modes_at_in` taking the
+/// queries in stored order → the kit's Wide.
+#[test]
+fn a_kit_query_beats_the_mapping_from_a_document_query() {
+    use ondin_core::variable::{KitMode, KitModes};
+    const KIT: &str = "0123456789abcdef0123456789abcdef";
+    let mut f = fixture();
+    let (kc, kw) = (f.ids.mint_mode(), f.ids.mint_mode());
+    let (from_c, from_w) = (f.ids.mint_mode(), f.ids.mint_mode());
+    let kit_mode = |id, from, name: &str| KitMode {
+        id,
+        name: name.into(),
+        from,
+        collection: "Density".into(),
+    };
+    let ours = [
+        (f.compact, 0.0),
+        (f.regular, QUERY_STEP),
+        (f.wide, 2.0 * QUERY_STEP),
+    ]
+    .into();
+    f.commit(vec![
+        Operation::SetKitModes {
+            kit: KIT.into(),
+            modes: Some(KitModes {
+                name: Some("Brand".into()),
+                modes: vec![
+                    kit_mode(kc, from_c, "Compact"),
+                    kit_mode(kw, from_w, "Wide"),
+                ],
+                map: Default::default(),
+            }),
+        },
+        Operation::SetQueries {
+            id: f.card,
+            queries: vec![ours, [(kc, 0.0), (kw, 1000.0)].into()],
+        },
+    ]);
+    let page = f.page;
+    let i = f.instance(page, 700.0);
+    let child = f.doc.get(i).unwrap().children()[0];
+    assert_eq!(
+        f.inside(i),
+        Some(f.wide),
+        "the fixture: the document's Wide"
+    );
+    let set = f.doc.modes_at(child);
+    assert_eq!(
+        f.doc.variables().kit_mode_at(KIT, "Density", &set),
+        Some(kc),
+        "the kit's own Compact, not Wide mapped"
+    );
+}

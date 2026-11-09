@@ -188,7 +188,13 @@ impl Tokens {
     /// of no weight, so source order alone ranks them and a child pinning a mode
     /// of its own keeps it, the nearer pin winning as on the canvas.
     fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
-        for (word, of, widths) in &self.queries {
+        // Kit queries after the document's, so a kit's own pick beats the
+        // mapping from a document query on the same frame, as on the canvas.
+        let (kits, ours): (Vec<_>, Vec<_>) = self
+            .queries
+            .iter()
+            .partition(|(_, of, _)| matches!(of, QueryOf::Kit(..)));
+        for (word, of, widths) in ours.into_iter().chain(kits) {
             let (col, modes): (Option<&variable::Collection>, Vec<ModeId>) = match of {
                 QueryOf::Collection(c) => {
                     let Some(col) = t.collection(*c) else {

@@ -2001,9 +2001,11 @@ fn a_width_query_is_written_as_a_container_query() {
 /// the kit collection, its children given the kit's narrowest mode and each
 /// other one under `@container`, with the kit's variables in that mode's column
 /// and a document alias of one redeclared beside it; a kit mode's pin is `~=`.
+/// Its blocks follow the frame's document query, listed after it, so they win.
 ///
 /// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container";
-/// `Tokens::kit_block` without its alias arm → "redeclares the alias".
+/// `Tokens::kit_block` without its alias arm → "redeclares the alias";
+/// `Tokens::query_blocks` in stored order → "after the document's".
 #[test]
 fn a_kit_collections_width_query_is_written_as_a_container_query() {
     use ondin_core::BrushSource;
@@ -2091,15 +2093,28 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
                 visible: true,
             }]),
         },
+        // The document's own query too, whose mapping onto the kit loses.
         Operation::SetQueries {
             id: card,
-            queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+            queries: vec![
+                [(compact, 0.0), (wide, 320.0)].into(),
+                [(first, 0.0)].into(),
+            ],
         },
     ]);
     let (doc, res) = d.done();
     let export = html_of(&doc, &res, &[card]);
     let tokens =
         String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    let at = |s: &str| {
+        tokens
+            .find(s)
+            .unwrap_or_else(|| panic!("no {s}:\n{tokens}"))
+    };
+    assert!(
+        at("[data-query~=\"card-variables\"] {") < at("[data-query~=\"card-density\"] {"),
+        "the kit's query after the document's:\n{tokens}"
+    );
     assert!(
         tokens.contains("  --brand-ink: #3c78f0;\n    --bg: var(--brand-ink);\n  }\n}\n"),
         "the wide block redeclares the alias:\n{tokens}"
@@ -2126,11 +2141,10 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
         ),
         "tokens.css lacks the wide block:\n{tokens}"
     );
-    let marked = export
-        .files
-        .iter()
-        .any(|f| String::from_utf8_lossy(&f.bytes).contains("data-query=\"card-density\""));
-    assert!(marked, "no file marks the frame with its query");
+    let marked = export.files.iter().any(|f| {
+        String::from_utf8_lossy(&f.bytes).contains("data-query=\"card-density card-variables\"")
+    });
+    assert!(marked, "no file marks the frame with its queries");
 }
 
 /// A text's bound type numbers write their variables in the unit each literal

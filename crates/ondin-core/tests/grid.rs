@@ -1970,6 +1970,15 @@ fn areas_read_and_write_as_css() {
         parse_areas("'a ...'  \"a b\"").unwrap(),
         vec![area("a", [1, 2], [1, 3]), area("b", [2, 3], [2, 3])]
     );
+    assert_eq!(
+        parse_areas("\"a..b\" \"a.b\"").unwrap(),
+        vec![area("a", [1, 2], [1, 3]), area("b", [3, 4], [1, 3])],
+        "dots split names without spaces, as CSS tokenizes"
+    );
+    assert_eq!(
+        parse_areas("\"a#b\"").unwrap_err(),
+        "\"#\" cannot be part of an area name"
+    );
     assert_eq!(parse_areas("none").unwrap(), vec![]);
     assert_eq!(areas_css(&[], 3, 2), "none");
     assert_eq!(

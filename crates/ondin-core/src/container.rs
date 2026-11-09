@@ -1394,7 +1394,7 @@ pub fn areas_css(areas: &[GridArea], columns: usize, rows: usize) -> String {
 }
 
 /// Areas from CSS `grid-template-areas` text, the inverse of [`areas_css`]:
-/// quoted rows of whitespace-separated names, any run of dots an empty cell.
+/// quoted rows of names, any run of dots an empty cell ([`area_cells`]).
 /// `none` or nothing is no areas. The error says what CSS would refuse: rows of
 /// different lengths, or a name whose cells are not one rectangle.
 pub fn parse_areas(text: &str) -> Result<Vec<GridArea>, String> {
@@ -1413,10 +1413,7 @@ pub fn parse_areas(text: &str) -> Result<Vec<GridArea>, String> {
         let Some(end) = body.find(q) else {
             return Err("a row's quote is not closed".into());
         };
-        let cells: Vec<Option<&str>> = body[..end]
-            .split_whitespace()
-            .map(|c| (!c.chars().all(|ch| ch == '.')).then_some(c))
-            .collect();
+        let cells = area_cells(&body[..end])?;
         if cells.is_empty() {
             return Err("a row has no cells".into());
         }
@@ -1463,6 +1460,33 @@ pub fn parse_areas(text: &str) -> Result<Vec<GridArea>, String> {
         }
     }
     Ok(areas)
+}
+
+/// One row of `grid-template-areas` as CSS tokenizes it: a run of name
+/// characters is a named cell and a run of dots an empty one, so `a..b` is three
+/// cells and needs no spaces. Any other character is an error, as in CSS.
+fn area_cells(row: &str) -> Result<Vec<Option<&str>>, String> {
+    let is_name = |c: char| c.is_alphanumeric() || c == '-' || c == '_' || !c.is_ascii();
+    let mut cells = Vec::new();
+    let mut rest = row;
+    while let Some(c) = rest.chars().next() {
+        if c.is_whitespace() {
+            rest = &rest[c.len_utf8()..];
+            continue;
+        }
+        let run = |f: &dyn Fn(char) -> bool| rest.find(|ch: char| !f(ch)).unwrap_or(rest.len());
+        let (cell, len) = if c == '.' {
+            (None, run(&|ch| ch == '.'))
+        } else if is_name(c) {
+            let len = run(&is_name);
+            (Some(&rest[..len]), len)
+        } else {
+            return Err(format!("\"{c}\" cannot be part of an area name"));
+        };
+        cells.push(cell);
+        rest = &rest[len..];
+    }
+    Ok(cells)
 }
 
 /// A cursor over CSS text for [`parse_tracks`] — whitespace skipped before every

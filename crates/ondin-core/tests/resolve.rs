@@ -4529,8 +4529,8 @@ fn equal_texts_share_a_layout_and_each_text_keeps_its_own() {
 /// index entry by entry rather than rebuild it, and the index still matches a
 /// rebuild. Opening a large file crashed in exactly this insert.
 ///
-/// flip: `PageIndex::insert` inserting into its bulk-loaded tree → panics inside
-/// `rstar` ("This is a bug in rstar") during the creates.
+/// flip: `rstar` held at 0.13.0 → panics inside `rstar` ("This is a bug in
+/// rstar") during the creates.
 #[test]
 fn creates_after_a_rebuild_patch_a_bulk_loaded_index() {
     let at = |i: u64| ((i * 7919 % 10_007) as f64, (i * 104_729 % 10_009) as f64);

@@ -21,13 +21,11 @@ use crate::op::DirtySet;
 use crate::text::{self, TextLayout};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::FontData;
-use rstar::{AABB, RTreeObject};
+use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-mod page_index;
 mod shaper;
-use page_index::PageIndex;
 use shaper::Shaper;
 
 /// R-tree leaf: the world bounds of one indexable node.
@@ -620,8 +618,9 @@ pub struct Resolved {
     /// because both read as "no entry" in `boolean`.
     failed: FxHashSet<NodeId>,
     /// One tree per page, keyed by the page's root: a query is always about
-    /// one canvas.
-    index: FxHashMap<NodeId, PageIndex>,
+    /// one canvas. `update` inserts into trees `build_index` bulk-loaded, which
+    /// needs `rstar` 0.13.1 or later (see `rtree_tests`).
+    index: FxHashMap<NodeId, RTree<BoundsEntry>>,
     /// The entry `index` holds for each node and the page whose tree holds it, so
     /// `update` takes out exactly what it put in rather than rebuilding the trees.
     indexed: FxHashMap<NodeId, (NodeId, BoundsEntry)>,
@@ -1653,7 +1652,7 @@ fn page_in(
 }
 
 /// What `index` holds, by node: the `Resolved::indexed` map.
-fn held(index: &FxHashMap<NodeId, PageIndex>) -> FxHashMap<NodeId, (NodeId, BoundsEntry)> {
+fn held(index: &FxHashMap<NodeId, RTree<BoundsEntry>>) -> FxHashMap<NodeId, (NodeId, BoundsEntry)> {
     index
         .iter()
         .flat_map(|(page, tree)| tree.iter().map(|e| (e.id, (*page, e.clone()))))
@@ -1670,7 +1669,7 @@ fn held(index: &FxHashMap<NodeId, PageIndex>) -> FxHashMap<NodeId, (NodeId, Boun
 fn build_index(
     doc: &Document,
     world_bounds: &FxHashMap<NodeId, Rect>,
-) -> FxHashMap<NodeId, PageIndex> {
+) -> FxHashMap<NodeId, RTree<BoundsEntry>> {
     doc.page_ids()
         .map(|page| {
             let entries: Vec<BoundsEntry> = crate::subtree_nodes(doc, &[page])
@@ -1681,7 +1680,7 @@ fn build_index(
                     Some(entry(id, r))
                 })
                 .collect();
-            (page, PageIndex::bulk_load(entries))
+            (page, RTree::bulk_load(entries))
         })
         .collect()
 }
@@ -2401,5 +2400,67 @@ mod used_geometry_tests {
             Some(Rect::new(50.0, 10.0, 150.0, 60.0)),
             "the entry left, and the rect is back where the document puts it"
         );
+    }
+}
+
+/// The premise `Resolved::reindex` rests on: `rstar` can insert into a tree it
+/// bulk-loaded. Before 0.13.1 its bulk load put leaves on uneven levels at some
+/// sizes and the first insert reaching the difference panicked.
+#[cfg(test)]
+mod rtree_tests {
+    use super::*;
+
+    fn e(seq: u64) -> BoundsEntry {
+        let (x, y) = (
+            (seq * 7919 % 10_007) as f64,
+            (seq * 104_729 % 10_009) as f64,
+        );
+        BoundsEntry {
+            id: NodeId { actor: 1, seq },
+            min: [x, y],
+            max: [x + 5.0, y + 5.0],
+        }
+    }
+
+    fn leaf_depths(n: &rstar::ParentNode<BoundsEntry>, d: usize, out: &mut FxHashSet<usize>) {
+        for c in n.children() {
+            match c {
+                rstar::RTreeNode::Leaf(_) => {
+                    out.insert(d);
+                }
+                rstar::RTreeNode::Parent(p) => leaf_depths(p, d + 1, out),
+            }
+        }
+    }
+
+    /// A bulk-loaded tree of any size has all its leaves on one level.
+    ///
+    /// flip: `rstar` held at 0.13.0 → fails at 25 entries.
+    #[test]
+    fn a_bulk_loaded_tree_has_its_leaves_on_one_level() {
+        for n in (0..=600).chain([1_537, 1_791, 6_145, 7_167]) {
+            let tree = RTree::bulk_load((0..n).map(e).collect());
+            let mut d = FxHashSet::default();
+            leaf_depths(tree.root(), 0, &mut d);
+            assert!(d.len() <= 1, "{n} entries: leaf depths {d:?}");
+        }
+    }
+
+    /// Removing from and inserting into a bulk-loaded tree, at the sizes that
+    /// used to come out uneven, keeps exactly the entries put in.
+    ///
+    /// flip: `rstar` held at 0.13.0 → panics inside `rstar` ("This is a bug in
+    /// rstar").
+    #[test]
+    fn a_bulk_loaded_tree_takes_inserts() {
+        for n in (25..=27).chain(97..=111).chain([385, 447]) {
+            let mut tree = RTree::bulk_load((0..n).map(e).collect());
+            for k in 0..n {
+                assert!(tree.remove(&e(k)).is_some(), "{n}: entry {k}");
+                tree.insert(e(1_000_000 + k));
+            }
+            let found: FxHashSet<u64> = tree.iter().map(|e| e.id.seq).collect();
+            assert_eq!(found, (1_000_000..1_000_000 + n).collect(), "{n} entries");
+        }
     }
 }

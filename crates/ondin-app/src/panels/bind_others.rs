@@ -4,9 +4,10 @@
 //!
 //! **Same value means binding changes nothing on screen**: each field's drawn
 //! value is compared with the variable's value in the modes in force at that
-//! layer (`Document::resolve_var`). A colour matches on its colour alone, the
-//! fill's `%` being its own field that the bind keeps. A field the bind would
-//! not write (`build::bind_field_ops` empty) is not offered.
+//! layer (`Document::resolve_var`). A paint draws the variable's colour times
+//! its own `%`, so it matches on the colour, and the bind sets the `%` that
+//! keeps its alpha: a 25% black is a 50% black variable at 50% (`share`). A
+//! field the bind would not write (`build::bind_field_ops` empty) is not offered.
 //!
 //! Left out: fields already bound, the vault and kit instances (their mains
 //! belong to the kit, and its next update would drop the binding), visibility,
@@ -19,8 +20,9 @@
 use super::binding::{COLUMN_GAP, FieldKey, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, ROW_GAP};
 use super::paint::PaintSlot;
 use crate::app::OndinApp;
+use ondin_core::peniko::Color;
 use ondin_core::variable::{Cell, Field, Value, VarId};
-use ondin_core::{Document, NodeId, NodeKind, Operation, Transaction};
+use ondin_core::{Document, NodeId, NodeKind, Operation, PaintTarget, Transaction};
 
 /// One field that draws the variable's value.
 #[derive(Clone, Debug, PartialEq)]
@@ -148,6 +150,46 @@ fn same(cell: &Cell, value: &Value) -> bool {
     }
 }
 
+/// The `%` a paint drawing `drawn` binds a colour variable of value `var` at so
+/// it draws the same: its alpha over the variable's. `None` when the colours
+/// differ, or the paint is more opaque than the variable can draw.
+fn share(drawn: Color, var: Color) -> Option<f32> {
+    if drawn.with_alpha(1.0).to_rgba8() != var.with_alpha(1.0).to_rgba8() {
+        return None;
+    }
+    let (d, v) = (drawn.components[3], var.components[3]);
+    let k = if v > 0.0 { (d / v).min(1.0) } else { 1.0 };
+    (var.multiply_alpha(k).to_rgba8() == drawn.to_rgba8()).then_some(k)
+}
+
+/// The solid colour paint field `key` draws, its alpha included; `None` for
+/// any other field or brush.
+fn drawn_solid(doc: &Document, key: FieldKey) -> Option<Color> {
+    let FieldKey::Paint { id, slot } = key else {
+        return None;
+    };
+    let (target, index) = super::binding::paint_item(slot)?;
+    let p = doc.get(id)?.paint();
+    let b = match target {
+        PaintTarget::Fill => &p.fills.get(index)?.brush,
+        PaintTarget::Stroke => &p.strokes.get(index)?.brush,
+    };
+    match doc.resolve_brush(id, b).into_owned() {
+        ondin_core::Brush::Solid(c) => Some(c),
+        _ => None,
+    }
+}
+
+/// Whether `key`, drawing `cell`, draws the variable's `value`.
+fn draws(doc: &Document, key: FieldKey, cell: &Cell, value: &Value) -> bool {
+    match (key, value) {
+        (FieldKey::Paint { .. }, Value::Color(v)) => {
+            drawn_solid(doc, key).and_then(|c| share(c, *v)).is_some()
+        }
+        _ => same(cell, value),
+    }
+}
+
 /// `key` on node `id` in place of its own.
 fn on(key: FieldKey, id: NodeId) -> FieldKey {
     match key {
@@ -259,7 +301,7 @@ impl OndinApp {
                 let Some(cell) = self.field_value(key) else {
                     continue;
                 };
-                if resting(key, &cell) || !same(&cell, &value) || !literal(doc, key) {
+                if resting(key, &cell) || !draws(doc, key, &cell, &value) || !literal(doc, key) {
                     continue;
                 }
                 let Some(bf) = key.bound() else { continue };
@@ -394,7 +436,22 @@ impl OndinApp {
         let mut n = 0;
         for k in keys {
             let Some(bf) = k.bound() else { continue };
-            let tx = ondin_core::build::bind_field_ops(&scratch, &[k.at()], bf, Some(var));
+            // A paint takes the `%` that keeps it drawing as it did, not its
+            // own alpha, which a translucent variable would multiply again.
+            let tx = match (*k, scratch.resolve_var(k.at(), var)) {
+                (FieldKey::Paint { slot, .. }, Some(Value::Color(v))) => {
+                    let Some(alpha) = drawn_solid(&scratch, *k).and_then(|c| share(c, v)) else {
+                        continue;
+                    };
+                    let Some((target, index)) = super::binding::paint_item(slot) else {
+                        continue;
+                    };
+                    ondin_core::set_brush_at_all(&scratch, &[k.at()], target, index, |_, _| {
+                        ondin_core::BrushSource::Bound { var, alpha }
+                    })
+                }
+                _ => ondin_core::build::bind_field_ops(&scratch, &[k.at()], bf, Some(var)),
+            };
             if tx.0.is_empty() || scratch.apply(&tx).is_err() {
                 continue;
             }
@@ -648,6 +705,78 @@ mod tests {
         );
         app.undo();
         assert_eq!(app.session.doc, before, "one undo");
+    }
+
+    /// **A translucent colour variable matches the paints it can draw**: a 50%
+    /// blue variable offers a 50% blue fill (bound at 100%) and a 25% one (at
+    /// 50%), not an opaque blue, and both draw as before once bound.
+    ///
+    /// flip: `bind_other_uses` keeping each fill's own alpha (`bind_field_ops`)
+    /// → fails at "A draws as before".
+    #[test]
+    fn a_translucent_variable_binds_the_fills_it_draws() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let [a, b, c] = [(); 3].map(|_| app.session.ids.mint());
+        app.session
+            .try_commit(Transaction(vec![
+                rect(a, page, "A"),
+                fill(a, BLUE, 0.5),
+                rect(b, page, "B"),
+                fill(b, BLUE, 0.25),
+                rect(c, page, "C"),
+                fill(c, BLUE, 1.0),
+            ]))
+            .unwrap();
+        let key = |id| FieldKey::Paint {
+            id,
+            slot: PaintSlot::Fill(0),
+        };
+        // Extract C's opaque blue, make the variable 50% blue, and give C its
+        // own opaque blue back.
+        app.extract_field(key(c), app.field_value(key(c)).unwrap());
+        let var = app.field_var(key(c)).unwrap();
+        let mut v = app.session.doc.variables().get(var).unwrap().clone();
+        for cell in v.cells.values_mut() {
+            *cell = Cell::Color(BLUE.with_alpha(0.5));
+        }
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::SetVariable { var: v },
+                Operation::SetFills {
+                    id: c,
+                    fills: keyed_by_position([Fill {
+                        brush: BLUE.into(),
+                        visible: true,
+                    }]),
+                },
+            ]))
+            .unwrap();
+        let keys: Vec<FieldKey> = app.other_uses(var).iter().map(|u| u.key).collect();
+        let mut at: Vec<NodeId> = keys.iter().map(|k| k.at()).collect();
+        at.sort();
+        let mut want = vec![a, b];
+        want.sort();
+        assert_eq!(at, want, "A and B, not opaque C");
+        app.bind_other_uses(var, &keys);
+        let doc = &app.session.doc;
+        let drawn = |id: NodeId| {
+            doc.resolve_brush(id, &doc.get(id).unwrap().paint().fills[0].brush)
+                .into_owned()
+        };
+        assert_eq!(doc.get(a).unwrap().paint().fills[0].brush.var(), Some(var));
+        assert_eq!(
+            drawn(a),
+            ondin_core::Brush::Solid(BLUE.with_alpha(0.5)),
+            "A draws as before"
+        );
+        assert_eq!(
+            drawn(b),
+            ondin_core::Brush::Solid(BLUE.with_alpha(0.25)),
+            "B draws as before"
+        );
     }
 
     #[test]

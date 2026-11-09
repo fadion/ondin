@@ -392,7 +392,24 @@ fn slider_rail(g: &Ground) -> bool {
     (g.rect.height() - ui::SLIDER_RAIL_H).abs() <= SLOP && g.stroke == Stroke::NONE
 }
 
+/// A `ui::inline_edit` ground: a text entry on the bare field fill at
+/// `BUTTON_R`, with no hairline or only the typing edge, shorter than a control.
+/// A `ui::text_field` keeps its hairline at rest and stands `CONTROL_H`.
+fn inline_edit(g: &Ground) -> bool {
+    g.field
+        && g.fill == color::field()
+        && uniform(g.radius) == Some(ui::BUTTON_R)
+        && (g.stroke == Stroke::NONE || g.stroke.color == color::accent_700())
+        && g.rect.height() < ui::CONTROL_H - SLOP
+}
+
 const EXEMPT: &[Exempt] = &[
+    Exempt {
+        what: "inline rename",
+        why: "`ui::inline_edit` lays a name field over a list row or card at the \
+              row's own height, not a control's, so it sits on no rung of the scale",
+        is: inline_edit,
+    },
     Exempt {
         what: "slider rail",
         why: "`ui::slider` draws a hairline track with a knob riding on it, a value \
@@ -1303,10 +1320,6 @@ fn sweep_on(theme: Theme) {
         let value = a.field_value(key).expect("the box draws a colour");
         a.extract_field(key, value);
         let var = a.field_var(key).expect("extracted");
-        // The extract leaves the name open for typing; this pass is the list's.
-        if let Some(b) = a.var_browser.as_mut() {
-            b.escape();
-        }
         a.open_bind_others(var);
     });
     check("bind other uses popover", app, found);

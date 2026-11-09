@@ -722,9 +722,12 @@ pub fn propagate_structure(
                     // origin, and the vault refused the commit; every update that
                     // added a layer to a nested kit main failed. That copy's own
                     // gain reaches its instances as a parent of its own above.
+                    // A push to main supplies an existing layer, relinked to the
+                    // layer it gave the main, so the test is a link this edit
+                    // wrote, not a node it made.
                     let supplied = after_nodes[&pc].children.iter().any(|k| {
-                        !before.contains_key(k)
-                            && after_nodes.get(k).and_then(|n| n.link) == Some(nodes[0].id)
+                        after_nodes.get(k).and_then(|n| n.link) == Some(nodes[0].id)
+                            && before.get(k).and_then(|n| n.link) != Some(nodes[0].id)
                     });
                     if supplied {
                         continue;

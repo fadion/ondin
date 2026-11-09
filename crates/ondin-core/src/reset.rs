@@ -852,7 +852,7 @@ pub fn subtree_child_drift(doc: &Document, p: NodeId) -> ChildDrift {
 /// Each (copy, its source's child) where the child has no counterpart anywhere in
 /// the copy's instance — moved elsewhere in the instance is not missing. A child
 /// under a missing one is not asked about: restoring the outer one brings it.
-fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
+pub(crate) fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
     let mut linked_in: FxHashMap<NodeId, FxHashSet<NodeId>> = FxHashMap::default();
     let mut out = Vec::new();
     for &p in nodes {
@@ -926,7 +926,7 @@ fn links_under(doc: &Document, root: NodeId) -> FxHashSet<NodeId> {
 /// `p`'s children in its source's order, where they are not — the linked
 /// children taking the source's order in the slots they occupy, the instance's own
 /// layers staying where they are (`propagate_structure`'s reorder rule).
-fn order_target(doc: &Document, p: NodeId) -> Option<Vec<NodeId>> {
+pub(crate) fn order_target(doc: &Document, p: NodeId) -> Option<Vec<NodeId>> {
     let node = doc.get(p)?;
     let src = doc.get(source_of(doc, p)?)?;
     let theirs: FxHashSet<NodeId> = src.children.iter().copied().collect();

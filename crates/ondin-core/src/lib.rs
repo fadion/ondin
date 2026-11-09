@@ -64,6 +64,7 @@ pub mod penpot_in;
 pub mod penpot_v1;
 pub mod pixel_fit;
 pub mod propagate;
+pub mod push;
 pub mod query;
 pub mod rename;
 pub mod repeat;

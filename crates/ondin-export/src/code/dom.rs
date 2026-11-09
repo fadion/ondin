@@ -45,6 +45,45 @@ pub(crate) struct Element {
     /// other variants, the first whose values hold winning. Each rule is whole,
     /// so exactly one of the element's rules applies.
     pub alts: Vec<Alt>,
+    /// The text style it wears as a class of `text-styles.css`, before its own.
+    /// [`Self::style`] stays whole, so merges and states compare what is drawn;
+    /// only the printed rule leaves out what the style's class declares.
+    pub text_class: Option<std::rc::Rc<TextClass>>,
+}
+
+/// A text style written as a global class, which every text using it wears.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TextClass {
+    pub class: String,
+    pub style: Vec<(&'static str, String)>,
+}
+
+impl TextClass {
+    /// `style` less the declarations this class already makes. A property the
+    /// class declares and `style` does not is set back to `normal`, the value
+    /// such a property takes when the walk leaves it out.
+    pub fn own(&self, style: &[(&'static str, String)]) -> Vec<(&'static str, String)> {
+        let mut out: Vec<_> = style
+            .iter()
+            .filter(|d| !self.style.contains(d))
+            .cloned()
+            .collect();
+        for (p, _) in &self.style {
+            if !style.iter().any(|(q, _)| q == p) {
+                out.push((p, "normal".into()));
+            }
+        }
+        out
+    }
+
+    /// The class's rule.
+    pub fn css(&self, out: &mut String) {
+        let _ = writeln!(out, ".{} {{", self.class);
+        for (p, v) in &self.style {
+            let _ = writeln!(out, "  {p}: {v};");
+        }
+        out.push_str("}\n");
+    }
 }
 
 /// A class an element wears under some of its set's variants.
@@ -514,22 +553,40 @@ impl Element {
             let _ = write!(expr, "{} ? {} : ", any_of(&a.when, syntax), one(&a.class));
         }
         expr.push_str(&one(&self.class));
+        // A text style's class is global, a plain string before the own class.
+        let global = match &self.text_class {
+            Some(t) => format!("{} ", t.class),
+            None => String::new(),
+        };
         match syntax {
             // The class a component root is placed with joins its own.
             Syntax::Jsx if self.takes_class => {
-                let _ = write!(out, " className={{`${{{expr}}} ${{className ?? \"\"}}`}}");
+                let _ = write!(
+                    out,
+                    " className={{`{global}${{{expr}}} ${{className ?? \"\"}}`}}"
+                );
+            }
+            Syntax::Jsx if !self.alts.is_empty() && !global.is_empty() => {
+                let _ = write!(out, " className={{`{global}${{{expr}}}`}}");
             }
             Syntax::Jsx if !self.alts.is_empty() => {
                 let _ = write!(out, " className={{{expr}}}");
             }
+            Syntax::Jsx if !global.is_empty() => {
+                let _ = write!(out, " className={{`{global}${{{expr}}}`}}");
+            }
             Syntax::Jsx => {
                 let _ = write!(out, " className={}", super::jsx::module_class(&self.class));
             }
+            // Vue joins a static `class` with a bound one.
             Syntax::Vue if !self.alts.is_empty() => {
+                if let Some(t) = &self.text_class {
+                    let _ = write!(out, " class=\"{}\"", escape(&t.class));
+                }
                 let _ = write!(out, " :class=\"{}\"", escape(&expr));
             }
             _ => {
-                let _ = write!(out, " class=\"{}\"", escape(&self.class));
+                let _ = write!(out, " class=\"{}{}\"", escape(&global), escape(&self.class));
             }
         }
     }
@@ -607,12 +664,30 @@ impl Element {
         }
     }
 
+    /// [`Self::each`], mutably.
+    pub fn each_mut(&mut self, f: &mut impl FnMut(&mut Element)) {
+        f(self);
+        for c in &mut self.children {
+            if let Child::Element(e) = c {
+                e.each_mut(f);
+            }
+        }
+    }
+
     /// Every rule in the subtree, in document order. A component use's rule names
     /// its class twice, so it outranks the component root's own rule whichever
     /// stylesheet loads last.
     pub fn css(&self, out: &mut String) {
         let alts = self.alts.iter().map(|a| (&a.class, &a.style));
         for (class, style) in std::iter::once((&self.class, &self.style)).chain(alts) {
+            let own;
+            let style = match &self.text_class {
+                Some(t) => {
+                    own = t.own(style);
+                    &own
+                }
+                None => style,
+            };
             if class.is_empty() || style.is_empty() {
                 continue;
             }
@@ -690,6 +765,15 @@ pub(crate) struct Classes {
 }
 
 impl Classes {
+    /// Classes that start out taken: the text styles', which share a page with
+    /// every file's own.
+    pub fn reserving<'a>(names: impl IntoIterator<Item = &'a String>) -> Self {
+        Classes {
+            taken: names.into_iter().cloned().collect(),
+            next: HashMap::new(),
+        }
+    }
+
     pub fn mint(&mut self, name: &str, fallback: &str) -> String {
         let mut base = slug(name);
         if base.is_empty() {

@@ -180,11 +180,16 @@ fn drawn(el: &Element, components: &Components, env: &Env) -> Option<Element> {
 /// the page's others, the one `styles.css` they share, and the tail every
 /// emitter writes.
 fn files_of(page: walk::Page, roots: Vec<Element>, styles: String) -> CodeExport {
-    let tokens_link = if page.tokens.is_some() {
-        "<link rel=\"stylesheet\" href=\"tokens.css\">\n"
-    } else {
-        ""
-    };
+    let mut tokens_link = String::new();
+    if page.tokens.is_some() {
+        tokens_link.push_str("<link rel=\"stylesheet\" href=\"tokens.css\">\n");
+    }
+    if page.text_styles.is_some() {
+        tokens_link.push_str(&format!(
+            "<link rel=\"stylesheet\" href=\"{}\">\n",
+            super::TEXT_STYLES
+        ));
+    }
     let paths = std::iter::once("index.html".to_string())
         .chain(page.others.iter().map(|(name, _)| format!("{name}.html")));
     let mut files: Vec<CodeFile> = paths

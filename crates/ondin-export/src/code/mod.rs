@@ -132,6 +132,8 @@ pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
             continue;
         };
         let mut el = (**el).clone();
+        // The clipboard carries no `text-styles.css`, so each text keeps its whole face.
+        el.each_mut(&mut |e| e.text_class = None);
         el.style
             .retain(|(p, _)| !matches!(*p, "position" | "left" | "top"));
         collapse_solids(&mut el);
@@ -335,6 +337,12 @@ pub(crate) fn finish(mut files: Vec<CodeFile>, page: walk::Page) -> CodeExport {
             bytes: tokens.into_bytes(),
         });
     }
+    if let Some(css) = page.text_styles {
+        files.push(CodeFile {
+            path: TEXT_STYLES.into(),
+            bytes: css.into_bytes(),
+        });
+    }
     files.extend(
         page.assets
             .into_iter()
@@ -362,6 +370,20 @@ pub(crate) fn stylesheet(root: &dom::Element, up: &str) -> String {
     root.css(&mut css);
     root.states_css(&mut css);
     css.replace("url(\"assets/", &format!("url(\"{up}assets/"))
+}
+
+/// The stylesheet holding a class per text style the export uses. Every file
+/// whose tree wears one imports it before its own rules, so where a text sets
+/// a value of its own, its rule comes later and wins.
+pub(crate) const TEXT_STYLES: &str = "text-styles.css";
+
+/// Whether any element under `roots` wears a text style's class.
+pub(crate) fn wears_text_style<'a>(roots: impl IntoIterator<Item = &'a dom::Element>) -> bool {
+    let mut any = false;
+    for root in roots {
+        root.each(&mut |e| any |= e.text_class.is_some());
+    }
+    any
 }
 
 /// Each component's folder, by name.

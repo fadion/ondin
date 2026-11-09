@@ -109,6 +109,9 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     if tokens {
         let _ = writeln!(out, "import \"{up}tokens.css\";");
     }
+    if super::wears_text_style(bodies.iter().map(|(_, e)| e)) {
+        let _ = writeln!(out, "import \"{up}{}\";", super::TEXT_STYLES);
+    }
     for u in &uses {
         let at = dirs.get(u.as_str()).copied().unwrap_or("components");
         let from = super::relative(dir, &format!("{at}/{u}"));

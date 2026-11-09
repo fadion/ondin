@@ -8,7 +8,7 @@
 
 use super::Report;
 use super::css::{self, px};
-use super::dom::{Arg, Child, Classes, Element, Instance, Live, When, slug};
+use super::dom::{Arg, Child, Classes, Element, Instance, Live, TextClass, When, slug};
 use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
@@ -19,6 +19,7 @@ use ondin_core::container::{
 use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
+use ondin_core::style::{StyleId, StyleValue};
 use ondin_core::variable::{ModeId, VarId};
 use ondin_core::variant::{self, Interaction, PropKind, PropValue, Property, RootElement};
 use ondin_core::{
@@ -42,6 +43,9 @@ pub(crate) struct Page {
     pub assets: Vec<(String, Vec<u8>)>,
     /// `tokens.css`, when the page reads a variable.
     pub tokens: Option<String>,
+    /// `text-styles.css`, when a text on the page or in a component wears a
+    /// text style.
+    pub text_styles: Option<String>,
     /// The components the page uses, at any depth, each after those it uses.
     pub components: Vec<Component>,
 }
@@ -173,10 +177,21 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         }
         None => (doc, res),
     };
+    // Every text style's class is named up front, in id order, so no layer's
+    // class takes the name whichever is met first.
+    let mut names = Classes::default();
+    let text_names: HashMap<StyleId, String> = doc
+        .styles()
+        .iter()
+        .filter(|s| matches!(s.value, StyleValue::Text(_)))
+        .map(|s| (s.id, names.mint(&format!("text {}", s.name), "text style")))
+        .collect();
     let mut walk = Walk {
         doc,
         res,
-        classes: Classes::default(),
+        classes: Classes::reserving(text_names.values()),
+        text_names,
+        text_classes: Vec::new(),
         report: Report::default(),
         assets: Vec::new(),
         tokens: Tokens::new(doc),
@@ -246,6 +261,13 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         ));
     }
     let tokens = walk.tokens.css(doc);
+    let text_styles = (!walk.text_classes.is_empty()).then(|| {
+        let mut css = String::new();
+        for (_, t) in &walk.text_classes {
+            t.css(&mut css);
+        }
+        css
+    });
     let components = walk.components.map(|c| c.list).unwrap_or_default();
     Page {
         root,
@@ -253,6 +275,7 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         report: walk.report,
         assets: walk.assets,
         tokens,
+        text_styles,
         components,
     }
 }
@@ -262,6 +285,10 @@ struct Walk<'a> {
     res: &'a Resolved,
     /// The classes of the file being written: the page's, or a component's.
     classes: Classes,
+    /// Every text style's class name, by style.
+    text_names: HashMap<StyleId, String>,
+    /// The text styles worn so far, in the order first met.
+    text_classes: Vec<(StyleId, Rc<TextClass>)>,
     report: Report,
     assets: Vec<(String, Vec<u8>)>,
     tokens: Tokens,
@@ -1188,7 +1215,10 @@ impl Walk<'_> {
         }
 
         // One file's classes across every variant's tree.
-        let classes = std::mem::take(&mut self.classes);
+        let classes = std::mem::replace(
+            &mut self.classes,
+            Classes::reserving(self.text_names.values()),
+        );
         let outer_bound = std::mem::replace(&mut self.bound, bound);
         let outer_forwards = std::mem::replace(&mut self.forwards, forwards);
         let mut bodies = Vec::new();
@@ -2337,6 +2367,7 @@ impl Walk<'_> {
                 ));
             }
         }
+        el.text_class = self.text_class(node, el);
         // On each paragraph, not here: the indentation between `p`s would be kept.
         let white_space = if matches!(sizing, TextSizing::Auto) {
             "pre"
@@ -2402,6 +2433,33 @@ impl Walk<'_> {
                 None => el.children.extend(paras),
             }
         }
+    }
+
+    /// The class of the text style `node` wears, made the first time one is
+    /// met: the style's face, an automatic line height as the px `el` (its first
+    /// user) was laid at. A user laid at another height keeps its own.
+    fn text_class(&mut self, node: &Node, el: &Element) -> Option<Rc<TextClass>> {
+        let id = node.styles().text?;
+        if let Some((_, t)) = self.text_classes.iter().find(|(s, _)| *s == id) {
+            return Some(t.clone());
+        }
+        let StyleValue::Text(ts) = &self.doc.styles().get(id)?.value else {
+            return None;
+        };
+        // A colour a hand-written file left in the style is no part of it.
+        let mut style = face(&ondin_core::style::type_part(ts), None);
+        if ts.line_height.is_none()
+            && let Some((_, laid)) = el.style.iter().find(|(p, _)| *p == "line-height")
+            && let Some(slot) = style.iter_mut().find(|(p, _)| *p == "line-height")
+        {
+            slot.1 = laid.clone();
+        }
+        let class = Rc::new(TextClass {
+            class: self.text_names.get(&id)?.clone(),
+            style,
+        });
+        self.text_classes.push((id, class.clone()));
+        Some(class)
     }
 
     /// `content`'s paragraphs as text `node` (drawn as `kind`) writes them under

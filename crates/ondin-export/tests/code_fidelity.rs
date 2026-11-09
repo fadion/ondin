@@ -1577,6 +1577,71 @@ fn text_spacing_and_features_match_the_canvas() {
     holds_within("spacing", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
 }
 
+/// Texts in a text style draw their face from its class in `text-styles.css`:
+/// two in one style with an automatic line height, one of them with a run of
+/// its own weight, and one in a style with tracking.
+///
+/// flip: `html::files_of` not linking `text-styles.css` → 104.1 on the lead text.
+#[test]
+fn text_styles_match_the_canvas() {
+    use ondin_core::style::{self, StyleSlot, StyleValue};
+    let lead = TextStyle {
+        font_size: 20.0,
+        weight: 600,
+        ..Default::default()
+    };
+    let small = TextStyle {
+        font_size: 12.0,
+        letter_spacing: ondin_core::Length::Px(1.5),
+        line_height: Some(ondin_core::Length::Px(16.0)),
+        ..Default::default()
+    };
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 300.0, 160.0, "Board");
+    let one = d.add(
+        Some(f),
+        text_node("Lead text", TextSizing::Auto, lead.clone(), |_| {}),
+        Affine::translate((16.0, 12.0)),
+        "One",
+    );
+    let two = d.add(
+        Some(f),
+        text_node("Lead, lighter", TextSizing::Auto, lead.clone(), |k| {
+            if let NodeKind::Text { spans, style, .. } = k {
+                spans.set(6..13, CharAttr::Weight(400), style);
+            }
+        }),
+        Affine::translate((16.0, 50.0)),
+        "Two",
+    );
+    let three = d.add(
+        Some(f),
+        text_node(
+            "Small tracked caption",
+            TextSizing::Auto,
+            small.clone(),
+            |_| {},
+        ),
+        Affine::translate((16.0, 100.0)),
+        "Three",
+    );
+    let (a, b) = (d.ids.mint_style(), d.ids.mint_style());
+    d.apply(vec![
+        style::add_op(a, "Lead", StyleValue::Text(Box::new(lead))),
+        style::add_op(b, "Small", StyleValue::Text(Box::new(small))),
+        style::bind_op(one, StyleSlot::Text, Some(a)),
+        style::bind_op(two, StyleSlot::Text, Some(a)),
+        style::bind_op(three, StyleSlot::Text, Some(b)),
+    ]);
+    let (doc, res) = d.done();
+    let out = html_of(&doc, &res, &[f]);
+    assert!(
+        out.file("text-styles.css").is_some(),
+        "the fixture wears its styles"
+    );
+    holds_within("text-styles", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
 /// What the page cannot draw as the canvas does is reported: a wavy underline, a
 /// strikethrough moved off the font's position, an ellipsis that fires, optical
 /// margins and right-to-left content.

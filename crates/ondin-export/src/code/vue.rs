@@ -30,6 +30,13 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
         )
         .collect();
     let all: Vec<&Component> = pages.iter().chain(&page.components).collect();
+    // The text styles' classes are global: a renamed class keeps off them too.
+    let mut globals = HashSet::new();
+    for c in &all {
+        for (_, body) in &c.bodies {
+            body.each(&mut |e| globals.extend(e.text_class.as_ref().map(|t| t.class.clone())));
+        }
+    }
 
     // A used component's root carries its user's scope as well as its own, and
     // its user's class as well as its own, so each file's classes are settled
@@ -57,7 +64,7 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
                 .flatten()
                 .map(|c| c.to_string())
                 .collect();
-            avoid(&mut bodies, &taken);
+            avoid(&mut bodies, &taken, &globals);
             bodies
         })
         .collect();
@@ -74,6 +81,7 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
         .collect();
     for bodies in &mut trees {
         let mut mine = classes_in(bodies);
+        mine.extend(globals.iter().cloned());
         for body in bodies.iter_mut() {
             keep_uses_apart(body, &classes, &any, &roots, &mut mine);
         }
@@ -185,6 +193,9 @@ fn sfc(
     if tokens {
         let _ = writeln!(out, "import \"{up}tokens.css\";");
     }
+    if super::wears_text_style(&bodies) {
+        let _ = writeln!(out, "import \"{up}{}\";", super::TEXT_STYLES);
+    }
     for u in &uses {
         let at = dirs.get(u.as_str()).copied().unwrap_or("components");
         let from = super::relative(&c.dir, &format!("{at}/{u}.vue"));
@@ -238,12 +249,13 @@ fn sfc(
 /// A child component's root carries its user's scope too, so a user's rule for
 /// one of its own elements would reach a child root of the same class. Rules are
 /// printed from the tree, so renaming the element renames its rule.
-fn avoid(bodies: &mut [Element], taken: &HashSet<String>) {
+fn avoid(bodies: &mut [Element], taken: &HashSet<String>, globals: &HashSet<String>) {
     if taken.is_empty() {
         return;
     }
     let mut all = classes_in(bodies);
     all.extend(taken.iter().cloned());
+    all.extend(globals.iter().cloned());
     for body in bodies {
         rename(body, taken, &mut all);
     }

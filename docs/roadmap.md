@@ -25,12 +25,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,
   TypeScript or Vue compiler runs in the tests. A CI leg parsing the emitted `.tsx` with `tsc`
   and the `.vue` files with `@vue/compiler-sfc` would catch output that does not compile.
-- **Text styles as classes.** Today each text node carries its style's resolved declarations, its
-  variables kept as `var()`. Emit one `text-styles.css` with a class per text style the export
-  uses, and give each node its style's class plus only the declarations it overrides. React
-  imports the file once at its root and Vue holds it in an unscoped `<style>`, which answers
-  D1098 (7)'s worry that global classes fight CSS modules. Colour is not part of a text style
-  (`styles-variables.md`), so it stays on the node, as spans do.
 - **A per-layer HTML tag field.** The emitters write four elements (`div`, `span`/`p`, `img`,
   `svg`) and guess nothing from layer names (D1098 (3)). A tag field lets a layer say it is a
   `button`, `a`, `h1`–`h6`, `nav`, `header`, `footer`, `section` or `ul`/`li`. It is new model: a

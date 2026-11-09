@@ -148,6 +148,14 @@ fn merged(group: &[Member]) -> Result<Element, String> {
         same_own(base, e)?;
     }
     let mut el = base.clone();
+    // A text style's class is worn under every variant, so it is kept only
+    // where every variant wears the same one; else each rule is written whole.
+    if group[1..]
+        .iter()
+        .any(|(_, e)| e.text_class != base.text_class)
+    {
+        el.text_class = None;
+    }
     for (when, e) in &group[1..] {
         if e.style == el.style {
             continue;

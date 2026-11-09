@@ -1999,9 +1999,11 @@ fn a_width_query_is_written_as_a_container_query() {
 
 /// A kit collection's width query is written as the document's are: named after
 /// the kit collection, its children given the kit's narrowest mode and each
-/// other one under `@container`, with the kit's variables in that mode's column.
+/// other one under `@container`, with the kit's variables in that mode's column
+/// and a document alias of one redeclared beside it; a kit mode's pin is `~=`.
 ///
-/// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container".
+/// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container";
+/// `Tokens::kit_block` without its alias arm → "redeclares the alias".
 #[test]
 fn a_kit_collections_width_query_is_written_as_a_container_query() {
     use ondin_core::BrushSource;
@@ -2052,6 +2054,30 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
             },
         },
     ]);
+    // The rect reads the kit's ink through an alias of the document's.
+    let bg = d.ids.mint_var();
+    let first = d.ids.mint_mode();
+    d.apply(vec![Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
+        mode: ondin_core::variable::Mode {
+            id: first,
+            name: "Light".into(),
+        },
+        index: 0,
+        cells: vec![],
+    }]);
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: bg,
+            name: "bg".into(),
+            kind: VarKind::Color,
+            cells: [(first, Cell::Alias(ink))].into_iter().collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
     let card = d.frame(None, 0.0, 0.0, 400.0, 120.0, "Card");
     let r = d.rect(card, 10.0, 10.0, 60.0, 60.0, 0.0);
     d.apply(vec![
@@ -2059,7 +2085,7 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
             id: r,
             fills: keyed_by_position([Fill {
                 brush: BrushSource::Bound {
-                    var: ink,
+                    var: bg,
                     alpha: 1.0,
                 },
                 visible: true,
@@ -2074,6 +2100,18 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
     let export = html_of(&doc, &res, &[card]);
     let tokens =
         String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    assert!(
+        tokens.contains("  --brand-ink: #3c78f0;\n    --bg: var(--brand-ink);\n  }\n}\n"),
+        "the wide block redeclares the alias:\n{tokens}"
+    );
+    assert!(
+        tokens.contains(
+            ":where([data-pin~=\"brand-wide\"] > [data-query~=\"card-density\"]) > *, \
+             :where([data-mode~=\"brand-wide\"][data-query~=\"card-density\"]) > * {"
+        ),
+        "the pin, `~=` on the kit mode:\n{tokens}"
+    );
+    assert!(!tokens.contains("{\n}"), "an empty block:\n{tokens}");
     assert!(
         tokens.contains("[data-query~=\"card-density\"] {\n  container-type: inline-size;\n}"),
         "tokens.css lacks the container:\n{tokens}"

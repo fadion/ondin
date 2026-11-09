@@ -222,12 +222,17 @@ impl Tokens {
                 }
                 let mut inner = String::new();
                 block(kids.clone(), *m, &mut inner);
+                if inner.is_empty() {
+                    continue;
+                }
                 out.push_str(&format!("@container (min-width: {}px) {{\n", fmt(*min)));
                 for line in inner.lines() {
                     out.push_str(&format!("  {line}\n"));
                 }
                 out.push_str("}\n");
             }
+            // A kit mode may share `data-mode` with a document mode, so `~=`.
+            let eq = if col.is_some() { eq } else { "~=" };
             for m in &modes {
                 let word = self.mode(*m).unwrap_or_default();
                 let pin = format!("[data-mode{eq}\"{word}\"]");
@@ -239,7 +244,8 @@ impl Tokens {
     }
 
     /// Kit mode `mode`'s block under `selector`: every kit variable read with a
-    /// value in that mode.
+    /// value in that mode, and every alias of the document's reaching one,
+    /// redeclared as `mode_block` redeclares them. Nothing for none.
     fn kit_block(
         &self,
         t: &Variables,
@@ -248,19 +254,27 @@ impl Tokens {
         mode: ModeId,
         out: &mut String,
     ) {
-        out.push_str(&selector);
-        out.push_str(" {\n");
+        let in_mode = |v: &variable::Variable| v.kit().is_some() && v.cells.contains_key(&mode);
+        let mut body = String::new();
         for id in shaken {
-            if let Some(value) = t
-                .get(*id)
-                .filter(|v| v.kit().is_some())
-                .and_then(|v| Some((v, v.cells.get(&mode)?)))
-                .and_then(|(v, c)| self.value(t, v, c))
-            {
-                out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
+            let Some(v) = t.get(*id) else { continue };
+            if v.kit().is_none() {
+                if let Some(to) = one_alias(t, v).filter(|to| reaches_by(t, *to, in_mode)) {
+                    body.push_str(&format!(
+                        "  --{}: var(--{});\n",
+                        self.name(*id),
+                        self.name(to)
+                    ));
+                }
+                continue;
+            }
+            if let Some(value) = v.cells.get(&mode).and_then(|c| self.value(t, v, c)) {
+                body.push_str(&format!("  --{}: {value};\n", self.name(*id)));
             }
         }
-        out.push_str("}\n");
+        if !body.is_empty() {
+            out.push_str(&format!("{selector} {{\n{body}}}\n"));
+        }
     }
 
     /// A hidden token read as a `display`: the element's own display `own` in
@@ -428,15 +442,9 @@ impl Tokens {
         // modes its children inherit from around it.
         self.query_blocks(t, &shaken, eq, &mut out);
         for km in t.kits().values() {
+            // `~=`: a frame setting a kit mode may name a document mode beside it.
             for m in &km.modes {
-                let read = shaken.iter().any(|id| {
-                    t.get(*id)
-                        .is_some_and(|v| v.kit().is_some() && v.cells.contains_key(&m.id))
-                });
-                if !read {
-                    continue;
-                }
-                let selector = format!("[data-mode=\"{}\"]", self.mode(m.id).unwrap_or_default());
+                let selector = format!("[data-mode~=\"{}\"]", self.mode(m.id).unwrap_or_default());
                 self.kit_block(t, &shaken, selector, m.id, &mut out);
             }
         }
@@ -615,6 +623,13 @@ fn one_alias(t: &Variables, v: &variable::Variable) -> Option<VarId> {
 
 /// Whether `from`, or a variable it aliases in any mode, is in collection `c`.
 fn reaches(t: &Variables, from: VarId, c: variable::CollectionId) -> bool {
+    reaches_by(t, from, |v| {
+        v.kit().is_none() && t.collection_of(v.id).is_some_and(|x| x.id == c)
+    })
+}
+
+/// Whether `from`, or a variable it aliases in any mode, is one `hit` takes.
+fn reaches_by(t: &Variables, from: VarId, hit: impl Fn(&variable::Variable) -> bool) -> bool {
     let mut seen = BTreeSet::new();
     let mut stack = vec![from];
     while let Some(at) = stack.pop() {
@@ -622,7 +637,7 @@ fn reaches(t: &Variables, from: VarId, c: variable::CollectionId) -> bool {
             continue;
         }
         let Some(v) = t.get(at) else { continue };
-        if v.kit().is_none() && t.collection_of(at).is_some_and(|x| x.id == c) {
+        if hit(v) {
             return true;
         }
         for cell in v.cells.values() {

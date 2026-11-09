@@ -164,6 +164,41 @@ fn each_element_writes_its_tag() {
     assert!(app.contains("<nav className={styles.nav}>"), "{app}");
 }
 
+/// On Automatic a frame, a text and a list's item are written with the tag the
+/// Element menu shows for them (`element::automatic_tag`).
+///
+/// flip: `automatic_tag` naming `p` for a text → fails at "the text's tag".
+#[test]
+fn automatic_writes_the_tag_the_menu_shows() {
+    let (doc, res, made) = doc_of(
+        &[
+            (0, frame(), "Card"),       // 1
+            (1, text("Note"), "Note"),  // 2
+            (0, frame(), "Items"),      // 3
+            (3, text("Item"), "Entry"), // 4
+        ],
+        &[(3, H::List)],
+    );
+    let out = Target::Html.export(&doc, &res, &[made[0]]);
+    let html = file(&out, "index.html");
+    for (i, class, what) in [
+        (1, "card", "the frame's tag"),
+        (2, "note", "the text's tag"),
+        (4, "entry", "the item's tag"),
+    ] {
+        let tag = ondin_core::element::automatic_tag(&doc, doc.get(made[i]).unwrap())
+            .expect("a frame or a text has one tag");
+        assert!(
+            html.contains(&format!("<{tag} class=\"{class}\">")),
+            "{what}: <{tag}> in {html}"
+        );
+    }
+    assert!(
+        html.contains("<p class=\"note-p\">Note</p>"),
+        "the text's paragraph is a p inside it: {html}"
+    );
+}
+
 /// A link moved into a button, and a second main, are written as Automatic
 /// and reported.
 ///

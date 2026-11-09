@@ -1991,9 +1991,10 @@ impl OndinApp {
                 (Some(*e), why)
             }))
             .collect();
+        // A shape's Automatic has no one tag, so it shows none.
         let shown = |e: Option<HtmlElement>| match e {
-            Some(e) => (e.label(), format!("<{}>", e.tag())),
-            None => ("Automatic", format!("<{automatic}>")),
+            Some(e) => (e.label(), Some(format!("<{}>", e.tag()))),
+            None => ("Automatic", automatic.map(|t| format!("<{t}>"))),
         };
         let (label, tag) = shown(current);
         let mut pick = None;
@@ -2004,14 +2005,17 @@ impl OndinApp {
                 egui::ComboBox::from_id_salt(("layer-element", id))
                     .icon(ui::combo_chevron)
                     .width(ui.available_width())
-                    .selected_text(ui::glyph_text_and_tag(icon::CODE, label, &tag))
+                    .selected_text(match &tag {
+                        Some(tag) => ui::glyph_text_and_tag(icon::CODE, label, tag),
+                        None => ui::glyph_and_text(icon::CODE, label),
+                    })
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);
                         for (e, why) in &choices {
                             let (label, tag) = shown(*e);
                             let row = ui::MenuRow::new("", label)
                                 .checked(*e == current)
-                                .accel(Some(&tag))
+                                .accel(tag.as_deref())
                                 .enabled(why.is_none());
                             let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);
                             match why {

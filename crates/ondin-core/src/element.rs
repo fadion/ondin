@@ -192,16 +192,17 @@ pub fn kind_refusal(kind: &NodeKind) -> Option<&'static str> {
     }
 }
 
-/// What the export writes a layer of `kind` as on Automatic, for the menu's
-/// faint tag: `div` for a frame or group, `p` for a text, `li` in a list.
-pub fn automatic_tag(doc: &Document, node: &Node) -> &'static str {
+/// What the export writes a layer as on Automatic, for the menu's faint tag:
+/// `li` in a list, else `div` for a frame, a group or a text (whose paragraphs
+/// are `p`s inside it). `None` for a shape, which is an `svg`, an `img` or a
+/// plain box depending on how it draws.
+pub fn automatic_tag(doc: &Document, node: &Node) -> Option<&'static str> {
     if in_list(doc, node.id()) {
-        return "li";
+        return Some("li");
     }
     match node.kind() {
-        NodeKind::Text { .. } => "p",
-        NodeKind::Artboard { .. } | NodeKind::Group => "div",
-        _ => "svg",
+        NodeKind::Text { .. } | NodeKind::Artboard { .. } | NodeKind::Group => Some("div"),
+        _ => None,
     }
 }
 

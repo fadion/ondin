@@ -209,17 +209,19 @@ fn a_page_has_one_main() {
     assert!(element::refusal(&f.doc, f.card, HtmlElement::Footer).is_some());
 }
 
-/// A list's children are its items: Automatic reads `li` there.
+/// A list's children are its items: Automatic reads `li` there. Elsewhere a
+/// text reads `div`, the box its paragraphs sit in, and a shape no tag.
 #[test]
 fn a_lists_children_are_items() {
     let mut f = fixture();
+    let tag = |f: &F, id| element::automatic_tag(&f.doc, f.doc.get(id).unwrap());
+    assert_eq!(tag(&f, f.terms), Some("div"));
+    assert_eq!(tag(&f, f.logo), None, "a shape is an svg, an img or a box");
     f.doc
         .apply(&Transaction(vec![set(f.card, HtmlElement::List)]))
         .unwrap();
-    let terms = f.doc.get(f.terms).unwrap();
-    assert_eq!(element::automatic_tag(&f.doc, terms), "li");
-    let card = f.doc.get(f.card).unwrap();
-    assert_eq!(element::automatic_tag(&f.doc, card), "div");
+    assert_eq!(tag(&f, f.terms), Some("li"));
+    assert_eq!(tag(&f, f.card), Some("div"));
 }
 
 /// Element and address save and load; a tag this build does not know, and an

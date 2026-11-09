@@ -2387,6 +2387,7 @@ impl OndinApp {
             .show(ui, |ui| {
                 let w = ui.available_width();
                 for f in &families {
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     let n = list.uses.iter().filter(|u| u.field == *f).count();
                     let (head, _) = ui.allocate_exact_size(
                         egui::vec2(w, super::binding::FACE_HEAD_H),

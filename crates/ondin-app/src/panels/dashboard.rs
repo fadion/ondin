@@ -4374,17 +4374,7 @@ fn archived_header(ui: &mut egui::Ui, open: bool, count: usize) -> bool {
         theme::text::faint()
     };
     let p = ui.painter();
-    p.text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        theme::icon_font(10.0),
-        fg,
-    );
+    ui::fold_caret(p, egui::pos2(rect.left() + 12.0, rect.center().y), open, fg);
     p.text(
         egui::pos2(rect.left() + 26.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

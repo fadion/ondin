@@ -732,6 +732,9 @@ pub struct OndinApp {
     ),
     /// The Component card's property readings, on `drift_cache`'s key (`panels::PropCache`).
     pub(crate) prop_cache: crate::panels::PropCache,
+    /// The pushes' readings for the Component card's rows, on the same key
+    /// (`panels::push::PushCache`).
+    pub(crate) push_cache: crate::panels::push::PushCache,
     /// This frame's overrides of the selected instance layers, by inspector card:
     /// title, unit count and the resetting operations. Gathered at the top of
     /// `inspector_ui`.
@@ -1723,6 +1726,7 @@ impl OndinApp {
             drift_cache: (u64::MAX, Default::default()),
             child_drift_cache: (u64::MAX, Default::default()),
             prop_cache: Default::default(),
+            push_cache: Default::default(),
             card_overrides: Vec::new(),
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
@@ -1961,6 +1965,9 @@ impl OndinApp {
         let canvas_tab =
             self.view != View::Dashboard && (self.text.is_some() || self.edited_path().is_some());
         let _focus = crate::ui::KeyboardFocus::begin(&ctx, canvas_tab);
+        // A push asked for by a menu is this frame's reset's to take; one no door
+        // took must not turn a later reset into a push.
+        crate::ui::take_push(&ctx);
         // Before anything draws a name.
         self.poll_private(&ctx);
         crate::private::set(self.prefs.private);
@@ -9395,7 +9402,7 @@ mod tests {
     /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 17] = [
+        let panels: [(&str, &str); 18] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("credit.rs", include_str!("panels/credit.rs")),
@@ -9409,6 +9416,7 @@ mod tests {
             ("layout/grid.rs", include_str!("panels/layout/grid.rs")),
             ("paint.rs", include_str!("panels/paint.rs")),
             ("picker.rs", include_str!("panels/picker.rs")),
+            ("push.rs", include_str!("panels/push.rs")),
             ("styles.rs", include_str!("panels/styles.rs")),
             ("typography.rs", include_str!("panels/typography.rs")),
             ("variables.rs", include_str!("panels/variables.rs")),

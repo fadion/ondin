@@ -195,8 +195,8 @@ stay shut (`align_dims_with_nothing_to_align_to_and_boolean_holds_the_four`).
 | Plain / Local | Create component (`Ctrl+Alt+K`) | withheld when the selection holds a main or a set; dims with the commit's own refusal (`create_refusal`: inside a component or instance, holds a component, wrong kind for the set, …) and on lock |
 | Set | Add variant · Select all instances | *Add variant* dims on lock |
 | Main | Add variant (in a set only) · Duplicate as component · Select all instances | first two dim on lock |
-| Instance | Go to main component · Reset ‹property› · Reset all · Restore children · Detach instance (`Ctrl+Alt+B`) | *Reset ‹property›* only for a nested copy bound to a property that differs; *Reset all* only when drifted; *Restore children* only when its own children (collapsed row: its subtree's structure) differ; all but *Go to main* dim on lock |
-| Kit instance | Go to main in ‹kit› · Accept kit updates · *resets as above* · Detach instance · Make local… | *Accept kit updates* only when a newer publish waits (omitted, not dimmed); it and *Make local…* dim on lock |
+| Instance | Go to main component · Reset ‹property› · Reset all · Push all to main · Restore children · Detach instance (`Ctrl+Alt+B`) | *Reset ‹property›* only for a nested copy bound to a property that differs; *Reset all* only when drifted; *Push all to main* (`icon::PUSH_TO_MAIN`) only on an instance root with something to push, dimmed with `PUSH_KIT` or `PUSH_LOCKED` when its main is a kit's or locked; *Restore children* only when its own children (collapsed row: its subtree's structure) differ; all but *Go to main* dim on lock |
+| Kit instance | Go to main in ‹kit› · Accept kit updates · *resets and push as above* · Detach instance · Make local… | *Accept kit updates* only when a newer publish waits (omitted, not dimmed); it and *Make local…* dim on lock |
 | Member (linked child) | Go to main component · Reset ‹property› · Reset ‹layer name› · Restore children | each reset only when it has something to reset; resets dim on lock |
 
 *Go to main* and *Select all instances* change only the selection and never dim. *Create component*

@@ -249,6 +249,10 @@ enum Act {
     /// rule for a child, which selects what it was copied from, not the main.
     GoToSource,
     Reset(Kind),
+    /// One of the ⋯ menu's pushes, from the one selected instance.
+    Push(ondin_core::push::Kind),
+    /// A local layer's *Push to ‹main›*.
+    PushLayer(NodeId),
     Detach,
     SelectAllInstances,
     DuplicateAsComponent,
@@ -370,7 +374,14 @@ impl OndinApp {
     /// - **A live text session on a layer the reset restyles adopts it**
     ///   (`text_session_restyled_after`), **but not on a content reset**
     ///   (`SetText`): the editor holds content a commit ahead of the document's.
+    ///
+    /// A reset whose menu asked for the push beside it (`ui::take_push`) is
+    /// committed as that push instead ([`OndinApp::push_from_reset`]).
     pub(crate) fn commit_reset(&mut self, tx: Transaction) {
+        if crate::ui::take_push(&self.egui_ctx) {
+            self.push_from_reset(tx);
+            return;
+        }
         let tx = self.items_stated(tx);
         let editing = self.text.as_ref().map(|s| s.id);
         let restyles = editing.is_some_and(|e| {
@@ -588,6 +599,12 @@ impl OndinApp {
             match &face {
                 Face::Child { main_name, linked } => {
                     child_line(ui, main_name, *linked, &mut act);
+                    if !*linked
+                        && let Some(layer) = self.session.selection.single()
+                        && ondin_core::push::is_local(&self.session.doc, layer)
+                    {
+                        self.push_layer_button(ui, layer, &mut act);
+                    }
                 }
                 Face::Mixed { roots, others } => mixed_line(ui, roots, *others, &mut act),
                 Face::InMain { node } => self.bind_line(ui, *node),
@@ -601,6 +618,15 @@ impl OndinApp {
                 && ondin_core::variant::owner_above(&self.session.doc, root).is_some()
             {
                 self.bind_line(ui, root);
+            }
+            // An instance dropped into another instance is that one's local layer
+            // (R3): it says so, and pushing it is its promotion into the main.
+            if let Face::Instance { .. } = &face
+                && let Some(layer) = self.session.selection.single()
+                && ondin_core::push::is_local(&self.session.doc, layer)
+            {
+                child_line(ui, "", false, &mut act);
+                self.push_layer_button(ui, layer, &mut act);
             }
             self.component_act(act);
             return;
@@ -673,7 +699,16 @@ impl OndinApp {
                         app.chosen_by_note(ui, *root);
                         app.instance_rows(ui, &[*root]);
                         app.show_switch(ui, *root);
-                        reset_row(ui, *drift, *props, true, kit.as_ref(), &mut act);
+                        let root = *root;
+                        let pushable = app.pushable_of(root);
+                        let refusal = app.push_refusal(root);
+                        let mut tip = |k| app.push_tip(root, k);
+                        let push = PushMenu {
+                            p: pushable,
+                            refusal,
+                            tip: &mut tip,
+                        };
+                        reset_row(ui, *drift, *props, true, kit.as_ref(), Some(push), &mut act);
                     }
                     Face::Instances {
                         count,
@@ -704,14 +739,14 @@ impl OndinApp {
                                 if let Some(roots) = shared {
                                     app.instance_rows(ui, roots);
                                 }
-                                reset_row(ui, *drift, *props, true, None, &mut act);
+                                reset_row(ui, *drift, *props, true, None, None, &mut act);
                             }
                             // No single main to go to, so no name link and no
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
                                 heading(ui, false, "", None, Some(&title), &summary, "", &mut act);
-                                reset_row(ui, *drift, *props, false, None, &mut act);
+                                reset_row(ui, *drift, *props, false, None, None, &mut act);
                             }
                         }
                     }
@@ -1015,6 +1050,8 @@ impl OndinApp {
                     self.commit_reset(tx);
                 }
             }
+            Some(Act::Push(kind)) => self.push_selection(kind),
+            Some(Act::PushLayer(layer)) => self.push_local_layer(layer),
             Some(Act::Detach) => self.detach_instances(),
             Some(Act::SelectAllInstances) => self.select_all_instances(),
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
@@ -1134,16 +1171,26 @@ pub(super) enum GhostLead<'a> {
 /// A **ghost row**: an item the instance removed while its main still has it,
 /// drawn dashed and dim with a restore button in the eye's column (a
 /// [`GhostLead::Plain`] row gets one too), laid out as the live row is with 3px
-/// corners (the live field's are 5). Answers whether restore was clicked.
+/// corners (the live field's are 5). A right-click offers *Restore* and *Push
+/// removal to main*. Answers which was asked for.
 /// ⚠️ **Lists only**: a deleted child *layer* has only the card's *Restore
 /// removed children*.
-pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> bool {
+pub(super) fn ghost_row(
+    ui: &mut egui::Ui,
+    lead: GhostLead<'_>,
+    label: &str,
+) -> Option<ui::ResetOrPush> {
     let h = ui::CONTROL_H;
     let gap = ui::CARD_COL_GAP;
     let width = ui.available_width() - h - gap;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::hover());
+        let (rect, row) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::click());
+        let menu = ui::reset_push_menu(&row, "Restore", "Push removal to main");
+        // The push is this row's, not a reset's: nothing else takes the request.
+        if menu == Some(ui::ResetOrPush::Push) {
+            ui::take_push(ui.ctx());
+        }
         let p = ui.painter();
         let dash = egui::Stroke::new(1.0, theme::text::faint());
         p.extend(egui::Shape::dashed_line(
@@ -1184,9 +1231,13 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
             egui::FontId::proportional(ui::CONTROL_PT),
             theme::text::faint(),
         );
-        ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, FieldButton::Off)
+        let restore = ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, FieldButton::Off)
             .on_hover_text("Restore — put the main's item back")
-            .clicked()
+            .clicked();
+        match restore {
+            true => Some(ui::ResetOrPush::Reset),
+            false => menu,
+        }
     })
     .inner
 }
@@ -1334,7 +1385,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
 /// An overridden dropdown's reset, as the open list's first row — ↺ *Reset to
 /// main · Alpha*, then a rule. A dropdown's face is one press target that opens
 /// the list, with no label slot to give the ↺, so the reset is the first thing
-/// the press shows. Answers whether it was clicked.
+/// the press shows, and *Push to main* the second (`ui::request_push`). Answers
+/// whether either was clicked.
 pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
     let hit = ui
         .selectable_label(
@@ -1342,8 +1394,17 @@ pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
             ui::glyph_and_text(icon::ARROW_COUNTER_CLOCKWISE, &mark.tip),
         )
         .clicked();
+    let push = ui
+        .selectable_label(
+            false,
+            ui::glyph_and_text(icon::PUSH_TO_MAIN, "Push to main"),
+        )
+        .clicked();
+    if push {
+        ui::request_push(ui.ctx());
+    }
     super::inspector::popup_rule(ui);
-    hit
+    hit || push
 }
 
 /// A row's label carrying an override mark: at full brightness with the dot after
@@ -1428,11 +1489,13 @@ pub(super) fn label_mark_in(
         ui::override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
     }
     // A cut label names itself in the tooltip too, over the mark's reset.
-    match cut {
+    let resp = match cut {
         true => resp.on_hover_text(format!("{text}\n{}", m.tip)),
         false => resp.on_hover_text(&m.tip),
-    }
-    .clicked()
+    };
+    // The push beside the reset, on a right-click (`ui::reset_push_menu`).
+    let menu = ui::reset_push_menu(&resp, "Reset to main", &format!("Push {text} to main"));
+    resp.clicked() || menu.is_some()
 }
 
 /// `text` laid out on one line no wider than `max_w`, cut with an ellipsis, and
@@ -1661,14 +1724,24 @@ fn heading(
     });
 }
 
+/// The push rows one instance's ⋯ menu carries (`push::push_rows`): what each
+/// would write, why none can, and the hovered row's tooltip.
+struct PushMenu<'a> {
+    p: ondin_core::push::Pushable,
+    refusal: Option<String>,
+    tip: &'a mut dyn FnMut(ondin_core::push::Kind) -> String,
+}
+
 /// **Reset all**, **Detach**, and — where there is one main to count against —
-/// the overflow of counted resets.
+/// the overflow of counted resets, then, for one instance, the pushes.
+#[allow(clippy::too_many_arguments)]
 fn reset_row(
     ui: &mut egui::Ui,
     d: Drift,
     p: PropDrift,
     overflow: bool,
     kit: Option<&crate::kits::card::KitLine>,
+    mut push: Option<PushMenu<'_>>,
     act: &mut Option<Act>,
 ) {
     // A kit instance always has the ⋯, for its kit rows.
@@ -1759,8 +1832,13 @@ fn reset_row(
                         })
                         .unwrap_or_default();
                     const GLYPH_ROOM: f32 = 22.0;
+                    let pushes: &[&str] = match push {
+                        Some(_) => &super::push::PUSH_LABELS,
+                        None => &[],
+                    };
                     let widest = std::iter::once(PROPS)
                         .chain(rows.iter().map(|(_, l, _)| *l))
+                        .chain(pushes.iter().copied())
                         .map(label_w)
                         .chain(kit_labels.iter().map(|l| label_w(l) + GLYPH_ROOM))
                         .fold(0.0, f32::max);
@@ -1788,6 +1866,18 @@ fn reset_row(
                         if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && n > 0 {
                             *act = Some(Act::Reset(kind));
                         }
+                    }
+                    // The pushes, the resets' opposite, under their own rules.
+                    if let Some(m) = push.as_mut()
+                        && let Some(kind) = super::push::push_rows(
+                            ui,
+                            m.p,
+                            p.defined,
+                            m.refusal.as_deref(),
+                            &mut *m.tip,
+                        )
+                    {
+                        *act = Some(Act::Push(kind));
                     }
                     // The kit rows, after the resets: where the main lives, the
                     // update when one waits, and the way out.
@@ -2095,6 +2185,38 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
         slot,
         row.response.rect.translate(egui::vec2(0.0, -lift)),
     );
+}
+
+impl OndinApp {
+    /// R3's button under a local layer's *no counterpart* line: *Push to ‹main›*,
+    /// the whole row wide, disabled with the reason where the layer cannot go.
+    fn push_layer_button(&mut self, ui: &mut egui::Ui, layer: NodeId, act: &mut Option<Act>) {
+        let doc = &self.session.doc;
+        let Some(root) = doc
+            .get(layer)
+            .and_then(|n| n.parent())
+            .and_then(|p| component::instance_root(doc, p))
+        else {
+            return;
+        };
+        let label = format!("Push to {}", self.push_main_name(root));
+        let refusal = self.layer_push_refusal(layer);
+        let state = match refusal {
+            Some(_) => FieldButton::Disabled,
+            None => FieldButton::Off,
+        };
+        let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+        let resp = ui::action_button(ui, icon::PUSH_TO_MAIN, &label, state, size);
+        let resp = match &refusal {
+            Some(why) => resp.on_hover_text(why),
+            None => resp.on_hover_text(
+                "Put this layer into the main, at the same place — every instance gets it",
+            ),
+        };
+        if refusal.is_none() && resp.clicked() {
+            *act = Some(Act::PushLayer(layer));
+        }
+    }
 }
 
 /// *2 instances · 3 other layers*, and *Select instances* to narrow to them.
@@ -7439,6 +7561,128 @@ mod tests {
                 .iter()
                 .any(|(t, _)| t == "Instances of 2 components"),
             "no single main"
+        );
+    }
+
+    /// A second instance of the fixture's main, at the page's end.
+    fn another_instance(f: &mut F) -> NodeId {
+        let doc = &f.app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut f.app.session.ids,
+            &[Placement {
+                nodes: doc.capture_subtree(f.m).unwrap(),
+                parent: doc.first_page(),
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(f.app.session.commit(tx));
+        made[0]
+    }
+
+    /// *Push fields to main* from the card writes the instance's opacity into the
+    /// main as one step, *Push to main*, which one undo takes back; the toast
+    /// counts the other instance that followed. Flip: `commit_push` without its
+    /// `name_step` fails at the step's label.
+    #[test]
+    fn a_push_from_the_card_is_one_named_step_with_its_toast() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let second = another_instance(&mut f);
+        let mr = f.app.session.doc.get(f.m).unwrap().children()[0];
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: f.ir,
+                    opacity: 0.5,
+                }]))
+        );
+        f.app.session.selection.set(vec![f.i]);
+        f.app.push_selection(ondin_core::push::Kind::Fields);
+        assert_eq!(f.app.session.doc.get(mr).unwrap().opacity(), 0.5);
+        let sr = f.app.session.doc.get(second).unwrap().children()[0];
+        assert_eq!(
+            f.app.session.doc.get(sr).unwrap().opacity(),
+            0.5,
+            "followed"
+        );
+        let step = f.app.session.history.done().last().unwrap();
+        assert_eq!(step.note.label, "Push to main");
+        assert_eq!(
+            f.app.session.status().text,
+            "Pushed 1 field into Button · 1 instance follows · Ctrl+Z to undo"
+        );
+        assert!(f.app.session.undo());
+        assert_eq!(f.app.session.doc.get(mr).unwrap().opacity(), 1.0);
+    }
+
+    /// A field mark's *Push to main* reaches the reset door as its reset, asked
+    /// for as a push (`ui::request_push`): `commit_reset` writes the copy's value
+    /// into the main instead of the main's into the copy. Flip: `commit_reset`
+    /// ignoring `take_push` resets the copy back to 1.
+    #[test]
+    fn a_marks_push_is_committed_as_a_push() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let mr = f.app.session.doc.get(f.m).unwrap().children()[0];
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: f.ir,
+                    opacity: 0.25,
+                }]))
+        );
+        let reset: Vec<Operation> = ondin_core::reset::overrides(&f.app.session.doc, f.ir)
+            .into_iter()
+            .map(|o| o.reset)
+            .collect();
+        assert_eq!(reset.len(), 1, "the fixture: one override");
+        crate::ui::request_push(&f.app.egui_ctx);
+        f.app.commit_reset(Transaction(reset));
+        assert_eq!(f.app.session.doc.get(mr).unwrap().opacity(), 0.25);
+        assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 0.25);
+        assert!(
+            !crate::ui::take_push(&f.app.egui_ctx),
+            "the request is spent"
+        );
+    }
+
+    /// A local layer's *Push to Button* puts it into the main, and the other
+    /// instance gets it: the toast names the layer and counts that one.
+    #[test]
+    fn a_local_layers_push_lands_in_the_main_and_says_so() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let second = another_instance(&mut f);
+        let badge = f.app.session.ids.mint();
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::CreateNode {
+                    id: badge,
+                    parent: f.i,
+                    index: 1,
+                    kind: NodeKind::Rect {
+                        size: Size::new(4.0, 4.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some("Badge".into()),
+                }]))
+        );
+        assert!(f.app.layer_push_refusal(badge).is_none());
+        f.app.push_local_layer(badge);
+        let doc = &f.app.session.doc;
+        assert_eq!(doc.get(f.m).unwrap().children().len(), 2);
+        assert_eq!(doc.get(second).unwrap().children().len(), 2);
+        assert_eq!(doc.get(f.i).unwrap().children().len(), 2, "not twice");
+        assert_eq!(
+            f.app.session.status().text,
+            "Pushed “Badge” into Button · 1 other instance now has it · Ctrl+Z to undo"
         );
     }
 }

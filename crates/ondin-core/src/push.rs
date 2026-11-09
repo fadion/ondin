@@ -365,33 +365,6 @@ pub fn fields(doc: &Document, resets: &[Operation], ids: &mut IdSource) -> Vec<O
     stated(doc, out)
 }
 
-/// Every property of the instance at `root` named `p` pushed into the main —
-/// a property row's *Push ‹name› to main*.
-pub fn property(
-    doc: &Document,
-    root: NodeId,
-    p: &crate::variant::Property,
-    ids: &mut IdSource,
-) -> Vec<Operation> {
-    if blocked(doc, root).is_some() {
-        return Vec::new();
-    }
-    let home = inside(doc, root);
-    let bound: FxHashSet<(NodeId, PropKind)> = crate::variant::counterparts(doc, root, p)
-        .into_iter()
-        .map(|c| (c, p.kind))
-        .collect();
-    let mut out = Vec::new();
-    for &(c, _) in &bound {
-        for o in reset::overrides(doc, c) {
-            if is_property(&o.reset, c, &bound) {
-                out.extend(push_override(doc, c, &o.reset, &home, ids));
-            }
-        }
-    }
-    stated(doc, out)
-}
-
 /// The list item `item` the copy `c` removed, deleted from its source's list —
 /// a ghost row's *Push removal to main*. `list` is the list's reset op (any
 /// value; only its kind is read). `None` where the source has no such item or
@@ -584,10 +557,10 @@ fn removal_ops(doc: &Document, root: NodeId, home: &FxHashSet<NodeId>) -> Vec<Op
 }
 
 /// `ops` with the placement stated: every `SetTransform`, or `SetGeometry` that
-/// resizes, on a main node with no `SetInsets` beside it takes its pushing copy's
-/// insets (the main node's own, for an instance root whose placement is its
-/// own), and every resize its item, so the commit door does not read the push as
-/// a hand's move (`keep_insets`) or resize (`flex_holds`).
+/// resizes, on a main node with no `SetInsets` beside it takes that node's own
+/// insets, and every resize its own item, so the commit door does not read the
+/// push as a hand's move (`keep_insets`) or resize (`flex_holds`). A copy whose
+/// insets or item differ pushes them as fields of their own.
 fn stated(doc: &Document, mut ops: Vec<Operation>) -> Vec<Operation> {
     let named = |ops: &[Operation], id: NodeId, insets: bool| {
         ops.iter().any(|o| match o {

@@ -5550,6 +5550,7 @@ impl OndinApp {
             }
             // The main's fills this instance removed, as ghost rows.
             let mut restore = None;
+            let mut pushed = None;
             for gone in source
                 .as_deref()
                 .map(|s| ondin_core::reset::removed_items(s, fills))
@@ -5557,9 +5558,18 @@ impl OndinApp {
             {
                 let lead = super::component::GhostLead::Chip;
                 let label = paint::source_label(&app.session.doc, &gone.brush);
-                if super::component::ghost_row(ui, lead, &label) {
-                    restore = Some(gone.id);
+                match super::component::ghost_row(ui, lead, &label) {
+                    Some(ui::ResetOrPush::Reset) => restore = Some(gone.id),
+                    Some(ui::ResetOrPush::Push) => pushed = Some(gone.id),
+                    None => {}
                 }
+            }
+            if let (Some(item), PaintScope::Node(id)) = (pushed, scope) {
+                let list = Operation::SetFills {
+                    id,
+                    fills: Vec::new(),
+                };
+                app.push_item_removal(id, &list, item);
             }
             if let Some((from, to)) = app.finish_paint_drag(ui, PaintList::Fill, anchor, slots) {
                 app.write_fill_list(scope, paint::reordered(fills, from, to));
@@ -5703,6 +5713,7 @@ impl OndinApp {
                 }
                 // The main's strokes this instance removed, as ghost rows.
                 let mut restore = None;
+                let mut pushed = None;
                 for gone in source
                     .as_deref()
                     .map(|s| ondin_core::reset::removed_items(s, strokes))
@@ -5710,9 +5721,18 @@ impl OndinApp {
                 {
                     let lead = super::component::GhostLead::Chip;
                     let label = paint::source_label(&app.session.doc, &gone.brush);
-                    if super::component::ghost_row(ui, lead, &label) {
-                        restore = Some(gone.id);
+                    match super::component::ghost_row(ui, lead, &label) {
+                        Some(ui::ResetOrPush::Reset) => restore = Some(gone.id),
+                        Some(ui::ResetOrPush::Push) => pushed = Some(gone.id),
+                        None => {}
                     }
+                }
+                if let (Some(item), PaintScope::Node(id)) = (pushed, scope) {
+                    let list = Operation::SetStrokes {
+                        id,
+                        strokes: Vec::new(),
+                    };
+                    app.push_item_removal(id, &list, item);
                 }
                 if let Some((from, to)) =
                     app.finish_paint_drag(ui, PaintList::Stroke, anchor, slots)
@@ -6981,8 +7001,18 @@ impl OndinApp {
             {
                 ui.add_space(GRID_ROW_GAP);
                 let label = format!("{} · {}", grid_axis_word(gone.axis), gone.count);
-                if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
-                    restore = true;
+                match super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
+                    Some(ui::ResetOrPush::Reset) => restore = true,
+                    Some(ui::ResetOrPush::Push) => {
+                        if let [id] = subjects.as_slice() {
+                            let list = Operation::SetLayoutGrids {
+                                id: *id,
+                                grids: Vec::new(),
+                            };
+                            app.push_item_removal(*id, &list, gone.id);
+                        }
+                    }
+                    None => {}
                 }
             }
             // Written whole, not through `retarget_grids`: a restored grid keeps the main's id.
@@ -9098,8 +9128,18 @@ impl OndinApp {
                     .unwrap_or_default()
                 {
                     let lead = super::component::GhostLead::Glyph(effect_glyph(&gone.kind));
-                    if super::component::ghost_row(ui, lead, gone.kind.label()) {
-                        restore = Some(gone.id);
+                    match super::component::ghost_row(ui, lead, gone.kind.label()) {
+                        Some(ui::ResetOrPush::Reset) => restore = Some(gone.id),
+                        Some(ui::ResetOrPush::Push) => {
+                            if let [id] = subjects {
+                                let list = Operation::SetEffects {
+                                    id: *id,
+                                    effects: Vec::new(),
+                                };
+                                app.push_item_removal(*id, &list, gone.id);
+                            }
+                        }
+                        None => {}
                     }
                 }
                 // After every row, so the popover cannot claim a press meant for a
@@ -10788,9 +10828,11 @@ impl OndinApp {
             .map(|(n, ops)| (n, ops.to_vec()))
             .unwrap_or_default();
         let reset_label = format!("Reset {}", title.to_lowercase());
+        let push_label = format!("Push {} to main", title.to_lowercase());
         let overrides = (count > 0).then_some(ui::HeadOverrides {
             count,
             reset: &reset_label,
+            push: &push_label,
         });
         // Salted by title, not position: the panel list changes with the subject,
         // and an index-derived id would clash for a frame (egui's red flash).

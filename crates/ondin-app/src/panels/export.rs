@@ -420,8 +420,22 @@ impl OndinApp {
                     .unwrap_or_default()
                 {
                     let label = format!("{} {}", gone.scale.label(), gone.format.label());
-                    if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
-                        restore = true;
+                    match super::component::ghost_row(
+                        ui,
+                        super::component::GhostLead::Plain,
+                        &label,
+                    ) {
+                        Some(ui::ResetOrPush::Reset) => restore = true,
+                        Some(ui::ResetOrPush::Push) => {
+                            if let Some(id) = sizing {
+                                let list = Operation::SetExports {
+                                    id,
+                                    exports: Vec::new(),
+                                };
+                                app.push_item_removal(id, &list, gone.id);
+                            }
+                        }
+                        None => {}
                     }
                 }
             });

@@ -194,9 +194,10 @@ link map:
   for its own copies.
 - Reorders go down the copy chain; the pass lays every linked child of each copy in the main's new
   order in the linked slots.
-- No arm acts on a copy the edit itself deleted. No gained child is copied into a copy the edit already
-  gave a node linked to it (`supplied`) — a kit update writes a nested main's layer and the nested
-  copy's layer in one transaction. No arm, nor the field pass, writes a copy in the kit vault
+- No arm acts on a copy the edit itself deleted. No gained child is copied into a copy holding a
+  child whose link to it the edit wrote (`supplied`: made by the edit or relinked by it) — a kit
+  update writes a nested main's layer and the nested copy's layer in one transaction, and a push
+  links the instance's own layer to the one it gives the main. No arm, nor the field pass, writes a copy in the kit vault
   (`propagate::follows_nothing`, §5.3e).
 - Ops go out **inserts → moves → deletes → reorders**, delete decisions after the moves, `untouched`
   ignoring children the pass carries out.
@@ -264,6 +265,42 @@ alone); reset all (fields, missing counterparts, the main's order).
   the layout item of each layer it resizes (`reset::items_stated`), or `keep_flex_sizes` reads it as
   the hand's resize. `reset::stated` is a reset with both (`reset::placement_stated` the insets), the
   context menu's door and `reset_overrides`'.
+
+### Push to main — `push.rs`
+
+Reset's opposite: an instance's differences written into its main. The commit's own passes carry them
+on — an instance still equal to the main's old value takes the new one, one with its own keeps it.
+
+- **One link up.** A copy pushes into `reset::source_of`, the node Reset compares it with, and never
+  past the main holding that node (`push::home`). A swapped copy's slot fields go to its link and the
+  rest to its swap, the split `reset::overrides` makes; a target outside `home`'s subtree is skipped,
+  so a swapped copy's content overrides inside an instance are not pushed (its swap is).
+- **Five families** (`push::Kind`), counted by `push::pushable`: properties (a field a boolean, text
+  or swap property drives, `variant::property_fields`), fields (every other override), local layers,
+  order, removals. *Push all* is the first four in one transaction: the layers first, the order read
+  on the document they leave so a pushed layer is ordered with its siblings, then the fields. A
+  removal deletes the main's layer and is only ever pushed on its own.
+- **A field** is the copy's own `reset::state_ops` value, retargeted at the target (`push::fields`
+  turns a reset's ops into their pushes). **A swap** is `variant::switch` on the slot — a relink for a
+  root linked straight to a main, a swap for a nested copy; the copy's swap then equals what its slot
+  shows and `swap::settle` clears it. **A list item the copy removed** is deleted from the target's
+  list (`push::item_removal`).
+- **A local layer** (outermost only, `push::is_local`; `push::push_layer`) is copied under its
+  parent's source at `propagate::anchor`'s place, and in the same transaction each of its nodes is
+  `SetLink`ed to its copy, so the commit gives it to every other instance and not to this one again
+  (`supplied`, above). **Order**: the main parent's children take the instance's order in the slots
+  its linked children hold. **A removal** is the main layer's `DeleteNode`; *Main loses a child*
+  decides each other instance's counterpart.
+- **Placement is stated** (`push::stated`): every pushed `SetTransform` or resizing `SetGeometry`
+  with no `SetInsets` beside it carries the target's insets, and every resize the target's layout
+  item, so `keep_insets` and `keep_flex_sizes` do not read the push as a hand's move or resize.
+- **Refused**: `push::blocked` — the main in the vault (`Kit`) or effectively locked (`Locked`).
+  `push::layer_blocked` — `WrapsLinked`, a local group holding linked copies, which would carry the
+  main's own children; `HoldsMain`, where `component::can_hold` refuses the layer under its parent's
+  source (an instance of the main, or of one reaching it).
+- **Counted**: `push::outcome(before, after, root, ops)` counts the main's other instances that took
+  the push and those that kept their own (a removal: lost it, or kept it unlinked);
+  `push::predicted` runs `propagate::owed` on a scratch document, for a row's tooltip.
 
 ### The verbs
 
@@ -433,8 +470,8 @@ any other pass that recomputes a copy's value.
 
 - Relinking a top-level instance to a kit main not yet vendored (the *Main* row offers the
   document's mains, vendored kit mains among them).
-- Pushing an instance's changes to its main — `roadmap.md` *Now · Components and layout*. No verb
-  un-makes a component (`non-goals.md`); one would owe its instances a detach, as a delete does.
+- No verb un-makes a component (`non-goals.md`); one would owe its instances a detach, as a delete
+  does.
 - Unruled, parked in `roadmap.md`: a main-scoped guide not copied into instances; whether a group
   *instance* gets a canvas label.
 - Real-time collaboration — non-goal for now (it is where linked copies cost).
@@ -517,6 +554,31 @@ Inspector:
   several instances read *K with changes*. Counts come from `reset::Drift` cached on
   `EditorSession::revision` (`OndinApp::drift_cache`, also read by the menu; property readings in
   `OndinApp::prop_cache`). Resets commit through `commit_edit` (`OndinApp::reset_tx`).
+- **Pushes** (`panels/push.rs`): a single instance's ⋯ adds, under a rule after the resets, *Push all
+  to main*, *Push properties to main N* (where the component defines properties), *Push fields to main
+  N*, *Push local layers to main N*, *Push order to main*, and under a second rule *Push removals to
+  main N*, the one push that deletes. Text rows, disabled at zero (*Nothing here differs from the main
+  component*; order *The order matches the main*) or with the kit or lock reason. A hovered row
+  predicts its effect: *Write this instance's fields into Card — 9 other instances follow, 2 keep
+  their own*; *Delete Footer from Card — 9 instances lose it, 2 with edits keep it, unlinked*.
+- A local layer, and an instance dropped into another instance (which shows the *Local to this
+  instance* line too), gets a full-width `ui::action_button` *Push to ‹main›* under that line,
+  disabled with its reason. Pushing a nested instance is how it joins the main; nothing in the push
+  shows its properties, which stays the main author's call (in a set, `owed_slots` still binds it
+  where another variant shows a slot at its name path).
+- **Every reset of one thing offers its push beside it** on a right-click (`ui::reset_push_menu`): a
+  card header with overrides (*Reset fill* / *Push fill to main*), a field's mark (*Reset to main* /
+  *Push to main*), a marked label (`component::label_mark`: *Push ‹label› to main*, on a property
+  row, in the Type popup and on the grid template and item placement rows), an overridden dropdown's list (*Push
+  to main* under its reset row), a ghost row (*Restore* / *Push removal to main*). The header's hover
+  chip stays the reset alone: a push reaches every instance, so it is never one stray click away. A
+  menu's push reaches the reset door as that reset with `ui::request_push` set; `commit_reset` and the
+  property rows' commit loop take it (`ui::take_push`) and commit `push::fields` instead. Each frame
+  clears a request no door took before any widget runs, so it cannot turn a later reset into a push.
+- A push is one undo step, *Push to main* (`icon::PUSH_TO_MAIN`), with no confirmation; its toast says
+  what followed: *Pushed 3 fields into Card · 9 instances follow · 2 keep their own · Ctrl+Z to undo*,
+  *Pushed “Badge” into Card · 11 other instances now have it*, *Deleted “Footer” from Card · 9
+  instances lost it · 2 with edits keep it, unlinked*.
 - **Override look**: a 4px neutral dot and full-brightness label, swapped for ↺ on hover with the main's
   value in a tooltip (*Reset to main*). Card headers carry the dot and a unit count, and on an open
   card a hover chip (*↺ Reset fill*), from `reset::overrides` grouped by `component::card_of`.
@@ -541,7 +603,8 @@ Inspector:
 Menus: *Create component*, *Detach instance*, *Duplicate as component*, *Select all instances*, *Go to
 main component* in Structure after *Frame selection* (`context-menus.md` §4); *Reset all* on an
 instance and *Reset <name>* on a linked child, **omitted** when `reset::Drift::any` is false
-(`context-menus.md` §3's exception). Toasts are text-only `EditorSession::info` lines naming `Ctrl+Z`.
+(`context-menus.md` §3's exception); *Push all to main* after *Reset all*, omitted when nothing would
+be pushed and dimmed with `menu::PUSH_KIT` or `PUSH_LOCKED` — the finer pushes live on the card. Toasts are text-only `EditorSession::info` lines naming `Ctrl+Z`.
 A selection never spans pages, so *Select all instances* selects those on the current page and the
 status line counts the ones on other pages; *Go to main component* switches to the main's page
 (`OndinApp::select_main`).
@@ -840,9 +903,8 @@ never raw fields) on every instance of the main.
 - Across a swap, a shown copy's variant values carry **by property name** (`carried_target`); booleans
   and text keep the rewrite's name-path carry.
 - Only a main's author shows nested properties. A nested instance added inside an instance, not in
-  its main, has no slot and shows nothing on the outer card; it is edited by selecting it. Promoting
-  it waits on pushing an instance's changes to its main (`roadmap.md`, *Now · Components and
-  layout*).
+  its main, has no slot and shows nothing on the outer card; it is edited by selecting it, or pushed
+  into the main (*Push to ‹main›*), which shows nothing until the main's author opts in.
 
 ### Traps
 
@@ -857,8 +919,10 @@ never raw fields) on every instance of the main.
   rewrite drops the move's follow *and* the layout passes take no follow for a drag; each alone
   suffices for that case, so either looks removable — but a pinned copy in a wider instance needs both
   and a pinned instance root needs the split.
-- **`supplied` is a second defence** behind `follows_nothing` for the vault; keep it as the general
-  rule for an edit that supplies a counterpart itself.
+- **`supplied` is a second defence** behind `follows_nothing` for the vault, and the only one for a
+  pushed local layer: it must test a link the edit **wrote**, not a node it made, or the pushing
+  instance gets its layer twice (`a_pushed_local_layer_lands_in_the_main_once_per_instance` asserts
+  the one copy).
 - **`only_new` in `restore_children` is load-bearing**: without it the commit is not refused —
   `settle_links` cuts the duplicate and an unlinked copy lands silently.
 - **Fixtures the size of their main hide layout defects**: test instances wider than their main (inset

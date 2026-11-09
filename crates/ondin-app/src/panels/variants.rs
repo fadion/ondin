@@ -2247,7 +2247,13 @@ impl OndinApp {
                 }
             }
         }
+        // A label's *Push ‹property› to main* reaches here as that row's reset.
+        let push = crate::ui::take_push(&self.egui_ctx);
         for tx in out.into_iter().filter(|t| !t.0.is_empty()) {
+            if push {
+                self.push_from_reset(tx);
+                continue;
+            }
             self.session.name_step("Property", icon::SLIDERS_HORIZONTAL);
             self.commit_edit(tx);
         }

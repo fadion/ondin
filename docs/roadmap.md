@@ -17,9 +17,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Components and layout
 
-- **Pushing an instance's changes to its main** (`architecture.md` §5.3d). A nested instance added
-  inside an instance rather than its main shows no properties on the outer card until it is
-  promoted, which waits on this (`components.md`).
 - **Container queries for instances** — an instance picking its mode by its own width, as a
   top-level frame picks by the viewport's. Needs a design first: instances are kept out of
   `Document::picks_by_width` on purpose, and a collection's breakpoints are keyed to the viewport.

@@ -1055,6 +1055,10 @@ pub mod icon {
     pub const WIFI_SLASH: &str = "\u{f05b}";
     /// A credit — the inspector's *Credit* and *Credits…*: two quotation marks.
     pub const QUOTES: &str = "\u{f05c}";
+    /// *Push to main*, an instance's differences written into its main: an arrow
+    /// rising into a hexagon outline. Not [`ARROW_UP_RIGHT`] (go to the main) nor
+    /// [`UPLOAD_SIMPLE`] (publish).
+    pub const PUSH_TO_MAIN: &str = "\u{f05d}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1392,6 +1396,7 @@ pub mod icon {
         ("assets", ASSETS),
         ("wifi-slash", WIFI_SLASH),
         ("quotes", QUOTES),
+        ("push-to-main", PUSH_TO_MAIN),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

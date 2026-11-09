@@ -247,6 +247,9 @@ pub enum Item {
     /// *Reset all* — on an instance: its fields, removed children and order back to
     /// the main's, its own layers kept (`reset::reset_all`).
     ResetInstance,
+    /// *Push all to main* — on an instance: its properties, fields, local layers
+    /// and order written into its main (`push::push`, `Kind::All`).
+    PushToMain,
     /// *Reset Label* — on a linked layer inside an instance: [`Self::ResetInstance`]
     /// scoped to that layer.
     ResetChild,
@@ -631,6 +634,7 @@ impl Item {
         Item::AcceptKitUpdates,
         Item::MakeLocal,
         Item::ResetInstance,
+        Item::PushToMain,
         Item::ResetChild,
         Item::RestoreChildren,
         Item::ResetProperty,
@@ -841,6 +845,12 @@ impl Item {
             Item::ResetInstance => s(
                 "Reset all",
                 icon::ARROW_COUNTER_CLOCKWISE,
+                None,
+                Group::Structure,
+            ),
+            Item::PushToMain => s(
+                "Push all to main",
+                icon::PUSH_TO_MAIN,
                 None,
                 Group::Structure,
             ),
@@ -1700,6 +1710,12 @@ pub struct Context<'a> {
     /// zero. Own children while expanded, whole subtree while collapsed
     /// (`OndinApp::child_drift_of`).
     pub children_differ: bool,
+    /// Whether that one instance has anything *Push all to main* would write
+    /// (`push::Pushable::any`) — what offers the row; omitted at zero.
+    pub pushable: bool,
+    /// Why the push is refused where it is (its main is a kit's or locked) —
+    /// the row then dims with it.
+    pub push_refused: Option<&'static str>,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
     /// When the one selected instance is a kit instance: its kit's name, and
@@ -1772,6 +1788,11 @@ pub(crate) fn create_refusal(why: ondin_core::component::NotMain) -> &'static st
 /// kind per set. The dimmed row's reason and the verb's message.
 pub(crate) const COMBINE_MIXED: &str =
     "A component set holds one kind of layer — these mains mix frames and groups";
+
+/// Why *Push all to main* is dimmed on a kit instance: the card names the kit.
+pub(crate) const PUSH_KIT: &str = "Its main comes from a kit — change it in the kit";
+/// Why *Push all to main* is dimmed on an instance of a locked main.
+pub(crate) const PUSH_LOCKED: &str = "Its main is locked — unlock it to push into it";
 
 /// The parts of the layer under the pointer that decide a row's label or its
 /// presence.
@@ -2130,6 +2151,14 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             }
             if cx.drifted {
                 rows.push(Row::new(Item::ResetInstance).dim_if(locked, why));
+            }
+            // Next to *Reset all*; the finer pushes live on the card.
+            if cx.pushable {
+                rows.push(
+                    Row::new(Item::PushToMain)
+                        .dim_if(cx.push_refused.is_some(), cx.push_refused.unwrap_or(""))
+                        .dim_if(locked, why),
+                );
             }
             if cx.children_differ {
                 rows.push(Row::new(Item::RestoreChildren).dim_if(locked, why));
@@ -3223,6 +3252,17 @@ impl OndinApp {
                 .selection
                 .single()
                 .is_some_and(|id| self.child_drift_read(id).any()),
+            pushable: self.session.selection.single().is_some_and(|id| {
+                let doc = &self.session.doc;
+                ondin_core::component::instance_root(doc, id) == Some(id)
+                    && ondin_core::push::pushable(doc, id).any()
+            }),
+            push_refused: self.session.selection.single().and_then(|id| {
+                match ondin_core::push::blocked(&self.session.doc, id)? {
+                    ondin_core::push::Blocked::Kit => Some(PUSH_KIT),
+                    ondin_core::push::Blocked::Locked => Some(PUSH_LOCKED),
+                }
+            }),
             layer_name: self
                 .session
                 .selection
@@ -3453,6 +3493,7 @@ impl OndinApp {
             Item::ResetInstance | Item::ResetChild => {
                 self.reset_selection(ondin_core::reset::Kind::All)
             }
+            Item::PushToMain => self.push_selection(ondin_core::push::Kind::All),
             Item::RestoreChildren => self.restore_selected_children(),
             Item::ResetProperty => self.reset_selected_property(),
             Item::CombineAsVariants => self.combine_as_variants(),
@@ -3818,6 +3859,8 @@ mod tests {
             role: Role::Plain,
             drifted: true,
             children_differ: false,
+            pushable: false,
+            push_refused: None,
             layer_name: String::new(),
             kit: None,
             combinable: false,
@@ -4881,6 +4924,40 @@ mod tests {
         assert!(!flat(&build(&cx)).contains(&Item::ResetInstance));
         cx.drifted = false;
         assert!(!flat(&build(&cx)).contains(&Item::ResetChild));
+    }
+
+    /// *Push all to main* sits right after *Reset all* on an instance with
+    /// something to push, is left out with nothing, and dims with the reason when
+    /// its main refuses a push. Flip: building the row without
+    /// `cx.pushable`'s gate fails at "left out".
+    #[test]
+    fn push_all_sits_after_reset_all_and_dims_on_a_refused_main() {
+        let sel = [id(1)];
+        let kinds = [Kind::Shape];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let mut cx = open(target, &sel, &kinds);
+        cx.role = Role::Instance;
+        cx.pushable = true;
+        let items = flat(&build(&cx));
+        let reset = items.iter().position(|i| *i == Item::ResetInstance);
+        let push = items.iter().position(|i| *i == Item::PushToMain);
+        assert_eq!(push, reset.map(|r| r + 1), "{items:?}");
+        let row = |cx: &Context<'_>| {
+            build(cx)
+                .into_iter()
+                .flatten()
+                .find(|r| r.item == Item::PushToMain)
+        };
+        assert!(row(&cx).unwrap().enabled);
+        cx.push_refused = Some(PUSH_LOCKED);
+        let dim = row(&cx).unwrap();
+        assert!(!dim.enabled);
+        assert_eq!(dim.why, Some(PUSH_LOCKED));
+        cx.pushable = false;
+        assert!(row(&cx).is_none(), "left out with nothing to push");
     }
 
     /// A kit instance's menu gains its kit rows (*Go to main in Atlas*, *Accept kit

@@ -1357,11 +1357,13 @@ pub struct HeadDrop<'a> {
 }
 
 /// A card's overrides, for its header: a dot and `count` at rest, and on hover a
-/// card-level reset named `reset` (*Reset effects*).
+/// card-level reset named `reset` (*Reset effects*); on a right-click, a menu of
+/// that reset and `push` (*Push effects to main*).
 #[derive(Clone, Copy)]
 pub struct HeadOverrides<'a> {
     pub count: usize,
     pub reset: &'a str,
+    pub push: &'a str,
 }
 
 /// The control on the right of a [`section_head`], if it has one.
@@ -1598,6 +1600,13 @@ pub fn section_head_full(
             egui::Sense::click(),
         );
         clicks.toggled = head.clicked();
+        // The chip's reset, and the push beside it, on a right-click: a push
+        // reaches every instance, so it is never the chip's one click.
+        if let Some(o) = overrides
+            && reset_push_menu(&head, o.reset, o.push).is_some()
+        {
+            clicks.reset = true;
+        }
     }
     if let (Some(o), Some(slot)) = (overrides, chip) {
         let mut over = row.rect;
@@ -1665,6 +1674,73 @@ pub fn section_head_full(
 /// because the accent means selected.
 pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
     p.circle_filled(at, 2.0, theme::text::muted());
+}
+
+/// Which row of a [`reset_push_menu`] was picked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetOrPush {
+    Reset,
+    Push,
+}
+
+/// The id [`request_push`] and [`take_push`] share.
+fn push_request_id() -> egui::Id {
+    egui::Id::new("ondin-push-request")
+}
+
+/// Turn the reset a mark reports this frame into a **push**: a field mark's ↺
+/// press and its menu's *Push to main* reach the caller as the same hit, and
+/// the reset door asks [`take_push`] which one it was. One click per frame, so
+/// the one door that commits this frame is the one the menu was on.
+pub fn request_push(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(push_request_id(), true));
+}
+
+/// Whether this frame's reset was asked for as a push ([`request_push`]),
+/// clearing the request.
+pub fn take_push(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.remove_temp::<bool>(push_request_id()))
+        .unwrap_or(false)
+}
+
+/// The right-click menu of anything that resets one thing to its main: `reset`,
+/// then `push`, the same thing written into the main (§5.3d). Each row wears its
+/// glyph. Sized to its longest row.
+pub fn reset_push_menu(resp: &egui::Response, reset: &str, push: &str) -> Option<ResetOrPush> {
+    let mut picked = None;
+    egui::Popup::context_menu(resp).show(|ui| {
+        popup_rows(ui);
+        let widest = [reset, push]
+            .iter()
+            .map(|t| {
+                ui.painter()
+                    .layout_no_wrap(
+                        t.to_string(),
+                        egui::FontId::proportional(SMALL_PT),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x
+            })
+            .fold(0.0, f32::max);
+        ui.set_width((8.0 + 22.0 + widest + 16.0).ceil());
+        if menu_item(ui, icon::ARROW_COUNTER_CLOCKWISE, reset, MENU_ROW_H).clicked() {
+            picked = Some(ResetOrPush::Reset);
+        }
+        if menu_item(ui, icon::PUSH_TO_MAIN, push, MENU_ROW_H).clicked() {
+            picked = Some(ResetOrPush::Push);
+        }
+    });
+    if picked == Some(ResetOrPush::Push) {
+        request_push(&resp.ctx);
+    }
+    picked
+}
+
+/// [`reset_push_menu`] for a field's override mark: *Reset to main* and *Push to
+/// main*. Whether either was picked — the mark's hit, a push already requested.
+fn mark_menu(resp: &egui::Response) -> bool {
+    reset_push_menu(resp, "Reset to main", "Push to main").is_some()
 }
 
 /// The centre of every override dot a frame painted (2-pt muted circle, also the
@@ -3340,7 +3416,7 @@ fn value_field_f64_marked(
             let lead_resp = lead_resp.on_hover_cursor(cursor);
             let lead_resp = match mark {
                 Some(m) => {
-                    if lead_resp.clicked() {
+                    if lead_resp.clicked() || mark_menu(&lead_resp) {
                         reset = true;
                     }
                     lead_resp.on_hover_text(m.tip)
@@ -4165,7 +4241,7 @@ pub fn field_button_marked(
         override_dot(ui.painter(), rect.right_top() + egui::vec2(-4.0, 4.0));
     }
     let resp = resp.on_hover_text(m.tip);
-    let reset = resp.clicked();
+    let reset = resp.clicked() || mark_menu(&resp);
     (resp, reset)
 }
 
@@ -4801,7 +4877,8 @@ pub fn segmented_marked(
                     paint(ui.painter(), i, rect, on);
                     override_dot(ui.painter(), rect.right_top() + egui::vec2(-4.0, 4.0));
                 }
-                if resp.on_hover_text(m.tip).clicked() {
+                let resp = resp.on_hover_text(m.tip);
+                if resp.clicked() || mark_menu(&resp) {
                     reset = true;
                 }
                 continue;

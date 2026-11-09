@@ -35,7 +35,7 @@ Read the file for the exact wording before relying on one.
 | `layout.md` | 5.3b, 5.3c | Layout grids; container layout (flexbox, grid, insets) |
 | `components.md` | 5.3d | Components, instances, overrides, variants, swap, reset, push to main, interaction states, lineage keys, documentation links |
 | `kits.md` | 5.3e | Kits: shared component libraries |
-| `styles-variables.md` | 5.3f | Variables, collections and modes (a collection picked by width), scope, bindings, styles, design tokens import and the linked tokens file |
+| `styles-variables.md` | 5.3f | Variables, collections and modes (a collection picked by width, width queries), scope, bindings, styles, design tokens import and the linked tokens file |
 | `text.md` | 5.4, 5.4a | The text node and fonts, spell check |
 | `images.md` | 5.5a | Images |
 | `io.md` | 5.11, 5.11a | Save format, schema migration, clipboard envelope, the library block |

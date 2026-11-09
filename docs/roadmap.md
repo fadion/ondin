@@ -17,9 +17,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Components and layout
 
-- **Container queries for instances** — an instance picking its mode by its own width, as a
-  top-level frame picks by the viewport's. Needs a design first: instances are kept out of
-  `Document::picks_by_width` on purpose, and a collection's breakpoints are keyed to the viewport.
 - **A per-component review table for kit updates** — the next step after the *accept all* notice
   (§15 D1010 (3), D1011 5D): each kit row's disclosure, whose room the design reserves, opens onto
   the components that changed.

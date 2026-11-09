@@ -72,6 +72,10 @@ fn mode(op: &Operation) -> Mode {
         // picture replaced, an icon ungrouped in it reach every copy, and a copy's
         // own photo is an override.
         | Operation::SetCredit { .. }
+        // What a layer is in code is its main's: the inspector never lets a copy
+        // differ, so every copy follows.
+        | Operation::SetElement { .. }
+        | Operation::SetHref { .. }
         // A copy's mode is an override like any field (§5.3f), and so is a
         // corner's binding: overrides compare the binding (§5.3d).
         | Operation::SetModes { .. }

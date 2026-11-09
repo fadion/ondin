@@ -105,7 +105,6 @@ fn kit() -> Kit {
                     "Size",
                     vec!["Large".into(), "Small".into()],
                 )],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -1069,7 +1068,6 @@ fn a_variant_newer_than_the_held_set_asks_for_an_update() {
                         "Size",
                         vec!["Large".into(), "Small".into(), "Medium".into()],
                     )],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

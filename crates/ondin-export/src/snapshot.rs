@@ -129,6 +129,14 @@ pub struct NodeSnapshot {
     /// same filter `fills` and `strokes` apply. Absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectSummary>,
+    /// The HTML element a code export writes the node as, by tag (`"nav"`,
+    /// `"h2"`), absent on Automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<String>,
+    /// The address a node written as a link goes to, absent when it has none
+    /// or is not a link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub href: Option<String>,
 }
 
 /// One effect, flattened for a reader that is not this program. `kind` is a
@@ -475,6 +483,10 @@ fn node_snapshot(
             .filter(|e| e.visible)
             .map(|e| effect_summary(e))
             .collect(),
+        element: node.element().map(|e| e.tag().to_string()),
+        href: (node.element() == Some(ondin_core::element::HtmlElement::Link)
+            && !node.href().is_empty())
+        .then(|| node.href().to_string()),
     }
 }
 

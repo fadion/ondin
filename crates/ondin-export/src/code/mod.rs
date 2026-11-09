@@ -214,6 +214,10 @@ pub struct CodeExport {
     /// One line per set whose interaction states are written as CSS, or, from
     /// plain HTML, that it writes none.
     pub states: Vec<String>,
+    /// Layers written as another element than the one they set, and why: an
+    /// element HTML refuses where the layer now sits, or a layer drawn as a
+    /// picture.
+    pub elements: Vec<String>,
 }
 
 impl CodeExport {
@@ -236,16 +240,25 @@ impl CodeExport {
     }
 }
 
-/// What the walk learns that is not markup: the three lists of [`CodeExport`].
+/// What the walk learns that is not markup: the lists of [`CodeExport`].
 #[derive(Default)]
 pub(crate) struct Report {
     approximated: Vec<String>,
     positioned: Vec<String>,
     inlined: Vec<String>,
     states: Vec<String>,
+    elements: Vec<String>,
 }
 
 impl Report {
+    /// A layer is written as another element than it sets.
+    pub(crate) fn element(&mut self, what: impl Into<String>) {
+        let what = what.into();
+        if !self.elements.contains(&what) {
+            self.elements.push(what);
+        }
+    }
+
     /// A set's interaction states, and how they are written.
     pub(crate) fn state(&mut self, what: impl Into<String>) {
         let what = what.into();
@@ -291,6 +304,7 @@ impl Report {
                 &self.positioned,
             ),
             ("Written out as layers, not as a component:", &self.inlined),
+            ("Written as another element than set:", &self.elements),
         ] {
             if lines.is_empty() {
                 continue;
@@ -307,7 +321,7 @@ impl Report {
             }
         }
         let exact = self.approximated.is_empty() && self.positioned.is_empty();
-        if exact && self.inlined.is_empty() {
+        if exact && self.inlined.is_empty() && self.elements.is_empty() {
             if !out.is_empty() {
                 out.push('\n');
             }
@@ -317,13 +331,14 @@ impl Report {
     }
 
     /// The report's lists, for [`CodeExport`]: approximated, positioned,
-    /// inlined and states.
-    pub(crate) fn into_lists(self) -> [Vec<String>; 4] {
+    /// inlined, states and elements.
+    pub(crate) fn into_lists(self) -> [Vec<String>; 5] {
         [
             self.approximated,
             self.positioned,
             self.inlined,
             self.states,
+            self.elements,
         ]
     }
 }
@@ -352,13 +367,14 @@ pub(crate) fn finish(mut files: Vec<CodeFile>, page: walk::Page) -> CodeExport {
         path: "report.txt".into(),
         bytes: page.report.text().into_bytes(),
     });
-    let [approximated, positioned, inlined, states] = page.report.into_lists();
+    let [approximated, positioned, inlined, states, elements] = page.report.into_lists();
     CodeExport {
         files,
         approximated,
         positioned,
         inlined,
         states,
+        elements,
     }
 }
 

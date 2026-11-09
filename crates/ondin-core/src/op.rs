@@ -286,6 +286,19 @@ pub enum Operation {
         id: NodeId,
         credit: Option<Box<crate::credit::Credit>>,
     },
+    /// The HTML element a code export writes a layer as (`crate::element`),
+    /// never drawn; `None` is Automatic. Refused for an element the layer's
+    /// kind is not offered.
+    SetElement {
+        id: NodeId,
+        element: Option<crate::element::HtmlElement>,
+    },
+    /// The address a layer written as a link goes to, never drawn. Refused
+    /// unless in [`crate::element::is_href`]'s form; empty is none.
+    SetHref {
+        id: NodeId,
+        href: String,
+    },
     /// The ground behind and around a page's frames (`crate::page`). A solid
     /// colour, not a `Brush`: nothing lies behind it for a gradient or an alpha
     /// to act on. `None` clears the page's own colour, so it is drawn on the
@@ -622,6 +635,8 @@ impl Operation {
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
             | Operation::SetCredit { id, .. }
+            | Operation::SetElement { id, .. }
+            | Operation::SetHref { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }
@@ -729,6 +744,8 @@ impl Operation {
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
             | Operation::SetCredit { id, .. }
+            | Operation::SetElement { id, .. }
+            | Operation::SetHref { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }
@@ -876,6 +893,8 @@ impl Operation {
             | Operation::SetDescription { .. }
             | Operation::SetDocLink { .. }
             | Operation::SetCredit { .. }
+            | Operation::SetElement { .. }
+            | Operation::SetHref { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. }
@@ -1033,6 +1052,10 @@ impl Operation {
             },
             Operation::SetDocLink { id, url } => node(id).is_some_and(|n| n.doc_link == *url),
             Operation::SetCredit { id, credit } => node(id).is_some_and(|n| n.credit == *credit),
+            Operation::SetElement { id, element } => {
+                node(id).is_some_and(|n| n.element == *element)
+            }
+            Operation::SetHref { id, href } => node(id).is_some_and(|n| n.href == *href),
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)
             }
@@ -1542,6 +1565,12 @@ pub enum OpError {
     /// A credit holding an address not in [`crate::web_link`]'s form.
     #[error("a credit's links must be http or https addresses")]
     BadCredit,
+    /// An HTML element the layer's kind is not offered (`crate::element::offered`).
+    #[error("this kind of layer cannot be written as that element")]
+    ElementForKind,
+    /// A link address not in [`crate::element::is_href`]'s form.
+    #[error("not an address a link can take")]
+    BadHref,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside
     /// frames and groups (§5.3, §15 D870) but not off a shape or inside a boolean
     /// or a mask (§15 D876). Also the answer to turning a group that holds a
@@ -1804,8 +1833,13 @@ mod changes_ink_tests {
                 url: "https://d".into(),
             },
             Operation::SetCredit { id, credit: None },
+            Operation::SetElement { id, element: None },
+            Operation::SetHref {
+                id,
+                href: String::new(),
+            },
         ];
-        assert_eq!(invisible.len(), 40, "the whole false arm");
+        assert_eq!(invisible.len(), 42, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

@@ -371,7 +371,6 @@ fn a_variant_switch_drops_the_old_variants_own_nested_override() {
             id: set,
             set: Some(VariantSet {
                 props: vec![VariantProp::new("V", vec!["A".into(), "B".into()])],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -906,7 +905,6 @@ fn a_nested_variant_switch_is_a_swap() {
                     "Icon",
                     vec!["Star".into(), "Heart".into()],
                 )],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {

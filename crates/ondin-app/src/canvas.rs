@@ -18247,7 +18247,6 @@ mod frame_menu_door_tests {
                 "Size",
                 vec!["Small".into(), "Large".into()],
             )],
-            ..Default::default()
         };
         let mut ops = vec![frame(a, 1), frame(b, 2)];
         for id in [a, b] {
@@ -18362,7 +18361,6 @@ mod frame_menu_door_tests {
                 id: set,
                 set: Some(VariantSet {
                     props: vec![VariantProp::new("Size", vec!["Small".into()])],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

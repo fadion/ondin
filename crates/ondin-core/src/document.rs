@@ -191,6 +191,8 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         description: String::new(),
         doc_link: String::new(),
         credit: None,
+        element: None,
+        href: String::new(),
         origin: None,
         modes: Vec::new(),
         queries: Vec::new(),
@@ -2040,6 +2042,28 @@ impl Document {
                     credit: old,
                 })
             }
+            // Nor by what a layer is in code, which only the code export reads.
+            Operation::SetElement { id, element } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                if let Some(e) = element
+                    && !crate::element::offered(&node.kind).is_some_and(|o| o.contains(e))
+                {
+                    return Err(OpError::ElementForKind);
+                }
+                let old = std::mem::replace(&mut node.element, *element);
+                Ok(Operation::SetElement {
+                    id: *id,
+                    element: old,
+                })
+            }
+            Operation::SetHref { id, href } => {
+                if !crate::element::is_href(href) {
+                    return Err(OpError::BadHref);
+                }
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.href, href.clone());
+                Ok(Operation::SetHref { id: *id, href: old })
+            }
             Operation::SetStyleValue { id, value } => {
                 if !crate::style::survives_save(value) {
                     return Err(OpError::NonFinite);
@@ -2400,6 +2424,8 @@ impl Document {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            element: None,
+            href: String::new(),
             origin: None,
             modes: Vec::new(),
             queries: Vec::new(),
@@ -3922,6 +3948,9 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             doc_link: n.doc_link.clone(),
             // An asset's credit travels with every copy of it.
             credit: n.credit.clone(),
+            // What the layer is in code travels with it, as its name does.
+            element: n.element,
+            href: n.href.clone(),
             // **Never carried** (§15 D1012): a copy of a vendored node does not live
             // in the vault, and `kit::check` refuses an origin outside it. The kit
             // verbs write the origin after minting their copies here.
@@ -4198,6 +4227,8 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            element: None,
+            href: String::new(),
             origin: None,
             modes: Vec::new(),
             queries: Vec::new(),

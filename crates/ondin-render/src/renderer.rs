@@ -1473,6 +1473,8 @@ impl RenderOverrides {
             | Operation::SetDescription { .. }
             | Operation::SetDocLink { .. }
             | Operation::SetCredit { .. }
+            | Operation::SetElement { .. }
+            | Operation::SetHref { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }

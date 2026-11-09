@@ -497,7 +497,6 @@ fn button_set(badge: Badge) -> (Document, NodeId) {
                     "Size",
                     vec!["Small".into(), "Large".into()],
                 )],
-                ..Default::default()
             }),
         },
         create(small, (set, 0), frame(80.0, 30.0), (10.0, 10.0), "Small"),

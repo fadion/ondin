@@ -288,7 +288,6 @@ fn icon_set() -> (Document, Resolved, NodeId) {
                     VariantProp::new("Name", vec!["Arrow left".into(), "Check".into()]),
                     VariantProp::new("Size", vec!["16".into(), "24".into()]),
                 ],
-                ..Default::default()
             }),
         },
     ];

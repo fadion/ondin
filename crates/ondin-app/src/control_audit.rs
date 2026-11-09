@@ -702,7 +702,6 @@ fn with_a_set(ctx: &egui::Context) -> OndinApp {
                     vec!["Default".into(), "Hover".into(), "Pressed".into()],
                 ),
             ],
-            ..Default::default()
         }),
     });
     for (v, size) in [(small, "Small"), (large, "Large")] {

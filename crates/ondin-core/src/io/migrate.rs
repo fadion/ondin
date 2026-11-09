@@ -406,13 +406,67 @@ fn migrate_13_to_14(value: &mut Value) {
 /// else: a v14 file holds none. The bump is for the older build, which would
 /// drop the queries and save every instance back picking by nothing. The
 /// published document's number moves too.
+///
+/// A set's `element` (Button, Link, Plain; absent is Button) moves onto its
+/// variant roots, where v15 keeps a layer's HTML element: a set with an
+/// interaction state writes `button` or `a` on each root, Plain writing nothing
+/// (Automatic). A set without states never read it, so it is dropped.
 fn migrate_14_to_15(value: &mut Value) {
     value["schema_version"] = Value::from(15u32);
+    set_element_onto_roots(value);
     if let Some(inner) = value
         .get_mut("published")
         .and_then(|p| p.get_mut("document"))
         .filter(|d| d.is_object())
     {
         inner["schema_version"] = Value::from(15u32);
+        set_element_onto_roots(inner);
+    }
+}
+
+/// [`migrate_14_to_15`]'s move of each set's element onto its roots.
+fn set_element_onto_roots(value: &mut Value) {
+    let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) else {
+        return;
+    };
+    // Each marked set's children and the tag its roots take.
+    let mut writes: Vec<(Vec<Value>, &'static str)> = Vec::new();
+    for node in nodes.iter_mut() {
+        let Some(set) = node.get_mut("set").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let element = set.remove("element");
+        let marked = set
+            .get("props")
+            .and_then(Value::as_array)
+            .is_some_and(|props| {
+                props.iter().any(|p| {
+                    p.get("states")
+                        .and_then(Value::as_object)
+                        .is_some_and(|s| !s.is_empty())
+                })
+            });
+        let tag = match element.as_ref().and_then(Value::as_str) {
+            None | Some("button") => Some("button"),
+            Some("link") => Some("a"),
+            _ => None,
+        };
+        if let (true, Some(tag)) = (marked, tag) {
+            let children = node
+                .get("children")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            writes.push((children, tag));
+        }
+    }
+    for (children, tag) in writes {
+        for node in nodes.iter_mut() {
+            let is_root = node.get("id").is_some_and(|id| children.contains(id))
+                && node.get("component").and_then(Value::as_bool) == Some(true);
+            if is_root {
+                node["element"] = Value::from(tag);
+            }
+        }
     }
 }

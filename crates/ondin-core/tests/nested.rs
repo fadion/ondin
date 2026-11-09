@@ -45,7 +45,6 @@ fn weight() -> VariantSet {
             "Weight",
             vec!["Regular".into(), "Bold".into()],
         )],
-        ..Default::default()
     }
 }
 
@@ -253,7 +252,6 @@ fn buttons(f: &mut F, sizes: &[&str]) -> (NodeId, Vec<NodeId>, Vec<NodeId>) {
                 "Size",
                 sizes.iter().map(|s| s.to_string()).collect(),
             )],
-            ..Default::default()
         }),
     }];
     for (m, s) in mains.iter().zip(sizes) {
@@ -434,7 +432,6 @@ fn a_carry_and_a_nested_row_match_properties_by_name_not_position() {
                     VariantProp::new("Size", values(&["M"])),
                     VariantProp::new("Weight", values(&["Regular", "Bold"])),
                 ],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {

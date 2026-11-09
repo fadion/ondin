@@ -1919,7 +1919,6 @@ pub(crate) mod tests {
                         "Size",
                         vec!["Small".into(), "Primary".into()],
                     )],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

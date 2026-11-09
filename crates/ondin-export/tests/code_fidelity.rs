@@ -1577,6 +1577,86 @@ fn text_spacing_and_features_match_the_canvas() {
     holds_within("spacing", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
 }
 
+/// Every HTML element a layer can set draws as the `div` or `p` it replaces: a
+/// header holding a navigation list of text items and a picture item, a button
+/// frame with its label, a link text, a heading, a main and a section.
+///
+/// flip: `write_element` leaving out the button's resets → 45.3 on the button.
+#[test]
+fn html_elements_match_the_canvas() {
+    use ondin_core::element::HtmlElement as H;
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 240.0, "Board");
+    let header = d.frame(Some(f), 0.0, 0.0, 320.0, 50.0, "Header");
+    let list = d.frame(Some(header), 10.0, 10.0, 220.0, 30.0, "Links");
+    let item = |content: &str| text_node(content, TextSizing::Auto, body_style(), |_| {});
+    d.add(
+        Some(list),
+        item("Home"),
+        Affine::translate((0.0, 0.0)),
+        "Home",
+    );
+    d.add(
+        Some(list),
+        item("Docs"),
+        Affine::translate((70.0, 0.0)),
+        "Docs",
+    );
+    d.rect(list, 140.0, 4.0, 20.0, 20.0, 4.0);
+    let button = d.frame(Some(header), 240.0, 10.0, 70.0, 30.0, "Go");
+    // Light under dark ink: white type on a dark ground is laid heavier by
+    // Chrome than by the canvas, whatever element holds it.
+    d.fill(button, solid(200, 215, 245, 255));
+    d.add(
+        Some(button),
+        item("Go"),
+        Affine::translate((18.0, 3.0)),
+        "Label",
+    );
+    let main = d.frame(Some(f), 0.0, 60.0, 320.0, 180.0, "Content");
+    let section = d.frame(Some(main), 10.0, 10.0, 300.0, 160.0, "Plans");
+    let heading = d.add(
+        Some(section),
+        item("Pricing"),
+        Affine::translate((10.0, 10.0)),
+        "Pricing",
+    );
+    let link = d.add(
+        Some(section),
+        item("Sign up"),
+        Affine::translate((10.0, 60.0)),
+        "Sign up",
+    );
+    d.fill(link, solid(200, 40, 90, 255));
+    let set = |id, e| Operation::SetElement {
+        id,
+        element: Some(e),
+    };
+    d.apply(vec![
+        set(header, H::Header),
+        set(list, H::List),
+        set(button, H::Button),
+        set(main, H::Main),
+        set(section, H::Section),
+        set(heading, H::H2),
+        set(link, H::Link),
+        Operation::SetHref {
+            id: link,
+            href: "/signup".into(),
+        },
+    ]);
+    let (doc, res) = d.done();
+    let out = html_of(&doc, &res, &[f]);
+    let html = String::from_utf8(out.file("index.html").unwrap().to_vec()).unwrap();
+    for tag in [
+        "<header", "<ul", "<li", "<button", "<main", "<section", "<h2", "<a ",
+    ] {
+        assert!(html.contains(tag), "the fixture writes {tag}: {html}");
+    }
+    assert!(out.elements.is_empty(), "{:?}", out.elements);
+    holds_within("elements", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
 /// Texts in a text style draw their face from its class in `text-styles.css`:
 /// two in one style with an automatic line height, one of them with a run of
 /// its own weight, and one in a style with tracking.
@@ -3672,7 +3752,6 @@ fn a_forced_state_matches_the_canvas() {
                     "State",
                     vec!["Default".into(), "Hover".into()],
                 )],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {

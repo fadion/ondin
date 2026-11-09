@@ -85,6 +85,9 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         doc_link: _,
         // Follows the picture it credits, so a reset puts back the main's.
         credit,
+        // Never an override by hand, but a reset puts back the main's all the same.
+        element,
+        href,
         // A vendored node's provenance (§15 D1012) — never on a copy, so never an
         // override.
         origin: _,
@@ -148,6 +151,14 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetCredit {
             id,
             credit: credit.clone(),
+        },
+        O::SetElement {
+            id,
+            element: *element,
+        },
+        O::SetHref {
+            id,
+            href: href.clone(),
         },
         O::SetLayoutGrids {
             id,

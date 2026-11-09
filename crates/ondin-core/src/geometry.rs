@@ -2111,6 +2111,8 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            element: None,
+            href: String::new(),
             origin: None,
             modes: Vec::new(),
             queries: Vec::new(),

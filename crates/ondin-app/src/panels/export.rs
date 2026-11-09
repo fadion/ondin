@@ -4613,7 +4613,6 @@ mod code_export_tests {
                 id: set,
                 set: Some(VariantSet {
                     props: vec![VariantProp::new("Size", vec!["16".into(), "24".into()])],
-                    ..Default::default()
                 }),
             },
         ];

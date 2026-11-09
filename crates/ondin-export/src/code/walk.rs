@@ -17,6 +17,7 @@ use ondin_core::container::{
     JustifyContent, LengthPct,
 };
 use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
+use ondin_core::element::HtmlElement;
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
 use ondin_core::style::{StyleId, StyleValue};
@@ -192,6 +193,8 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         classes: Classes::reserving(text_names.values()),
         text_names,
         text_classes: Vec::new(),
+        inside: Vec::new(),
+        main_written: false,
         report: Report::default(),
         assets: Vec::new(),
         tokens: Tokens::new(doc),
@@ -289,6 +292,10 @@ struct Walk<'a> {
     text_names: HashMap<StyleId, String>,
     /// The text styles worn so far, in the order first met.
     text_classes: Vec<(StyleId, Rc<TextClass>)>,
+    /// The elements written around the layer being walked, outermost first.
+    inside: Vec<HtmlElement>,
+    /// Whether the file being written already holds its one `main`.
+    main_written: bool,
     report: Report,
     assets: Vec<(String, Vec<u8>)>,
     tokens: Tokens,
@@ -344,6 +351,8 @@ impl Walk<'_> {
     /// the frame `left: 0; width: 100%`.
     fn page_root(&mut self, origins: &[NodeId]) -> Element {
         let (doc, res) = (self.doc, self.res);
+        // Each page is a document of its own, holding its own main.
+        self.main_written = false;
         let view = crate::extent(res, &crate::drawn_origins(doc, origins))
             .unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
         let mut root = Element::new("div", self.classes.mint("page", "page"));
@@ -463,13 +472,28 @@ impl Walk<'_> {
                     .inline(format!("instance {}: {why}", label(node))),
             }
         }
-        let mut el = match used {
-            Some(el) => el,
+        // A use's element is its component root's, written in its own file.
+        let element = match &used {
+            None => self.element_of(node),
+            Some(_) => None,
+        };
+        if let Some(e) = element {
+            self.inside.push(e);
+        }
+        let built = match used {
+            Some(el) => Some(el),
             None => match self.css_blocker(node) {
-                None => self.css_element(node, place),
-                Some(why) => self.picture(node, place, &why)?,
+                None => Some(self.css_element(node, place)),
+                Some(why) => self.picture(node, place, &why),
             },
         };
+        if element.is_some() {
+            self.inside.pop();
+        }
+        let mut el = built?;
+        if let Some(e) = element {
+            self.write_element(&mut el, node, e);
+        }
         if let Some(var) = shown_var {
             // A use's own display is its component root's, which a `display`
             // in its doubled-class rule would override.
@@ -1191,7 +1215,8 @@ impl Walk<'_> {
             let p = params
                 .iter()
                 .position(|p| matches!(p.kind, ParamKind::Choice(i) if i == at))?;
-            Some((at, rest, vs.props[at].states.clone(), vs.element, p))
+            let element = variant::root_element(doc, owner_id);
+            Some((at, rest, vs.props[at].states.clone(), element, p))
         });
         let mut live = None;
         if let Some((_, rest, ties, element, p)) = &marked {
@@ -1219,6 +1244,9 @@ impl Walk<'_> {
             &mut self.classes,
             Classes::reserving(self.text_names.values()),
         );
+        // A component is its own file: nothing around its use, and no main yet.
+        let outer_inside = std::mem::take(&mut self.inside);
+        let outer_main = std::mem::replace(&mut self.main_written, false);
         let outer_bound = std::mem::replace(&mut self.bound, bound);
         let outer_forwards = std::mem::replace(&mut self.forwards, forwards);
         let mut bodies = Vec::new();
@@ -1229,7 +1257,20 @@ impl Walk<'_> {
             .chain(trees.iter().filter(|t| **t != default))
         {
             let Some(node) = doc.get(*t) else { continue };
+            // Each variant's tree is drawn alone, so each may hold the main. A
+            // marked set's root is written by `as_element`, but what it is still
+            // bars what may sit inside it.
+            self.main_written = false;
+            let element = match &marked {
+                Some(_) => variant::root_element(doc, owner_id).element(),
+                None => self.element_of(node),
+            };
+            self.inside.extend(element);
             let mut root = self.css_element(node, Place::Root);
+            self.inside.clear();
+            if let (Some(e), None) = (element, &marked) {
+                self.write_element(&mut root, node, e);
+            }
             root.takes_class = true;
             let when = match *t == default {
                 true => Vec::new(),
@@ -1318,6 +1359,8 @@ impl Walk<'_> {
             }
         }
         self.classes = classes;
+        self.inside = outer_inside;
+        self.main_written = outer_main;
 
         // Pushed once finished, so after the components it uses.
         let comps = self.components.as_mut().expect("components are on");
@@ -2435,6 +2478,112 @@ impl Walk<'_> {
         }
     }
 
+    /// The element `node` is written as, or `None` for Automatic. One HTML
+    /// refuses where the layer now sits — a later move can put a link in a
+    /// button the menu never would — is written as Automatic, and reported.
+    fn element_of(&mut self, node: &Node) -> Option<HtmlElement> {
+        use HtmlElement as H;
+        let offered = ondin_core::element::offered(node.kind())?;
+        let e = node.element().filter(|e| offered.contains(e))?;
+        let around = |f: &dyn Fn(HtmlElement) -> bool| self.inside.iter().any(|a| f(*a));
+        let why = if around(&|a| a == H::Button) {
+            Some("inside a button, which holds only text and pictures".to_string())
+        } else if e.interactive() && around(&|a| a.interactive()) {
+            Some("a button or a link cannot sit inside another".into())
+        } else if e == H::Main && self.main_written {
+            Some("a page has one main".into())
+        } else if e == H::Main
+            && around(&|a| matches!(a, H::Article | H::Aside | H::Header | H::Footer | H::Nav))
+        {
+            Some("the main cannot sit inside a landmark".into())
+        } else if matches!(e, H::Header | H::Footer)
+            && around(&|a| matches!(a, H::Header | H::Footer))
+        {
+            Some("a header or footer cannot sit inside another".into())
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            self.report.element(format!(
+                "{}: written as Automatic, not <{}>: {why}",
+                label(node),
+                e.tag()
+            ));
+            return None;
+        }
+        if e == H::Main {
+            self.main_written = true;
+        }
+        Some(e)
+    }
+
+    /// Write `el`, drawn for `node`, as `e`: its tag, the attributes and the
+    /// resets that make it draw as the `div` it replaces, and phrasing content
+    /// inside a button or a heading. A layer drawn as a picture keeps its tag.
+    fn write_element(&mut self, el: &mut Element, node: &Node, e: HtmlElement) {
+        use HtmlElement as H;
+        if el.markup.is_some() || el.tag == "img" {
+            self.report.element(format!(
+                "{}: drawn as a picture, so not written as <{}>",
+                label(node),
+                e.tag()
+            ));
+            return;
+        }
+        el.tag = e.tag();
+        match e {
+            H::Button => {
+                el.attrs.insert(0, ("type", "button".into()));
+                // A text style's class sets the face, which `font` would undo.
+                let reset: Vec<_> = BUTTON_RESET
+                    .iter()
+                    .filter(|(p, _)| el.text_class.is_none() || *p != "font")
+                    .copied()
+                    .collect();
+                reset_first(el, &reset);
+                phrasing(el);
+            }
+            H::Link => {
+                if !node.href().is_empty() {
+                    el.attrs.push(("href", node.href().to_string()));
+                }
+                reset_first(el, LINK_RESET);
+            }
+            H::List => {
+                reset_first(
+                    el,
+                    &[("list-style", "none"), ("margin", "0"), ("padding", "0")],
+                );
+                self.items(el);
+            }
+            e if e.heading() => {
+                reset_first(el, &[("margin", "0")]);
+                phrasing(el);
+            }
+            _ => {}
+        }
+    }
+
+    /// A list's children as its items: one written as a plain box becomes the
+    /// `li`; any other (an element of its own, a picture, a use) is wrapped in
+    /// one that draws no box of its own.
+    fn items(&mut self, list: &mut Element) {
+        for c in &mut list.children {
+            let Child::Element(e) = c else { continue };
+            if e.tag == "div" && e.markup.is_none() && e.instance.is_none() {
+                e.tag = "li";
+                continue;
+            }
+            let mut li = Element::new(
+                "li",
+                self.classes.mint(&format!("{} item", e.class), "item"),
+            );
+            li.set("display", "contents");
+            li.children.push(Child::Element(e.clone()));
+            *c = Child::Element(Box::new(li));
+        }
+    }
+
     /// The class of the text style `node` wears, made the first time one is
     /// met: the style's face, an automatic line height as the px `el` (its first
     /// user) was laid at. A user laid at another height keeps its own.
@@ -2887,32 +3036,43 @@ fn as_element(root: &mut Element, live: &Live) {
     if root.markup.is_some() {
         return;
     }
-    let reset: &[(&'static str, &str)] = match live.element {
+    match live.element {
         RootElement::Button => {
             root.tag = "button";
             root.attrs.insert(0, ("type", "button".into()));
-            &[
-                ("margin", "0"),
-                ("padding", "0"),
-                ("border", "0"),
-                ("background", "none"),
-                ("font", "inherit"),
-                ("color", "inherit"),
-                ("text-align", "inherit"),
-            ]
+            reset_first(root, BUTTON_RESET);
+            phrasing(root);
         }
         RootElement::Link => {
             root.tag = "a";
-            &[("color", "inherit"), ("text-decoration", "none")]
+            reset_first(root, LINK_RESET);
         }
         RootElement::Plain => {
             root.attrs.insert(0, ("tabindex", "0".into()));
-            &[]
         }
-    };
-    // Ahead of all the root's own declarations, so each overrides a reset: a
-    // reset placed after a longhand (`font` after `font-size`) would win.
-    let styles = std::iter::once(&mut root.style).chain(root.alts.iter_mut().map(|a| &mut a.style));
+    }
+    root.live = Some(live.clone());
+}
+
+/// What a `button` sets that a `div` does not, undone.
+const BUTTON_RESET: &[(&str, &str)] = &[
+    ("margin", "0"),
+    ("padding", "0"),
+    ("border", "0"),
+    ("background", "none"),
+    ("font", "inherit"),
+    ("color", "inherit"),
+    ("text-align", "inherit"),
+];
+
+/// What an `a` sets that a `div` does not, undone.
+const LINK_RESET: &[(&str, &str)] = &[("color", "inherit"), ("text-decoration", "none")];
+
+/// `reset` ahead of all `el`'s own declarations and its alternatives', each
+/// only where the rule does not state the property: a reset placed after a
+/// longhand (`font` after `font-size`) would win.
+fn reset_first(el: &mut Element, reset: &[(&'static str, &str)]) {
+    let styles = std::iter::once(&mut el.style).chain(el.alts.iter_mut().map(|a| &mut a.style));
     for style in styles {
         let mut at = 0;
         for (p, v) in reset {
@@ -2922,7 +3082,25 @@ fn as_element(root: &mut Element, live: &Live) {
             }
         }
     }
-    root.live = Some(live.clone());
+}
+
+/// Every element under `el` written as phrasing content, which a button or a
+/// heading only takes: a box becomes a `span` drawn as the block it was.
+fn phrasing(el: &mut Element) {
+    for c in &mut el.children {
+        let Child::Element(e) = c else { continue };
+        if e.markup.is_none() && e.instance.is_none() && !matches!(e.tag, "span" | "img" | "a") {
+            e.tag = "span";
+            let styles =
+                std::iter::once(&mut e.style).chain(e.alts.iter_mut().map(|a| &mut a.style));
+            for style in styles {
+                if !style.iter().any(|(p, _)| *p == "display") {
+                    style.push(("display", "block".into()));
+                }
+            }
+        }
+        phrasing(e);
+    }
 }
 
 /// `left`/`top` for a translation, else a `transform`.

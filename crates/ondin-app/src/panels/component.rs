@@ -1379,7 +1379,10 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         // override.
         | O::SetDescription { .. }
         | O::SetDocLink { .. }
-        | O::SetCredit { .. } => None,
+        | O::SetCredit { .. }
+        // What a layer is in code is its main's; an instance never differs.
+        | O::SetElement { .. }
+        | O::SetHref { .. } => None,
     }
 }
 
@@ -4788,7 +4791,6 @@ mod tests {
                         "Size",
                         vec!["Small".into(), "Large".into()],
                     )],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {
@@ -5475,7 +5477,6 @@ mod tests {
                 id: set,
                 set: Some(VariantSet {
                     props: vec![VariantProp::new("Style", vec!["Dot".into()])],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

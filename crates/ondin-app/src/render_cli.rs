@@ -854,7 +854,6 @@ mod tests {
                         "Size",
                         vec!["Small".into(), "Large".into()],
                     )],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {
@@ -1436,7 +1435,6 @@ mod tests {
                 id: set,
                 set: Some(VariantSet {
                     props: vec![VariantProp::new("Dir", vec!["Up".into(), "Down".into()])],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

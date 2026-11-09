@@ -34,6 +34,7 @@ pub mod diff;
 pub mod document;
 pub mod edit;
 pub mod effect;
+pub mod element;
 pub mod export;
 pub mod fallback_fonts;
 pub mod families;

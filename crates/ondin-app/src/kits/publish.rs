@@ -790,7 +790,6 @@ mod tests {
                         "Size",
                         vec!["Small".into(), "Large".into()]
                     )],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

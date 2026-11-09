@@ -373,10 +373,7 @@ impl Fixture {
             },
             Operation::SetVariantSet {
                 id: set,
-                set: Some(VariantSet {
-                    props: vec![prop],
-                    ..Default::default()
-                }),
+                set: Some(VariantSet { props: vec![prop] }),
             },
             Operation::SetVariant {
                 id: rest,

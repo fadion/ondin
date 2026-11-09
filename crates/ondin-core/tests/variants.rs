@@ -131,7 +131,6 @@ fn fixture() -> F {
             id: s,
             set: Some(VariantSet {
                 props: vec![VariantProp::new("Size", strs(&["Small", "Large"]))],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -268,7 +267,6 @@ fn the_variant_rules_are_held_after_the_last_op() {
             id: f.s,
             set: Some(VariantSet {
                 props: vec![VariantProp::new("Size", strs(&["Small", "Small", "Large"]))],
-                ..Default::default()
             }),
         }],
     );
@@ -1524,7 +1522,6 @@ fn an_empty_property_is_refused_rather_than_panicking() {
         id: f.s,
         set: Some(VariantSet {
             props: vec![VariantProp::new("Size", Vec::new())],
-            ..Default::default()
         }),
     }]);
     ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
@@ -1872,12 +1869,21 @@ fn the_first_tie_guesses_the_others() {
         variant::why_not_tie(&f.doc, f.s, 1, 0).is_some_and(|w| w.starts_with("Rest is")),
         "rest's value is refused"
     );
-    let tx = variant::set_element(&f.doc, f.s, variant::RootElement::Link).unwrap();
-    f.commit(tx.0);
+    assert_eq!(
+        variant::root_element(&f.doc, f.s),
+        variant::RootElement::Button,
+        "a set first given states is a button"
+    );
+    let ops =
+        ondin_core::element::set_ops(&f.doc, f.s, Some(ondin_core::element::HtmlElement::Link));
+    f.commit(ops);
     let bytes = io::save(&f.doc).unwrap();
     let loaded = io::load(&bytes).unwrap();
+    assert_eq!(
+        variant::root_element(&loaded, f.s),
+        variant::RootElement::Link
+    );
     let set = loaded.get(f.s).unwrap().set().unwrap();
-    assert_eq!(set.element, variant::RootElement::Link);
     assert_eq!(set.props[1].state_of("Hover"), Some(Hover));
     assert_eq!(io::save(&loaded).unwrap(), bytes);
 }

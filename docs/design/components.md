@@ -622,7 +622,7 @@ variant* is the verb that takes the next free combination; an instance's name is
 **A component set is a frame around mains, never a main; a variant is a main whose parent is a set.**
 
 - `Node::set: Option<VariantSet>` — the set's variant properties, each `VariantProp { name, values,
-  states }`, and `element: RootElement` (*Interaction states*, below).
+  states }` (*Interaction states*, below).
 - `Node::variant: Vec<String>` — a variant's values, one per property in the set's order.
 - `Node::lineage: Option<NodeId>` — the **lineage key** a variant's layer shares with its counterparts
   in the other variants; `Node::lineage()` is the recorded key, else the layer's own id. Only
@@ -651,8 +651,8 @@ variant* is the verb that takes the next free combination; an instance's name is
 - Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, `SetDocLink`, each inverting to
   the old value; no ink, no-ops in `absorb`, `overwrites` none, skipped by `propagate::mode`, never
   written by `reset::state_ops` — **never followed or overridden**. `description` and
-  `Property::preferred` are new in v9; `doc_link`, `VariantProp::states`, `VariantSet::element` and
-  `lineage` in v13.
+  `Property::preferred` are new in v9; `doc_link`, `VariantProp::states` and `lineage` in v13
+  (the v13 set's `element` moved onto its roots in v15, `io.md`).
 - `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values,
   properties, description, link and lineage key cleared); every door that makes an instance node goes
   through it.
@@ -733,16 +733,19 @@ app). **A property with any tie is its set's interaction state** (`VariantProp::
 `VariantSet::interaction`); there is no separate mark, so a set is never interactive with nothing tied.
 **Rest is not stored**: it is the default variant's value (`variant::rest_value`, through
 `kit::default_variant`), so it follows the default; a value tied to none stays a plain prop value.
-`VariantSet::element` (`RootElement::{Button, Link, Plain}`, Button by default) says what the root is
-written as, read only while a property holds ties.
+What the root is written as is the roots' own HTML element (`core-model.md`, `element`), one on every
+root of the set, read only while a property holds ties: `variant::root_element` reads the default
+variant's as `RootElement::{Button, Link, Plain}`, Plain standing for Automatic and any other element.
 
 - `tie_state` ties a value or unties it. **The first tie on a property also ties its other values as
   their names suggest** (`Interaction::guess`: *hover*; *pressed*/*active*; *focus*; *disabled*), in
   the same step, never rest's value and never a state already tied; untying the last makes the property
   plain again. Guessing waits for that deliberate first tie, so a *Tab* set's *Active* value is never
   written as `:active` unasked. `why_not_tie` refuses a tie while another property holds the states,
-  or on rest's value; `tie_state` also refuses a state another value holds. `set_element` sets the
-  element. `rename_value` keeps a tie; `delete_value` drops it.
+  or on rest's value; `tie_state` also refuses a state another value holds. The first tie also makes
+  every root a Button, in the same step, when no root has an element yet and `element::refusal` lets
+  each be one, so a marked set is a button unless said otherwise. `rename_value` keeps a tie;
+  `delete_value` drops it.
 - `unpaired_states(doc, set) -> Vec<Unpaired { variant, why, layer }>` lists each state variant whose
   layers do not line up with its rest variant (the one with the same values of every other property):
   no rest variant, other text, or another order (*“Label” moves before “Bg”*, naming the layer moved
@@ -831,7 +834,9 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   *Pressed*, *Focus*, *Disabled*, the selector in the accel column; a state another value holds shows
   that value's name there and is greyed. Undo step *Interaction state*. Once the property holds a tie,
   each value chip is `ui::label_button_noted`, its note `rest` or the tied selector, and an *Element*
-  dropdown (Button, Link, Plain; undo step *Element*) shows under its chips. Each `unpaired_states` entry is a warning note
+  dropdown (Button, Link, Plain; undo step *Element*) shows under its chips. It writes the roots'
+  element (`element::set_ops`, Plain as Automatic), the field the identity card's *Element* row
+  shows, and greys a choice `element::refusal` refuses on any root, with the reason. Each `unpaired_states` entry is a warning note
   (*Large, Focus does not pair*, the sentence in its tooltip) with *Select it* (the layer, else the
   variant), as the clash note is.
 - **A variant** gets the Component card with *Variant in* and the set as a link, its derived read-only
@@ -871,7 +876,8 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   `chrome_claims` keeps guides off it; `begin_select_drag` starts nothing on it), drawn after
   `draw_key_outline` (`draw_set_plus`).
 - **Layers**: the badge slot shows *N variants* on a collapsed set, `icon::PROPERTY_BOUND` on a layer bound
-  to a property of the owner above; priority mask → set count → bound → frame size / subtract base. A variant row is
+  to a property of the owner above; priority mask → set count → bound → element tag → frame size /
+  subtract base. A variant row is
   named by its values and wears the filled hexagon.
 - Values are renamed, moved and deleted from a chip's popup, never edited in place or dragged;
   binding is from one line, not `{}` buttons on layers/Appearance/Type; defining is through the

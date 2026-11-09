@@ -1232,31 +1232,38 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     row_label(ui, "Element", None);
+                    // The roots' element (`element::targets`), shown as three
+                    // words; the identity card's Element row is the same field.
+                    let shown = variant::root_element(doc, set);
+                    let roots = variant::variants(doc, set);
                     let choices: Vec<Choice> = variant::RootElement::ALL
                         .iter()
                         .map(|e| Choice {
                             label: e.label().to_string(),
-                            refused: None,
+                            refused: e.element().and_then(|el| {
+                                roots
+                                    .iter()
+                                    .find_map(|r| ondin_core::element::refusal(doc, *r, el))
+                            }),
                         })
                         .collect();
-                    let current = variant::RootElement::ALL
-                        .iter()
-                        .position(|e| *e == vs.element);
+                    let current = variant::RootElement::ALL.iter().position(|e| *e == shown);
                     let w = ui.available_width();
                     let picked = dropdown(
                         ui,
                         ("set-element", set),
                         w,
-                        vs.element.label(),
+                        shown.label(),
                         &choices,
                         current,
                         None,
                     );
                     if let Some(i) = picked {
-                        let element = variant::RootElement::ALL[i];
+                        let element = variant::RootElement::ALL[i].element();
                         edits.push(defer(move |cx| {
                             cx.step = Some(("Element", icon::CODE));
-                            Ok(variant::set_element(cx.doc, set, element))
+                            let ops = ondin_core::element::set_ops(cx.doc, set, element);
+                            Ok((!ops.is_empty()).then(|| Transaction(ops)))
                         }));
                     }
                 });
@@ -3786,7 +3793,6 @@ mod tests {
                         "Size",
                         vec!["Small".into(), "Primary".into(), "Huge".into()],
                     )],
-                    ..Default::default()
                 }),
             },
             ondin_core::Operation::SetVariant {
@@ -4103,7 +4109,6 @@ mod tests {
                     "State",
                     vec!["Default".into(), "Hover".into(), "Pressed".into()],
                 )],
-                ..Default::default()
             }),
         });
         for (v, value) in [(rest, "Default"), (hover, "Hover")] {

@@ -127,7 +127,6 @@ fn fixture() -> Fixture {
                         vec!["Default".into(), "Hover".into(), "Pressed".into()],
                     ),
                 ],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -475,7 +474,6 @@ fn chip_set(
                     "State",
                     vec!["Default".into(), "Hover".into()],
                 )],
-                ..Default::default()
             }),
         },
         Operation::SetVariant {
@@ -585,7 +583,7 @@ fn the_same_picture_pairs_across_variants() {
         "the gradient's id is written: {tsx}"
     );
     let css = file(&out, "components/Chip.module.css");
-    assert!(!css.contains("display"), "nothing swapped: {css}");
+    assert!(!css.contains("display: none"), "nothing swapped: {css}");
     assert!(out.approximated.is_empty(), "{:?}", out.approximated);
 }
 
@@ -751,13 +749,8 @@ fn variant_of(
 
 /// The chip's set with its root written as `element`.
 fn set_element(doc: &mut Document, set: NodeId, element: RootElement) {
-    let mut vs = doc.get(set).unwrap().set().unwrap().clone();
-    vs.element = element;
-    doc.apply(&Transaction(vec![Operation::SetVariantSet {
-        id: set,
-        set: Some(vs),
-    }]))
-    .unwrap();
+    let ops = ondin_core::element::set_ops(doc, set, element.element());
+    doc.apply(&Transaction(ops)).unwrap();
 }
 
 /// A Disabled tie on a Plain root: a focusable `div` whose `aria-disabled` the

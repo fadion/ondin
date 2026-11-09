@@ -135,6 +135,12 @@ pub struct Node {
     /// Where an inserted icon or photo came from and what its licence asks
     /// for (`crate::credit`). Every copy keeps it; never drawn.
     pub(crate) credit: Option<Box<crate::credit::Credit>>,
+    /// The HTML element a code export writes this layer as (`crate::element`);
+    /// `None` is Automatic. An instance's follow its main's and never differ.
+    pub(crate) element: Option<crate::element::HtmlElement>,
+    /// The address a link goes to, in [`crate::element::is_href`]'s form; empty
+    /// is none. Kept while the element is not a link, written only while it is.
+    pub(crate) href: String,
     /// Where this node was **vendored from**, when part of a kit main in the
     /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
     /// the kit verbs write one (`crate::kit::check`).
@@ -221,6 +227,14 @@ impl Node {
     /// The credit this layer came with from the assets browser, if any.
     pub fn credit(&self) -> Option<&crate::credit::Credit> {
         self.credit.as_deref()
+    }
+    /// The HTML element a code export writes this layer as; `None` is Automatic.
+    pub fn element(&self) -> Option<crate::element::HtmlElement> {
+        self.element
+    }
+    /// The address a link goes to; empty is none.
+    pub fn href(&self) -> &str {
+        &self.href
     }
     /// The variant properties, if this frame is a component set.
     pub fn set(&self) -> Option<&crate::variant::VariantSet> {

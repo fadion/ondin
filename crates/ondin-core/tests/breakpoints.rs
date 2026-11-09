@@ -276,7 +276,6 @@ fn a_top_level_instance_or_set_never_picks_by_width() {
                 id: f.home,
                 set: Some(VariantSet {
                     props: vec![VariantProp::new("Size", vec!["Large".into()])],
-                    ..Default::default()
                 }),
             },
             Operation::SetVariant {

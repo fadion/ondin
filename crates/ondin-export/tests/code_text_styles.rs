@@ -243,7 +243,6 @@ fn set_of_two(both_heading: bool) -> (Document, Resolved, NodeId) {
                     "Size",
                     vec!["Small".into(), "Large".into()],
                 )],
-                ..Default::default()
             }),
         },
         create(small, set, 0, frame(80.0, 40.0), 10.0, "Small"),

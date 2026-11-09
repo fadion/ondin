@@ -37,10 +37,6 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariantSet {
     pub props: Vec<VariantProp>,
-    /// The element a code export writes the component's root as, read only while
-    /// a property is the interaction state.
-    #[serde(default, skip_serializing_if = "RootElement::is_button")]
-    pub element: RootElement,
 }
 
 /// One variant property — `Size`, with `Small` and `Large`.
@@ -140,24 +136,39 @@ impl Interaction {
     }
 }
 
-/// What a code export writes the root of a set with an interaction state as.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// What a code export writes the root of a set with an interaction state as:
+/// its roots' element (`crate::element`) read as one of three.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum RootElement {
     /// A `<button type="button">`, the one with `:disabled`.
     #[default]
     Button,
     /// An `<a>`, taking `href` from the props it is passed.
     Link,
-    /// A `div` with `tabindex="0"`, for a card or a row.
+    /// A `div` with `tabindex="0"`, for a card or a row: any root that is
+    /// neither, Automatic included.
     Plain,
 }
 
 impl RootElement {
     pub const ALL: [RootElement; 3] = [RootElement::Button, RootElement::Link, RootElement::Plain];
 
-    fn is_button(&self) -> bool {
-        *self == RootElement::Button
+    /// The roots' element this stands for; Plain is Automatic.
+    pub fn element(self) -> Option<crate::element::HtmlElement> {
+        match self {
+            RootElement::Button => Some(crate::element::HtmlElement::Button),
+            RootElement::Link => Some(crate::element::HtmlElement::Link),
+            RootElement::Plain => None,
+        }
+    }
+
+    /// What a root holding `element` is written as.
+    pub fn of(element: Option<crate::element::HtmlElement>) -> Self {
+        match element {
+            Some(crate::element::HtmlElement::Button) => RootElement::Button,
+            Some(crate::element::HtmlElement::Link) => RootElement::Link,
+            _ => RootElement::Plain,
+        }
     }
 
     /// The app's word for it.
@@ -920,10 +931,7 @@ pub fn combine(
     };
     tx.0.push(Operation::SetVariantSet {
         id: set,
-        set: Some(VariantSet {
-            props,
-            ..Default::default()
-        }),
+        set: Some(VariantSet { props }),
     });
     for (m, values) in ordered.iter().zip(rows) {
         tx.0.push(Operation::SetVariant { id: *m, values });
@@ -1410,17 +1418,32 @@ pub fn tie_state(
             }
         }
     }
-    Some(edit_set(doc, set, next, |v| v.to_vec()))
+    let mut tx = edit_set(doc, set, next, |v| v.to_vec());
+    // A set first given states is a button, unless its roots already say what
+    // they are or a button would not be valid HTML there.
+    let roots = variants(doc, set);
+    let button = crate::element::HtmlElement::Button;
+    if first
+        && roots
+            .iter()
+            .all(|r| doc.get(*r).is_some_and(|n| n.element().is_none()))
+        && roots
+            .iter()
+            .all(|r| crate::element::refusal(doc, *r, button).is_none())
+    {
+        tx.0.extend(roots.into_iter().map(|id| Operation::SetElement {
+            id,
+            element: Some(button),
+        }));
+    }
+    Some(tx)
 }
 
-/// The element a code export writes `set`'s root as.
-pub fn set_element(doc: &Document, set: NodeId, element: RootElement) -> Option<Transaction> {
-    let mut next = doc.get(set)?.set.clone()?;
-    if next.element == element {
-        return None;
-    }
-    next.element = element;
-    Some(edit_set(doc, set, next, |v| v.to_vec()))
+/// What a code export writes `set`'s root as: its default variant's element,
+/// which every root shares (`element::targets`).
+pub fn root_element(doc: &Document, set: NodeId) -> RootElement {
+    let d = crate::kit::default_variant(doc, set);
+    RootElement::of(d.and_then(|d| doc.get(d)).and_then(Node::element))
 }
 
 /// A state variant of a set with an interaction state whose layers do not line up with its rest
@@ -3159,7 +3182,6 @@ mod tests {
                     VariantProp::new(n.to_string(), vs.iter().map(|v| v.to_string()).collect())
                 })
                 .collect(),
-            ..Default::default()
         }
     }
 

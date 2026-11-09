@@ -357,6 +357,19 @@ pub(crate) struct NodeDto {
         deserialize_with = "lenient_credit"
     )]
     pub credit: Option<Box<crate::credit::Credit>>,
+    /// The HTML element a code export writes the layer as, by tag, absent on
+    /// Automatic. New in v15. A tag this build does not know, or one the
+    /// layer's kind is not offered, is dropped on load, never refused.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pub element: Option<crate::element::HtmlElement>,
+    /// The address a link goes to, absent when empty. New in v15. One not in
+    /// `element::is_href`'s form is emptied on load, never refused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub href: String,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -415,6 +428,15 @@ pub(crate) struct NodeDto {
 fn lenient_credit<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<Box<crate::credit::Credit>>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
+/// An optional value that reads as `None` when it will not read at all: a name
+/// a later build added.
+fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
     let value = Option::<serde_json::Value>::deserialize(d)?;
     Ok(value.and_then(|v| serde_json::from_value(v).ok()))
 }
@@ -502,6 +524,8 @@ impl NodeDto {
             description: n.description().to_string(),
             doc_link: n.doc_link().to_string(),
             credit: n.credit.clone(),
+            element: n.element,
+            href: n.href.clone(),
             origin: n.origin().map(|o| OriginDto {
                 kit: o.kit.clone(),
                 node: o.node.to_wire(),
@@ -553,6 +577,10 @@ impl NodeDto {
             .blend
             .filter(|b| b.allowed_on(&self.kind))
             .unwrap_or_else(|| BlendMode::default_for(&self.kind));
+        // Dropped, like `clip`, on a kind it does not apply to.
+        let element = self
+            .element
+            .filter(|e| crate::element::offered(&self.kind).is_some_and(|o| o.contains(e)));
         Ok(Node {
             id,
             parent,
@@ -616,6 +644,11 @@ impl NodeDto {
                 .filter(|l| *l == self.doc_link)
                 .unwrap_or_default(),
             credit: self.credit.map(|c| Box::new(c.normalized())),
+            element,
+            href: match crate::element::is_href(&self.href) {
+                true => self.href,
+                false => String::new(),
+            },
             origin: self
                 .origin
                 .map(|o| -> Result<_, IoError> {

@@ -1984,7 +1984,10 @@ fn a_width_query_is_written_as_a_container_query() {
         "tokens.css lacks the wide block:\n{tokens}"
     );
     assert!(
-        tokens.contains("[data-mode=\"wide\"] > [data-query~=\"card-variables\"] > *"),
+        tokens.contains(
+            "[data-pin~=\"wide\"] > [data-query~=\"card-variables\"] > *, \
+             [data-mode=\"wide\"][data-query~=\"card-variables\"] > *"
+        ),
         "tokens.css lacks the pin:\n{tokens}"
     );
     let marked = export

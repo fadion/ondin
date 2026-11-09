@@ -4353,9 +4353,13 @@ pub(crate) fn width_inherits(doc: &Document, id: NodeId, c: CollectionId) -> boo
             .is_some_and(|page| !page.modes().iter().any(|m| col.has(*m)))
 }
 
-/// Whether `id` is a main, whose mode rows offer *By width* beside *Inherit*.
+/// Whether `id`'s width queries are its own to edit, so its mode rows offer
+/// *By width* beside *Inherit* and the *Widths* fold: a main, or a frame that
+/// holds a query and follows no main — a detached instance keeps its main's,
+/// and must be able to let them go.
 pub(crate) fn node_is_main(doc: &Document, id: NodeId) -> bool {
-    doc.get(id).is_some_and(|n| n.component())
+    doc.get(id)
+        .is_some_and(|n| n.component() || (n.link().is_none() && !n.queries().is_empty()))
 }
 
 /// The collections a frame's identity card gives a mode row: the one a
@@ -4735,7 +4739,7 @@ impl OndinApp {
         // A width query over `c` on this frame — a main's own, or its instance's
         // following it — and whether this frame is the main that sets one.
         let query = node.query_of(table, owner).cloned();
-        let main = node.component();
+        let main = node_is_main(doc, id);
         let refusal = var::why_no_query(doc, id);
         let picked = query
             .as_ref()
@@ -7023,6 +7027,12 @@ mod tests {
         assert!(!menu.iter().any(|t| t == "Inherit"), "{menu:?}");
         assert!(menu.iter().any(|t| t == "≥320"), "{menu:?}");
         app.mode_menu = None;
+
+        // Detached, the instance keeps its query and owns it: its menu can end it.
+        assert!(!node_is_main(&app.session.doc, instance));
+        let detach = ondin_core::component::detach(&app.session.doc, instance).unwrap();
+        assert!(app.commit_edit(detach));
+        assert!(node_is_main(&app.session.doc, instance), "a detached copy");
 
         let mut item = *app.session.doc.get(card).unwrap().item();
         item.width = ondin_core::container::Dimension::FitContent;

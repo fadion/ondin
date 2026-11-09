@@ -159,7 +159,9 @@ impl Tokens {
     /// container of its inline size, and its children — never itself, which a
     /// container cannot query — given its first mode, then each other mode
     /// under `@container (min-width: …)`, then each mode pinned on the frame or
-    /// the element around it, after them all so a pin wins. The children's own
+    /// on a component use's mode wrapper (`data-pin`), after them all so that
+    /// pin wins — a pin on any other element around loses, as on the canvas,
+    /// where a frame's width beats what it inherits. The children's own
     /// blocks are `:where()`, of no weight, so a child pinning a mode of its own
     /// keeps it.
     fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
@@ -190,8 +192,10 @@ impl Tokens {
                 out.push_str("}\n");
             }
             for m in &col.modes {
-                let pin = format!("[data-mode{eq}\"{}\"]", self.mode(m.id).unwrap_or_default());
-                let selector = format!("{pin} > {at} > *, {pin}{at} > *");
+                let word = self.mode(m.id).unwrap_or_default();
+                let pin = format!("[data-mode{eq}\"{word}\"]");
+                let own = format!("[data-pin~=\"{word}\"]");
+                let selector = format!("{own} > {at} > *, {pin}{at} > *");
                 self.mode_block(t, shaken, col, selector, Some(m.id), out);
             }
         }

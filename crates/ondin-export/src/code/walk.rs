@@ -1017,7 +1017,19 @@ impl Walk<'_> {
         match self.tokens.modes_attr(own) {
             Some(mode) => {
                 let mode = mode.to_string();
-                self.with_mode(el, mode)
+                // A use of a main with width queries marks its own pin
+                // `data-pin` too: it beats the queries, as a pin on the instance
+                // does on the canvas (`Tokens::query_blocks`), where a mode
+                // inherited from around does not.
+                let pin = doc
+                    .get(main)
+                    .is_some_and(|m| !m.queries().is_empty())
+                    .then(|| mode.clone());
+                let mut around = self.with_mode(el, mode);
+                if let Some(pin) = pin {
+                    around.attrs.push(("data-pin", pin));
+                }
+                around
             }
             None => el,
         }

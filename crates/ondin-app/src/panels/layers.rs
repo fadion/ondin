@@ -548,6 +548,18 @@ fn subtract_base(doc: &ondin_core::Document, node: &ondin_core::Node) -> bool {
     ) && parent.children().first() == Some(&node.id())
 }
 
+/// The tag a code export writes `node` as, for its row's badge, when it is not
+/// one of the four plain elements: its own element, or `li` on Automatic in a
+/// list. A kind not offered an element shows none.
+fn element_tag(doc: &ondin_core::Document, node: &ondin_core::Node) -> Option<&'static str> {
+    use ondin_core::element;
+    let offered = element::offered(node.kind())?;
+    match node.element().filter(|e| offered.contains(e)) {
+        Some(e) => Some(e.tag()),
+        None => element::in_list(doc, node.id()).then_some("li"),
+    }
+}
+
 /// The layers-tree icon (glyph + resting colour) for a node kind.
 pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
     let (glyph, ink) = node_glyph(kind);
@@ -1800,8 +1812,9 @@ impl OndinApp {
         // The right-hand end of a resting row: one slot (the one the eye and lock
         // take over on hover) for several remarks, in priority order — mask (a mask
         // draws nothing, so its row is the only sign the layer exists), a folded
-        // set's variant count, `{}` for a component-property binding, then a
-        // frame's size, a subtract's base or a mirrored path's mirror.
+        // set's variant count, `{}` for a component-property binding, the HTML
+        // element's tag, then a frame's size, a subtract's base or a mirrored
+        // path's mirror.
         let doc = &self.session.doc;
         let set_count = (node.set().is_some() && self.collapsed.contains(&id))
             .then(|| ondin_core::variant::variants(doc, id).len());
@@ -1817,6 +1830,9 @@ impl OndinApp {
             }))
         } else if bound {
             Some(RowBadge::Icon(icon::PROPERTY_BOUND, BADGE_BOUND))
+        } else if let Some(tag) = element_tag(doc, node) {
+            // What the layer is in code, where that is not a plain element.
+            Some(RowBadge::Text(tag.to_string()))
         } else {
             // The frame's used size (§15 D868): where container layout put it.
             match self.session.resolved.used_kind_of(node) {

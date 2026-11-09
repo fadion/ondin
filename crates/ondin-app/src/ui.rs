@@ -1995,6 +1995,35 @@ pub fn text_field(
     })
 }
 
+/// [`text_field`] led by a faint `glyph` standing in for its label, as the
+/// documentation link's field is: a link's address on the identity card.
+pub fn text_field_glyph(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    text: &mut String,
+    glyph: &str,
+    hint: &str,
+) -> egui::Response {
+    let pt = Scale::of(size.y).text_pt();
+    let font = egui::FontId::proportional(pt);
+    field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
+        ui.spacing_mut().item_spacing.x = 7.0;
+        ui.label(theme::icon_text(
+            glyph,
+            CONTROL_GLYPH_PT,
+            theme::text::faint(),
+        ));
+        let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
+        frame.add(
+            ui,
+            f32::INFINITY,
+            egui::TextEdit::singleline(text)
+                .font(font)
+                .hint_text(egui::RichText::new(hint).size(pt)),
+        )
+    })
+}
+
 /// The width of a [`secret_field`]'s eye button, with the gap before it.
 const SECRET_EYE_W: f32 = 26.0;
 /// The eye button's own box.
@@ -3173,6 +3202,11 @@ pub fn glyph_and_text_tinted(
     text: &str,
     glyph_col: egui::Color32,
 ) -> egui::WidgetText {
+    glyph_job(glyph, text, glyph_col).into()
+}
+
+/// [`glyph_and_text_tinted`]'s run, for a caller appending to it.
+fn glyph_job(glyph: &str, text: &str, glyph_col: egui::Color32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     job.append(
         glyph,
@@ -3190,6 +3224,23 @@ pub fn glyph_and_text_tinted(
         egui::TextFormat {
             font_id: egui::FontId::proportional(CONTROL_PT),
             color: color::text(),
+            valign: egui::Align::Center,
+            ..Default::default()
+        },
+    );
+    job
+}
+
+/// [`glyph_and_text`] followed by a faint `tag`, the way a menu row shows its
+/// accelerator: the Element row's `Header <header>`.
+pub fn glyph_text_and_tag(glyph: &str, text: &str, tag: &str) -> egui::WidgetText {
+    let mut job = glyph_job(glyph, text, theme::text::faint());
+    job.append(
+        tag,
+        7.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(CONTROL_PT),
+            color: theme::text::faint(),
             valign: egui::Align::Center,
             ..Default::default()
         },

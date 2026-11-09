@@ -1869,6 +1869,7 @@ impl OndinApp {
             self.frame_mode_row(ui, id);
             self.identity_boolean_row(ui);
             self.identity_kind_row(ui, id);
+            self.identity_element_row(ui, id);
             // What the layer is inside a component, in the same card.
             self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
@@ -1955,6 +1956,151 @@ impl OndinApp {
         } else if fitted && let Some(tx) = fit {
             self.session.name_step("Resize to fit", icon::CORNERS_IN);
             self.commit_edit(tx);
+        }
+    }
+
+    /// The identity card's *Element* row: the HTML element a code export writes
+    /// the layer as (`ondin_core::element`), each choice with its tag where a
+    /// menu row shows its accelerator, and a choice that would make invalid
+    /// HTML dimmed with the reason. On a variant root it writes every root of
+    /// the set. Disabled on a kind that takes none and on an instance, whose
+    /// elements are its main's. A link adds its address row. Nothing on a slice.
+    fn identity_element_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        use ondin_core::element::{self, HtmlElement};
+        let doc = &self.session.doc;
+        let Some(node) = doc.get(id) else { return };
+        if matches!(node.kind(), NodeKind::Slice { .. }) {
+            return;
+        }
+        let offered = element::offered(node.kind()).unwrap_or(&[]);
+        let current = node.element().filter(|e| offered.contains(e));
+        let automatic = element::automatic_tag(doc, node);
+        let main = node
+            .link()
+            .and_then(|_| ondin_core::component::instance_root(doc, id))
+            .and_then(|r| ondin_core::component::main_of(doc, r))
+            .and_then(|m| doc.get(m));
+        let refusal = match main {
+            Some(m) => Some(format!("Set on the main component — “{}”", m.name())),
+            None => element::kind_refusal(node.kind()).map(str::to_string),
+        };
+        let targets = element::targets(doc, id);
+        let choices: Vec<(Option<HtmlElement>, Option<String>)> = std::iter::once((None, None))
+            .chain(offered.iter().map(|e| {
+                let why = targets.iter().find_map(|t| element::refusal(doc, *t, *e));
+                (Some(*e), why)
+            }))
+            .collect();
+        let shown = |e: Option<HtmlElement>| match e {
+            Some(e) => (e.label(), format!("<{}>", e.tag())),
+            None => ("Automatic", format!("<{automatic}>")),
+        };
+        let (label, tag) = shown(current);
+        let mut pick = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().interact_size.y = BOOL_ROW_H;
+            ui.spacing_mut().button_padding.y = 0.0;
+            let resp = ui::disable_unless(ui, refusal.is_none(), |ui| {
+                egui::ComboBox::from_id_salt(("layer-element", id))
+                    .icon(ui::combo_chevron)
+                    .width(ui.available_width())
+                    .selected_text(ui::glyph_text_and_tag(icon::CODE, label, &tag))
+                    .show_ui(ui, |ui| {
+                        ui::menu_rows(ui);
+                        for (e, why) in &choices {
+                            let (label, tag) = shown(*e);
+                            let row = ui::MenuRow::new("", label)
+                                .checked(*e == current)
+                                .accel(Some(&tag))
+                                .enabled(why.is_none());
+                            let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);
+                            match why {
+                                Some(why) => {
+                                    resp.on_hover_text(why);
+                                }
+                                None if resp.clicked() && *e != current => pick = Some(*e),
+                                None => {}
+                            }
+                        }
+                    })
+                    .response
+            })
+            .inner;
+            match &refusal {
+                Some(why) => {
+                    resp.on_disabled_hover_text(why);
+                }
+                None => {
+                    resp.on_hover_text("HTML element in code export");
+                }
+            }
+        });
+        if let Some(e) = pick {
+            let ops = element::set_ops(&self.session.doc, id, e);
+            if !ops.is_empty() {
+                self.session.name_step("Element", icon::CODE);
+                self.commit_edit(Transaction(ops));
+            }
+        }
+        if current == Some(HtmlElement::Link) {
+            self.link_address_row(ui, id, refusal.is_none());
+        }
+    }
+
+    /// A link's address under its Element row: a text field with the link glyph
+    /// for a label, applied when it loses focus (`Escape` abandons it), a red
+    /// caption under it while what was typed is not an address a link can take
+    /// (`element::is_href`).
+    fn link_address_row(&mut self, ui: &mut egui::Ui, id: NodeId, enabled: bool) {
+        let saved = self
+            .session
+            .doc
+            .get(id)
+            .map(|n| n.href().to_string())
+            .unwrap_or_default();
+        let draft_id = egui::Id::new(("link-address", id));
+        let (mut text, refused) = ui
+            .data(|d| d.get_temp::<(String, bool)>(draft_id))
+            .unwrap_or((saved.clone(), false));
+        let mut commit = None;
+        ui.horizontal(|ui| {
+            ui::disable_unless(ui, enabled, |ui| {
+                let w = ui.available_width();
+                let resp = ui::text_field_glyph(
+                    ui,
+                    egui::vec2(w, BOOL_ROW_H),
+                    &mut text,
+                    icon::LINK_SIMPLE,
+                    "https://, /path or #id",
+                );
+                // Typing only keeps the draft; the commit is the defocus below.
+                // valve-gate-not-a-commit
+                if resp.changed() {
+                    ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), false)));
+                }
+                if resp.lost_focus() {
+                    if !ui::defocus_commits(&resp) {
+                        ui.data_mut(|d| d.remove::<(String, bool)>(draft_id));
+                    } else if ondin_core::element::is_href(text.trim()) {
+                        ui.data_mut(|d| d.remove::<(String, bool)>(draft_id));
+                        commit = Some(text.trim().to_string());
+                    } else {
+                        ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), true)));
+                    }
+                }
+                resp.on_hover_text("Link address");
+            });
+        });
+        if refused {
+            ui.label(
+                egui::RichText::new("Not an address a link can take")
+                    .size(ui::SMALL_PT)
+                    .color(theme::color::error()),
+            );
+        }
+        if let Some(href) = commit.filter(|h| *h != saved) {
+            self.session.name_step("Link address", icon::LINK_SIMPLE);
+            self.commit_edit(Transaction(vec![Operation::SetHref { id, href }]));
         }
     }
 
@@ -13664,6 +13810,75 @@ mod mask_card_tests {
                     Some(NodeKind::Artboard { .. })
                 )),
             "picking Frame turned the group into a frame and selected it"
+        );
+    }
+
+    /// A frame's identity card shows its Element, Automatic with the tag it
+    /// writes, and its Layers row wears an element's tag once one is set.
+    /// flip: `inspector_header` without its `identity_element_row` → fails at
+    /// "the Element row".
+    #[test]
+    fn a_frame_shows_its_element_and_its_tag() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let frame = t.add(
+            root,
+            NodeKind::Artboard {
+                size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        app.session.adopt_document(t.doc.clone(), None);
+        app.session.selection.set(vec![frame]);
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut texts = |app: &mut crate::app::OndinApp| {
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                shapes = ctx
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1320.0, 820.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| eframe::App::ui(app, ui, &mut kitten),
+                    )
+                    .shapes;
+            }
+            shapes
+                .into_iter()
+                .filter_map(|c| match c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let drawn = texts(&mut app);
+        assert!(
+            drawn
+                .iter()
+                .any(|s| s.contains("Automatic") && s.contains("<div>")),
+            "the Element row: {drawn:?}"
+        );
+        app.session.commit(Transaction(vec![Operation::SetElement {
+            id: frame,
+            element: Some(ondin_core::element::HtmlElement::Header),
+        }]));
+        let drawn = texts(&mut app);
+        assert!(
+            drawn
+                .iter()
+                .any(|s| s.contains("Header") && s.contains("<header>")),
+            "the row names it: {drawn:?}"
+        );
+        assert!(
+            drawn.iter().any(|s| s == "header"),
+            "the Layers row wears its tag: {drawn:?}"
         );
     }
 

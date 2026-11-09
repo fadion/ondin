@@ -72,8 +72,8 @@ Mask card, and how a failed boolean draws. Part of §9.4.
   `Operation::Reorder` to index 0 (`canvas::designate_key`).
 - `layers::subtract_base` marks `children[0]` of a `Subtract` with a faint `diamond` glyph in the
   row's badge slot (shared `RowBadge`, `BADGE_BASE`), derived every frame. Only `Subtract`.
-- Badge slot priority: mask (`icon::MASK`) > frame size badge > subtract base mark. No row can want
-  two (a frame cannot be a mask; operands are not painted).
+- Badge slot priority: mask (`icon::MASK`) > element tag > frame size badge > subtract base mark
+  (the whole order is in `components.md`, *Layers*).
 - **Switching the operation is a `GeometryPatch`**: children and paint stay, undo restores the previous
   op, re-picking is an empty transaction. Travels the normal preview→commit valve.
 - The dropdown is **disabled, never hidden**, with one layer selected. Its enabled test is a dry run of

@@ -25,11 +25,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,
   TypeScript or Vue compiler runs in the tests. A CI leg parsing the emitted `.tsx` with `tsc`
   and the `.vue` files with `@vue/compiler-sfc` would catch output that does not compile.
-- **A per-layer HTML tag field.** The emitters write four elements (`div`, `span`/`p`, `img`,
-  `svg`) and guess nothing from layer names (D1098 (3)). A tag field lets a layer say it is a
-  `button`, `a`, `h1`–`h6`, `nav`, `header`, `footer`, `section` or `ul`/`li`. It is new model: a
-  node field, a save-format version, an inspector row, the emitters and the MCP snapshot. Each tag
-  needs a rule for which kinds may take it; a picture cannot be a list.
 
 ## Later
 

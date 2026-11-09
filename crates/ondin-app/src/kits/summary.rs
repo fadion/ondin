@@ -67,8 +67,8 @@ pub(crate) enum Change {
 }
 
 impl Change {
-    /// Whether the component stays the kit's, rewritten — a row of the review's
-    /// *Changed* section rather than *Removed*.
+    /// Whether the component stays the kit's — a row of the review's *Changed*
+    /// section rather than *Removed*.
     pub(crate) fn stays(&self) -> bool {
         matches!(self, Change::Changed | Change::Unbinds(..))
     }

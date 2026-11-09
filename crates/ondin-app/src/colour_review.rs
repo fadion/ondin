@@ -793,17 +793,7 @@ fn group_head(
     ui::list_row_ground(p, ground(row), false, resp.hovered());
     let rect = row.shrink2(egui::vec2(ROW_X, 0.0));
     let y = rect.center().y;
-    p.text(
-        egui::pos2(rect.left() + 6.0, y),
-        egui::Align2::CENTER_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        theme::icon_font(12.0),
-        theme::text::faint(),
-    );
+    ui::fold_caret(p, egui::pos2(rect.left(), y), open, theme::text::faint());
     let patch =
         egui::Rect::from_min_size(egui::pos2(rect.left() + INDENT, y - PATCH.y / 2.0), PATCH);
     let colours: Vec<Color> = group.members.iter().map(|&m| census[m].color).collect();

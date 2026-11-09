@@ -1505,7 +1505,9 @@ fn update_in_order(
         at: 0,
         later: Vec::new(),
         dropped: Vec::new(),
-        keep_out: Vec::new(),
+        // A held top is left as it is: a layer the kit moved out of it into a
+        // synced top is copied there fresh, not taken from it.
+        keep_out: held.iter().copied().filter(|t| doc.in_vault(*t)).collect(),
         tokens: Default::default(),
     };
     let mut updated = Vec::new();
@@ -2014,8 +2016,8 @@ struct Builder<'a> {
     /// D1022). Deleted at once, a move between parents was a delete and a fresh
     /// copy, its instances cut loose.
     dropped: Vec<(NodeId, NodeId)>,
-    /// The vault tops being made local: nothing is moved out of them (§15
-    /// D1024).
+    /// The vault tops being made local, and those held back
+    /// ([`update_holding`]): nothing is moved out of them (§15 D1024).
     keep_out: Vec<NodeId>,
     /// Where the current kit's variables, modes and styles landed in the scratch
     /// (§15 D1064) — every published node a sync writes is pointed through it.

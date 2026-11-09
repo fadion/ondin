@@ -2765,3 +2765,51 @@ fn a_held_back_main_keeps_its_version_and_needs_are_named() {
         "and its old width"
     );
 }
+
+/// **A layer the kit moved out of a held-back main stays in it**: the kit
+/// moves Icon's Dot into Card. With Icon held, Card's sync copies the Dot in
+/// fresh rather than taking Icon's, which keeps its Dot.
+///
+/// flip: `update_in_order` starting `keep_out` empty → fails at "Icon keeps
+/// its Dot".
+#[test]
+fn a_layer_moved_out_of_a_held_main_stays_in_it() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.card);
+    let (dot, card) = (k.icon_dot, k.card);
+    edit_and_publish(
+        &mut k,
+        vec![Operation::Reparent {
+            id: dot,
+            new_parent: card,
+            index: 1,
+        }],
+    );
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let icon_d = copy_of(&d, k.icon);
+    let u = kit::update_holding(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version, published(&k))],
+        &[icon_d],
+    )
+    .unwrap();
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("a partial update commits");
+    let names = |id: NodeId| -> Vec<String> {
+        d.get(id)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|c| d.get(*c).unwrap().name().to_string())
+            .collect()
+    };
+    assert_eq!(names(icon_d), ["Dot"], "Icon keeps its Dot");
+    assert!(
+        names(copy_of(&d, card)).iter().any(|n| n == "Dot"),
+        "Card has one of its own"
+    );
+}

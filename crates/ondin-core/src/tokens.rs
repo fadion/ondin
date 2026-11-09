@@ -448,6 +448,41 @@ pub(crate) fn plan<'a>(
     }
 
     let t = doc.variables();
+    // What `keep` spares, less one whose name the publish now gives another of
+    // its kit's variables or styles: kept, the two would share a name, which
+    // the table refuses. It is removed as any other, its users keeping what
+    // they drew.
+    let taken_var = |v: &Variable| {
+        want_vars.iter().any(|w| {
+            src.vars.get(*w).is_some_and(|x| {
+                x.name == v.name
+                    && src.var_origin(x).map(|o| o.var) != v.origin.as_ref().map(|o| o.var)
+            })
+        })
+    };
+    let keep_vars: FxHashSet<VarId> = keep
+        .vars
+        .iter()
+        .copied()
+        .filter(|v| t.get(*v).is_some_and(|v| !taken_var(v)))
+        .collect();
+    let keep_styles: FxHashSet<StyleId> = keep
+        .styles
+        .iter()
+        .copied()
+        .filter(|s| {
+            doc.styles().get(*s).is_some_and(|h| {
+                !want_styles.iter().any(|w| {
+                    src.styles.get(*w).is_some_and(|x| {
+                        x.name == h.name
+                            && x.slot() == h.slot()
+                            && src.style_origin(x).map(|o| o.style)
+                                != h.origin.as_ref().map(|o| o.style)
+                    })
+                })
+            })
+        })
+        .collect();
     let mut plan = Plan::default();
     let mut scoped: Vec<(VarId, Option<crate::variable::Scope>)> = Vec::new();
     let mut records: BTreeMap<String, KitModes> = BTreeMap::new();
@@ -529,7 +564,7 @@ pub(crate) fn plan<'a>(
                     .collect();
                 // A variable kept for a held-back main keeps the modes its
                 // cells are in, though the publish dropped them.
-                if t.of_kit(kit).any(|v| keep.vars.contains(&v.id)) {
+                if t.of_kit(kit).any(|v| keep_vars.contains(&v.id)) {
                     for m in &h.modes {
                         if !modes.iter().any(|x| x.from == m.from) {
                             modes.push(m.clone());
@@ -792,7 +827,7 @@ pub(crate) fn plan<'a>(
         plan.removed_vars = t
             .of_kit(kit)
             .map(|v| v.id)
-            .filter(|v| !kept_v.contains(v) && !keep.vars.contains(v))
+            .filter(|v| !kept_v.contains(v) && !keep_vars.contains(v))
             .collect();
         let kept_s: FxHashSet<StyleId> = plan.styles.values().copied().collect();
         plan.removed_styles = doc
@@ -800,8 +835,29 @@ pub(crate) fn plan<'a>(
             .iter()
             .filter(|s| s.origin.as_ref().is_some_and(|o| o.kit == kit))
             .map(|s| s.id)
-            .filter(|s| !kept_s.contains(s) && !keep.styles.contains(s))
+            .filter(|s| !kept_s.contains(s) && !keep_styles.contains(s))
             .collect();
+        // A kept variable takes a cell in each mode the publish added to its
+        // collection — its first cell there, as a rewritten one's is filled —
+        // or the table refuses it as missing one.
+        if let Some(r) = records.get(kit) {
+            for v in t.of_kit(kit).filter(|v| keep_vars.contains(&v.id)) {
+                let Some((collection, first)) = r
+                    .modes
+                    .iter()
+                    .find_map(|m| Some((m.collection.clone(), v.cells.get(&m.id)?.clone())))
+                else {
+                    continue;
+                };
+                let mut next = v.clone();
+                for m in r.modes_in(&collection) {
+                    next.cells.entry(m.id).or_insert_with(|| first.clone());
+                }
+                if next != *v {
+                    plan.ops.push(Operation::SetVariable { var: next });
+                }
+            }
+        }
     }
 
     let mut ops: Vec<Operation> = Vec::new();

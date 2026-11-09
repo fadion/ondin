@@ -583,6 +583,86 @@ fn a_removed_variable_stays_while_a_held_main_reads_it() {
     );
 }
 
+/// **A variable kept for a held-back main takes a cell in a mode the publish
+/// adds**: L adds *Dusk*, draws Icon's dot in a literal and Badge in a new
+/// `accent`, so `brand` no longer travels. Holding Icon keeps `brand`, which
+/// must hold a cell in *Dusk* too, or the table refuses the whole update.
+///
+/// flip: `tokens::plan` skipping the kept variables' cell fill → fails at "a
+/// partial update commits", `MissingCell`.
+#[test]
+fn a_kept_variable_takes_a_cell_in_a_mode_the_publish_adds() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let held_var = d.variables().iter().find(|v| v.name == "brand").unwrap().id;
+    let night = k.doc.variables().first_collection().modes[1].id;
+    let (dusk, accent) = (k.ids.mint_mode(), k.ids.mint_var());
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
+                mode: Mode {
+                    id: dusk,
+                    name: "Dusk".into(),
+                },
+                index: 2,
+                cells: vec![(k.brand, Cell::Color(NAVY)), (k.spare, Cell::Number(3.0))],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: accent,
+                    name: "accent".into(),
+                    kind: VarKind::Color,
+                    cells: [
+                        (k.day, Cell::Color(GOLD)),
+                        (night, Cell::Color(GOLD)),
+                        (dusk, Cell::Color(RED)),
+                    ]
+                    .into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetFills {
+                id: k.dot,
+                fills: keyed_by_position([Fill {
+                    brush: WHITE.into(),
+                    visible: true,
+                }]),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: bound(accent),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let vault: Vec<NodeId> = d.get(d.vault().unwrap()).unwrap().children().to_vec();
+    let icon_d = *vault
+        .iter()
+        .find(|t| d.get(**t).unwrap().origin().unwrap().node == k.icon)
+        .unwrap();
+    let u = kit::update_holding(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version(&k), published(&k))],
+        &[icon_d],
+    )
+    .unwrap();
+    assert!(!u.vars_removed.contains(&held_var), "kept for Icon");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("a partial update commits");
+    let modes = d.variables().kits()[L_ID].modes.len();
+    assert_eq!(modes, 3, "Dusk arrived");
+    assert_eq!(d.variables().get(held_var).unwrap().cells.len(), 3);
+}
+
 /// **A main from a newer publish whose kit gained a mode is refused until the
 /// update** (`KitError::Modes`): D's copy of `brand` has no cell in it.
 #[test]

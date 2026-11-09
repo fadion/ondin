@@ -2254,6 +2254,133 @@ pub fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) -> eg
     resp
 }
 
+/// What a [`tick_row`]'s box says.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Tick {
+    /// Ticked or not; the row is a click target and its caller flips it.
+    Open(bool),
+    /// Ticked and not the user's to change — what comes with the rest, as a kit
+    /// update's variables do. Drawn faded.
+    Fixed,
+}
+
+/// A [`tick_row`]'s leading mark: a glyph, or a colour's chip.
+#[derive(Clone, Copy, Debug)]
+pub enum RowMark {
+    Glyph(&'static str),
+    Chip(egui::Color32),
+}
+
+/// What a [`tick_row`] shows on its right: a faint word, or two chips with an
+/// arrow between (a colour's old → new).
+#[derive(Clone, Debug)]
+pub enum RowTail {
+    None,
+    Text(String),
+    Chips(egui::Color32, egui::Color32),
+}
+
+/// How far a [`Tick::Fixed`] box fades, so it reads as settled rather than as
+/// one more choice.
+pub const TICK_FIXED_FADE: f32 = 0.45;
+
+/// One row of a ticked list inside a popover (the kit update review, *Bind other
+/// uses*): [`paint_tick_box`] at the menu's inset, a mark in the menu glyph's
+/// column, the name at [`SMALL_PT`] and a faint tail on the right, one
+/// [`MENU_ROW_H`] row of `w` with [`list_row_ground`] under the pointer. An
+/// unticked row's words fade by [`UNTICKED_FADE`]. The caller flips the tick on
+/// the answer's click; only [`Tick::Open`] senses one.
+pub fn tick_row(
+    ui: &mut egui::Ui,
+    w: f32,
+    tick: Tick,
+    mark: RowMark,
+    name: &str,
+    tail: RowTail,
+) -> egui::Response {
+    /// The menu's inset, before the box.
+    const INSET: f32 = 8.0;
+    /// The name's start: past the mark, which sits in the menu glyph's column.
+    const NAME_X: f32 = MENU_LABEL_X + 16.0;
+    let sense = match tick {
+        Tick::Open(_) => egui::Sense::click(),
+        _ => egui::Sense::hover(),
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, MENU_ROW_H), sense);
+    let hovered = resp.hovered() && matches!(tick, Tick::Open(_));
+    list_row_ground(ui.painter(), rect, false, hovered);
+    let y = rect.center().y;
+    let at = egui::pos2(rect.left() + INSET + TICK_BOX / 2.0, y);
+    let mut p = ui.painter().clone();
+    match tick {
+        Tick::Open(on) => paint_tick_box(&p, at, on, hovered),
+        Tick::Fixed => {
+            p.multiply_opacity(TICK_FIXED_FADE);
+            paint_tick_box(&p, at, true, false);
+            p.set_opacity(1.0);
+        }
+    }
+    if tick == Tick::Open(false) {
+        p.multiply_opacity(UNTICKED_FADE);
+    }
+    let chip = |x: f32, c| {
+        paint_colour_chip(
+            &p,
+            egui::Rect::from_center_size(egui::pos2(x + 5.0, y), egui::vec2(10.0, 10.0)),
+            c,
+        );
+    };
+    let mark_x = rect.left() + MENU_LABEL_X;
+    match mark {
+        RowMark::Chip(c) => chip(mark_x, c),
+        RowMark::Glyph(g) => {
+            p.text(
+                egui::pos2(mark_x, y),
+                egui::Align2::LEFT_CENTER,
+                g,
+                theme::icon_font(11.0),
+                theme::text::dim(),
+            );
+        }
+    }
+    // The tail first, so the name is cut short of it rather than under it.
+    let right = rect.right() - INSET;
+    let tail_left = match tail {
+        RowTail::None => right,
+        RowTail::Text(t) => p
+            .text(
+                egui::pos2(right, y),
+                egui::Align2::RIGHT_CENTER,
+                t,
+                egui::FontId::proportional(CAPTION_PT),
+                theme::text::faint(),
+            )
+            .left(),
+        RowTail::Chips(a, b) => {
+            chip(right - 10.0, b);
+            let arrow = p.text(
+                egui::pos2(right - 14.0, y),
+                egui::Align2::RIGHT_CENTER,
+                icon::ARROW_RIGHT,
+                theme::icon_font(10.0),
+                theme::text::faint(),
+            );
+            chip(arrow.left() - 14.0, a);
+            arrow.left() - 14.0
+        }
+    };
+    let name_rect =
+        egui::Rect::from_x_y_ranges(rect.left() + NAME_X..=tail_left - 8.0, rect.y_range());
+    p.with_clip_rect(name_rect.intersect(p.clip_rect())).text(
+        egui::pos2(name_rect.left(), y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(SMALL_PT),
+        color::text(),
+    );
+    resp
+}
+
 /// The side of a [`field_toggle`]: a segment cell's height, so a toggle inside a
 /// field lights as a [`segmented`] cell does.
 pub const FIELD_TOGGLE: egui::Vec2 = egui::vec2(24.0, CONTROL_H - 6.0);

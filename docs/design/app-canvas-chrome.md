@@ -1372,7 +1372,7 @@ runs (`pages` names each frame's page, index for index).
   menu with its *Move to page* list open, the variables browser, the Export card, the contrast check,
   the vision simulation, version history, the recovery and close cards and present mode;
   `no_kit_surface_draws_a_name_in_private_mode` an instance's kit card, the insert picker, *Kits
-  used*, *Make local*, the kit update popover (shut: its components are a count until a row opens)
+  used*, *Make local*, the kit update popover (its one kit's table open, components named as layers)
   and *Publish*; `the_library_draws_no_name_in_private_mode` the library with its delete, move and
   missing-file cards; and `contrast::tests::the_fix_card_masks_its_layer_in_private_mode` the
   contrast fix card, which needs that module's measured fixture. A surface they do not open is

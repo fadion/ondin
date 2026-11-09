@@ -60,14 +60,20 @@ impl OndinApp {
     /// main selected there, and leave its top bar a link back here (D1011 (7)).
     pub(crate) fn go_to_kit_main(&mut self) {
         let doc = &self.session.doc;
-        let Some(main) = self
+        if let Some(main) = self
             .session
             .selection
             .single()
             .and_then(|i| ondin_core::component::main_of(doc, i))
-        else {
-            return;
-        };
+        {
+            self.go_to_kit_main_of(main);
+        }
+    }
+
+    /// *Go to main in the kit* for vault node `main` — the kit update review's
+    /// component menu asks it of a row.
+    pub(crate) fn go_to_kit_main_of(&mut self, main: NodeId) {
+        let doc = &self.session.doc;
         let Some(origin) = doc.get(main).and_then(|n| n.origin()).cloned() else {
             return;
         };

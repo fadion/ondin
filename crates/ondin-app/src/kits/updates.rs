@@ -18,6 +18,7 @@ use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
 use ondin_core::{NodeId, Operation};
+use std::collections::{BTreeMap, HashSet};
 
 /// The popover's width.
 const POP_W: f32 = 300.0;
@@ -54,6 +55,49 @@ pub(crate) struct KitWatch {
     /// window.
     focused: bool,
 }
+
+/// The update popover's review of what to take: components unticked by their
+/// vault top, kits opened or closed by hand, and a component's open menu.
+/// Started afresh each time the popover opens.
+#[derive(Default)]
+pub(crate) struct KitReview {
+    pub off: HashSet<NodeId>,
+    /// A kit's table opened (`true`) or closed by hand; otherwise one kit
+    /// opens and several start closed.
+    open: BTreeMap<String, bool>,
+    /// A component row's menu: its top, and where it was asked for.
+    menu: Option<(NodeId, egui::Pos2)>,
+}
+
+impl KitReview {
+    /// Whether `kit`'s table shows, when `n` kits wait.
+    fn is_open(&self, kit: &str, n: usize) -> bool {
+        self.open.get(kit).copied().unwrap_or(n == 1)
+    }
+
+    /// Tick or untick `top`, keeping the ticks whole under `needs`: ticking a
+    /// top ticks what it needs, and unticking one unticks what needs it.
+    pub(crate) fn toggle(&mut self, top: NodeId, needs: &[(NodeId, NodeId)]) {
+        let mut stack = vec![top];
+        if self.off.contains(&top) {
+            while let Some(t) = stack.pop() {
+                if self.off.remove(&t) {
+                    stack.extend(needs.iter().filter(|(a, _)| *a == t).map(|(_, b)| *b));
+                }
+            }
+        } else {
+            while let Some(t) = stack.pop() {
+                if self.off.insert(t) {
+                    stack.extend(needs.iter().filter(|(_, b)| *b == t).map(|(a, _)| *a));
+                }
+            }
+        }
+    }
+}
+
+/// The popover's list at its tallest: its scroll area is this high or as high
+/// as every kit opened, whichever is less, so opening one never resizes it.
+const LIST_MAX_H: f32 = 360.0;
 
 /// A file's modification time, in the scan's whole seconds, and its size — what
 /// the library scan read of it (`library::scan`), so the two compare. `None`
@@ -297,6 +341,9 @@ impl OndinApp {
             for w in &waiting {
                 self.kit_shelf.ask(&w.kit);
             }
+            if !open {
+                self.kit_review = KitReview::default();
+            }
             self.toggle_menu(TopMenu::KitUpdates);
         }
         if self.open_menu != TopMenu::KitUpdates {
@@ -316,6 +363,24 @@ impl OndinApp {
         } else {
             None
         };
+        // Every component row, by its top: its name and its kit's.
+        let mut rows: Vec<(NodeId, String, String, usize)> = Vec::new();
+        for k in summary.iter().flat_map(|s| &s.kits) {
+            for c in &k.components {
+                if !rows.iter().any(|r| r.0 == c.top) {
+                    let kit = waiting.iter().find(|w| w.kit.id == k.kit);
+                    let kit = kit.map_or_else(String::new, |w| w.kit.name.clone());
+                    rows.push((c.top, c.name.clone(), kit, c.instances));
+                }
+            }
+        }
+        let needs = summary.as_ref().map_or(&[][..], |s| &s.needs[..]).to_vec();
+        let total = rows.len();
+        let taken = rows
+            .iter()
+            .filter(|r| !self.kit_review.off.contains(&r.0))
+            .count();
+        let list_h = list_height(&waiting, summary.as_ref()).min(LIST_MAX_H);
         self.dropdown(&ctx, "kit-updates", anchor, POP_W, &resp, |app, ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
@@ -328,13 +393,81 @@ impl OndinApp {
                 .color(theme::text::strong()),
             );
             ui.add_space(4.0);
-            for w in &waiting {
-                let part = summary
-                    .as_ref()
-                    .and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id));
-                waiting_row(ui, w, part);
+            let off = app.kit_review.off.clone();
+            let row_of = |t: NodeId| rows.iter().find(|r| r.0 == t);
+            let name = |t: NodeId| row_of(t).map(|r| r.1.clone());
+            // An unticked row whose update needs another unticked one says so.
+            let why = |t: NodeId| {
+                if !off.contains(&t) {
+                    return None;
+                }
+                let (_, u) = needs.iter().find(|(a, b)| *a == t && off.contains(b))?;
+                let (me, other) = (row_of(t)?, row_of(*u)?);
+                let tail = match me.2 == other.2 {
+                    true => format!("needs {}", other.1),
+                    false => format!("needs {} from {}", other.1, other.2),
+                };
+                Some((
+                    tail,
+                    format!(
+                        "{}'s update uses {}'s — tick {} to take both",
+                        me.1, other.1, me.1
+                    ),
+                ))
+            };
+            let mut clicked: Option<(String, Option<super::summary::ReviewAct>)> = None;
+            egui::ScrollArea::vertical()
+                .id_salt("kit-updates-list")
+                .max_height(list_h)
+                .min_scrolled_height(list_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    for w in &waiting {
+                        let part = summary
+                            .as_ref()
+                            .and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id));
+                        let review = super::summary::Review {
+                            off: &off,
+                            why: &why,
+                            name: &name,
+                            held: w.held,
+                            version: w.kit.version,
+                        };
+                        let opened = app.kit_review.is_open(&w.kit.id, n);
+                        match waiting_row(ui, w, part, opened, &review) {
+                            Some(RowClick::Fold) => clicked = Some((w.kit.id.clone(), None)),
+                            Some(RowClick::Review(a)) => {
+                                clicked = Some((w.kit.id.clone(), Some(a)));
+                            }
+                            None => {}
+                        }
+                    }
+                });
+            match clicked {
+                Some((kit, None)) => {
+                    let was = app.kit_review.is_open(&kit, n);
+                    app.kit_review.open.insert(kit, !was);
+                }
+                Some((_, Some(super::summary::ReviewAct::Toggle(t)))) => {
+                    app.kit_review.toggle(t, &needs);
+                    app.kit_review.menu = None;
+                }
+                Some((_, Some(super::summary::ReviewAct::Menu(t, at)))) => {
+                    app.kit_review.menu = Some((t, at));
+                }
+                None => {}
             }
-            let instances: usize = waiting.iter().map(|w| w.instances).sum();
+            // The instances the ticked components reach; before the dry run
+            // has read them, every instance of the kits.
+            let instances: usize = match summary {
+                Some(_) => rows
+                    .iter()
+                    .filter(|r| !app.kit_review.off.contains(&r.0))
+                    .map(|r| r.3)
+                    .sum(),
+                None => waiting.iter().map(|w| w.instances).sum(),
+            };
             ui.add_space(4.0);
             // The layers the kits' removals detach keep their values.
             if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
@@ -359,26 +492,122 @@ impl OndinApp {
                 .color(theme::text::dim()),
             );
             ui.add_space(6.0);
+            // Every component ticked reads *Accept all*, as before the review.
+            let accept = match (ready, taken) {
+                (false, _) => "Loading…".to_string(),
+                (true, _) if taken == total => "Accept all".to_string(),
+                (true, 0) => "Accept".to_string(),
+                (true, _) => format!("Accept {taken} of {total}"),
+            };
+            let state = match ready && (taken > 0 || total == 0) {
+                true => crate::ui::FieldButton::Primary,
+                false => crate::ui::FieldButton::Disabled,
+            };
+            let why =
+                (ready && taken == 0 && total > 0).then_some("Tick a component to take its update");
             let buttons = [
                 ("Later", crate::ui::FieldButton::Off),
-                if ready {
-                    ("Accept all", crate::ui::FieldButton::Primary)
-                } else {
-                    ("Loading…", crate::ui::FieldButton::Disabled)
-                },
+                (accept.as_str(), state),
             ];
-            match crate::settings::footer_row(ui, &buttons) {
+            match crate::settings::footer_row_noted(ui, &buttons, why) {
                 Some(0) => {
                     app.open_menu = TopMenu::None;
                     app.later_kit_updates();
                 }
                 Some(_) => {
                     app.open_menu = TopMenu::None;
-                    app.accept_kit_updates(None);
+                    let held: Vec<NodeId> = app.kit_review.off.iter().copied().collect();
+                    app.accept_kit_updates_holding(None, &held);
                 }
                 None => {}
             }
         });
+        self.component_menu(&ctx);
+    }
+
+    /// A review row's menu (right-click on a component): *Select instances*,
+    /// which closes the popover for the canvas, and *Go to main in ‹kit›*.
+    fn component_menu(&mut self, ctx: &egui::Context) {
+        let Some((top, at)) = self.kit_review.menu else {
+            return;
+        };
+        if self.open_menu != TopMenu::KitUpdates {
+            self.kit_review.menu = None;
+            return;
+        }
+        let doc = &self.session.doc;
+        let mains = match doc.get(top) {
+            Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, top),
+            Some(_) => vec![top],
+            None => {
+                self.kit_review.menu = None;
+                return;
+            }
+        };
+        let instances: Vec<NodeId> = mains
+            .iter()
+            .flat_map(|m| ondin_core::component::instances_of(doc, *m))
+            .filter(|i| !doc.in_vault(*i))
+            .collect();
+        let kit = doc
+            .get(top)
+            .and_then(|n| n.origin())
+            .and_then(|o| {
+                self.kits_waiting(false)
+                    .into_iter()
+                    .find(|w| w.kit.id == o.kit)
+            })
+            .map_or_else(|| "the kit".to_string(), |w| w.kit.name);
+        let go = format!("Go to main in {kit}");
+        let count = instances.len().to_string();
+        let w = 220.0;
+        let size = egui::vec2(w, 2.0 * ui::MENU_ROW_H + 2.0 * ui::MENU_PAD);
+        let pos = ui::menu_place(ctx, at, size);
+        let mut act = None;
+        let rect = egui::Area::new(Self::flyout_id("kit-updates"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(w, ui::MENU_PAD));
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let r = ui::MenuRow::new(icon::SELECTION_ALL, "Select instances")
+                        .accel(Some(count.as_str()))
+                        .enabled(!instances.is_empty());
+                    if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
+                        act = Some(0);
+                    }
+                    let r = ui::MenuRow::new(icon::ARROW_UP_RIGHT, &go);
+                    if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
+                        act = Some(1);
+                    }
+                });
+            })
+            .response
+            .rect;
+        match act {
+            Some(0) => {
+                self.kit_review.menu = None;
+                self.open_menu = TopMenu::None;
+                self.select_font_users(instances);
+            }
+            Some(_) => {
+                self.kit_review.menu = None;
+                self.open_menu = TopMenu::None;
+                self.go_to_kit_main_of(top);
+            }
+            None => {
+                let away = ctx.input(|i| {
+                    i.pointer.any_pressed()
+                        && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+                });
+                // The press that opened it is no press away from it.
+                let opening = ctx.input(|i| i.pointer.secondary_clicked());
+                if (away && !opening) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.kit_review.menu = None;
+                }
+            }
+        }
     }
 
     /// Open the update popover from elsewhere than its pill — a kit header's
@@ -391,6 +620,7 @@ impl OndinApp {
         for w in &self.kits_waiting(false) {
             self.kit_shelf.ask(&w.kit);
         }
+        self.kit_review = KitReview::default();
         self.toggle_menu(TopMenu::KitUpdates);
     }
 
@@ -452,16 +682,61 @@ impl OndinApp {
     /// top right of the content (D1011 (3)); the toast says what changed and that
     /// overrides were kept, and names `Ctrl+Z` (D981 (d): toasts are text).
     pub(crate) fn accept_kit_updates(&mut self, only: Option<&str>) {
+        self.accept_kit_updates_holding(only, &[]);
+    }
+
+    /// [`Self::accept_kit_updates`] with the review's unticked components,
+    /// by their vault tops, left as they are (`kit::update_holding`). A kit
+    /// whose every component is held is skipped whole, its variables and
+    /// styles too; the toast names what stayed behind.
+    pub(crate) fn accept_kit_updates_holding(&mut self, only: Option<&str>, held: &[NodeId]) {
         // The typing is committed before the update, so a layer being typed
         // into is touched — cut loose rather than deleted under the session,
         // which then committed onto a node that was gone and said "Text
         // updated".
         self.finish_text_first();
-        let waiting: Vec<Waiting> = self
+        // The review's rows, read off the summary it was drawn from.
+        let parts: Vec<super::summary::KitSummary> = self
+            .kit_summary
+            .as_ref()
+            .and_then(|(_, s)| s.as_ref())
+            .map(|s| s.kits.clone())
+            .unwrap_or_default();
+        let skipped = |kit: &str| {
+            !held.is_empty()
+                && parts.iter().find(|k| k.kit == kit).is_some_and(|k| {
+                    let tops = k.tops();
+                    !tops.is_empty() && tops.iter().all(|t| held.contains(t))
+                })
+        };
+        let (waiting, skipped): (Vec<Waiting>, Vec<Waiting>) = self
             .kits_waiting(false)
             .into_iter()
             .filter(|w| only.is_none_or(|k| k == w.kit.id))
-            .collect();
+            .partition(|w| !skipped(&w.kit.id));
+        if waiting.is_empty() {
+            return;
+        }
+        // The held components the toast names, with the version they stay at.
+        let doc = &self.session.doc;
+        let stayed: Vec<(String, u32)> = parts
+            .iter()
+            .flat_map(|k| &k.components)
+            .filter(|c| held.contains(&c.top))
+            .filter(|c| {
+                !skipped.iter().any(|w| {
+                    doc.get(c.top)
+                        .and_then(|n| n.origin())
+                        .is_some_and(|o| o.kit == w.kit.id)
+                })
+            })
+            .filter_map(|c| Some((c.name.clone(), doc.get(c.top)?.origin()?.version)))
+            .fold(Vec::new(), |mut v, x| {
+                if !v.contains(&x) {
+                    v.push(x);
+                }
+                v
+            });
         let mut loaded = Vec::new();
         for w in &waiting {
             // The shelf's copy when it has one; otherwise the file, read here —
@@ -502,52 +777,53 @@ impl OndinApp {
         let doc = &self.session.doc;
         let page = self.session.page;
         let content = self.session.preview_world_bounds(page);
-        let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, page, &args) {
-            Ok(u) => u,
-            // **This kit's publish reaches a newer version of a third kit's
-            // main than the document holds** (§15 D1024): from the card or the
-            // canvas menu, which accept one kit, it would fail for good. When more
-            // updates wait, all of them are accepted together — the third kit's
-            // among them — as *Accept all* does; otherwise the third kit is not in
-            // the library to update from.
-            // A third kit's modes held at another version than this publish
-            // read are the same owed update (§15 D1064).
-            Err(
-                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
-            ) if only.is_some() && self.kits_waiting(false).len() > waiting.len() => {
-                self.accept_kit_updates(None);
-                return;
-            }
-            Err(
-                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
-            ) => {
-                self.session.fail(
-                    "This update needs a newer version of another kit it uses, which is not \
+        let update =
+            match ondin_core::kit::update_holding(doc, &mut self.session.ids, page, &args, held) {
+                Ok(u) => u,
+                // **This kit's publish reaches a newer version of a third kit's
+                // main than the document holds** (§15 D1024): from the card or the
+                // canvas menu, which accept one kit, it would fail for good. When more
+                // updates wait, all of them are accepted together — the third kit's
+                // among them — as *Accept all* does; otherwise the third kit is not in
+                // the library to update from.
+                // A third kit's modes held at another version than this publish
+                // read are the same owed update (§15 D1064).
+                Err(
+                    ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+                ) if only.is_some() && self.kits_waiting(false).len() > waiting.len() => {
+                    self.accept_kit_updates(None);
+                    return;
+                }
+                Err(
+                    ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+                ) => {
+                    self.session.fail(
+                        "This update needs a newer version of another kit it uses, which is not \
                      in your library"
-                        .to_string(),
-                );
-                return;
-            }
-            // §15 D1036 (2): a kit built on this one.
-            Err(ondin_core::kit::KitError::Circular(own)) => {
-                let own = match self.session.doc.get(own) {
-                    Some(_) => crate::private::layer(&self.session.doc, own),
-                    None => "component".into(),
-                };
-                self.session.fail(format!(
-                    "This update uses this kit's own {own}, so it cannot be taken here"
-                ));
-                return;
-            }
-            Err(_) => {
-                self.session.fail(
-                    "The kit update could not be applied — its published components are \
+                            .to_string(),
+                    );
+                    return;
+                }
+                // §15 D1036 (2): a kit built on this one.
+                Err(ondin_core::kit::KitError::Circular(own)) => {
+                    let own = match self.session.doc.get(own) {
+                        Some(_) => crate::private::layer(&self.session.doc, own),
+                        None => "component".into(),
+                    };
+                    self.session.fail(format!(
+                        "This update uses this kit's own {own}, so it cannot be taken here"
+                    ));
+                    return;
+                }
+                Err(_) => {
+                    self.session.fail(
+                        "The kit update could not be applied — its published components are \
                      incomplete"
-                        .to_string(),
-                );
-                return;
-            }
-        };
+                            .to_string(),
+                    );
+                    return;
+                }
+            };
         // The instances a variant the kit removed takes with it, counted before
         // the commit detaches them (§15 D982 (c), D1036 (4)).
         let cut: Vec<(String, usize)> = update
@@ -585,15 +861,24 @@ impl OndinApp {
         // Only the mains that changed (§15 D1036 (5)): a version-only publish
         // moves every main's version and changes none of them.
         let changed = update.changed.len();
+        // What the review left behind: the held components, the kits skipped.
+        let behind = held_words(&stayed, &skipped);
         let mut toast = if changed == 0 {
             format!(
-                "Updated {} · no component you use changed · Ctrl+Z to undo",
+                "Updated {}{behind} · no component you use changed · Ctrl+Z to undo",
                 ui::count(kits, "kit")
+            )
+        } else if stayed.is_empty() {
+            format!(
+                "Updated {} from {} · overrides kept on {}{behind} · Ctrl+Z to undo",
+                ui::count(changed, "component"),
+                ui::count(kits, "kit"),
+                ui::count(kept, "instance"),
             )
         } else {
             format!(
-                "Updated {} from {} · overrides kept on {} · Ctrl+Z to undo",
-                ui::count(changed, "component"),
+                "Updated {changed} of {} from {} · overrides kept on {}{behind} · Ctrl+Z to undo",
+                ui::count(changed + stayed.len(), "component"),
                 ui::count(kits, "kit"),
                 ui::count(kept, "instance"),
             )
@@ -682,26 +967,94 @@ pub(crate) fn stack_local(
     out
 }
 
-/// One kit in the popover: its name and *v8 → v9*, how many components, and
-/// its publish note — and, once the dry run has read it, what the update
-/// changes: the headline's counts and the *Changed*, *Added* and
-/// *Removed* rows (`kits::summary`).
-fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::KitSummary>) {
-    ui.horizontal(|ui| {
-        ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::muted()));
-        ui.label(
-            egui::RichText::new(&w.kit.name)
-                .size(ui::CONTROL_PT)
-                .color(color::text()),
+/// The partial accept's words, each after a `" · "`: *Button and Card stay at
+/// v4*, *Charts skipped* — empty when the review held nothing back.
+fn held_words(stayed: &[(String, u32)], skipped: &[Waiting]) -> String {
+    let mut out = String::new();
+    if let Some((first, v)) = stayed.first() {
+        let names = match stayed {
+            [_] => first.clone(),
+            [a, b] => format!("{} and {}", a.0, b.0),
+            [a, b, rest @ ..] => format!("{}, {} and {} more", a.0, b.0, rest.len()),
+            [] => String::new(),
+        };
+        let verb = if stayed.len() == 1 { "stays" } else { "stay" };
+        out += &match stayed.iter().all(|(_, x)| x == v) {
+            true => format!(" · {names} {verb} at v{v}"),
+            false => format!(" · {names} {verb} behind"),
+        };
+    }
+    match skipped {
+        [] => {}
+        [w] => out += &format!(" · {} skipped", w.kit.name),
+        _ => out += &format!(" · {} skipped", ui::count(skipped.len(), "kit")),
+    }
+    out
+}
+
+/// One kit in the popover: its caret, name and *v8 → v9*, the headline's
+/// counts and its publish note — and, while `open`, the review table the dry
+/// run reads (`kits::summary::draw`). Answers what was clicked.
+fn waiting_row(
+    ui: &mut egui::Ui,
+    w: &Waiting,
+    part: Option<&super::summary::KitSummary>,
+    open: bool,
+    review: &super::summary::Review<'_>,
+) -> Option<RowClick> {
+    // The caret folds the table, when there is one: the whole head is its
+    // target, its ink brightening as a fold head's does.
+    let table = part.is_some_and(|k| !k.components.is_empty() || k.counts() != (0, 0, 0));
+    let sense = match table {
+        true => egui::Sense::click(),
+        false => egui::Sense::hover(),
+    };
+    let (rect, head) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ui::FOLD_HEAD_H), sense);
+    let ink = match head.hovered() && table {
+        true => theme::text::muted(),
+        false => theme::text::faint(),
+    };
+    let p = ui.painter();
+    let y = rect.center().y;
+    let mut x = rect.left();
+    if table {
+        let caret = if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        };
+        p.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_CENTER,
+            caret,
+            theme::icon_font(12.0),
+            ink,
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(format!("v{} → v{}", w.held, w.kit.version))
-                    .size(ui::CAPTION_PT)
-                    .color(theme::text::faint()),
-            );
-        });
-    });
+        x += 16.0;
+    }
+    let glyph = p.text(
+        egui::pos2(x, y),
+        egui::Align2::LEFT_CENTER,
+        icon::PACKAGE,
+        theme::icon_font(12.0),
+        theme::text::muted(),
+    );
+    p.text(
+        egui::pos2(glyph.right() + 6.0, y),
+        egui::Align2::LEFT_CENTER,
+        &w.kit.name,
+        egui::FontId::proportional(ui::CONTROL_PT),
+        color::text(),
+    );
+    p.text(
+        egui::pos2(rect.right(), y),
+        egui::Align2::RIGHT_CENTER,
+        format!("v{} → v{}", w.held, w.kit.version),
+        egui::FontId::proportional(ui::CAPTION_PT),
+        theme::text::faint(),
+    );
+    let mut click = head.clicked().then_some(RowClick::Fold);
     let line = match part.map(super::summary::headline) {
         Some(h) if !h.is_empty() => h,
         Some(_) => "No component you use changes".to_string(),
@@ -721,9 +1074,57 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
                 .color(theme::text::muted()),
         );
     }
-    if let Some(k) = part {
-        super::summary::draw(ui, k);
+    if let Some(k) = part
+        && open
+        && let Some(a) = super::summary::draw(ui, k, review)
+    {
+        click = Some(RowClick::Review(a));
     }
+    click
+}
+
+/// What a kit's row in the popover was asked.
+enum RowClick {
+    /// Its head: open or close its table.
+    Fold,
+    Review(super::summary::ReviewAct),
+}
+
+/// How tall the popover's list stands with every kit's table open — an
+/// estimate from the rows' heights, so opening a table never grows the popover
+/// (an egui popup that shrank does not grow back).
+fn list_height(waiting: &[Waiting], summary: Option<&super::summary::Summary>) -> f32 {
+    /// A line of small text and the list's gap after it.
+    const LINE: f32 = 18.0;
+    /// A section's eyebrow, its space above included.
+    const SECTION: f32 = 20.0;
+    let mut h = 0.0;
+    for w in waiting {
+        h += ui::FOLD_HEAD_H + 4.0 + LINE;
+        if w.kit.note.is_some() {
+            h += LINE;
+        }
+        let Some(k) = summary.and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id)) else {
+            continue;
+        };
+        let changed = k
+            .components
+            .iter()
+            .filter(|c| c.change == super::summary::Change::Changed)
+            .count();
+        let removed = k.components.len() - changed;
+        let tokens = k.changed.len() + k.added.len() + k.removed.len();
+        let shown = tokens.min(super::summary::MAX_ROWS);
+        for n in [changed, removed, shown] {
+            if n > 0 {
+                h += SECTION + n as f32 * (ui::MENU_ROW_H + 4.0);
+            }
+        }
+        if tokens > shown {
+            h += LINE;
+        }
+    }
+    h
 }
 
 #[cfg(test)]
@@ -975,6 +1376,139 @@ mod tests {
         app.undo();
         assert_eq!(app.session.doc, before, "one undo");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The review takes the ticked components and leaves the rest**: Badge
+    /// and Pill both change; with Pill unticked the accept takes Badge alone,
+    /// Pill keeps its version, the kit still waits, and the toast names what
+    /// stayed.
+    ///
+    /// flip: `accept_kit_updates_holding` passing no held tops to
+    /// `update_holding` → fails at "Pill keeps its version".
+    #[test]
+    fn a_review_takes_the_ticked_components_and_leaves_the_rest() {
+        let ctx = egui::Context::default();
+        let root = temp_root("review");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let mut kids = IdSource::new(0xAD);
+        let pill = kids.mint();
+        let kit_root = ondin_core::io::load(&std::fs::read(&path).unwrap())
+            .unwrap()
+            .first_page();
+        republish(
+            &path,
+            vec![
+                Operation::CreateNode {
+                    id: pill,
+                    parent: kit_root,
+                    index: 1,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(30.0, 12.0),
+                        corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some("Pill".into()),
+                },
+                Operation::SetComponent {
+                    id: pill,
+                    component: true,
+                },
+            ],
+            "A pill",
+        );
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        let Some(super::Load::Ready(Some(p))) = app.kit_shelf.load(&kit) else {
+            panic!("the kit loads")
+        };
+        let page = app.session.doc.first_page();
+        let (tx, _) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &kit,
+            5,
+            p,
+            pill,
+            page,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        settle_for_accept(&mut app);
+        app.accept_kit_updates(None);
+        assert!(app.kits_waiting(false).is_empty(), "both at v5");
+
+        republish(
+            &path,
+            vec![
+                Operation::SetOpacity {
+                    id: dot,
+                    opacity: 0.5,
+                },
+                Operation::SetOpacity {
+                    id: pill,
+                    opacity: 0.5,
+                },
+            ],
+            "Softer",
+        );
+        // Past the first publish's time, so the shelf reads the file again.
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(6))
+            .unwrap();
+        drop(f);
+        app.library.refresh();
+        settle_for_accept(&mut app);
+        let waiting = app.kits_waiting(false);
+        let summary = app.update_summary(&waiting).expect("the dry run reads");
+        let rows: Vec<(NodeId, String)> = summary.kits[0]
+            .components
+            .iter()
+            .map(|c| (c.top, c.name.clone()))
+            .collect();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let pill_top = rows.iter().find(|r| r.1 == "Pill").unwrap().0;
+        app.kit_review.toggle(pill_top, &summary.needs);
+        let held: Vec<NodeId> = app.kit_review.off.iter().copied().collect();
+        assert_eq!(held, [pill_top]);
+        app.accept_kit_updates_holding(None, &held);
+
+        let doc = &app.session.doc;
+        let idot = doc.get(inst).unwrap().children()[0];
+        assert_eq!(doc.get(idot).unwrap().opacity(), 0.5, "Badge is taken");
+        let v = doc.get(pill_top).unwrap().origin().unwrap().version;
+        assert_eq!(v, 5, "Pill keeps its version");
+        let w = app.kits_waiting(false);
+        assert_eq!((w.len(), w[0].held), (1, 5), "the kit still waits");
+        let toast = app.session.status().text.clone();
+        assert!(
+            toast.contains("Updated 1 of 2 components") && toast.contains("Pill stays at v5"),
+            "{toast}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Ticking a component ticks what it needs, and unticking one unticks what
+    /// needs it, across a chain.
+    #[test]
+    fn review_ticks_stay_whole_under_needs() {
+        let mut ids = IdSource::new(0xAE);
+        let [a, b, c] = [(); 3].map(|_| ids.mint());
+        // a needs b, b needs c.
+        let needs = [(a, b), (b, c)];
+        let mut r = super::KitReview::default();
+        r.toggle(c, &needs);
+        let off = |r: &super::KitReview| {
+            let mut v: Vec<NodeId> = r.off.iter().copied().collect();
+            v.sort();
+            v
+        };
+        let mut all = vec![a, b, c];
+        all.sort();
+        assert_eq!(off(&r), all, "unticking c unticks b and a");
+        r.toggle(b, &needs);
+        assert_eq!(off(&r), [a], "ticking b ticks c, not a");
+        r.toggle(a, &needs);
+        assert!(r.off.is_empty());
     }
 
     /// **A kit that publishes while its consumer is open brings the pill without

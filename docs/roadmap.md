@@ -17,9 +17,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Components and layout
 
-- **A per-component review table for kit updates** — the next step after the *accept all* notice
-  (§15 D1010 (3), D1011 5D): each kit row's disclosure, whose room the design reserves, opens onto
-  the components that changed.
 - **Binding the other users of an extracted value** after *Extract into variable…*, which binds only
   the field it was run from (§15 D1037, D1038): offer the other fields drawing the same value.
 - **Three CSS layout properties §5.3c defers** — `aspect-ratio`, named grid areas and

@@ -32,6 +32,35 @@ pub(crate) struct Token {
     pub new: Option<Value>,
     /// For a removed one: the layers of the document it detaches, values kept.
     pub detach: usize,
+    /// For a removed one: the vault tops that read it, which keep it while
+    /// they are held back (`kit::update_holding`).
+    pub readers: Vec<NodeId>,
+}
+
+/// One component an update changes or removes — a row of the review, ticked
+/// by its vault top.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Component {
+    /// The vault top the row holds back when unticked: the main, or the set a
+    /// removed variant belongs to.
+    pub top: NodeId,
+    pub name: String,
+    /// The instances outside the vault the update reaches.
+    pub instances: usize,
+    /// Of those, the ones with overrides.
+    pub overridden: usize,
+    pub change: Change,
+}
+
+/// What an update does to a [`Component`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Change {
+    /// Rewritten to the new publish.
+    Changed,
+    /// No longer published: made a local main, its instances still following it.
+    MadeLocal,
+    /// A variant its set's update deletes, detaching this many instances.
+    Detached(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,8 +73,9 @@ pub(crate) enum TokenKind {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct KitSummary {
     pub kit: String,
-    /// The components the update rewrites, by name, in the vault's order.
-    pub components: Vec<String>,
+    /// The components the update rewrites, then those it removes, in the
+    /// vault's order.
+    pub components: Vec<Component>,
     pub changed: Vec<Token>,
     pub added: Vec<Token>,
     pub removed: Vec<Token>,
@@ -61,7 +91,18 @@ impl KitSummary {
         let styles = all()
             .filter(|t| matches!(t.kind, TokenKind::Style(_)))
             .count();
-        (self.components.len(), vars, styles)
+        (self.tops().len(), vars, styles)
+    }
+
+    /// The vault tops the review ticks, each once.
+    pub(crate) fn tops(&self) -> Vec<NodeId> {
+        let mut out: Vec<NodeId> = Vec::new();
+        for c in &self.components {
+            if !out.contains(&c.top) {
+                out.push(c.top);
+            }
+        }
+        out
     }
 }
 
@@ -69,6 +110,8 @@ impl KitSummary {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Summary {
     pub kits: Vec<KitSummary>,
+    /// `kit::Update::needs`: which top's new version reaches which.
+    pub needs: Vec<(NodeId, NodeId)>,
 }
 
 impl Summary {
@@ -162,6 +205,46 @@ fn detached(doc: &Document, users: Vec<NodeId>, reads: impl Fn(NodeId) -> bool) 
         .count()
 }
 
+/// The vault top `id` sits under, itself included; `None` outside the vault.
+fn vault_top(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let vault = doc.vault()?;
+    let mut at = id;
+    for _ in 0..=doc.len() {
+        let p = doc.get(at)?.parent()?;
+        if p == vault {
+            return Some(at);
+        }
+        at = p;
+    }
+    None
+}
+
+/// The instances of `mains` outside the vault, and how many of them carry
+/// overrides.
+fn instances_outside(doc: &Document, mains: &[NodeId]) -> (usize, usize) {
+    let all: Vec<NodeId> = mains
+        .iter()
+        .flat_map(|m| ondin_core::component::instances_of(doc, *m))
+        .filter(|i| !doc.in_vault(*i))
+        .collect();
+    let drifted = all
+        .iter()
+        .filter(|i| ondin_core::reset::drift(doc, **i).any())
+        .count();
+    (all.len(), drifted)
+}
+
+/// The vault tops of `users`, each once.
+fn reader_tops(doc: &Document, users: &[NodeId]) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = Vec::new();
+    for t in users.iter().filter_map(|u| vault_top(doc, *u)) {
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
 /// The summary of `update` over `doc`. Values are read in the document's
 /// default mode, as the browser's first column shows them.
 pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
@@ -204,15 +287,37 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
         }
     }
 
-    for m in &update.changed {
-        if let Some(n) = doc.get(*m)
-            && let Some(o) = n.origin()
-        {
-            let i = part(&mut kits, &o.kit);
-            kits[i]
-                .components
-                .push(crate::private::layer(doc, *m).into_owned());
-        }
+    let rows = update
+        .changed
+        .iter()
+        .map(|m| (*m, *m, Change::Changed))
+        .chain(
+            update
+                .made_local
+                .iter()
+                .map(|m| (*m, *m, Change::MadeLocal)),
+        )
+        .chain(update.removed.iter().filter_map(|m| {
+            let n = instances_outside(doc, &[*m]).0;
+            Some((vault_top(doc, *m)?, *m, Change::Detached(n)))
+        }));
+    for (top, m, change) in rows {
+        let Some(o) = doc.get(top).and_then(|n| n.origin()) else {
+            continue;
+        };
+        let mains = match doc.get(m) {
+            Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, m),
+            _ => vec![m],
+        };
+        let (instances, overridden) = instances_outside(doc, &mains);
+        let i = part(&mut kits, &o.kit);
+        kits[i].components.push(Component {
+            top,
+            name: crate::private::layer(doc, m).into_owned(),
+            instances,
+            overridden,
+            change,
+        });
     }
     for v in &update.vars_changed {
         let Some(next) = new_vars.get(v) else {
@@ -226,6 +331,7 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old,
             new,
             detach: 0,
+            readers: Vec::new(),
         };
         let i = part(&mut kits, kit);
         match t.get(*v) {
@@ -268,6 +374,7 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old: None,
             new: None,
             detach: 0,
+            readers: Vec::new(),
         };
         let i = part(&mut kits, &kit);
         if held.is_some() {
@@ -288,6 +395,7 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old: read(doc, held, &lookup_old, &held_kits),
             new: None,
             detach,
+            readers: reader_tops(doc, &users),
         });
     }
     for s in &update.styles_removed {
@@ -304,18 +412,19 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old: None,
             new: None,
             detach,
+            readers: reader_tops(doc, &users),
         });
     }
-    Summary { kits }
+    Summary {
+        kits,
+        needs: update.needs.clone(),
+    }
 }
 
-/// How many rows a section shows before *and N more*: the popover stands under
-/// the top bar, and a kit that renamed its whole palette must not push its
-/// buttons off the window.
-const MAX_ROWS: usize = 6;
-
-/// A row's height.
-const ROW_H: f32 = 20.0;
+/// How many variable and style rows a kit's table shows before *and N more*:
+/// they are fixed, so listing a whole renamed palette would only be scrolled
+/// past on the way to the components.
+pub(crate) const MAX_ROWS: usize = 6;
 
 /// The headline under a kit's name: *2 components · 4 variables · 1
 /// style*, the empty kinds left out.
@@ -343,23 +452,123 @@ fn value_text(v: &Value) -> Option<String> {
     }
 }
 
-/// Draw one kit's sections — *Changed*, *Added*, *Removed* — under its row.
-pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
+/// Draw one kit's review table under its row: the components it changes and
+/// removes, each with its tick, then the variables and styles that come with
+/// them, ticked and fixed. Answers what a click asked.
+pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Option<ReviewAct> {
     use crate::theme::{self, icon};
-    let w = ui.available_width();
-    let section = |ui: &mut egui::Ui, title: &str, rows: Vec<Row<'_>>| {
-        if rows.is_empty() {
-            return;
-        }
+    use crate::ui::{RowMark, RowTail};
+    let section = |ui: &mut egui::Ui, title: &str| {
         ui.add_space(2.0);
-        ui.label(
-            egui::RichText::new(title)
-                .size(crate::ui::CAPTION_PT)
-                .color(theme::text::faint()),
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(crate::ui::eyebrow(title));
+        });
+    };
+    let chip = |c: &ondin_core::peniko::Color| crate::ui::color_to_egui(*c);
+    let token = |t: &Token| -> (RowMark, RowTail) {
+        let lead = match (t.kind, t.old.as_ref().or(t.new.as_ref())) {
+            (TokenKind::Var(_), Some(Value::Color(c))) => RowMark::Chip(chip(c)),
+            (TokenKind::Var(VarKind::Number), _) => RowMark::Glyph(icon::HASH),
+            (TokenKind::Var(VarKind::String), _) => RowMark::Glyph(icon::TEXT_T),
+            (TokenKind::Var(VarKind::Boolean), _) => RowMark::Glyph(icon::TOGGLE),
+            (TokenKind::Var(_), _) => RowMark::Glyph(icon::HASH),
+            (TokenKind::Style(_), _) => RowMark::Glyph(icon::SWATCHES),
+        };
+        let tail = if t.detach > 0 {
+            RowTail::Text(format!("{} detach", crate::ui::count(t.detach, "layer")))
+        } else {
+            match (t.kind, &t.old, &t.new) {
+                (TokenKind::Style(_), ..) => RowTail::Text("style".into()),
+                (_, Some(Value::Color(a)), Some(Value::Color(b))) => {
+                    RowTail::Chips(chip(a), chip(b))
+                }
+                (_, Some(a), Some(b)) => RowTail::Text(format!(
+                    "{} → {}",
+                    value_text(a).unwrap_or_default(),
+                    value_text(b).unwrap_or_default()
+                )),
+                (_, None, Some(v)) | (_, Some(v), None) => {
+                    value_text(v).map_or(RowTail::None, RowTail::Text)
+                }
+                _ => RowTail::None,
+            }
+        };
+        (lead, tail)
+    };
+    let w = ui.available_width();
+    let mut act = None;
+    // The components, each ticked by its vault top.
+    let mut component = |ui: &mut egui::Ui, c: &Component| {
+        let on = !review.off.contains(&c.top);
+        let blocked = (review.why)(c.top);
+        let tail = match (&blocked, c.change) {
+            (Some((tail, _)), _) => tail.clone(),
+            (None, Change::Changed) => crate::ui::count(c.instances, "instance"),
+            (None, Change::MadeLocal) => "made local".into(),
+            (None, Change::Detached(0)) => "removed".into(),
+            (None, Change::Detached(n)) => format!("{} detach", crate::ui::count(n, "instance")),
+        };
+        let resp = crate::ui::tick_row(
+            ui,
+            w,
+            crate::ui::Tick::Open(on),
+            crate::ui::RowMark::Glyph(icon::HEXAGON_FILL),
+            &c.name,
+            crate::ui::RowTail::Text(tail),
         );
-        let more = rows.len().saturating_sub(MAX_ROWS);
-        for r in rows.into_iter().take(MAX_ROWS) {
-            row(ui, w, r);
+        let resp = match blocked {
+            Some((_, tip)) => resp.on_hover_text(tip),
+            None => resp.on_hover_text(format!(
+                "v{} → v{} · {} · {} with overrides",
+                review.held,
+                review.version,
+                crate::ui::count(c.instances, "instance"),
+                c.overridden
+            )),
+        };
+        if resp.clicked() {
+            act = Some(ReviewAct::Toggle(c.top));
+        }
+        if resp.secondary_clicked()
+            && let Some(at) = resp.interact_pointer_pos()
+        {
+            act = Some(ReviewAct::Menu(c.top, at));
+        }
+    };
+    let changed: Vec<&Component> = k
+        .components
+        .iter()
+        .filter(|c| c.change == Change::Changed)
+        .collect();
+    let removed: Vec<&Component> = k
+        .components
+        .iter()
+        .filter(|c| c.change != Change::Changed)
+        .collect();
+    for (title, rows) in [("Changed", changed), ("Removed", removed)] {
+        if rows.is_empty() {
+            continue;
+        }
+        section(ui, title);
+        for c in rows {
+            component(ui, c);
+        }
+    }
+    // The variables and styles: fixed on, as the kit applies them whole.
+    let tokens: Vec<&Token> = k.changed.iter().chain(&k.added).chain(&k.removed).collect();
+    if !tokens.is_empty() {
+        section(ui, "With any of these");
+        let more = tokens.len().saturating_sub(MAX_ROWS);
+        for t in tokens.into_iter().take(MAX_ROWS) {
+            let (mark, tail) = token(t);
+            let held = t.readers.iter().find(|r| review.off.contains(r));
+            let tail = match held.and_then(|r| (review.name)(*r)) {
+                Some(name) => crate::ui::RowTail::Text(format!("kept for {name}")),
+                None => tail,
+            };
+            crate::ui::tick_row(ui, w, crate::ui::Tick::Fixed, mark, &t.name, tail)
+                .on_hover_text("Variables and styles come with any part of this update");
         }
         if more > 0 {
             ui.label(
@@ -368,131 +577,31 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
                     .color(theme::text::dim()),
             );
         }
-    };
-    fn token(t: &Token) -> Row<'_> {
-        let lead = match (t.kind, t.old.as_ref().or(t.new.as_ref())) {
-            (TokenKind::Var(_), Some(Value::Color(c))) => Lead::Chip(*c),
-            (TokenKind::Var(VarKind::Number), _) => Lead::Glyph(icon::HASH),
-            (TokenKind::Var(VarKind::String), _) => Lead::Glyph(icon::TEXT_T),
-            (TokenKind::Var(VarKind::Boolean), _) => Lead::Glyph(icon::TOGGLE),
-            (TokenKind::Var(_), _) => Lead::Glyph(icon::HASH),
-            (TokenKind::Style(_), _) => Lead::Glyph(icon::SWATCHES),
-        };
-        let tail = if t.detach > 0 {
-            Tail::Text(format!("{} detach", crate::ui::count(t.detach, "layer")))
-        } else {
-            match (t.kind, &t.old, &t.new) {
-                (TokenKind::Style(_), ..) => Tail::Text("style".into()),
-                (_, Some(Value::Color(a)), Some(Value::Color(b))) => Tail::Chips(*a, *b),
-                (_, Some(a), Some(b)) => Tail::Text(format!(
-                    "{} → {}",
-                    value_text(a).unwrap_or_default(),
-                    value_text(b).unwrap_or_default()
-                )),
-                (_, None, Some(v)) | (_, Some(v), None) => {
-                    value_text(v).map_or(Tail::None, Tail::Text)
-                }
-                _ => Tail::None,
-            }
-        };
-        Row {
-            lead,
-            name: &t.name,
-            tail,
-        }
     }
-    let mut changed: Vec<Row<'_>> = k
-        .components
-        .iter()
-        .map(|c| Row {
-            lead: Lead::Glyph(icon::HEXAGON_FILL),
-            name: c,
-            tail: Tail::Text("component".into()),
-        })
-        .collect();
-    changed.extend(k.changed.iter().map(token));
-    section(ui, "Changed", changed);
-    section(ui, "Added", k.added.iter().map(token).collect());
-    section(ui, "Removed", k.removed.iter().map(token).collect());
+    act
 }
 
-enum Lead {
-    Chip(ondin_core::peniko::Color),
-    Glyph(&'static str),
+/// What the review needs of the popover to draw a kit's table.
+pub(crate) struct Review<'a> {
+    /// The vault tops unticked.
+    pub off: &'a std::collections::HashSet<NodeId>,
+    /// For an unticked top whose update needs another unticked one: the row's
+    /// tail and its tooltip.
+    pub why: &'a dyn Fn(NodeId) -> Option<(String, String)>,
+    /// A component row's name, by its top, across every kit.
+    pub name: &'a dyn Fn(NodeId) -> Option<String>,
+    /// The version the kit is held at, and the one it publishes.
+    pub held: u32,
+    pub version: u32,
 }
 
-enum Tail {
-    None,
-    Text(String),
-    Chips(ondin_core::peniko::Color, ondin_core::peniko::Color),
-}
-
-struct Row<'a> {
-    lead: Lead,
-    name: &'a str,
-    tail: Tail,
-}
-
-/// One row: its chip or glyph, its name, and on the right what changes.
-fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
-    use crate::theme::{self, color, icon};
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::hover());
-    let p = ui.painter();
-    let y = rect.center().y;
-    let chip = |x: f32, c| {
-        crate::panels::variables::swatch(
-            p,
-            egui::Rect::from_center_size(egui::pos2(x + 5.0, y), egui::vec2(10.0, 10.0)),
-            c,
-        );
-    };
-    match r.lead {
-        Lead::Chip(c) => chip(rect.left() + 1.0, c),
-        Lead::Glyph(g) => {
-            p.text(
-                egui::pos2(rect.left(), y),
-                egui::Align2::LEFT_CENTER,
-                g,
-                theme::icon_font(11.0),
-                theme::text::dim(),
-            );
-        }
-    }
-    // The tail first, so the name is cut short of it rather than under it.
-    let right = rect.right() - 2.0;
-    let tail_left = match r.tail {
-        Tail::None => right,
-        Tail::Text(t) => p
-            .text(
-                egui::pos2(right, y),
-                egui::Align2::RIGHT_CENTER,
-                t,
-                egui::FontId::proportional(crate::ui::CAPTION_PT),
-                theme::text::faint(),
-            )
-            .left(),
-        Tail::Chips(a, b) => {
-            chip(right - 10.0, b);
-            let arrow = p.text(
-                egui::pos2(right - 14.0, y),
-                egui::Align2::RIGHT_CENTER,
-                icon::ARROW_RIGHT,
-                theme::icon_font(10.0),
-                theme::text::faint(),
-            );
-            chip(arrow.left() - 14.0, a);
-            arrow.left() - 14.0
-        }
-    };
-    let name_rect =
-        egui::Rect::from_x_y_ranges(rect.left() + 18.0..=tail_left - 8.0, rect.y_range());
-    p.with_clip_rect(name_rect).text(
-        egui::pos2(name_rect.left(), y),
-        egui::Align2::LEFT_CENTER,
-        r.name,
-        egui::FontId::proportional(crate::ui::SMALL_PT),
-        color::text(),
-    );
+/// What a click in a kit's table asked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ReviewAct {
+    /// A component's tick, by its top.
+    Toggle(NodeId),
+    /// A component's menu, opened at a point.
+    Menu(NodeId, egui::Pos2),
 }
 
 #[cfg(test)]
@@ -692,7 +801,8 @@ mod tests {
         let [k] = &s.kits[..] else {
             panic!("one kit: {s:?}")
         };
-        assert_eq!(k.components, ["Icon", "Badge"]);
+        let names: Vec<&str> = k.components.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Icon", "Badge"]);
         let [changed] = &k.changed[..] else {
             panic!("brand changed: {:?}", k.changed)
         };

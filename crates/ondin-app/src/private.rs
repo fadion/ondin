@@ -896,8 +896,8 @@ mod leak {
             &|app, _| app.making_local = Some(top),
             &|app| app.making_local = None,
         );
-        // The kit publishes again: the update pill's popover names the kit. Its
-        // components are a count until a row is expanded, which this leaves shut.
+        // The kit publishes again: the update pill's popover names the kit, and
+        // its one kit's table opens on the components, named as layers are.
         let kit_path = root.join("atlas.ondin");
         let mut published = ondin_core::io::load(&std::fs::read(&kit_path).unwrap()).unwrap();
         published

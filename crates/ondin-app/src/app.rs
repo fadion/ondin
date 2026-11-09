@@ -901,6 +901,8 @@ pub struct OndinApp {
         crate::kits::summary::Key,
         Option<crate::kits::summary::Summary>,
     )>,
+    /// The update popover's review: its unticked components, its opened kits.
+    pub(crate) kit_review: crate::kits::updates::KitReview,
     /// When the kits this document uses were last looked at on disk (`kits::updates`).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
     /// When the linked `tokens.json` was last looked at (`tokens_import.rs`).
@@ -1752,6 +1754,7 @@ impl OndinApp {
             kit_placing: None,
             kit_shelf: Default::default(),
             kit_summary: None,
+            kit_review: Default::default(),
             kit_watch: Default::default(),
             tokens_watch: Default::default(),
             kit_users: None,
@@ -7833,7 +7836,7 @@ impl OndinApp {
     }
 
     /// The area id of the submenu a [`Self::dropdown`] named `id` opens beside a row.
-    fn flyout_id(id: &str) -> egui::Id {
+    pub(crate) fn flyout_id(id: &str) -> egui::Id {
         egui::Id::new(id).with("flyout")
     }
 

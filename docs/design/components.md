@@ -280,8 +280,11 @@ on — an instance still equal to the main's old value takes the new one, one wi
   order, removals. *Push all* is the first four in one transaction: the layers first, the order read
   on the document they leave so a pushed layer is ordered with its siblings, then the fields. A
   removal deletes the main's layer and is only ever pushed on its own.
-- **A field** is the copy's own `reset::state_ops` value, retargeted at the target (`push::fields`
-  turns a reset's ops into their pushes). **A swap** is `variant::switch` on the slot — a relink for a
+- **A field** is the target's own `reset::state_ops` value with the parts the reset would change on
+  the copy taken from the copy (`push::changed_from`: objects part by part, a run of numbers number
+  by number, a list or string whole), retargeted at the target — so a mark's reset of one axis,
+  written as the whole size, pushes that axis alone (`push::fields` turns a reset's ops into their
+  pushes). **A swap** is `variant::switch` on the slot — a relink for a
   root linked straight to a main, a swap for a nested copy; the copy's swap then equals what its slot
   shows and `swap::settle` clears it. **A list item the copy removed** is deleted from the target's
   list (`push::item_removal`).
@@ -573,7 +576,8 @@ Inspector:
   to main* under its reset row), a ghost row (*Restore* / *Push removal to main*). The header's hover
   chip stays the reset alone: a push reaches every instance, so it is never one stray click away. A
   menu's push reaches the reset door as that reset with `ui::request_push` set; `commit_reset` and the
-  property rows' commit loop take it (`ui::take_push`) and commit `push::fields` instead. Each frame
+  property rows' commit loop take it (`ui::take_push`) and commit `push::fields` instead, refused
+  with *Select one instance to push* when the reset spans several instances. Each frame
   clears a request no door took before any widget runs, so it cannot turn a later reset into a push.
 - A push is one undo step, *Push to main* (`icon::PUSH_TO_MAIN`), with no confirmation; its toast says
   what followed: *Pushed 3 fields into Card · 9 instances follow · 2 keep their own · Ctrl+Z to undo*,

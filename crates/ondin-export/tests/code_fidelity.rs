@@ -1985,8 +1985,8 @@ fn a_width_query_is_written_as_a_container_query() {
     );
     assert!(
         tokens.contains(
-            "[data-pin~=\"wide\"] > [data-query~=\"card-variables\"] > *, \
-             [data-mode=\"wide\"][data-query~=\"card-variables\"] > *"
+            ":where([data-pin~=\"wide\"] > [data-query~=\"card-variables\"]) > *, \
+             :where([data-mode=\"wide\"][data-query~=\"card-variables\"]) > *"
         ),
         "tokens.css lacks the pin:\n{tokens}"
     );

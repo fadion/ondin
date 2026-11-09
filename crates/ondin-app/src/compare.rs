@@ -506,18 +506,18 @@ impl OndinApp {
     pub(crate) fn compare_with(&mut self, pick: Pick, newer: Option<Pick>) {
         self.finish_text_first();
         let newer = match newer.map(|n| load(&n.path).map(|doc| (n, doc))).transpose() {
-            Ok(n) => n.map(|(pick, doc)| Newer {
+            Ok(n) => n.map(|(pick, mut doc)| Newer {
                 pick,
-                res: Resolved::rebuild(&doc),
+                res: Resolved::settled(&mut doc),
                 doc,
             }),
             Err(e) => return self.session.fail(format!("Compare failed: {e}")),
         };
-        let then = match load(&pick.path) {
+        let mut then = match load(&pick.path) {
             Ok(doc) => doc,
             Err(e) => return self.session.fail(format!("Compare failed: {e}")),
         };
-        let then_res = Resolved::rebuild(&then);
+        let then_res = Resolved::settled(&mut then);
         let (now, now_res) = match &newer {
             Some(n) => (&n.doc, &n.res),
             None => (&self.session.doc, &self.session.resolved),

@@ -1856,11 +1856,14 @@ impl EditorSession {
     }
 
     /// After a resolve: give the document the laid-out widths its width queries
-    /// pick by (`Document::settle_widths`) and lay out again what that moved.
-    /// One pass, which is exact: a query's width never depends on its pick.
+    /// pick by and lay out again what that moved, until nothing moves
+    /// (`Resolved::settle`); the ink of what moved recorded with the edit's.
     fn settle_widths(&mut self, revs: (u64, u64)) {
-        let more = self.doc.settle_widths(&self.resolved);
-        if !more.0.is_empty() {
+        for _ in 0..ondin_core::resolve::MAX_SETTLE_ROUNDS {
+            let more = self.doc.settle_widths(&self.resolved);
+            if more.0.is_empty() {
+                break;
+            }
             self.ink.record(revs, &self.doc, &self.resolved, &more);
             self.resolved.update(&self.doc, &more);
         }

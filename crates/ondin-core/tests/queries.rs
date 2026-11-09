@@ -337,3 +337,45 @@ fn queries_save_and_stay_on_frames() {
         "{err:?}"
     );
 }
+
+/// The width picked by is the content box, as `@container (min-width)` reads
+/// it in the export: a Card with 24 px each side, 650 wide, is 602 inside and
+/// so Regular, not Wide at 640. Flip: `query_width_in` without its padding
+/// reads Wide.
+#[test]
+fn the_query_reads_the_content_box() {
+    let mut f = fixture();
+    f.by_width();
+    f.commit(vec![Operation::SetDisplay {
+        id: f.card,
+        display: Some(Display::Flex(Flex {
+            padding: [0.0, 24.0, 0.0, 24.0],
+            ..Default::default()
+        })),
+    }]);
+    let page = f.page;
+    let i = f.instance(page, 650.0);
+    assert_eq!(f.inside(i), Some(f.regular));
+}
+
+/// A mode moved in its collection keeps its place among a query's widths: with
+/// Wide moved first, Regular's width can still be set between Compact's and
+/// Wide's, and the order the fold lists stays narrowest first. Flip:
+/// `query_width_ops` ordering by the collection → "Compact starts at 0." is
+/// not the refusal, Regular is refused against Wide.
+#[test]
+fn a_reordered_collection_keeps_the_query_in_width_order() {
+    let mut f = fixture();
+    f.by_width();
+    let ops = variable::move_mode_ops(&f.doc, f.wide, 0);
+    f.commit(ops);
+    let ops = variable::query_width_ops(&f.doc, f.card, f.regular, 500.0).expect("between");
+    f.commit(ops);
+    let q = f.doc.get(f.card).unwrap().queries()[0].clone();
+    let order: Vec<ModeId> =
+        variable::query_order(f.doc.variables(), ModeOwner::Collection(f.density), &q)
+            .into_iter()
+            .map(|(m, _)| m)
+            .collect();
+    assert_eq!(order, vec![f.compact, f.regular, f.wide]);
+}

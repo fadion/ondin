@@ -157,13 +157,13 @@ impl Tokens {
 
     /// Each width query's blocks (§5.3f, CSS's container query): the frame a
     /// container of its inline size, and its children — never itself, which a
-    /// container cannot query — given its first mode, then each other mode
+    /// container cannot query — given its narrowest mode, then each other mode
     /// under `@container (min-width: …)`, then each mode pinned on the frame or
     /// on a component use's mode wrapper (`data-pin`), after them all so that
     /// pin wins — a pin on any other element around loses, as on the canvas,
-    /// where a frame's width beats what it inherits. The children's own
-    /// blocks are `:where()`, of no weight, so a child pinning a mode of its own
-    /// keeps it.
+    /// where a frame's width beats what it inherits. Every block is `:where()`,
+    /// of no weight, so source order alone ranks them and a child pinning a mode
+    /// of its own keeps it, the nearer pin winning as on the canvas.
     fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
         for (word, c, widths) in &self.queries {
             let Some(col) = t.collection(*c) else {
@@ -195,7 +195,7 @@ impl Tokens {
                 let word = self.mode(m.id).unwrap_or_default();
                 let pin = format!("[data-mode{eq}\"{word}\"]");
                 let own = format!("[data-pin~=\"{word}\"]");
-                let selector = format!("{own} > {at} > *, {pin}{at} > *");
+                let selector = format!(":where({own} > {at}) > *, :where({pin}{at}) > *");
                 self.mode_block(t, shaken, col, selector, Some(m.id), out);
             }
         }

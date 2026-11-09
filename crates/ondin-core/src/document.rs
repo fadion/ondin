@@ -601,35 +601,43 @@ impl Document {
     }
 
     /// The width frame `id`'s queries pick by, measured as CSS measures a
-    /// container: a resize preview's ([`crate::variable::Variables::with_width`]),
-    /// else its laid-out width ([`Self::settle_widths`]), else its own — the
-    /// horizontal padding where its width comes from its content (fit-content,
-    /// which layout holds there too, `container::style_of`), else its width, a
-    /// bound one read in the mode around it.
+    /// container — its **content box**, the frame's width less its side
+    /// padding, which `@container (min-width)` compares in the export: of a
+    /// resize preview's width ([`crate::variable::Variables::with_width`]), else
+    /// its laid-out width ([`Self::settle_widths`]), else its own — its padding
+    /// alone where its width comes from its content (fit-content, which layout
+    /// holds there, `limits_drawn_in`), else its width, a bound one read in the
+    /// modes it and its surroundings set.
     pub fn query_width_in(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
-        if let Some((frame, w)) = t.previewed_width
-            && frame == id
-        {
-            return Some(w);
-        }
-        if let Some(w) = self.laid_widths.0.get(&id) {
-            return Some(*w);
-        }
-        self.own_query_width(t, id)
+        let outer = match t.previewed_width {
+            Some((frame, w)) if frame == id => Some(w),
+            _ => self
+                .laid_widths
+                .0
+                .get(&id)
+                .copied()
+                .or_else(|| self.own_query_width(t, id)),
+        }?;
+        Some((outer - self.side_padding(id)).max(0.0))
     }
 
-    /// [`Self::query_width_in`] with no layout to ask.
+    /// Frame `id`'s left and right padding, as laid out.
+    fn side_padding(&self, id: NodeId) -> f64 {
+        let [_, right, _, left] = self
+            .resolved_display(id)
+            .map(|d| d.padding())
+            .unwrap_or_default();
+        right.max(0.0) + left.max(0.0)
+    }
+
+    /// The border width [`Self::query_width_in`] measures, with no layout to ask.
     fn own_query_width(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
         let n = self.nodes.get(&id)?;
         let NodeKind::Artboard { size, .. } = &n.kind else {
             return None;
         };
         if n.item.width == crate::container::Dimension::FitContent {
-            let [_, right, _, left] = self
-                .resolved_display(id)
-                .map(|d| d.padding())
-                .unwrap_or_default();
-            return Some(right.max(0.0) + left.max(0.0));
+            return Some(self.side_padding(id));
         }
         match n.size_vars[0] {
             Some(v) => {
@@ -646,10 +654,11 @@ impl Document {
 
     /// Take the laid-out widths of every frame with a width query from `res`,
     /// and answer the layers to lay out again: every variable-reading layer
-    /// under a frame whose pick moved. One pass, as CSS picks a container's
-    /// query once per layout: the width never depends on what it picks, since a
-    /// frame's own fields read the mode around it and a fit-content width is
-    /// held at its padding.
+    /// under a frame whose pick moved. A frame's width never depends on its own
+    /// pick (its own fields read the mode around it, a fit-content width is held
+    /// at its padding), but a nested querying frame's can follow an outer one's
+    /// pick, so a caller lays out again and settles until nothing moves
+    /// ([`crate::resolve::Resolved::settle`]).
     pub fn settle_widths(&mut self, res: &crate::resolve::Resolved) -> DirtySet {
         let queried: Vec<NodeId> = self
             .nodes

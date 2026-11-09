@@ -2520,12 +2520,14 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
         let gone = q.get(&mode)?;
         let mut next = q.clone();
         next.remove(&mode);
+        // The narrowest left, by width, whatever the collection's order.
         if *gone == 0.0
-            && let Some(first) = t
-                .collection_of_mode(mode)
-                .and_then(|c| c.modes.iter().find(|m| next.contains_key(&m.id)))
+            && let Some(first) = next
+                .iter()
+                .min_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(m, _)| *m)
         {
-            next.insert(first.id, 0.0);
+            next.insert(first, 0.0);
         }
         Some((next.len() > 1).then_some(next))
     }));
@@ -2915,6 +2917,17 @@ fn owner_named(t: &Variables, owner: ModeOwner<'_>) -> Vec<(ModeId, String)> {
     }
 }
 
+/// The modes of `owner` that query `q` gives a width, with their names,
+/// narrowest first — collection order on a tie, as [`query_mode`] breaks one.
+pub fn query_order(t: &Variables, owner: ModeOwner<'_>, q: &Breakpoints) -> Vec<(ModeId, String)> {
+    let mut modes: Vec<(ModeId, String)> = owner_named(t, owner)
+        .into_iter()
+        .filter(|(m, _)| q.contains_key(m))
+        .collect();
+    modes.sort_by(|a, b| q[&a.0].total_cmp(&q[&b.0]));
+    modes
+}
+
 /// *By width* on frame `frame`'s mode row for `owner` (§5.3f), ticked or not.
 /// Ticked, the frame's contents pick `owner`'s mode by the frame's own width:
 /// its first mode from 0, each next [`QUERY_STEP`] past the one before, and any
@@ -2992,7 +3005,9 @@ pub fn query_width_ops(
     let Some(q) = n.query_of(t, owner) else {
         return Ok(Vec::new());
     };
-    let modes = owner_named(t, owner);
+    // In the order of the query's widths, not the collection's: a mode moved in
+    // its collection keeps its place among the widths.
+    let modes = query_order(t, owner, q);
     let Some(at) = modes.iter().position(|(m, _)| *m == mode) else {
         return Ok(Vec::new());
     };
@@ -3698,8 +3713,9 @@ pub(crate) fn check<'a>(
 }
 
 /// The mode width query `q` picks at `width`: of its modes `t` still holds, the
-/// one whose minimum is the largest `width` reaches, the earlier mode of a tie;
-/// the narrowest when `width` reaches none. `None` when `t` holds none of them.
+/// one whose minimum is the largest `width` reaches, the later mode of a tie,
+/// as the later of two `@container` blocks wins in the export; the narrowest
+/// when `width` reaches none. `None` when `t` holds none of them.
 pub fn query_mode(t: &Variables, q: &Breakpoints, width: f64) -> Option<ModeId> {
     let order = |m: &ModeId| {
         t.owner_of(*m)
@@ -3715,7 +3731,7 @@ pub fn query_mode(t: &Variables, q: &Breakpoints, width: f64) -> Option<ModeId> 
     let first = held.first().map(|(m, _)| *m);
     held.iter()
         .filter(|(_, w)| width >= *w)
-        .max_by(|a, b| a.1.total_cmp(&b.1).then(order(&b.0).cmp(&order(&a.0))))
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(order(&a.0).cmp(&order(&b.0))))
         .map(|(m, _)| *m)
         .or(first)
 }

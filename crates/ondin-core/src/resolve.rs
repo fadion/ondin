@@ -572,6 +572,10 @@ pub(crate) fn is_indexed(kind: &NodeKind) -> bool {
     )
 }
 
+/// The most rounds [`Resolved::settle`] lays out again: nested width queries
+/// deeper than this settle on the next commit.
+pub const MAX_SETTLE_ROUNDS: usize = 8;
+
 /// The document's derived state, kept equal to [`Self::rebuild`] by
 /// [`Self::update`]. `Clone` so an edit not yet committed is laid out by updating
 /// a copy, which reshapes only the text it dirties.
@@ -726,9 +730,27 @@ impl Resolved {
     /// width.
     pub fn settled(doc: &mut Document) -> Self {
         let mut res = Self::rebuild(doc);
-        let more = doc.settle_widths(&res);
-        res.update(doc, &more);
+        res.settle(doc);
         res
+    }
+
+    /// `doc` settled against this resolve ([`Document::settle_widths`]) and
+    /// what that moved laid out again, until nothing moves: a querying frame
+    /// nested in another can be widened by the outer one's pick. Each round
+    /// settles at least the next level down, so the depth of nested queries
+    /// bounds it; [`MAX_SETTLE_ROUNDS`] is the backstop. Answers every layer it
+    /// laid out again.
+    pub fn settle(&mut self, doc: &mut Document) -> DirtySet {
+        let mut all = DirtySet::default();
+        for _ in 0..MAX_SETTLE_ROUNDS {
+            let more = doc.settle_widths(self);
+            if more.0.is_empty() {
+                break;
+            }
+            self.update(doc, &more);
+            all.0.extend(more.0);
+        }
+        all
     }
 
     /// Incrementally apply a `DirtySet`. Equivalent in result to `rebuild`.

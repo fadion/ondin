@@ -1139,6 +1139,30 @@ impl RenderOverrides {
                         self.redraw_reading(doc, res, &t, reading, Some(*id));
                     }
                 }
+                // So does a frame with width queries — a main resized previews the
+                // mode its contents land in; its own fields read the mode around
+                // it, so only what is inside redraws.
+                if let Some(w) = width
+                    && let Some(n) = doc.get(*id).filter(|n| !n.queries().is_empty())
+                {
+                    let t = doc.variables().with_width(*id, w);
+                    let moved = n
+                        .queries()
+                        .iter()
+                        .any(|q| doc.query_pick_in(&t, *id, q) != doc.query_pick(*id, q));
+                    if moved {
+                        let mut reading = Vec::new();
+                        let mut stack: Vec<NodeId> = n.children().to_vec();
+                        while let Some(at) = stack.pop() {
+                            let Some(c) = doc.get(at) else { continue };
+                            if c.reads_variables() {
+                                reading.push(at);
+                            }
+                            stack.extend(c.children().iter().copied());
+                        }
+                        self.redraw_reading(doc, res, &t, reading, None);
+                    }
+                }
                 // Only the node's own painted area moves, not its children's frame.
                 self.moved.insert(*id);
             }
@@ -1546,7 +1570,9 @@ impl RenderOverrides {
             // A frame's modes change what a whole subtree resolves to, read through
             // the document and `Resolved`, which no override patches; so do the
             // widths that pick them.
-            Operation::SetModes { .. } | Operation::SetBreakpoints { .. } => return None,
+            Operation::SetModes { .. }
+            | Operation::SetBreakpoints { .. }
+            | Operation::SetQueries { .. } => return None,
             // A ghost carries its own: a warp's stand-in for a mask stays a mask,
             // and the walk reads it off the ghost.
             Operation::SetMask { id, mask } if self.ghost(*id).is_some() => {

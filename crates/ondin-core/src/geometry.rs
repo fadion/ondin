@@ -2113,6 +2113,7 @@ mod tests {
             credit: None,
             origin: None,
             modes: Vec::new(),
+            queries: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,

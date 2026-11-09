@@ -718,8 +718,8 @@ impl EditorSession {
         Self::from_parts(doc, ids, None)
     }
 
-    fn from_parts(doc: Document, ids: IdSource, path: Option<PathBuf>) -> Self {
-        let resolved = Resolved::rebuild(&doc);
+    fn from_parts(mut doc: Document, ids: IdSource, path: Option<PathBuf>) -> Self {
+        let resolved = Resolved::settled(&mut doc);
         let saved_at = path.is_some().then(Instant::now);
         let saved_step = path.is_some().then_some(None);
         let page = doc.first_page();
@@ -1615,6 +1615,7 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
+        self.settle_widths((self.revision, revision));
         if let Some(again) = watch.and_then(|w| w.finish(&self.doc, &self.resolved)) {
             self.last_transform = Some(again);
         }
@@ -1768,6 +1769,7 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
+        self.settle_widths((self.revision, revision));
         self.keep_page();
         self.dirty = true;
         // `finish_save` above all must see it, or it marks the session clean over a
@@ -1853,12 +1855,23 @@ impl EditorSession {
         self.resumed
     }
 
+    /// After a resolve: give the document the laid-out widths its width queries
+    /// pick by (`Document::settle_widths`) and lay out again what that moved.
+    /// One pass, which is exact: a query's width never depends on its pick.
+    fn settle_widths(&mut self, revs: (u64, u64)) {
+        let more = self.doc.settle_widths(&self.resolved);
+        if !more.0.is_empty() {
+            self.ink.record(revs, &self.doc, &self.resolved, &more);
+            self.resolved.update(&self.doc, &more);
+        }
+    }
+
     /// Replace the open document (open / new). Resets history, selection and
     /// save state, and re-seeds the id source so subsequent creates cannot
     /// collide with ids the loaded file already uses.
-    pub fn adopt_document(&mut self, doc: Document, path: Option<PathBuf>) {
+    pub fn adopt_document(&mut self, mut doc: Document, path: Option<PathBuf>) {
         self.compare = None;
-        self.resolved = Resolved::rebuild(&doc);
+        self.resolved = Resolved::settled(&mut doc);
         self.page = doc.first_page();
         self.parked.clear();
         self.first_visit = false;

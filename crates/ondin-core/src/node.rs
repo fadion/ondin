@@ -143,6 +143,13 @@ pub struct Node {
     /// at most one per collection, in id order; a collection with none here
     /// inherits. Only on an `Artboard` or a page (`crate::variable::check`).
     pub(crate) modes: Vec<crate::variable::ModeId>,
+    /// The **width queries** this frame's contents pick modes by (§5.3f), CSS's
+    /// container query: each one collection's modes with their minimum widths in
+    /// px, its first at 0. Set on a main and followed by its copies as one field.
+    /// The frame's own fields read the mode around it, as in CSS, where a
+    /// container cannot query itself. Only on an `Artboard`
+    /// (`crate::variable::check`).
+    pub(crate) queries: Vec<crate::variable::Breakpoints>,
     /// The variables this rectangle's corners are bound to.
     pub(crate) corner_vars: crate::variable::CornerVars,
     /// The variables this container's gaps and padding are bound to.
@@ -235,6 +242,23 @@ impl Node {
     /// modes in force here, which are [`crate::Document::modes_at`].
     pub fn modes(&self) -> &[crate::variable::ModeId] {
         &self.modes
+    }
+    /// The width queries this frame's contents pick modes by, one per
+    /// collection.
+    pub fn queries(&self) -> &[crate::variable::Breakpoints] {
+        &self.queries
+    }
+    /// This frame's width query over `owner`'s modes, if it has one.
+    pub fn query_of(
+        &self,
+        t: &crate::variable::Variables,
+        owner: crate::variable::ModeOwner<'_>,
+    ) -> Option<&crate::variable::Breakpoints> {
+        self.queries.iter().find(|q| {
+            q.keys()
+                .next()
+                .is_some_and(|m| t.owner_of(*m) == Some(owner))
+        })
     }
     /// The mode this frame sets of `owner`, a collection of the document's or
     /// a kit.

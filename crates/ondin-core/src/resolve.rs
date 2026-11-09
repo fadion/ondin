@@ -719,6 +719,18 @@ impl Resolved {
         resolved
     }
 
+    /// [`Self::rebuild`] with `doc` given the laid-out widths its width queries
+    /// pick by, and what that moved laid out again
+    /// ([`Document::settle_widths`]): what a reader that loads a document and
+    /// draws it builds, or a query stretched by its parent picks by its stored
+    /// width.
+    pub fn settled(doc: &mut Document) -> Self {
+        let mut res = Self::rebuild(doc);
+        let more = doc.settle_widths(&res);
+        res.update(doc, &more);
+        res
+    }
+
     /// Incrementally apply a `DirtySet`. Equivalent in result to `rebuild`.
     pub fn update(&mut self, doc: &Document, dirty: &DirtySet) {
         if dirty.0.is_empty() {

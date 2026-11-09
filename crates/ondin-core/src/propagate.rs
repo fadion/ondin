@@ -75,6 +75,8 @@ fn mode(op: &Operation) -> Mode {
         // A copy's mode is an override like any field (§5.3f), and so is a
         // corner's binding: overrides compare the binding (§5.3d).
         | Operation::SetModes { .. }
+        // A main's width queries, followed by its copies as one field.
+        | Operation::SetQueries { .. }
         | Operation::SetCornerVars { .. }
         | Operation::SetSpacingVars { .. }
         | Operation::SetVisibleVar { .. }

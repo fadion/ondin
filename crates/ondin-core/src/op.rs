@@ -480,6 +480,13 @@ pub enum Operation {
         id: NodeId,
         modes: Vec<crate::variable::ModeId>,
     },
+    /// The width queries a frame's contents pick modes by (§5.3f), whole: per
+    /// collection, each mode's minimum width. Only on a frame
+    /// (`variable::check`); `variable::query_ops` writes one collection's.
+    SetQueries {
+        id: NodeId,
+        queries: Vec<crate::variable::Breakpoints>,
+    },
     /// The variables a rectangle's corners are bound to (§15 D1039). Writes the
     /// bindings alone; `build::bind_corners_ops` writes the literals beside it.
     SetCornerVars {
@@ -626,6 +633,7 @@ impl Operation {
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
             | Operation::SetModes { id, .. }
+            | Operation::SetQueries { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
@@ -732,6 +740,7 @@ impl Operation {
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
             | Operation::SetModes { id, .. }
+            | Operation::SetQueries { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
@@ -938,6 +947,7 @@ impl Operation {
             // The widths choose the mode every top-level frame draws in.
             | Operation::SetBreakpoints { .. }
             | Operation::SetModes { .. }
+            | Operation::SetQueries { .. }
             | Operation::SetCornerVars { .. }
             | Operation::SetSpacingVars { .. }
             | Operation::SetVisibleVar { .. }
@@ -1059,6 +1069,9 @@ impl Operation {
                 .is_some_and(|c| c.breakpoints == *breakpoints),
             Operation::SetModes { id, modes } => {
                 node(id).is_some_and(|n| n.modes() == modes.as_slice())
+            }
+            Operation::SetQueries { id, queries } => {
+                node(id).is_some_and(|n| n.queries() == queries.as_slice())
             }
             Operation::SetCornerVars { id, vars } => {
                 node(id).is_some_and(|n| n.corner_vars() == *vars)

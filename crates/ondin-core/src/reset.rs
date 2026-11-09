@@ -89,6 +89,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         // override.
         origin: _,
         modes,
+        queries,
         corner_vars,
         spacing_vars,
         visible_var,
@@ -166,6 +167,11 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetModes {
             id,
             modes: modes.clone(),
+        },
+        // A main's width queries follow it as one field, and differ as one.
+        O::SetQueries {
+            id,
+            queries: queries.clone(),
         },
         O::SetCornerVars {
             id,

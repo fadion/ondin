@@ -503,8 +503,8 @@ fn run_check_contrast(
 fn run_check_code(file: &str, page: Option<&str>) -> Result<(String, bool), String> {
     use ondin_export::code::fidelity;
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
-    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
-    let res = ondin_core::Resolved::rebuild(&doc);
+    let mut doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let res = ondin_core::Resolved::settled(&mut doc);
     let page = chosen_page(&doc, page)?;
     let origins = doc
         .get(page)
@@ -1183,8 +1183,8 @@ fn run_export(
     use ondin_core::Resolved;
 
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
-    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
-    let res = Resolved::rebuild(&doc);
+    let mut doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let res = Resolved::settled(&mut doc);
     let page = chosen_page(&doc, page)?;
 
     let out_path = out
@@ -1327,8 +1327,8 @@ fn run_export_all(
     use ondin_core::Resolved;
 
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
-    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
-    let res = Resolved::rebuild(&doc);
+    let mut doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let res = Resolved::settled(&mut doc);
 
     // Every layer carrying settings, in document order — the same set and the same
     // order the panel's *Export all* collects (drafts left out), so the two produce

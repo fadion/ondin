@@ -99,6 +99,22 @@ pub struct Document {
     /// back values this document already held, which the layout operations then
     /// take whether or not CSS accepts them. Never true between calls.
     restoring: bool,
+    /// The laid-out widths of the frames with width queries, which their queries
+    /// pick by ([`Self::settle_widths`]). Derived from layout, never saved and
+    /// never compared: a document that was never settled reads each frame's own
+    /// width instead.
+    laid_widths: LaidWidths,
+}
+
+/// [`Document`]'s laid-out query widths: shared on clone, and equal to any other
+/// so two documents holding the same nodes compare equal however they were laid.
+#[derive(Clone, Debug, Default)]
+struct LaidWidths(std::sync::Arc<FxHashMap<NodeId, f64>>);
+
+impl PartialEq for LaidWidths {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl Document {
@@ -130,6 +146,7 @@ impl Document {
             published: None,
             tokens_link: None,
             restoring: false,
+            laid_widths: LaidWidths::default(),
         }
     }
 
@@ -176,6 +193,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         credit: None,
         origin: None,
         modes: Vec::new(),
+        queries: Vec::new(),
         corner_vars: Default::default(),
         spacing_vars: Default::default(),
         visible_var: None,
@@ -458,6 +476,19 @@ impl Document {
                     out.push(m);
                 }
             }
+            // A frame's width queries answer for what is inside it, after its own
+            // pins and before anything around it; never for the frame itself.
+            if n.id != id {
+                for q in &n.queries {
+                    if let Some(m) = self.query_pick_in(t, n.id, q)
+                        && !out
+                            .iter()
+                            .any(|x| crate::variable::same_collection(t, *x, m))
+                    {
+                        out.push(m);
+                    }
+                }
+            }
             if let Some(m) = self.width_pick_in(t, n.id)
                 && !out
                     .iter()
@@ -536,6 +567,131 @@ impl Document {
                 }
             }
             None => Some(size.width),
+        }
+    }
+
+    /// The mode query `q` on frame `id` picks for its contents: the one whose
+    /// minimum is the largest the frame's width ([`Self::query_width_in`])
+    /// reaches. `None` for a query naming no mode `t` holds.
+    pub fn query_pick_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        q: &crate::variable::Breakpoints,
+    ) -> Option<crate::variable::ModeId> {
+        let width = self.query_width_in(t, id)?;
+        crate::variable::query_mode(t, q, width)
+    }
+
+    /// [`Self::query_pick_in`] against the document's own table.
+    pub fn query_pick(
+        &self,
+        id: NodeId,
+        q: &crate::variable::Breakpoints,
+    ) -> Option<crate::variable::ModeId> {
+        self.query_pick_in(&self.variables, id, q)
+    }
+
+    /// Each of frame `id`'s queries' picks, in its queries' order.
+    fn query_picks(&self, id: NodeId) -> Vec<Option<crate::variable::ModeId>> {
+        self.nodes
+            .get(&id)
+            .map(|n| n.queries.iter().map(|q| self.query_pick(id, q)).collect())
+            .unwrap_or_default()
+    }
+
+    /// The width frame `id`'s queries pick by, measured as CSS measures a
+    /// container: a resize preview's ([`crate::variable::Variables::with_width`]),
+    /// else its laid-out width ([`Self::settle_widths`]), else its own — the
+    /// horizontal padding where its width comes from its content (fit-content,
+    /// which layout holds there too, `container::style_of`), else its width, a
+    /// bound one read in the mode around it.
+    pub fn query_width_in(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
+        if let Some((frame, w)) = t.previewed_width
+            && frame == id
+        {
+            return Some(w);
+        }
+        if let Some(w) = self.laid_widths.0.get(&id) {
+            return Some(*w);
+        }
+        self.own_query_width(t, id)
+    }
+
+    /// [`Self::query_width_in`] with no layout to ask.
+    fn own_query_width(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
+        let n = self.nodes.get(&id)?;
+        let NodeKind::Artboard { size, .. } = &n.kind else {
+            return None;
+        };
+        if n.item.width == crate::container::Dimension::FitContent {
+            let [_, right, _, left] = self
+                .resolved_display(id)
+                .map(|d| d.padding())
+                .unwrap_or_default();
+            return Some(right.max(0.0) + left.max(0.0));
+        }
+        match n.size_vars[0] {
+            Some(v) => {
+                let around = n.parent.map(|p| self.modes_at_in(t, p)).unwrap_or_default();
+                let set: Vec<_> = n.modes.iter().copied().chain(around).collect();
+                match t.resolve_at(v, &set) {
+                    Some(crate::variable::Value::Number(w)) => Some(w),
+                    _ => Some(size.width),
+                }
+            }
+            None => Some(size.width),
+        }
+    }
+
+    /// Take the laid-out widths of every frame with a width query from `res`,
+    /// and answer the layers to lay out again: every variable-reading layer
+    /// under a frame whose pick moved. One pass, as CSS picks a container's
+    /// query once per layout: the width never depends on what it picks, since a
+    /// frame's own fields read the mode around it and a fit-content width is
+    /// held at its padding.
+    pub fn settle_widths(&mut self, res: &crate::resolve::Resolved) -> DirtySet {
+        let queried: Vec<NodeId> = self
+            .nodes
+            .values()
+            .filter(|n| !n.queries.is_empty())
+            .map(|n| n.id)
+            .collect();
+        let mut dirty = DirtySet::default();
+        if queried.is_empty() && self.laid_widths.0.is_empty() {
+            return dirty;
+        }
+        let mut widths: FxHashMap<NodeId, f64> = FxHashMap::default();
+        for id in &queried {
+            if self.in_vault(*id) {
+                continue;
+            }
+            if let Some(NodeKind::Artboard { size, .. }) = res.used_kind(self, *id) {
+                widths.insert(*id, size.width);
+            }
+        }
+        let before: Vec<Vec<Option<crate::variable::ModeId>>> =
+            queried.iter().map(|id| self.query_picks(*id)).collect();
+        self.laid_widths = LaidWidths(std::sync::Arc::new(widths));
+        for (id, was) in queried.iter().zip(before) {
+            if self.query_picks(*id) != was {
+                self.dirty_readers_under(*id, &mut dirty);
+            }
+        }
+        dirty
+    }
+
+    /// Every variable-reading layer at or under `id` into `dirty`.
+    fn dirty_readers_under(&self, id: NodeId, dirty: &mut DirtySet) {
+        let mut stack = vec![id];
+        while let Some(at) = stack.pop() {
+            let Some(n) = self.nodes.get(&at) else {
+                continue;
+            };
+            if n.reads_variables() {
+                dirty.0.insert(at);
+            }
+            stack.extend(n.children().iter().copied());
         }
     }
 
@@ -878,6 +1034,19 @@ impl Document {
             };
             *item.limit_mut(k) = crate::container::Dimension::Px(x);
         }
+        // **Inline-size containment** for a frame with width queries, as CSS lays
+        // a query container: a width that would come from its content is its
+        // padding alone, so what the queries pick can never move the width they
+        // pick by.
+        if item.width == crate::container::Dimension::FitContent
+            && self.nodes.get(&id).is_some_and(|n| !n.queries.is_empty())
+        {
+            let [_, right, _, left] = self
+                .resolved_display(id)
+                .map(|d| d.padding())
+                .unwrap_or_default();
+            item.width = crate::container::Dimension::Px(right.max(0.0) + left.max(0.0));
+        }
         item
     }
 
@@ -887,7 +1056,7 @@ impl Document {
     /// The default item for a node not in the document.
     pub fn resolved_item(&self, id: NodeId) -> crate::container::LayoutItem {
         match self.nodes.get(&id) {
-            Some(n) if n.item.limit_vars.iter().any(Option::is_some) => {
+            Some(n) if n.item.limit_vars.iter().any(Option::is_some) || !n.queries.is_empty() => {
                 self.limits_drawn_in(&self.variables, id, n.item)
             }
             Some(n) => n.item,
@@ -1183,6 +1352,7 @@ impl Document {
             published: published.map(std::sync::Arc::new),
             tokens_link: None,
             restoring: false,
+            laid_widths: LaidWidths::default(),
         }
     }
 
@@ -1360,6 +1530,7 @@ impl Document {
             published: None,
             tokens_link: None,
             restoring: self.restoring,
+            laid_widths: LaidWidths::default(),
         };
         one.apply_one(op, &mut DirtySet::default(), &mut Numbering::default())
             .ok()
@@ -1384,7 +1555,16 @@ impl Document {
             _ => op.overwrites(),
         };
         let before = subject.and_then(|id| self.width_pick(id));
+        // A frame with width queries: a resize can move what they pick.
+        let queried =
+            subject.filter(|id| self.nodes.get(id).is_some_and(|n| !n.queries.is_empty()));
+        let picks = queried.map(|id| self.query_picks(id));
         let undo = self.apply_op(op, dirty, numbering)?;
+        if let (Some(id), Some(was)) = (queried, picks)
+            && self.query_picks(id) != was
+        {
+            self.dirty_readers_under(id, dirty);
+        }
         if let Some(id) = subject
             && self.width_pick(id) != before
         {
@@ -1713,6 +1893,19 @@ impl Document {
                 Ok(Operation::SetModes {
                     id: *id,
                     modes: old,
+                })
+            }
+            // Written on any node, as `SetModes` is; refused anywhere but a frame
+            // at the commit (`variable::check`).
+            Operation::SetQueries { id, queries } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.queries, queries.clone());
+                dirty.0.insert(*id);
+                // Every bound layer inside may now read another column.
+                self.dirty_readers_under(*id, dirty);
+                Ok(Operation::SetQueries {
+                    id: *id,
+                    queries: old,
                 })
             }
             Operation::SetCornerVars { id, vars } => {
@@ -2194,6 +2387,7 @@ impl Document {
             credit: None,
             origin: None,
             modes: Vec::new(),
+            queries: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
@@ -3720,6 +3914,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // Bindings are ids into the document's table, not the template, so
             // nothing is remapped (§5.3f).
             modes: n.modes.clone(),
+            queries: n.queries.clone(),
             corner_vars: n.corner_vars,
             spacing_vars: n.spacing_vars,
             visible_var: n.visible_var,
@@ -3990,6 +4185,7 @@ mod tests {
             credit: None,
             origin: None,
             modes: Vec::new(),
+            queries: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,

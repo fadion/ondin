@@ -369,6 +369,10 @@ pub(crate) struct NodeDto {
     /// collection, in id order; `mode` is absent then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<crate::variable::ModeId>,
+    /// A frame's width queries (§5.3f): per collection, each mode's minimum
+    /// width. Absent when none. New in v15.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<crate::variable::Breakpoints>,
     /// A rectangle's corner bindings (§15 D1039), absent when none is bound.
     /// New in v7.
     #[serde(default, skip_serializing_if = "no_corner_vars")]
@@ -512,6 +516,7 @@ impl NodeDto {
                 [_] => Vec::new(),
                 many => many.to_vec(),
             },
+            queries: n.queries().to_vec(),
             corner_vars: n.corner_vars(),
             spacing_vars: n.spacing_vars(),
             visible_var: n.visible_var(),
@@ -628,6 +633,7 @@ impl NodeDto {
                 m.dedup();
                 m
             },
+            queries: self.queries,
             corner_vars: self.corner_vars,
             spacing_vars: self.spacing_vars,
             visible_var: self.visible_var,

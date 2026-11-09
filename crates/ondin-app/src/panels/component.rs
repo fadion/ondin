@@ -1356,6 +1356,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetOrigin { .. }
         // A frame's modes are rows of the identity card, under its name.
         | O::SetModes { .. }
+        | O::SetQueries { .. }
         | O::AddCollection { .. }
         | O::RemoveCollection { .. }
         | O::SetCollectionName { .. }

@@ -1008,6 +1008,21 @@ impl Variables {
     }
 }
 
+/// The modes `owner` holds, in its order.
+pub fn owner_modes(t: &Variables, owner: ModeOwner<'_>) -> Vec<ModeId> {
+    match owner {
+        ModeOwner::Collection(c) => t
+            .collection(c)
+            .map(|c| c.modes.iter().map(|m| m.id).collect())
+            .unwrap_or_default(),
+        ModeOwner::Kit(kit, collection) => t
+            .kits
+            .get(kit)
+            .map(|k| k.modes_in(collection).map(|m| m.id).collect())
+            .unwrap_or_default(),
+    }
+}
+
 /// What owns a mode: one of the document's collections, or a kit's collection
 /// by kit id and collection name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1556,6 +1571,8 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.opacity_var = None;
     }
     node.modes = Vec::new();
+    // Its width queries pick among modes the other document does not have.
+    node.queries = Vec::new();
     // And its styles, its lists already holding their values (§15 D1062).
     node.styles = Default::default();
     node
@@ -1973,14 +1990,13 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             // one of `doc`'s own kit is that mode itself, or *Inherit*. A mode
             // `doc` lacks maps to its namesake in the collection of the same
             // name, else in the first, else *Inherit*.
-            let mut modes: Vec<ModeId> = Vec::new();
-            for &m in &n.modes {
+            let carry = |m: ModeId| -> Option<ModeId> {
                 let carried_kit = carried
                     .tokens
                     .kits
                     .iter()
                     .find_map(|(k, km)| km.mode(m).map(|x| (k.as_str(), x.from)));
-                let to = match carried_kit {
+                match carried_kit {
                     Some((k, from)) if Some(k) == own => t.mode(from).map(|x| x.id),
                     Some(_) => Some(m),
                     None if t.has_mode(m) => Some(m),
@@ -1994,8 +2010,11 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                             .find(|here| here.name == c.name)
                             .map(|here| here.id)
                     }),
-                };
-                if let Some(to) = to
+                }
+            };
+            let mut modes: Vec<ModeId> = Vec::new();
+            for &m in &n.modes {
+                if let Some(to) = carry(m)
                     && !modes.iter().any(|x| same_collection(t, *x, to))
                 {
                     modes.push(to);
@@ -2003,6 +2022,26 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             }
             modes.sort();
             n.modes = modes;
+            // A width query's modes the same way, each keeping its width; one
+            // left with no mode, or over a collection another already queries,
+            // goes.
+            let mut queries: Vec<Breakpoints> = Vec::new();
+            for q in &n.queries {
+                let mapped: Breakpoints = q
+                    .iter()
+                    .filter_map(|(m, w)| Some((carry(*m)?, *w)))
+                    .collect();
+                let first = mapped.keys().next().copied();
+                if let Some(f) = first
+                    && !queries
+                        .iter()
+                        .any(|x| x.keys().next().is_some_and(|k| same_collection(t, *k, f)))
+                    && mapped.keys().all(|k| same_collection(t, *k, f))
+                {
+                    queries.push(mapped);
+                }
+            }
+            n.queries = queries;
             n
         })
         .collect()
@@ -2475,6 +2514,21 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
             breakpoints: first.map(|_| next),
         });
     }
+    // A frame's width query over it drops its width, the next taking 0 when the
+    // narrowest goes; one left with a single mode has nothing to pick and goes.
+    ops.extend(queries_ops(doc, |q| {
+        let gone = q.get(&mode)?;
+        let mut next = q.clone();
+        next.remove(&mode);
+        if *gone == 0.0
+            && let Some(first) = t
+                .collection_of_mode(mode)
+                .and_then(|c| c.modes.iter().find(|m| next.contains_key(&m.id)))
+        {
+            next.insert(first.id, 0.0);
+        }
+        Some((next.len() > 1).then_some(next))
+    }));
     // And every kit mapping's entry for it (§15 D1064), which would name a mode
     // the document no longer has.
     for (kit, km) in doc.variables().kits() {
@@ -2488,6 +2542,39 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
         }
     }
     ops.push(crate::Operation::RemoveMode { id: mode });
+    ops
+}
+
+/// A `SetQueries` for every frame, in id order, one of whose width queries
+/// `edit` changes: `None` keeps a query, `Some(None)` drops it, `Some(Some(q))`
+/// writes `q` in its place.
+fn queries_ops(
+    doc: &crate::Document,
+    edit: impl Fn(&Breakpoints) -> Option<Option<Breakpoints>>,
+) -> Vec<crate::Operation> {
+    let mut frames: Vec<&crate::Node> = doc
+        .node_map()
+        .values()
+        .filter(|n| !n.queries.is_empty())
+        .collect();
+    frames.sort_by_key(|n| n.id);
+    let mut ops = Vec::new();
+    for n in frames {
+        let mut changed = false;
+        let mut queries = Vec::new();
+        for q in &n.queries {
+            match edit(q) {
+                None => queries.push(q.clone()),
+                Some(next) => {
+                    changed = true;
+                    queries.extend(next);
+                }
+            }
+        }
+        if changed {
+            ops.push(crate::Operation::SetQueries { id: n.id, queries });
+        }
+    }
     ops
 }
 
@@ -2601,6 +2688,24 @@ pub fn copy_mode_ops(
             breakpoints: Some(next),
         });
     }
+    // Every frame's width query over the collection gives the copy a width, by
+    // the rule above on its own widths, [`QUERY_STEP`] past the last at the end.
+    ops.extend(queries_ops(doc, |q| {
+        if !c.modes.iter().any(|m| q.contains_key(&m.id)) {
+            return None;
+        }
+        let width = |i: usize| c.modes.get(i).and_then(|m| q.get(&m.id)).copied();
+        let lo = index.checked_sub(1).and_then(width).unwrap_or(0.0);
+        let at = match width(index) {
+            Some(hi) => Some(((lo + hi) / 2.0).round())
+                .filter(|w| lo < *w && *w < hi)
+                .unwrap_or((lo + hi) / 2.0),
+            None => lo + QUERY_STEP,
+        };
+        let mut next = q.clone();
+        next.insert(id, at);
+        Some(Some(next))
+    }));
     ops.extend(keep_kit_columns(t, c.id, id, name, from));
     ops
 }
@@ -2777,6 +2882,162 @@ pub fn breakpoint_ops(
     }])
 }
 
+/// How far apart a new width query's modes start: a card is never a viewport,
+/// so its steps are a third of [`WIDTH_STEP`]'s scale.
+pub const QUERY_STEP: f64 = 320.0;
+
+/// Why a frame cannot pick `owner`'s mode by its own width.
+pub fn why_no_query(doc: &crate::Document, frame: NodeId) -> Option<&'static str> {
+    let n = doc.get(frame)?;
+    if !matches!(n.kind, crate::NodeKind::Artboard { .. }) {
+        return Some("Only a frame picks by its width");
+    }
+    (n.item.width == crate::container::Dimension::FitContent)
+        .then_some("Picks by width only when its width is set from outside — not Fit content")
+}
+
+/// The modes of `owner` with their names, in order.
+fn owner_named(t: &Variables, owner: ModeOwner<'_>) -> Vec<(ModeId, String)> {
+    match owner {
+        ModeOwner::Collection(c) => t
+            .collection(c)
+            .map(|c| c.modes.iter().map(|m| (m.id, m.name.clone())).collect())
+            .unwrap_or_default(),
+        ModeOwner::Kit(kit, collection) => t
+            .kits
+            .get(kit)
+            .map(|k| {
+                k.modes_in(collection)
+                    .map(|m| (m.id, m.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+/// *By width* on frame `frame`'s mode row for `owner` (§5.3f), ticked or not.
+/// Ticked, the frame's contents pick `owner`'s mode by the frame's own width:
+/// its first mode from 0, each next [`QUERY_STEP`] past the one before, and any
+/// mode the frame pins of `owner` let go, since a pin beats the width. Unticked,
+/// the query goes. Refused with [`why_no_query`]'s sentence; empty when nothing
+/// changes.
+pub fn query_ops(
+    doc: &crate::Document,
+    frame: NodeId,
+    owner: ModeOwner<'_>,
+    on: bool,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let Some(n) = doc.get(frame) else {
+        return Ok(Vec::new());
+    };
+    let held = n.query_of(t, owner).is_some();
+    let rest: Vec<Breakpoints> = n
+        .queries
+        .iter()
+        .filter(|q| {
+            !q.keys()
+                .next()
+                .is_some_and(|m| t.owner_of(*m) == Some(owner))
+        })
+        .cloned()
+        .collect();
+    if !on {
+        return Ok(match held {
+            true => vec![crate::Operation::SetQueries {
+                id: frame,
+                queries: rest,
+            }],
+            false => Vec::new(),
+        });
+    }
+    if let Some(why) = why_no_query(doc, frame) {
+        return Err(why.into());
+    }
+    let modes = owner_named(t, owner);
+    if held || modes.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let q: Breakpoints = modes
+        .iter()
+        .enumerate()
+        .map(|(i, (m, _))| (*m, i as f64 * QUERY_STEP))
+        .collect();
+    let mut queries = rest;
+    queries.push(q);
+    let mut ops = vec![crate::Operation::SetQueries { id: frame, queries }];
+    if n.mode_of(t, owner).is_some() {
+        ops.push(crate::Operation::SetModes {
+            id: frame,
+            modes: with_mode(t, &n.modes, owner, None),
+        });
+    }
+    Ok(ops)
+}
+
+/// Mode `mode`'s minimum width in frame `frame`'s query, typed as `width` —
+/// [`breakpoint_ops`]' rule for a frame's own widths: the first mode's 0 is
+/// fixed, and a width at or past a neighbour's is refused naming where that
+/// one starts. Empty when nothing changes or the frame has no such query.
+pub fn query_width_ops(
+    doc: &crate::Document,
+    frame: NodeId,
+    mode: ModeId,
+    width: f64,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let (Some(n), Some(owner)) = (doc.get(frame), t.owner_of(mode)) else {
+        return Ok(Vec::new());
+    };
+    let Some(q) = n.query_of(t, owner) else {
+        return Ok(Vec::new());
+    };
+    let modes = owner_named(t, owner);
+    let Some(at) = modes.iter().position(|(m, _)| *m == mode) else {
+        return Ok(Vec::new());
+    };
+    if at == 0 {
+        return Err(format!("{} starts at 0.", modes[0].1));
+    }
+    if !width.is_finite() || width < 0.0 {
+        return Err("A width is a number of px.".into());
+    }
+    if q.get(&mode) == Some(&width) {
+        return Ok(Vec::new());
+    }
+    let neighbour = |i: usize| {
+        modes
+            .get(i)
+            .and_then(|(m, name)| Some((name.clone(), *q.get(m)?)))
+    };
+    if let Some((name, w)) = (0..at)
+        .rev()
+        .find_map(neighbour)
+        .filter(|(_, w)| width <= *w)
+    {
+        return Err(format!("{name} starts at {}.", px(w)));
+    }
+    if let Some((name, w)) = (at + 1..modes.len())
+        .find_map(neighbour)
+        .filter(|(_, w)| width >= *w)
+    {
+        return Err(format!("{name} starts at {}.", px(w)));
+    }
+    let queries = n
+        .queries
+        .iter()
+        .map(|x| match std::ptr::eq(x, q) {
+            true => {
+                let mut x = x.clone();
+                x.insert(mode, width);
+                x
+            }
+            false => x.clone(),
+        })
+        .collect();
+    Ok(vec![crate::Operation::SetQueries { id: frame, queries }])
+}
+
 /// A width as the browser and the refusals write it: whole px bare, a fraction
 /// to two places at most.
 pub fn px(w: f64) -> String {
@@ -2856,6 +3117,10 @@ pub fn remove_collection_ops(doc: &crate::Document, c: CollectionId) -> Vec<crat
     let modes: Vec<ModeId> = col.modes.iter().map(|m| m.id).collect();
     let mut ops = remove_ops(doc, &vars);
     ops.extend(inherit_ops(doc, &modes));
+    // A width query over it goes with it.
+    ops.extend(queries_ops(doc, |q| {
+        q.keys().any(|m| modes.contains(m)).then_some(None)
+    }));
     for (kit, km) in t.kits() {
         if km.map.keys().any(|m| modes.contains(m)) {
             let mut next = km.clone();
@@ -3098,6 +3363,10 @@ pub enum VarRule {
     NotAWord(VarId),
     #[error("collection {0:?}'s widths are not one per mode, from 0 and ascending")]
     BadBreakpoints(CollectionId),
+    #[error(
+        "node {0:?} has a width query off a frame, over two collections, twice over one, or with a width that is not a finite one ≥ 0"
+    )]
+    BadQuery(NodeId),
 }
 
 /// Whether string `v`, when scoped to flex directions or wraps and nothing
@@ -3402,8 +3671,53 @@ pub(crate) fn check<'a>(
                 return Err(VarRule::TwoModes(n.id));
             }
         }
+        // Width queries only on a frame, each over one collection's modes, one
+        // per collection, every width finite and not negative. A mode since
+        // removed is passed over by the pick (`query_mode`), not refused: a kit
+        // update may take a kit's mode away under a vendored main.
+        if !n.queries.is_empty() {
+            let frame = matches!(n.kind, crate::NodeKind::Artboard { .. });
+            let mut owners: Vec<ModeOwner<'_>> = Vec::new();
+            for q in &n.queries {
+                let known: Vec<ModeOwner<'_>> = q.keys().filter_map(|m| t.owner_of(*m)).collect();
+                let one = known.windows(2).all(|p| p[0] == p[1]);
+                let widths = q.values().all(|w| w.is_finite() && *w >= 0.0);
+                if !frame || !one || !widths || q.is_empty() {
+                    return Err(VarRule::BadQuery(n.id));
+                }
+                if let Some(o) = known.first() {
+                    if owners.contains(o) {
+                        return Err(VarRule::BadQuery(n.id));
+                    }
+                    owners.push(*o);
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// The mode width query `q` picks at `width`: of its modes `t` still holds, the
+/// one whose minimum is the largest `width` reaches, the earlier mode of a tie;
+/// the narrowest when `width` reaches none. `None` when `t` holds none of them.
+pub fn query_mode(t: &Variables, q: &Breakpoints, width: f64) -> Option<ModeId> {
+    let order = |m: &ModeId| {
+        t.owner_of(*m)
+            .and_then(|o| owner_modes(t, o).iter().position(|x| x == m))
+            .unwrap_or(usize::MAX)
+    };
+    let mut held: Vec<(ModeId, f64)> = q
+        .iter()
+        .filter(|(m, _)| t.has_mode(**m))
+        .map(|(m, w)| (*m, *w))
+        .collect();
+    held.sort_by(|a, b| a.1.total_cmp(&b.1).then(order(&a.0).cmp(&order(&b.0))));
+    let first = held.first().map(|(m, _)| *m);
+    held.iter()
+        .filter(|(_, w)| width >= *w)
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(order(&b.0).cmp(&order(&a.0))))
+        .map(|(m, _)| *m)
+        .or(first)
 }
 
 /// The variables `n` binds in fields of family `f`.

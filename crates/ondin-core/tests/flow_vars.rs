@@ -494,3 +494,34 @@ fn unscoping_a_direction_string_detaches_it() {
     assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], None);
     assert_eq!(direction(&f.doc, f.cards), FlexDirection::Row);
 }
+
+/// **Binding a size axis takes an aspect ratio off**, rather than the ratio
+/// reading the bound axis's stored 0 as a size: the tile's height stays 20.
+/// flip: `keep_ratios` reading no `SetSizeVars` as binding → fails at *"the ratio
+/// off"*.
+#[test]
+fn binding_a_size_takes_a_ratio_off() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    let mut f = fixture();
+    let mut item = *f.doc.get(f.tile).unwrap().item();
+    item.aspect_ratio = Some(AspectRatio {
+        ratio: 2.0,
+        side: RatioSide::Height,
+    });
+    let tx = build::keep_ratios(
+        &f.doc,
+        Transaction(vec![Operation::SetLayoutItem { id: f.tile, item }]),
+    );
+    f.doc.apply(&tx).expect("a ratio");
+    let ops = build::bind_size_ops(&f.doc, f.tile, [Some(f.width), None]);
+    let tx = build::keep_ratios(&f.doc, Transaction(ops));
+    f.doc.apply(&tx).expect("bound");
+    let tile = f.doc.get(f.tile).unwrap();
+    assert_eq!(tile.size_vars()[0], Some(f.width));
+    assert_eq!(tile.item().aspect_ratio, None, "the ratio off");
+    assert_eq!(
+        ondin_core::edit::resizable_size(tile.kind()).map(|s| s.height),
+        Some(20.0),
+        "the height kept"
+    );
+}

@@ -925,9 +925,11 @@ fn grid_areas_and_auto_fit_match_the_canvas() {
             ..Default::default()
         })),
     }]);
-    for (i, name) in ["body", "head", "side"].into_iter().enumerate() {
+    // `nowhere` is an area the grid lacks: laid `auto` in the first free cell, and
+    // a browser must lay it there too, not on a named line past the grid.
+    for (i, name) in ["body", "head", "side", "nowhere"].into_iter().enumerate() {
         let r = d.rect(grid, 0.0, 0.0, 20.0, 20.0, 0.0);
-        d.fill(r, solid(60 + 70 * i as u8, 120, 200, 255));
+        d.fill(r, solid(60 + 50 * i as u8, 120, 200, 255));
         d.apply(vec![Operation::SetLayoutItem {
             id: r,
             item: LayoutItem {

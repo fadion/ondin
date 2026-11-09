@@ -705,3 +705,37 @@ fn resetting_a_nested_copy_inside_a_main_reaches_the_mains_instances() {
     assert_eq!(f.doc.get(f.ia).unwrap().name(), a_name);
     assert_eq!(f.doc.get(deep).unwrap().name(), a_name, "carried on");
 }
+
+/// **A copy holding a size of its own follows its main's new aspect ratio with
+/// that size**: a 2 : 1 ratio on the main's 10 × 10 rect makes it 10 × 5, and
+/// the copy's own 30 × 10 becomes 30 × 15, not left at a size its ratio denies.
+/// flip: `owed` without its `keep_ratios` → fails at *"the copy"*.
+#[test]
+fn a_copy_with_its_own_size_follows_the_mains_ratio() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    use ondin_core::{GeometryPatch, edit::resizable_size};
+    let mut f = fixture();
+    f.edit(vec![Operation::SetGeometry {
+        id: f.ia,
+        geometry: GeometryPatch::Size(Size::new(30.0, 10.0)),
+    }]);
+    let mut item = *f.doc.get(f.a).unwrap().item();
+    item.aspect_ratio = Some(AspectRatio {
+        ratio: 2.0,
+        side: RatioSide::Height,
+    });
+    // The commit door's own pass, then what `owed` appends.
+    let tx = ondin_core::build::keep_ratios(
+        &f.doc,
+        Transaction(vec![Operation::SetLayoutItem { id: f.a, item }]),
+    );
+    f.commit_all(tx.0);
+    let size = |id| resizable_size(f.doc.get(id).unwrap().kind());
+    assert_eq!(size(f.a), Some(Size::new(10.0, 5.0)), "the main");
+    assert_eq!(
+        f.doc.get(f.ia).unwrap().item().aspect_ratio,
+        item.aspect_ratio,
+        "the ratio followed"
+    );
+    assert_eq!(size(f.ia), Some(Size::new(30.0, 15.0)), "the copy");
+}

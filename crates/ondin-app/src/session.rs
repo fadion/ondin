@@ -1152,6 +1152,9 @@ impl EditorSession {
         // **A resized flex item holds its size in the preview as the commit will
         // make it**: the growth, `align-self` and size keyword `keep_flex_sizes`
         // adds, or the preview's re-layout stretches the item back every frame.
+        // A resize of a layer holding a ratio draws it held, as the commit will —
+        // first, as there, so the holds judge the sides it really changes.
+        let tx = &ondin_core::build::keep_ratios(&self.doc, tx.clone());
         let holds = ondin_core::build::flex_holds(&self.doc, &self.resolved, tx);
         let mut ops = match &self.session_preview {
             Some(session) => session.0.clone(),
@@ -1159,10 +1162,8 @@ impl EditorSession {
         };
         ops.extend(tx.0.iter().cloned());
         ops.extend(holds);
-        // A resize of a layer holding a ratio draws it held, as the commit will.
-        let ops = ondin_core::build::keep_ratios(&self.doc, Transaction(ops));
         // A resize drag draws its gradients carried, as the commit will write them.
-        let composed = ondin_core::paint_box::keep_gradients(&self.doc, ops);
+        let composed = ondin_core::paint_box::keep_gradients(&self.doc, Transaction(ops));
         let tx = &composed;
         let follows = self.preview_follows(tx);
         self.overrides = RenderOverrides::from_transaction_following(
@@ -1493,6 +1494,10 @@ impl EditorSession {
         // conversion also recognises a pinned layer written back to where it is
         // drawn as changing nothing.
         let tx = ondin_core::build::keep_insets(&self.doc, &self.resolved, tx);
+        // A layer holding an aspect ratio keeps its stored size to it — before
+        // `keep_flex_sizes`, which must judge the sides the resize really changes:
+        // a drag on the derived side's handle is a change of the other side.
+        let tx = ondin_core::build::keep_ratios(&self.doc, tx);
         // The items this edit sets itself, so the receipt names only what
         // `keep_flex_sizes` added.
         let asked: Vec<NodeId> =
@@ -1507,8 +1512,6 @@ impl EditorSession {
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
         // A grid's renamed or removed area is followed by the items naming it.
         let tx = ondin_core::build::keep_area_names(&self.doc, tx);
-        // A layer holding an aspect ratio keeps its stored size to it.
-        let tx = ondin_core::build::keep_ratios(&self.doc, tx);
         // Where the binding passes below start appending their detaches, so the
         // floating status can name the variables they cut.
         let asked_ops = tx.0.len();

@@ -1003,7 +1003,7 @@ impl AreaName {
 
     /// Whether CSS reads this as an area name: letters, digits, `-` and `_`, not
     /// starting with a digit (or `-` and a digit), and not one of the keywords a
-    /// grid placement already spells.
+    /// grid placement already spells or a CSS-wide keyword.
     pub fn is_valid(self) -> bool {
         let s = self.0;
         let mut chars = s.chars();
@@ -1018,7 +1018,15 @@ impl AreaName {
             && s.chars()
                 .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
             && ![
-                "auto", "span", "none", "inherit", "initial", "unset", "default",
+                "auto",
+                "span",
+                "none",
+                "inherit",
+                "initial",
+                "unset",
+                "revert",
+                "revert-layer",
+                "default",
             ]
             .iter()
             .any(|k| s.eq_ignore_ascii_case(k))
@@ -1091,11 +1099,20 @@ impl GridArea {
 /// Every area valid, no two sharing a name or a cell — CSS's own rules, since a
 /// `grid-template-areas` string can say neither.
 pub fn areas_are_valid(areas: &[GridArea]) -> bool {
-    areas.iter().all(GridArea::is_valid)
+    areas_are_valid_over(areas, None)
+}
+
+/// [`areas_are_valid`], **tolerating what `was` already held**: an area carried
+/// forward unchanged is not the edit's to answer for, nor a clash between two
+/// such — [`Display::is_valid_over`]'s rule, so one bad area a file carries does
+/// not refuse every later rename, new area or track removal on its grid.
+fn areas_are_valid_over(areas: &[GridArea], was: Option<&[GridArea]>) -> bool {
+    let held = |a: &GridArea| was.is_some_and(|w| w.contains(a));
+    areas.iter().all(|a| held(a) || a.is_valid())
         && areas.iter().enumerate().all(|(i, a)| {
             areas[i + 1..]
                 .iter()
-                .all(|b| a.name != b.name && !a.overlaps(b))
+                .all(|b| (held(a) && held(b)) || (a.name != b.name && !a.overlaps(b)))
         })
 }
 
@@ -1349,8 +1366,11 @@ pub fn parse_placement(text: &str) -> Option<GridPlacement> {
 
 /// `areas` as CSS writes `grid-template-areas` — one quoted string per row, `.`
 /// for a cell no area holds — over at least `columns` × `rows` cells, so the
-/// strings cover the explicit grid; `none` for no areas.
+/// strings cover the explicit grid; `none` for no areas. An area the operation
+/// would refuse — which only a file carries — is left out, so its lines can
+/// neither underflow nor ask for millions of cells.
 pub fn areas_css(areas: &[GridArea], columns: usize, rows: usize) -> String {
+    let areas: Vec<GridArea> = areas.iter().copied().filter(GridArea::is_valid).collect();
     if areas.is_empty() {
         return "none".into();
     }
@@ -1621,7 +1641,7 @@ impl Display {
                 };
                 axis(&g.columns, old.map(|w| w.columns.as_slice()))
                     && axis(&g.rows, old.map(|w| w.rows.as_slice()))
-                    && (old.is_some_and(|w| w.areas == g.areas) || areas_are_valid(&g.areas))
+                    && areas_are_valid_over(&g.areas, old.map(|w| w.areas.as_slice()))
             }
         };
         padding_ok && gaps_ok && tracks_ok
@@ -2393,6 +2413,18 @@ pub struct LaidTracks {
 }
 
 impl LaidTracks {
+    /// Where CSS lines `[start, end]` lie, start to end — counting from the
+    /// explicit grid's line 1, which starts track [`Self::before`]. `None` for a
+    /// line no laid track has.
+    pub fn lines_span(&self, [start, end]: [u16; 2]) -> Option<(f64, f64)> {
+        let at =
+            |l: u16, back: usize| (usize::from(l) + usize::from(self.before)).checked_sub(back);
+        Some((
+            self.spans.get(at(start, 1)?)?.0,
+            self.spans.get(at(end, 2)?)?.1,
+        ))
+    }
+
     /// The track under `v`, or the nearest one — a point in a gap goes to the
     /// closer edge, one past either end to the end track. `None` with no tracks.
     pub fn index_at(&self, v: f64) -> Option<usize> {
@@ -2641,11 +2673,12 @@ impl<'v> FlexTree<'v> {
             Leaf::Replaced(s) => {
                 // A ratio sizes the derived side from a known other: taffy's leaf
                 // only ever grows a measured box to its ratio, never shrinks it.
+                // Only where `style_of` took the ratio.
                 let ratio = self
                     .view
                     .item(self.ids[index])
                     .aspect_ratio
-                    .filter(|r| r.is_valid());
+                    .filter(|_| self.styles[index].aspect_ratio.is_some());
                 let (w, h) = match (ratio, known.width, known.height) {
                     (Some(r), Some(w), None) if r.side == RatioSide::Height => {
                         (w, w / r.ratio as f32)
@@ -2834,8 +2867,11 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
     };
     // The derived side goes `auto` — a frame's stored size there would make the
     // ratio unread — and the ratio sets it from the other. A ratio a file carries
-    // refused is read as none.
-    if let Some(r) = item.aspect_ratio.filter(|r| r.is_valid()) {
+    // refused, or on a kind that cannot hold one, is read as none.
+    if let Some(r) = item
+        .aspect_ratio
+        .filter(|r| r.is_valid() && holds_ratio(kind))
+    {
         style.aspect_ratio = Some(r.ratio as f32);
         match r.side {
             RatioSide::Width => style.size.width = auto(),

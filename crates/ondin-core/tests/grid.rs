@@ -1934,6 +1934,8 @@ fn areas_css_refuses_are_refused() {
         vec![area("a", [1, 2], [1, 2]), area("a", [2, 3], [1, 2])],
         vec![area("2col", [1, 2], [1, 2])],
         vec![area("span", [1, 2], [1, 2])],
+        vec![area("revert", [1, 2], [1, 2])],
+        vec![area("Revert-Layer", [1, 2], [1, 2])],
         vec![area("a", [2, 2], [1, 2])],
     ] {
         let r = s.try_commit(vec![Operation::SetDisplay {
@@ -2064,5 +2066,63 @@ fn a_dropped_area_item_is_written_by_lines() {
                 end: GridPlacement::Line(3)
             }
         )
+    );
+}
+
+/// **Areas a file carries refused do not refuse the edits after them**: with
+/// `head` and `body` overlapping (as only a file can hold them), a new area on a
+/// free cell is taken, and a new area over another is still refused.
+/// flip: `areas_are_valid_over` excusing nothing → fails at *"a new area beside
+/// them"*.
+#[test]
+fn areas_a_file_carries_refused_do_not_refuse_later_edits() {
+    let (mut s, f) = areas_scene();
+    let grid_with = |s: &Scene, areas| {
+        let Some(Display::Grid(g)) = s.doc.get(f).unwrap().display().cloned() else {
+            panic!("a grid");
+        };
+        Some(Display::Grid(Grid { areas, ..g }))
+    };
+    let clash = vec![area("head", [1, 4], [1, 2]), area("body", [2, 4], [1, 3])];
+    // As a file holds it: written past the operation's check.
+    let display = grid_with(&s, clash.clone());
+    s.doc
+        .apply_restoring(&Transaction(vec![Operation::SetDisplay { id: f, display }]))
+        .expect("held as a file holds it");
+    s.res = Resolved::rebuild(&s.doc);
+    let mut more = clash.clone();
+    more.push(area("side", [1, 2], [2, 3]));
+    let display = grid_with(&s, more);
+    assert!(
+        s.try_commit(vec![Operation::SetDisplay { id: f, display }])
+            .is_ok(),
+        "a new area beside them"
+    );
+    let mut over = clash.clone();
+    over.push(area("over", [3, 4], [2, 3]));
+    let display = grid_with(&s, over);
+    assert!(
+        matches!(
+            s.try_commit(vec![Operation::SetDisplay { id: f, display }]),
+            Err(OpError::BadLayout)
+        ),
+        "a new area over another"
+    );
+}
+
+/// **An area's lines are counted from the explicit grid's first line**, past any
+/// implicit track an item at a negative line lays before it: `head`, columns
+/// 1–4 of three, spans laid tracks 1–3 when one implicit track comes first.
+/// flip: `lines_span` without `before` → fails at the span.
+#[test]
+fn an_areas_lines_skip_the_implicit_tracks_before_the_grid() {
+    let (mut s, f) = areas_scene();
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.item(a, |i| i.grid_column.start = GridPlacement::Line(-5));
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(g.columns.before, 1, "the fixture: one track before");
+    assert_eq!(
+        g.columns.lines_span([1, 4]),
+        Some((g.columns.spans[1].0, g.columns.spans[3].1))
     );
 }

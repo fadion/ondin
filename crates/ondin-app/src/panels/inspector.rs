@@ -4108,8 +4108,18 @@ impl OndinApp {
         };
         let shown_line = line_ends.map(|(a, b)| (b.y - a.y).atan2(b.x - a.x));
         let laid_out = ondin_core::build::is_flex_item(&self.session.doc, id);
+        // A bound axis's literal is 0, which a ratio would read as a size; binding
+        // takes a ratio off (`build::keep_ratios`), so none is offered over one.
+        let size_bound = self
+            .session
+            .doc
+            .get(id)
+            .is_some_and(|n| n.size_vars().iter().any(Option::is_some));
         let size_menu = self.session.display_node(id).and_then(|n| {
-            let modes = super::layout::size_modes(n.kind(), n.display().is_some(), laid_out);
+            let mut modes = super::layout::size_modes(n.kind(), n.display().is_some(), laid_out);
+            if size_bound {
+                modes.retain(|m| *m != SizeMode::Ratio);
+            }
             let item = n.item();
             (modes.len() > 1).then(|| {
                 let w = super::layout::side_mode(n.kind(), &item, true);

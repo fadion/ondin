@@ -1100,8 +1100,9 @@ impl OndinApp {
         let laid = ondin_core::build::laid_grid(&self.session.doc, subjects[0]);
         let mut widths: Vec<f32> = (0..cols)
             .map(|c| {
+                // CSS's column 1 is laid track `before`.
                 laid.as_ref()
-                    .and_then(|l| l.columns.spans.get(c))
+                    .and_then(|l| l.columns.spans.get(usize::from(l.columns.before) + c))
                     .map_or(1.0, |(a, b)| (b - a).max(0.0) as f32)
             })
             .collect();
@@ -1604,7 +1605,11 @@ impl OndinApp {
                     )
                     .truncate(),
                 )
-                .on_hover_text("Several tracks repeated — edit them in the CSS line");
+                .on_hover_text(if several.len() == 1 {
+                    "A minmax track repeated — edit it in the CSS line"
+                } else {
+                    "Several tracks repeated — edit them in the CSS line"
+                });
             }
         }
     }
@@ -1631,8 +1636,16 @@ impl OndinApp {
         const LABEL_W: f32 = 74.0;
 
         // --- grid-area: offered where the grid has areas or an item names one ------
+        // `parent` is the first subject's; its areas are offered only to a
+        // selection that is all in that one grid.
+        let doc = &self.session.doc;
+        let first_parent = doc.get(subjects[0]).and_then(|n| n.parent());
+        let one_grid = subjects
+            .iter()
+            .all(|id| doc.get(*id).and_then(|n| n.parent()) == first_parent);
         let area = shared(items, |i| i.grid_area);
-        if !parent.areas.is_empty() || items.iter().any(|i| i.grid_area.is_some()) {
+        let in_area = items.iter().any(|i| i.grid_area.is_some());
+        if one_grid && (!parent.areas.is_empty() || in_area) {
             let mark = self.item_mark(
                 subjects,
                 |i| i.grid_area,
@@ -1687,8 +1700,9 @@ impl OndinApp {
                 self.commit_edit(tx);
             }
         }
-        // While every item fills an area, the lines rows show the area's and wait.
-        let by_area = area.flatten();
+        // While every item fills one area, the lines rows show the area's; while
+        // any fills one, they wait, as a typed line would not move it.
+        let by_area = area.flatten().filter(|_| one_grid);
 
         for (label, rows) in [("Grid column", false), ("Grid row", true)] {
             let lines = |i: &LayoutItem| match by_area {
@@ -1715,7 +1729,7 @@ impl OndinApp {
             );
             let mut refused = None;
             let row = ui
-                .add_enabled_ui(by_area.is_none(), |ui| {
+                .add_enabled_ui(!in_area, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = gap;
                         let hit = super::super::component::label_mark(
@@ -1780,11 +1794,19 @@ impl OndinApp {
                     })
                 })
                 .response;
-            if let Some(name) = by_area {
-                row.on_disabled_hover_text(format!(
-                    "Placed by the area \u{201c}{name}\u{201d} — set Grid area to None to place \
-                     by lines"
-                ));
+            match by_area {
+                Some(name) => {
+                    row.on_disabled_hover_text(format!(
+                        "Placed by the area \u{201c}{name}\u{201d} — set Grid area to None to \
+                         place by lines"
+                    ));
+                }
+                None if in_area => {
+                    row.on_disabled_hover_text(
+                        "Some are placed by an area — set Grid area to None to place by lines",
+                    );
+                }
+                None => {}
             }
             if let Some(why) = refused {
                 ui.label(

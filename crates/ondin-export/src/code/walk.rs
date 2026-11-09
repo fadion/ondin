@@ -1682,7 +1682,20 @@ impl Walk<'_> {
                     }
                 } else if let Some(area) = item.grid_area {
                     // The area sets all four lines; the item's own are not drawn.
-                    el.set("grid-area", area.to_string());
+                    // A name the grid lacks is laid `auto` (`container::area_lines`),
+                    // where a browser would read it as a named line past the grid,
+                    // so it is written only where the grid has the area.
+                    let has = node
+                        .parent()
+                        .and_then(|p| self.doc.get(p))
+                        .and_then(|p| match p.display() {
+                            Some(Display::Grid(g)) => g.area(area),
+                            _ => None,
+                        })
+                        .is_some();
+                    if has {
+                        el.set("grid-area", area.to_string());
+                    }
                     if let Some(j) = item.justify_self {
                         el.set("justify-self", align_items(j));
                     }
@@ -1721,7 +1734,11 @@ impl Walk<'_> {
                 {
                     // Not on a ratio's derived side, which the ratio sizes, down
                     // as well as up, from whatever the layout gives the other.
-                    let derived = |side| item.aspect_ratio.is_some_and(|r| r.side == side);
+                    let derived = |side| {
+                        item.aspect_ratio.is_some_and(|r| {
+                            r.side == side && r.is_valid() && container::holds_ratio(kind)
+                        })
+                    };
                     if item.min_width == Dimension::Auto && !derived(container::RatioSide::Width) {
                         let w = self.axis_size(node, 0, b.width());
                         el.set("min-width", w);

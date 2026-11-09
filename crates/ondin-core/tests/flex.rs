@@ -81,8 +81,8 @@ impl Scene {
 
     fn commit(&mut self, ops: Vec<Operation>) {
         let tx = ondin_core::build::keep_insets(&self.doc, &self.res, Transaction(ops));
-        let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.res, tx);
         let tx = ondin_core::build::keep_ratios(&self.doc, tx);
+        let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.res, tx);
         let dirty = self
             .history
             .commit(&mut self.doc, tx)
@@ -2148,4 +2148,30 @@ fn a_ratio_reads_writes_and_refuses() {
         Transaction(vec![Operation::SetLayoutItem { id: r, item }]),
     );
     assert!(refused.is_err());
+}
+
+/// **A drag on a stretched item's derived side lets go of the stretch**: in a
+/// 300-wide column a 2 : 1 rect is 300 × 150; a drag of its bottom edge to 100
+/// is a change of W to 200, so the cross stretch is released and it lands
+/// 200 × 100.
+/// flip: `keep_ratios` after `keep_flex_sizes` in the harness's commit → fails
+/// at *"landed"*, the stretch held and the rect still 300 wide.
+#[test]
+fn dragging_the_derived_side_releases_a_stretch() {
+    use ondin_core::container::RatioSide;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 600.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            ..Default::default()
+        })),
+    );
+    let r = s.add(f, rect(300.0, 150.0), (0.0, 0.0));
+    s.item(r, |i| i.aspect_ratio = Some(ratio(2.0, RatioSide::Height)));
+    assert_eq!(s.bounds(r).size(), Size::new(300.0, 150.0), "the fixture");
+    s.resize(r, 300.0, 100.0);
+    assert_eq!(s.bounds(r).size(), Size::new(200.0, 100.0), "landed");
 }

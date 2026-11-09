@@ -9401,15 +9401,10 @@ impl OndinApp {
         else {
             return;
         };
-        let span = |spans: &[(f64, f64)], [a, b]: [u16; 2]| {
-            let start = spans.get(usize::from(a).checked_sub(1)?)?.0;
-            let end = spans.get(usize::from(b).checked_sub(2)?)?.1;
-            Some((start, end))
-        };
         for area in &g.areas {
             let (Some((x0, x1)), Some((y0, y1))) = (
-                span(&grid.columns.spans, area.columns),
-                span(&grid.rows.spans, area.rows),
+                grid.columns.lines_span(area.columns),
+                grid.rows.lines_span(area.rows),
             ) else {
                 continue;
             };

@@ -4968,12 +4968,59 @@ pub fn kept_spacing_vars(
 /// - a resize changing the driving side (or both) sets the derived side from it;
 ///   one changing only the derived side — a drag on its handle — sets the
 ///   driving side from that instead, the derived side being the ratio's;
-/// - a ratio set or changed with no resize beside it resizes the derived side.
+/// - a ratio set or changed with no resize beside it resizes the derived side;
+/// - binding either size axis to a variable takes the ratio off, and a layer
+///   with a bound axis is left alone.
 ///
 /// Patches the transaction's own `SetGeometry` in place, so the gesture preview
 /// can run it on the resize it draws.
 pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
     use crate::container::{AspectRatio, RatioSide, holds_ratio};
+    // **A ratio and a size binding do not mix**: a bound axis's stored literal is
+    // 0, which a ratio would read as a size. Binding either axis takes the ratio
+    // off in the same step, and a layer with a bound axis is left alone.
+    let mut bound: Vec<(NodeId, bool)> = Vec::new();
+    for op in &tx.0 {
+        if let Operation::SetSizeVars { id, vars } = op {
+            let any = vars.iter().any(Option::is_some);
+            match bound.iter_mut().find(|(n, _)| n == id) {
+                Some((_, b)) => *b = any,
+                None => bound.push((*id, any)),
+            }
+        }
+    }
+    let is_bound = |id: NodeId| match bound.iter().find(|(n, _)| *n == id) {
+        Some((_, b)) => *b,
+        None => doc
+            .get(id)
+            .is_some_and(|n| n.size_vars().iter().any(Option::is_some)),
+    };
+    for &(id, binds) in &bound {
+        if !binds {
+            continue;
+        }
+        let mut patched = false;
+        for op in tx.0.iter_mut() {
+            if let Operation::SetLayoutItem { id: i, item } = op
+                && *i == id
+            {
+                item.aspect_ratio = None;
+                patched = true;
+            }
+        }
+        if !patched
+            && let Some(item) = doc.get(id).map(|n| *n.item())
+            && item.aspect_ratio.is_some()
+        {
+            tx.0.push(Operation::SetLayoutItem {
+                id,
+                item: crate::container::LayoutItem {
+                    aspect_ratio: None,
+                    ..item
+                },
+            });
+        }
+    }
     // Each touched layer's ratio as the transaction leaves it.
     let mut ratios: Vec<(NodeId, Option<AspectRatio>, bool)> = Vec::new();
     for op in &tx.0 {
@@ -5016,7 +5063,7 @@ pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
         };
         let Some(old) = doc
             .get(*id)
-            .filter(|n| holds_ratio(n.kind()))
+            .filter(|n| holds_ratio(n.kind()) && !is_bound(*id))
             .and_then(|n| crate::edit::resizable_size(n.kind()))
         else {
             continue;
@@ -5037,7 +5084,7 @@ pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
         };
         let Some(old) = doc
             .get(id)
-            .filter(|n| holds_ratio(n.kind()))
+            .filter(|n| holds_ratio(n.kind()) && !is_bound(id))
             .and_then(|n| crate::edit::resizable_size(n.kind()))
         else {
             continue;

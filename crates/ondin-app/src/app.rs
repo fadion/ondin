@@ -964,7 +964,7 @@ pub struct OndinApp {
     pub(crate) style_naming: Option<crate::panels::styles::StyleNaming>,
     /// The style slots whose capsule is opened over its greyed rows — per slot, not per layer.
     pub(crate) style_open: HashSet<ondin_core::style::StyleSlot>,
-    /// The publish dialog, while it is open.
+    /// The publish popover's draft, while it is open.
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
     /// This kit's changes since its last publish, with the session revision and mark
     /// version they were counted at (`OndinApp::kit_changes`).
@@ -1141,6 +1141,9 @@ pub enum TopMenu {
     Document,
     /// The kit update notice's popover.
     KitUpdates,
+    /// A kit's publish popover, under *Publish N* (`OndinApp::publishing`
+    /// holds its note).
+    Publish,
 }
 
 /// A row of the top bar's Tools menu ([`OndinApp::tools_menu`]), in its order.
@@ -2316,7 +2319,7 @@ impl OndinApp {
         }
         // Outside the `!focus` guard: shortcuts and the canvas menu open the kit
         // dialogs in focus mode, and every flag `modal_is_up` reads must be drawn.
-        self.publish_dialog(&ctx);
+        self.publish_popover(&ctx);
         self.make_local_dialog(&ctx);
         self.kits_used_dialog(&ctx);
         self.version_history_dialog(&ctx);
@@ -7806,11 +7809,21 @@ impl OndinApp {
         head: &egui::Response,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
-        self.dropdown_padded(ctx, id, anchor, width, crate::ui::MENU_PAD, head, body);
+        self.dropdown_padded(
+            ctx,
+            id,
+            anchor,
+            width,
+            crate::ui::MENU_PAD,
+            Some(head),
+            body,
+        );
     }
 
     /// [`Self::dropdown`] on a card padded by `pad`: [`crate::ui::POPOVER_PAD`]
-    /// for one that holds prose and fields rather than menu rows.
+    /// for one that holds prose and fields rather than menu rows. `head` is the
+    /// control that toggles it, when it has one; one opened from a menu row or
+    /// a chord has none.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn dropdown_padded(
         &mut self,
@@ -7819,9 +7832,16 @@ impl OndinApp {
         anchor: egui::Pos2,
         width: f32,
         pad: f32,
-        head: &egui::Response,
+        head: Option<&egui::Response>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
+        // The click that opened it — a menu row's — is not a click outside it.
+        let shown = ctx.memory(|m| {
+            m.areas().visible_last_frame(&egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new(id),
+            ))
+        });
         let menu = egui::Area::new(egui::Id::new(id))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
@@ -7839,9 +7859,10 @@ impl OndinApp {
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.id == Self::flyout_id(id));
         // The head toggles on its own click; counting it here would reopen it.
-        if ctx.input(|i| i.pointer.any_click())
+        if shown
+            && ctx.input(|i| i.pointer.any_click())
             && !menu.contains_pointer()
-            && !head.contains_pointer()
+            && !head.is_some_and(|h| h.contains_pointer())
             && !on_flyout
         {
             self.open_menu = TopMenu::None;
@@ -8079,7 +8100,8 @@ impl OndinApp {
             });
     }
 
-    /// Whether a modal card is up: anything that paints an `egui::Modal` with a backdrop.
+    /// Whether a modal card is up: anything that paints an `egui::Modal` with a backdrop,
+    /// and the publish popover, which holds the keys as one does though it has none.
     /// Not `edited_image` (a canvas mode), and not `ctx.egui_wants_keyboard_input()`,
     /// which is false for a modal with buttons and no text field.
     pub(crate) fn modal_is_up(&self) -> bool {
@@ -16323,7 +16345,7 @@ mod library_wiring_tests {
     /// A kit dialog opened in focus mode is drawn, so Escape still gets out.
     /// Driven through whole frames with the real `Ctrl+Alt+P` chord.
     ///
-    /// flip: the four kit dialogs back inside the `!focus` guard → fails at "the first Escape closed the card"
+    /// flip: the kit dialogs and the publish popover back inside the `!focus` guard → fails at "the first Escape closed the card"
     #[test]
     fn a_kit_dialog_in_focus_mode_is_drawn_and_escape_leaves() {
         let ctx = egui::Context::default();

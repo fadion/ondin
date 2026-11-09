@@ -39,7 +39,7 @@ matched by id, so a renamed or moved layer is one change.
     happened; `undo`, `redo` and `jump_to` (a History row) refuse, each saying `compare::READ_ONLY`
     on the status line. What is written outside `apply` is refused at its doors
     (`OndinApp::refused_by_compare`): for the tokens link the review does not open, and *Unlink*
-    and Apply say `READ_ONLY`; *Make a kit*, *Stop sharing as kit* and the publish dialog say it
+    and Apply say `READ_ONLY`; *Make a kit*, *Stop sharing as kit* and the publish popover say it
     too, and the publish itself refuses.
   - `OndinApp::dispatch` runs only what `compare::admits` (save, open, new, close and tab keys,
     settings, exports, cheatsheet, *Show in library*, version history, compare, zoom, page steps,

@@ -2,13 +2,13 @@
 //!
 //! A kit's top bar carries *Publish N* — the components changed since the last
 //! publish, the working document frozen against the published state
-//! (`ondin_core::kit::changes`) — which opens the dialog; so do the document
-//! menu's *Publish kit…* and `Ctrl+Alt+P`. The dialog lists what changed, added /
+//! (`ondin_core::kit::changes`) — which opens the popover under it; so do the
+//! document menu's *Publish kit…* and `Ctrl+Alt+P`. The popover lists what changed, added /
 //! changed / removed, takes an optional note, and publishes: the mark's version
 //! goes up, the date is stamped, the frozen copy replaces the last one, and the
 //! file is saved. **Not undoable** (§15 D1011 (2)) — an outward act, as *Save* is.
 
-use crate::app::OndinApp;
+use crate::app::{OndinApp, TopMenu};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -17,8 +17,14 @@ use ondin_core::{Document, NodeId};
 
 /// How many components a first publish lists before *+ N more*.
 const FIRST_LISTED: usize = 6;
+/// Where *Publish N* stood this frame, with the pass it was drawn in: the
+/// popover hangs from it.
+const HEAD_ID: &str = "publish-kit-head";
+/// What the popover holds besides its list — title, line, note, buttons and
+/// padding — taken from the room below the button before the list's cap.
+const CHROME_H: f32 = 170.0;
 
-/// The publish dialog's state while it is open.
+/// The publish popover's state while it is open.
 #[derive(Default)]
 pub(crate) struct PublishDraft {
     note: String,
@@ -141,21 +147,40 @@ impl OndinApp {
                 color::accent_100(),
             );
         }
-        let resp = resp.on_hover_text(tip);
+        let open = self.publishing.is_some();
+        let resp = match open {
+            true => resp,
+            false => resp.on_hover_text(tip),
+        };
+        // Where the popover hangs, this frame (`publish_popover`).
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(egui::Id::new(HEAD_ID), (pass, rect)));
         if resp.clicked() && enabled {
-            self.open_publish();
+            match open {
+                true => self.close_publish(),
+                false => self.open_publish(),
+            }
         }
     }
 
-    /// Open the publish dialog — *Publish N*, *Publish kit…*, `Ctrl+Alt+P`. With
-    /// nothing to publish it says so instead.
+    /// Close the publish popover, its note let go.
+    fn close_publish(&mut self) {
+        self.publishing = None;
+        if self.open_menu == TopMenu::Publish {
+            self.open_menu = TopMenu::None;
+        }
+    }
+
+    /// Open the publish popover — *Publish N*, *Publish kit…*, `Ctrl+Alt+P`. With
+    /// nothing to publish it says so instead; open already, it keeps its note.
     pub(crate) fn open_publish(&mut self) {
         if self.refused_by_compare() {
             return;
         }
         // The one seam for the button, the menu row and the chord: a publish
         // under a live text session froze the main without what was typed and
-        // spent the version on it, and the dialog's change list has to be
+        // spent the version on it, and the popover's change list has to be
         // counted from the committed text too.
         self.finish_text_first();
         let Some(c) = self.kit_changes() else {
@@ -169,36 +194,63 @@ impl OndinApp {
                 .info(format!("Nothing to publish · no changes since v{version}"));
             return;
         }
-        self.publishing = Some(PublishDraft::default());
+        self.publishing.get_or_insert_with(PublishDraft::default);
+        self.open_menu = TopMenu::Publish;
     }
 
-    /// The publish dialog, while it is open.
-    pub(crate) fn publish_dialog(&mut self, ctx: &egui::Context) {
+    /// The publish popover, while it is open: the kit update popover's card,
+    /// hung under *Publish N* — or, where the top bar is not drawn (focus mode),
+    /// at the top of the window's middle. What changed by section, scrolling past
+    /// the room there is, an optional note, and *Cancel* / *Publish*. A click
+    /// outside it or `Escape` lets it go, as any top-bar dropdown.
+    pub(crate) fn publish_popover(&mut self, ctx: &egui::Context) {
+        // Let go last frame, or the slot taken by another top-bar menu: the
+        // note goes a frame after the `Escape` that closed it, so that press is
+        // not also read as leaving focus mode (`modal_is_up`).
+        if self.publishing.is_some() && self.open_menu != TopMenu::Publish {
+            self.publishing = None;
+        }
         if self.publishing.is_none() {
+            if self.open_menu == TopMenu::Publish {
+                self.open_menu = TopMenu::None;
+            }
             return;
         }
         let Some(c) = self.kit_changes() else {
-            self.publishing = None;
+            self.close_publish();
             return;
         };
         let mark = self.shared_kit().cloned().unwrap_or_default();
         let name = self.shown_title();
         let first = mark.version == 0;
-        let doc = &self.session.doc;
-        let before = doc.published().map(|p| p.document().clone());
-        let draft = self.publishing.as_mut().expect("checked above");
+        let before = self.session.doc.published().map(|p| p.document().clone());
+        let pass = ctx.cumulative_pass_nr();
+        let head: Option<(u64, egui::Rect)> = ctx.data(|d| d.get_temp(egui::Id::new(HEAD_ID)));
+        let anchor = match head {
+            Some((p, r)) if p == pass => egui::pos2(r.left(), r.bottom() + ui::MENU_GAP),
+            _ => {
+                let screen = ctx.content_rect();
+                egui::pos2(
+                    screen.center().x - super::updates::POP_W / 2.0,
+                    screen.top() + ui::CANVAS_POPUP_TOP,
+                )
+            }
+        };
+        let list_max = ui::popover_list_max(ctx, anchor.y, CHROME_H, super::updates::LIST_MAX_H);
         let mut decision: Option<bool> = None;
-        let modal = crate::settings::card("publish-kit", ctx, |ui| {
-            ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));
+        let (w, pad) = (super::updates::POP_W, ui::POPOVER_PAD);
+        self.dropdown_padded(ctx, "publish-kit", anchor, w, pad, None, |app, ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
             let title = if first {
                 format!("Publish {name} for the first time")
             } else {
                 format!("Publish {name} · v{}", mark.version + 1)
             };
-            if crate::settings::modal_title(ui, &title) {
-                decision = Some(false);
-            }
-            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(ui::CONTROL_PT)
+                    .color(theme::text::strong()),
+            );
             let sub = if first {
                 "Documents in your library can use these once you publish.".to_string()
             } else {
@@ -235,75 +287,84 @@ impl OndinApp {
             };
             ui.label(
                 egui::RichText::new(sub)
-                    .size(ui::CONTROL_PT)
-                    .color(theme::text::muted()),
+                    .size(ui::SMALL_PT)
+                    .color(theme::text::dim()),
             );
-            ui.add_space(10.0);
-            if first {
-                for id in c.added.iter().take(FIRST_LISTED) {
-                    item_row(ui, doc, *id, None);
+            ui.add_space(4.0);
+            let doc = &app.session.doc;
+            ui::fit_scroll(ui, "publish-kit-list", list_max, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                if first {
+                    for id in c.added.iter().take(FIRST_LISTED) {
+                        item_row(ui, doc, *id, None);
+                    }
+                    if c.added.len() > FIRST_LISTED {
+                        ui.label(
+                            egui::RichText::new(format!("+ {} more", c.added.len() - FIRST_LISTED))
+                                .size(ui::SMALL_PT)
+                                .color(theme::text::dim()),
+                        );
+                    }
+                } else {
+                    section(ui, "Added", &c.added, doc, None);
+                    section(ui, "Changed", &c.changed, doc, None);
+                    if let Some(b) = &before {
+                        section(
+                            ui,
+                            "Removed",
+                            &c.removed,
+                            b,
+                            Some("kept as copy where used"),
+                        );
+                    }
                 }
-                if c.added.len() > FIRST_LISTED {
-                    ui.label(
-                        egui::RichText::new(format!("+ {} more", c.added.len() - FIRST_LISTED))
-                            .size(ui::SMALL_PT)
-                            .color(theme::text::dim()),
-                    );
-                }
-            } else {
-                section(ui, "Added", &c.added, doc, None);
-                section(ui, "Changed", &c.changed, doc, None);
-                if let Some(b) = &before {
-                    section(
-                        ui,
-                        "Removed",
-                        &c.removed,
-                        b,
-                        Some("kept as copy where used"),
-                    );
-                }
-            }
-            ui.add_space(10.0);
+            });
+            ui.add_space(6.0);
             ui.label(
                 egui::RichText::new("Note · optional")
                     .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
             );
-            ui.add_space(4.0);
             // The app's text field, not a bare `TextEdit`: egui's own frame has
             // almost no inset and a focus ring nothing else draws (`ui::text_field`).
-            crate::ui::text_field(
-                ui,
-                egui::vec2(ui.available_width(), crate::settings::FIELD_H),
-                &mut draft.note,
-                "What changed, in a line. Shown with the update.",
-            );
+            if let Some(draft) = app.publishing.as_mut() {
+                ui::text_field(
+                    ui,
+                    egui::vec2(ui.available_width(), ui::CONTROL_H),
+                    &mut draft.note,
+                    "What changed, in a line. Shown with the update.",
+                );
+            }
+            ui.add_space(6.0);
             let verb = if first {
                 format!("Publish {}", ui::count(c.count(), "component"))
             } else {
                 "Publish".to_string()
             };
-            if let Some(d) = crate::settings::modal_footer(ui, &verb, true) {
-                decision = Some(matches!(d, crate::settings::Decision::Save));
+            let buttons = [
+                ("Cancel", FieldButton::Off),
+                (verb.as_str(), FieldButton::Primary),
+            ];
+            match crate::settings::footer_row(ui, &buttons) {
+                Some(0) => decision = Some(false),
+                Some(_) => decision = Some(true),
+                None => {}
             }
         });
-        // `Escape` and the backdrop are *Cancel*, as on every card (§15 D525).
-        if modal.should_close() {
-            decision = Some(false);
-        }
         match decision {
             Some(true) => {
                 let note = self.publishing.take().map(|d| d.note).unwrap_or_default();
+                self.close_publish();
                 self.publish_now(note);
             }
-            Some(false) => self.publishing = None,
+            Some(false) => self.close_publish(),
             None => {}
         }
     }
 
     /// Publish: freeze, bump, stamp, save — and say so.
     pub(crate) fn publish_now(&mut self, note: String) {
-        // The writer refuses as well as the dialog's door, for any other caller.
+        // The writer refuses as well as the popover's door, for any other caller.
         if self.refused_by_compare() {
             return;
         }
@@ -407,35 +468,29 @@ fn breakdown(c: &Changes) -> String {
     .join(", ")
 }
 
-/// One of the dialog's groups — *Added 1* and its rows — when it has any.
+/// One of the popover's groups — an eyebrow, *Changed · 2*, as the kit update
+/// review's and *Bind other uses*' are, and its rows — when it has any.
 fn section(ui: &mut egui::Ui, title: &str, ids: &[NodeId], doc: &Document, aside: Option<&str>) {
     if ids.is_empty() {
         return;
     }
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(title)
-                .size(ui::SMALL_PT)
-                .color(theme::text::dim()),
-        );
-        ui.label(
-            egui::RichText::new(ids.len().to_string())
-                .size(ui::SMALL_PT)
-                .color(theme::text::faint()),
-        );
-    });
+    ui.add_space(4.0);
+    ui.label(ui::eyebrow(&format!("{title} · {}", ids.len())));
+    ui.add_space(2.0);
     for id in ids {
         item_row(ui, doc, *id, aside);
     }
-    ui.add_space(6.0);
 }
 
-/// A component in the dialog: its glyph — a set's or a main's — its name, and on
-/// the right a set's variant count or the row's aside.
+/// A component in the popover: its glyph — a set's or a main's — its name, and
+/// on the right a set's variant count or the row's aside. A name too long for
+/// the row is cut short of the aside and names itself in a tooltip.
 fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) {
     let Some(n) = doc.get(id) else { return };
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ui::MENU_ROW_H),
+        egui::Sense::hover(),
+    );
     let p = ui.painter();
     let y = rect.center().y;
     if n.set().is_some() {
@@ -454,13 +509,6 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
             theme::text::muted(),
         );
     }
-    p.text(
-        egui::pos2(rect.left() + 22.0, y),
-        egui::Align2::LEFT_CENTER,
-        crate::private::layer(doc, id),
-        egui::FontId::proportional(ui::CONTROL_PT),
-        color::text(),
-    );
     let right = match (aside, n.set().is_some()) {
         (Some(a), _) => Some(a.to_string()),
         (None, true) => {
@@ -470,20 +518,44 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
         }
         (None, false) => None,
     };
-    if let Some(r) = right {
-        p.text(
-            egui::pos2(rect.right() - 4.0, y),
-            egui::Align2::RIGHT_CENTER,
-            r,
-            egui::FontId::proportional(ui::CAPTION_PT),
-            theme::text::faint(),
-        );
+    let tail_left = match right {
+        Some(r) => p
+            .text(
+                egui::pos2(rect.right() - 4.0, y),
+                egui::Align2::RIGHT_CENTER,
+                r,
+                egui::FontId::proportional(ui::CAPTION_PT),
+                theme::text::faint(),
+            )
+            .left(),
+        None => rect.right(),
+    };
+    let name = crate::private::layer(doc, id);
+    let mut job = egui::text::LayoutJob::single_section(
+        name.to_string(),
+        egui::TextFormat::simple(egui::FontId::proportional(ui::SMALL_PT), color::text()),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: (tail_left - 8.0 - (rect.left() + 22.0)).max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = p.layout_job(job);
+    let cut = galley.elided;
+    p.galley(
+        egui::pos2(rect.left() + 22.0, y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    if cut {
+        resp.on_hover_text(name.as_ref());
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::app::OndinApp;
+    use crate::app::{OndinApp, TopMenu};
     use crate::library::state::Library;
     use eframe::egui;
     use ondin_core::kurbo::Size;
@@ -493,7 +565,7 @@ mod tests {
         let mut out = Vec::new();
         for _ in 0..2 {
             out = ctx
-                .run_ui(Default::default(), |_| app.publish_dialog(ctx))
+                .run_ui(Default::default(), |_| app.publish_popover(ctx))
                 .shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
@@ -505,12 +577,12 @@ mod tests {
         out
     }
 
-    /// **A kit publishes from its dialog, and what it published is in the file**
+    /// **A kit publishes from its popover, and what it published is in the file**
     /// (§5.3e; §15 D1015). Never published, the count is every component
-    /// and the dialog's verb names it; publishing bumps the mark to v1, stamps it,
+    /// and the popover's verb names it; publishing bumps the mark to v1, stamps it,
     /// keeps the note, saves — so the library scan reads v1 from the file's first
     /// 4 KB — and leaves nothing to publish, which the next ask says instead of
-    /// opening the dialog. An edit after it is counted again.
+    /// opening the popover. An edit after it is counted again.
     #[test]
     fn a_kit_publishes_and_the_file_says_so() {
         let ctx = egui::Context::default();
@@ -552,7 +624,7 @@ mod tests {
         );
 
         app.open_publish();
-        assert!(app.publishing.is_some(), "the dialog opens");
+        assert!(app.publishing.is_some(), "the popover opens");
         let text = painted(&ctx, &mut app);
         for want in [
             "Publish Atlas for the first time",
@@ -656,7 +728,10 @@ mod tests {
         app.stop_sharing_kit();
         assert!(app.shared_kit().is_some(), "Stop sharing is refused");
         app.open_publish();
-        assert!(app.publishing.is_none(), "the publish dialog does not open");
+        assert!(
+            app.publishing.is_none(),
+            "the publish popover does not open"
+        );
         app.publish_now("Then".into());
         assert_eq!(
             app.shared_kit().map(|k| k.version),
@@ -667,7 +742,7 @@ mod tests {
     }
 
     /// **A set's row counts its variants, not its children** (§15 D1015's fix):
-    /// a set may hold a plain layer beside its variants, and the dialog read
+    /// a set may hold a plain layer beside its variants, and the popover read
     /// three for two.
     ///
     /// Flip, run: counting `children()` fails, the row reading *"3 variants"*.
@@ -735,5 +810,60 @@ mod tests {
         app.open_publish();
         let text = painted(&ctx, &mut app);
         assert!(text.contains(&"2 variants".to_string()), "{text:?}");
+    }
+
+    /// The click that opens the popover — a menu row's — is not read as a click
+    /// outside it; a later one is, and lets it go.
+    /// flip: `dropdown_padded` without its `shown` gate → fails at "the opening click".
+    #[test]
+    fn the_opening_click_keeps_the_popover_and_a_later_one_closes_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let main = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(80.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Button".into()),
+            },
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        app.make_kit();
+        let click = |at: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            egui::RawInput {
+                events: vec![egui::Event::PointerMoved(at), press(true), press(false)],
+                ..Default::default()
+            }
+        };
+        let outside = egui::pos2(5.0, 5.0);
+        app.open_publish();
+        assert!(app.publishing.is_some(), "the fixture opens it");
+        let _ = ctx.run_ui(click(outside), |_| app.publish_popover(&ctx));
+        let _ = ctx.run_ui(Default::default(), |_| app.publish_popover(&ctx));
+        assert!(
+            app.publishing.is_some() && app.open_menu == TopMenu::Publish,
+            "the opening click"
+        );
+        let _ = ctx.run_ui(click(outside), |_| app.publish_popover(&ctx));
+        let _ = ctx.run_ui(Default::default(), |_| app.publish_popover(&ctx));
+        assert!(app.publishing.is_none(), "a later click outside lets it go");
     }
 }

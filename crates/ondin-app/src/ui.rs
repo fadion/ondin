@@ -2956,6 +2956,46 @@ pub fn split_handle(painter: &egui::Painter, rect: egui::Rect, x: f32) {
     );
 }
 
+/// A list in a popover as tall as its content, up to `max_h`, scrolling with no
+/// bar past it: the kit update and publish popovers. ⚠️ The height is asked as
+/// a minimum, as last frame measured it: an `Area` hands a scroll area last
+/// frame's size, so a maximum alone would never grow back after the content
+/// shrank. A change of height paints one more frame.
+pub fn fit_scroll<R>(
+    ui: &mut egui::Ui,
+    id: &str,
+    max_h: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let h_id = egui::Id::new((id, "fit-scroll-h"));
+    let last = ui.data(|d| d.get_temp::<f32>(h_id)).unwrap_or(0.0);
+    let out = egui::ScrollArea::vertical()
+        .id_salt(id)
+        .max_height(max_h)
+        .min_scrolled_height(last.min(max_h))
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, add);
+    let measured = out.content_size.y;
+    if (measured - last).abs() > 0.5 {
+        ui.data_mut(|d| d.insert_temp(h_id, measured));
+        ui.ctx().request_repaint();
+    }
+    out.inner
+}
+
+/// The tallest a [`fit_scroll`] list may stand in a popover hung at `top`: `cap`,
+/// or the window's room under `top` less the popover's own `chrome` (title,
+/// footer, padding), never under [`POPOVER_LIST_MIN_H`].
+pub fn popover_list_max(ctx: &egui::Context, top: f32, chrome: f32, cap: f32) -> f32 {
+    let room = ctx.content_rect().bottom() - top - chrome - SCREEN_MARGIN;
+    cap.min(room).max(POPOVER_LIST_MIN_H)
+}
+
+/// The least a popover's list is given however short the window, so a few rows
+/// always show.
+pub const POPOVER_LIST_MIN_H: f32 = 120.0;
+
 /// How tall a scrolled list's top fade is ([`scroll_fade_top`]).
 pub const SCROLL_FADE_H: f32 = 20.0;
 
@@ -4687,6 +4727,29 @@ pub fn labelled<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::U
 const ACTION_GAP: f32 = 7.0;
 /// An [`action_button`]'s leading glyph.
 const ACTION_GLYPH_PT: f32 = CONTROL_GLYPH_PT;
+/// A bare word that acts, at `SMALL_PT` in the flow of `ui`: the accent's 300
+/// step, lit to 200 under the pointer, or with `quiet` dim, lit to strong — the
+/// status line's *Cancel*, the variables browser's offer to bind other uses.
+/// For an act that sits inside a line of words, where a button would outweigh it.
+pub fn word_link(ui: &mut egui::Ui, label: &str, quiet: bool) -> egui::Response {
+    let word = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(SMALL_PT),
+            egui::Color32::PLACEHOLDER,
+        )
+    });
+    let (rect, resp) = ui.allocate_exact_size(word.size(), egui::Sense::click());
+    let ink = match (quiet, resp.hovered()) {
+        (false, false) => color::accent_300(),
+        (false, true) => color::accent_200(),
+        (true, false) => theme::text::dim(),
+        (true, true) => theme::text::strong(),
+    };
+    ui.painter().galley(rect.min, word, ink);
+    resp
+}
+
 /// What an [`action_button`]'s pair keeps clear of its own corners, so an elided
 /// name ends in a `…` with air after it.
 const ACTION_PAD: f32 = 10.0;
@@ -4727,29 +4790,6 @@ pub fn action_button(
     let (rect, resp, fg) = button_face(ui, size, state);
     let font = egui::FontId::proportional(ACTION_LABEL_PT);
     // Measured after eliding, so the pair is centred as one thing.
-/// A bare word that acts, at `SMALL_PT` in the flow of `ui`: the accent's 300
-/// step, lit to 200 under the pointer, or with `quiet` dim, lit to strong — the
-/// status line's *Cancel*, the variables browser's offer to bind other uses.
-/// For an act that sits inside a line of words, where a button would outweigh it.
-pub fn word_link(ui: &mut egui::Ui, label: &str, quiet: bool) -> egui::Response {
-    let word = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            label.to_owned(),
-            egui::FontId::proportional(SMALL_PT),
-            egui::Color32::PLACEHOLDER,
-        )
-    });
-    let (rect, resp) = ui.allocate_exact_size(word.size(), egui::Sense::click());
-    let ink = match (quiet, resp.hovered()) {
-        (false, false) => color::accent_300(),
-        (false, true) => color::accent_200(),
-        (true, false) => theme::text::dim(),
-        (true, true) => theme::text::strong(),
-    };
-    ui.painter().galley(rect.min, word, ink);
-    resp
-}
-
     let galley = ui.ctx().fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), font, fg);
         job.wrap = egui::text::TextWrapping::truncate_at_width(

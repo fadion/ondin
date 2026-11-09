@@ -20,8 +20,9 @@ use ondin_core::kurbo::{Affine, Rect, Vec2};
 use ondin_core::{NodeId, Operation};
 use std::collections::{BTreeMap, HashSet};
 
-/// The popover's width: room for a kit's slash-path component names.
-const POP_W: f32 = 340.0;
+/// The popover's width: room for a kit's slash-path component names. The
+/// publish popover shares it.
+pub(crate) const POP_W: f32 = 340.0;
 /// The gap between the content's right edge and a main made local, and between
 /// mains stacked there (D1011 (3)).
 const LOCAL_GAP: f64 = 80.0;
@@ -96,9 +97,7 @@ impl KitReview {
 }
 
 /// The popover's list at its tallest; past it, the list scrolls.
-const LIST_MAX_H: f32 = 400.0;
-/// The list's cap never falls below this, however little room the window has.
-const LIST_MIN_H: f32 = 120.0;
+pub(crate) const LIST_MAX_H: f32 = 400.0;
 /// What the popover holds besides its list — title, footer lines, buttons and
 /// padding — taken from the room below the pill before the list's cap.
 const POP_CHROME_H: f32 = 130.0;
@@ -401,57 +400,52 @@ impl OndinApp {
             .iter()
             .filter(|r| !self.kit_review.off.contains(&r.0))
             .count();
-        // The list stands as tall as its rows, up to the cap or the room below
-        // the pill. ⚠️ Asked as a minimum, as last frame measured it: an `Area`
-        // hands a scroll area last frame's size, so a maximum alone would never
-        // grow back once a table closed.
-        let room = ctx.content_rect().bottom() - anchor.y - POP_CHROME_H - ui::SCREEN_MARGIN;
-        let list_max = LIST_MAX_H.min(room).max(LIST_MIN_H);
-        let list_id = egui::Id::new("kit-updates-list-h");
-        let list_h = ctx.data(|d| d.get_temp::<f32>(list_id)).unwrap_or(0.0);
+        let list_max = ui::popover_list_max(&ctx, anchor.y, POP_CHROME_H, LIST_MAX_H);
         let pad = ui::POPOVER_PAD;
-        self.dropdown_padded(&ctx, "kit-updates", anchor, POP_W, pad, &resp, |app, ui| {
-            ui.spacing_mut().item_spacing.y = 4.0;
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} {} updates",
-                    ui::count(n, "kit"),
-                    if n == 1 { "has" } else { "have" }
-                ))
-                .size(ui::CONTROL_PT)
-                .color(theme::text::strong()),
-            );
-            ui.add_space(4.0);
-            let off = app.kit_review.off.clone();
-            let row_of = |t: NodeId| rows.iter().find(|r| r.0 == t);
-            let name = |t: NodeId| row_of(t).map(|r| r.1.clone());
-            // An unticked row whose update needs another unticked one says so.
-            let why = |t: NodeId| {
-                if !off.contains(&t) {
-                    return None;
-                }
-                let (_, u) = needs.iter().find(|(a, b)| *a == t && off.contains(b))?;
-                let (me, other) = (row_of(t)?, row_of(*u)?);
-                let tail = match me.2 == other.2 {
-                    true => format!("needs {}", other.1),
-                    false => format!("needs {} from {}", other.1, other.2),
+        self.dropdown_padded(
+            &ctx,
+            "kit-updates",
+            anchor,
+            POP_W,
+            pad,
+            Some(&resp),
+            |app, ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} {} updates",
+                        ui::count(n, "kit"),
+                        if n == 1 { "has" } else { "have" }
+                    ))
+                    .size(ui::CONTROL_PT)
+                    .color(theme::text::strong()),
+                );
+                ui.add_space(4.0);
+                let off = app.kit_review.off.clone();
+                let row_of = |t: NodeId| rows.iter().find(|r| r.0 == t);
+                let name = |t: NodeId| row_of(t).map(|r| r.1.clone());
+                // An unticked row whose update needs another unticked one says so.
+                let why = |t: NodeId| {
+                    if !off.contains(&t) {
+                        return None;
+                    }
+                    let (_, u) = needs.iter().find(|(a, b)| *a == t && off.contains(b))?;
+                    let (me, other) = (row_of(t)?, row_of(*u)?);
+                    let tail = match me.2 == other.2 {
+                        true => format!("needs {}", other.1),
+                        false => format!("needs {} from {}", other.1, other.2),
+                    };
+                    Some((
+                        tail,
+                        format!(
+                            "{}'s update uses {}'s — tick {} to take both",
+                            me.1, other.1, me.1
+                        ),
+                    ))
                 };
-                Some((
-                    tail,
-                    format!(
-                        "{}'s update uses {}'s — tick {} to take both",
-                        me.1, other.1, me.1
-                    ),
-                ))
-            };
-            let mut clicked: Option<(String, Option<super::summary::ReviewAct>)> = None;
-            let list = egui::ScrollArea::vertical()
-                .id_salt("kit-updates-list")
-                .max_height(list_max)
-                .min_scrolled_height(list_h.min(list_max))
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
+                let mut clicked: Option<(String, Option<super::summary::ReviewAct>)> = None;
+                // As tall as its rows, up to the cap or the room below the pill.
+                ui::fit_scroll(ui, "kit-updates-list", list_max, |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     for w in &waiting {
                         let part = summary
@@ -474,91 +468,87 @@ impl OndinApp {
                         }
                     }
                 });
-            let measured = list.content_size.y;
-            if (measured - list_h).abs() > 0.5 {
-                ui.data_mut(|d| d.insert_temp(list_id, measured));
-                ui.ctx().request_repaint();
-            }
-            match clicked {
-                Some((kit, None)) => {
-                    let was = app.kit_review.is_open(&kit, n);
-                    app.kit_review.open.insert(kit, !was);
+                match clicked {
+                    Some((kit, None)) => {
+                        let was = app.kit_review.is_open(&kit, n);
+                        app.kit_review.open.insert(kit, !was);
+                    }
+                    Some((_, Some(super::summary::ReviewAct::Toggle(t)))) => {
+                        app.kit_review.toggle(t, &needs);
+                        app.kit_review.menu = None;
+                    }
+                    Some((_, Some(super::summary::ReviewAct::Menu(t, at)))) => {
+                        app.kit_review.menu = Some((t, at));
+                    }
+                    None => {}
                 }
-                Some((_, Some(super::summary::ReviewAct::Toggle(t)))) => {
-                    app.kit_review.toggle(t, &needs);
-                    app.kit_review.menu = None;
+                // The instances the ticked components reach; before the dry run
+                // has read them, every instance of the kits.
+                let instances: usize = match summary {
+                    Some(_) => rows
+                        .iter()
+                        .filter(|r| !app.kit_review.off.contains(&r.0))
+                        .map(|r| r.3)
+                        .sum(),
+                    None => waiting.iter().map(|w| w.instances).sum(),
+                };
+                ui.add_space(4.0);
+                // The layers the kits' removals detach keep their values.
+                if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
+                    && n > 0
+                {
+                    let layers = ui::count(n, "layer");
+                    ui.label(
+                        egui::RichText::new(match one {
+                            Some(name) => format!("{layers} using {name} keep its values."),
+                            None => {
+                                format!("{layers} using what the kits removed keep their values.")
+                            }
+                        })
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::dim()),
+                    );
                 }
-                Some((_, Some(super::summary::ReviewAct::Menu(t, at)))) => {
-                    app.kit_review.menu = Some((t, at));
-                }
-                None => {}
-            }
-            // The instances the ticked components reach; before the dry run
-            // has read them, every instance of the kits.
-            let instances: usize = match summary {
-                Some(_) => rows
-                    .iter()
-                    .filter(|r| !app.kit_review.off.contains(&r.0))
-                    .map(|r| r.3)
-                    .sum(),
-                None => waiting.iter().map(|w| w.instances).sum(),
-            };
-            ui.add_space(4.0);
-            // The layers the kits' removals detach keep their values.
-            if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
-                && n > 0
-            {
-                let layers = ui::count(n, "layer");
                 ui.label(
-                    egui::RichText::new(match one {
-                        Some(name) => format!("{layers} using {name} keep its values."),
-                        None => {
-                            format!("{layers} using what the kits removed keep their values.")
-                        }
-                    })
+                    egui::RichText::new(format!(
+                        "Changes {}. Your overrides stay.",
+                        ui::count(instances, "instance")
+                    ))
                     .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
                 );
-            }
-            ui.label(
-                egui::RichText::new(format!(
-                    "Changes {}. Your overrides stay.",
-                    ui::count(instances, "instance")
-                ))
-                .size(ui::SMALL_PT)
-                .color(theme::text::dim()),
-            );
-            ui.add_space(6.0);
-            // Every component ticked reads *Accept all*, as before the review.
-            let accept = match (ready, taken) {
-                (false, _) => "Loading…".to_string(),
-                (true, _) if taken == total => "Accept all".to_string(),
-                (true, 0) => "Accept".to_string(),
-                (true, _) => format!("Accept {taken} of {total}"),
-            };
-            let takes = taken > 0 || total == 0 || bare;
-            let state = match ready && takes {
-                true => crate::ui::FieldButton::Primary,
-                false => crate::ui::FieldButton::Disabled,
-            };
-            let why = (ready && !takes).then_some("Tick a component to take its update");
-            let buttons = [
-                ("Later", crate::ui::FieldButton::Off),
-                (accept.as_str(), state),
-            ];
-            match crate::settings::footer_row_noted(ui, &buttons, why) {
-                Some(0) => {
-                    app.open_menu = TopMenu::None;
-                    app.later_kit_updates();
+                ui.add_space(6.0);
+                // Every component ticked reads *Accept all*, as before the review.
+                let accept = match (ready, taken) {
+                    (false, _) => "Loading…".to_string(),
+                    (true, _) if taken == total => "Accept all".to_string(),
+                    (true, 0) => "Accept".to_string(),
+                    (true, _) => format!("Accept {taken} of {total}"),
+                };
+                let takes = taken > 0 || total == 0 || bare;
+                let state = match ready && takes {
+                    true => crate::ui::FieldButton::Primary,
+                    false => crate::ui::FieldButton::Disabled,
+                };
+                let why = (ready && !takes).then_some("Tick a component to take its update");
+                let buttons = [
+                    ("Later", crate::ui::FieldButton::Off),
+                    (accept.as_str(), state),
+                ];
+                match crate::settings::footer_row_noted(ui, &buttons, why) {
+                    Some(0) => {
+                        app.open_menu = TopMenu::None;
+                        app.later_kit_updates();
+                    }
+                    Some(_) => {
+                        app.open_menu = TopMenu::None;
+                        let held: Vec<NodeId> = app.kit_review.off.iter().copied().collect();
+                        app.accept_kit_updates_holding(None, &held);
+                    }
+                    None => {}
                 }
-                Some(_) => {
-                    app.open_menu = TopMenu::None;
-                    let held: Vec<NodeId> = app.kit_review.off.iter().copied().collect();
-                    app.accept_kit_updates_holding(None, &held);
-                }
-                None => {}
-            }
-        });
+            },
+        );
         self.component_menu(&ctx);
     }
 

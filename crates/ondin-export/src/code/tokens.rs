@@ -237,14 +237,28 @@ impl Tokens {
                 }
                 out.push_str("}\n");
             }
+            let pinned = |word: &str, eq: &str| {
+                let pin = format!("[data-mode{eq}\"{word}\"]");
+                let own = format!("[data-pin~=\"{word}\"]");
+                format!(":where({own} > {at}) > *, :where({pin}{at}) > *")
+            };
+            // A kit query also loses to a pin of the document collection its
+            // kit collection maps from, read through the mapping: a frame's pins
+            // answer before its queries. Before the kit's own pins, which beat it.
+            if let QueryOf::Kit(k, kc) = of
+                && let Some(onto) = t.kit_onto(kc)
+            {
+                for dm in &onto.modes {
+                    if let Some(km) = t.kit_mode_at(k, kc, &[dm.id]) {
+                        let word = self.mode(dm.id).unwrap_or_default();
+                        self.kit_block(t, shaken, pinned(word, "~="), km, out);
+                    }
+                }
+            }
             // A kit mode may share `data-mode` with a document mode, so `~=`.
             let eq = if col.is_some() { eq } else { "~=" };
             for m in &modes {
-                let word = self.mode(*m).unwrap_or_default();
-                let pin = format!("[data-mode{eq}\"{word}\"]");
-                let own = format!("[data-pin~=\"{word}\"]");
-                let selector = format!(":where({own} > {at}) > *, :where({pin}{at}) > *");
-                block(selector, *m, out);
+                block(pinned(self.mode(*m).unwrap_or_default(), eq), *m, out);
             }
         }
     }

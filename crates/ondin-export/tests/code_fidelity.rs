@@ -2001,11 +2001,14 @@ fn a_width_query_is_written_as_a_container_query() {
 /// the kit collection, its children given the kit's narrowest mode and each
 /// other one under `@container`, with the kit's variables in that mode's column
 /// and a document alias of one redeclared beside it; a kit mode's pin is `~=`.
-/// Its blocks follow the frame's document query, listed after it, so they win.
+/// Its blocks follow the frame's document query, listed after it, so they win;
+/// a document pin on the frame, mapped onto the kit, follows them, and the kit's
+/// own pins follow that.
 ///
 /// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container";
 /// `Tokens::kit_block` without its alias arm → "redeclares the alias";
-/// `Tokens::query_blocks` in stored order → "after the document's".
+/// `Tokens::query_blocks` in stored order → "after the document's"; without its
+/// mapped pins → no `light` pin block.
 #[test]
 fn a_kit_collections_width_query_is_written_as_a_container_query() {
     use ondin_core::BrushSource;
@@ -2068,6 +2071,13 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
         index: 0,
         cells: vec![],
     }]);
+    // Light maps to the kit's Wide, so a Light pin reads apart from the default.
+    let mut mapped = d.doc.variables().kits()[KIT].clone();
+    mapped.map.insert(first, wide);
+    d.apply(vec![Operation::SetKitModes {
+        kit: KIT.into(),
+        modes: Some(mapped),
+    }]);
     d.apply(vec![Operation::AddVariable {
         var: Variable {
             id: bg,
@@ -2114,6 +2124,15 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
     assert!(
         at("[data-query~=\"card-variables\"] {") < at("[data-query~=\"card-density\"] {"),
         "the kit's query after the document's:\n{tokens}"
+    );
+    let light_pin = ":where([data-pin~=\"light\"] > [data-query~=\"card-density\"]) > *, \
+                     :where([data-mode~=\"light\"][data-query~=\"card-density\"]) > * {\n  \
+                     --brand-ink: #3c78f0;";
+    assert!(
+        at("@container (min-width: 320px) {\n  :where([data-query~=\"card-density\"])")
+            < at(light_pin)
+            && at(light_pin) < at(":where([data-pin~=\"brand-compact\"]"),
+        "a document pin beats the kit query, mapped, and loses to the kit's own pins:\n{tokens}"
     );
     assert!(
         tokens.contains("  --brand-ink: #3c78f0;\n    --bg: var(--brand-ink);\n  }\n}\n"),

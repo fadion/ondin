@@ -452,8 +452,9 @@ fn a_nested_query_settles_after_the_one_around_it() {
 /// A frame querying both Density and a kit's Density mapped onto it: the kit's
 /// own pick answers for the kit, whatever the queries' order. At 700 the
 /// document query picks Wide, which maps to the kit's Wide; the kit query, Wide
-/// only from 1000, picks the kit's Compact. Flip: `modes_at_in` taking the
-/// queries in stored order → the kit's Wide.
+/// only from 1000, picks the kit's Compact. A document pin on the instance
+/// still beats both, mapped. Flip: `modes_at_in` taking the queries in stored
+/// order → the kit's Wide.
 #[test]
 fn a_kit_query_beats_the_mapping_from_a_document_query() {
     use ondin_core::variable::{KitMode, KitModes};
@@ -503,5 +504,15 @@ fn a_kit_query_beats_the_mapping_from_a_document_query() {
         f.doc.variables().kit_mode_at(KIT, "Density", &set),
         Some(kc),
         "the kit's own Compact, not Wide mapped"
+    );
+    f.commit(vec![Operation::SetModes {
+        id: i,
+        modes: vec![f.wide],
+    }]);
+    let set = f.doc.modes_at(child);
+    assert_eq!(
+        f.doc.variables().kit_mode_at(KIT, "Density", &set),
+        Some(kw),
+        "a pin on the instance beats its kit query, through the mapping"
     );
 }

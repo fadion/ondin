@@ -619,8 +619,8 @@ impl OndinApp {
             {
                 self.bind_line(ui, root);
             }
-            // An instance dropped into another instance is that one's local layer
-            // (R3): it says so, and pushing it is its promotion into the main.
+            // An instance dropped into another instance is that one's local
+            // layer: it says so, and pushing it is its promotion into the main.
             if let Face::Instance { .. } = &face
                 && let Some(layer) = self.session.selection.single()
                 && ondin_core::push::is_local(&self.session.doc, layer)
@@ -2189,7 +2189,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
 }
 
 impl OndinApp {
-    /// R3's button under a local layer's *no counterpart* line: *Push to ‹main›*,
+    /// The button under a local layer's *no counterpart* line: *Push to ‹main›*,
     /// the whole row wide, disabled with the reason where the layer cannot go.
     fn push_layer_button(&mut self, ui: &mut egui::Ui, layer: NodeId, act: &mut Option<Act>) {
         let doc = &self.session.doc;

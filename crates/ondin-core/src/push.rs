@@ -136,8 +136,11 @@ fn is_property(op: &Operation, c: NodeId, bound: &FxHashSet<(NodeId, PropKind)>)
     }
 }
 
-/// The copy `c`'s own value of the field `reset` writes, aimed at its push
-/// target — `None` where there is no target inside `home`.
+/// The field `reset` writes, pushed: the target's own value with **the parts
+/// `reset` would change on the copy** taken from the copy — so a mark's reset
+/// of one axis, written as the whole size with the other axis the copy's own,
+/// pushes that axis alone. Aimed at the push target; `None` where there is no
+/// target inside `home`.
 fn field_push(
     doc: &Document,
     c: NodeId,
@@ -146,10 +149,62 @@ fn field_push(
 ) -> Option<Operation> {
     let key = reset::field_key(reset)?;
     let target = target_of(doc, c, reset).filter(|t| home.contains(t))?;
-    reset::state_ops(doc.get(c)?)
-        .into_iter()
-        .find(|o| reset::field_key(o) == Some(key))?
-        .retargeted(target)
+    let of = |n: NodeId| {
+        reset::state_ops(doc.get(n)?)
+            .into_iter()
+            .find(|o| reset::field_key(o) == Some(key))
+    };
+    let (mine, theirs) = (of(c)?, of(target)?);
+    let (Ok(r), Ok(m), Ok(t)) = (
+        serde_json::to_value(reset.retargeted(c)?),
+        serde_json::to_value(&mine),
+        serde_json::to_value(theirs.retargeted(c)?),
+    ) else {
+        return mine.retargeted(target);
+    };
+    match serde_json::from_value::<Operation>(changed_from(&r, &m, t)) {
+        Ok(op) => op.retargeted(target),
+        Err(_) => mine.retargeted(target),
+    }
+}
+
+/// `theirs` with each part where `reset` and `mine` differ taken from `mine`:
+/// objects part by part, a run of numbers (a transform's coefficients) number by
+/// number, anything else — a keyed list, a string — whole.
+fn changed_from(
+    reset: &serde_json::Value,
+    mine: &serde_json::Value,
+    theirs: serde_json::Value,
+) -> serde_json::Value {
+    use serde_json::Value;
+    if reset == mine {
+        return theirs;
+    }
+    match (reset, mine, theirs) {
+        (Value::Object(r), Value::Object(m), Value::Object(mut t))
+            if r.keys().eq(m.keys()) && m.keys().all(|k| t.contains_key(k)) =>
+        {
+            for (k, mv) in m {
+                let tv = t.remove(k).unwrap_or(Value::Null);
+                t.insert(k.clone(), changed_from(&r[k], mv, tv));
+            }
+            Value::Object(t)
+        }
+        (Value::Array(r), Value::Array(m), Value::Array(t))
+            if r.len() == m.len()
+                && m.len() == t.len()
+                && m.iter().chain(r).chain(&t).all(Value::is_number) =>
+        {
+            Value::Array(
+                r.iter()
+                    .zip(m)
+                    .zip(t)
+                    .map(|((r, m), t)| if r == m { t } else { m.clone() })
+                    .collect(),
+            )
+        }
+        _ => mine.clone(),
+    }
 }
 
 /// The swap of the swapped copy `c` pushed into its slot: the slot relinked (a

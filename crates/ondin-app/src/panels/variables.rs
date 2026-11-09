@@ -4612,7 +4612,7 @@ impl OndinApp {
         }
     }
 
-    /// The *Widths* fold under a main's mode row while it picks by width (R1): a
+    /// The *Widths* fold under a main's mode row while it picks by width: a
     /// field per mode after the first, its minimum width, labelled with the
     /// mode's name. A drag holds a draft committed when it ends; a typed width
     /// lands on `Enter` or defocus, one step *Breakpoint*; a refusal is said on
@@ -4636,13 +4636,16 @@ impl OndinApp {
         if !open {
             return;
         }
-        let modes: Vec<Mode> = self
-            .session
-            .doc
-            .variables()
-            .collection(c)
-            .map(|c| c.modes.clone())
-            .unwrap_or_default();
+        // Narrowest first, by the query's own widths: a mode moved in its
+        // collection keeps its place here.
+        let modes: Vec<Mode> = var::query_order(
+            self.session.doc.variables(),
+            var::ModeOwner::Collection(c),
+            q,
+        )
+        .into_iter()
+        .map(|(id, name)| Mode { id, name })
+        .collect();
         let Some(first) = modes.first() else { return };
         ui.label(
             egui::RichText::new(format!("{} below {}", first.name, {
@@ -6922,7 +6925,7 @@ mod tests {
         assert!(!width_inherits(doc, home, c));
     }
 
-    /// **Modes by a main's width, through the mode row** (R1, R2): a main's menu
+    /// **Modes by a main's width, through the mode row**: a main's menu
     /// offers *Inherit* and *By width* both, sized for both; picking by width,
     /// the main's row and its instance's read the mode the width picks *· by
     /// width*; the instance's menu has *By width* in *Inherit*'s place with the

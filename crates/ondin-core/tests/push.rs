@@ -496,3 +496,26 @@ fn an_ordinary_instance_is_not_blocked() {
     assert_eq!(push::home(&f.doc, f.i), Some(f.m));
     assert_eq!(push::home(&f.doc, f.root), None);
 }
+
+/// One field's push carries only what its reset would change: the width mark's
+/// reset is the whole size with the copy's own height, so pushing it writes the
+/// copy's width into the main and leaves the main's height. Flip: `field_push`
+/// taking the copy's whole op → the main's height becomes 80.
+#[test]
+fn a_fields_push_carries_that_field_alone() {
+    let mut f = fixture();
+    f.edit(vec![Operation::SetGeometry {
+        id: f.ia,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(30.0, 80.0)),
+    }]);
+    let width_reset = Operation::SetGeometry {
+        id: f.ia,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(10.0, 80.0)),
+    };
+    let ops = push::fields(&f.doc, &[width_reset], &mut f.ids);
+    f.commit(ops);
+    match f.doc.get(f.a).unwrap().kind() {
+        NodeKind::Rect { size, .. } => assert_eq!((size.width, size.height), (30.0, 10.0)),
+        _ => unreachable!(),
+    }
+}

@@ -66,7 +66,20 @@ fn named(names: &[String], noun: &str) -> String {
     }
 }
 
-/// The toast a push leaves (§5.3d, the words of R4): what went into which main,
+/// The instance root at or above `id` that no other instance holds.
+fn outermost_root(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
+    let mut root = ondin_core::component::instance_root(doc, id)?;
+    while let Some(outer) = doc
+        .get(root)
+        .and_then(|n| n.parent())
+        .and_then(|p| ondin_core::component::instance_root(doc, p))
+    {
+        root = outer;
+    }
+    Some(root)
+}
+
+/// The toast a push leaves (§5.3d): what went into which main,
 /// how many instances took it, and how many kept their own — the surprise a push
 /// can cause, said out loud.
 pub(crate) fn toast(what: &PushWhat, main: &str, out: Outcome) -> String {
@@ -133,7 +146,7 @@ impl OndinApp {
             .or_insert_with(|| push::pushable(doc, root))
     }
 
-    /// A push row's tooltip (R1): what push `kind` from `root` writes into which
+    /// A push row's tooltip: what push `kind` from `root` writes into which
     /// main, and what it would do to the main's other instances — read while the
     /// row is hovered and kept for the revision.
     pub(crate) fn push_tip(&mut self, root: NodeId, kind: Kind) -> String {
@@ -317,7 +330,8 @@ impl OndinApp {
         self.commit_push(root, ops, what);
     }
 
-    /// Push the local layer `layer` into its instance's main (R3's button).
+    /// Push the local layer `layer` into its instance's main (its card's
+    /// *Push to ‹main›*).
     pub(crate) fn push_local_layer(&mut self, layer: NodeId) {
         if let Some(why) = self.layer_push_refusal(layer) {
             self.session.info(why);
@@ -341,6 +355,19 @@ impl OndinApp {
     /// written into the main from the copy.
     pub(crate) fn push_from_reset(&mut self, tx: Transaction) {
         let doc = &self.session.doc;
+        // One instance pushes: two pushing one field into one main would leave
+        // whichever came last, silently. Several layers of one instance are one.
+        let mut roots: Vec<NodeId> =
+            tx.0.iter()
+                .filter_map(|op| op.overwrites())
+                .filter_map(|c| outermost_root(doc, c))
+                .collect();
+        roots.sort();
+        roots.dedup();
+        if roots.len() > 1 {
+            self.session.info("Select one instance to push");
+            return;
+        }
         let Some(root) =
             tx.0.iter()
                 .find_map(|op| op.overwrites())
@@ -402,7 +429,7 @@ impl OndinApp {
     }
 }
 
-/// The ⋯ menu's push rows (R1): under a rule after the resets, *Push all*, then
+/// The ⋯ menu's push rows: under a rule after the resets, *Push all*, then
 /// each family with its count, and *Push removals* apart under a second rule —
 /// the one push that deletes. Text rows with a count, as the resets are; a row
 /// with nothing to push is disabled and counts nothing. Returns the push picked.

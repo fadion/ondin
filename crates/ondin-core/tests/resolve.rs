@@ -782,7 +782,7 @@ fn rand_grid(rng: &mut Lcg) -> ondin_core::container::Display {
             .map(|_| {
                 if rng.next_range(5) == 0 {
                     Track::Repeat {
-                        repeat: 1 + rng.next_range(3) as u16,
+                        repeat: RepeatCount::Count(1 + rng.next_range(3) as u16),
                         tracks: (0..1 + rng.next_range(2)).map(|_| size(rng)).collect(),
                     }
                 } else {

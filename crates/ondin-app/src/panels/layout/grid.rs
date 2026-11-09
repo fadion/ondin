@@ -31,8 +31,9 @@
 
 use super::*;
 use ondin_core::container::{
-    GridAutoFlow, GridLines, Track, TrackBreadth, TrackSize, parse_placement, parse_tracks,
-    placement_css, track_count, track_size_css, tracks_css,
+    AutoRepeat, GridAutoFlow, GridLines, RepeatCount, Track, TrackBreadth, TrackSize,
+    auto_repeat_refusal, parse_placement, parse_tracks, placement_css, repeats_to_fit, track_count,
+    track_size_css, tracks_css,
 };
 
 /// A grid item's `justify-self`, in the card — `baseline` left out, the inline
@@ -155,9 +156,11 @@ enum Kind {
     MaxContent,
     MinMax,
     Repeat,
+    AutoFill,
+    AutoFit,
 }
 
-const KINDS: [Kind; 8] = [
+const KINDS: [Kind; 10] = [
     Kind::Px,
     Kind::Fr,
     Kind::Percent,
@@ -166,11 +169,21 @@ const KINDS: [Kind; 8] = [
     Kind::MaxContent,
     Kind::MinMax,
     Kind::Repeat,
+    Kind::AutoFill,
+    Kind::AutoFit,
 ];
 
 impl Kind {
     fn of(t: &Track) -> Kind {
         match t {
+            Track::Repeat {
+                repeat: RepeatCount::Auto(AutoRepeat::Fill),
+                ..
+            } => Kind::AutoFill,
+            Track::Repeat {
+                repeat: RepeatCount::Auto(AutoRepeat::Fit),
+                ..
+            } => Kind::AutoFit,
             Track::Repeat { .. } => Kind::Repeat,
             Track::Size(TrackSize::MinMax { .. }) => Kind::MinMax,
             Track::Size(TrackSize::Breadth(b)) => Kind::of_breadth(*b),
@@ -198,7 +211,17 @@ impl Kind {
             Kind::MaxContent => "max-content",
             Kind::MinMax => "minmax",
             Kind::Repeat => "repeat",
+            Kind::AutoFill => "auto-fill",
+            Kind::AutoFit => "auto-fit",
         }
+    }
+
+    /// Whether this kind is a function, with no breadth of its own.
+    fn is_function(self) -> bool {
+        matches!(
+            self,
+            Kind::MinMax | Kind::Repeat | Kind::AutoFill | Kind::AutoFit
+        )
     }
 
     fn describe(self) -> &'static str {
@@ -210,7 +233,9 @@ impl Kind {
             Kind::MinContent => "As narrow as its content can go",
             Kind::MaxContent => "As wide as its content wants",
             Kind::MinMax => "Between a minimum and a maximum",
-            Kind::Repeat => "The same tracks, several times",
+            Kind::Repeat => "The same tracks, a fixed number of times",
+            Kind::AutoFill => "As many as fit",
+            Kind::AutoFit => "As many as fit, and close the empty ones",
         }
     }
 
@@ -224,8 +249,24 @@ impl Kind {
             Kind::Auto => TrackBreadth::Auto,
             Kind::MinContent => TrackBreadth::MinContent,
             Kind::MaxContent => TrackBreadth::MaxContent,
-            Kind::MinMax | Kind::Repeat => return None,
+            Kind::MinMax | Kind::Repeat | Kind::AutoFill | Kind::AutoFit => return None,
         })
+    }
+}
+
+/// `s` with a fixed part, as an automatic repeat needs: kept where it has one,
+/// else given a 100px minimum under what it had as its maximum.
+fn fixed(s: TrackSize) -> TrackSize {
+    if s.is_fixed() {
+        return s;
+    }
+    let max = match s {
+        TrackSize::Breadth(b) => b,
+        TrackSize::MinMax { max, .. } => max,
+    };
+    TrackSize::MinMax {
+        min: TrackBreadth::Px(100.0),
+        max,
     }
 }
 
@@ -242,8 +283,29 @@ fn number_of(b: TrackBreadth) -> Option<f64> {
 /// at its default instead; a single `fr` becomes `minmax()`'s maximum over a
 /// 100px minimum and any other single size its minimum under `1fr`, and a single
 /// size becomes `repeat()`'s track; a function's lead size — a `repeat()`'s first
-/// track, a `minmax()`'s maximum — comes back out where it is of kind `k`.
+/// track, a `minmax()`'s maximum — comes back out where it is of kind `k`. A
+/// repeat keeps its tracks between a count and `auto-fill`/`auto-fit`, each
+/// given a fixed part on the way to an automatic one ([`fixed`]).
 fn converted(t: &Track, k: Kind) -> Track {
+    let repeated = |repeat: RepeatCount| {
+        let tracks = match t {
+            Track::Size(s) => vec![*s],
+            Track::Repeat { tracks, .. } => tracks.clone(),
+        };
+        Track::Repeat {
+            repeat,
+            tracks: match repeat {
+                RepeatCount::Auto(_) => tracks.into_iter().map(fixed).collect(),
+                RepeatCount::Count(_) => tracks,
+            },
+        }
+    };
+    match k {
+        Kind::Repeat => return repeated(RepeatCount::Count(2)),
+        Kind::AutoFill => return repeated(RepeatCount::Auto(AutoRepeat::Fill)),
+        Kind::AutoFit => return repeated(RepeatCount::Auto(AutoRepeat::Fit)),
+        _ => {}
+    }
     let size = match t {
         Track::Size(s) => *s,
         Track::Repeat { tracks, .. } => tracks
@@ -268,10 +330,6 @@ fn converted(t: &Track, k: Kind) -> Track {
                 max: TrackBreadth::Fr(1.0),
             },
         }),
-        Kind::Repeat => Track::Repeat {
-            repeat: 2,
-            tracks: vec![size],
-        },
         _ => Track::Size(TrackSize::Breadth(
             same(lead)
                 .or_else(|| k.breadth(None))
@@ -338,7 +396,7 @@ fn breadth_field(
                 ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
                 for k in KINDS
                     .into_iter()
-                    .filter(|k| !matches!(k, Kind::MinMax | Kind::Repeat))
+                    .filter(|k| !k.is_function())
                     .filter(|k| fr || *k != Kind::Fr)
                 {
                     // **The lit row picks nothing** (§15 D941) — `track_row`'s
@@ -440,9 +498,15 @@ const REFUSED: &str = "refused";
 
 /// Remember that the text typed into the field at `key` was refused, `why`, while
 /// the field read `shown`.
-fn refuse(ui: &egui::Ui, key: egui::Id, shown: Option<&str>, why: String) {
+fn refuse(ctx: &egui::Context, key: egui::Id, shown: Option<&str>, why: String) {
     let r: Refused = (shown.map(str::to_owned), why);
-    ui.ctx().data_mut(|d| d.insert_temp(key.with(REFUSED), r));
+    ctx.data_mut(|d| d.insert_temp(key.with(REFUSED), r));
+}
+
+/// The key of a track list's CSS line, under which a refusal of the list is
+/// shown whichever control made it.
+fn css_key(rows: bool, subjects: &[NodeId]) -> egui::Id {
+    egui::Id::new(("grid-track-css", rows, subjects.first().copied()))
 }
 
 /// The refusal to show under the field at `key`, **only while the field still
@@ -745,6 +809,8 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(match (agreed, n) {
                         (false, _) => ui::MIXED_WORD.to_owned(),
+                        // The count depends on the container's size.
+                        (true, _) if repeats_to_fit(&list) => "repeats to fit".to_owned(),
                         (true, 0) => "None".to_owned(),
                         (true, 1) => "1 track".to_owned(),
                         (true, n) => format!("{n} tracks"),
@@ -815,7 +881,7 @@ impl OndinApp {
         }
 
         // --- the CSS line --------------------------------------------------------
-        let key = egui::Id::new(("grid-track-css", rows, subjects.first().copied()));
+        let key = css_key(rows, subjects);
         let shown = agreed.then(|| tracks_css(&list));
         if let Some(text) = css_field(
             ui,
@@ -836,13 +902,14 @@ impl OndinApp {
                     self.name_tracks_step(rows);
                     self.commit_edit(tx);
                 }
-                Ok(_) => refuse(
-                    ui,
+                Ok(parsed) => refuse(
+                    ui.ctx(),
                     key,
                     shown.as_deref(),
-                    "CSS does not accept that list".into(),
+                    auto_repeat_refusal(&parsed)
+                        .unwrap_or_else(|| "CSS does not accept that list".into()),
                 ),
-                Err(e) => refuse(ui, key, shown.as_deref(), e),
+                Err(e) => refuse(ui.ctx(), key, shown.as_deref(), e),
             }
         }
         if let Some(why) = refusal(ui, key, shown.as_deref()) {
@@ -851,7 +918,63 @@ impl OndinApp {
                     .size(ui::CAPTION_PT)
                     .color(color::danger()),
             );
+        } else if grids
+            .iter()
+            .zip(subjects)
+            .any(|(g, id)| repeats_to_fit(&get(g)) && self.hugs_axis(*id, rows))
+        {
+            // Valid, with a consequence worth naming: CSS repeats once.
+            ui.label(
+                egui::RichText::new(if rows {
+                    "Fit content gives no height to fill — it repeats once"
+                } else {
+                    "Fit content gives no width to fill — it repeats once"
+                })
+                .size(ui::CAPTION_PT)
+                .color(color::warn()),
+            );
         }
+    }
+
+    /// Every subject's track list `rows` names set to `now`, replacing the shared
+    /// `was` — or nothing, with the reason under the list's CSS line, where `now`
+    /// holds an automatic repeat CSS refuses. Said rather than left to the
+    /// operation, which refuses it in silence.
+    fn list_tx(
+        &self,
+        ctx: &egui::Context,
+        subjects: &[NodeId],
+        rows: bool,
+        was: &[Track],
+        now: &[Track],
+    ) -> Transaction {
+        if let Some(why) = auto_repeat_refusal(now) {
+            let shown = tracks_css(was);
+            refuse(ctx, css_key(rows, subjects), Some(&shown), why);
+            return Transaction(Vec::new());
+        }
+        self.grid_tx(subjects, |g| with_list(g, rows, now))
+    }
+
+    /// Whether container `id` has no size of its own across `rows`' axis for an
+    /// automatic repeat to fill: a frame asked to fit its content, or a group whose
+    /// size is not typed — unless two insets stretch it on that axis.
+    fn hugs_axis(&self, id: NodeId, rows: bool) -> bool {
+        let Some(node) = self.session.doc.get(id) else {
+            return false;
+        };
+        let item = node.item();
+        let insets = node.insets();
+        let (size, pinned) = if rows {
+            (item.height, insets.top.is_some() && insets.bottom.is_some())
+        } else {
+            (item.width, insets.left.is_some() && insets.right.is_some())
+        };
+        !pinned
+            && match node.kind() {
+                NodeKind::Group => matches!(size, Dimension::Auto | Dimension::FitContent),
+                _ => size == Dimension::FitContent,
+            }
     }
 
     /// Entry `i` of a track list: the grip, the kind menu, the kind's fields and
@@ -901,9 +1024,11 @@ impl OndinApp {
             });
             if let Some(k) = picked.filter(|k| *k != kind) {
                 let l = put(converted(&track, k));
-                let tx = self.grid_tx(subjects, |g| with_list(g, rows, &l));
-                self.name_tracks_step(rows);
-                self.commit_edit(tx);
+                let tx = self.list_tx(ui.ctx(), subjects, rows, list, &l);
+                if !tx.0.is_empty() {
+                    self.name_tracks_step(rows);
+                    self.commit_edit(tx);
+                }
             }
             // The fields, in what is left before the cross.
             let room = (ui.available_width() - side - gap).max(40.0);
@@ -946,10 +1071,11 @@ impl OndinApp {
     ) {
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
+        let ctx = ui.ctx().clone();
         let commit_list = |app: &mut Self, t: Track| {
             let mut l = list.to_vec();
             l[i] = t;
-            app.grid_tx(subjects, |g| with_list(g, rows, &l))
+            app.list_tx(&ctx, subjects, rows, list, &l)
         };
         match track {
             Track::Size(TrackSize::Breadth(b)) => match number_of(*b) {
@@ -1014,7 +1140,23 @@ impl OndinApp {
                     self.named_valve(tracks_label(rows), tracks_glyph(rows), &edit.resp, tx);
                 }
             }
-            Track::Repeat { repeat, tracks } => {
+            // An automatic repeat takes no count: the repeated size alone, so no
+            // field ever shows a keyword where its digits go.
+            Track::Repeat {
+                repeat: repeat @ RepeatCount::Auto(_),
+                tracks,
+            } => self.repeated_fields(
+                ui,
+                rows,
+                *repeat,
+                tracks,
+                egui::vec2(room, side),
+                &commit_list,
+            ),
+            Track::Repeat {
+                repeat: RepeatCount::Count(repeat),
+                tracks,
+            } => {
                 let count_w = 64.0;
                 let mut v = f64::from(*repeat);
                 let (resp, _) = ui::value_field_suffixed(
@@ -1035,7 +1177,7 @@ impl OndinApp {
                     commit_list(
                         self,
                         Track::Repeat {
-                            repeat: count,
+                            repeat: RepeatCount::Count(count),
                             tracks: tracks.clone(),
                         },
                     )
@@ -1044,48 +1186,64 @@ impl OndinApp {
                 };
                 self.named_valve(tracks_label(rows), tracks_glyph(rows), &resp, tx);
                 let rest = egui::vec2((room - count_w - gap).max(20.0), side);
-                match tracks.as_slice() {
-                    [TrackSize::Breadth(b)] => {
-                        let edit = breadth_field(ui, rest, Prefix::Text(""), *b, true);
-                        let to = |nb| Track::Repeat {
-                            repeat: *repeat,
-                            tracks: vec![TrackSize::Breadth(nb)],
-                        };
-                        if let Some(nb) = edit.picked {
-                            let tx = commit_list(self, to(nb));
-                            self.name_tracks_step(rows);
-                            self.commit_edit(tx);
-                        } else {
-                            let tx = match edit.typed {
-                                Some(nb) => commit_list(self, to(nb)),
-                                None => Transaction(Vec::new()),
-                            };
-                            self.named_valve(
-                                tracks_label(rows),
-                                tracks_glyph(rows),
-                                &edit.resp,
-                                tx,
-                            );
-                        }
-                    }
-                    several => {
-                        let text = several
-                            .iter()
-                            .map(|s| track_size_css(*s))
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        ui.add_sized(
-                            rest,
-                            egui::Label::new(
-                                egui::RichText::new(text)
-                                    .size(ui::SMALL_PT)
-                                    .color(theme::text::dim()),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text("Several tracks repeated — edit them in the CSS line");
-                    }
+                self.repeated_fields(
+                    ui,
+                    rows,
+                    RepeatCount::Count(*repeat),
+                    tracks,
+                    rest,
+                    &commit_list,
+                );
+            }
+        }
+    }
+
+    /// A repeat's tracks in `size`: one breadth as a field, several as their CSS,
+    /// which the list's CSS line edits.
+    fn repeated_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        rows: bool,
+        repeat: RepeatCount,
+        tracks: &[TrackSize],
+        size: egui::Vec2,
+        commit_list: &dyn Fn(&mut Self, Track) -> Transaction,
+    ) {
+        match tracks {
+            [TrackSize::Breadth(b)] => {
+                let edit = breadth_field(ui, size, Prefix::Text(""), *b, true);
+                let to = |nb| Track::Repeat {
+                    repeat,
+                    tracks: vec![TrackSize::Breadth(nb)],
+                };
+                if let Some(nb) = edit.picked {
+                    let tx = commit_list(self, to(nb));
+                    self.name_tracks_step(rows);
+                    self.commit_edit(tx);
+                } else {
+                    let tx = match edit.typed {
+                        Some(nb) => commit_list(self, to(nb)),
+                        None => Transaction(Vec::new()),
+                    };
+                    self.named_valve(tracks_label(rows), tracks_glyph(rows), &edit.resp, tx);
                 }
+            }
+            several => {
+                let text = several
+                    .iter()
+                    .map(|s| track_size_css(*s))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                ui.add_sized(
+                    size,
+                    egui::Label::new(
+                        egui::RichText::new(text)
+                            .size(ui::SMALL_PT)
+                            .color(theme::text::dim()),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text("Several tracks repeated — edit them in the CSS line");
             }
         }
     }
@@ -1174,7 +1332,7 @@ impl OndinApp {
                             // Said, not dropped: an unreadable line is never thrown
                             // away in silence.
                             None => refuse(
-                                ui,
+                                ui.ctx(),
                                 key,
                                 shown.as_deref(),
                                 format!(
@@ -1340,7 +1498,7 @@ mod tests {
         assert_eq!(
             converted(&fr, Kind::Repeat),
             Track::Repeat {
-                repeat: 2,
+                repeat: RepeatCount::Count(2),
                 tracks: vec![TrackSize::Breadth(TrackBreadth::Fr(2.0))],
             }
         );
@@ -1358,6 +1516,40 @@ mod tests {
             "its maximum back out"
         );
         assert_eq!(converted(&mm, Kind::MinMax), mm, "the same kind is itself");
+    }
+
+    /// **An automatic repeat gets a fixed part on the way in, and keeps its
+    /// tracks between a count and `auto-fit`**: `1fr` becomes `minmax(100px,
+    /// 1fr)`, a px track stays as it is, and a repeat's tracks travel whole.
+    /// flip: `fixed` returning its input → fails at the first assert.
+    #[test]
+    fn an_automatic_repeat_gets_a_fixed_part() {
+        let fr = b(TrackBreadth::Fr(1.0));
+        let fill = converted(&fr, Kind::AutoFill);
+        assert_eq!(
+            fill,
+            Track::Repeat {
+                repeat: RepeatCount::Auto(AutoRepeat::Fill),
+                tracks: vec![TrackSize::MinMax {
+                    min: TrackBreadth::Px(100.0),
+                    max: TrackBreadth::Fr(1.0),
+                }],
+            }
+        );
+        assert_eq!(auto_repeat_refusal(std::slice::from_ref(&fill)), None);
+        let px = b(TrackBreadth::Px(160.0));
+        assert_eq!(
+            converted(&px, Kind::AutoFit),
+            Track::Repeat {
+                repeat: RepeatCount::Auto(AutoRepeat::Fit),
+                tracks: vec![TrackSize::Breadth(TrackBreadth::Px(160.0))],
+            }
+        );
+        let Track::Repeat { tracks, .. } = converted(&fill, Kind::Repeat) else {
+            panic!("a repeat");
+        };
+        assert_eq!(tracks.len(), 1);
+        assert!(matches!(tracks[0], TrackSize::MinMax { .. }), "kept whole");
     }
 
     /// **A grip drop moves the entry to the slot it lands in** — a slot is the gap

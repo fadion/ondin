@@ -5252,6 +5252,37 @@ mod tests {
         p.run("100 needs a unit: px, % or fr");
     }
 
+    /// An automatic repeat beside an `fr` track is refused under the CSS line with
+    /// the track it needs fixed named; on its own it applies, and the list's head
+    /// reads *repeats to fit* for a count the frame's width decides.
+    ///
+    /// flip: the CSS line's refusal falling back to the plain *CSS does not accept
+    /// that list* → fails at the named refusal.
+    #[test]
+    fn an_automatic_repeat_is_refused_with_its_reason_and_counts_to_fit() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let css =
+            |app: &OndinApp| ondin_core::container::tracks_css(&grid_of(app, frame_id).columns);
+        let depth = p.app.session.history.undo_depth();
+        p.retype(
+            "100px 1fr",
+            "repeat(auto-fill, 100px) 1fr",
+            egui::Key::Enter,
+        );
+        assert_eq!(css(&p.app), "100px 1fr", "refused");
+        assert_eq!(p.app.session.history.undo_depth(), depth, "with no step");
+        p.run(
+            "auto-fill needs every track to have a fixed size — track 2, 1fr, has none. Make it \
+             px, %, or a minmax with a px end",
+        );
+        p.retype("100px 1fr", "repeat(auto-fill, 100px)", egui::Key::Enter);
+        assert_eq!(css(&p.app), "repeat(auto-fill, 100px)");
+        p.run("repeats to fit");
+    }
+
     /// `grid_scene` with its columns set to `css`.
     fn grid_with_columns(css: &str) -> Scene {
         let mut s = grid_scene();

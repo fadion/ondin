@@ -1056,10 +1056,12 @@ fn values_the_commit_would_reject_are_refused() {
     // which the preview drew as the capped grid the template lays and the commit
     // then refused. Flip run: `absorb`'s `SetDisplay` check deleted fails on "a
     // template past the track cap".
-    use ondin_core::container::{Display, Grid, LayoutItem, Track, TrackBreadth, TrackSize};
+    use ondin_core::container::{
+        Display, Grid, LayoutItem, RepeatCount, Track, TrackBreadth, TrackSize,
+    };
     let too_many = Grid {
         columns: vec![Track::Repeat {
-            repeat: 600,
+            repeat: RepeatCount::Count(600),
             tracks: vec![
                 TrackSize::Breadth(TrackBreadth::Fr(1.0)),
                 TrackSize::Breadth(TrackBreadth::Fr(2.0)),

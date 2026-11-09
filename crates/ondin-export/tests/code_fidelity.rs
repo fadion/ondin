@@ -13,7 +13,7 @@
 
 use ondin_core::container::{
     AlignItems, Display, Flex, FlexDirection, Grid, Insets, JustifyContent, LayoutItem, LengthPct,
-    Track, TrackBreadth, TrackSize,
+    RepeatCount, Track, TrackBreadth, TrackSize,
 };
 use ondin_core::kurbo::{Affine, Join, Point, RoundedRectRadii, Size, Vec2};
 use ondin_core::peniko::{
@@ -887,7 +887,7 @@ fn layout_matches_the_canvas() {
                 Track::Size(TrackSize::Breadth(TrackBreadth::Fr(2.0))),
             ],
             rows: vec![Track::Repeat {
-                repeat: 2,
+                repeat: RepeatCount::Count(2),
                 tracks: vec![TrackSize::Breadth(TrackBreadth::Px(40.0))],
             }],
             row_gap: 8.0,

@@ -746,19 +746,63 @@ impl TrackSize {
             }
         }
     }
+
+    /// Whether this size has a **fixed part**: a length or percentage as its
+    /// breadth or at either end of its `minmax()`. CSS takes an automatic repeat
+    /// only in a list where every size has one.
+    pub fn is_fixed(self) -> bool {
+        let fixed = |b: TrackBreadth| matches!(b, TrackBreadth::Px(_) | TrackBreadth::Percent(_));
+        match self {
+            TrackSize::Breadth(b) => fixed(b),
+            TrackSize::MinMax { min, max } => fixed(min) || fixed(max),
+        }
+    }
+}
+
+/// How many times a `repeat()` repeats: a number, or as many as the container's
+/// size fits — CSS's `auto-fill` and `auto-fit`.
+///
+/// **Untagged in the file**, so a count is the bare number it always was and an
+/// older file reads unchanged: `3`, `"auto-fill"`, `"auto-fit"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RepeatCount {
+    Count(u16),
+    Auto(AutoRepeat),
+}
+
+/// The two automatic repeats. `Fit` closes the repeated tracks no item sits in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutoRepeat {
+    #[serde(rename = "auto-fill")]
+    Fill,
+    #[serde(rename = "auto-fit")]
+    Fit,
+}
+
+impl AutoRepeat {
+    /// The keyword as CSS writes it.
+    pub fn css(self) -> &'static str {
+        match self {
+            AutoRepeat::Fill => "auto-fill",
+            AutoRepeat::Fit => "auto-fit",
+        }
+    }
 }
 
 /// One entry of `grid-template-columns` or `-rows`: a track, or `repeat(n, …)`.
 ///
 /// **A repeat holds sizes, not entries**, so it cannot nest — CSS's own grammar,
-/// made unrepresentable rather than refused. `auto-fill`/`auto-fit` are deferred
-/// (§5.3c), so the count is a number. Untagged in the file, [`TrackSize`]'s
-/// reason: `{"repeat":3,"tracks":["Auto"]}`.
+/// made unrepresentable rather than refused. Untagged in the file, [`TrackSize`]'s
+/// reason: `{"repeat":3,"tracks":["Auto"]}`, `{"repeat":"auto-fill",…}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Track {
     Size(TrackSize),
-    Repeat { repeat: u16, tracks: Vec<TrackSize> },
+    Repeat {
+        repeat: RepeatCount,
+        tracks: Vec<TrackSize>,
+    },
 }
 
 impl Track {
@@ -775,10 +819,73 @@ impl Track {
         match self {
             Track::Size(s) => s.is_valid(),
             Track::Repeat { repeat, tracks } => {
-                *repeat > 0 && !tracks.is_empty() && tracks.iter().all(|s| s.is_valid())
+                *repeat != RepeatCount::Count(0)
+                    && !tracks.is_empty()
+                    && tracks.iter().all(|s| s.is_valid())
             }
         }
     }
+
+    /// The automatic repeat this entry is, if it is one.
+    pub fn auto_repeat(&self) -> Option<AutoRepeat> {
+        match self {
+            Track::Repeat {
+                repeat: RepeatCount::Auto(a),
+                ..
+            } => Some(*a),
+            _ => None,
+        }
+    }
+
+    /// Every size this entry lays, each once.
+    fn sizes(&self) -> &[TrackSize] {
+        match self {
+            Track::Size(s) => std::slice::from_ref(s),
+            Track::Repeat { tracks, .. } => tracks,
+        }
+    }
+}
+
+/// Why CSS would refuse `tracks` for its automatic repeat, in the words the
+/// Container card shows; `None` where it holds none or holds one CSS takes.
+///
+/// CSS takes **one** automatic repeat per axis, and only in a list where every
+/// size, the repeat's own included, has a fixed part ([`TrackSize::is_fixed`]):
+/// the repeat count is worked out from those parts. taffy drops a template that
+/// breaks either rule whole, as a browser drops the declaration.
+pub fn auto_repeat_refusal(tracks: &[Track]) -> Option<String> {
+    let mut autos = tracks.iter().filter_map(Track::auto_repeat);
+    let first = autos.next()?;
+    if autos.next().is_some() {
+        return Some("One repeat per axis can be automatic".into());
+    }
+    let (n, s) = tracks
+        .iter()
+        .flat_map(Track::sizes)
+        .enumerate()
+        .find(|(_, s)| !s.is_fixed())?;
+    Some(format!(
+        "{} needs every track to have a fixed size — track {}, {}, has none. Make it px, %, \
+         or a minmax with a px end",
+        first.css(),
+        n + 1,
+        track_size_css(*s),
+    ))
+}
+
+/// Every entry of `tracks` one CSS accepts, as a list: each entry valid, its
+/// automatic repeat allowed ([`auto_repeat_refusal`]), and no more than
+/// [`MAX_TEMPLATE_TRACKS`] explicit tracks.
+fn template_is_valid(tracks: &[Track]) -> bool {
+    tracks.iter().all(Track::is_valid)
+        && auto_repeat_refusal(tracks).is_none()
+        && track_count(tracks) <= MAX_TEMPLATE_TRACKS
+}
+
+/// Whether `tracks` holds an automatic repeat, so its track count depends on
+/// the container's size.
+pub fn repeats_to_fit(tracks: &[Track]) -> bool {
+    tracks.iter().any(|t| t.auto_repeat().is_some())
 }
 
 /// A grid container's properties — CSS's, under CSS's names (§15 D867, D914).
@@ -852,9 +959,7 @@ impl Grid {
     /// **And no more than [`MAX_TEMPLATE_TRACKS`] explicit tracks on an axis**
     /// (§15 D919).
     pub fn is_valid(&self) -> bool {
-        self.columns.iter().chain(&self.rows).all(Track::is_valid)
-            && track_count(&self.columns) <= MAX_TEMPLATE_TRACKS
-            && track_count(&self.rows) <= MAX_TEMPLATE_TRACKS
+        template_is_valid(&self.columns) && template_is_valid(&self.rows)
     }
 }
 
@@ -872,13 +977,18 @@ impl Grid {
 pub const MAX_TEMPLATE_TRACKS: usize = 1000;
 
 /// How many explicit tracks `tracks` makes, saturating — a repeat counts its
-/// tracks `repeat` times. The Container card's *N tracks*.
+/// tracks `repeat` times, and an automatic repeat once, the fewest it lays. The
+/// Container card's *N tracks*.
 pub fn track_count(tracks: &[Track]) -> usize {
     tracks
         .iter()
         .map(|t| match t {
             Track::Size(_) => 1,
-            Track::Repeat { repeat, tracks } => usize::from(*repeat).saturating_mul(tracks.len()),
+            Track::Repeat {
+                repeat: RepeatCount::Count(n),
+                tracks,
+            } => usize::from(*n).saturating_mul(tracks.len()),
+            Track::Repeat { tracks, .. } => tracks.len(),
         })
         .fold(0usize, usize::saturating_add)
 }
@@ -969,7 +1079,11 @@ pub fn tracks_css(tracks: &[Track]) -> String {
         .map(|t| match t {
             Track::Size(s) => track_size_css(*s),
             Track::Repeat { repeat, tracks } => format!(
-                "repeat({repeat}, {})",
+                "repeat({}, {})",
+                match repeat {
+                    RepeatCount::Count(n) => n.to_string(),
+                    RepeatCount::Auto(a) => a.css().into(),
+                },
                 tracks
                     .iter()
                     .map(|s| track_size_css(*s))
@@ -993,8 +1107,16 @@ pub fn parse_tracks(text: &str) -> Result<Vec<Track>, String> {
     let mut out = Vec::new();
     while !p.done() {
         if p.eat_word("repeat(") {
-            let count = p.integer()?;
-            let repeat = u16::try_from(count).map_err(|_| format!("repeat count {count}"))?;
+            let repeat = if p.eat_word("auto-fill") {
+                RepeatCount::Auto(AutoRepeat::Fill)
+            } else if p.eat_word("auto-fit") {
+                RepeatCount::Auto(AutoRepeat::Fit)
+            } else {
+                let count = p.integer()?;
+                RepeatCount::Count(
+                    u16::try_from(count).map_err(|_| format!("repeat count {count}"))?,
+                )
+            };
             p.expect(',')?;
             let mut tracks = Vec::new();
             while !p.eat(')') {
@@ -1217,9 +1339,7 @@ impl Display {
                     _ => None,
                 };
                 let axis = |now: &[Track], then: Option<&[Track]>| {
-                    then.is_some_and(|t| t == now)
-                        || (now.iter().all(Track::is_valid)
-                            && track_count(now) <= MAX_TEMPLATE_TRACKS)
+                    then.is_some_and(|t| t == now) || template_is_valid(now)
                 };
                 axis(&g.columns, old.map(|w| w.columns.as_slice()))
                     && axis(&g.rows, old.map(|w| w.rows.as_slice()))
@@ -2468,7 +2588,8 @@ fn content_alignment(a: AlignContent) -> taffy::AlignContent {
 /// [`MAX_TEMPLATE_TRACKS`]** (§15 D919): a repeat that would pass it repeats as
 /// many whole times as fit, and what follows is laid only as far as there is
 /// room — a multi-track repeat can leave a remainder a later single track still
-/// fits in.
+/// fits in. A list whose automatic repeat CSS refuses goes as stored, and taffy
+/// drops it whole, as a browser does.
 fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
     let mut room = MAX_TEMPLATE_TRACKS;
     let mut out = Vec::new();
@@ -2478,8 +2599,29 @@ fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
                 room -= 1;
                 out.push(taffy::GridTemplateComponent::Single(track_size(*s)));
             }
-            Track::Repeat { repeat, tracks } if *repeat > 0 && !tracks.is_empty() => {
-                let times = usize::from(*repeat).min(room / tracks.len());
+            // An automatic repeat goes as it is, taking one repetition's room: how
+            // many it lays depends on the container's size, which taffy caps.
+            Track::Repeat {
+                repeat: RepeatCount::Auto(a),
+                tracks,
+            } if !tracks.is_empty() && tracks.len() <= room => {
+                room -= tracks.len();
+                out.push(taffy::GridTemplateComponent::Repeat(
+                    taffy::GridTemplateRepetition {
+                        count: match a {
+                            AutoRepeat::Fill => taffy::RepetitionCount::AutoFill,
+                            AutoRepeat::Fit => taffy::RepetitionCount::AutoFit,
+                        },
+                        tracks: tracks.iter().map(|s| track_size(*s)).collect(),
+                        line_names: Vec::new(),
+                    },
+                ));
+            }
+            Track::Repeat {
+                repeat: RepeatCount::Count(n),
+                tracks,
+            } if *n > 0 && !tracks.is_empty() => {
+                let times = usize::from(*n).min(room / tracks.len());
                 if times == 0 {
                     continue;
                 }

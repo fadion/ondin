@@ -16,7 +16,7 @@ use ondin_core::{
     Transaction,
     container::{
         AlignContent, AlignItems, Display, Flex, Grid, GridAutoFlow, GridLines, GridPlacement,
-        LayoutItem, Track, TrackBreadth, TrackSize,
+        LayoutItem, RepeatCount, Track, TrackBreadth, TrackSize,
     },
 };
 
@@ -480,7 +480,7 @@ fn a_repeat_expands_into_its_tracks() {
             ..grid(
                 vec![
                     Track::Repeat {
-                        repeat: 3,
+                        repeat: RepeatCount::Count(3),
                         tracks: vec![TrackSize::Breadth(TrackBreadth::Px(50.0))],
                     },
                     px(20.0),
@@ -592,30 +592,30 @@ fn values_css_refuses_are_refused() {
             max: TrackBreadth::Fr(2.0),
         })],
         vec![Track::Repeat {
-            repeat: 0,
+            repeat: RepeatCount::Count(0),
             tracks: vec![auto],
         }],
         vec![Track::Repeat {
-            repeat: 2,
+            repeat: RepeatCount::Count(2),
             tracks: vec![],
         }],
         vec![Track::Repeat {
-            repeat: 1001,
+            repeat: RepeatCount::Count(1001),
             tracks: vec![auto],
         }],
         vec![
             Track::Repeat {
-                repeat: 300,
+                repeat: RepeatCount::Count(300),
                 tracks: vec![auto, auto],
             },
             Track::Repeat {
-                repeat: 401,
+                repeat: RepeatCount::Count(401),
                 tracks: vec![auto],
             },
         ],
     ];
     let at_the_cap = Track::Repeat {
-        repeat: 1000,
+        repeat: RepeatCount::Count(1000),
         tracks: vec![auto],
     };
     s.try_commit(vec![Operation::SetDisplay {
@@ -664,7 +664,7 @@ fn a_grid_round_trips_through_the_save_format() {
                         max: TrackBreadth::Fr(2.0),
                     }),
                     Track::Repeat {
-                        repeat: 3,
+                        repeat: RepeatCount::Count(3),
                         tracks: vec![TrackSize::Breadth(TrackBreadth::Auto)],
                     },
                 ],
@@ -719,7 +719,7 @@ fn a_file_with_a_refused_track_opens_and_lays_around_it() {
                 vec![
                     px(100.0),
                     Track::Repeat {
-                        repeat: 3,
+                        repeat: RepeatCount::Count(3),
                         tracks: vec![TrackSize::Breadth(TrackBreadth::Px(50.0))],
                     },
                 ],
@@ -750,7 +750,13 @@ fn a_file_with_a_refused_track_opens_and_lays_around_it() {
         panic!("the grid survived the load");
     };
     assert!(
-        matches!(g.columns[1], Track::Repeat { repeat: 0, .. }),
+        matches!(
+            g.columns[1],
+            Track::Repeat {
+                repeat: RepeatCount::Count(0),
+                ..
+            }
+        ),
         "kept as stored, not dropped: {:?}",
         g.columns
     );
@@ -861,7 +867,7 @@ fn every_value_css_refuses_is_read_around_in_a_file() {
     let (mut s, f, _) = base();
     let mut columns = vec![px(100.0), px(50.0), px(100.0)];
     columns.push(Track::Repeat {
-        repeat: 3,
+        repeat: RepeatCount::Count(3),
         tracks: vec![TrackSize::Breadth(TrackBreadth::Px(10.0))],
     });
     s.display(f, Some(Display::Grid(grid(columns, vec![]))));
@@ -1359,7 +1365,7 @@ fn a_track_list_reads_and_writes_as_css() {
                 max: TrackBreadth::Fr(2.0),
             }),
             Track::Repeat {
-                repeat: 3,
+                repeat: RepeatCount::Count(3),
                 tracks: vec![TrackSize::Breadth(TrackBreadth::Auto)],
             },
         ]
@@ -1375,7 +1381,7 @@ fn a_track_list_reads_and_writes_as_css() {
             }),
             Track::Size(TrackSize::Breadth(TrackBreadth::Percent(12.5))),
             Track::Repeat {
-                repeat: 2,
+                repeat: RepeatCount::Count(2),
                 tracks: vec![
                     TrackSize::Breadth(TrackBreadth::Fr(1.5)),
                     TrackSize::Breadth(TrackBreadth::MinContent),
@@ -1701,5 +1707,161 @@ fn a_drop_into_a_pinned_grid_picks_the_cell_it_is_drawn_over() {
         item.grid_column.start,
         GridPlacement::Line(2),
         "the second column"
+    );
+}
+
+fn auto_repeat(a: ondin_core::container::AutoRepeat, s: TrackSize) -> Track {
+    Track::Repeat {
+        repeat: RepeatCount::Auto(a),
+        tracks: vec![s],
+    }
+}
+
+fn min160() -> TrackSize {
+    TrackSize::MinMax {
+        min: TrackBreadth::Px(160.0),
+        max: TrackBreadth::Fr(1.0),
+    }
+}
+
+/// **`auto-fill` lays as many tracks as the frame's width fits, and a resize
+/// adds them**: 160px tracks with a 10 gap fit three in 520 (160 + 3 × 170 would
+/// be 670) and four in 700.
+#[test]
+fn auto_fill_lays_as_many_tracks_as_fit() {
+    use ondin_core::container::AutoRepeat;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(520.0, 100.0), (0.0, 0.0));
+    s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            column_gap: 10.0,
+            ..grid(
+                vec![auto_repeat(
+                    AutoRepeat::Fill,
+                    TrackSize::Breadth(TrackBreadth::Px(160.0)),
+                )],
+                vec![],
+            )
+        })),
+    );
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(g.columns.explicit, 3, "three fit in 520");
+    assert_eq!(
+        g.columns.spans,
+        vec![(0.0, 160.0), (170.0, 330.0), (340.0, 500.0)]
+    );
+    s.resize(f, 700.0, 100.0);
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(g.columns.explicit, 4, "four fit in 700");
+}
+
+/// **`auto-fit` closes the repeated tracks no item sits in; `auto-fill` keeps
+/// them**: `minmax(160px, 1fr)` repeats three times in 520 either way, and with
+/// two items `auto-fit` shares the width between two tracks (b at 265) where
+/// `auto-fill` shares it between three (b at 500 / 3 + 10).
+/// flip: `template` sending `Fit` as `AutoFill` → fails at *"auto-fit"*.
+#[test]
+fn auto_fit_closes_the_empty_tracks() {
+    use ondin_core::container::AutoRepeat;
+    for (a, b_x, why) in [
+        (AutoRepeat::Fit, 265.0, "auto-fit"),
+        (AutoRepeat::Fill, 500.0 / 3.0 + 10.0, "auto-fill"),
+    ] {
+        let mut s = Scene::new();
+        let f = s.add(s.root, frame(520.0, 100.0), (0.0, 0.0));
+        s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+        let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+        s.display(
+            f,
+            Some(Display::Grid(Grid {
+                column_gap: 10.0,
+                justify_items: Some(AlignItems::Start),
+                ..grid(vec![auto_repeat(a, min160())], vec![])
+            })),
+        );
+        assert!(
+            (s.bounds(b).x0 - b_x).abs() < 0.05,
+            "{why}: {}",
+            s.bounds(b).x0
+        );
+    }
+}
+
+/// **CSS's two rules for an automatic repeat are the operation's**: one per
+/// axis, and every size in the list with a fixed part — `1fr` beside it is
+/// refused, and the refusal names the track; `minmax(auto, 100px)` has one and is
+/// taken.
+#[test]
+fn an_automatic_repeat_needs_fixed_sizes_and_is_alone() {
+    use ondin_core::container::{AutoRepeat, auto_repeat_refusal};
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 100.0), (0.0, 0.0));
+    let fill = auto_repeat(AutoRepeat::Fill, TrackSize::Breadth(TrackBreadth::Px(50.0)));
+    let set = |s: &mut Scene, columns: Vec<Track>| {
+        s.try_commit(vec![Operation::SetDisplay {
+            id: f,
+            display: Some(Display::Grid(grid(columns, vec![]))),
+        }])
+    };
+    let with_fr = vec![fill.clone(), fr(1.0)];
+    assert!(matches!(
+        set(&mut s, with_fr.clone()),
+        Err(OpError::BadLayout)
+    ));
+    assert_eq!(
+        auto_repeat_refusal(&with_fr).as_deref(),
+        Some(
+            "auto-fill needs every track to have a fixed size — track 2, 1fr, has none. \
+             Make it px, %, or a minmax with a px end"
+        )
+    );
+    let two = vec![fill.clone(), auto_repeat(AutoRepeat::Fit, min160())];
+    assert!(matches!(set(&mut s, two.clone()), Err(OpError::BadLayout)));
+    assert_eq!(
+        auto_repeat_refusal(&two).as_deref(),
+        Some("One repeat per axis can be automatic")
+    );
+    let capped = Track::Size(TrackSize::MinMax {
+        min: TrackBreadth::Auto,
+        max: TrackBreadth::Px(100.0),
+    });
+    assert!(set(&mut s, vec![fill, capped]).is_ok());
+}
+
+/// **An automatic repeat reads and writes as CSS and keeps a count's file
+/// form**: `repeat(auto-fit, …)` round-trips through the CSS line, the file
+/// writes the keyword as a string, and a counted repeat is still a bare number.
+#[test]
+fn an_automatic_repeat_reads_and_writes() {
+    use ondin_core::container::{AutoRepeat, parse_tracks, tracks_css};
+    let line = "repeat(auto-fit, minmax(160px, 1fr)) 40px";
+    let tracks = parse_tracks(line).unwrap();
+    assert_eq!(
+        tracks,
+        vec![auto_repeat(AutoRepeat::Fit, min160()), px(40.0)]
+    );
+    assert_eq!(tracks_css(&tracks), line);
+    assert_eq!(
+        parse_tracks("REPEAT(Auto-Fill, 10%)").unwrap(),
+        vec![auto_repeat(
+            AutoRepeat::Fill,
+            TrackSize::Breadth(TrackBreadth::Percent(10.0))
+        )]
+    );
+    let json = serde_json::to_string(&tracks[0]).unwrap();
+    assert_eq!(
+        json,
+        r#"{"repeat":"auto-fit","tracks":[{"min":{"Px":160.0},"max":{"Fr":1.0}}]}"#
+    );
+    assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), tracks[0]);
+    let counted: Track = serde_json::from_str(r#"{"repeat":3,"tracks":["Auto"]}"#).unwrap();
+    assert_eq!(
+        counted,
+        Track::Repeat {
+            repeat: RepeatCount::Count(3),
+            tracks: vec![TrackSize::Breadth(TrackBreadth::Auto)],
+        }
     );
 }

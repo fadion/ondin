@@ -242,7 +242,7 @@ fn scaling_a_frame_leaves_other_frames_and_global_guides_alone() {
 /// flip: the grid arm scales the columns by `csy` → fails at "the columns, across"
 #[test]
 fn a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis() {
-    use crate::container::{Display, Grid, Track, TrackBreadth as B, TrackSize as S};
+    use crate::container::{Display, Grid, RepeatCount, Track, TrackBreadth as B, TrackSize as S};
     let (mut doc, _res, frame, ..) = framed_guides();
     let one = |b| Track::Size(S::Breadth(b));
     doc.apply(&Transaction(vec![Operation::SetDisplay {
@@ -252,7 +252,7 @@ fn a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis() {
                 one(B::Px(100.0)),
                 one(B::Fr(1.0)),
                 Track::Repeat {
-                    repeat: 2,
+                    repeat: RepeatCount::Count(2),
                     tracks: vec![S::MinMax {
                         min: B::Px(20.0),
                         max: B::Percent(10.0),
@@ -280,7 +280,7 @@ fn a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis() {
             one(B::Px(200.0)),
             one(B::Fr(1.0)),
             Track::Repeat {
-                repeat: 2,
+                repeat: RepeatCount::Count(2),
                 tracks: vec![S::MinMax {
                     min: B::Px(40.0),
                     max: B::Percent(10.0),

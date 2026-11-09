@@ -15,8 +15,8 @@ use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
 use ondin_core::{
     Document, History, IdSource, NodeId, NodeKind, OpError, Operation, Resolved, Transaction,
     container::{
-        AlignContent, AlignItems, Dimension, Display, Flex, Grid, LayoutItem, Track, TrackBreadth,
-        TrackSize,
+        AlignContent, AlignItems, Dimension, Display, Flex, Grid, LayoutItem, RepeatCount, Track,
+        TrackBreadth, TrackSize,
     },
 };
 
@@ -392,30 +392,30 @@ fn rows_are_refused_as_columns_are() {
         })],
         vec![negative_max.clone()],
         vec![Track::Repeat {
-            repeat: 0,
+            repeat: RepeatCount::Count(0),
             tracks: vec![auto],
         }],
         vec![Track::Repeat {
-            repeat: 2,
+            repeat: RepeatCount::Count(2),
             tracks: vec![],
         }],
         vec![Track::Repeat {
-            repeat: 1001,
+            repeat: RepeatCount::Count(1001),
             tracks: vec![auto],
         }],
         vec![
             Track::Repeat {
-                repeat: 300,
+                repeat: RepeatCount::Count(300),
                 tracks: vec![auto, auto],
             },
             Track::Repeat {
-                repeat: 401,
+                repeat: RepeatCount::Count(401),
                 tracks: vec![auto],
             },
         ],
     ];
     let at_the_cap = Track::Repeat {
-        repeat: 1000,
+        repeat: RepeatCount::Count(1000),
         tracks: vec![auto],
     };
     s.try_commit(vec![Operation::SetDisplay {
@@ -468,7 +468,7 @@ fn a_track_after_a_capped_repeat_is_not_laid() {
         Some(Display::Grid(grid(
             vec![
                 Track::Repeat {
-                    repeat: 3,
+                    repeat: RepeatCount::Count(3),
                     tracks: vec![TrackSize::Breadth(TrackBreadth::Px(10.0))],
                 },
                 px(20.0),

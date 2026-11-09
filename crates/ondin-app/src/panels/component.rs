@@ -869,11 +869,11 @@ impl OndinApp {
             text.clear();
         }
         ui.add_space(DESC_GAP);
-        let ring = refused.map(|_| theme::color::error());
+        let ring = refused.map(|_| ui::refused_stroke().color);
         let mut opened = false;
         let mut frame = ui::field_frame();
-        if let Some(c) = ring {
-            frame = frame.stroke(egui::Stroke::new(1.0, c));
+        if ring.is_some() {
+            frame = frame.stroke(ui::refused_stroke());
         }
         // The open button sits inside the field's right inset, so the field is as
         // wide with it as without.
@@ -973,11 +973,7 @@ impl OndinApp {
             .filter(|e| e.id == id)
             .and_then(|e| e.refused)
         {
-            ui.label(
-                egui::RichText::new(why.to_string())
-                    .size(ui::SMALL_PT)
-                    .color(theme::color::error()),
-            );
+            ui::field_refusal(ui, &why.to_string());
         }
     }
 

@@ -1915,7 +1915,8 @@ fn framed_row<R>(
                 .inner
         },
     );
-    if typing_inside(ui.ctx(), row.response.rect) {
+    // A refused field keeps its error ring while typed in.
+    if frame.stroke != refused_stroke() && typing_inside(ui.ctx(), row.response.rect) {
         typing_edge(ui, row.response.rect);
     }
     row.inner
@@ -1997,16 +1998,28 @@ pub fn text_field(
 
 /// [`text_field`] led by a faint `glyph` standing in for its label, as the
 /// documentation link's field is: a link's address on the identity card.
+/// `refused` draws it as [`refused_stroke`] says; the caller puts the reason
+/// under it with [`field_refusal`].
 pub fn text_field_glyph(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     text: &mut String,
     glyph: &str,
     hint: &str,
+    refused: bool,
 ) -> egui::Response {
     let pt = Scale::of(size.y).text_pt();
     let font = egui::FontId::proportional(pt);
-    field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
+    let mut frame = field_frame().inner_margin(egui::Margin {
+        left: FIELD_PAD_X as i8,
+        right: 0,
+        top: 0,
+        bottom: 0,
+    });
+    if refused {
+        frame = frame.stroke(refused_stroke());
+    }
+    framed_row(ui, size, frame, |ui| {
         ui.spacing_mut().item_spacing.x = 7.0;
         ui.label(theme::icon_text(
             glyph,
@@ -2019,9 +2032,27 @@ pub fn text_field_glyph(
             f32::INFINITY,
             egui::TextEdit::singleline(text)
                 .font(font)
+                .text_color_opt(refused.then(color::error))
                 .hint_text(egui::RichText::new(hint).size(pt)),
         )
     })
+}
+
+/// The hairline a field wears while what was typed in it is refused, in place
+/// of its own and of [`typing_edge`]; the typed text takes the same colour and
+/// the reason sits under the field ([`field_refusal`]). The documentation link
+/// and a link's address show a bad address this way.
+pub fn refused_stroke() -> egui::Stroke {
+    egui::Stroke::new(1.0, color::error())
+}
+
+/// Why a field refused what was typed, one line under it in the error colour.
+pub fn field_refusal(ui: &mut egui::Ui, why: &str) {
+    ui.label(
+        egui::RichText::new(why)
+            .size(SMALL_PT)
+            .color(color::error()),
+    );
 }
 
 /// The width of a [`secret_field`]'s eye button, with the gap before it.
@@ -6448,6 +6479,64 @@ mod keyboard_focus_tests {
             }
         }
         assert_eq!(edges, 1, "one");
+    }
+
+    /// A refused `text_field_glyph` typed in keeps the error ring and no typing
+    /// edge; an accepted one wears the edge.
+    /// flip: `framed_row` painting `typing_edge` on a refused frame → fails at
+    /// "no typing edge over the ring".
+    #[test]
+    fn a_refused_glyph_field_keeps_its_ring_while_typed_in() {
+        let run = |refused: bool| {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let frame = |events: Vec<egui::Event>| {
+                let raw = egui::RawInput {
+                    events,
+                    ..Default::default()
+                };
+                ctx.run_ui(raw, |ui| {
+                    let mut text = "nope".to_string();
+                    let size = egui::vec2(160.0, CONTROL_H);
+                    let _ = text_field_glyph(ui, size, &mut text, "@", "", refused);
+                })
+            };
+            frame(Vec::new());
+            frame(vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            let out = frame(Vec::new());
+            let (mut edges, mut rings) = (0, 0);
+            let mut count = |s: &egui::Shape| {
+                if let egui::Shape::Rect(r) = s {
+                    if r.stroke.color == color::accent_700() {
+                        edges += 1;
+                    }
+                    if r.stroke == refused_stroke() {
+                        rings += 1;
+                    }
+                }
+            };
+            for c in &out.shapes {
+                match &c.shape {
+                    egui::Shape::Vec(v) => v.iter().for_each(&mut count),
+                    s => count(s),
+                }
+            }
+            (edges, rings)
+        };
+        assert_eq!(
+            run(false),
+            (1, 0),
+            "the control: focused and wearing the edge"
+        );
+        let (edges, rings) = run(true);
+        assert_eq!(rings, 1, "the error ring");
+        assert_eq!(edges, 0, "no typing edge over the ring");
     }
 
     /// A focused slider steps on `←`/`→` (a hundredth, a tenth with `Shift`) and keeps the focus.

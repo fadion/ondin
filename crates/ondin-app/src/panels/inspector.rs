@@ -2052,9 +2052,9 @@ impl OndinApp {
     }
 
     /// A link's address under its Element row: a text field with the link glyph
-    /// for a label, applied when it loses focus (`Escape` abandons it), a red
-    /// caption under it while what was typed is not an address a link can take
-    /// (`element::is_href`).
+    /// for a label, applied when it loses focus (`Escape` abandons it), ringed in
+    /// red with the reason under it while what was typed is not an address a link
+    /// can take (`element::is_href`), as the documentation link is.
     fn link_address_row(&mut self, ui: &mut egui::Ui, id: NodeId, enabled: bool) {
         let saved = self
             .session
@@ -2076,6 +2076,7 @@ impl OndinApp {
                     &mut text,
                     icon::LINK_SIMPLE,
                     "https://, /path or #id",
+                    refused,
                 );
                 // Typing only keeps the draft; the commit is the defocus below.
                 // valve-gate-not-a-commit
@@ -2096,11 +2097,7 @@ impl OndinApp {
             });
         });
         if refused {
-            ui.label(
-                egui::RichText::new("Not an address a link can take")
-                    .size(ui::SMALL_PT)
-                    .color(theme::color::error()),
-            );
+            ui::field_refusal(ui, "Not an address a link can take");
         }
         if let Some(href) = commit.filter(|h| *h != saved) {
             self.session.name_step("Link address", icon::LINK_SIMPLE);

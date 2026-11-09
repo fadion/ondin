@@ -822,6 +822,7 @@ fn rand_grid(rng: &mut Lcg) -> ondin_core::container::Display {
         column_gap: n(20) as f64,
         row_gap: n(20) as f64,
         padding: [n(30) as f64, n(30) as f64, n(30) as f64, n(30) as f64],
+        areas: Vec::new(),
     })
 }
 

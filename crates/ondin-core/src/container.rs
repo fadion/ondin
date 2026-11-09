@@ -939,6 +939,10 @@ pub struct Grid {
     /// Top, right, bottom, left — CSS's order.
     #[serde(default, skip_serializing_if = "is_zero4")]
     pub padding: [f64; 4],
+    /// `grid-template-areas`, as named rectangles of cells rather than CSS's
+    /// strings, so an area is a rectangle by construction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub areas: Vec<GridArea>,
 }
 
 impl Grid {
@@ -957,10 +961,186 @@ impl Grid {
     /// export spec, and nothing here is rewritten at load.
     ///
     /// **And no more than [`MAX_TEMPLATE_TRACKS`] explicit tracks on an axis**
-    /// (§15 D919).
+    /// (§15 D919), and areas CSS would draw ([`areas_are_valid`]).
     pub fn is_valid(&self) -> bool {
-        template_is_valid(&self.columns) && template_is_valid(&self.rows)
+        template_is_valid(&self.columns)
+            && template_is_valid(&self.rows)
+            && areas_are_valid(&self.areas)
     }
+
+    /// The area called `name`, if this grid has one.
+    pub fn area(&self, name: AreaName) -> Option<&GridArea> {
+        self.areas.iter().find(|a| a.name == name)
+    }
+}
+
+/// The name of a grid area — a CSS `<custom-ident>`, **interned** so that
+/// [`LayoutItem`], which names the area it sits in, stays `Copy`.
+///
+/// Each distinct name is kept for the life of the process: names are few and
+/// short, and a document's are bounded by its size.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AreaName(&'static str);
+
+impl AreaName {
+    /// The interned name for `name`, as typed.
+    pub fn new(name: &str) -> Self {
+        use std::collections::BTreeSet;
+        use std::sync::{LazyLock, Mutex};
+        static NAMES: LazyLock<Mutex<BTreeSet<&'static str>>> = LazyLock::new(Default::default);
+        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = names.get(name) {
+            return AreaName(n);
+        }
+        let n: &'static str = Box::leak(name.to_owned().into_boxed_str());
+        names.insert(n);
+        AreaName(n)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+
+    /// Whether CSS reads this as an area name: letters, digits, `-` and `_`, not
+    /// starting with a digit (or `-` and a digit), and not one of the keywords a
+    /// grid placement already spells.
+    pub fn is_valid(self) -> bool {
+        let s = self.0;
+        let mut chars = s.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        let second = chars.next();
+        let starts = first.is_alphabetic()
+            || first == '_'
+            || (first == '-' && second.is_some_and(|c| !c.is_ascii_digit()));
+        starts
+            && s.chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            && ![
+                "auto", "span", "none", "inherit", "initial", "unset", "default",
+            ]
+            .iter()
+            .any(|k| s.eq_ignore_ascii_case(k))
+    }
+}
+
+impl std::fmt::Debug for AreaName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.0, f)
+    }
+}
+
+impl std::fmt::Display for AreaName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl Serialize for AreaName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for AreaName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = std::borrow::Cow::<'de, str>::deserialize(d)?;
+        Ok(AreaName::new(&s))
+    }
+}
+
+/// One named area of a grid: its column and row lines, start and end, as CSS
+/// numbers them from 1. `{"name":"head","columns":[1,4],"rows":[1,2]}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GridArea {
+    pub name: AreaName,
+    pub columns: [u16; 2],
+    pub rows: [u16; 2],
+}
+
+impl GridArea {
+    /// A name CSS reads, and at least one cell inside [`MAX_TEMPLATE_TRACKS`].
+    fn is_valid(&self) -> bool {
+        let span = |[a, b]: [u16; 2]| a >= 1 && a < b && usize::from(b) <= MAX_TEMPLATE_TRACKS + 1;
+        self.name.is_valid() && span(self.columns) && span(self.rows)
+    }
+
+    /// Whether this area shares a cell with `other`.
+    pub fn overlaps(&self, other: &GridArea) -> bool {
+        let meet = |[a, b]: [u16; 2], [c, d]: [u16; 2]| a < d && c < b;
+        meet(self.columns, other.columns) && meet(self.rows, other.rows)
+    }
+
+    /// Whether the cell at 1-based track `column`, `row` is in this area.
+    pub fn holds(&self, column: u16, row: u16) -> bool {
+        (self.columns[0]..self.columns[1]).contains(&column)
+            && (self.rows[0]..self.rows[1]).contains(&row)
+    }
+
+    /// This area's lines as an item's `grid-column` and `grid-row`.
+    pub fn lines(&self) -> (GridLines, GridLines) {
+        let l = |[a, b]: [u16; 2]| GridLines {
+            start: GridPlacement::Line(a.min(i16::MAX as u16) as i16),
+            end: GridPlacement::Line(b.min(i16::MAX as u16) as i16),
+        };
+        (l(self.columns), l(self.rows))
+    }
+}
+
+/// Every area valid, no two sharing a name or a cell — CSS's own rules, since a
+/// `grid-template-areas` string can say neither.
+pub fn areas_are_valid(areas: &[GridArea]) -> bool {
+    areas.iter().all(GridArea::is_valid)
+        && areas.iter().enumerate().all(|(i, a)| {
+            areas[i + 1..]
+                .iter()
+                .all(|b| a.name != b.name && !a.overlaps(b))
+        })
+}
+
+/// `areas` after removing tracks `from..to` (0-based) on one axis, `rows` naming
+/// which: every area crossing them shrinks, those after move back, and one left
+/// with no cells is gone.
+pub fn areas_without_tracks(
+    areas: &[GridArea],
+    rows: bool,
+    from: usize,
+    to: usize,
+) -> Vec<GridArea> {
+    let gone = to.saturating_sub(from);
+    // A 1-based line past the removed tracks moves back by them; one inside them
+    // lands on the line they started at.
+    let line = |l: u16| -> u16 {
+        let l = usize::from(l);
+        let out = if l <= from + 1 {
+            l
+        } else if l <= to + 1 {
+            from + 1
+        } else {
+            l - gone
+        };
+        out as u16
+    };
+    areas
+        .iter()
+        .filter_map(|a| {
+            let mut a = *a;
+            let span = if rows { &mut a.rows } else { &mut a.columns };
+            *span = [line(span[0]), line(span[1])];
+            (span[0] < span[1]).then_some(a)
+        })
+        .collect()
+}
+
+/// The lines an item naming an area is placed by in `grid`: the area's, or
+/// `auto` on both axes for a name the grid does not have — CSS's `grid-area`
+/// sets all four lines, so the item's own are not read either way.
+pub fn area_lines(name: AreaName, grid: &Grid) -> (GridLines, GridLines) {
+    grid.area(name).map_or(
+        (GridLines::default(), GridLines::default()),
+        GridArea::lines,
+    )
 }
 
 /// The most explicit tracks a template makes on one axis (§15 D919). CSS lets a
@@ -1167,6 +1347,104 @@ pub fn parse_placement(text: &str) -> Option<GridPlacement> {
         .map(GridPlacement::Line)
 }
 
+/// `areas` as CSS writes `grid-template-areas` — one quoted string per row, `.`
+/// for a cell no area holds — over at least `columns` × `rows` cells, so the
+/// strings cover the explicit grid; `none` for no areas.
+pub fn areas_css(areas: &[GridArea], columns: usize, rows: usize) -> String {
+    if areas.is_empty() {
+        return "none".into();
+    }
+    let extent = |f: fn(&GridArea) -> u16| areas.iter().map(|a| usize::from(f(a)) - 1).max();
+    let columns = columns.max(extent(|a| a.columns[1]).unwrap_or(0));
+    let rows = rows.max(extent(|a| a.rows[1]).unwrap_or(0));
+    (1..=rows)
+        .map(|r| {
+            let cells: Vec<&str> = (1..=columns)
+                .map(|c| {
+                    areas
+                        .iter()
+                        .find(|a| a.holds(c as u16, r as u16))
+                        .map_or(".", |a| a.name.as_str())
+                })
+                .collect();
+            format!("\"{}\"", cells.join(" "))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Areas from CSS `grid-template-areas` text, the inverse of [`areas_css`]:
+/// quoted rows of whitespace-separated names, any run of dots an empty cell.
+/// `none` or nothing is no areas. The error says what CSS would refuse: rows of
+/// different lengths, or a name whose cells are not one rectangle.
+pub fn parse_areas(text: &str) -> Result<Vec<GridArea>, String> {
+    let t = text.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("none") {
+        return Ok(Vec::new());
+    }
+    let mut grid: Vec<Vec<Option<&str>>> = Vec::new();
+    let mut rest = t;
+    while !rest.is_empty() {
+        let q = rest.chars().next().filter(|c| *c == '"' || *c == '\'');
+        let Some(q) = q else {
+            return Err(format!("expected a quoted row at \"{rest}\""));
+        };
+        let body = &rest[1..];
+        let Some(end) = body.find(q) else {
+            return Err("a row's quote is not closed".into());
+        };
+        let cells: Vec<Option<&str>> = body[..end]
+            .split_whitespace()
+            .map(|c| (!c.chars().all(|ch| ch == '.')).then_some(c))
+            .collect();
+        if cells.is_empty() {
+            return Err("a row has no cells".into());
+        }
+        grid.push(cells);
+        rest = body[end + 1..].trim_start();
+    }
+    let width = grid[0].len();
+    if grid.iter().any(|r| r.len() != width) {
+        return Err("Every row needs the same number of cells".into());
+    }
+    let mut areas: Vec<GridArea> = Vec::new();
+    for (r, row) in grid.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            let Some(name) = cell else { continue };
+            let name = AreaName::new(name);
+            if !name.is_valid() {
+                return Err(format!("\"{name}\" is not a name CSS reads"));
+            }
+            let (c, r) = (c as u16 + 1, r as u16 + 1);
+            match areas.iter_mut().find(|a| a.name == name) {
+                None => areas.push(GridArea {
+                    name,
+                    columns: [c, c + 1],
+                    rows: [r, r + 1],
+                }),
+                Some(a) => {
+                    a.columns = [a.columns[0].min(c), a.columns[1].max(c + 1)];
+                    a.rows = [a.rows[0].min(r), a.rows[1].max(r + 1)];
+                }
+            }
+        }
+    }
+    // Each name's cells must fill its bounding box exactly.
+    for a in &areas {
+        let filled = (a.rows[0]..a.rows[1]).all(|r| {
+            (a.columns[0]..a.columns[1])
+                .all(|c| grid[usize::from(r) - 1][usize::from(c) - 1] == Some(a.name.as_str()))
+        });
+        if !filled {
+            return Err(format!(
+                "An area must be a rectangle — \"{}\" is not",
+                a.name
+            ));
+        }
+    }
+    Ok(areas)
+}
+
 /// A cursor over CSS text for [`parse_tracks`] — whitespace skipped before every
 /// token.
 struct CssText<'a> {
@@ -1343,6 +1621,7 @@ impl Display {
                 };
                 axis(&g.columns, old.map(|w| w.columns.as_slice()))
                     && axis(&g.rows, old.map(|w| w.rows.as_slice()))
+                    && (old.is_some_and(|w| w.areas == g.areas) || areas_are_valid(&g.areas))
             }
         };
         padding_ok && gaps_ok && tracks_ok
@@ -1484,6 +1763,11 @@ pub struct LayoutItem {
     pub grid_column: GridLines,
     #[serde(default, skip_serializing_if = "is_default")]
     pub grid_row: GridLines,
+    /// `grid-area`, read under grid: the parent's area this item fills, which
+    /// places it in place of [`Self::grid_column`] and [`Self::grid_row`]
+    /// ([`area_lines`]). Those two are kept, for *None* to give back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_area: Option<AreaName>,
     /// The number variables the four limits are bound to, in
     /// `variable::LimitVars`' order — beside the values as an effect's bindings
     /// are, so every door that writes the item from the stored one carries them.
@@ -1509,6 +1793,7 @@ impl Default for LayoutItem {
             justify_self: None,
             grid_column: GridLines::default(),
             grid_row: GridLines::default(),
+            grid_area: None,
             limit_vars: Default::default(),
         }
     }
@@ -1589,6 +1874,7 @@ impl LayoutItem {
             && (self.shrink == was.shrink || self.shrink >= 0.0)
             && (self.grid_column == was.grid_column || self.grid_column.is_valid())
             && (self.grid_row == was.grid_row || self.grid_row.is_valid())
+            && (self.grid_area == was.grid_area || self.grid_area.is_none_or(AreaName::is_valid))
     }
 }
 
@@ -2238,7 +2524,13 @@ impl<'v> FlexTree<'v> {
                         Display::Grid(grid) => {
                             // `is_replaced`'s answer, read off the leaf just built.
                             let replaced = matches!(self.leaves[c], Leaf::Replaced(_));
-                            let (across, down) = grid_held(&self.view.item(child), grid, replaced);
+                            let child_item = self.view.item(child);
+                            if let Some(name) = child_item.grid_area {
+                                let (column, row) = area_lines(name, grid);
+                                self.styles[c].grid_column = grid_lines(column);
+                                self.styles[c].grid_row = grid_lines(row);
+                            }
+                            let (across, down) = grid_held(&child_item, grid, replaced);
                             if across {
                                 self.styles[c].justify_self = Some(taffy::AlignItems::START);
                             }

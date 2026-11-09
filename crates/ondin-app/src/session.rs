@@ -1503,6 +1503,8 @@ impl EditorSession {
         // A resized flex item keeps the size it was dragged to, and an in-flow item
         // its stored translation.
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        // A grid's renamed or removed area is followed by the items naming it.
+        let tx = ondin_core::build::keep_area_names(&self.doc, tx);
         // Where the binding passes below start appending their detaches, so the
         // floating status can name the variables they cut.
         let asked_ops = tx.0.len();

@@ -904,6 +904,64 @@ fn layout_matches_the_canvas() {
     holds("layout", &doc, &res);
 }
 
+/// A grid whose items fill named areas (one naming an area out of source
+/// order), and an `auto-fit` row of fixed-minimum tracks with an empty one to
+/// close: Chrome reads `grid-template-areas`, `grid-area` and the automatic
+/// repeat as the canvas lays them.
+#[test]
+fn grid_areas_and_auto_fit_match_the_canvas() {
+    use ondin_core::container::{AutoRepeat, parse_areas, parse_tracks};
+    let mut d = Doc::new();
+    let grid = d.frame(None, 0.0, 0.0, 240.0, 140.0, "Areas");
+    d.apply(vec![Operation::SetDisplay {
+        id: grid,
+        display: Some(Display::Grid(Grid {
+            columns: parse_tracks("60px 1fr 1fr").unwrap(),
+            rows: parse_tracks("30px 1fr").unwrap(),
+            areas: parse_areas("\"head head head\" \"side body body\"").unwrap(),
+            row_gap: 6.0,
+            column_gap: 6.0,
+            padding: [8.0; 4],
+            ..Default::default()
+        })),
+    }]);
+    for (i, name) in ["body", "head", "side"].into_iter().enumerate() {
+        let r = d.rect(grid, 0.0, 0.0, 20.0, 20.0, 0.0);
+        d.fill(r, solid(60 + 70 * i as u8, 120, 200, 255));
+        d.apply(vec![Operation::SetLayoutItem {
+            id: r,
+            item: LayoutItem {
+                grid_area: Some(ondin_core::container::AreaName::new(name)),
+                align_self: Some(AlignItems::Stretch),
+                justify_self: Some(AlignItems::Stretch),
+                ..Default::default()
+            },
+        }]);
+    }
+    let fit = d.frame(None, 0.0, 160.0, 260.0, 40.0, "Fit");
+    d.apply(vec![Operation::SetDisplay {
+        id: fit,
+        display: Some(Display::Grid(Grid {
+            columns: vec![Track::Repeat {
+                repeat: RepeatCount::Auto(AutoRepeat::Fit),
+                tracks: vec![TrackSize::MinMax {
+                    min: TrackBreadth::Px(70.0),
+                    max: TrackBreadth::Fr(1.0),
+                }],
+            }],
+            column_gap: 4.0,
+            justify_items: Some(AlignItems::Stretch),
+            ..Default::default()
+        })),
+    }]);
+    for i in 0..2 {
+        let r = d.rect(fit, 0.0, 0.0, 20.0, 40.0, 0.0);
+        d.fill(r, solid(230, 90 + 60 * i as u8, 60, 255));
+    }
+    let (doc, res) = d.done();
+    holds("grid-areas", &doc, &res);
+}
+
 /// A hugging group with a column layout inside a frame, and children pinned by
 /// insets — one to the bottom right, one stretched across.
 #[test]

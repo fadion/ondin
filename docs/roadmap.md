@@ -17,8 +17,7 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Components and layout
 
-- **Two CSS layout properties §5.3c defers** — `aspect-ratio` and named grid areas
-  (`layout.md`). The engine supports each.
+- **`aspect-ratio`, which §5.3c defers** (`layout.md`). The engine supports it.
 
 ## Now · Code export (HTML/CSS, React, Vue)
 

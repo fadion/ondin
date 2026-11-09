@@ -1865,3 +1865,204 @@ fn an_automatic_repeat_reads_and_writes() {
         }
     );
 }
+
+fn area(name: &str, columns: [u16; 2], rows: [u16; 2]) -> ondin_core::container::GridArea {
+    ondin_core::container::GridArea {
+        name: ondin_core::container::AreaName::new(name),
+        columns,
+        rows,
+    }
+}
+
+/// Three 100px columns over two 50px rows, `head` across the top and `body` the
+/// right two cells of the bottom, items held at the start.
+fn areas_scene() -> (Scene, NodeId) {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
+            areas: vec![area("head", [1, 4], [1, 2]), area("body", [2, 4], [2, 3])],
+            ..grid(vec![px(100.0); 3], vec![px(50.0); 2])
+        })),
+    );
+    (s, f)
+}
+
+/// **An item naming an area is placed in it, its own lines unread**; one naming
+/// an area the grid lacks is placed as if it named nothing and had no lines,
+/// CSS's reading of a `grid-area` no template defines.
+/// flip: `push` leaving the area unread → fails at *"in body"*.
+#[test]
+fn an_item_naming_an_area_fills_it() {
+    use ondin_core::container::AreaName;
+    let (mut s, f) = areas_scene();
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.item(a, |i| {
+        i.grid_area = Some(AreaName::new("body"));
+        i.grid_column.start = GridPlacement::Line(1);
+    });
+    assert_eq!(s.bounds(a).origin(), (100.0, 50.0).into(), "in body");
+    s.item(b, |i| {
+        i.grid_area = Some(AreaName::new("nowhere"));
+        i.grid_row.start = GridPlacement::Line(2);
+    });
+    assert_eq!(
+        s.bounds(b).origin(),
+        (0.0, 0.0).into(),
+        "auto-placed in the first free cell, its own row unread"
+    );
+}
+
+/// **Areas CSS would not draw are refused**: two sharing a cell, two sharing a
+/// name, a name CSS does not read; and an item naming one by a bad name.
+#[test]
+fn areas_css_refuses_are_refused() {
+    use ondin_core::container::AreaName;
+    let (mut s, f) = areas_scene();
+    let with = |areas| {
+        Some(Display::Grid(Grid {
+            areas,
+            ..grid(vec![px(100.0); 3], vec![px(50.0); 2])
+        }))
+    };
+    for bad in [
+        vec![area("a", [1, 3], [1, 2]), area("b", [2, 4], [1, 2])],
+        vec![area("a", [1, 2], [1, 2]), area("a", [2, 3], [1, 2])],
+        vec![area("2col", [1, 2], [1, 2])],
+        vec![area("span", [1, 2], [1, 2])],
+        vec![area("a", [2, 2], [1, 2])],
+    ] {
+        let r = s.try_commit(vec![Operation::SetDisplay {
+            id: f,
+            display: with(bad.clone()),
+        }]);
+        assert!(matches!(r, Err(OpError::BadLayout)), "{bad:?}");
+    }
+    let c = s.add(f, rect(10.0, 10.0), (0.0, 0.0));
+    let mut item = *s.doc.get(c).unwrap().item();
+    item.grid_area = Some(AreaName::new("a b"));
+    let r = s.try_commit(vec![Operation::SetLayoutItem { id: c, item }]);
+    assert!(matches!(r, Err(OpError::BadLayout)));
+}
+
+/// **Areas read and write as CSS**: one quoted row per track row, `.` (or any
+/// run of dots) for an empty cell, the strings covering the explicit grid; a
+/// name whose cells are not a rectangle and rows of different lengths are errors.
+#[test]
+fn areas_read_and_write_as_css() {
+    use ondin_core::container::{areas_css, parse_areas};
+    let areas = vec![area("head", [1, 4], [1, 2]), area("body", [2, 4], [2, 3])];
+    let line = "\"head head head\" \". body body\"";
+    assert_eq!(areas_css(&areas, 3, 2), line);
+    assert_eq!(parse_areas(line).unwrap(), areas);
+    assert_eq!(
+        areas_css(&areas, 4, 3),
+        "\"head head head .\" \". body body .\" \". . . .\"",
+        "covering the explicit grid"
+    );
+    assert_eq!(
+        parse_areas("'a ...'  \"a b\"").unwrap(),
+        vec![area("a", [1, 2], [1, 3]), area("b", [2, 3], [2, 3])]
+    );
+    assert_eq!(parse_areas("none").unwrap(), vec![]);
+    assert_eq!(areas_css(&[], 3, 2), "none");
+    assert_eq!(
+        parse_areas("\"a b\" \"b a\"").unwrap_err(),
+        "An area must be a rectangle — \"a\" is not"
+    );
+    assert_eq!(
+        parse_areas("\"a b\" \"a\"").unwrap_err(),
+        "Every row needs the same number of cells"
+    );
+    let json = serde_json::to_string(&areas[0]).unwrap();
+    assert_eq!(json, r#"{"name":"head","columns":[1,4],"rows":[1,2]}"#);
+}
+
+/// **The items naming an area follow it**: renamed (a new name on the same
+/// cells) they take the new name, removed they name none and go back to their
+/// own lines — in the transaction that changed the areas.
+/// flip: `keep_area_names` returning `tx` untouched → fails at *"renamed"*.
+#[test]
+fn items_follow_their_area_through_a_rename_and_a_removal() {
+    use ondin_core::container::AreaName;
+    let (mut s, f) = areas_scene();
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.item(a, |i| i.grid_area = Some(AreaName::new("body")));
+    let set = |s: &mut Scene, areas| {
+        let Some(Display::Grid(g)) = s.doc.get(f).unwrap().display().cloned() else {
+            panic!("a grid");
+        };
+        let tx = Transaction(vec![Operation::SetDisplay {
+            id: f,
+            display: Some(Display::Grid(Grid { areas, ..g })),
+        }]);
+        let tx = ondin_core::build::keep_area_names(&s.doc, tx);
+        s.commit(tx.0);
+    };
+    set(
+        &mut s,
+        vec![area("head", [1, 4], [1, 2]), area("main", [2, 4], [2, 3])],
+    );
+    assert_eq!(
+        s.doc.get(a).unwrap().item().grid_area,
+        Some(AreaName::new("main")),
+        "renamed"
+    );
+    set(&mut s, vec![area("head", [1, 4], [1, 2])]);
+    assert_eq!(s.doc.get(a).unwrap().item().grid_area, None, "removed");
+}
+
+/// **Removing tracks shrinks the areas crossing them**: dropping column 2 of
+/// three takes `head` to two columns and `body` to one; dropping columns 2–3
+/// leaves `body` no cells, and it goes.
+#[test]
+fn removing_tracks_shrinks_the_areas_across_them() {
+    use ondin_core::container::areas_without_tracks;
+    let areas = vec![area("head", [1, 4], [1, 2]), area("body", [2, 4], [2, 3])];
+    assert_eq!(
+        areas_without_tracks(&areas, false, 1, 2),
+        vec![area("head", [1, 3], [1, 2]), area("body", [2, 3], [2, 3])]
+    );
+    assert_eq!(
+        areas_without_tracks(&areas, false, 1, 3),
+        vec![area("head", [1, 2], [1, 2])]
+    );
+    assert_eq!(
+        areas_without_tracks(&areas, true, 0, 1),
+        vec![area("body", [2, 4], [1, 2])],
+        "rows, the first gone"
+    );
+}
+
+/// **A drop moves an item off its area onto lines**: `body`'s item dragged one
+/// column left is written `1 / 3`, `2 / 3`, its area cleared.
+#[test]
+fn a_dropped_area_item_is_written_by_lines() {
+    use ondin_core::container::AreaName;
+    let (mut s, f) = areas_scene();
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.item(a, |i| i.grid_area = Some(AreaName::new("body")));
+    let Some(Operation::SetLayoutItem { item, .. }) =
+        ondin_core::build::grid_drop(&s.doc, &s.res, a, ondin_core::kurbo::Vec2::new(-100.0, 0.0))
+    else {
+        panic!("a drop");
+    };
+    assert_eq!(item.grid_area, None);
+    assert_eq!(
+        (item.grid_column, item.grid_row),
+        (
+            GridLines {
+                start: GridPlacement::Line(1),
+                end: GridPlacement::Line(3)
+            },
+            GridLines {
+                start: GridPlacement::Line(2),
+                end: GridPlacement::Line(3)
+            }
+        )
+    );
+}

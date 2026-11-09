@@ -109,7 +109,7 @@ How `ondin-app` draws its window and panels: the toolkit choice, the shared widg
 - **Precision is pinned per field**, never derived from drag speed (egui's `auto_decimals` printed 15 decimals at zero speed): `ui::number(n)` as a `custom_formatter` (trims zeros) or `max_decimals`. Single- and multi-selection twin fields must use the same spelling. `Scrub`'s `decimals` is a different thing (where a drag settles).
 - **Scrub wrap:** a scrub reaching the window edge teleports the cursor (`ui::wrap_scrub`, x axis only). The artefact delta is spent on a zero speed (`ui::scrub_speed_for`); `Wrap` recognises it by size (more than half the requested jump), not timing.
 - **"An edit is happening" is not answered by value fields.** The chrome retreat asks the transaction (`Transaction::changes_ink`) at the committer.
-- Clicking a text field selects all (`ui::select_all_on_focus`, applied after the field runs). Operator glyph shape changes while typing are Inter's `calt`; nothing to fix.
+- Clicking a text field selects all (`ui::select_all_on_focus`, applied after the field runs); a field opened with its focus requested by code selects all through `ui::select_all`, since it never reports gaining focus. Operator glyph shape changes while typing are Inter's `calt`; nothing to fix.
 
 ### Window, icon, updates
 

@@ -3,10 +3,11 @@
 //! **Container**, under `display: grid`: `grid-auto-flow`, the two track lists —
 //! each track a row leading with its kind, a function's arguments as fields of
 //! their own, a grip to reorder and a cross to remove, and under the list the
-//! whole template as editable CSS for pasting — then `justify-content`,
-//! `justify-items`, `align-items`, `align-content`, the gaps and the padding.
-//! **Item**, in a grid: `grid-column` and `grid-row` as CSS writes them, start
-//! and end, then `justify-self` and `align-self`.
+//! whole template as editable CSS for pasting — then the named areas as a map
+//! and as CSS, then `justify-content`, `justify-items`, `align-items`,
+//! `align-content`, the gaps and the padding. **Item**, in a grid: `grid-area`
+//! where the grid has areas, `grid-column` and `grid-row` as CSS writes them,
+//! start and end, then `justify-self` and `align-self`.
 //!
 //! Four things differ from flex's rows on purpose:
 //!
@@ -31,8 +32,9 @@
 
 use super::*;
 use ondin_core::container::{
-    AutoRepeat, GridAutoFlow, GridLines, RepeatCount, Track, TrackBreadth, TrackSize,
-    auto_repeat_refusal, parse_placement, parse_tracks, placement_css, repeats_to_fit, track_count,
+    AreaName, AutoRepeat, GridArea, GridAutoFlow, GridLines, RepeatCount, Track, TrackBreadth,
+    TrackSize, area_lines, areas_are_valid, areas_css, areas_without_tracks, auto_repeat_refusal,
+    parse_areas, parse_placement, parse_tracks, placement_css, repeats_to_fit, track_count,
     track_size_css, tracks_css,
 };
 
@@ -553,6 +555,22 @@ struct TrackDrag {
     from: usize,
 }
 
+/// The area whose name the map is editing, and the text typed so far; `fresh`
+/// until the field has been given focus.
+#[derive(Clone, Debug)]
+struct Renaming {
+    name: AreaName,
+    text: String,
+    fresh: bool,
+}
+
+/// The undo step of every edit to a grid's areas.
+const AREAS_STEP: &str = "Grid areas";
+
+/// The most tracks on an axis the area map draws a cell for; past it the cells
+/// are too narrow to drag across, and the CSS line edits the areas.
+const MAP_TRACKS: usize = 24;
+
 impl OndinApp {
     /// Every subject's grid with `f` applied — [`Self::display_tx`] for a grid.
     fn grid_tx(&self, subjects: &[NodeId], f: impl Fn(&mut Grid)) -> Transaction {
@@ -617,6 +635,7 @@ impl OndinApp {
         // --- the tracks ------------------------------------------------------------
         self.track_list(ui, subjects, grids, false, full);
         self.track_list(ui, subjects, grids, true, full);
+        self.area_map(ui, subjects, grids, full);
 
         // --- the alignments ---------------------------------------------------------
         let content = |c: AlignContent| Glyph::Content(c);
@@ -956,6 +975,341 @@ impl OndinApp {
         self.grid_tx(subjects, |g| with_list(g, rows, now))
     }
 
+    /// `grid-template-areas`: a head with the property's name and how many areas,
+    /// a map of the explicit grid's cells while the selection agrees on its
+    /// tracks and areas, and the areas as CSS under it — which is also how a
+    /// selection that disagrees is edited.
+    fn area_map(&mut self, ui: &mut egui::Ui, subjects: &[NodeId], grids: &[Grid], full: f32) {
+        let g = grids[0].clone();
+        let agreed = grids
+            .iter()
+            .all(|o| o.areas == g.areas && o.columns == g.columns && o.rows == g.rows);
+        let (cols, rows) = (track_count(&g.columns), track_count(&g.rows));
+        let mark = self.grid_mark(
+            subjects,
+            |g| g.areas.clone(),
+            |g, v| g.areas = v,
+            |v| areas_css(v, 0, 0),
+        );
+
+        // --- the head ----------------------------------------------------------
+        ui.horizontal(|ui| {
+            let hit = super::super::component::label_mark(
+                ui,
+                None,
+                "Grid template areas",
+                11.0,
+                theme::text::dim(),
+                mark.as_ref(),
+            );
+            self.reset_marked(hit, &mark);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(match (agreed, g.areas.len()) {
+                        (false, _) => ui::MIXED_WORD.to_owned(),
+                        (true, 0) => "None".to_owned(),
+                        (true, 1) => "1 area".to_owned(),
+                        (true, n) => format!("{n} areas"),
+                    })
+                    .size(ui::CAPTION_PT)
+                    .color(theme::text::faint()),
+                );
+            });
+        });
+
+        // --- the map --------------------------------------------------------------
+        let key = egui::Id::new(("grid-areas-css", subjects.first().copied()));
+        let shown = agreed.then(|| areas_css(&g.areas, cols, rows));
+        if agreed {
+            let why = if repeats_to_fit(&g.columns) || repeats_to_fit(&g.rows) {
+                Some("Areas need a fixed number of tracks — this axis repeats to fit")
+            } else if cols == 0 || rows == 0 {
+                Some("Areas are drawn on the tracks — add a column and a row")
+            } else if cols > MAP_TRACKS || rows > MAP_TRACKS {
+                Some("Too many tracks to draw — edit the areas as CSS")
+            } else {
+                None
+            };
+            match why {
+                Some(why) => {
+                    ui.label(
+                        egui::RichText::new(why)
+                            .size(ui::CAPTION_PT)
+                            .color(theme::text::faint()),
+                    );
+                }
+                None => self.area_cells(ui, subjects, &g, key, shown.as_deref(), full),
+            }
+        }
+
+        // --- the CSS line -----------------------------------------------------------
+        if let Some(text) = css_field(
+            ui,
+            key,
+            egui::vec2(full, ui::CONTROL_H),
+            shown.as_deref(),
+            "The areas as CSS — a quoted row per track row, . for an empty cell, Enter to apply",
+        ) {
+            match parse_areas(&text) {
+                Ok(parsed) if areas_are_valid(&parsed) => {
+                    let tx = self.grid_tx(subjects, |g| g.areas.clone_from(&parsed));
+                    self.session.name_step(AREAS_STEP, icon::GRID_LAYOUT);
+                    self.commit_edit(tx);
+                }
+                Ok(_) => refuse(
+                    ui.ctx(),
+                    key,
+                    shown.as_deref(),
+                    "CSS does not accept those areas".into(),
+                ),
+                Err(e) => refuse(ui.ctx(), key, shown.as_deref(), e),
+            }
+        }
+        if let Some(why) = refusal(ui, key, shown.as_deref()) {
+            ui.label(
+                egui::RichText::new(why)
+                    .size(ui::CAPTION_PT)
+                    .color(color::danger()),
+            );
+        }
+    }
+
+    /// The map itself: one cell per explicit track crossing, columns at the
+    /// widths the first subject lays them, each area one tinted rectangle with its
+    /// name. A drag across empty cells makes an area and opens its name; a
+    /// double-click opens an area's name, and clearing it removes the area.
+    /// `key` and `shown` are the CSS line's, where a refusal is said.
+    fn area_cells(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        g: &Grid,
+        key: egui::Id,
+        shown: Option<&str>,
+        full: f32,
+    ) {
+        const GAP: f32 = 3.0;
+        let (cols, rows) = (track_count(&g.columns), track_count(&g.rows));
+        let h = ui::CONTROL_H;
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(full, rows as f32 * (h + GAP) + GAP),
+            egui::Sense::click_and_drag(),
+        );
+        // Column widths at the laid tracks' proportions, each at least a sliver;
+        // equal where the grid lays none.
+        let laid = ondin_core::build::laid_grid(&self.session.doc, subjects[0]);
+        let mut widths: Vec<f32> = (0..cols)
+            .map(|c| {
+                laid.as_ref()
+                    .and_then(|l| l.columns.spans.get(c))
+                    .map_or(1.0, |(a, b)| (b - a).max(0.0) as f32)
+            })
+            .collect();
+        let total: f32 = widths.iter().sum();
+        let room = rect.width() - GAP * (cols as f32 + 1.0);
+        for w in &mut widths {
+            *w = if total > 0.0 {
+                (*w / total * room).max(12.0)
+            } else {
+                room / cols as f32
+            };
+        }
+        let scale = room / widths.iter().sum::<f32>();
+        let mut xs = vec![rect.left() + GAP];
+        for w in &widths {
+            let x = *xs.last().unwrap_or(&rect.left());
+            xs.push(x + w * scale + GAP);
+        }
+        // The screen rectangle over 1-based lines `[c0, c1)` × `[r0, r1)`.
+        let span = |c: [u16; 2], r: [u16; 2]| {
+            let c = c.map(|l| usize::from(l).clamp(1, cols + 1) - 1);
+            let r = r.map(|l| usize::from(l).clamp(1, rows + 1) - 1);
+            egui::Rect::from_min_max(
+                egui::pos2(xs[c[0]], rect.top() + GAP + r[0] as f32 * (h + GAP)),
+                egui::pos2(
+                    xs[c[1]] - GAP,
+                    rect.top() + GAP + r[1] as f32 * (h + GAP) - GAP,
+                ),
+            )
+        };
+        let cell_at = |p: egui::Pos2| -> (u16, u16) {
+            let c = xs.iter().take(cols).rposition(|x| p.x >= *x).unwrap_or(0);
+            let r = (((p.y - rect.top() - GAP) / (h + GAP)).floor() as isize)
+                .clamp(0, rows as isize - 1) as usize;
+            (c as u16 + 1, r as u16 + 1)
+        };
+        let painter = ui.painter_at(rect);
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(ui::BUTTON_R),
+            color::field(),
+            egui::Stroke::new(1.0, color::field_border()),
+            egui::StrokeKind::Inside,
+        );
+        let radius = egui::CornerRadius::same(3);
+        for r in 1..=rows as u16 {
+            for c in 1..=cols as u16 {
+                if !g.areas.iter().any(|a| a.holds(c, r)) {
+                    painter.rect_filled(span([c, c + 1], [r, r + 1]), radius, color::hover());
+                }
+            }
+        }
+        let renaming_key = key.with("rename");
+        let renaming = ui
+            .ctx()
+            .data(|d| d.get_temp::<Renaming>(renaming_key))
+            .filter(|n| g.area(n.name).is_some());
+        for a in &g.areas {
+            let r = span(a.columns, a.rows);
+            painter.rect_filled(r, radius, color::accent_a(56));
+            if renaming.as_ref().is_some_and(|n| n.name == a.name) {
+                continue;
+            }
+            painter.text(
+                r.left_center() + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                a.name.as_str(),
+                egui::FontId::proportional(ui::CAPTION_PT),
+                color::text(),
+            );
+        }
+
+        // --- a drag across empty cells makes an area ----------------------------
+        let anchor_key = key.with("anchor");
+        if resp.drag_started()
+            && let Some(p) = ui.input(|i| i.pointer.press_origin())
+        {
+            let at = cell_at(p);
+            ui.ctx().data_mut(|d| d.insert_temp(anchor_key, at));
+        }
+        let anchor = ui.ctx().data(|d| d.get_temp::<(u16, u16)>(anchor_key));
+        if let (Some((ac, ar)), Some(p)) = (anchor, resp.interact_pointer_pos()) {
+            let (pc, pr) = cell_at(p);
+            let new = GridArea {
+                name: AreaName::new(""),
+                columns: [ac.min(pc), ac.max(pc) + 1],
+                rows: [ar.min(pr), ar.max(pr) + 1],
+            };
+            painter.rect_stroke(
+                span(new.columns, new.rows),
+                radius,
+                egui::Stroke::new(1.5, color::accent()),
+                egui::StrokeKind::Inside,
+            );
+            if resp.drag_stopped() {
+                ui.ctx().data_mut(|d| d.remove::<(u16, u16)>(anchor_key));
+                if g.areas.iter().any(|a| a.overlaps(&new)) {
+                    refuse(
+                        ui.ctx(),
+                        key,
+                        shown,
+                        "Areas cannot overlap — clear an area's name to remove it".into(),
+                    );
+                } else {
+                    let name = (1..)
+                        .map(|n| match n {
+                            1 => AreaName::new("area"),
+                            n => AreaName::new(&format!("area-{n}")),
+                        })
+                        .find(|n| g.area(*n).is_none())
+                        .unwrap_or_else(|| AreaName::new("area"));
+                    let area = GridArea { name, ..new };
+                    let tx = self.grid_tx(subjects, |g| g.areas.push(area));
+                    self.session.name_step(AREAS_STEP, icon::GRID_LAYOUT);
+                    if self.commit_edit(tx) {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(
+                                renaming_key,
+                                Renaming {
+                                    name,
+                                    text: name.as_str().to_owned(),
+                                    fresh: true,
+                                },
+                            )
+                        });
+                    }
+                }
+            }
+        } else if anchor.is_some() && !ui.input(|i| i.pointer.any_down()) {
+            ui.ctx().data_mut(|d| d.remove::<(u16, u16)>(anchor_key));
+        }
+        let resp = resp.on_hover_text(
+            "Drag across cells to make an area · double-click one to rename it, or clear its \
+             name to remove it",
+        );
+
+        // --- a double-click opens an area's name ----------------------------------
+        if ui::double_clicked(ui, &resp)
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let (c, r) = cell_at(p);
+            if let Some(a) = g.areas.iter().find(|a| a.holds(c, r)) {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(
+                        renaming_key,
+                        Renaming {
+                            name: a.name,
+                            text: a.name.as_str().to_owned(),
+                            fresh: true,
+                        },
+                    )
+                });
+            }
+        }
+
+        // --- the name being typed ----------------------------------------------------
+        let Some(mut n) = renaming else {
+            return;
+        };
+        let Some(area) = g.area(n.name).copied() else {
+            return;
+        };
+        let at = span(area.columns, area.rows);
+        let at = egui::Rect::from_min_size(at.min, egui::vec2(at.width(), h.min(at.height())));
+        let field = ui.put(at, |ui: &mut egui::Ui| {
+            let resp = ui::text_field(ui, at.size(), &mut n.text, "");
+            ui::select_all_on_focus(ui, &resp, &n.text);
+            resp
+        });
+        if n.fresh {
+            field.request_focus();
+            ui::select_all(ui, &field, &n.text);
+            n.fresh = false;
+        }
+        if field.lost_focus() {
+            ui.ctx().data_mut(|d| d.remove::<Renaming>(renaming_key));
+            let typed = n.text.trim();
+            if !ui::defocus_commits(&field) || typed == area.name.as_str() {
+                return;
+            }
+            let to = AreaName::new(typed);
+            let why = if typed.is_empty() {
+                None
+            } else if !to.is_valid() {
+                Some(format!("\"{typed}\" is not a name CSS reads"))
+            } else if g.area(to).is_some() {
+                Some(format!("Another area is called \"{typed}\""))
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                refuse(ui.ctx(), key, shown, why);
+                return;
+            }
+            let tx = self.grid_tx(subjects, |g| {
+                if typed.is_empty() {
+                    g.areas.retain(|a| a.name != area.name);
+                } else if let Some(a) = g.areas.iter_mut().find(|a| a.name == area.name) {
+                    a.name = to;
+                }
+            });
+            self.session.name_step(AREAS_STEP, icon::GRID_LAYOUT);
+            self.commit_edit(tx);
+        } else {
+            ui.ctx().data_mut(|d| d.insert_temp(renaming_key, n));
+        }
+    }
+
     /// Whether container `id` has no size of its own across `rows`' axis for an
     /// automatic repeat to fill: a frame asked to fit its content, or a group whose
     /// size is not typed — unless two insets stretch it on that axis.
@@ -1038,7 +1392,14 @@ impl OndinApp {
             if remove.clicked() {
                 let mut l = list.to_vec();
                 l.remove(i);
-                let tx = self.grid_tx(subjects, |g| with_list(g, rows, &l));
+                // The tracks entry `i` made: every area crossing them shrinks, and
+                // `keep_area_names` sends an emptied one's items back to their lines.
+                let from = track_count(&list[..i]);
+                let to = track_count(&list[..=i]);
+                let tx = self.grid_tx(subjects, |g| {
+                    with_list(g, rows, &l);
+                    g.areas = areas_without_tracks(&g.areas, rows, from, to);
+                });
                 self.session.name_step(
                     if rows {
                         "Remove row track"
@@ -1268,8 +1629,76 @@ impl OndinApp {
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
         const LABEL_W: f32 = 74.0;
+
+        // --- grid-area: offered where the grid has areas or an item names one ------
+        let area = shared(items, |i| i.grid_area);
+        if !parent.areas.is_empty() || items.iter().any(|i| i.grid_area.is_some()) {
+            let mark = self.item_mark(
+                subjects,
+                |i| i.grid_area,
+                |i, v| i.grid_area = v,
+                |v| v.map_or_else(|| "None".to_owned(), |n| n.to_string()),
+            );
+            let mut picked = None;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                let hit = super::super::component::label_mark(
+                    ui,
+                    Some(egui::vec2(LABEL_W, side)),
+                    "Grid area",
+                    10.5,
+                    theme::text::faint(),
+                    mark.as_ref(),
+                );
+                self.reset_marked(hit, &mark);
+                ui.spacing_mut().interact_size.y = side;
+                ui.spacing_mut().button_padding.y = 0.0;
+                let face = match area {
+                    None => ui::MIXED_WORD.to_owned(),
+                    Some(None) => "None".to_owned(),
+                    Some(Some(n)) => n.to_string(),
+                };
+                egui::ComboBox::from_id_salt(("grid-area", subjects.first().copied()))
+                    .icon(ui::combo_chevron)
+                    .width(full - LABEL_W - gap)
+                    .selected_text(ui::combo_text(&face))
+                    .show_ui(ui, |ui| {
+                        ui::menu_rows(ui);
+                        if ui
+                            .selectable_label(area == Some(None), "None")
+                            .on_hover_text("Placed by its lines")
+                            .clicked()
+                        {
+                            picked = Some(None);
+                        }
+                        for a in &parent.areas {
+                            if ui
+                                .selectable_label(area == Some(Some(a.name)), a.name.as_str())
+                                .clicked()
+                            {
+                                picked = Some(Some(a.name));
+                            }
+                        }
+                    });
+            });
+            if let Some(to) = picked.filter(|to| area != Some(*to)) {
+                let tx = self.item_tx(subjects, |i| i.grid_area = to);
+                self.session.name_step("Grid area", icon::GRID_LAYOUT);
+                self.commit_edit(tx);
+            }
+        }
+        // While every item fills an area, the lines rows show the area's and wait.
+        let by_area = area.flatten();
+
         for (label, rows) in [("Grid column", false), ("Grid row", true)] {
-            let lines = |i: &LayoutItem| if rows { i.grid_row } else { i.grid_column };
+            let lines = |i: &LayoutItem| match by_area {
+                Some(name) => {
+                    let (c, r) = area_lines(name, parent);
+                    if rows { r } else { c }
+                }
+                None if rows => i.grid_row,
+                None => i.grid_column,
+            };
             // An instance's overridden lines (§15 D981), on the row's label: both
             // ends are one property, `grid-column` or `grid-row`.
             let mark = self.item_mark(
@@ -1285,68 +1714,78 @@ impl OndinApp {
                 |v| format!("{} / {}", placement_css(v.start), placement_css(v.end)),
             );
             let mut refused = None;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                let hit = super::super::component::label_mark(
-                    ui,
-                    Some(egui::vec2(LABEL_W, side)),
-                    label,
-                    10.5,
-                    theme::text::faint(),
-                    mark.as_ref(),
-                );
-                self.reset_marked(hit, &mark);
-                let half = egui::vec2((full - LABEL_W - gap * 2.0) / 2.0, side);
-                for is_start in [true, false] {
-                    let end = |l: GridLines| if is_start { l.start } else { l.end };
-                    let shown = shared(items, |i| end(lines(i))).map(placement_css);
-                    let key = egui::Id::new((
-                        "grid-item-line",
-                        rows,
-                        is_start,
-                        subjects.first().copied(),
-                    ));
-                    let tip = if is_start {
-                        "Where it starts — auto, a line (2, or -1 from the end), or span n"
-                    } else {
-                        "Where it ends — auto, a line (2, or -1 from the end), or span n"
-                    };
-                    if let Some(text) = css_field(ui, key, half, shown.as_deref(), tip) {
-                        match parse_placement(&text) {
-                            Some(p) => {
-                                let tx = self.item_tx(subjects, |i| {
-                                    let l = if rows {
-                                        &mut i.grid_row
-                                    } else {
-                                        &mut i.grid_column
-                                    };
-                                    if is_start {
-                                        l.start = p;
-                                    } else {
-                                        l.end = p;
+            let row = ui
+                .add_enabled_ui(by_area.is_none(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        let hit = super::super::component::label_mark(
+                            ui,
+                            Some(egui::vec2(LABEL_W, side)),
+                            label,
+                            10.5,
+                            theme::text::faint(),
+                            mark.as_ref(),
+                        );
+                        self.reset_marked(hit, &mark);
+                        let half = egui::vec2((full - LABEL_W - gap * 2.0) / 2.0, side);
+                        for is_start in [true, false] {
+                            let end = |l: GridLines| if is_start { l.start } else { l.end };
+                            let shown = shared(items, |i| end(lines(i))).map(placement_css);
+                            let key = egui::Id::new((
+                                "grid-item-line",
+                                rows,
+                                is_start,
+                                subjects.first().copied(),
+                            ));
+                            let tip = if is_start {
+                                "Where it starts — auto, a line (2, or -1 from the end), or span n"
+                            } else {
+                                "Where it ends — auto, a line (2, or -1 from the end), or span n"
+                            };
+                            if let Some(text) = css_field(ui, key, half, shown.as_deref(), tip) {
+                                match parse_placement(&text) {
+                                    Some(p) => {
+                                        let tx = self.item_tx(subjects, |i| {
+                                            let l = if rows {
+                                                &mut i.grid_row
+                                            } else {
+                                                &mut i.grid_column
+                                            };
+                                            if is_start {
+                                                l.start = p;
+                                            } else {
+                                                l.end = p;
+                                            }
+                                        });
+                                        self.session.name_step(label, tracks_glyph(rows));
+                                        self.commit_edit(tx);
                                     }
-                                });
-                                self.session.name_step(label, tracks_glyph(rows));
-                                self.commit_edit(tx);
+                                    // Said, not dropped: an unreadable line is never thrown
+                                    // away in silence.
+                                    None => refuse(
+                                        ui.ctx(),
+                                        key,
+                                        shown.as_deref(),
+                                        format!(
+                                            "\"{}\" is not a line — auto, 2, -1 or span 2",
+                                            text.trim()
+                                        ),
+                                    ),
+                                }
                             }
-                            // Said, not dropped: an unreadable line is never thrown
-                            // away in silence.
-                            None => refuse(
-                                ui.ctx(),
-                                key,
-                                shown.as_deref(),
-                                format!(
-                                    "\"{}\" is not a line — auto, 2, -1 or span 2",
-                                    text.trim()
-                                ),
-                            ),
+                            if refused.is_none() {
+                                refused = refusal(ui, key, shown.as_deref());
+                            }
                         }
-                    }
-                    if refused.is_none() {
-                        refused = refusal(ui, key, shown.as_deref());
-                    }
-                }
-            });
+                    })
+                })
+                .response;
+            if let Some(name) = by_area {
+                row.on_disabled_hover_text(format!(
+                    "Placed by the area \u{201c}{name}\u{201d} — set Grid area to None to place \
+                     by lines"
+                ));
+            }
             if let Some(why) = refused {
                 ui.label(
                     egui::RichText::new(why)

@@ -4961,6 +4961,91 @@ pub fn kept_spacing_vars(
     std::array::from_fn(|k| bound[k].filter(|_| w[k] == drawn[k] || w[k] == literal[k]))
 }
 
+/// Keeps the items of every grid whose areas `tx` changes naming areas it has:
+/// an item naming an area that is gone takes the name of a new area on the same
+/// cells (a rename), or none and goes back to its own lines (a removal) — in
+/// the same step, whichever door changed the areas.
+///
+/// The edit's own `SetLayoutItem` for such an item is patched where it stands;
+/// otherwise one is appended.
+pub fn keep_area_names(doc: &Document, mut tx: Transaction) -> Transaction {
+    use crate::container::{AreaName, Display};
+    // Each grid's areas as the transaction leaves them.
+    let mut changed: Vec<(NodeId, FxHashMap<AreaName, Option<AreaName>>)> = Vec::new();
+    // In the order the grids are first written, so the appended ops are too.
+    let mut last: Vec<(NodeId, Vec<crate::container::GridArea>)> = Vec::new();
+    for op in &tx.0 {
+        if let Operation::SetDisplay {
+            id,
+            display: Some(Display::Grid(g)),
+        } = op
+        {
+            match last.iter_mut().find(|(n, _)| n == id) {
+                Some((_, a)) => a.clone_from(&g.areas),
+                None => last.push((*id, g.areas.clone())),
+            }
+        }
+    }
+    for (id, now) in last {
+        let Some(Display::Grid(was)) = doc.get(id).and_then(|n| n.display()) else {
+            continue;
+        };
+        if was.areas == now {
+            continue;
+        }
+        let renamed: FxHashMap<AreaName, Option<AreaName>> = was
+            .areas
+            .iter()
+            .filter(|a| !now.iter().any(|n| n.name == a.name))
+            .map(|a| {
+                let to = now
+                    .iter()
+                    .find(|n| {
+                        n.columns == a.columns
+                            && n.rows == a.rows
+                            && !was.areas.iter().any(|w| w.name == n.name)
+                    })
+                    .map(|n| n.name);
+                (a.name, to)
+            })
+            .collect();
+        if !renamed.is_empty() {
+            changed.push((id, renamed));
+        }
+    }
+    for (id, renamed) in changed {
+        let Some(node) = doc.get(id) else { continue };
+        for &child in node.children() {
+            let follow = |item: &mut crate::container::LayoutItem| {
+                if let Some(to) = item.grid_area.and_then(|n| renamed.get(&n)) {
+                    item.grid_area = *to;
+                }
+            };
+            let mut patched = false;
+            for op in tx.0.iter_mut() {
+                if let Operation::SetLayoutItem { id, item } = op
+                    && *id == child
+                {
+                    follow(item);
+                    patched = true;
+                }
+            }
+            if patched {
+                continue;
+            }
+            let Some(was) = doc.get(child).map(|c| *c.item()) else {
+                continue;
+            };
+            let mut item = was;
+            follow(&mut item);
+            if item != was {
+                tx.0.push(Operation::SetLayoutItem { id: child, item });
+            }
+        }
+    }
+    tx
+}
+
 /// [`keep_corner_bindings`]' rule for a container's gaps and padding, adding the
 /// `SetSpacingVars`. Propagation runs after it (`propagate::owed`), so a copy
 /// follows a detach through the main's `SetSpacingVars`. A layout taken away
@@ -8566,6 +8651,19 @@ pub fn grid_drop_many(
         .into_iter()
         .map(|(id, area)| {
             let mut item = *doc.get(id)?.item();
+            // An item placed by a named area is moved off it onto lines, both
+            // ends written: the area's lines are what it was drawn by.
+            if item.grid_area.take().is_some() {
+                let line = |n: i32| GridPlacement::Line(n as i16);
+                item.grid_column = GridLines {
+                    start: line(area[0]),
+                    end: line(area[1]),
+                };
+                item.grid_row = GridLines {
+                    start: line(area[2]),
+                    end: line(area[3]),
+                };
+            }
             item.grid_column = placed(item.grid_column, area[0], area[1], dc, &grid.columns);
             item.grid_row = placed(item.grid_row, area[2], area[3], dr, &grid.rows);
             Some(Operation::SetLayoutItem { id, item })

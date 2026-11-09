@@ -1680,6 +1680,12 @@ impl Walk<'_> {
                     if item.basis != Dimension::Auto {
                         el.set("flex-basis", dimension(item.basis));
                     }
+                } else if let Some(area) = item.grid_area {
+                    // The area sets all four lines; the item's own are not drawn.
+                    el.set("grid-area", area.to_string());
+                    if let Some(j) = item.justify_self {
+                        el.set("justify-self", align_items(j));
+                    }
                 } else {
                     if item.grid_column != Default::default() {
                         el.set(
@@ -2152,6 +2158,16 @@ impl Walk<'_> {
                 el.set("display", "grid");
                 el.set("grid-template-columns", container::tracks_css(&g.columns));
                 el.set("grid-template-rows", container::tracks_css(&g.rows));
+                if !g.areas.is_empty() {
+                    el.set(
+                        "grid-template-areas",
+                        container::areas_css(
+                            &g.areas,
+                            container::track_count(&g.columns),
+                            container::track_count(&g.rows),
+                        ),
+                    );
+                }
                 if g.auto_flow != GridAutoFlow::Row {
                     el.set("grid-auto-flow", "column");
                 }

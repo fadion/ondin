@@ -5987,9 +5987,14 @@ pub fn defocus_commits(resp: &egui::Response) -> bool {
 /// the field's own response: stored after the field has run, it takes effect next
 /// frame and overwrites the focusing click's caret.
 pub fn select_all_on_focus(ui: &egui::Ui, resp: &egui::Response, text: &str) {
-    if !resp.gained_focus() {
-        return;
+    if resp.gained_focus() {
+        select_all(ui, resp, text);
     }
+}
+
+/// Select all of the text field `resp`'s `text` now — for a field given focus
+/// by code, which [`select_all_on_focus`] does not see gain it.
+pub fn select_all(ui: &egui::Ui, resp: &egui::Response, text: &str) {
     let mut state = egui::TextEdit::load_state(ui.ctx(), resp.id).unwrap_or_default();
     state
         .cursor

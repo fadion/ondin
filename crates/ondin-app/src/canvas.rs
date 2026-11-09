@@ -9381,6 +9381,59 @@ impl OndinApp {
         }
     }
 
+    /// Each named area of the selected grid `id`, its name written in its top-left
+    /// corner in `SELECT_DIM` at the caption size, inset 4. An area too small on
+    /// screen to hold its name goes unlabelled rather than overflowing.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_area_names(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        ppp: f32,
+        id: NodeId,
+        grid: &ondin_core::container::LaidGrid,
+        world: Affine,
+        offset: egui::Vec2,
+    ) {
+        const INSET: f32 = 4.0;
+        let (doc, ..) = self.session.render_inputs();
+        let Some(ondin_core::container::Display::Grid(g)) = doc.get(id).and_then(|n| n.display())
+        else {
+            return;
+        };
+        let span = |spans: &[(f64, f64)], [a, b]: [u16; 2]| {
+            let start = spans.get(usize::from(a).checked_sub(1)?)?.0;
+            let end = spans.get(usize::from(b).checked_sub(2)?)?.1;
+            Some((start, end))
+        };
+        for area in &g.areas {
+            let (Some((x0, x1)), Some((y0, y1))) = (
+                span(&grid.columns.spans, area.columns),
+                span(&grid.rows.spans, area.rows),
+            ) else {
+                continue;
+            };
+            let [a, b] = [Point::new(x0, y0), Point::new(x1, y1)]
+                .map(|p| self.to_screen(world * p, rect, ppp) + offset);
+            let galley = painter.layout_no_wrap(
+                area.name.to_string(),
+                egui::FontId::proportional(crate::ui::CAPTION_PT),
+                color::SELECT_DIM,
+            );
+            let room = egui::Rect::from_two_pos(a, b);
+            if galley.size().x + INSET * 2.0 > room.width()
+                || galley.size().y + INSET * 2.0 > room.height()
+            {
+                continue;
+            }
+            painter.galley(
+                room.min + egui::vec2(INSET, INSET),
+                galley,
+                color::SELECT_DIM,
+            );
+        }
+    }
+
     /// A grid container's tracks, read-only: each edge a 1px `SELECT_DIM` line
     /// (dashed for an explicit track, dotted for implicit), each gap a
     /// [`color::GRID_GAP`] band. Not the layout grids of [`Self::draw_layout_grids`].
@@ -9466,6 +9519,9 @@ impl OndinApp {
                 if let Some(ends) = Self::dashed_in_view(a, b, rect, dash + gap) {
                     painter.extend(egui::Shape::dashed_line(&ends, stroke, dash, gap));
                 }
+            }
+            if selected {
+                self.draw_area_names(painter, rect, ppp, id, &grid, world, offset);
             }
         }
     }

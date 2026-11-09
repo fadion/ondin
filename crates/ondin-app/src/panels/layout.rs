@@ -5404,6 +5404,106 @@ mod tests {
         );
     }
 
+    /// `grid_scene` with one 50px row and a `head` area across both columns, and
+    /// item `a` placed in it.
+    fn areas_scene() -> Scene {
+        let mut s = grid_with_columns("100px 1fr");
+        let mut g = grid_of(&s.app, s.frame);
+        g.rows = ondin_core::container::parse_tracks("50px").unwrap();
+        g.areas = ondin_core::container::parse_areas("\"head head\"").unwrap();
+        let mut item = *s.app.session.doc.get(s.a).unwrap().item();
+        item.grid_area = Some(ondin_core::container::AreaName::new("head"));
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::SetDisplay {
+                id: s.frame,
+                display: Some(Display::Grid(g)),
+            },
+            Operation::SetLayoutItem { id: s.a, item },
+        ])));
+        s
+    }
+
+    /// The Container card's areas: the head counts them, the map names them, and
+    /// the CSS line takes typed areas or says why not.
+    ///
+    /// flip: `area_map`'s CSS line committing nothing → fails at *"typed areas
+    /// apply"*.
+    #[test]
+    fn grid_areas_are_mapped_and_typed_as_css() {
+        let s = areas_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.run("Grid template areas");
+        p.run("1 area");
+        p.run("head");
+        p.retype("\"head head\"", "\"a b\"", egui::Key::Enter);
+        let names: Vec<String> = grid_of(&p.app, frame_id)
+            .areas
+            .iter()
+            .map(|a| a.name.to_string())
+            .collect();
+        assert_eq!(names, ["a", "b"], "typed areas apply");
+        p.run("2 areas");
+        let depth = p.app.session.history.undo_depth();
+        p.retype("\"a b\"", "\"a b a\"", egui::Key::Enter);
+        assert_eq!(p.app.session.history.undo_depth(), depth, "refused");
+        p.run("An area must be a rectangle — \"a\" is not");
+    }
+
+    /// A double-click on an area in the map opens its name; a name typed there
+    /// renames it, and the item placed in it follows in the same step.
+    ///
+    /// flip: `commit_inner` without `keep_area_names` → fails at *"the item
+    /// follows"*.
+    #[test]
+    fn renaming_an_area_in_the_map_carries_its_items() {
+        let s = areas_scene();
+        let (frame_id, a) = (s.frame, s.a);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let at = p.run("head");
+        p.frame(vec![egui::Event::PointerMoved(at)]);
+        p.click(at);
+        p.click(at);
+        let depth = p.app.session.history.undo_depth();
+        p.frame(vec![egui::Event::Text("main".into())]);
+        p.frame(vec![key(egui::Key::Enter)]);
+        p.frame(Vec::new());
+        let names: Vec<String> = grid_of(&p.app, frame_id)
+            .areas
+            .iter()
+            .map(|a| a.name.to_string())
+            .collect();
+        assert_eq!(names, ["main"], "renamed");
+        assert_eq!(
+            p.app.session.doc.get(a).unwrap().item().grid_area,
+            Some(ondin_core::container::AreaName::new("main")),
+            "the item follows"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth + 1, "one step");
+    }
+
+    /// An item in an area: the Item card's *Grid area* reads its name, and the
+    /// line rows show the area's lines, disabled.
+    #[test]
+    fn an_item_in_an_area_shows_it_and_its_lines() {
+        let s = areas_scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        p.run("Grid area");
+        p.run("head");
+        p.run("3");
+        let depth = p.app.session.history.undo_depth();
+        p.retype("3", "2", egui::Key::Enter);
+        assert_eq!(
+            p.app.session.history.undo_depth(),
+            depth,
+            "a disabled line takes no typing"
+        );
+    }
+
     /// A grid item's card has its lines and self-alignments in place of flex's rows,
     /// and a line is typed as CSS: a column start `2` and end `span 2` land as
     /// `2 / span 2`.

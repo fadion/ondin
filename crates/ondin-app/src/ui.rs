@@ -2345,8 +2345,9 @@ pub const TICK_DEAD_FADE: f32 = 0.5;
 /// uses*): [`paint_tick_box`] at the menu's inset, a mark in the menu glyph's
 /// column, the name at [`SMALL_PT`] and a faint tail on the right, one
 /// [`MENU_ROW_H`] row of `w` with [`list_row_ground`] under the pointer. An
-/// unticked row's words fade by [`UNTICKED_FADE`]. The caller flips the tick on
-/// the answer's click; only [`Tick::Open`] senses one.
+/// unticked row's words fade by [`UNTICKED_FADE`]. A name too long for the row is
+/// cut with an ellipsis and leads the tooltip, before `tip`. The caller flips the
+/// tick on the answer's click; only [`Tick::Open`] senses one.
 pub fn tick_row(
     ui: &mut egui::Ui,
     w: f32,
@@ -2354,6 +2355,7 @@ pub fn tick_row(
     mark: RowMark,
     name: &str,
     tail: RowTail,
+    tip: Option<&str>,
 ) -> egui::Response {
     /// The menu's inset, before the box.
     const INSET: f32 = 8.0;
@@ -2437,16 +2439,29 @@ pub fn tick_row(
             arrow.left() - 14.0
         }
     };
-    let name_rect =
-        egui::Rect::from_x_y_ranges(rect.left() + NAME_X..=tail_left - 8.0, rect.y_range());
-    p.with_clip_rect(name_rect.intersect(p.clip_rect())).text(
-        egui::pos2(name_rect.left(), y),
-        egui::Align2::LEFT_CENTER,
-        name,
-        egui::FontId::proportional(SMALL_PT),
+    let mut job = egui::text::LayoutJob::single_section(
+        name.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(SMALL_PT), color::text()),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: (tail_left - 8.0 - (rect.left() + NAME_X)).max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = p.layout_job(job);
+    let cut = galley.elided;
+    p.galley(
+        egui::pos2(rect.left() + NAME_X, y - galley.size().y / 2.0),
+        galley,
         color::text(),
     );
-    resp
+    match (cut, tip) {
+        (true, Some(tip)) => resp.on_hover_text(format!("{name} · {tip}")),
+        (true, None) => resp.on_hover_text(name),
+        (false, Some(tip)) => resp.on_hover_text(tip),
+        (false, None) => resp,
+    }
 }
 
 /// The side of a [`field_toggle`]: a segment cell's height, so a toggle inside a
@@ -7727,6 +7742,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A `tick_row` name too long for the row is elided and ends short of the tail.
+    /// flip: `tick_row`'s name laid out with no `max_width` → fails at "elided".
+    #[test]
+    fn a_long_tick_row_name_is_elided_short_of_its_tail() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let long = "Forms/Inputs/Text field/With leading icon/Error state/Large";
+        let tail = "12 instances";
+        let out = ctx.run_ui(Default::default(), |ui| {
+            let _ = tick_row(
+                ui,
+                240.0,
+                Tick::Open(true),
+                RowMark::Glyph(theme::icon::HEXAGON_FILL),
+                long,
+                RowTail::Text(tail.into()),
+                None,
+            );
+        });
+        let texts: Vec<&egui::epaint::TextShape> = out
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        let name = texts
+            .iter()
+            .find(|t| t.galley.job.text == long)
+            .expect("the row paints its name");
+        let tail = texts
+            .iter()
+            .find(|t| t.galley.job.text == tail)
+            .expect("the row paints its tail");
+        assert!(name.galley.elided, "the name was laid out in full");
+        assert!(
+            name.pos.x + name.galley.size().x <= tail.pos.x,
+            "the name's ink runs under the tail"
+        );
     }
 }
 

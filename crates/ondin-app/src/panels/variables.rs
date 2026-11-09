@@ -2427,10 +2427,10 @@ impl OndinApp {
                         );
                         // Outlined only where the canvas shows it.
                         if resp.hovered() && doc.page_of(id) == Some(self.session.page) {
+                            u.why_not.as_deref(),
                             hover = Some(id);
                         }
-                        if let Some(why) = &u.why_not {
-                            resp.on_hover_text(why);
+                        if u.why_not.is_some() {
                             continue;
                         }
                         if ui::double_clicked(ui, &resp) {

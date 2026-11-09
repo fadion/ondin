@@ -555,6 +555,16 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Op
             (None, Change::Detached(0)) => "removed".into(),
             (None, Change::Detached(n)) => format!("{} detach", crate::ui::count(*n, "instance")),
         };
+        let tip = match blocked {
+            Some((_, tip)) => tip,
+            None => format!(
+                "v{} → v{} · {} · {} with overrides",
+                review.held,
+                review.version,
+                crate::ui::count(c.instances, "instance"),
+                c.overridden
+            ),
+        };
         let resp = crate::ui::tick_row(
             ui,
             w,
@@ -562,17 +572,8 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Op
             crate::ui::RowMark::Glyph(icon::HEXAGON_FILL),
             &c.name,
             crate::ui::RowTail::Text(tail),
+            Some(&tip),
         );
-        let resp = match blocked {
-            Some((_, tip)) => resp.on_hover_text(tip),
-            None => resp.on_hover_text(format!(
-                "v{} → v{} · {} · {} with overrides",
-                review.held,
-                review.version,
-                crate::ui::count(c.instances, "instance"),
-                c.overridden
-            )),
-        };
         if resp.clicked() {
             act = Some(ReviewAct::Toggle(c.top));
         }
@@ -605,8 +606,15 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Op
                 Some(name) => crate::ui::RowTail::Text(format!("kept for {name}")),
                 None => tail,
             };
-            crate::ui::tick_row(ui, w, crate::ui::Tick::Fixed, mark, &t.name, tail)
-                .on_hover_text("Variables and styles come with any part of this update");
+            crate::ui::tick_row(
+                ui,
+                w,
+                crate::ui::Tick::Fixed,
+                mark,
+                &t.name,
+                tail,
+                Some("Variables and styles come with any part of this update"),
+            );
         }
         if more > 0 {
             ui.label(

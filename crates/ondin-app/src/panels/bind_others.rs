@@ -15,7 +15,8 @@
 //! radius, gap, padding, limit or effect number — which would list every
 //! layer in the document. A copy that draws the value because its main does is
 //! offered once, as the main's field, with the copies counted; a copy that
-//! overrides it is its own row.
+//! overrides it is its own row, and so is one in modes where the main's `%`
+//! would draw it otherwise.
 
 use super::binding::{COLUMN_GAP, FieldKey, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, ROW_GAP};
 use super::paint::PaintSlot;
@@ -139,10 +140,10 @@ fn literal(doc: &Document, key: FieldKey) -> bool {
     }
 }
 
-/// Whether a field's drawn `cell` is the variable's `value`.
+/// Whether a field's drawn `cell` is the variable's `value`; a colour is
+/// matched by [`draws`], only paints taking one.
 fn same(cell: &Cell, value: &Value) -> bool {
     match (cell, value) {
-        (Cell::Color(a), Value::Color(b)) => a.to_rgba8() == b.to_rgba8(),
         (Cell::Number(a), Value::Number(b)) => (a - b).abs() <= 1e-6 * b.abs().max(1.0),
         (Cell::String(a), Value::String(b)) => a == b,
         (Cell::Boolean(a), Value::Boolean(b)) => a == b,
@@ -270,7 +271,7 @@ impl OndinApp {
                 .any(|n| n.locked())
         };
         // Every candidate first: copies are folded into their mains after.
-        let mut found: Vec<(FieldKey, Field)> = Vec::new();
+        let mut found: Vec<(FieldKey, Field, Option<f32>)> = Vec::new();
         // Every page's layers, top to bottom; the vault is no page's.
         let mut ids: Vec<NodeId> = Vec::new();
         for page in doc.page_ids() {
@@ -311,30 +312,38 @@ impl OndinApp {
                 {
                     continue;
                 }
-                found.push((key, field));
+                // The `%` a paint binds at, read in this layer's modes.
+                let alpha = match &value {
+                    Value::Color(v) => drawn_solid(doc, key).and_then(|c| share(c, *v)),
+                    _ => None,
+                };
+                found.push((key, field, alpha));
             }
         }
         // A copy whose main's same field is offered and can be bound follows
-        // it; under a locked or styled main it is offered as its own.
-        let is_found = |k: FieldKey| found.iter().any(|(f, _)| *f == k);
+        // it; under a locked or styled main it is offered as its own, and so
+        // is one in other modes that the main's `%` would not draw the same.
+        let found_at = |k: FieldKey| found.iter().find(|(f, ..)| *f == k).map(|x| x.2);
+        let is_found = |k: FieldKey, alpha: Option<f32>| found_at(k).is_some_and(|a| a == alpha);
         let dead = |k: FieldKey| {
             locked(k.at()) || doc.get(k.at()).and_then(|n| style_over(n, k)).is_some()
         };
         let source = |k: FieldKey| {
+            let alpha = found_at(k).flatten();
             doc.get(k.at())
                 .and_then(|n| n.link())
                 .map(|l| on(k, l))
-                .filter(|s| is_found(*s) && !dead(*s))
+                .filter(|s| is_found(*s, alpha) && !dead(*s))
         };
         let mut out: Vec<Use> = Vec::new();
-        for &(key, field) in &found {
+        for &(key, field, _) in &found {
             if source(key).is_some() {
                 continue;
             }
             // The copies that follow it, through copies of copies.
             let follows = found
                 .iter()
-                .filter(|(k, _)| {
+                .filter(|(k, ..)| {
                     std::iter::successors(source(*k), |s| source(*s)).any(|s| s == key)
                 })
                 .count();
@@ -777,6 +786,111 @@ mod tests {
             ondin_core::Brush::Solid(BLUE.with_alpha(0.25)),
             "B draws as before"
         );
+    }
+
+    /// **A copy in other modes is its own row when the main's `%` would not draw
+    /// it the same**: `overlay` is black 40% in Light and 60% in Dark; a 40%
+    /// black main in Light binds at 100%, its copy in Dark needs 67%, so the
+    /// copy is offered apart and both draw 40% once bound.
+    ///
+    /// flip: `other_uses`'s `source` ignoring the alpha (`is_found` by key
+    /// alone) → fails at "the copy is its own row".
+    #[test]
+    fn a_copy_needing_another_share_is_its_own_row() {
+        use ondin_core::variable::{Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let m = app.session.ids.mint();
+        let (light, dark) = (app.session.ids.mint_mode(), app.session.ids.mint_mode());
+        let var = app.session.ids.mint_var();
+        let black = |a: f32| Color::BLACK.with_alpha(a);
+        let add = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: Vec::new(),
+        };
+        app.session
+            .try_commit(Transaction(vec![
+                add(light, "Light", 0),
+                add(dark, "Dark", 1),
+                Operation::AddVariable {
+                    var: Variable {
+                        id: var,
+                        name: "overlay".into(),
+                        kind: VarKind::Color,
+                        cells: [
+                            (light, Cell::Color(black(0.4))),
+                            (dark, Cell::Color(black(0.6))),
+                        ]
+                        .into(),
+                        scope: None,
+                        origin: None,
+                        forked: None,
+                        description: String::new(),
+                    },
+                },
+                Operation::CreateNode {
+                    id: m,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(40.0, 20.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some("M".into()),
+                },
+                fill(m, Color::BLACK, 0.4),
+                Operation::SetComponent {
+                    id: m,
+                    component: true,
+                },
+            ]))
+            .expect("the main");
+        let doc = &app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(m).unwrap(),
+                parent: page,
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(app.commit_edit(tx));
+        let inst = made[0];
+        app.session
+            .try_commit(Transaction(vec![Operation::SetModes {
+                id: inst,
+                modes: vec![dark],
+            }]))
+            .expect("the copy in Dark");
+        let uses = app.other_uses(var);
+        let mut at: Vec<NodeId> = uses.iter().map(|u| u.key.at()).collect();
+        at.sort();
+        let mut want = vec![m, inst];
+        want.sort();
+        assert_eq!(at, want, "the copy is its own row");
+        let keys: Vec<FieldKey> = uses.iter().map(|u| u.key).collect();
+        app.bind_other_uses(var, &keys);
+        let doc = &app.session.doc;
+        for id in [m, inst] {
+            let brush = &doc.get(id).unwrap().paint().fills[0].brush;
+            assert_eq!(brush.var(), Some(var));
+            assert_eq!(
+                doc.resolve_brush(id, brush).into_owned().to_owned(),
+                ondin_core::Brush::Solid(black(0.4)),
+                "{id:?} draws as before"
+            );
+        }
     }
 
     #[test]

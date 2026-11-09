@@ -34,6 +34,7 @@ fn pass(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> eg
         events,
         ..Default::default()
     };
+    ui::forget_inline_grounds(ctx);
     ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame))
 }
 
@@ -201,6 +202,9 @@ struct Ground {
     /// Whether it hosts a text entry or a scrubbed number, which keeps its
     /// resting ground under the pointer.
     field: bool,
+    /// Whether `ui::paint_inline_ground` painted it: a rename laid over a row
+    /// or card at that row's height, which sits on no rung of the scale.
+    inline: bool,
 }
 
 impl std::fmt::Display for Ground {
@@ -265,6 +269,7 @@ fn surface(s: &RectShape) -> bool {
 fn grounds(ctx: &egui::Context, out: &egui::FullOutput) -> Vec<Ground> {
     let controls = controls(ctx);
     let texts = texts(out);
+    let inline = ui::inline_grounds(ctx);
     let mut found: Vec<Ground> = Vec::new();
     for (order, s) in rect_shapes(out)
         .into_iter()
@@ -297,6 +302,7 @@ fn grounds(ctx: &egui::Context, out: &egui::FullOutput) -> Vec<Ground> {
                     label: label_in(s.rect, order, &texts),
                     live: false,
                     field: false,
+                    inline: inline.contains(&s.rect),
                 });
                 found.last_mut().expect("just pushed")
             }
@@ -392,24 +398,7 @@ fn slider_rail(g: &Ground) -> bool {
     (g.rect.height() - ui::SLIDER_RAIL_H).abs() <= SLOP && g.stroke == Stroke::NONE
 }
 
-/// A `ui::inline_edit` ground: a text entry on the bare field fill at
-/// `BUTTON_R`, with no hairline or only the typing edge, shorter than a control.
-/// A `ui::text_field` keeps its hairline at rest and stands `CONTROL_H`.
-fn inline_edit(g: &Ground) -> bool {
-    g.field
-        && g.fill == color::field()
-        && uniform(g.radius) == Some(ui::BUTTON_R)
-        && (g.stroke == Stroke::NONE || g.stroke.color == color::accent_700())
-        && g.rect.height() < ui::CONTROL_H - SLOP
-}
-
 const EXEMPT: &[Exempt] = &[
-    Exempt {
-        what: "inline rename",
-        why: "`ui::inline_edit` lays a name field over a list row or card at the \
-              row's own height, not a control's, so it sits on no rung of the scale",
-        is: inline_edit,
-    },
     Exempt {
         what: "slider rail",
         why: "`ui::slider` draws a hairline track with a knob riding on it, a value \
@@ -526,6 +515,11 @@ fn colour_fault(g: &Ground) -> Option<String> {
 }
 
 fn shape_fault(g: &Ground) -> Option<String> {
+    // An inline rename takes its row's height; its corner is still a control's.
+    if g.inline {
+        return (uniform(g.radius) != Some(ui::BUTTON_R))
+            .then(|| "corner off the standard for an inline rename".into());
+    }
     let h = g.rect.height();
     let all = heights();
     let fits: Vec<&Rung> = all.iter().filter(|s| (h - s.h).abs() <= SLOP).collect();

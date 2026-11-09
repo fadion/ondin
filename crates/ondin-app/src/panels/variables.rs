@@ -4602,8 +4602,7 @@ fn edit_field(
     // advances the cursor past what it drew, and a field inside a row the
     // caller had already allocated put the cursor back *above* that row's
     // bottom — the table under a mode being renamed came up five points.
-    ui.painter()
-        .rect_filled(r, egui::CornerRadius::same(ui::BUTTON_R), color::field());
+    ui::paint_inline_ground(ui, r);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
     ));

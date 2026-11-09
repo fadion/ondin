@@ -2167,13 +2167,43 @@ pub fn inline_edit(
     text: &mut String,
     id: egui::Id,
 ) -> egui::Response {
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(BUTTON_R), color::field());
+    paint_inline_ground(ui, rect);
     let resp = label_edit(ui, rect, text, id);
     if resp.has_focus() {
         typing_edge(ui, rect);
     }
     resp
+}
+
+/// An [`inline_edit`]'s ground over `rect`, for a field composed around its own
+/// entry. Under test it notes `rect`, which `control_audit` reads as a ground off
+/// the height scale by design (`inline_grounds`).
+pub fn paint_inline_ground(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(BUTTON_R), color::field());
+    #[cfg(test)]
+    ui.ctx().data_mut(|d| {
+        d.get_temp_mut_or_default::<Vec<egui::Rect>>(inline_grounds_id())
+            .push(rect);
+    });
+}
+
+#[cfg(test)]
+fn inline_grounds_id() -> egui::Id {
+    egui::Id::new("ui-inline-grounds")
+}
+
+/// The rects [`paint_inline_ground`] painted since [`forget_inline_grounds`].
+#[cfg(test)]
+pub(crate) fn inline_grounds(ctx: &egui::Context) -> Vec<egui::Rect> {
+    ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(inline_grounds_id()))
+        .unwrap_or_default()
+}
+
+/// Empty [`inline_grounds`]' list, before a frame whose grounds are read.
+#[cfg(test)]
+pub(crate) fn forget_inline_grounds(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove_temp::<Vec<egui::Rect>>(inline_grounds_id()));
 }
 
 /// [`inline_edit`] with no ground and no edge: the label itself turns editable

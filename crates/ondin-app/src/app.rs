@@ -7806,12 +7806,28 @@ impl OndinApp {
         head: &egui::Response,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
+        self.dropdown_padded(ctx, id, anchor, width, crate::ui::MENU_PAD, head, body);
+    }
+
+    /// [`Self::dropdown`] on a card padded by `pad`: [`crate::ui::POPOVER_PAD`]
+    /// for one that holds prose and fields rather than menu rows.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn dropdown_padded(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        anchor: egui::Pos2,
+        width: f32,
+        pad: f32,
+        head: &egui::Response,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
         let menu = egui::Area::new(egui::Id::new(id))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(width, crate::ui::MENU_PAD));
+                crate::ui::menu_frame(pad).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(width, pad));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     body(self, ui);
                 });

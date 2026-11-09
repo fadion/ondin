@@ -20,8 +20,8 @@ use ondin_core::kurbo::{Affine, Rect, Vec2};
 use ondin_core::{NodeId, Operation};
 use std::collections::{BTreeMap, HashSet};
 
-/// The popover's width.
-const POP_W: f32 = 300.0;
+/// The popover's width: room for a kit's slash-path component names.
+const POP_W: f32 = 340.0;
 /// The gap between the content's right edge and a main made local, and between
 /// mains stacked there (D1011 (3)).
 const LOCAL_GAP: f64 = 80.0;
@@ -95,9 +95,13 @@ impl KitReview {
     }
 }
 
-/// The popover's list at its tallest: its scroll area is this high or as high
-/// as every kit opened, whichever is less, so opening one never resizes it.
-const LIST_MAX_H: f32 = 360.0;
+/// The popover's list at its tallest; past it, the list scrolls.
+const LIST_MAX_H: f32 = 400.0;
+/// The list's cap never falls below this, however little room the window has.
+const LIST_MIN_H: f32 = 120.0;
+/// What the popover holds besides its list — title, footer lines, buttons and
+/// padding — taken from the room below the pill before the list's cap.
+const POP_CHROME_H: f32 = 130.0;
 
 /// A file's modification time, in the scan's whole seconds, and its size — what
 /// the library scan read of it (`library::scan`), so the two compare. `None`
@@ -397,8 +401,16 @@ impl OndinApp {
             .iter()
             .filter(|r| !self.kit_review.off.contains(&r.0))
             .count();
-        let list_h = list_height(&waiting, summary.as_ref()).min(LIST_MAX_H);
-        self.dropdown(&ctx, "kit-updates", anchor, POP_W, &resp, |app, ui| {
+        // The list stands as tall as its rows, up to the cap or the room below
+        // the pill. ⚠️ Asked as a minimum, as last frame measured it: an `Area`
+        // hands a scroll area last frame's size, so a maximum alone would never
+        // grow back once a table closed.
+        let room = ctx.content_rect().bottom() - anchor.y - POP_CHROME_H - ui::SCREEN_MARGIN;
+        let list_max = LIST_MAX_H.min(room).max(LIST_MIN_H);
+        let list_id = egui::Id::new("kit-updates-list-h");
+        let list_h = ctx.data(|d| d.get_temp::<f32>(list_id)).unwrap_or(0.0);
+        let pad = ui::POPOVER_PAD;
+        self.dropdown_padded(&ctx, "kit-updates", anchor, POP_W, pad, &resp, |app, ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
                 egui::RichText::new(format!(
@@ -433,11 +445,12 @@ impl OndinApp {
                 ))
             };
             let mut clicked: Option<(String, Option<super::summary::ReviewAct>)> = None;
-            egui::ScrollArea::vertical()
+            let list = egui::ScrollArea::vertical()
                 .id_salt("kit-updates-list")
-                .max_height(list_h)
-                .min_scrolled_height(list_h)
-                .auto_shrink([false, false])
+                .max_height(list_max)
+                .min_scrolled_height(list_h.min(list_max))
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     for w in &waiting {
@@ -461,6 +474,11 @@ impl OndinApp {
                         }
                     }
                 });
+            let measured = list.content_size.y;
+            if (measured - list_h).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(list_id, measured));
+                ui.ctx().request_repaint();
+            }
             match clicked {
                 Some((kit, None)) => {
                     let was = app.kit_review.is_open(&kit, n);
@@ -494,7 +512,9 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(match one {
                         Some(name) => format!("{layers} using {name} keep its values."),
-                        None => format!("{layers} using what the kits removed keep their values."),
+                        None => {
+                            format!("{layers} using what the kits removed keep their values.")
+                        }
                     })
                     .size(ui::SMALL_PT)
                     .color(theme::text::dim()),
@@ -1063,20 +1083,36 @@ fn waiting_row(
         theme::icon_font(12.0),
         theme::text::muted(),
     );
-    p.text(
-        egui::pos2(glyph.right() + 6.0, y),
-        egui::Align2::LEFT_CENTER,
-        &w.kit.name,
-        egui::FontId::proportional(ui::CONTROL_PT),
-        color::text(),
-    );
-    p.text(
+    let version = p.text(
         egui::pos2(rect.right(), y),
         egui::Align2::RIGHT_CENTER,
         format!("v{} → v{}", w.held, w.kit.version),
         egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
+    // The name is cut short of the version, and then names itself in a tooltip.
+    let name_x = glyph.right() + 6.0;
+    let mut job = egui::text::LayoutJob::single_section(
+        w.kit.name.clone(),
+        egui::TextFormat::simple(egui::FontId::proportional(ui::CONTROL_PT), color::text()),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: (version.left() - 8.0 - name_x).max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = p.layout_job(job);
+    let cut = galley.elided;
+    p.galley(
+        egui::pos2(name_x, y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    let head = match cut {
+        true => head.on_hover_text(&w.kit.name),
+        false => head,
+    };
     let mut click = head.clicked().then_some(RowClick::Fold);
     let line = match part.map(super::summary::headline) {
         Some(h) if !h.is_empty() => h,
@@ -1084,19 +1120,28 @@ fn waiting_row(
         None if w.mains == 0 => "Its variables and styles".to_string(),
         None => ui::count(w.mains, "component"),
     };
-    ui.label(
-        egui::RichText::new(line)
-            .size(ui::SMALL_PT)
-            .color(theme::text::dim()),
-    );
-    if let Some(note) = &w.kit.note {
-        ui.label(
-            egui::RichText::new(format!("“{note}”"))
-                .size(ui::SMALL_PT)
-                .italics()
-                .color(theme::text::muted()),
-        );
-    }
+    // The headline and the note stand under the name, wrapping within the card.
+    let indent = (name_x - rect.left()).round() as i8;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin {
+            left: indent,
+            ..Default::default()
+        })
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(line)
+                    .size(ui::SMALL_PT)
+                    .color(theme::text::dim()),
+            );
+            if let Some(note) = &w.kit.note {
+                ui.label(
+                    egui::RichText::new(format!("“{}”", note.trim()))
+                        .size(ui::SMALL_PT)
+                        .italics()
+                        .color(theme::text::muted()),
+                );
+            }
+        });
     if let Some(k) = part
         && open
         && let Some(a) = super::summary::draw(ui, k, review)
@@ -1111,39 +1156,6 @@ enum RowClick {
     /// Its head: open or close its table.
     Fold,
     Review(super::summary::ReviewAct),
-}
-
-/// How tall the popover's list stands with every kit's table open — an
-/// estimate from the rows' heights, so opening a table never grows the popover
-/// (an egui popup that shrank does not grow back).
-fn list_height(waiting: &[Waiting], summary: Option<&super::summary::Summary>) -> f32 {
-    /// A line of small text and the list's gap after it.
-    const LINE: f32 = 18.0;
-    /// A section's eyebrow, its space above included.
-    const SECTION: f32 = 20.0;
-    let mut h = 0.0;
-    for w in waiting {
-        h += ui::FOLD_HEAD_H + 4.0 + LINE;
-        if w.kit.note.is_some() {
-            h += LINE;
-        }
-        let Some(k) = summary.and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id)) else {
-            continue;
-        };
-        let changed = k.components.iter().filter(|c| c.change.stays()).count();
-        let removed = k.components.len() - changed;
-        let tokens = k.changed.len() + k.added.len() + k.removed.len();
-        let shown = tokens.min(super::summary::MAX_ROWS);
-        for n in [changed, removed, shown] {
-            if n > 0 {
-                h += SECTION + n as f32 * (ui::MENU_ROW_H + 4.0);
-            }
-        }
-        if tokens > shown {
-            h += LINE;
-        }
-    }
-    h
 }
 
 #[cfg(test)]

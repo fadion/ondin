@@ -379,3 +379,72 @@ fn a_reordered_collection_keeps_the_query_in_width_order() {
             .collect();
     assert_eq!(order, vec![f.compact, f.regular, f.wide]);
 }
+
+/// A querying frame nested in another settles in a second round: *Shell*, 300
+/// wide, stretched to 700 by a column, picks Wide only once laid out; the Card
+/// inside it is as wide as `density/w` reads there (260 Compact, 700 Wide), so
+/// it can pick Wide only after Shell has. Flip: `Resolved::settle` running one
+/// round → the inner Card reads Compact.
+#[test]
+fn a_nested_query_settles_after_the_one_around_it() {
+    let mut f = fixture();
+    f.by_width();
+    let (col, shell) = (f.ids.mint(), f.ids.mint());
+    let w: VarId = f.ids.mint_var();
+    let page = f.page;
+    f.commit(vec![
+        frame(col, page, 700.0),
+        Operation::SetDisplay {
+            id: col,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                ..Default::default()
+            })),
+        },
+        frame(shell, col, 300.0),
+        Operation::AddVariable {
+            var: Variable {
+                id: w,
+                name: "density/w".into(),
+                kind: VarKind::Number,
+                cells: [
+                    (f.compact, Cell::Number(260.0)),
+                    (f.regular, Cell::Number(400.0)),
+                    (f.wide, Cell::Number(700.0)),
+                ]
+                .into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let mut fill = *f.doc.get(shell).unwrap().item();
+    fill.width = Dimension::Percent(100.0);
+    f.commit(vec![Operation::SetLayoutItem {
+        id: shell,
+        item: fill,
+    }]);
+    let ops = variable::query_ops(&f.doc, shell, ModeOwner::Collection(f.density), true)
+        .expect("a plain frame picks by width");
+    f.commit(ops);
+    let inner = f.instance(shell, 300.0);
+    let ops = ondin_core::bind_size_ops(&f.doc, inner, [Some(w), None]);
+    assert!(!ops.is_empty(), "the fixture: the width binds");
+    f.commit(ops);
+    assert_eq!(
+        f.inside(shell),
+        Some(f.compact),
+        "unsettled: Shell's own 300"
+    );
+    assert_eq!(f.inside(inner), Some(f.compact), "unsettled: 260");
+
+    let res = Resolved::settled(&mut f.doc);
+    assert_eq!(f.inside(shell), Some(f.wide), "Shell stretched to 700");
+    let Some(NodeKind::Artboard { size, .. }) = res.used_kind(&f.doc, inner) else {
+        panic!("the inner Card is a frame");
+    };
+    assert_eq!(size.width, 700.0, "the inner Card reads Wide's width");
+    assert_eq!(f.inside(inner), Some(f.wide), "and then picks Wide itself");
+}

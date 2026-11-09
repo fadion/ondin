@@ -556,12 +556,31 @@ struct TrackDrag {
 }
 
 /// The area whose name the map is editing, and the text typed so far; `fresh`
-/// until the field has been given focus.
+/// until the field has been given focus. `fold` is the undo step a drag just
+/// made the area in, which the name joins (`EditorSession::commit_into_last`).
 #[derive(Clone, Debug)]
 struct Renaming {
     name: AreaName,
     text: String,
     fresh: bool,
+    fold: Option<(usize, u64)>,
+}
+
+/// The columns and rows the area map draws: the template's tracks, or as many as
+/// the areas reach past them — CSS sizes the explicit grid by the larger.
+fn map_tracks(g: &Grid) -> (usize, usize) {
+    let reach = |f: fn(&GridArea) -> u16| {
+        g.areas
+            .iter()
+            .filter(|a| a.is_valid())
+            .map(|a| usize::from(f(a)) - 1)
+            .max()
+            .unwrap_or(0)
+    };
+    (
+        track_count(&g.columns).max(reach(|a| a.columns[1])),
+        track_count(&g.rows).max(reach(|a| a.rows[1])),
+    )
 }
 
 /// The undo step of every edit to a grid's areas.
@@ -982,7 +1001,7 @@ impl OndinApp {
         let agreed = grids
             .iter()
             .all(|o| o.areas == g.areas && o.columns == g.columns && o.rows == g.rows);
-        let (cols, rows) = (track_count(&g.columns), track_count(&g.rows));
+        let (cols, rows) = map_tracks(&g);
         let mark = self.grid_mark(
             subjects,
             |g| g.areas.clone(),
@@ -1087,23 +1106,30 @@ impl OndinApp {
         full: f32,
     ) {
         const GAP: f32 = 3.0;
-        let (cols, rows) = (track_count(&g.columns), track_count(&g.rows));
+        let (cols, rows) = map_tracks(g);
         let h = ui::CONTROL_H;
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(full, rows as f32 * (h + GAP) + GAP),
             egui::Sense::click_and_drag(),
         );
         // Column widths at the laid tracks' proportions, each at least a sliver;
-        // equal where the grid lays none.
+        // a column with no laid track (an area past the template, nothing in it)
+        // at the laid ones' mean, and all equal where the grid lays none.
         let laid = ondin_core::build::laid_grid(&self.session.doc, subjects[0]);
-        let mut widths: Vec<f32> = (0..cols)
+        let laid: Vec<Option<f32>> = (0..cols)
             .map(|c| {
                 // CSS's column 1 is laid track `before`.
                 laid.as_ref()
                     .and_then(|l| l.columns.spans.get(usize::from(l.columns.before) + c))
-                    .map_or(1.0, |(a, b)| (b - a).max(0.0) as f32)
+                    .map(|(a, b)| (b - a).max(0.0) as f32)
             })
             .collect();
+        let known: Vec<f32> = laid.iter().flatten().copied().collect();
+        let mean = match known.len() {
+            0 => 1.0,
+            n => known.iter().sum::<f32>() / n as f32,
+        };
+        let mut widths: Vec<f32> = laid.iter().map(|w| w.unwrap_or(mean)).collect();
         let total: f32 = widths.iter().sum();
         let room = rect.width() - GAP * (cols as f32 + 1.0);
         for w in &mut widths {
@@ -1216,6 +1242,8 @@ impl OndinApp {
                     let tx = self.grid_tx(subjects, |g| g.areas.push(area));
                     self.session.name_step(AREAS_STEP, icon::GRID_LAYOUT);
                     if self.commit_edit(tx) {
+                        let fold =
+                            Some((self.session.history.undo_depth(), self.session.commits()));
                         ui.ctx().data_mut(|d| {
                             d.insert_temp(
                                 renaming_key,
@@ -1223,6 +1251,7 @@ impl OndinApp {
                                     name,
                                     text: name.as_str().to_owned(),
                                     fresh: true,
+                                    fold,
                                 },
                             )
                         });
@@ -1250,6 +1279,7 @@ impl OndinApp {
                             name: a.name,
                             text: a.name.as_str().to_owned(),
                             fresh: true,
+                            fold: None,
                         },
                     )
                 });
@@ -1303,7 +1333,15 @@ impl OndinApp {
                 }
             });
             self.session.name_step(AREAS_STEP, icon::GRID_LAYOUT);
-            self.commit_edit(tx);
+            match n.fold {
+                Some(at) => {
+                    self.note_edit(None, &tx);
+                    self.session.commit_into_last(tx, at);
+                }
+                None => {
+                    self.commit_edit(tx);
+                }
+            }
         } else {
             ui.ctx().data_mut(|d| d.insert_temp(renaming_key, n));
         }

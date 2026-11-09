@@ -5648,6 +5648,102 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth + 1, "one step");
     }
 
+    /// A drag across empty cells makes an area and opens its name; the name typed
+    /// there joins the drag's undo step, so one undo takes the area away.
+    ///
+    /// flip: the rename committing with `commit_edit` whatever its `fold` → fails
+    /// at *"making and naming is one step"*.
+    #[test]
+    fn making_and_naming_an_area_is_one_step() {
+        let s = areas_scene();
+        let frame_id = s.frame;
+        let mut g = grid_of(&s.app, frame_id);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        g.rows = ondin_core::container::parse_tracks("50px 50px").unwrap();
+        assert!(
+            p.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: frame_id,
+                    display: Some(Display::Grid(g)),
+                }]))
+        );
+        p.app.session.selection.set(vec![frame_id]);
+        let head = p.run("head");
+        let depth = p.app.session.history.undo_depth();
+        // The empty second row, under `head`'s label.
+        let row2 = head + egui::vec2(0.0, ui::CONTROL_H + 3.0);
+        p.drag(row2, row2 + egui::vec2(8.0, 0.0), true);
+        p.frame(vec![egui::Event::Text("side".into())]);
+        p.frame(vec![key(egui::Key::Enter)]);
+        p.frame(Vec::new());
+        let names = |app: &OndinApp| -> Vec<String> {
+            grid_of(app, frame_id)
+                .areas
+                .iter()
+                .map(|a| a.name.to_string())
+                .collect()
+        };
+        assert_eq!(names(&p.app), ["head", "side"], "made and named");
+        assert_eq!(
+            p.app.session.history.undo_depth(),
+            depth + 1,
+            "making and naming is one step"
+        );
+        p.app.session.undo();
+        assert_eq!(names(&p.app), ["head"], "one undo takes it away");
+    }
+
+    /// An area typed past the template's tracks is drawn on tracks of its own, as
+    /// CSS grows the explicit grid to it: a third column beside a two-column
+    /// template sits inside the map, and a second row under a one-row template a
+    /// whole row below.
+    ///
+    /// flip: `area_cells` counting `track_count` alone → fails at *"side inside
+    /// the map"*.
+    #[test]
+    fn an_area_past_the_template_gets_tracks_of_its_own() {
+        let s = areas_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype(
+            "\"head head\"",
+            "\"head head side\" \"low . .\"",
+            egui::Key::Enter,
+        );
+        assert_eq!(
+            grid_of(&p.app, frame_id).areas.len(),
+            3,
+            "typed areas apply"
+        );
+        let shapes = p.shapes();
+        let label = |name: &str| {
+            shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == name => {
+                        Some((t.galley.rect.translate(t.pos.to_vec2()), cs.clip_rect))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{name} is drawn"))
+        };
+        let (head, _) = label("head");
+        let (side, clip) = label("side");
+        assert!(
+            clip.contains_rect(side),
+            "side inside the map: {side:?} in {clip:?}"
+        );
+        assert!(side.left() > head.right(), "side right of head");
+        let (low, clip) = label("low");
+        assert!(clip.contains_rect(low), "low inside the map");
+        assert!(
+            (low.center().y - head.center().y - (ui::CONTROL_H + 3.0)).abs() < 1.0,
+            "low a whole row below: {low:?} under {head:?}"
+        );
+    }
+
     /// An item in an area: the Item card's *Grid area* reads its name, and the
     /// line rows show the area's lines, disabled.
     #[test]

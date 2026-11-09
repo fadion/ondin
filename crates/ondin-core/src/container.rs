@@ -1069,7 +1069,7 @@ pub struct GridArea {
 
 impl GridArea {
     /// A name CSS reads, and at least one cell inside [`MAX_TEMPLATE_TRACKS`].
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         let span = |[a, b]: [u16; 2]| a >= 1 && a < b && usize::from(b) <= MAX_TEMPLATE_TRACKS + 1;
         self.name.is_valid() && span(self.columns) && span(self.rows)
     }

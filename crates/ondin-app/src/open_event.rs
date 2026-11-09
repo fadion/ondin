@@ -194,7 +194,11 @@ mod tests {
         for _ in 0..3 {
             let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
         }
-        assert_eq!(*pending(), [path.clone()], "still queued");
+        assert_eq!(
+            pending().as_slice(),
+            std::slice::from_ref(&path),
+            "still queued"
+        );
         assert_ne!(app.session.path.as_deref(), Some(path.as_path()));
 
         app.confirming_close = false;

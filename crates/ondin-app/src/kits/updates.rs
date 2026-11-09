@@ -1141,11 +1141,7 @@ fn list_height(waiting: &[Waiting], summary: Option<&super::summary::Summary>) -
         let Some(k) = summary.and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id)) else {
             continue;
         };
-        let changed = k
-            .components
-            .iter()
-            .filter(|c| c.change == super::summary::Change::Changed)
-            .count();
+        let changed = k.components.iter().filter(|c| c.change.stays()).count();
         let removed = k.components.len() - changed;
         let tokens = k.changed.len() + k.added.len() + k.removed.len();
         let shown = tokens.min(super::summary::MAX_ROWS);

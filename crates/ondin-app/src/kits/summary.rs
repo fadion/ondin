@@ -53,14 +53,25 @@ pub(crate) struct Component {
 }
 
 /// What an update does to a [`Component`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Change {
     /// Rewritten to the new publish.
     Changed,
+    /// Otherwise as published, but reading a variable or style the publish
+    /// removes, which it detaches from: the first one's name, and how many more.
+    Unbinds(String, usize),
     /// No longer published: made a local main, its instances still following it.
     MadeLocal,
     /// A variant its set's update deletes, detaching this many instances.
     Detached(usize),
+}
+
+impl Change {
+    /// Whether the component stays the kit's, rewritten — a row of the review's
+    /// *Changed* section rather than *Removed*.
+    pub(crate) fn stays(&self) -> bool {
+        matches!(self, Change::Changed | Change::Unbinds(..))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,7 +85,8 @@ pub(crate) enum TokenKind {
 pub(crate) struct KitSummary {
     pub kit: String,
     /// The components the update rewrites, then those it removes, in the
-    /// vault's order.
+    /// vault's order, then those it only detaches from a removed variable or
+    /// style.
     pub components: Vec<Component>,
     pub changed: Vec<Token>,
     pub added: Vec<Token>,
@@ -415,6 +427,38 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             readers: reader_tops(doc, &users),
         });
     }
+    // A main the sync leaves as it is still changes when it reads what the
+    // publish removes: the removal detaches it, and holding it back keeps it.
+    let mut unbinds: Vec<(NodeId, Vec<String>)> = Vec::new();
+    for t in kits.iter().flat_map(|k| &k.removed) {
+        for r in &t.readers {
+            if !update.updated.contains(r) || kits.iter().any(|k| k.tops().contains(r)) {
+                continue;
+            }
+            match unbinds.iter_mut().find(|(top, _)| top == r) {
+                Some((_, names)) => names.push(t.name.clone()),
+                None => unbinds.push((*r, vec![t.name.clone()])),
+            }
+        }
+    }
+    for (top, names) in unbinds {
+        let Some(o) = doc.get(top).and_then(|n| n.origin()) else {
+            continue;
+        };
+        let mains = match doc.get(top) {
+            Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, top),
+            _ => vec![top],
+        };
+        let (instances, overridden) = instances_outside(doc, &mains);
+        let i = part(&mut kits, &o.kit);
+        kits[i].components.push(Component {
+            top,
+            name: crate::private::layer(doc, top).into_owned(),
+            instances,
+            overridden,
+            change: Change::Unbinds(names[0].clone(), names.len() - 1),
+        });
+    }
     Summary {
         kits,
         needs: update.needs.clone(),
@@ -502,12 +546,14 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Op
     let mut component = |ui: &mut egui::Ui, c: &Component| {
         let on = !review.off.contains(&c.top);
         let blocked = (review.why)(c.top);
-        let tail = match (&blocked, c.change) {
+        let tail = match (&blocked, &c.change) {
             (Some((tail, _)), _) => tail.clone(),
             (None, Change::Changed) => crate::ui::count(c.instances, "instance"),
+            (None, Change::Unbinds(name, 0)) => format!("detaches {name}"),
+            (None, Change::Unbinds(name, more)) => format!("detaches {name} +{more}"),
             (None, Change::MadeLocal) => "made local".into(),
             (None, Change::Detached(0)) => "removed".into(),
-            (None, Change::Detached(n)) => format!("{} detach", crate::ui::count(n, "instance")),
+            (None, Change::Detached(n)) => format!("{} detach", crate::ui::count(*n, "instance")),
         };
         let resp = crate::ui::tick_row(
             ui,
@@ -536,16 +582,8 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary, review: &Review<'_>) -> Op
             act = Some(ReviewAct::Menu(c.top, at));
         }
     };
-    let changed: Vec<&Component> = k
-        .components
-        .iter()
-        .filter(|c| c.change == Change::Changed)
-        .collect();
-    let removed: Vec<&Component> = k
-        .components
-        .iter()
-        .filter(|c| c.change != Change::Changed)
-        .collect();
+    let changed: Vec<&Component> = k.components.iter().filter(|c| c.change.stays()).collect();
+    let removed: Vec<&Component> = k.components.iter().filter(|c| !c.change.stays()).collect();
     for (title, rows) in [("Changed", changed), ("Removed", removed)] {
         if rows.is_empty() {
             continue;
@@ -826,5 +864,101 @@ mod tests {
         assert_eq!(removed.detach, 1, "the page's layer, not Badge's copy");
         assert_eq!(headline(k), "2 components · 3 variables");
         assert_eq!(s.detaching(), (1, Some("old")));
+    }
+
+    /// **A main whose only change is a removed variable is a row**: v2 detaches
+    /// Badge from `old` to the same navy and removes `old`, so the sync writes
+    /// nothing, yet the removal detaches Badge here — a row the review can hold.
+    ///
+    /// flip: `summary` dropping its `unbinds` rows → fails at "Badge's row".
+    #[test]
+    fn a_main_reading_a_removed_variable_is_a_row() {
+        let mut ids = IdSource::new(0xBF);
+        let root = ids.mint();
+        let mut kit = ondin_core::Document::new(root);
+        let badge = ids.mint();
+        let day = ids.mint_mode();
+        let old = ids.mint_var();
+        kit.apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
+                mode: Mode {
+                    id: day,
+                    name: "Day".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            var(old, "old", day, Cell::Color(NAVY)),
+            Operation::CreateNode {
+                id: badge,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(24.0, 24.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            Operation::SetFills {
+                id: badge,
+                fills: bound(old),
+            },
+            Operation::SetComponent {
+                id: badge,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        kit.set_meta(DocumentMeta {
+            id: Some(KIT.into()),
+            name: Some("Atlas".into()),
+            kit: Some(KitMark::default()),
+            ..DocumentMeta::default()
+        });
+        ondin_core::kit::publish(&mut kit, None, 1);
+        let mut d = ondin_core::Document::new(ids.mint());
+        let droot = d.first_page();
+        let (tx, _) =
+            ondin_core::kit::insert(&d, &mut ids, KIT, 1, kit.published().unwrap(), badge, droot)
+                .unwrap();
+        d.apply(&tx).unwrap();
+        kit.apply(&Transaction(vec![
+            Operation::SetFills {
+                id: badge,
+                fills: keyed_by_position([Fill {
+                    brush: NAVY.into(),
+                    visible: true,
+                }]),
+            },
+            Operation::RemoveVariable { id: old },
+        ]))
+        .unwrap();
+        ondin_core::kit::publish(&mut kit, None, 2);
+        let v2 = [(KIT, 2, kit.published().unwrap())];
+        let u = ondin_core::kit::update_all(&d, &mut ids, d.first_page(), &v2).unwrap();
+        let [top] = u.updated[..] else {
+            panic!("Badge synced: {:?}", u.updated)
+        };
+        assert!(u.changed.is_empty(), "the sync writes nothing to Badge");
+        let s = summary(&d, &u);
+        let [k] = &s.kits[..] else {
+            panic!("one kit: {s:?}")
+        };
+        let [c] = &k.components[..] else {
+            panic!("Badge's row: {:?}", k.components)
+        };
+        assert_eq!(
+            (c.top, &c.change),
+            (top, &Change::Unbinds("old".into(), 0)),
+            "Badge detaches from old"
+        );
+        assert_eq!(headline(k), "1 component · 1 variable");
+        // Its row held, `old` stays for it.
+        let held =
+            ondin_core::kit::update_holding(&d, &mut ids, d.first_page(), &v2, &[top]).unwrap();
+        assert!(held.vars_removed.is_empty(), "old kept for Badge");
     }
 }

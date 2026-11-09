@@ -64,7 +64,7 @@ The popover (`kits/updates.rs`) lists each kit as a head row (caret, name, "v8 �
 
 | Section | Rows | Tick | Tail |
 | --- | --- | --- | --- |
-| *Changed* | each changed vault top | the user's | its instance count; tooltip "v4 → v6 · N instances · M with overrides" |
+| *Changed* | each changed vault top, then each top the sync leaves as it is that reads a variable or style the publish removes (the removal detaches it; holding it keeps the token) | the user's | its instance count, or "detaches ‹name›" ("+N" for more); tooltip "v4 → v6 · N instances · M with overrides" |
 | *Removed* | a main made local, or a variant its set's update deletes | the user's; a variant is ticked with its set | "made local", "N instances detach" (or "removed" with none) |
 | *With any of these* | the kit's changed, added and removed variables and styles, at most `MAX_ROWS` (6) then "and N more" | fixed on (tooltip "Variables and styles come with any part of this update") | old → new value; a removed one a held top reads, "kept for ‹name›" |
 

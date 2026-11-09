@@ -379,7 +379,7 @@ impl OndinApp {
     /// committed as that push instead ([`OndinApp::push_from_reset`]).
     pub(crate) fn commit_reset(&mut self, tx: Transaction) {
         if crate::ui::take_push(&self.egui_ctx) {
-            self.push_from_reset(tx);
+            self.push_from_reset(tx, false);
             return;
         }
         let tx = self.items_stated(tx);
@@ -7648,6 +7648,38 @@ mod tests {
         assert!(
             !crate::ui::take_push(&f.app.egui_ctx),
             "the request is spent"
+        );
+    }
+
+    /// A reset pushed as one property's (its label's row) toasts a property, not
+    /// a field. Flip: `push_from_reset` ignoring `property` → fails at the toast.
+    /// The flag's caller in `own_rows` is not driven here.
+    #[test]
+    fn a_property_push_from_its_label_toasts_a_property() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: f.ir,
+                    opacity: 0.25,
+                }]))
+        );
+        let reset: Vec<Operation> = ondin_core::reset::overrides(&f.app.session.doc, f.ir)
+            .into_iter()
+            .map(|o| o.reset)
+            .collect();
+        assert_eq!(reset.len(), 1, "the fixture: one override");
+        f.app.push_from_reset(Transaction(reset), true);
+        assert!(
+            f.app
+                .session
+                .status()
+                .text
+                .starts_with("Pushed 1 property into Button"),
+            "{}",
+            f.app.session.status().text
         );
     }
 

@@ -2251,7 +2251,7 @@ impl OndinApp {
         let push = crate::ui::take_push(&self.egui_ctx);
         for tx in out.into_iter().filter(|t| !t.0.is_empty()) {
             if push {
-                self.push_from_reset(tx);
+                self.push_from_reset(tx, true);
                 continue;
             }
             self.session.name_step("Property", icon::SLIDERS_HORIZONTAL);

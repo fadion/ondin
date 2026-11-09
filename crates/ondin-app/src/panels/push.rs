@@ -352,8 +352,9 @@ impl OndinApp {
 
     /// A reset of one thing, committed as its push instead — the row beside a
     /// reset (`ui::reset_push_menu`): each field the reset would write back is
-    /// written into the main from the copy.
-    pub(crate) fn push_from_reset(&mut self, tx: Transaction) {
+    /// written into the main from the copy. `property` says the reset was one
+    /// component property's (its label's row), so the toast counts a property.
+    pub(crate) fn push_from_reset(&mut self, tx: Transaction, property: bool) {
         let doc = &self.session.doc;
         // One instance pushes: two pushing one field into one main would leave
         // whichever came last, silently. Several layers of one instance are one.
@@ -380,6 +381,10 @@ impl OndinApp {
             return;
         }
         let ops = push::fields(doc, &tx.0, &mut self.session.ids);
+        if property {
+            self.commit_push(root, ops, PushWhat::Properties(1));
+            return;
+        }
         let n = ops
             .iter()
             .filter(|op| {

@@ -3402,15 +3402,10 @@ fn styles_tab(
                     ui.allocate_exact_size(egui::vec2(b.inner_w, GROUP_H), egui::Sense::click());
                 let p = ui.painter();
                 ui::list_row_ground(p, rect, false, resp.hovered());
-                p.text(
+                ui::fold_caret(
+                    p,
                     egui::pos2(rect.left() + 6.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    if open {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_RIGHT
-                    },
-                    crate::theme::icon_font(11.0),
+                    open,
                     theme::text::faint(),
                 );
                 let name = p.layout_no_wrap(
@@ -3550,15 +3545,10 @@ fn style_group_row(
         matches!(&b.menu, Some((Menu::StyleGroup(s, p), _)) if *s == g.slot && p == g.path);
     let p = ui.painter();
     ui::list_row_ground(p, rect, menu_open, resp.hovered());
-    p.text(
+    ui::fold_caret(
+        p,
         egui::pos2(left + 6.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        crate::theme::icon_font(11.0),
+        open,
         theme::text::faint(),
     );
     let name = p.layout_no_wrap(
@@ -3871,15 +3861,10 @@ fn group_row(
     let p = ui.painter();
     ui::list_row_ground(p, rect, false, resp.hovered());
     let open = !b.collapsed.contains(&key) || !b.query.trim().is_empty();
-    p.text(
+    ui::fold_caret(
+        p,
         egui::pos2(rect.left() + 6.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        crate::theme::icon_font(11.0),
+        open,
         theme::text::faint(),
     );
     let name = p.layout_no_wrap(

@@ -1053,18 +1053,7 @@ fn waiting_row(
     let y = rect.center().y;
     let mut x = rect.left();
     if table {
-        let caret = if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        };
-        p.text(
-            egui::pos2(x, y),
-            egui::Align2::LEFT_CENTER,
-            caret,
-            theme::icon_font(12.0),
-            ink,
-        );
+        ui::fold_caret(p, egui::pos2(x, y), open, ink);
         x += 16.0;
     }
     let glyph = p.text(

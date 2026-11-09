@@ -1161,6 +1161,26 @@ pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response,
     (resp, baseline)
 }
 
+/// A fold's caret beside a name rather than an eyebrow — a group, a kit — its
+/// left edge at `at`'s x and centred on its y. Answers the glyph's rect.
+pub fn fold_caret(p: &egui::Painter, at: egui::Pos2, open: bool, ink: egui::Color32) -> egui::Rect {
+    let caret = if open {
+        icon::CARET_DOWN
+    } else {
+        icon::CARET_RIGHT
+    };
+    p.text(
+        at,
+        egui::Align2::LEFT_CENTER,
+        caret,
+        theme::icon_font(FOLD_CARET_PT),
+        ink,
+    )
+}
+
+/// A [`fold_caret`]'s size.
+pub const FOLD_CARET_PT: f32 = 11.0;
+
 /// How far below a galley's top its first row's baseline sits.
 pub fn baseline_in(galley: &egui::Galley) -> f32 {
     galley

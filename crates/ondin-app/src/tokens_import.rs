@@ -805,15 +805,10 @@ fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
     let p = ui.painter();
     ui::list_row_ground(p, rect, false, resp.hovered());
     let y = rect.center().y;
-    p.text(
+    ui::fold_caret(
+        p,
         egui::pos2(rect.left() + ROW_IN, y),
-        egui::Align2::LEFT_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        theme::icon_font(11.0),
+        open,
         theme::text::faint(),
     );
     let label = p.text(

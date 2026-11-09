@@ -1475,15 +1475,10 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
     } else {
         theme::text::muted()
     };
-    p.text(
+    ui::fold_caret(
+        p,
         egui::pos2(rect.left() + 4.0, y),
-        egui::Align2::LEFT_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        theme::icon_font(11.0),
+        open,
         theme::text::dim(),
     );
     p.text(

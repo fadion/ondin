@@ -937,11 +937,9 @@ impl OndinApp {
                     .size(ui::CAPTION_PT)
                     .color(color::danger()),
             );
-        } else if grids
-            .iter()
-            .zip(subjects)
-            .any(|(g, id)| repeats_to_fit(&get(g)) && self.hugs_axis(*id, rows))
-        {
+        } else if grids.iter().zip(subjects).any(|(g, id)| {
+            repeats_to_fit(&get(g)) && self.hugs_axis(*id, rows) && self.laid_once(*id, rows)
+        }) {
             // Valid, with a consequence worth naming: CSS repeats once.
             ui.label(
                 egui::RichText::new(if rows {
@@ -1330,6 +1328,23 @@ impl OndinApp {
                 NodeKind::Group => matches!(size, Dimension::Auto | Dimension::FitContent),
                 _ => size == Dimension::FitContent,
             }
+    }
+
+    /// Whether grid container `id`'s automatic repeat across `rows`' axis was laid
+    /// once — read from the layout, since a row parent can grow a frame that fits
+    /// its content to a width the repeat then fills.
+    fn laid_once(&self, id: NodeId, rows: bool) -> bool {
+        let Some(Display::Grid(g)) = self.session.doc.get(id).and_then(|n| n.display()) else {
+            return false;
+        };
+        let Some(laid) = ondin_core::build::laid_grid(&self.session.doc, id) else {
+            return true;
+        };
+        let (list, axis) = match rows {
+            true => (&g.rows, &laid.rows),
+            false => (&g.columns, &laid.columns),
+        };
+        usize::from(axis.explicit) <= track_count(list)
     }
 
     /// Entry `i` of a track list: the grip, the kind menu, the kind's fields and

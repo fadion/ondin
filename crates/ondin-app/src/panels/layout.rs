@@ -5401,6 +5401,52 @@ mod tests {
         p.run("repeats to fit");
     }
 
+    /// The *repeats once* note reads the layout: a frame that fits its content,
+    /// grown by its row parent to 240 wide, repeats `auto-fill` twice and has no
+    /// note; not grown, it has nothing to fill, and the note shows.
+    ///
+    /// flip: the note's `laid_once` test dropped → fails at *"grown, no note"*.
+    #[test]
+    fn a_grown_fit_content_grid_has_no_repeats_once_note() {
+        const NOTE: &str = "Fit content gives no width to fill — it repeats once";
+        let mut s = scene();
+        let inner = s.app.session.ids.mint();
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: inner,
+                parent: s.frame,
+                index: 2,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: inner,
+                display: Some(Display::Grid(Grid {
+                    columns:
+                        ondin_core::container::parse_tracks("repeat(auto-fill, 100px)").unwrap(),
+                    ..Default::default()
+                })),
+            },
+        ])));
+        set_item(&mut s.app, inner, |i| {
+            i.width = Dimension::FitContent;
+            i.grow = 1.0;
+        });
+        // 400 less the padding, the two rects and two gaps.
+        assert_eq!(drawn(&s.app, inner).width(), 240.0, "fixture: grown");
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![inner]);
+        p.run("repeats to fit");
+        assert!(p.runs(NOTE).is_empty(), "grown, no note");
+        set_item(&mut p.app, inner, |i| i.grow = 0.0);
+        p.run(NOTE);
+    }
+
     /// `grid_scene` with its columns set to `css`.
     fn grid_with_columns(css: &str) -> Scene {
         let mut s = grid_scene();

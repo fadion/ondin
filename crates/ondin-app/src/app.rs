@@ -8477,22 +8477,7 @@ impl OndinApp {
                                         .size(crate::ui::SMALL_PT)
                                         .color(theme::text::muted()),
                                 );
-                                // A bare word, lit a ramp step under the pointer.
-                                let word = ui.fonts_mut(|f| {
-                                    f.layout_no_wrap(
-                                        "Cancel".into(),
-                                        egui::FontId::proportional(crate::ui::SMALL_PT),
-                                        egui::Color32::PLACEHOLDER,
-                                    )
-                                });
-                                let (rect, resp) =
-                                    ui.allocate_exact_size(word.size(), egui::Sense::click());
-                                let ink = match resp.hovered() {
-                                    true => color::accent_200(),
-                                    false => color::accent_300(),
-                                };
-                                ui.painter().galley(rect.min, word, ink);
-                                cancel = resp.clicked();
+                                cancel = crate::ui::word_link(ui, "Cancel", false).clicked();
                             }
                         });
                     });

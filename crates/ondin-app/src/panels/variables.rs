@@ -200,9 +200,9 @@ pub(crate) struct Browser {
     inner_w: f32,
     /// The panel's rect as last drawn.
     pub(crate) panel: Option<egui::Rect>,
-    /// After *Extract into variable…*: the variable made and how many other
-    /// fields draw its value — the offer line under its row while it shows.
-    pub(crate) offer: Option<(VarId, usize)>,
+    /// After *Extract into variable…*: the variable made and the other fields
+    /// drawing its value — the offer line under its row while it shows.
+    pub(crate) offer: Option<super::bind_others::Offer>,
     /// The document revision `offer` was counted at; counted again when it
     /// moves, and gone once nothing else draws the value.
     pub(crate) offer_rev: u64,
@@ -317,6 +317,9 @@ enum Act {
     Scope(VarId, Option<Scope>),
     /// *Bind other uses*'s *Bind*: these fields bound to the variable.
     BindUses(VarId, Vec<super::binding::FieldKey>),
+    /// The offer line's *Bind N other fields*: what the list would start with
+    /// ticked, bound without opening it.
+    BindReady(VarId),
     /// A row of that list double-clicked: its layer selected and shown.
     Reveal(NodeId),
 }
@@ -470,11 +473,10 @@ impl OndinApp {
             b.bind = None;
         }
         let rev = self.session.revision();
-        if let Some((v, _)) = b.offer
+        if let Some(o) = b.offer
             && b.offer_rev != rev
         {
-            let n = self.other_uses(v).len();
-            b.offer = (n > 0).then_some((v, n));
+            b.offer = self.offer_of(o.var);
             b.offer_rev = rev;
         }
         // **Collapsed groups are the document's, not the panel's** (D1038
@@ -715,10 +717,10 @@ impl OndinApp {
                                             &mut acts,
                                             pending,
                                         );
-                                        if let Some((o, n)) = b.offer
-                                            && o == v.id
+                                        if let Some(o) = b.offer
+                                            && o.var == v.id
                                         {
-                                            offer_line(ui, doc, v, n, b.inner_w, &mut acts);
+                                            offer_line(ui, doc, v, o, b.inner_w, &mut acts);
                                         }
                                     }
                                     Line::Kit(k) => kit_row(
@@ -1428,13 +1430,7 @@ impl OndinApp {
                             if b.bind.as_ref().is_none_or(|l| l.var != *var) {
                                 let uses = self.other_uses(*var);
                                 let own = table.get(*var).and_then(|v| v.scope);
-                                let on = uses
-                                    .iter()
-                                    .map(|u| {
-                                        u.why_not.is_none()
-                                            && own.is_none_or(|s| s.contains(u.field))
-                                    })
-                                    .collect();
+                                let on = super::bind_others::ticked_by_default(&uses, own);
                                 b.bind = Some(BindList {
                                     var: *var,
                                     uses,
@@ -1724,6 +1720,13 @@ impl OndinApp {
                     b.bind = None;
                 }
                 self.bind_other_uses(var, &keys);
+            }
+            Act::BindReady(var) => {
+                if let Some(b) = self.var_browser.as_mut() {
+                    b.offer = None;
+                    b.bind = None;
+                }
+                self.bind_ready_uses(var);
             }
             Act::Reveal(id) => self.select_main(id),
             Act::NewVar(kind) => {
@@ -2384,10 +2387,10 @@ impl OndinApp {
             .max_height(h)
             .min_scrolled_height(h)
             .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
                 let w = ui.available_width();
                 for f in &families {
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     let n = list.uses.iter().filter(|u| u.field == *f).count();
                     let (head, _) = ui.allocate_exact_size(
                         egui::vec2(w, super::binding::FACE_HEAD_H),
@@ -2682,14 +2685,17 @@ fn layers_label(n: usize) -> String {
     }
 }
 
-/// The line under a variable *Extract into variable…* just made: how many
-/// other fields draw its value, and *Bind them…*, which opens their list. A
-/// line rather than a dialog, so a run of extracts goes on uninterrupted.
+/// The line under a variable *Extract into variable…* just made, at its name's
+/// inset: *Bind N other fields*, which binds what the list would start with
+/// ticked in one click (it changes nothing on screen, and undoes), then
+/// *Choose…*, which opens the list. With none ready (all locked, or of a family
+/// the scope leaves out) it says how many draw the value instead. A line rather
+/// than a dialog, so a run of extracts goes on uninterrupted.
 fn offer_line(
     ui: &mut egui::Ui,
     doc: &Document,
     v: &Variable,
-    n: usize,
+    o: super::bind_others::Offer,
     w: f32,
     acts: &mut Vec<Act>,
 ) {
@@ -2700,47 +2706,45 @@ fn offer_line(
         .and_then(|m| table.resolve(v.id, m))
         .map(value_text)
         .unwrap_or_default();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::hover());
-    let label = "Bind them…";
-    let bw = ui::action_button_w(ui.ctx(), label);
-    let button = egui::Rect::from_min_size(
-        egui::pos2(
-            rect.right() - 6.0 - bw,
-            rect.center().y - ui::CONTROL_H / 2.0,
-        ),
-        egui::vec2(bw, ui::CONTROL_H),
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, OFFER_H), egui::Sense::hover());
+    let line =
+        egui::Rect::from_x_y_ranges(rect.left() + name_indent(v)..=rect.right(), rect.y_range());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(line)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    let words = format!(
-        "{} other {} {what}",
-        n,
-        if n == 1 { "field uses" } else { "fields use" }
-    );
-    let text = egui::Rect::from_x_y_ranges(
-        rect.left() + name_indent(v)..=button.left() - 8.0,
-        rect.y_range(),
-    );
-    ui.painter().with_clip_rect(text).text(
-        text.left_center(),
-        egui::Align2::LEFT_CENTER,
-        words,
-        egui::FontId::proportional(ui::SMALL_PT),
-        theme::text::dim(),
-    );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(button));
-    let resp = ui::action_button(
-        &mut child,
-        icon::LINK_SIMPLE,
-        label,
-        ui::FieldButton::Off,
-        button.size(),
-    )
-    .on_hover_text(format!(
-        "Choose which fields that draw {what} to bind to this variable"
+    child.spacing_mut().item_spacing.x = 10.0;
+    if o.ready > 0 {
+        let bind = format!("Bind {}", ui::count(o.ready, "other field"));
+        let resp = ui::word_link(&mut child, &bind, false).on_hover_text(format!(
+            "Bind the fields drawing {what} to this variable — nothing on screen changes"
+        ));
+        if resp.clicked() {
+            acts.push(Act::BindReady(v.id));
+        }
+    } else {
+        let words = match o.total {
+            1 => format!("1 other field draws {what}"),
+            n => format!("{n} other fields draw {what}"),
+        };
+        child.label(
+            egui::RichText::new(words)
+                .size(ui::SMALL_PT)
+                .color(theme::text::dim()),
+        );
+    }
+    let choose = ui::word_link(&mut child, "Choose…", true).on_hover_text(format!(
+        "Pick which of the {} drawing {what} to bind",
+        ui::count(o.total, "field")
     ));
-    if resp.clicked() {
-        acts.push(Act::OpenMenu(Menu::Bind(v.id), button.left_bottom()));
+    if choose.clicked() {
+        acts.push(Act::OpenMenu(Menu::Bind(v.id), choose.rect.left_bottom()));
     }
 }
+
+/// The offer line's height: a line of words under its variable's row.
+const OFFER_H: f32 = 22.0;
 
 /// A variable's value as a sentence names it: `16`, `#8BA5E0`, `“Sign in”`.
 fn value_text(v: Value) -> String {
@@ -7540,16 +7544,9 @@ mod tests {
         assert!(var::users(&app.session.doc, v).is_empty());
     }
 
-    /// **An extract offers the value's other users, and their list binds
-    /// them**: two boxes of one blue; extracting one draws the offer line
-    /// under the new row, its *Bind them…* opens the list with the twin ticked,
-    /// and *Bind 1* binds it.
-    ///
-    /// flip: `extract_field` leaving `offer` unset → fails at "the offer line".
-    #[test]
-    fn an_extract_offers_the_other_users_and_the_list_binds_them() {
-        let (ctx, mut app) = app();
-        crate::theme::install(&ctx);
+    /// Two boxes of one blue, the first's fill extracted into a variable:
+    /// the twin's id and the variable.
+    fn extract_one_of_two_blues(app: &mut OndinApp) -> (NodeId, VarId) {
         let page = app.session.doc.first_page();
         let [one, twin] = [(); 2].map(|_| app.session.ids.mint());
         let blue = keyed_by_position([ondin_core::Fill {
@@ -7588,18 +7585,31 @@ mod tests {
         };
         let value = app.field_value(key).unwrap();
         app.extract_field(key, value);
-        let var = app.field_var(key).unwrap();
+        (twin, app.field_var(key).unwrap())
+    }
+
+    /// **An extract offers the value's other users, and their list binds
+    /// them**: extracting one of two blues draws the offer line under the new
+    /// row, its *Choose…* opens the list with the twin ticked, and *Bind 1*
+    /// binds it.
+    ///
+    /// flip: `extract_field` leaving `offer` unset → fails at "the offer line".
+    #[test]
+    fn an_extract_offers_the_other_users_and_the_list_binds_them() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        let (twin, var) = extract_one_of_two_blues(&mut app);
         let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
         let mut shapes = vec![];
         for _ in 0..3 {
             shapes = pass(&ctx, &mut app, vec![], draw);
         }
         assert!(
-            last_text(&shapes, "1 other field uses #2F6FD8").is_some(),
+            last_text(&shapes, "Bind 1 other field").is_some(),
             "the offer line"
         );
         app.var_browser.as_mut().unwrap().edit = None;
-        click_text(&ctx, &mut app, "Bind them…", draw);
+        click_text(&ctx, &mut app, "Choose…", draw);
         assert!(matches!(
             app.var_browser.as_ref().unwrap().menu,
             Some((Menu::Bind(v), _)) if v == var
@@ -7632,5 +7642,26 @@ mod tests {
             app.var_browser.as_ref().unwrap().menu.is_none(),
             "and it closes"
         );
+    }
+
+    /// The offer line's *Bind 1 other field* binds the twin in one click,
+    /// without the list, and the line goes.
+    /// flip: `bind_ready_uses` binding no keys → fails at "the twin is bound".
+    #[test]
+    fn the_offer_line_binds_the_ready_fields_in_one_click() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        let (twin, var) = extract_one_of_two_blues(&mut app);
+        let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
+        for _ in 0..3 {
+            pass(&ctx, &mut app, vec![], draw);
+        }
+        app.var_browser.as_mut().unwrap().edit = None;
+        click_text(&ctx, &mut app, "Bind 1 other field", draw);
+        let fills = &app.session.doc.get(twin).unwrap().paint().fills;
+        assert_eq!(fills[0].brush.var(), Some(var), "the twin is bound");
+        let b = app.var_browser.as_ref().unwrap();
+        assert!(b.menu.is_none(), "without opening the list");
+        assert!(b.offer.is_none(), "and the offer line goes");
     }
 }

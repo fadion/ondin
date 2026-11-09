@@ -22,7 +22,7 @@ use super::binding::{COLUMN_GAP, FieldKey, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_
 use super::paint::PaintSlot;
 use crate::app::OndinApp;
 use ondin_core::peniko::Color;
-use ondin_core::variable::{Cell, Field, Value, VarId};
+use ondin_core::variable::{Cell, Field, Scope, Value, VarId};
 use ondin_core::{Document, NodeId, NodeKind, Operation, PaintTarget, Transaction};
 
 /// One field that draws the variable's value.
@@ -247,7 +247,55 @@ fn slot_word(key: FieldKey) -> &'static str {
     }
 }
 
+/// Which of `uses` start ticked in the list, and are what the offer line's
+/// one-click bind takes: those that can be bound, of a family `scope` already
+/// takes, so neither binds a locked layer or widens the scope unasked.
+pub(crate) fn ticked_by_default(uses: &[Use], scope: Option<Scope>) -> Vec<bool> {
+    uses.iter()
+        .map(|u| u.why_not.is_none() && scope.is_none_or(|s| s.contains(u.field)))
+        .collect()
+}
+
+/// The offer line under a variable *Extract into variable…* just made.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Offer {
+    pub var: VarId,
+    /// The fields its one-click bind takes ([`ticked_by_default`]).
+    pub ready: usize,
+    /// Every field drawing the value, the list's rows.
+    pub total: usize,
+}
+
 impl OndinApp {
+    /// The offer line for `var`, or `None` when no other field draws its value.
+    pub(crate) fn offer_of(&self, var: VarId) -> Option<Offer> {
+        let uses = self.other_uses(var);
+        let scope = self.session.doc.variables().get(var).and_then(|v| v.scope);
+        let ready = ticked_by_default(&uses, scope)
+            .into_iter()
+            .filter(|t| *t)
+            .count();
+        (!uses.is_empty()).then_some(Offer {
+            var,
+            ready,
+            total: uses.len(),
+        })
+    }
+
+    /// Bind `var` to the fields the list would start with ticked: the offer
+    /// line's one click.
+    pub(crate) fn bind_ready_uses(&mut self, var: VarId) {
+        let uses = self.other_uses(var);
+        let scope = self.session.doc.variables().get(var).and_then(|v| v.scope);
+        let keys: Vec<FieldKey> = uses
+            .iter()
+            .zip(ticked_by_default(&uses, scope))
+            .filter(|(_, t)| *t)
+            .map(|(u, _)| u.key)
+            .collect();
+        self.bind_other_uses(var, &keys);
+    }
+
     /// Every field outside `var` that draws its value and could be bound to it,
     /// in document order — see the module's doc for what is left out. A field
     /// of a family the variable's scope leaves out is listed too: binding it
@@ -662,8 +710,12 @@ mod tests {
         let var = app.field_var(key).expect("A is bound");
         assert_eq!(
             app.var_browser.as_ref().and_then(|b| b.offer),
-            Some((var, 4)),
-            "B, M, L and S's stroke"
+            Some(super::Offer {
+                var,
+                ready: 2,
+                total: 4
+            }),
+            "B, M, L and S's stroke; B and M ready, L being locked and S out of scope"
         );
         let uses = app.other_uses(var);
         let row = |id: NodeId| uses.iter().find(|u| u.key.at() == id);

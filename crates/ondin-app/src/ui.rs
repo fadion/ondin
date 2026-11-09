@@ -4727,6 +4727,29 @@ pub fn action_button(
     let (rect, resp, fg) = button_face(ui, size, state);
     let font = egui::FontId::proportional(ACTION_LABEL_PT);
     // Measured after eliding, so the pair is centred as one thing.
+/// A bare word that acts, at `SMALL_PT` in the flow of `ui`: the accent's 300
+/// step, lit to 200 under the pointer, or with `quiet` dim, lit to strong — the
+/// status line's *Cancel*, the variables browser's offer to bind other uses.
+/// For an act that sits inside a line of words, where a button would outweigh it.
+pub fn word_link(ui: &mut egui::Ui, label: &str, quiet: bool) -> egui::Response {
+    let word = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(SMALL_PT),
+            egui::Color32::PLACEHOLDER,
+        )
+    });
+    let (rect, resp) = ui.allocate_exact_size(word.size(), egui::Sense::click());
+    let ink = match (quiet, resp.hovered()) {
+        (false, false) => color::accent_300(),
+        (false, true) => color::accent_200(),
+        (true, false) => theme::text::dim(),
+        (true, true) => theme::text::strong(),
+    };
+    ui.painter().galley(rect.min, word, ink);
+    resp
+}
+
     let galley = ui.ctx().fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), font, fg);
         job.wrap = egui::text::TextWrapping::truncate_at_width(

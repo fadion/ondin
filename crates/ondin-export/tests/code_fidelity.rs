@@ -1997,6 +1997,104 @@ fn a_width_query_is_written_as_a_container_query() {
     assert!(marked, "no file marks the frame with its query");
 }
 
+/// A kit collection's width query is written as the document's are: named after
+/// the kit collection, its children given the kit's narrowest mode and each
+/// other one under `@container`, with the kit's variables in that mode's column.
+///
+/// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container".
+#[test]
+fn a_kit_collections_width_query_is_written_as_a_container_query() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, KitMode, KitModes, VarKind, VarOrigin, Variable};
+    const KIT: &str = "0123456789abcdef0123456789abcdef";
+    let mut d = Doc::new();
+    let (compact, wide) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let (from_c, from_w) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let ink = d.ids.mint_var();
+    let theirs = d.ids.mint_var();
+    let kit_mode = |id, from, name: &str| KitMode {
+        id,
+        name: name.into(),
+        from,
+        collection: "Density".into(),
+    };
+    d.apply(vec![
+        Operation::SetKitModes {
+            kit: KIT.into(),
+            modes: Some(KitModes {
+                name: Some("Brand".into()),
+                modes: vec![
+                    kit_mode(compact, from_c, "Compact"),
+                    kit_mode(wide, from_w, "Wide"),
+                ],
+                map: Default::default(),
+            }),
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "ink".into(),
+                kind: VarKind::Color,
+                cells: [
+                    (compact, Cell::Color(Color::from_rgba8(230, 70, 50, 255))),
+                    (wide, Cell::Color(Color::from_rgba8(60, 120, 240, 255))),
+                ]
+                .into_iter()
+                .collect(),
+                scope: None,
+                origin: Some(VarOrigin {
+                    kit: KIT.into(),
+                    var: theirs,
+                    version: 1,
+                }),
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let card = d.frame(None, 0.0, 0.0, 400.0, 120.0, "Card");
+    let r = d.rect(card, 10.0, 10.0, 60.0, 60.0, 0.0);
+    d.apply(vec![
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: ink,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+        Operation::SetQueries {
+            id: card,
+            queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+        },
+    ]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[card]);
+    let tokens =
+        String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    assert!(
+        tokens.contains("[data-query~=\"card-density\"] {\n  container-type: inline-size;\n}"),
+        "tokens.css lacks the container:\n{tokens}"
+    );
+    assert!(
+        tokens.contains(":where([data-query~=\"card-density\"]) > * {\n  --brand-ink: #e64632;"),
+        "tokens.css lacks the narrowest mode's block:\n{tokens}"
+    );
+    assert!(
+        tokens.contains(
+            "@container (min-width: 320px) {\n  :where([data-query~=\"card-density\"]) > * {\n    --brand-ink: #3c78f0;"
+        ),
+        "tokens.css lacks the wide block:\n{tokens}"
+    );
+    let marked = export
+        .files
+        .iter()
+        .any(|f| String::from_utf8_lossy(&f.bytes).contains("data-query=\"card-density\""));
+    assert!(marked, "no file marks the frame with its query");
+}
+
 /// A text's bound type numbers write their variables in the unit each literal
 /// holds — a size and a paragraph spacing in px, a weight bare, a `%` line height
 /// as a multiple and a `%` letter spacing in hundredths of an em — and draw as

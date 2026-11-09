@@ -36,8 +36,24 @@ pub(crate) struct Tokens {
     /// collection, and the modes it shows in.
     hidden: Vec<(VarId, String, variable::CollectionId, Vec<ModeId>)>,
     /// The width queries [`Self::query_attr`] named: each `data-query` word,
-    /// its collection and its widths — one container query apiece.
-    queries: Vec<(String, variable::CollectionId, variable::Breakpoints)>,
+    /// whose modes it picks and its widths — one container query apiece.
+    queries: Vec<(String, QueryOf, variable::Breakpoints)>,
+}
+
+/// Whose modes a width query picks: a collection of the document's, or a kit's
+/// collection, by kit id and collection name.
+#[derive(Clone, PartialEq)]
+enum QueryOf {
+    Collection(variable::CollectionId),
+    Kit(String, String),
+}
+
+/// A kit's name for the export's words: its recorded name, else its id.
+fn kit_name(t: &Variables, kit: &str) -> String {
+    t.kits()
+        .get(kit)
+        .and_then(|k| k.name.clone())
+        .unwrap_or_else(|| kit.to_string())
 }
 
 impl Tokens {
@@ -60,12 +76,7 @@ impl Tokens {
             }
             name
         };
-        let kit_name = |kit: &str| {
-            t.kits()
-                .get(kit)
-                .and_then(|k| k.name.clone())
-                .unwrap_or_else(|| kit.to_string())
-        };
+        let kit_name = |kit: &str| kit_name(t, kit);
         // The document's own first, so a kit's variable is the one suffixed when
         // the two slug alike.
         let mut names = BTreeMap::new();
@@ -119,10 +130,10 @@ impl Tokens {
     }
 
     /// The `data-query` a frame with width `queries` writes, `None` for none:
-    /// one word per query over a collection of the document's, named after
-    /// `scope` (the component it belongs to) and the collection, and shared by
-    /// every frame querying that collection at the same widths. A kit's
-    /// collection is never queried in the export.
+    /// one word per query, named after `scope` (the component it belongs to) and
+    /// the collection — a kit's by its collection's name, or the kit's for its
+    /// only one — and shared by every frame querying that collection at the
+    /// same widths.
     pub fn query_attr(
         &mut self,
         t: &Variables,
@@ -131,25 +142,37 @@ impl Tokens {
     ) -> Option<String> {
         let mut words = Vec::new();
         for q in queries {
-            let Some(c) = q.keys().find_map(|m| t.collection_of_mode(*m)) else {
+            let Some((of, name)) = q.keys().find_map(|m| match t.owner_of(*m)? {
+                variable::ModeOwner::Collection(c) => {
+                    Some((QueryOf::Collection(c), t.collection(c)?.name.clone()))
+                }
+                variable::ModeOwner::Kit(k, c) => Some((
+                    QueryOf::Kit(k.to_string(), c.to_string()),
+                    if c.is_empty() {
+                        kit_name(t, k)
+                    } else {
+                        c.to_string()
+                    },
+                )),
+            }) else {
                 continue;
             };
             if let Some((word, ..)) = self
                 .queries
                 .iter()
-                .find(|(_, of, widths)| *of == c.id && widths == q)
+                .find(|(_, at, widths)| *at == of && widths == q)
             {
                 words.push(word.clone());
                 continue;
             }
-            let base = format!("{}-{}", slug(scope), slug(&c.name)).replace(' ', "-");
+            let base = format!("{}-{}", slug(scope), slug(&name)).replace(' ', "-");
             let mut word = base.clone();
             let mut n = 1;
             while self.queries.iter().any(|(w, ..)| *w == word) {
                 n += 1;
                 word = format!("{base}-{n}");
             }
-            self.queries.push((word.clone(), c.id, q.clone()));
+            self.queries.push((word.clone(), of, q.clone()));
             words.push(word);
         }
         (!words.is_empty()).then(|| words.join(" "))
@@ -165,40 +188,79 @@ impl Tokens {
     /// of no weight, so source order alone ranks them and a child pinning a mode
     /// of its own keeps it, the nearer pin winning as on the canvas.
     fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
-        for (word, c, widths) in &self.queries {
-            let Some(col) = t.collection(*c) else {
-                continue;
+        for (word, of, widths) in &self.queries {
+            let (col, modes): (Option<&variable::Collection>, Vec<ModeId>) = match of {
+                QueryOf::Collection(c) => {
+                    let Some(col) = t.collection(*c) else {
+                        continue;
+                    };
+                    (Some(col), col.modes.iter().map(|m| m.id).collect())
+                }
+                QueryOf::Kit(k, kc) => {
+                    let Some(km) = t.kits().get(k) else {
+                        continue;
+                    };
+                    (None, km.modes_in(kc).map(|m| m.id).collect())
+                }
+            };
+            let block = |selector: String, m: ModeId, out: &mut String| match col {
+                Some(col) => self.mode_block(t, shaken, col, selector, Some(m), out),
+                None => self.kit_block(t, shaken, selector, m, out),
             };
             let at = format!("[data-query~=\"{word}\"]");
             out.push_str(&format!("{at} {{\n  container-type: inline-size;\n}}\n"));
             let kids = format!(":where({at}) > *");
-            let mut held: Vec<(ModeId, f64)> = col
-                .modes
+            let mut held: Vec<(ModeId, f64)> = modes
                 .iter()
-                .filter_map(|m| Some((m.id, *widths.get(&m.id)?)))
+                .filter_map(|m| Some((*m, *widths.get(m)?)))
                 .collect();
             held.sort_by(|a, b| a.1.total_cmp(&b.1));
             for (i, (m, min)) in held.iter().enumerate() {
                 if i == 0 {
-                    self.mode_block(t, shaken, col, kids.clone(), Some(*m), out);
+                    block(kids.clone(), *m, out);
                     continue;
                 }
                 let mut inner = String::new();
-                self.mode_block(t, shaken, col, kids.clone(), Some(*m), &mut inner);
+                block(kids.clone(), *m, &mut inner);
                 out.push_str(&format!("@container (min-width: {}px) {{\n", fmt(*min)));
                 for line in inner.lines() {
                     out.push_str(&format!("  {line}\n"));
                 }
                 out.push_str("}\n");
             }
-            for m in &col.modes {
-                let word = self.mode(m.id).unwrap_or_default();
+            for m in &modes {
+                let word = self.mode(*m).unwrap_or_default();
                 let pin = format!("[data-mode{eq}\"{word}\"]");
                 let own = format!("[data-pin~=\"{word}\"]");
                 let selector = format!(":where({own} > {at}) > *, :where({pin}{at}) > *");
-                self.mode_block(t, shaken, col, selector, Some(m.id), out);
+                block(selector, *m, out);
             }
         }
+    }
+
+    /// Kit mode `mode`'s block under `selector`: every kit variable read with a
+    /// value in that mode.
+    fn kit_block(
+        &self,
+        t: &Variables,
+        shaken: &BTreeSet<VarId>,
+        selector: String,
+        mode: ModeId,
+        out: &mut String,
+    ) {
+        out.push_str(&selector);
+        out.push_str(" {\n");
+        for id in shaken {
+            if let Some(value) = t
+                .get(*id)
+                .filter(|v| v.kit().is_some())
+                .and_then(|v| Some((v, v.cells.get(&mode)?)))
+                .and_then(|(v, c)| self.value(t, v, c))
+            {
+                out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
+            }
+        }
+        out.push_str("}\n");
     }
 
     /// A hidden token read as a `display`: the element's own display `own` in
@@ -367,29 +429,15 @@ impl Tokens {
         self.query_blocks(t, &shaken, eq, &mut out);
         for km in t.kits().values() {
             for m in &km.modes {
-                let vars: Vec<VarId> = shaken
-                    .iter()
-                    .copied()
-                    .filter(|id| t.get(*id).is_some_and(|v| v.cells.contains_key(&m.id)))
-                    .filter(|id| t.get(*id).is_some_and(|v| v.kit().is_some()))
-                    .collect();
-                if vars.is_empty() {
+                let read = shaken.iter().any(|id| {
+                    t.get(*id)
+                        .is_some_and(|v| v.kit().is_some() && v.cells.contains_key(&m.id))
+                });
+                if !read {
                     continue;
                 }
-                out.push_str(&format!(
-                    "[data-mode=\"{}\"] {{\n",
-                    self.mode(m.id).unwrap_or_default()
-                ));
-                for id in vars {
-                    if let Some(value) = t
-                        .get(id)
-                        .and_then(|v| Some((v, v.cells.get(&m.id)?)))
-                        .and_then(|(v, c)| self.value(t, v, c))
-                    {
-                        out.push_str(&format!("  --{}: {value};\n", self.name(id)));
-                    }
-                }
-                out.push_str("}\n");
+                let selector = format!("[data-mode=\"{}\"]", self.mode(m.id).unwrap_or_default());
+                self.kit_block(t, &shaken, selector, m.id, &mut out);
             }
         }
         Some(out)

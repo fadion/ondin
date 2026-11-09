@@ -37,13 +37,15 @@ chain locked); W is exactly X's width.
 - The numeric doors pair through `edit::paired_size`, not the handles' `Resize` flag, which takes the larger factor and would refuse a one-axis shrink.
 
 **Sizing modes on W/H** (`layout::size_modes`). The unit is a menu: `px` always; `fit-content` for a
-frame with a layout; `auto` for a group with one; `%` for an in-flow kind that layout can resize.
+frame with a layout; `auto` for a group with one; `%` for an in-flow kind that layout can resize;
+*Ratio* for any kind with a stored size (`container::holds_ratio`: frames and shapes, not text).
 
 - A keyword side shows the size it resolved to, with the keyword where the unit goes. The menu opens under the unit (`ui::value_field_unit`).
 - **Picking a mode** (`layout::size_mode_tx`) moves nothing: it converts what the axis *specifies* (a number as is, `auto` as the stored size, the drawn size only under a keyword). Picking the lit row does nothing, so a re-pick cannot rewrite `33.33%` as `33.3%`.
 - **`px`** writes the picked axis only. For text it goes through `baked_ops` and keeps the stored mode: W gives an auto-width label `AutoHeight`, H fixes the box.
 - Typing writes px, or `%` in `%` mode; a click in and out writes nothing; a typed size keeps a text's stored sizing mode.
-- The lock is disabled while either side is a keyword or `%`, with the reason on hover. Multi W/H are plain fields.
+- **Ratio** (`layout::side_mode`): picked on one side, it holds that side to the other at the drawn W : H; picked on W while H holds it, it moves to W; any other mode on that side takes it off. The field shows the ratio (`container::ratio_words`, `16 : 9`, or a decimal where no fraction with a denominator up to 32 names it) and takes `16:9`, `16/9` or `1.78`; scrubbing steps the quotient by 0.01. The hover names the side's drawn size. Typing the other side resizes both.
+- The lock is disabled while either side is a keyword, `%` or a ratio, with the reason on hover. Multi W/H are plain fields.
 
 **X/Y of an in-flow item are disabled** with the reason on hover: its container places it, and
 `keep_flex_sizes` drops a typed translation. On the multi card they are disabled while any outermost

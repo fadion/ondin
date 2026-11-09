@@ -4112,15 +4112,19 @@ impl OndinApp {
             let modes = super::layout::size_modes(n.kind(), n.display().is_some(), laid_out);
             let item = n.item();
             (modes.len() > 1).then(|| {
-                let pct = |d: ondin_core::container::Dimension| match d {
-                    ondin_core::container::Dimension::Percent(v) => Some(v),
+                let w = super::layout::side_mode(n.kind(), &item, true);
+                let h = super::layout::side_mode(n.kind(), &item, false);
+                // A `%` side shows its percentage, a ratio side its ratio.
+                let number = |mode: SizeMode, d: ondin_core::container::Dimension| match (mode, d) {
+                    (SizeMode::Ratio, _) => item.aspect_ratio.map(|r| r.ratio),
+                    (_, ondin_core::container::Dimension::Percent(v)) => Some(v),
                     _ => None,
                 };
                 SizeMenu {
-                    w: super::layout::size_mode_of(n.kind(), item.width),
-                    h: super::layout::size_mode_of(n.kind(), item.height),
-                    w_pct: pct(item.width),
-                    h_pct: pct(item.height),
+                    w_pct: number(w, item.width),
+                    h_pct: number(h, item.height),
+                    w,
+                    h,
                     modes,
                 }
             })
@@ -4242,6 +4246,9 @@ impl OndinApp {
                 let both_px = size_menu
                     .as_ref()
                     .is_none_or(|m| m.w == SizeMode::Px && m.h == SizeMode::Px);
+                let held_by_ratio = size_menu
+                    .as_ref()
+                    .is_some_and(|m| m.w == SizeMode::Ratio || m.h == SizeMode::Ratio);
                 let pairs = locked && both_px;
                 let paired = |want: Size, drove_x: bool| {
                     if pairs {
@@ -4261,6 +4268,18 @@ impl OndinApp {
                         item.width = d;
                     } else {
                         item.height = d;
+                    }
+                    Transaction(vec![Operation::SetLayoutItem { id, item }])
+                };
+                // A ratio typed into its side; `keep_ratios` resizes to it.
+                let ratio_tx = |app: &Self, v: f64| {
+                    let Some(node) = app.session.doc.get(id) else {
+                        return Transaction(Vec::new());
+                    };
+                    let mut item = *node.item();
+                    match item.aspect_ratio.as_mut() {
+                        Some(r) if v.is_finite() && v > 0.0 => r.ratio = v,
+                        _ => return Transaction(Vec::new()),
                     }
                     Transaction(vec![Operation::SetLayoutItem { id, item }])
                 };
@@ -4332,8 +4351,18 @@ impl OndinApp {
                                 (r, moved)
                             }
                         };
+                        if let Some((SizeMode::Ratio, Some(r))) = mode {
+                            resp.clone().on_hover_text(format!(
+                                "{} follows the {} at {} — {} px now. Type 4:3, 1.5 or 2/1",
+                                if horizontal { "Width" } else { "Height" },
+                                if horizontal { "height" } else { "width" },
+                                ondin_core::container::ratio_words(r),
+                                ui::number(2)(drawn, 0..=0),
+                            ));
+                        }
                         let tx = match mode {
                             Some((SizeMode::Percent, _)) if typed => percent_tx(app, horizontal, v),
+                            Some((SizeMode::Ratio, _)) if typed => ratio_tx(app, v),
                             // A click in and out would fix a keyword in px or change a text's mode.
                             _ if !typed => Transaction(Vec::new()),
                             _ if horizontal => {
@@ -4358,7 +4387,9 @@ impl OndinApp {
                         ui::FieldButton::Disabled
                     };
                     if ui::field_button(ui, glyph, 28.0, state)
-                        .on_hover_text(if !both_px {
+                        .on_hover_text(if held_by_ratio {
+                            "Proportions are held by the ratio — set its side to px to lock them"
+                        } else if !both_px {
                             "Proportions do not lock while a side is sized by a keyword or %"
                         } else if locked {
                             "Unlock proportions — Shift while dragging a handle also releases it"
@@ -11353,7 +11384,8 @@ const GRID_ROW_GAP: f32 = ui::CARD_ROW_GAP;
 
 /// The Transform card's W and H sizing modes for one layer: which
 /// `layout::size_modes` offers, which each side is in, and the percentage a `%`
-/// side holds — the number its field shows in place of the drawn size.
+/// side holds or the ratio a *Ratio* side does — the number its field shows in
+/// place of the drawn size.
 struct SizeMenu {
     modes: Vec<SizeMode>,
     w: SizeMode,

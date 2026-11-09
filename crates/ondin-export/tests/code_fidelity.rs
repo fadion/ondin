@@ -962,6 +962,57 @@ fn grid_areas_and_auto_fit_match_the_canvas() {
     holds("grid-areas", &doc, &res);
 }
 
+/// Layers holding an aspect ratio: a 2 : 1 rect stretched across a column, a
+/// 16 : 9 frame at half the column's width, and a 1 : 2 rect on W outside any
+/// layout — Chrome sizes each derived side from `aspect-ratio` as the canvas does.
+#[test]
+fn aspect_ratios_match_the_canvas() {
+    use ondin_core::container::{AspectRatio, Dimension, RatioSide};
+    let mut d = Doc::new();
+    let col = d.frame(None, 0.0, 0.0, 200.0, 260.0, "Column");
+    d.apply(vec![Operation::SetDisplay {
+        id: col,
+        display: Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            row_gap: 8.0,
+            ..Default::default()
+        })),
+    }]);
+    let ratio = |ratio, side| Some(AspectRatio { ratio, side });
+    let wide = d.rect(col, 0.0, 0.0, 200.0, 100.0, 0.0);
+    d.fill(wide, solid(60, 120, 220, 255));
+    d.apply(vec![Operation::SetLayoutItem {
+        id: wide,
+        item: LayoutItem {
+            aspect_ratio: ratio(2.0, RatioSide::Height),
+            ..Default::default()
+        },
+    }]);
+    let half = d.frame(Some(col), 0.0, 0.0, 100.0, 56.25, "Half");
+    d.fill(half, solid(220, 120, 60, 255));
+    d.apply(vec![Operation::SetLayoutItem {
+        id: half,
+        item: LayoutItem {
+            width: Dimension::Percent(50.0),
+            aspect_ratio: ratio(16.0 / 9.0, RatioSide::Height),
+            ..Default::default()
+        },
+    }]);
+    let free = d.frame(None, 220.0, 0.0, 60.0, 100.0, "Free");
+    let tall = d.rect(free, 10.0, 10.0, 40.0, 80.0, 0.0);
+    d.fill(tall, solid(60, 180, 90, 255));
+    d.apply(vec![Operation::SetLayoutItem {
+        id: tall,
+        item: LayoutItem {
+            aspect_ratio: ratio(0.5, RatioSide::Width),
+            ..Default::default()
+        },
+    }]);
+    let (doc, res) = d.done();
+    holds("aspect-ratio", &doc, &res);
+}
+
 /// A hugging group with a column layout inside a frame, and children pinned by
 /// insets — one to the bottom right, one stretched across.
 #[test]

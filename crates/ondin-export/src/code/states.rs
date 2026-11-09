@@ -51,6 +51,7 @@ const PLACEMENT: &[&str] = &[
     "min-height",
     "max-width",
     "max-height",
+    "aspect-ratio",
     "margin",
     "flex",
     "flex-grow",

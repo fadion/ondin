@@ -532,13 +532,15 @@ pub(crate) fn edited(resp: &egui::Response, moved: bool) -> bool {
 
 // --- sizing modes -------------------------------------------------------------
 
-/// How a W or H — or a basis, or a limit — is set: CSS's four ways of saying a size.
+/// How a W or H — or a basis, or a limit — is set: CSS's four ways of saying a
+/// size, and for W or H alone `aspect-ratio`, the side sized from the other.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SizeMode {
     Px,
     Percent,
     Auto,
     FitContent,
+    Ratio,
 }
 
 impl SizeMode {
@@ -550,6 +552,7 @@ impl SizeMode {
             SizeMode::Percent => "%",
             SizeMode::Auto => "auto",
             SizeMode::FitContent => "fit content",
+            SizeMode::Ratio => "ratio",
         }
     }
 
@@ -561,6 +564,7 @@ impl SizeMode {
             SizeMode::Percent => "%",
             SizeMode::Auto => "Auto",
             SizeMode::FitContent => "Fit content",
+            SizeMode::Ratio => "Ratio",
         }
     }
 
@@ -570,6 +574,7 @@ impl SizeMode {
             SizeMode::Percent => "of the container",
             SizeMode::Auto => "size to content",
             SizeMode::FitContent => "size to content",
+            SizeMode::Ratio => "from the other side",
         }
     }
 }
@@ -583,7 +588,8 @@ impl SizeMode {
 /// a **shape** is sized by its own geometry. So a frame offers `px` and, with a
 /// layout to hug, `fit-content`; a group with a layout `px` and `auto`; a shape only
 /// `px`. `%` joins any that is `laid_out` and can resize (`container::can_stretch`,
-/// or the group's box). **Fewer than two means no menu at all.**
+/// or the group's box), and *Ratio* any whose size is stored
+/// (`container::holds_ratio`). **Fewer than two means no menu at all.**
 pub(crate) fn size_modes(kind: &NodeKind, has_display: bool, laid_out: bool) -> Vec<SizeMode> {
     let mut modes = vec![SizeMode::Px];
     let resizable = match kind {
@@ -602,7 +608,24 @@ pub(crate) fn size_modes(kind: &NodeKind, has_display: bool, laid_out: bool) -> 
     if laid_out && resizable {
         modes.push(SizeMode::Percent);
     }
+    if container::holds_ratio(kind) {
+        modes.push(SizeMode::Ratio);
+    }
     modes
+}
+
+/// The mode W (`horizontal`) or H shows for a layer of `kind` with `item`:
+/// *Ratio* on the side its aspect ratio derives, else [`size_mode_of`].
+pub(crate) fn side_mode(kind: &NodeKind, item: &LayoutItem, horizontal: bool) -> SizeMode {
+    let side = if horizontal {
+        container::RatioSide::Width
+    } else {
+        container::RatioSide::Height
+    };
+    match item.aspect_ratio {
+        Some(r) if r.side == side => SizeMode::Ratio,
+        _ => size_mode_of(kind, if horizontal { item.width } else { item.height }),
+    }
 }
 
 /// The mode a stored W or H `d` shows as, for a layer of `kind` — [`size_modes`]'
@@ -717,6 +740,8 @@ pub(crate) fn size_field(
     let mut v = number.unwrap_or(under);
     let start = v;
     let percent = mode == Some(SizeMode::Percent);
+    // A ratio reads `16 : 9` and takes `4:3`, `2/1` or `1.5`.
+    let ratio = mode == Some(SizeMode::Ratio) && number.is_some();
     // The keyword standing in the digits, when there is no number to show.
     let word = match (number, mode) {
         (None, Some(m @ (SizeMode::Auto | SizeMode::FitContent))) => Some(m.word()),
@@ -737,13 +762,18 @@ pub(crate) fn size_field(
         }),
         mark,
         &mut v,
-        if percent {
+        if ratio {
+            Scrub::fine(0.01, 2).range(0.01..=100.0)
+        } else if percent {
             Scrub::fine(0.25, 1)
         } else {
             Scrub::whole(0.5).range(0.0..=f64::MAX)
         },
         |d| match word {
             Some(w) => d.custom_formatter(move |_, _| w.into()),
+            None if ratio => d
+                .custom_formatter(|v, _| container::ratio_words(v))
+                .custom_parser(container::parse_ratio),
             None => mixed_if(d.custom_formatter(ui::number(2)), number.is_none()),
         },
     );
@@ -2631,6 +2661,8 @@ impl OndinApp {
                         SizeMode::Percent => length
                             .zip(extent)
                             .map(|(d, e)| Dimension::Percent((d / e * 1000.0).round() / 10.0)),
+                        // Never offered here: a basis or a limit has no other side.
+                        SizeMode::Ratio => None,
                     }?;
                     put(&mut item, to);
                     (item != *node.item()).then_some(Operation::SetLayoutItem { id: *id, item })
@@ -2730,7 +2762,31 @@ impl OndinApp {
             }
             (SizeMode::Auto, _) => Dimension::Auto,
             (SizeMode::FitContent, _) => Dimension::FitContent,
+            // From the drawn W : H; on W while H holds one, the ratio moves to W.
+            // `build::keep_ratios` keeps the stored size to it.
+            (SizeMode::Ratio, _) => {
+                if drawn.width > 0.0 && drawn.height > 0.0 {
+                    item.aspect_ratio = Some(container::AspectRatio {
+                        ratio: drawn.width / drawn.height,
+                        side: if horizontal {
+                            container::RatioSide::Width
+                        } else {
+                            container::RatioSide::Height
+                        },
+                    });
+                }
+                Dimension::Auto
+            }
         };
+        // Any other mode on the side a ratio derives takes the side back from it.
+        let side = if horizontal {
+            container::RatioSide::Width
+        } else {
+            container::RatioSide::Height
+        };
+        if mode != SizeMode::Ratio && item.aspect_ratio.is_some_and(|r| r.side == side) {
+            item.aspect_ratio = None;
+        }
         if horizontal {
             item.width = to;
         } else {
@@ -3116,11 +3172,15 @@ mod tests {
             corner_smoothing: 0.0,
             mirror: ondin_core::symmetry::PathMirror::NONE,
         };
-        assert_eq!(size_modes(&frame, false, false), vec![Px], "no menu at all");
-        assert_eq!(size_modes(&frame, true, false), vec![Px, FitContent]);
+        assert_eq!(
+            size_modes(&frame, false, false),
+            vec![Px, Ratio],
+            "a stored size can follow a ratio anywhere"
+        );
+        assert_eq!(size_modes(&frame, true, false), vec![Px, FitContent, Ratio]);
         assert_eq!(
             size_modes(&frame, true, true),
-            vec![Px, FitContent, Percent]
+            vec![Px, FitContent, Percent, Ratio]
         );
         assert_eq!(size_modes(&NodeKind::Group, true, false), vec![Px, Auto]);
         assert_eq!(
@@ -3132,12 +3192,13 @@ mod tests {
             vec![Px],
             "a group without a layout has no box to size"
         );
-        assert_eq!(size_modes(&rect, false, true), vec![Px, Percent]);
-        assert_eq!(size_modes(&rect, false, false), vec![Px]);
+        assert_eq!(size_modes(&rect, false, true), vec![Px, Percent, Ratio]);
+        assert_eq!(size_modes(&rect, false, false), vec![Px, Ratio]);
         assert_eq!(
             size_modes(&path, false, true),
             vec![Px],
-            "the layout cannot resize a path, so a percentage would do nothing"
+            "the layout cannot resize a path, so a percentage would do nothing, and a \
+             path has no stored size for a ratio to keep: no menu at all"
         );
     }
 
@@ -4203,11 +4264,66 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth + 1, "as one step");
     }
 
+    /// *Ratio* on H, picked from its unit's menu, holds H at the drawn W : H and
+    /// reads it as `2 : 1`; a ratio typed there resizes H to it, W held.
+    ///
+    /// flip: `size_mode_tx`'s Ratio arm writing no ratio → fails at *"a ratio on
+    /// H"*.
+    #[test]
+    fn ratio_on_h_holds_it_to_w() {
+        let mut s = scene();
+        let page = s.app.session.doc.first_page();
+        let r = s.app.session.ids.mint();
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::CreateNode {
+                    id: r,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(200.0, 100.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: Some(Affine::translate((900.0, 0.0))),
+                    name: None,
+                }]))
+        );
+        let mut p = Panel::new(s.app, transform_card);
+        p.app.session.selection.set(vec![r]);
+        // H's unit is the right-hand `px`.
+        let units = p.runs("px");
+        let unit = *units
+            .iter()
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("two units");
+        p.click(unit);
+        let at = p.run("Ratio");
+        p.click(at);
+        let item = *p.app.session.doc.get(r).unwrap().item();
+        assert_eq!(
+            item.aspect_ratio,
+            Some(ondin_core::container::AspectRatio {
+                ratio: 2.0,
+                side: ondin_core::container::RatioSide::Height,
+            }),
+            "a ratio on H"
+        );
+        p.retype("2 : 1", "4:1", egui::Key::Enter);
+        assert_eq!(
+            ondin_core::edit::resizable_size(p.app.session.doc.get(r).unwrap().kind()),
+            Some(Size::new(200.0, 50.0)),
+            "H follows W at 4 : 1"
+        );
+        p.run("4 : 1");
+    }
+
     /// The sizing menu opens under the unit that was clicked, with room either side
     /// of the lit row's text.
     ///
-    /// flip: the popup anchored on the number's response with its default alignment
-    /// → fails at *"under the unit"*; the row padding dropped → fails at *"room
+    /// flip: the popup on the unit with its default alignment → fails at *"under the
+    /// unit"*; the row padding dropped → fails at *"room
     /// either side"*. The highlight is searched from the end of the shapes: from the
     /// front it finds the rotation field's ground under the popup.
     #[test]
@@ -4227,12 +4343,6 @@ mod tests {
         p.frame(vec![button(false)]);
         let row = p.run("%");
         assert!(row.y > unit.y, "below it: {row:?} against {unit:?}");
-        assert!(
-            (row.x - unit.x).abs() < 24.0,
-            "under the unit: the row at x {} against the unit's {}",
-            row.x,
-            unit.x
-        );
 
         // The lit row (`px`, W's mode) and the highlight behind its text.
         let out = p.frame(Vec::new());
@@ -4262,6 +4372,14 @@ mod tests {
                 _ => None,
             })
             .expect("the lit row's highlight");
+        // Right edges together: the rows are as wide as the longest mode's name, so
+        // the menu's right edge is what lines up with the unit.
+        assert!(
+            (lit.right() - unit.x).abs() < 24.0,
+            "under the unit: the menu's right edge at x {} against the unit's {}",
+            lit.right(),
+            unit.x
+        );
         let (left, right) = (text.left() - lit.left(), lit.right() - text.right());
         assert!(
             left >= 7.0 && right >= 7.0,

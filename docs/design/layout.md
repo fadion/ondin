@@ -56,8 +56,7 @@ Code export (§7) writes this model as CSS under the same names, `Start`/`End` a
 | | |
 |---|---|
 | Container | `display` (unset / flex / grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `justify-items` (grid), `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`, `repeat(auto-fill)`, `repeat(auto-fit)`), `grid-template-areas`, `grid-auto-flow` |
-| Item | `width`/`height` (auto / px / %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto / line / span), `grid-area` (a name), `position` (in flow / absolute) with `top`/`right`/`bottom`/`left` (px / % / auto) |
-| Not built | `aspect-ratio` (`roadmap.md`; the engine supports it) |
+| Item | `width`/`height` (auto / px / %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto / line / span), `grid-area` (a name), `aspect-ratio` (on W or H), `position` (in flow / absolute) with `top`/`right`/`bottom`/`left` (px / % / auto) |
 | Not to be built | `margin` other than `auto`, `order`, `calc`, block/inline/float layout (`non-goals.md`) |
 
 ### Who is a container
@@ -119,6 +118,15 @@ An in-flow item's stored translation is drawn nowhere, so a move of one in-flow 
 An in-flow item leaves its container only once the pointer is out of it (the area rule decides past that), because an overflowing row can put its box mostly outside a fixed frame. A frame inside the container covering most of the moved box takes it first.
 
 Several in-flow items of one container, none leaving it, reorder as a block: `build::flex_reorder_many` reads the centre of their union by the same reading order (`build::flow_index`), moving them in child-list order; in a grid the block moves by tracks. Any other multi-move uses transforms, except an in-flow item, which keeps its slot in drag and release (`canvas::stays_in_flow`). The preview represents the reorder as a per-parent child order and outlines the landing slot (§6.2, §9.4).
+
+### Aspect ratio
+
+`LayoutItem::aspect_ratio` is CSS's `aspect-ratio` on one side: `AspectRatio { ratio, side }`, `ratio` width over height, `side` the side it derives. It is held only by a kind with a stored size (`container::holds_ratio`: frames and shapes, not text, whose size is its content's), and read in two places:
+
+- **The layout** lays the derived side `auto` with taffy's `aspect_ratio` (`style_of`; a frame's stored size there would leave the ratio unread), so it follows whatever the layout gives the other side: a stretch, a `%`, a grow. taffy's leaf only grows a measured box to its ratio, so `FlexTree::measure` sizes a replaced leaf's derived side from a known other side itself.
+- **The stored size** is kept to the ratio at the commit door by `build::keep_ratios`, after `keep_area_names`: a resize changing the driving side (or both) sets the derived side from it; one changing only the derived side, a drag on its handle, sets the driving side instead; a ratio set or changed with no resize beside it resizes the derived side. That is what a layer no layout sizes (a top-level frame, a shape in a plain group) is drawn by, and what the layout measures a shape by. The gesture preview runs it too (`set_preview`), so a drag draws the ratio held. Min and max still apply in a layout, and win over the ratio, as in CSS.
+
+Export writes `aspect-ratio` (`AspectRatio::css`, `16 / 9`) and leaves the derived side's size and replaced-element minimum out. A ratio a file carries refused (zero, negative) is read as none.
 
 ### Inspector cards (§9.4)
 

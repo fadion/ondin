@@ -82,6 +82,7 @@ impl Scene {
     fn commit(&mut self, ops: Vec<Operation>) {
         let tx = ondin_core::build::keep_insets(&self.doc, &self.res, Transaction(ops));
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.res, tx);
+        let tx = ondin_core::build::keep_ratios(&self.doc, tx);
         let dirty = self
             .history
             .commit(&mut self.doc, tx)
@@ -2054,4 +2055,97 @@ fn flex_from_placement_pads_against_the_box_a_parent_grew() {
         panic!("a flex layout");
     };
     assert_eq!(flex.padding[1], 340.0, "the right padding");
+}
+
+fn ratio(ratio: f64, side: ondin_core::container::RatioSide) -> ondin_core::container::AspectRatio {
+    ondin_core::container::AspectRatio { ratio, side }
+}
+
+fn stored(s: &Scene, id: NodeId) -> Size {
+    ondin_core::edit::resizable_size(s.doc.get(id).unwrap().kind()).unwrap()
+}
+
+/// **A ratio keeps the stored size to it**: set on a 200 × 100 rect at 2 : 1 on
+/// H it leaves it as it is, at 16 : 9 it makes H 112.5; a resize of W carries
+/// H, and a resize of H alone — a drag on its handle — carries W instead.
+/// flip: `keep_ratios` returning `tx` untouched → fails at *"set"*.
+#[test]
+fn a_ratio_keeps_the_stored_size_to_it() {
+    use ondin_core::container::RatioSide;
+    let mut s = Scene::new();
+    let r = s.add(s.root, rect(200.0, 100.0), (0.0, 0.0));
+    s.item(r, |i| {
+        i.aspect_ratio = Some(ratio(16.0 / 9.0, RatioSide::Height))
+    });
+    assert_eq!(stored(&s, r), Size::new(200.0, 112.5), "set");
+    s.resize(r, 320.0, 112.5);
+    assert_eq!(stored(&s, r), Size::new(320.0, 180.0), "W carries H");
+    s.resize(r, 320.0, 90.0);
+    assert_eq!(stored(&s, r), Size::new(160.0, 90.0), "H alone carries W");
+    s.item(r, |i| i.aspect_ratio = Some(ratio(2.0, RatioSide::Width)));
+    assert_eq!(stored(&s, r), Size::new(180.0, 90.0), "on W, from H");
+}
+
+/// **In a layout the derived side follows the size the layout gives the other**:
+/// a 2 : 1 rect stretched across a 300-wide column is 150 high, and a 2 : 1
+/// frame at 50% of it 75 high, whatever their stored heights say (a frame's
+/// stored width is its CSS width, so it is not stretched).
+/// flip: `style_of` leaving the derived side at the frame's stored size → fails
+/// at *"the frame"*; the measure's ratio arm removed → fails at *"the rect"*.
+#[test]
+fn a_ratio_derives_its_side_from_the_layouts_size() {
+    use ondin_core::container::RatioSide;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 600.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            ..Default::default()
+        })),
+    );
+    // Wider than the column: taffy's leaf grows a box to its ratio, never
+    // shrinks one, so this is what the measure's own ratio arm is for.
+    let r = s.add(f, rect(600.0, 300.0), (0.0, 0.0));
+    let inner = s.add(f, frame(40.0, 20.0), (0.0, 0.0));
+    for id in [r, inner] {
+        s.item(id, |i| i.aspect_ratio = Some(ratio(2.0, RatioSide::Height)));
+    }
+    s.item(inner, |i| {
+        i.width = ondin_core::container::Dimension::Percent(50.0)
+    });
+    assert_eq!(s.bounds(r).size(), Size::new(300.0, 150.0), "the rect");
+    assert_eq!(stored(&s, inner), Size::new(40.0, 20.0), "stored as set");
+    assert_eq!(s.bounds(inner).size(), Size::new(150.0, 75.0), "the frame");
+    assert_eq!(s.bounds(inner).y0, 150.0, "below the rect");
+}
+
+/// **A ratio reads and writes**: `16 : 9` out of the stored quotient, `4:3`,
+/// `2/1` and `1.5` typed in, CSS's `16 / 9`, and the file's record; zero and
+/// below refused at the operation.
+#[test]
+fn a_ratio_reads_writes_and_refuses() {
+    use ondin_core::container::{RatioSide, parse_ratio, ratio_words};
+    assert_eq!(ratio_words(16.0 / 9.0), "16 : 9");
+    assert_eq!(ratio_words(1.85), "37 : 20");
+    assert_eq!(ratio_words(std::f64::consts::PI), "3.14");
+    assert_eq!(ratio_words(std::f64::consts::SQRT_2), "1.41");
+    assert_eq!(parse_ratio("4:3"), Some(4.0 / 3.0));
+    assert_eq!(parse_ratio(" 2 / 1 "), Some(2.0));
+    assert_eq!(parse_ratio("1.5"), Some(1.5));
+    assert_eq!(parse_ratio("0"), None);
+    assert_eq!(parse_ratio("4:0"), None);
+    assert_eq!(ratio(16.0 / 9.0, RatioSide::Height).css(), "16 / 9");
+    let json = serde_json::to_string(&ratio(2.0, RatioSide::Width)).unwrap();
+    assert_eq!(json, r#"{"ratio":2.0,"side":"Width"}"#);
+    let mut s = Scene::new();
+    let r = s.add(s.root, rect(10.0, 10.0), (0.0, 0.0));
+    let mut item = *s.doc.get(r).unwrap().item();
+    item.aspect_ratio = Some(ratio(0.0, RatioSide::Height));
+    let refused = s.history.commit(
+        &mut s.doc,
+        Transaction(vec![Operation::SetLayoutItem { id: r, item }]),
+    );
+    assert!(refused.is_err());
 }

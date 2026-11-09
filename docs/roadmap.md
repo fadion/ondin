@@ -15,10 +15,6 @@ item's premise can go stale while its ask still reads true.
   path points to one limit where operations and loads are already checked
   (`build::affine_is_finite` and its neighbours), so every door shares the field limit's number.
 
-## Now · Components and layout
-
-- **`aspect-ratio`, which §5.3c defers** (`layout.md`). The engine supports it.
-
 ## Now · Code export (HTML/CSS, React, Vue)
 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built

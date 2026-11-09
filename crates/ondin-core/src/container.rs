@@ -1715,6 +1715,83 @@ impl Dimension {
     }
 }
 
+/// The side an [`AspectRatio`] sizes from the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RatioSide {
+    Width,
+    Height,
+}
+
+/// CSS `aspect-ratio` on one side: `ratio` is width over height, and `side` is
+/// the side it derives — that side's size is `auto` and the ratio sets it from
+/// the other. `{"ratio":1.7777777777777777,"side":"Height"}`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AspectRatio {
+    pub ratio: f64,
+    pub side: RatioSide,
+}
+
+impl AspectRatio {
+    /// A ratio CSS accepts: finite and above zero.
+    pub fn is_valid(self) -> bool {
+        self.ratio.is_finite() && self.ratio > 0.0
+    }
+
+    /// `size` with its derived side following the other.
+    pub fn applied(self, size: Size) -> Size {
+        match self.side {
+            RatioSide::Height => Size::new(size.width, size.width / self.ratio),
+            RatioSide::Width => Size::new(size.height * self.ratio, size.height),
+        }
+    }
+
+    /// `aspect-ratio` as CSS writes it — `16 / 9`, or `1.85` where no small
+    /// fraction is the ratio.
+    pub fn css(self) -> String {
+        match small_fraction(self.ratio) {
+            Some((w, h)) => format!("{w} / {h}"),
+            None => css_number(self.ratio),
+        }
+    }
+}
+
+/// `ratio` as the cards show it — `16 : 9`, or `1.85` where no small fraction
+/// is the ratio.
+pub fn ratio_words(ratio: f64) -> String {
+    match small_fraction(ratio) {
+        Some((w, h)) => format!("{w} : {h}"),
+        None => css_number((ratio * 100.0).round() / 100.0),
+    }
+}
+
+/// A ratio typed as `16:9`, `16/9`, `16 / 9` or `1.78`; `None` for anything
+/// else, a zero or a negative.
+pub fn parse_ratio(text: &str) -> Option<f64> {
+    let t = text.trim();
+    let r = match t.split_once([':', '/']) {
+        Some((w, h)) => w.trim().parse::<f64>().ok()? / h.trim().parse::<f64>().ok()?,
+        None => t.parse::<f64>().ok()?,
+    };
+    (r.is_finite() && r > 0.0).then_some(r)
+}
+
+/// `r` as the smallest whole `w / h` with `h` up to 32 that names it to within
+/// a ten-thousandth — how a typed `16:9` comes back out of the stored quotient,
+/// tight enough that π is not `22 : 7`.
+fn small_fraction(r: f64) -> Option<(u32, u32)> {
+    (1..=32u32).find_map(|h| {
+        let w = (r * f64::from(h)).round();
+        ((1.0..=10_000.0).contains(&w) && (w / f64::from(h) - r).abs() <= r * 1e-4)
+            .then_some((w as u32, h))
+    })
+}
+
+/// Whether a layer of `kind` can hold an aspect ratio: one whose size is a
+/// stored field the ratio can keep — not text, whose size is its content's.
+pub fn holds_ratio(kind: &NodeKind) -> bool {
+    !matches!(kind, NodeKind::Text { .. }) && crate::edit::resizable_size(kind).is_some()
+}
+
 /// A layer's properties **as an item of a layout** — CSS's size properties,
 /// `flex-*`, `grid-column`/`grid-row` and the self-alignments (§15 D867, D914).
 ///
@@ -1768,6 +1845,11 @@ pub struct LayoutItem {
     /// ([`area_lines`]). Those two are kept, for *None* to give back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_area: Option<AreaName>,
+    /// `aspect-ratio`, read under any layout and outside one: the side it
+    /// derives is laid `auto`, and `build::keep_ratios` keeps the stored size
+    /// to it on every edit, which is what a layer no layout sizes is drawn by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<AspectRatio>,
     /// The number variables the four limits are bound to, in
     /// `variable::LimitVars`' order — beside the values as an effect's bindings
     /// are, so every door that writes the item from the stored one carries them.
@@ -1794,6 +1876,7 @@ impl Default for LayoutItem {
             grid_column: GridLines::default(),
             grid_row: GridLines::default(),
             grid_area: None,
+            aspect_ratio: None,
             limit_vars: Default::default(),
         }
     }
@@ -1841,6 +1924,7 @@ impl LayoutItem {
         .all(Dimension::is_finite)
             && self.grow.is_finite()
             && self.shrink.is_finite()
+            && self.aspect_ratio.is_none_or(|r| r.ratio.is_finite())
     }
 
     /// Every value one CSS accepts: no grid line 0 and no `span 0`, and — since
@@ -1875,6 +1959,8 @@ impl LayoutItem {
             && (self.grid_column == was.grid_column || self.grid_column.is_valid())
             && (self.grid_row == was.grid_row || self.grid_row.is_valid())
             && (self.grid_area == was.grid_area || self.grid_area.is_none_or(AreaName::is_valid))
+            && (self.aspect_ratio == was.aspect_ratio
+                || self.aspect_ratio.is_none_or(AspectRatio::is_valid))
     }
 }
 
@@ -2553,9 +2639,28 @@ impl<'v> FlexTree<'v> {
     ) -> taffy::Size<f32> {
         let kind = match &self.leaves[index] {
             Leaf::Replaced(s) => {
+                // A ratio sizes the derived side from a known other: taffy's leaf
+                // only ever grows a measured box to its ratio, never shrinks it.
+                let ratio = self
+                    .view
+                    .item(self.ids[index])
+                    .aspect_ratio
+                    .filter(|r| r.is_valid());
+                let (w, h) = match (ratio, known.width, known.height) {
+                    (Some(r), Some(w), None) if r.side == RatioSide::Height => {
+                        (w, w / r.ratio as f32)
+                    }
+                    (Some(r), None, Some(h)) if r.side == RatioSide::Width => {
+                        (h * r.ratio as f32, h)
+                    }
+                    _ => (
+                        known.width.unwrap_or(s.width as f32),
+                        known.height.unwrap_or(s.height as f32),
+                    ),
+                };
                 return taffy::Size {
-                    width: known.width.unwrap_or(s.width as f32),
-                    height: known.height.unwrap_or(s.height as f32),
+                    width: w,
+                    height: h,
                 };
             }
             Leaf::Container => return taffy::Size::ZERO,
@@ -2727,6 +2832,16 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
         grid_row: grid_lines(item.grid_row),
         ..Default::default()
     };
+    // The derived side goes `auto` — a frame's stored size there would make the
+    // ratio unread — and the ratio sets it from the other. A ratio a file carries
+    // refused is read as none.
+    if let Some(r) = item.aspect_ratio.filter(|r| r.is_valid()) {
+        style.aspect_ratio = Some(r.ratio as f32);
+        match r.side {
+            RatioSide::Width => style.size.width = auto(),
+            RatioSide::Height => style.size.height = auto(),
+        }
+    }
     match display {
         Some(Display::Flex(f)) => {
             style.display = taffy::Display::Flex;

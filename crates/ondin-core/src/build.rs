@@ -4961,6 +4961,98 @@ pub fn kept_spacing_vars(
     std::array::from_fn(|k| bound[k].filter(|_| w[k] == drawn[k] || w[k] == literal[k]))
 }
 
+/// Keeps every layer holding an aspect ratio at it, so its stored size — what a
+/// layer no layout sizes is drawn by, and what a layout measures a shape by — is
+/// always the ratio's:
+///
+/// - a resize changing the driving side (or both) sets the derived side from it;
+///   one changing only the derived side — a drag on its handle — sets the
+///   driving side from that instead, the derived side being the ratio's;
+/// - a ratio set or changed with no resize beside it resizes the derived side.
+///
+/// Patches the transaction's own `SetGeometry` in place, so the gesture preview
+/// can run it on the resize it draws.
+pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
+    use crate::container::{AspectRatio, RatioSide, holds_ratio};
+    // Each touched layer's ratio as the transaction leaves it.
+    let mut ratios: Vec<(NodeId, Option<AspectRatio>, bool)> = Vec::new();
+    for op in &tx.0 {
+        let (id, set) = match op {
+            Operation::SetLayoutItem { id, item } => (*id, Some(item.aspect_ratio)),
+            Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::Size(_),
+            } => (*id, None),
+            _ => continue,
+        };
+        let was = doc.get(id).and_then(|n| n.item().aspect_ratio);
+        match ratios.iter_mut().find(|(n, ..)| *n == id) {
+            Some((_, r, changed)) => {
+                if let Some(s) = set {
+                    *r = s;
+                    *changed = s != was;
+                }
+            }
+            None => ratios.push((id, set.unwrap_or(was), set.is_some_and(|s| s != was))),
+        }
+    }
+    let mut resized: FxHashSet<NodeId> = FxHashSet::default();
+    for op in tx.0.iter_mut() {
+        let Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Size(new),
+        } = op
+        else {
+            continue;
+        };
+        resized.insert(*id);
+        let Some(r) = ratios
+            .iter()
+            .find(|(n, ..)| n == id)
+            .and_then(|(_, r, _)| *r)
+            .filter(|r| r.is_valid())
+        else {
+            continue;
+        };
+        let Some(old) = doc
+            .get(*id)
+            .filter(|n| holds_ratio(n.kind()))
+            .and_then(|n| crate::edit::resizable_size(n.kind()))
+        else {
+            continue;
+        };
+        *new = match r.side {
+            RatioSide::Height if new.width == old.width && new.height != old.height => {
+                kurbo::Size::new(new.height * r.ratio, new.height)
+            }
+            RatioSide::Width if new.height == old.height && new.width != old.width => {
+                kurbo::Size::new(new.width, new.width / r.ratio)
+            }
+            _ => r.applied(*new),
+        };
+    }
+    for (id, r, changed) in ratios {
+        let Some(r) = r.filter(|r| changed && r.is_valid() && !resized.contains(&id)) else {
+            continue;
+        };
+        let Some(old) = doc
+            .get(id)
+            .filter(|n| holds_ratio(n.kind()))
+            .and_then(|n| crate::edit::resizable_size(n.kind()))
+        else {
+            continue;
+        };
+        let to = r.applied(old);
+        if to != old {
+            tx.0.push(Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::Size(to),
+            });
+        }
+    }
+    tx
+}
+
 /// Keeps the items of every grid whose areas `tx` changes naming areas it has:
 /// an item naming an area that is gone takes the name of a new area on the same
 /// cells (a rename), or none and goes back to its own lines (a removal) — in

@@ -1719,11 +1719,15 @@ impl Walk<'_> {
                 if replaced(node, kind)
                     && let Some(b) = bx
                 {
-                    if item.min_width == Dimension::Auto {
+                    // Not on a ratio's derived side, which the ratio sizes, down
+                    // as well as up, from whatever the layout gives the other.
+                    let derived = |side| item.aspect_ratio.is_some_and(|r| r.side == side);
+                    if item.min_width == Dimension::Auto && !derived(container::RatioSide::Width) {
                         let w = self.axis_size(node, 0, b.width());
                         el.set("min-width", w);
                     }
-                    if item.min_height == Dimension::Auto {
+                    if item.min_height == Dimension::Auto && !derived(container::RatioSide::Height)
+                    {
                         let h = self.axis_size(node, 1, b.height());
                         el.set("min-height", h);
                     }
@@ -1831,11 +1835,19 @@ impl Walk<'_> {
                 )
             }
         };
-        if let Some(w) = w.filter(|_| !stretched.0) {
+        // A ratio's derived side is left to `aspect-ratio`, as the canvas lays it.
+        let ratio = item
+            .aspect_ratio
+            .filter(|r| r.is_valid() && container::holds_ratio(kind));
+        let derived = |side| ratio.is_some_and(|r| r.side == side);
+        if let Some(w) = w.filter(|_| !stretched.0 && !derived(container::RatioSide::Width)) {
             el.set("width", w);
         }
-        if let Some(h) = h.filter(|_| !stretched.1) {
+        if let Some(h) = h.filter(|_| !stretched.1 && !derived(container::RatioSide::Height)) {
             el.set("height", h);
+        }
+        if let Some(r) = ratio {
+            el.set("aspect-ratio", r.css());
         }
         // `k` is `LayoutItem::limit`'s place; a bound limit is its variable in px.
         for (k, prop) in [

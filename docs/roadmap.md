@@ -61,6 +61,11 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and
   specified beside used values (§15 D868). The page verbs are built; `export_svg` and `export_png`
   still take no page.
+- **The *Measured empty* caption for every width from content.** The Variables card's warning
+  under a querying frame (`panels::variables`, beside `widths_fold`) checks only the frame's own
+  *Fit content*. A frame sized by an auto grid track, or a flex item that does not grow, is also
+  measured empty under containment and gets no caption. Ask layout whether the width comes from
+  content, not each setting in turn.
 
 ## Later · Platform and dependencies
 

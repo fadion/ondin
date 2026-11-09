@@ -1468,8 +1468,12 @@ impl OndinApp {
             if self.var_browser.is_none() {
                 self.toggle_var_browser();
             }
+            // The other fields drawing the value, counted now so the offer
+            // under the new row is right when shown.
+            let others = self.other_uses(id).len();
             if let Some(b) = self.var_browser.as_mut() {
                 b.start_rename(id, name);
+                b.offer = (others > 0).then_some((id, others));
             }
         }
     }
@@ -1988,7 +1992,7 @@ impl OndinApp {
     }
 
     /// `key`'s value as a cell — what *Extract* files.
-    pub(super) fn field_value(&self, key: FieldKey) -> Option<Cell> {
+    pub(crate) fn field_value(&self, key: FieldKey) -> Option<Cell> {
         let doc = &self.session.doc;
         match key {
             FieldKey::Paint { id, slot } => {

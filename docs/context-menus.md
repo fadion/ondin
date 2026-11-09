@@ -387,7 +387,7 @@ the Paragraph tab's spacing. X, Y and rotation are not bindable.
 | Row | Accelerator | Shown / enabled |
 |---|---|---|
 | Bind to variable… | `--` (typed fields only) | opens the variable list filtered to the field's type, the current one highlighted |
-| Extract into variable… | — | files a variable from the value and binds it in one step, then opens the browser on its name; disabled while bound |
+| Extract into variable… | — | files a variable from the value and binds it in one step, then opens the browser on its name, offering to bind the other fields that draw the value (`styles-variables.md`, *Bind other uses*); disabled while bound |
 | Detach variable | `Backspace` (typed fields only) | the field keeps its resolved value; omitted when not bound |
 
 No variable is offered on a field's label badge (it scrubs).

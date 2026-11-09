@@ -8097,7 +8097,12 @@ impl OndinApp {
         let boxed = (self.clean_up.as_ref().map(|b| b.ringed()))
             .or_else(|| self.fill_content.as_ref().map(|b| b.ringed()));
         let (box_ids, soft) = boxed.unwrap_or((&[], false));
-        let panels = self.layers_hover.iter().chain(&self.history_pane.hover);
+        let bind_list = self.var_browser.as_ref().and_then(|b| b.bind_hover);
+        let panels = self
+            .layers_hover
+            .iter()
+            .chain(&self.history_pane.hover)
+            .chain(&bind_list);
         for (&id, width) in panels
             .map(|id| (id, 3.0))
             .chain(box_ids.iter().map(|id| (id, if soft { 1.0 } else { 3.0 })))

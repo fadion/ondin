@@ -4,6 +4,7 @@
 //! Pure views over `EditorSession`: they read through `display_node()` so controls
 //! reflect an in-progress gesture, and act only through `commit`/`edit_valve`.
 
+pub(crate) mod bind_others;
 pub(crate) mod binding;
 mod component;
 pub(crate) mod credit;

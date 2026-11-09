@@ -2262,6 +2262,9 @@ pub enum Tick {
     /// Ticked and not the user's to change — what comes with the rest, as a kit
     /// update's variables do. Drawn faded.
     Fixed,
+    /// Not offered: a dead box and dimmed words, its reason the row's tooltip
+    /// (a locked layer in *Bind other uses*).
+    Dead,
 }
 
 /// A [`tick_row`]'s leading mark: a glyph, or a colour's chip.
@@ -2283,6 +2286,10 @@ pub enum RowTail {
 /// How far a [`Tick::Fixed`] box fades, so it reads as settled rather than as
 /// one more choice.
 pub const TICK_FIXED_FADE: f32 = 0.45;
+
+/// How far a [`Tick::Dead`] row's words fade: tokens import's kit rows' half,
+/// fainter than an unticked row, since no click brings it in.
+pub const TICK_DEAD_FADE: f32 = 0.5;
 
 /// One row of a ticked list inside a popover (the kit update review, *Bind other
 /// uses*): [`paint_tick_box`] at the menu's inset, a mark in the menu glyph's
@@ -2319,9 +2326,20 @@ pub fn tick_row(
             paint_tick_box(&p, at, true, false);
             p.set_opacity(1.0);
         }
+        // The dead box tokens import draws for a row it cannot take.
+        Tick::Dead => {
+            p.rect_stroke(
+                egui::Rect::from_center_size(at, egui::vec2(TICK_BOX, TICK_BOX)),
+                3.0,
+                egui::Stroke::new(1.0, color::text_a(40)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
-    if tick == Tick::Open(false) {
-        p.multiply_opacity(UNTICKED_FADE);
+    match tick {
+        Tick::Open(false) => p.multiply_opacity(UNTICKED_FADE),
+        Tick::Dead => p.multiply_opacity(TICK_DEAD_FADE),
+        _ => {}
     }
     let chip = |x: f32, c| {
         paint_colour_chip(

@@ -146,6 +146,9 @@ enum Menu {
     ConfirmCollection(CollectionId),
     /// A variable's scope: the field families it may bind, ticked.
     Scope(VarId),
+    /// *Bind other uses…*: the fields drawing a variable's value, ticked, and
+    /// bound together (`bind_others`).
+    Bind(VarId),
     /// The words a flex direction's or wrap's string may hold, for one cell.
     Words(VarId, ModeId),
 }
@@ -194,6 +197,26 @@ pub(crate) struct Browser {
     inner_w: f32,
     /// The panel's rect as last drawn.
     pub(crate) panel: Option<egui::Rect>,
+    /// After *Extract into variable…*: the variable made and how many other
+    /// fields draw its value — the offer line under its row while it shows.
+    pub(crate) offer: Option<(VarId, usize)>,
+    /// *Bind other uses*'s list while its popover is open.
+    bind: Option<BindList>,
+    /// The layer whose row in that list is under the pointer, outlined on the
+    /// canvas as a Layers row's is. Set while drawn, read by the next frame's
+    /// canvas, which draws first.
+    pub(crate) bind_hover: Option<NodeId>,
+    /// The variable menu's count of other uses, by variable and document
+    /// revision: the walk is the whole document's, too dear for every frame.
+    uses_count: Option<(VarId, u64, usize)>,
+}
+
+/// *Bind other uses*'s list: the fields found when it opened, and which are
+/// ticked.
+struct BindList {
+    var: VarId,
+    uses: Vec<super::bind_others::Use>,
+    on: Vec<bool>,
 }
 
 impl Browser {
@@ -286,6 +309,10 @@ enum Act {
     MoveTo(VarId, Option<CollectionId>),
     /// A scope ticked: the variable's new scope, `None` every field.
     Scope(VarId, Option<Scope>),
+    /// *Bind other uses*'s *Bind*: these fields bound to the variable.
+    BindUses(VarId, Vec<super::binding::FieldKey>),
+    /// A row of that list double-clicked: its layer selected and shown.
+    Reveal(NodeId),
 }
 
 /// One row of the table as drawn: a group's header or a variable, or a kit's
@@ -381,6 +408,18 @@ impl OndinApp {
     /// Open the browser on `var`'s collection with its scope popover open — the
     /// `--` list's *Scope…*.
     pub(crate) fn open_scope(&mut self, var: VarId) {
+        self.open_var_popover(var, Menu::Scope(var));
+    }
+
+    /// Open the browser on `var` with *Bind other uses…*'s popover open, as its
+    /// menu row does — for the tests and the audit, which draw no menu first.
+    #[cfg(test)]
+    pub(crate) fn open_bind_others(&mut self, var: VarId) {
+        self.open_var_popover(var, Menu::Bind(var));
+    }
+
+    /// Open the browser on `var`'s collection with `menu` beside the panel.
+    fn open_var_popover(&mut self, var: VarId, menu: Menu) {
         let Some(c) = self
             .session
             .doc
@@ -404,7 +443,7 @@ impl OndinApp {
                 .map_or(self.canvas_rect.left_top() + egui::vec2(60.0, 60.0), |p| {
                     p.right_top() + egui::vec2(ui::MENU_GAP, 0.0)
                 });
-            b.menu = Some((Menu::Scope(var), at));
+            b.menu = Some((menu, at));
         }
     }
 
@@ -418,6 +457,12 @@ impl OndinApp {
         let Some(mut b) = self.var_browser.take() else {
             return;
         };
+        // Set again by the bind list while a row of it is under the pointer;
+        // its list is read afresh each time the popover opens.
+        b.bind_hover = None;
+        if !matches!(b.menu, Some((Menu::Bind(_), _))) {
+            b.bind = None;
+        }
         // **Collapsed groups are the document's, not the panel's** (D1038
         // G-series): loaded from the app's per-document sets ([`collapsed_key`])
         // whenever the document under the browser is not the one it loaded for,
@@ -645,16 +690,23 @@ impl OndinApp {
                                     Line::Var(v) if v.origin.is_some() => {
                                         kit_var_row(ui, doc, v, modes, &users[&v.id], &b, &mut acts)
                                     }
-                                    Line::Var(v) => var_row(
-                                        ui,
-                                        doc,
-                                        v,
-                                        modes,
-                                        &users[&v.id],
-                                        &mut b,
-                                        &mut acts,
-                                        pending,
-                                    ),
+                                    Line::Var(v) => {
+                                        var_row(
+                                            ui,
+                                            doc,
+                                            v,
+                                            modes,
+                                            &users[&v.id],
+                                            &mut b,
+                                            &mut acts,
+                                            pending,
+                                        );
+                                        if let Some((o, n)) = b.offer
+                                            && o == v.id
+                                        {
+                                            offer_line(ui, doc, v, n, b.inner_w, &mut acts);
+                                        }
+                                    }
                                     Line::Kit(k) => kit_row(
                                         ui,
                                         doc,
@@ -739,7 +791,7 @@ impl OndinApp {
         let table = doc.variables();
         let menu_w = match &menu {
             Menu::ConfirmMode(_) | Menu::ConfirmCollection(_) => 240.0,
-            Menu::Scope(_) => SCOPE_W,
+            Menu::Scope(_) | Menu::Bind(_) => SCOPE_W,
             _ => 200.0,
         };
         let modes_of = |m: ModeId| table.collection_of_mode(m).map_or(0, |c| c.modes.len());
@@ -753,7 +805,8 @@ impl OndinApp {
         };
         let rows = match &menu {
             Menu::Add => 7.0,
-            Menu::Var(_) => 7.0,
+            Menu::Var(_) => 8.0,
+            Menu::Bind(_) => BIND_LIST_ROWS + 5.0,
             Menu::Mode(m) if modes_of(*m) > 1 => 6.5 + width_field(*m),
             Menu::Mode(m) => 3.0 + width_field(*m),
             Menu::Collection(_) => 5.5,
@@ -904,6 +957,31 @@ impl OndinApp {
                             if select.clicked() {
                                 acts.push(Act::Select(users[&v.id].clone()));
                                 close = true;
+                            }
+                            // The fields drawing its value, counted once per
+                            // revision; a kit's variable is the kit's to scope.
+                            if v.origin.is_none() {
+                                let rev = self.session.revision();
+                                let n = match b.uses_count {
+                                    Some((x, r, n)) if x == v.id && r == rev => n,
+                                    _ => {
+                                        let n = self.other_uses(v.id).len();
+                                        b.uses_count = Some((v.id, rev, n));
+                                        n
+                                    }
+                                };
+                                let count = n.to_string();
+                                let bind = item(
+                                    ui,
+                                    ui::MenuRow::new(icon::LINK_SIMPLE, "Bind other uses…")
+                                        .accel((n > 0).then_some(count.as_str()))
+                                        .enabled(n > 0),
+                                )
+                                .on_disabled_hover_text("No other field draws this value");
+                                // Not `close`: the popover takes the menu's place.
+                                if bind.clicked() && n > 0 {
+                                    b.menu = Some((Menu::Bind(v.id), at));
+                                }
                             }
                             ui::menu_sep(ui);
                             let del =
@@ -1332,6 +1410,25 @@ impl OndinApp {
                             };
                             scope_popover(ui, doc, v, users, acts);
                         }
+                        Menu::Bind(var) => {
+                            if b.bind.as_ref().is_none_or(|l| l.var != *var) {
+                                let uses = self.other_uses(*var);
+                                let own = table.get(*var).and_then(|v| v.scope);
+                                let on = uses
+                                    .iter()
+                                    .map(|u| {
+                                        u.why_not.is_none()
+                                            && own.is_none_or(|s| s.contains(u.field))
+                                    })
+                                    .collect();
+                                b.bind = Some(BindList {
+                                    var: *var,
+                                    uses,
+                                    on,
+                                });
+                            }
+                            close = self.bind_popover(ui, b, acts);
+                        }
                         Menu::Words(v, m) => {
                             let Some(v) = table.get(*v) else {
                                 close = true;
@@ -1607,6 +1704,14 @@ impl OndinApp {
                     self.session.selection.set(ids);
                 }
             }
+            Act::BindUses(var, keys) => {
+                if let Some(b) = self.var_browser.as_mut() {
+                    b.offer = None;
+                    b.bind = None;
+                }
+                self.bind_other_uses(var, &keys);
+            }
+            Act::Reveal(id) => self.select_main(id),
             Act::NewVar(kind) => {
                 // Into the collection on show.
                 let shown = self.shown_collection();
@@ -2197,6 +2302,163 @@ fn scope_rows(v: Option<&Variable>) -> f32 {
     2.5 + fields + groups * 0.9 + 2.0
 }
 
+/// *Bind other uses*'s list at its tallest, in menu rows: past it the fields
+/// scroll inside the popover rather than growing it.
+const BIND_LIST_ROWS: f32 = 10.0;
+
+impl OndinApp {
+    /// *Bind other uses…*'s popover, in the variable menu's place: what was
+    /// searched, the fields grouped by family — the scope's own first and
+    /// ticked, any other unticked under a heading saying it widens the scope —
+    /// and *Cancel* / *Bind N*. A row's hover outlines its layer on the canvas
+    /// and a double-click goes to it. Answers whether it closes.
+    fn bind_popover(&self, ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) -> bool {
+        let doc = &self.session.doc;
+        let table = doc.variables();
+        let Some(list) = b.bind.as_mut() else {
+            return true;
+        };
+        let Some(v) = table.get(list.var) else {
+            return true;
+        };
+        let inset = |ui: &mut egui::Ui, text: egui::RichText| {
+            ui.horizontal(|ui| {
+                ui.add_space(SCOPE_INSET);
+                ui.add(egui::Label::new(text).wrap());
+            });
+        };
+        inset(
+            ui,
+            egui::RichText::new(format!("Bind {} to its other users", v.name))
+                .size(ui::CONTROL_PT)
+                .color(theme::text::strong()),
+        );
+        let value = table
+            .collection_of(v.id)
+            .and_then(|c| c.default_mode())
+            .and_then(|m| table.resolve(v.id, m));
+        let what = value.clone().map(value_text).unwrap_or_default();
+        let opacity = match value {
+            Some(Value::Color(_)) => " at any opacity",
+            _ => "",
+        };
+        inset(
+            ui,
+            egui::RichText::new(format!(
+                "Fields drawing {what}{opacity}, on every page, in the modes in force there"
+            ))
+            .size(ui::SMALL_PT)
+            .color(theme::text::dim()),
+        );
+        ui::menu_sep(ui);
+        // The scope's own families first, each in the scope popover's order.
+        let own = |f: Field| v.scope.is_none_or(|s| s.contains(f));
+        let mut families: Vec<Field> = Vec::new();
+        for u in &list.uses {
+            if !families.contains(&u.field) {
+                families.push(u.field);
+            }
+        }
+        let order = |f: &Field| Field::ALL.iter().position(|x| x == f).unwrap_or(0);
+        families.sort_by_key(|f| (!own(*f), order(f)));
+        let need = list.uses.len() as f32 * (MENU_ROW_H + 1.0)
+            + families.len() as f32 * (super::binding::FACE_HEAD_H + 1.0);
+        let h = need.min(BIND_LIST_ROWS * MENU_ROW_H);
+        let mut hover = None;
+        egui::ScrollArea::vertical()
+            .id_salt("bind-others")
+            .max_height(h)
+            .min_scrolled_height(h)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let w = ui.available_width();
+                for f in &families {
+                    let n = list.uses.iter().filter(|u| u.field == *f).count();
+                    let (head, _) = ui.allocate_exact_size(
+                        egui::vec2(w, super::binding::FACE_HEAD_H),
+                        egui::Sense::hover(),
+                    );
+                    let p = ui.painter();
+                    let y = head.bottom() - 7.0;
+                    p.text(
+                        egui::pos2(head.left() + SCOPE_INSET, y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{} · {n}", field_label(*f)).to_uppercase(),
+                        egui::FontId::proportional(ui::EYEBROW_PT),
+                        theme::text::faint(),
+                    );
+                    if !own(*f) {
+                        p.text(
+                            egui::pos2(head.right() - SCOPE_INSET, y),
+                            egui::Align2::RIGHT_CENTER,
+                            "widens its scope",
+                            egui::FontId::proportional(ui::CAPTION_PT),
+                            theme::text::muted(),
+                        );
+                    }
+                    for (i, u) in list.uses.iter().enumerate() {
+                        if u.field != *f {
+                            continue;
+                        }
+                        let id = u.key.at();
+                        let Some(node) = doc.get(id) else { continue };
+                        let tick = match u.why_not {
+                            Some(_) => ui::Tick::Dead,
+                            None => ui::Tick::Open(list.on[i]),
+                        };
+                        let glyph = super::layers::node_glyph(node.kind()).0;
+                        let resp = ui::tick_row(
+                            ui,
+                            w,
+                            tick,
+                            ui::RowMark::Glyph(glyph),
+                            &crate::private::layer(doc, id),
+                            ui::RowTail::Text(u.tail.clone()),
+                        );
+                        // Outlined only where the canvas shows it.
+                        if resp.hovered() && doc.page_of(id) == Some(self.session.page) {
+                            hover = Some(id);
+                        }
+                        if let Some(why) = &u.why_not {
+                            resp.on_hover_text(why);
+                            continue;
+                        }
+                        if ui::double_clicked(ui, &resp) {
+                            acts.push(Act::Reveal(id));
+                        } else if resp.clicked() {
+                            list.on[i] = !list.on[i];
+                        }
+                    }
+                }
+            });
+        ui::menu_sep(ui);
+        let keys: Vec<super::binding::FieldKey> = list
+            .uses
+            .iter()
+            .zip(&list.on)
+            .filter(|(u, on)| **on && u.why_not.is_none())
+            .map(|(u, _)| u.key)
+            .collect();
+        let bind = format!("Bind {}", keys.len());
+        let state = match keys.is_empty() {
+            true => ui::FieldButton::Disabled,
+            false => ui::FieldButton::Primary,
+        };
+        let why = keys.is_empty().then_some("Tick a field to bind it");
+        let var = list.var;
+        b.bind_hover = hover;
+        let buttons = [("Cancel", ui::FieldButton::Off), (bind.as_str(), state)];
+        match crate::settings::footer_row_noted(ui, &buttons, why) {
+            Some(0) => true,
+            Some(_) => {
+                acts.push(Act::BindUses(var, keys));
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// *Scope…*: which fields `v` may bind. *Every … field* on is no scope — every
 /// field of its kind, any bindable later too; off, a box per family, each
 /// counting the layers bound there (the count selects them). Unticking a family
@@ -2400,6 +2662,64 @@ fn layers_label(n: usize) -> String {
         0 => "No layers use it".into(),
         1 => "Select 1 layer".into(),
         n => format!("Select {n} layers"),
+    }
+}
+
+/// The line under a variable *Extract into variable…* just made: how many
+/// other fields draw its value, and *Bind them…*, which opens their list. A
+/// line rather than a dialog, so a run of extracts goes on uninterrupted.
+fn offer_line(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    v: &Variable,
+    n: usize,
+    w: f32,
+    acts: &mut Vec<Act>,
+) {
+    let table = doc.variables();
+    let what = table
+        .collection_of(v.id)
+        .and_then(|c| c.default_mode())
+        .and_then(|m| table.resolve(v.id, m))
+        .map(value_text)
+        .unwrap_or_default();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::hover());
+    let label = "Bind them…";
+    let bw = ui::action_button_w(ui.ctx(), label);
+    let button = egui::Rect::from_min_size(
+        egui::pos2(
+            rect.right() - 6.0 - bw,
+            rect.center().y - ui::CONTROL_H / 2.0,
+        ),
+        egui::vec2(bw, ui::CONTROL_H),
+    );
+    let words = format!(
+        "{} other {} {what}",
+        n,
+        if n == 1 { "field uses" } else { "fields use" }
+    );
+    let text =
+        egui::Rect::from_x_y_ranges(rect.left() + INDENT..=button.left() - 8.0, rect.y_range());
+    ui.painter().with_clip_rect(text).text(
+        text.left_center(),
+        egui::Align2::LEFT_CENTER,
+        words,
+        egui::FontId::proportional(ui::SMALL_PT),
+        theme::text::dim(),
+    );
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(button));
+    let resp = ui::action_button(
+        &mut child,
+        icon::LINK_SIMPLE,
+        label,
+        ui::FieldButton::Off,
+        button.size(),
+    )
+    .on_hover_text(format!(
+        "Choose which fields that draw {what} to bind to this variable"
+    ));
+    if resp.clicked() {
+        acts.push(Act::OpenMenu(Menu::Bind(v.id), button.left_bottom()));
     }
 }
 
@@ -7205,5 +7525,82 @@ mod tests {
         app.var_act(Act::Scope(v, Some(Scope::of([Field::Spacing]))));
         assert_eq!(app.session.status().text, "1 layer was detached.");
         assert!(var::users(&app.session.doc, v).is_empty());
+    }
+
+    /// **An extract offers the value's other users, and their list binds
+    /// them**: two boxes of one blue; extracting one draws the offer line
+    /// under the new row, its *Bind them…* opens the list with the twin ticked,
+    /// and *Bind 1* binds it.
+    ///
+    /// flip: `extract_field` leaving `offer` unset → fails at "the offer line".
+    #[test]
+    fn an_extract_offers_the_other_users_and_the_list_binds_them() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        let page = app.session.doc.first_page();
+        let [one, twin] = [(); 2].map(|_| app.session.ids.mint());
+        let blue = keyed_by_position([ondin_core::Fill {
+            brush: Color::from_rgba8(47, 111, 216, 255).into(),
+            visible: true,
+        }]);
+        let rect = |id, name: &str| Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: ondin_core::NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(40.0, 40.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        app.session
+            .try_commit(Transaction(vec![
+                rect(one, "One"),
+                Operation::SetFills {
+                    id: one,
+                    fills: blue.clone(),
+                },
+                rect(twin, "Twin"),
+                Operation::SetFills {
+                    id: twin,
+                    fills: blue,
+                },
+            ]))
+            .unwrap();
+        let key = super::super::binding::FieldKey::Paint {
+            id: one,
+            slot: super::super::paint::PaintSlot::Fill(0),
+        };
+        let value = app.field_value(key).unwrap();
+        app.extract_field(key, value);
+        let var = app.field_var(key).unwrap();
+        let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
+        let mut shapes = vec![];
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, vec![], draw);
+        }
+        assert!(
+            last_text(&shapes, "1 other field uses #2F6FD8").is_some(),
+            "the offer line"
+        );
+        app.var_browser.as_mut().unwrap().edit = None;
+        click_text(&ctx, &mut app, "Bind them…", draw);
+        assert!(matches!(
+            app.var_browser.as_ref().unwrap().menu,
+            Some((Menu::Bind(v), _)) if v == var
+        ));
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], draw);
+        }
+        assert!(last_text(&shapes, "Twin").is_some(), "the twin's row");
+        click_text(&ctx, &mut app, "Bind 1", draw);
+        let fills = &app.session.doc.get(twin).unwrap().paint().fills;
+        assert_eq!(fills[0].brush.var(), Some(var), "the twin is bound");
+        assert!(
+            app.var_browser.as_ref().unwrap().menu.is_none(),
+            "and it closes"
+        );
     }
 }

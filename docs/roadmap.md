@@ -17,8 +17,6 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Components and layout
 
-- **Binding the other users of an extracted value** after *Extract into variable…*, which binds only
-  the field it was run from (§15 D1037, D1038): offer the other fields drawing the same value.
 - **Three CSS layout properties §5.3c defers** — `aspect-ratio`, named grid areas and
   `auto-fill`/`auto-fit` (`layout.md`). The engine supports each.
 

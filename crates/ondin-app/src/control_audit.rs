@@ -1261,6 +1261,55 @@ fn sweep_on(theme: Theme) {
         a.open_scope(id);
     });
     check("scope popover", app, found);
+    // *Bind other uses…*'s popover: the Box's fill extracted, a second box of
+    // the same fill offered, ticked.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let first = a.session.doc.first_page();
+        let box_id = a.session.doc.get(first).unwrap().children()[0];
+        let twin = a.session.ids.mint();
+        let fill = ondin_core::keyed_by_position([ondin_core::Fill {
+            brush: ondin_core::peniko::Color::from_rgba8(47, 111, 216, 255).into(),
+            visible: true,
+        }]);
+        a.session
+            .try_commit(Transaction(vec![
+                Operation::CreateNode {
+                    id: twin,
+                    parent: first,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(40.0, 40.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some("Twin".into()),
+                },
+                Operation::SetFills {
+                    id: twin,
+                    fills: fill.clone(),
+                },
+                Operation::SetFills {
+                    id: box_id,
+                    fills: fill,
+                },
+            ]))
+            .expect("a twin");
+        let key = crate::panels::binding::FieldKey::Paint {
+            id: box_id,
+            slot: crate::panels::paint::PaintSlot::Fill(0),
+        };
+        let value = a.field_value(key).expect("the box draws a colour");
+        a.extract_field(key, value);
+        let var = a.field_var(key).expect("extracted");
+        // The extract leaves the name open for typing; this pass is the list's.
+        if let Some(b) = a.var_browser.as_mut() {
+            b.escape();
+        }
+        a.open_bind_others(var);
+    });
+    check("bind other uses popover", app, found);
     let scratch = std::env::temp_dir().join(format!(
         "ondin-audit-{}-{}",
         std::process::id(),

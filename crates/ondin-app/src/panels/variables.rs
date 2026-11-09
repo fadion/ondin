@@ -200,6 +200,9 @@ pub(crate) struct Browser {
     /// After *Extract into variable…*: the variable made and how many other
     /// fields draw its value — the offer line under its row while it shows.
     pub(crate) offer: Option<(VarId, usize)>,
+    /// The document revision `offer` was counted at; counted again when it
+    /// moves, and gone once nothing else draws the value.
+    pub(crate) offer_rev: u64,
     /// *Bind other uses*'s list while its popover is open.
     bind: Option<BindList>,
     /// The layer whose row in that list is under the pointer, outlined on the
@@ -462,6 +465,14 @@ impl OndinApp {
         b.bind_hover = None;
         if !matches!(b.menu, Some((Menu::Bind(_), _))) {
             b.bind = None;
+        }
+        let rev = self.session.revision();
+        if let Some((v, _)) = b.offer
+            && b.offer_rev != rev
+        {
+            let n = self.other_uses(v).len();
+            b.offer = (n > 0).then_some((v, n));
+            b.offer_rev = rev;
         }
         // **Collapsed groups are the document's, not the panel's** (D1038
         // G-series): loaded from the app's per-document sets ([`collapsed_key`])
@@ -2380,12 +2391,11 @@ impl OndinApp {
                     );
                     let p = ui.painter();
                     let y = head.bottom() - 7.0;
-                    p.text(
+                    ui::paint_eyebrow(
+                        p,
                         egui::pos2(head.left() + SCOPE_INSET, y),
                         egui::Align2::LEFT_CENTER,
-                        format!("{} · {n}", field_label(*f)).to_uppercase(),
-                        egui::FontId::proportional(ui::EYEBROW_PT),
-                        theme::text::faint(),
+                        &format!("{} · {n}", field_label(*f)),
                     );
                     if !own(*f) {
                         p.text(
@@ -2424,6 +2434,9 @@ impl OndinApp {
                             continue;
                         }
                         if ui::double_clicked(ui, &resp) {
+                            // The double-click's first press flipped the
+                            // tick; a reveal leaves it as it was.
+                            list.on[i] = !list.on[i];
                             acts.push(Act::Reveal(id));
                         } else if resp.clicked() {
                             list.on[i] = !list.on[i];
@@ -7594,7 +7607,24 @@ mod tests {
         for _ in 0..2 {
             shapes = pass(&ctx, &mut app, vec![], draw);
         }
-        assert!(last_text(&shapes, "Twin").is_some(), "the twin's row");
+        let at = last_text(&shapes, "Twin").expect("the twin's row");
+        // A double-click goes to the layer and leaves its tick as it was.
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        pass(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], draw);
+        for _ in 0..2 {
+            pass(&ctx, &mut app, vec![press(true)], draw);
+            pass(&ctx, &mut app, vec![press(false)], draw);
+        }
+        assert_eq!(app.session.selection.single(), Some(twin), "revealed");
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], draw);
+        }
+        assert!(last_text(&shapes, "Bind 1").is_some(), "still ticked");
         click_text(&ctx, &mut app, "Bind 1", draw);
         let fills = &app.session.doc.get(twin).unwrap().paint().fills;
         assert_eq!(fills[0].brush.var(), Some(var), "the twin is bound");

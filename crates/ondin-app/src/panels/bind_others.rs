@@ -118,6 +118,25 @@ fn resting(key: FieldKey, v: &Cell) -> bool {
     }
 }
 
+/// Whether `key` holds its drawn number as such: not a percentage limit nor an
+/// *Auto* line height, which `field_value` reads as the px they come to and a
+/// bind would turn into a fixed px, the same today and not after a resize.
+fn literal(doc: &Document, key: FieldKey) -> bool {
+    match key {
+        FieldKey::Limit { id, slot } => matches!(
+            doc.resolved_item(id).limit(slot),
+            ondin_core::container::Dimension::Px(_)
+        ),
+        FieldKey::Type { id, slot } => match doc.resolved_kind(id).as_deref() {
+            Some(NodeKind::Text {
+                style, paragraph, ..
+            }) => ondin_core::variable::text_slot_number(slot, style, paragraph).is_some(),
+            _ => false,
+        },
+        _ => true,
+    }
+}
+
 /// Whether a field's drawn `cell` is the variable's `value`.
 fn same(cell: &Cell, value: &Value) -> bool {
     match (cell, value) {
@@ -240,7 +259,7 @@ impl OndinApp {
                 let Some(cell) = self.field_value(key) else {
                     continue;
                 };
-                if resting(key, &cell) || !same(&cell, &value) {
+                if resting(key, &cell) || !same(&cell, &value) || !literal(doc, key) {
                     continue;
                 }
                 let Some(bf) = key.bound() else { continue };
@@ -253,13 +272,17 @@ impl OndinApp {
                 found.push((key, field));
             }
         }
-        // A copy whose main's same field is offered follows it.
+        // A copy whose main's same field is offered and can be bound follows
+        // it; under a locked or styled main it is offered as its own.
         let is_found = |k: FieldKey| found.iter().any(|(f, _)| *f == k);
+        let dead = |k: FieldKey| {
+            locked(k.at()) || doc.get(k.at()).and_then(|n| style_over(n, k)).is_some()
+        };
         let source = |k: FieldKey| {
             doc.get(k.at())
                 .and_then(|n| n.link())
                 .map(|l| on(k, l))
-                .filter(|s| is_found(*s))
+                .filter(|s| is_found(*s) && !dead(*s))
         };
         let mut out: Vec<Use> = Vec::new();
         for &(key, field) in &found {
@@ -324,6 +347,16 @@ impl OndinApp {
     /// variable's scope to the families it takes in; the status line says how
     /// many fields and how many layers now use it.
     pub(crate) fn bind_other_uses(&mut self, var: VarId, keys: &[FieldKey]) {
+        // Read again: the list may have been open across an edit that changed
+        // a field's value, or reordered a layer's fills under its key.
+        let still: Vec<FieldKey> = self
+            .other_uses(var)
+            .into_iter()
+            .filter(|u| u.why_not.is_none())
+            .map(|u| u.key)
+            .collect();
+        let keys: Vec<FieldKey> = keys.iter().copied().filter(|k| still.contains(k)).collect();
+        let keys = &keys[..];
         let doc = &self.session.doc;
         let Some(v) = doc.variables().get(var).cloned() else {
             return;
@@ -440,6 +473,42 @@ mod tests {
                 visible: true,
             }]),
         }
+    }
+
+    /// **A field that stopped drawing the value is not bound**: the list may
+    /// stay open across an edit, so the bind reads the uses again.
+    ///
+    /// flip: `bind_other_uses` binding its keys unchecked → fails at "red
+    /// stays red".
+    #[test]
+    fn a_field_recoloured_since_the_list_opened_is_left_alone() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let [a, b] = [(); 2].map(|_| app.session.ids.mint());
+        app.session
+            .try_commit(Transaction(vec![
+                rect(a, page, "A"),
+                fill(a, BLUE, 1.0),
+                rect(b, page, "B"),
+                fill(b, BLUE, 1.0),
+            ]))
+            .unwrap();
+        let key = FieldKey::Paint {
+            id: a,
+            slot: PaintSlot::Fill(0),
+        };
+        app.extract_field(key, app.field_value(key).unwrap());
+        let var = app.field_var(key).unwrap();
+        let keys: Vec<FieldKey> = app.other_uses(var).iter().map(|u| u.key).collect();
+        assert_eq!(keys.len(), 1, "B is offered");
+        app.session
+            .try_commit(Transaction(vec![fill(b, RED, 1.0)]))
+            .unwrap();
+        app.bind_other_uses(var, &keys);
+        let brush = &app.session.doc.get(b).unwrap().paint().fills[0].brush;
+        assert_eq!(brush.var(), None, "red stays red");
     }
 
     /// **The other uses are the fields drawing the value, and they bind in

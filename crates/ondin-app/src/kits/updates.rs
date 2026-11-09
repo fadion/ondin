@@ -375,6 +375,23 @@ impl OndinApp {
             }
         }
         let needs = summary.as_ref().map_or(&[][..], |s| &s.needs[..]).to_vec();
+        // A publish read while the popover is open can change the rows: what
+        // is unticked is only ever a row on show.
+        if summary.is_some() {
+            self.kit_review
+                .off
+                .retain(|t| rows.iter().any(|r| r.0 == *t));
+        }
+        // A kit with no component rows — its variables and styles alone — is
+        // taken whatever is ticked.
+        let bare = summary.as_ref().is_some_and(|s| {
+            waiting.iter().any(|w| {
+                s.kits
+                    .iter()
+                    .find(|k| k.kit == w.kit.id)
+                    .is_none_or(|k| k.components.is_empty())
+            })
+        });
         let total = rows.len();
         let taken = rows
             .iter()
@@ -499,12 +516,12 @@ impl OndinApp {
                 (true, 0) => "Accept".to_string(),
                 (true, _) => format!("Accept {taken} of {total}"),
             };
-            let state = match ready && (taken > 0 || total == 0) {
+            let takes = taken > 0 || total == 0 || bare;
+            let state = match ready && takes {
                 true => crate::ui::FieldButton::Primary,
                 false => crate::ui::FieldButton::Disabled,
             };
-            let why =
-                (ready && taken == 0 && total > 0).then_some("Tick a component to take its update");
+            let why = (ready && !takes).then_some("Tick a component to take its update");
             let buttons = [
                 ("Later", crate::ui::FieldButton::Off),
                 (accept.as_str(), state),
@@ -730,13 +747,18 @@ impl OndinApp {
                         .is_some_and(|o| o.kit == w.kit.id)
                 })
             })
-            .filter_map(|c| Some((c.name.clone(), doc.get(c.top)?.origin()?.version)))
-            .fold(Vec::new(), |mut v, x| {
-                if !v.contains(&x) {
+            // One per top: a removed variant's row is its set's.
+            .filter(|c| !matches!(c.change, super::summary::Change::Detached(_)))
+            .filter_map(|c| Some((c.top, c.name.clone(), doc.get(c.top)?.origin()?.version)))
+            .fold(Vec::new(), |mut v: Vec<(NodeId, String, u32)>, x| {
+                if !v.iter().any(|y| y.0 == x.0) {
                     v.push(x);
                 }
                 v
-            });
+            })
+            .into_iter()
+            .map(|(_, name, v)| (name, v))
+            .collect();
         let mut loaded = Vec::new();
         for w in &waiting {
             // The shelf's copy when it has one; otherwise the file, read here —
@@ -792,6 +814,18 @@ impl OndinApp {
                     ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
                 ) if only.is_some() && self.kits_waiting(false).len() > waiting.len() => {
                     self.accept_kit_updates(None);
+                    return;
+                }
+                // The review skipped a kit whose update this one leans on.
+                Err(
+                    ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+                ) if !skipped.is_empty() => {
+                    let names: Vec<&str> = skipped.iter().map(|w| w.kit.name.as_str()).collect();
+                    self.session.fail(format!(
+                        "This update needs {}'s too, which the review leaves out — tick one of \
+                         its components",
+                        names.join(" and ")
+                    ));
                     return;
                 }
                 Err(

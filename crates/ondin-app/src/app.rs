@@ -195,6 +195,8 @@ pub(crate) struct InFlight {
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
     pub(crate) effect_drag: Option<crate::panels::paint::EffectDrag>,
+    /// A grid track row being dragged up or down its list.
+    pub(crate) track_drag: Option<crate::panels::paint::TrackDrag>,
     /// The export setting being scrubbed (the JPEG quality, an SVG's precision), which
     /// spec it belongs to, and its in-flight value; `RenderOverrides` cannot preview
     /// `SetExports`, and committing every frame would make it uncancellable.
@@ -358,6 +360,19 @@ mod in_flight_tests {
                 InFlight {
                     effect_drag: Some(crate::panels::paint::EffectDrag {
                         anchor: id,
+                        from: 0,
+                        to: 1,
+                        slots: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            ),
+            (
+                "track_drag",
+                InFlight {
+                    track_drag: Some(crate::panels::paint::TrackDrag {
+                        anchor: Some(id),
+                        rows: false,
                         from: 0,
                         to: 1,
                         slots: Default::default(),
@@ -2358,19 +2373,7 @@ impl OndinApp {
 
         // End of frame, because the release is the event the suppression swallows.
         if ctx.input(|i| !i.pointer.any_down()) {
-            self.gesture_cancelled = false;
-            // Here rather than on `drag_stopped`, which the session-scoped valves see
-            // only on a frame the field changed.
-            self.in_flight.session_scrub = None;
-            self.in_flight.settings_scrub = None;
-            self.in_flight.rename_scrub = None;
-            self.in_flight.repeat_scrub = None;
-            self.in_flight.blend_scrub = None;
-            self.in_flight.warp_scrub = None;
-            self.in_flight.trace_scrub = None;
-            self.in_flight.cleanup_scrub = None;
-            self.in_flight.offset_scrub = None;
-            self.in_flight.vision_scrub = None;
+            self.end_released_gestures();
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2896,6 +2899,25 @@ impl OndinApp {
         }
     }
 
+    /// End what a release ends, run at the close of a frame with no button down.
+    /// Here rather than on `drag_stopped`, which the session-scoped valves see only
+    /// on a frame the field changed, and a track drag's list may not be drawn on the
+    /// release frame at all (the selection changed under it).
+    pub(crate) fn end_released_gestures(&mut self) {
+        self.gesture_cancelled = false;
+        self.in_flight.session_scrub = None;
+        self.in_flight.settings_scrub = None;
+        self.in_flight.rename_scrub = None;
+        self.in_flight.repeat_scrub = None;
+        self.in_flight.blend_scrub = None;
+        self.in_flight.warp_scrub = None;
+        self.in_flight.trace_scrub = None;
+        self.in_flight.cleanup_scrub = None;
+        self.in_flight.offset_scrub = None;
+        self.in_flight.vision_scrub = None;
+        self.in_flight.track_drag = None;
+    }
+
     fn canvas_center(&self) -> Vec2 {
         Vec2::new(self.canvas_px.0 as f64 / 2.0, self.canvas_px.1 as f64 / 2.0)
     }
@@ -2979,6 +3001,7 @@ impl OndinApp {
         self.pages.cancel_drag();
         self.in_flight.paint_drag = None;
         self.in_flight.effect_drag = None;
+        self.in_flight.track_drag = None;
         // `gesture_cancelled` stops the release placing it.
         if let Some(p) = self.kit_picker.as_mut() {
             p.cancel_drag();

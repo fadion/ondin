@@ -74,6 +74,18 @@ pub struct EffectDrag {
     pub slots: Slots,
 }
 
+/// A grid track row being dragged up or down its list in the Container card:
+/// [`EffectDrag`] for the column list, or the row list when `rows`.
+#[derive(PartialEq)]
+pub struct TrackDrag {
+    /// The first subject the card was drawn for; the drag is dropped when it stops matching.
+    pub anchor: Option<NodeId>,
+    pub rows: bool,
+    pub from: usize,
+    pub to: usize,
+    pub slots: Slots,
+}
+
 /// The model indices to draw a top-first list in, with `moved`'s entry shown at
 /// its landing.
 pub fn forward_order(n: usize, moved: Option<(usize, usize)>) -> Vec<usize> {

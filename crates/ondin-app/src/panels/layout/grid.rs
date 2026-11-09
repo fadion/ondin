@@ -31,6 +31,8 @@
 //!   that each read half.
 
 use super::*;
+use crate::panels::inspector::carried_unit;
+use crate::panels::paint;
 use ondin_core::container::{
     AreaName, AutoRepeat, GridArea, GridAutoFlow, GridLines, RepeatCount, Track, TrackBreadth,
     TrackSize, area_lines, areas_are_valid, areas_css, areas_without_tracks, auto_repeat_refusal,
@@ -531,30 +533,6 @@ fn with_list(g: &mut Grid, rows: bool, list: &[Track]) {
     }
 }
 
-/// `list` with entry `from` dropped at slot `to` — a slot being the gap before
-/// entry `to`, `list.len()` the end. `None` where that is where it already is:
-/// the slot before it and the slot after it both leave the list as it was.
-fn reordered(list: &[Track], from: usize, to: usize) -> Option<Vec<Track>> {
-    // `to` counts the entry being moved; taken out first, it lands one earlier
-    // when the slot was below it.
-    let at = if to > from { to - 1 } else { to };
-    if at == from || from >= list.len() {
-        return None;
-    }
-    let mut moved = list.to_vec();
-    let t = moved.remove(from);
-    moved.insert(at.min(moved.len()), t);
-    Some(moved)
-}
-
-/// The grip reorder a track list is in the middle of: which list (by `rows`),
-/// and the entry picked up.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct TrackDrag {
-    rows: bool,
-    from: usize,
-}
-
 /// The area whose name the map is editing, and the text typed so far; `fresh`
 /// until the field has been given focus. `fold` is the undo step a drag just
 /// made the area in, which the name joins (`EditorSession::commit_into_last`).
@@ -819,14 +797,18 @@ impl OndinApp {
             );
             self.reset_marked(hit, &mark);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let add = ui::icon_button(ui, icon::PLUS, 20.0, 13.0, false, true).on_hover_text(
-                    if rows {
-                        "Add a row track"
-                    } else {
-                        "Add a column track"
+                // The new track is `1fr`, which CSS refuses beside an automatic repeat.
+                let fits = grids.iter().any(|g| repeats_to_fit(&get(g)));
+                let add = ui::icon_button(ui, icon::PLUS, 20.0, 13.0, false, !fits).on_hover_text(
+                    match (fits, rows) {
+                        (true, _) => {
+                            "This list repeats to fit — type any other tracks into its CSS line"
+                        }
+                        (false, true) => "Add a row track",
+                        (false, false) => "Add a column track",
                     },
                 );
-                if add.clicked() {
+                if add.clicked() && !fits {
                     let one = Track::Size(TrackSize::Breadth(TrackBreadth::Fr(1.0)));
                     let tx = self.grid_tx(subjects, |g| {
                         let mut l = get(g);
@@ -861,59 +843,64 @@ impl OndinApp {
 
         // --- a row per entry --------------------------------------------------------
         if agreed {
-            let drag_key = egui::Id::new(("grid-track-drag", subjects.first().copied()));
-            let dragging = ui
-                .ctx()
-                .data(|d| d.get_temp::<TrackDrag>(drag_key))
-                .filter(|d| d.rows == rows);
-            let mut rects = Vec::with_capacity(list.len());
-            let mut released = false;
-            for i in 0..list.len() {
-                let (rect, grip) = self.track_row(ui, subjects, rows, &list, i);
-                rects.push(rect);
-                if grip.drag_started() {
-                    ui.ctx()
-                        .data_mut(|d| d.insert_temp(drag_key, TrackDrag { rows, from: i }));
-                }
-                released |= grip.drag_stopped();
+            // The Effects card's carry: the picked-up row follows the pointer while
+            // the others make room, measured against last frame's slots.
+            // In `InFlight`, so a right-click cancels it (`cancel_gesture`) and a
+            // release this list never sees ends it (`end_released_gestures`).
+            let n = list.len();
+            let anchor = subjects.first().copied();
+            let ours =
+                |d: &&mut paint::TrackDrag| d.anchor == anchor && d.rows == rows && d.from < n;
+            let y = ui.ctx().input(|i| i.pointer.interact_pos()).map(|p| p.y);
+            if let Some(d) = self.in_flight.track_drag.as_mut().filter(ours)
+                && let Some(y) = y
+                && !d.slots.is_empty()
+            {
+                d.to = paint::forward_landing(n, d.to.min(n - 1), d.slots.gap(y));
             }
-            // A drag that ended where no grip saw it — the selection changed under
-            // it, or the list turned mixed — is over once no button is held;
-            // otherwise its line would follow the pointer the next time this list
-            // was drawn.
-            let dragging = dragging.filter(|_| {
-                let held = ui.input(|i| i.pointer.any_down());
-                if !held && !released {
-                    ui.ctx().data_mut(|d| d.remove::<TrackDrag>(drag_key));
+            let moved = self
+                .in_flight
+                .track_drag
+                .as_mut()
+                .filter(ours)
+                .map(|d| (d.from, d.to));
+            // Salted by list as well as entry: the two lists share a parent, and
+            // one id for both made the rows' widgets answer for the columns'.
+            let salt = if rows {
+                "grid-row-track"
+            } else {
+                "grid-column-track"
+            };
+            let mut slots = paint::Slots::default();
+            for i in paint::forward_order(n, moved) {
+                let carrying = moved.is_some_and(|(from, _)| from == i);
+                let (grip, rect) = carried_unit(ui, carrying, (salt, i), |ui| {
+                    self.track_row(ui, subjects, rows, &list, i).1
+                });
+                slots.push(rect.top(), rect.bottom());
+                if grip.drag_started() {
+                    self.in_flight.track_drag = Some(paint::TrackDrag {
+                        anchor,
+                        rows,
+                        from: i,
+                        to: i,
+                        slots: paint::Slots::default(),
+                    });
                 }
-                held || released
-            });
-            if let Some(drag) = dragging {
-                // Where the entry would land: before the first row whose middle the
-                // pointer is above, or at the end — drawn as a line between rows.
-                let y = ui.ctx().pointer_latest_pos().map_or(f32::INFINITY, |p| p.y);
-                let to = rects
-                    .iter()
-                    .position(|r| y < r.center().y)
-                    .unwrap_or(rects.len());
-                let line_y = match rects.get(to) {
-                    Some(r) => r.top() - 2.0,
-                    None => rects.last().map_or(0.0, |r| r.bottom() + 2.0),
-                };
-                if let Some(first) = rects.first() {
-                    ui.painter().hline(
-                        first.x_range(),
-                        line_y,
-                        egui::Stroke::new(1.5, color::accent()),
-                    );
-                }
-                if released {
-                    ui.ctx().data_mut(|d| d.remove::<TrackDrag>(drag_key));
-                    if let Some(moved) = reordered(&list, drag.from, to) {
-                        let tx = self.grid_tx(subjects, |g| with_list(g, rows, &moved));
-                        self.name_tracks_step(rows);
-                        self.commit_edit(tx);
-                    }
+            }
+            if let Some(d) = self.in_flight.track_drag.as_mut().filter(ours) {
+                d.slots = slots;
+                // A carried row's responses are empty, so the release is read from
+                // the pointer.
+                if ui.input(|i| i.pointer.primary_down()) {
+                    ui.ctx().request_repaint();
+                } else if let Some(d) = self.in_flight.track_drag.take()
+                    && d.to != d.from
+                {
+                    let moved = paint::reordered(&list, d.from, d.to);
+                    let tx = self.grid_tx(subjects, |g| with_list(g, rows, &moved));
+                    self.name_tracks_step(rows);
+                    self.commit_edit(tx);
                 }
             }
         }
@@ -1441,7 +1428,7 @@ impl OndinApp {
             // The fields, in what is left before the cross.
             let room = (ui.available_width() - side - gap).max(40.0);
             self.track_fields(ui, subjects, rows, list, i, &track, room);
-            let remove = ui::icon_button(ui, icon::X, side, 13.0, false, true)
+            let remove = ui::field_button(ui, icon::X, side, ui::FieldButton::Off)
                 .on_hover_text("Remove this track");
             if remove.clicked() {
                 let mut l = list.to_vec();
@@ -2064,29 +2051,5 @@ mod tests {
         };
         assert_eq!(tracks.len(), 1);
         assert!(matches!(tracks[0], TrackSize::MinMax { .. }), "kept whole");
-    }
-
-    /// **A grip drop moves the entry to the slot it lands in** — a slot is the gap
-    /// before an entry, the list's length the end — and the two slots either side
-    /// of the entry are where it already is, so they move nothing.
-    #[test]
-    fn a_grip_drop_moves_the_entry_to_its_slot() {
-        let [x, y, z] = [1.0, 2.0, 3.0].map(|v| b(TrackBreadth::Px(v)));
-        let list = vec![x.clone(), y.clone(), z.clone()];
-        assert_eq!(
-            reordered(&list, 0, 3),
-            Some(vec![y.clone(), z.clone(), x.clone()])
-        );
-        assert_eq!(
-            reordered(&list, 2, 0),
-            Some(vec![z.clone(), x.clone(), y.clone()])
-        );
-        assert_eq!(
-            reordered(&list, 0, 2),
-            Some(vec![y.clone(), x.clone(), z.clone()])
-        );
-        assert_eq!(reordered(&list, 1, 1), None, "the slot before it");
-        assert_eq!(reordered(&list, 1, 2), None, "the slot after it");
-        assert_eq!(reordered(&list, 5, 0), None, "an entry that is not there");
     }
 }

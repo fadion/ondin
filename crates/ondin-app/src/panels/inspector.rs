@@ -641,7 +641,7 @@ fn paint_unit<S, A, B>(
 ///
 /// `salt` identifies the entry through `UiBuilder::id`; `id_salt` would fold in the
 /// positional counter, so a reorder would move ids and drop focus.
-fn carried_unit<R>(
+pub(super) fn carried_unit<R>(
     ui: &mut egui::Ui,
     carrying: bool,
     salt: (&'static str, usize),

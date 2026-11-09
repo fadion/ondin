@@ -5291,15 +5291,15 @@ mod tests {
         }
     }
 
-    /// Whether `shapes` hold the grip reorder's insertion line — the one
-    /// horizontal `accent()` stroke 1.5 wide the track list draws.
-    fn reorder_line(shapes: &[egui::epaint::ClippedShape]) -> bool {
-        shapes.iter().any(|cs| {
-            matches!(
-                &cs.shape,
-                egui::epaint::Shape::LineSegment { points: [a, b], stroke }
-                    if a.y == b.y && stroke.color == color::accent() && stroke.width == 1.5
-            )
+    /// Whether `shapes` hold a carried track row: a grip off every one of the
+    /// `resting` grips' heights, which `carried_unit` moves it from.
+    fn carried(shapes: &[egui::epaint::ClippedShape], resting: &[egui::Pos2]) -> bool {
+        shapes.iter().any(|cs| match &cs.shape {
+            egui::epaint::Shape::Text(t) if t.galley.text() == icon::DOTS_SIX_VERTICAL => {
+                let y = t.galley.rect.translate(t.pos.to_vec2()).center().y;
+                resting.iter().all(|r| (r.y - y).abs() > 0.5)
+            }
+            _ => false,
         })
     }
 
@@ -5375,10 +5375,13 @@ mod tests {
 
     /// An automatic repeat beside an `fr` track is refused under the CSS line with
     /// the track it needs fixed named; on its own it applies, and the list's head
-    /// reads *repeats to fit* for a count the frame's width decides.
+    /// reads *repeats to fit* for a count the frame's width decides, its `+`
+    /// disabled.
     ///
     /// flip: the CSS line's refusal falling back to the plain *CSS does not accept
-    /// that list* → fails at the named refusal.
+    /// that list* → fails at the named refusal; the `+` enabled whatever the list
+    /// holds → fails at *"the columns' + disabled"* (the click alone cannot tell,
+    /// since the operation refuses the `1fr` too).
     #[test]
     fn an_automatic_repeat_is_refused_with_its_reason_and_counts_to_fit() {
         let s = grid_scene();
@@ -5402,6 +5405,32 @@ mod tests {
         p.retype("100px 1fr", "repeat(auto-fill, 100px)", egui::Key::Enter);
         assert_eq!(css(&p.app), "repeat(auto-fill, 100px)");
         p.run("repeats to fit");
+        // The `+`s, columns' first: its `1fr` could not stand beside the repeat, so
+        // it is drawn disabled; the rows' stays live.
+        let pluses: Vec<egui::Color32> = p
+            .shapes()
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == icon::PLUS => {
+                    Some(t.fallback_color)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            pluses,
+            [theme::text::disabled(), theme::text::muted()],
+            "the columns' + disabled"
+        );
+        let depth = p.app.session.history.undo_depth();
+        let at = p.runs(icon::PLUS)[0];
+        p.click(at);
+        assert_eq!(
+            css(&p.app),
+            "repeat(auto-fill, 100px)",
+            "the + adds nothing"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
     }
 
     /// The *repeats once* note reads the layout: a frame that fits its content,
@@ -5807,11 +5836,11 @@ mod tests {
         ondin_core::container::tracks_css(&grid_of(app, id).columns)
     }
 
-    /// A track row's grip drops its entry in the slot it is let go over, as one undo
-    /// step; the insertion line is drawn while the button is held and gone after.
+    /// A track row's grip carries the row under the pointer while the button is
+    /// held, and drops its entry where it is let go, as one undo step.
     ///
-    /// flip: the list's `released |= grip.drag_stopped()` dropped → fails at
-    /// *"dropped last"*.
+    /// flip: the list's `forward_landing` update dropped → fails at *"dropped
+    /// last"*.
     #[test]
     fn a_track_rows_grip_drag_reorders_the_list() {
         let s = grid_scene();
@@ -5823,19 +5852,24 @@ mod tests {
         let depth = p.app.session.history.undo_depth();
         let below = grips[1] + egui::vec2(0.0, 8.0);
         p.drag(grips[0], below, false);
-        assert!(reorder_line(&p.frame(Vec::new()).shapes), "the line, held");
+        assert!(
+            carried(&p.frame(Vec::new()).shapes, &grips),
+            "the row, carried"
+        );
         p.frame(vec![press(below, false)]);
         p.frame(Vec::new());
         assert_eq!(columns_css(&p.app, frame_id), "1fr 100px", "dropped last");
         assert_eq!(p.app.session.history.undo_depth(), depth + 1, "one step");
-        assert!(!reorder_line(&p.shapes()), "and gone with the drag");
+        assert!(!carried(&p.shapes(), &grips), "and set down");
     }
 
-    /// A grip drag let go where no grip saw it (the selection changed mid-drag) draws
-    /// no insertion line and reorders nothing on a later press.
+    /// A grip drag let go where no grip saw it (the selection changed mid-drag)
+    /// carries nothing and reorders nothing on a later press. The panel harness
+    /// runs no frame's close, so the release frame's `end_released_gestures` is
+    /// called by hand.
     ///
-    /// flip: the clean-up's `remove::<TrackDrag>` dropped → fails at *"no line
-    /// follows a later press"*.
+    /// flip: `end_released_gestures` leaving `track_drag` → fails at *"nothing
+    /// moved"*.
     #[test]
     fn a_grip_drag_let_go_elsewhere_draws_nothing_later() {
         let s = grid_scene();
@@ -5843,26 +5877,87 @@ mod tests {
         let mut p = Panel::new(s.app, OndinApp::inspector_container);
         p.app.session.selection.set(vec![frame_id]);
         let grips = p.runs(icon::DOTS_SIX_VERTICAL);
-        let away = grips[0] + egui::vec2(0.0, 40.0);
+        let away = grips[0] + egui::vec2(0.0, 60.0);
         p.drag(grips[0], away, false);
         assert!(
-            reorder_line(&p.frame(Vec::new()).shapes),
+            carried(&p.frame(Vec::new()).shapes, &grips),
             "the fixture: held"
         );
         p.app.session.selection.set(vec![a]);
         p.frame(vec![press(away, false)]);
+        p.app.end_released_gestures();
         p.frame(Vec::new());
         p.app.session.selection.set(vec![frame_id]);
         p.frame(Vec::new());
         let nowhere = egui::pos2(1000.0, 800.0);
         p.drag(nowhere, nowhere + egui::vec2(0.0, 30.0), false);
         assert!(
-            !reorder_line(&p.frame(Vec::new()).shapes),
-            "no line follows a later press"
+            !carried(&p.frame(Vec::new()).shapes, &grips),
+            "no row follows a later press"
         );
         p.frame(vec![press(nowhere, false)]);
         p.frame(Vec::new());
         assert_eq!(columns_css(&p.app, frame_id), "100px 1fr", "nothing moved");
+    }
+
+    /// A right-click mid-drag (`cancel_gesture`) sets the carried row back and the
+    /// release then moves nothing, as on the Fill and Stroke rows.
+    ///
+    /// flip: `cancel_gesture` leaving `track_drag` → fails at *"set back while
+    /// still held"*.
+    #[test]
+    fn a_right_click_cancels_a_track_drag() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let grips = p.runs(icon::DOTS_SIX_VERTICAL);
+        let below = grips[1] + egui::vec2(0.0, 8.0);
+        let depth = p.app.session.history.undo_depth();
+        p.drag(grips[0], below, false);
+        assert!(
+            carried(&p.frame(Vec::new()).shapes, &grips),
+            "the fixture: held"
+        );
+        let ctx = p.ctx.clone();
+        assert!(p.app.cancel_gesture(&ctx), "a gesture to cancel");
+        assert!(
+            !carried(&p.frame(Vec::new()).shapes, &grips),
+            "set back while still held"
+        );
+        p.frame(vec![press(below, false)]);
+        p.frame(Vec::new());
+        assert_eq!(columns_css(&p.app, frame_id), "100px 1fr", "nothing moved");
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
+    }
+
+    /// The columns' cross removes a column with the row list drawn under it: the
+    /// two lists' rows share a parent, so each needs ids of its own.
+    ///
+    /// flip: one `carried_unit` salt for both lists → fails at *"a column gone"*.
+    #[test]
+    fn the_columns_cross_removes_a_column_with_rows_below() {
+        let mut s = grid_scene();
+        let mut g = grid_of(&s.app, s.frame);
+        g.rows = ondin_core::container::parse_tracks("50px 60px").unwrap();
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: s.frame,
+                    display: Some(Display::Grid(g)),
+                }]))
+        );
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        // The topmost cross is the columns' first entry's.
+        let at = p.runs(icon::X)[0];
+        p.click(at);
+        let g = grid_of(&p.app, frame_id);
+        let css = ondin_core::container::tracks_css;
+        assert_eq!(css(&g.columns), "1fr", "a column gone");
+        assert_eq!(css(&g.rows), "50px 60px", "the rows untouched");
     }
 
     /// A refusal stays under the CSS line only while the line reads what was refused

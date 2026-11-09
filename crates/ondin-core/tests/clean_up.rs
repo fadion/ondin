@@ -991,7 +991,8 @@ fn each_rule_keeps_a_locked_layer_while_skipping() {
 /// *Covered fills* grows linearly with the layers it lists: it asks each layer's
 /// instance copies from one map, not by a scan of the document per layer. Its
 /// cost over a plan with no rule, at eight times the layers, is about eight
-/// times (sixty-four when quadratic).
+/// times (sixty-four when quadratic). Both sizes sit past the cache knee: from
+/// 1,000 layers a fast runner's release build grows well past eight.
 /// flip: `Run::covered_fills` building `Run::copies` per covered layer → fails
 /// at the growth bound.
 #[test]
@@ -1033,10 +1034,10 @@ fn covered_fills_is_linear_in_the_layers() {
         assert_eq!(found, n, "the fixture: every layer is listed");
         (covered - bare).max(f64::EPSILON)
     };
-    let (small, large) = (cost(1000), cost(8000));
+    let (small, large) = (cost(4000), cost(32000));
     assert!(
         large / small < 24.0,
-        "1,000 layers {small:.4}s, 8,000 layers {large:.4}s"
+        "4,000 layers {small:.4}s, 32,000 layers {large:.4}s"
     );
 }
 

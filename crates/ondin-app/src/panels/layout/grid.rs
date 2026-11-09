@@ -34,10 +34,10 @@ use super::*;
 use crate::panels::inspector::carried_unit;
 use crate::panels::paint;
 use ondin_core::container::{
-    AreaName, AutoRepeat, GridArea, GridAutoFlow, GridLines, RepeatCount, Track, TrackBreadth,
-    TrackSize, area_lines, areas_are_valid, areas_css, areas_without_tracks, auto_repeat_refusal,
-    parse_areas, parse_placement, parse_tracks, placement_css, repeats_to_fit, track_count,
-    track_size_css, tracks_css,
+    AreaName, AutoRepeat, GridArea, GridAutoFlow, GridLines, LaidGrid, LaidTracks, RepeatCount,
+    Track, TrackBreadth, TrackSize, area_lines, areas_are_valid, areas_css, areas_without_tracks,
+    auto_repeat_refusal, parse_areas, parse_placement, parse_tracks, placement_css, repeats_to_fit,
+    track_count, track_size_css, tracks_css,
 };
 
 /// A grid item's `justify-self`, in the card — `baseline` left out, the inline
@@ -545,8 +545,11 @@ struct Renaming {
 }
 
 /// The columns and rows the area map draws: the template's tracks, or as many as
-/// the areas reach past them — CSS sizes the explicit grid by the larger.
-fn map_tracks(g: &Grid) -> (usize, usize) {
+/// the areas reach past them — CSS sizes the explicit grid by the larger. With
+/// `laid`, an axis that repeats to fit counts the tracks laid at the current
+/// size; without, its repeat counts once (`track_count`), which is what the CSS
+/// line pads to, so its text does not change as the frame is resized.
+fn map_tracks(g: &Grid, laid: Option<&LaidGrid>) -> (usize, usize) {
     let reach = |f: fn(&GridArea) -> u16| {
         g.areas
             .iter()
@@ -555,9 +558,13 @@ fn map_tracks(g: &Grid) -> (usize, usize) {
             .max()
             .unwrap_or(0)
     };
+    let template = |list: &[Track], axis: Option<&LaidTracks>| match axis {
+        Some(l) if repeats_to_fit(list) => usize::from(l.explicit),
+        _ => track_count(list),
+    };
     (
-        track_count(&g.columns).max(reach(|a| a.columns[1])),
-        track_count(&g.rows).max(reach(|a| a.rows[1])),
+        template(&g.columns, laid.map(|l| &l.columns)).max(reach(|a| a.columns[1])),
+        template(&g.rows, laid.map(|l| &l.rows)).max(reach(|a| a.rows[1])),
     )
 }
 
@@ -633,6 +640,9 @@ impl OndinApp {
         self.track_list(ui, subjects, grids, false, full);
         self.track_list(ui, subjects, grids, true, full);
         self.area_map(ui, subjects, grids, full);
+        // A row pitch more, so the template — tracks and areas — reads as one
+        // section apart from the alignments under it.
+        ui.add_space(ui::CARD_ROW_GAP);
 
         // --- the alignments ---------------------------------------------------------
         let content = |c: AlignContent| Glyph::Content(c);
@@ -988,7 +998,7 @@ impl OndinApp {
         let agreed = grids
             .iter()
             .all(|o| o.areas == g.areas && o.columns == g.columns && o.rows == g.rows);
-        let (cols, rows) = map_tracks(&g);
+        let (cols, rows) = map_tracks(&g, None);
         let mark = self.grid_mark(
             subjects,
             |g| g.areas.clone(),
@@ -1025,11 +1035,11 @@ impl OndinApp {
         let key = egui::Id::new(("grid-areas-css", subjects.first().copied()));
         let shown = agreed.then(|| areas_css(&g.areas, cols, rows));
         if agreed {
-            let why = if repeats_to_fit(&g.columns) || repeats_to_fit(&g.rows) {
-                Some("Areas need a fixed number of tracks — this axis repeats to fit")
-            } else if cols == 0 || rows == 0 {
+            let laid = ondin_core::build::laid_grid(&self.session.doc, subjects[0]);
+            let (map_cols, map_rows) = map_tracks(&g, laid.as_ref());
+            let why = if map_cols == 0 || map_rows == 0 {
                 Some("Areas are drawn on the tracks — add a column and a row")
-            } else if cols > MAP_TRACKS || rows > MAP_TRACKS {
+            } else if map_cols > MAP_TRACKS || map_rows > MAP_TRACKS {
                 Some("Too many tracks to draw — edit the areas as CSS")
             } else {
                 None
@@ -1042,7 +1052,21 @@ impl OndinApp {
                             .color(theme::text::faint()),
                     );
                 }
-                None => self.area_cells(ui, subjects, &g, key, shown.as_deref(), full),
+                None => {
+                    self.area_cells(ui, subjects, &g, laid.as_ref(), key, shown.as_deref(), full);
+                    // The cells of a repeat to fit are this size's; say so, since
+                    // the same areas sit on other cells at another size.
+                    if repeats_to_fit(&g.columns) || repeats_to_fit(&g.rows) {
+                        ui.label(
+                            egui::RichText::new(
+                                "Drawn at the frame's current size — the repeat lays more or \
+                                 fewer tracks at another",
+                            )
+                            .size(ui::CAPTION_PT)
+                            .color(theme::text::faint()),
+                        );
+                    }
+                }
             }
         }
 
@@ -1079,21 +1103,23 @@ impl OndinApp {
     }
 
     /// The map itself: one cell per explicit track crossing, columns at the
-    /// widths the first subject lays them, each area one tinted rectangle with its
-    /// name. A drag across empty cells makes an area and opens its name; a
+    /// widths the first subject lays them (`laid`), each area one tinted rectangle
+    /// with its name. A drag across empty cells makes an area and opens its name; a
     /// double-click opens an area's name, and clearing it removes the area.
     /// `key` and `shown` are the CSS line's, where a refusal is said.
+    #[allow(clippy::too_many_arguments)]
     fn area_cells(
         &mut self,
         ui: &mut egui::Ui,
         subjects: &[NodeId],
         g: &Grid,
+        laid: Option<&LaidGrid>,
         key: egui::Id,
         shown: Option<&str>,
         full: f32,
     ) {
         const GAP: f32 = 3.0;
-        let (cols, rows) = map_tracks(g);
+        let (cols, rows) = map_tracks(g, laid);
         let h = ui::CONTROL_H;
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(full, rows as f32 * (h + GAP) + GAP),
@@ -1102,12 +1128,10 @@ impl OndinApp {
         // Column widths at the laid tracks' proportions, each at least a sliver;
         // a column with no laid track (an area past the template, nothing in it)
         // at the laid ones' mean, and all equal where the grid lays none.
-        let laid = ondin_core::build::laid_grid(&self.session.doc, subjects[0]);
         let laid: Vec<Option<f32>> = (0..cols)
             .map(|c| {
                 // CSS's column 1 is laid track `before`.
-                laid.as_ref()
-                    .and_then(|l| l.columns.spans.get(usize::from(l.columns.before) + c))
+                laid.and_then(|l| l.columns.spans.get(usize::from(l.columns.before) + c))
                     .map(|(a, b)| (b - a).max(0.0) as f32)
             })
             .collect();
@@ -1186,9 +1210,11 @@ impl OndinApp {
             );
         }
 
-        // --- a drag across empty cells makes an area ----------------------------
+        // --- a left drag across empty cells makes an area -------------------------
+        // Left only: egui starts a drag for any button. A right-click mid-drag
+        // ends egui's drag, so no release follows to make the area.
         let anchor_key = key.with("anchor");
-        if resp.drag_started()
+        if resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(p) = ui.input(|i| i.pointer.press_origin())
         {
             let at = cell_at(p);
@@ -1208,7 +1234,7 @@ impl OndinApp {
                 egui::Stroke::new(1.5, color::accent()),
                 egui::StrokeKind::Inside,
             );
-            if resp.drag_stopped() {
+            if resp.drag_stopped_by(egui::PointerButton::Primary) {
                 ui.ctx().data_mut(|d| d.remove::<(u16, u16)>(anchor_key));
                 if g.areas.iter().any(|a| a.overlaps(&new)) {
                     refuse(

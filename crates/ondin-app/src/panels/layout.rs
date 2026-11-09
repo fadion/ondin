@@ -5726,6 +5726,114 @@ mod tests {
         assert_eq!(names(&p.app), ["head"], "one undo takes it away");
     }
 
+    /// A right-button drag across the map's empty cells makes no area: only the
+    /// left button draws one, and a right-click during it drops it.
+    ///
+    /// The cancel is egui's own (the right press ends its drag), so no flip of
+    /// ours reaches *"a right-click cancels a left drag"*; it pins egui's
+    /// behaviour.
+    /// flip: `area_cells` starting and ending its drag on `drag_started()` and
+    /// `drag_stopped()`, any button → fails at *"no area"*. Either guard alone
+    /// holds: the flip has to take both.
+    #[test]
+    fn a_right_drag_on_the_area_map_makes_nothing() {
+        let s = areas_scene();
+        let frame_id = s.frame;
+        let mut g = grid_of(&s.app, frame_id);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        g.rows = ondin_core::container::parse_tracks("50px 50px").unwrap();
+        assert!(
+            p.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: frame_id,
+                    display: Some(Display::Grid(g)),
+                }]))
+        );
+        p.app.session.selection.set(vec![frame_id]);
+        let head = p.run("head");
+        let depth = p.app.session.history.undo_depth();
+        let row2 = head + egui::vec2(0.0, ui::CONTROL_H + 3.0);
+        let right = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        p.frame(vec![egui::Event::PointerMoved(row2), right(row2, true)]);
+        for step in 1..=4 {
+            let at = row2 + egui::vec2(2.0 * step as f32, 0.0);
+            p.frame(vec![egui::Event::PointerMoved(at)]);
+        }
+        p.frame(vec![right(row2 + egui::vec2(8.0, 0.0), false)]);
+        for _ in 0..3 {
+            p.frame(Vec::new());
+        }
+        assert_eq!(grid_of(&p.app, frame_id).areas.len(), 1, "no area");
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
+        // A right-click during a left drag drops it.
+        let to = row2 + egui::vec2(8.0, 0.0);
+        p.drag(row2, to, false);
+        p.frame(vec![right(to, true)]);
+        p.frame(vec![right(to, false)]);
+        p.frame(vec![press(to, false)]);
+        for _ in 0..3 {
+            p.frame(Vec::new());
+        }
+        assert_eq!(
+            grid_of(&p.app, frame_id).areas.len(),
+            1,
+            "a right-click cancels a left drag"
+        );
+        p.drag(row2, to, true);
+        for _ in 0..3 {
+            p.frame(Vec::new());
+        }
+        assert_eq!(
+            grid_of(&p.app, frame_id).areas.len(),
+            2,
+            "the control: a left drag alone makes one"
+        );
+    }
+
+    /// An axis that repeats to fit draws the map on the tracks laid at the frame's
+    /// size, with a caption saying so: `repeat(auto-fill, 100px)` across the
+    /// fixture's 360 of content lays three columns, `head` over two of them and
+    /// one cell empty.
+    ///
+    /// flip: `area_cells` counting with `map_tracks(g, None)` → fails at *"three
+    /// columns"*.
+    #[test]
+    fn an_auto_fill_grid_maps_its_areas_at_the_laid_size() {
+        let s = areas_scene();
+        let frame_id = s.frame;
+        let mut g = grid_of(&s.app, frame_id);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        g.columns = ondin_core::container::parse_tracks("repeat(auto-fill, 100px)").unwrap();
+        assert!(
+            p.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: frame_id,
+                    display: Some(Display::Grid(g)),
+                }]))
+        );
+        p.app.session.selection.set(vec![frame_id]);
+        p.run("head");
+        p.run(
+            "Drawn at the frame's current size — the repeat lays more or fewer tracks at another",
+        );
+        let empty = p
+            .shapes()
+            .iter()
+            .filter(|cs| {
+                matches!(&cs.shape, egui::epaint::Shape::Rect(r)
+                    if r.fill == color::hover() && (r.rect.height() - ui::CONTROL_H).abs() < 0.5)
+            })
+            .count();
+        assert_eq!(empty, 1, "three columns: head's two and one empty cell");
+    }
+
     /// An area typed past the template's tracks is drawn on tracks of its own, as
     /// CSS grows the explicit grid to it: a third column beside a two-column
     /// template sits inside the map, and a second row under a one-row template a

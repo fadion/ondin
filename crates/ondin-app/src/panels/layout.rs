@@ -4265,10 +4265,11 @@ mod tests {
     }
 
     /// *Ratio* on H, picked from its unit's menu, holds H at the drawn W : H and
-    /// reads it as `2 : 1`; a ratio typed there resizes H to it, W held.
+    /// reads it as `2 : 1`, and the proportions lock gives H its room; a ratio
+    /// typed there resizes H to it, W held.
     ///
     /// flip: `size_mode_tx`'s Ratio arm writing no ratio → fails at *"a ratio on
-    /// H"*.
+    /// H"*; the lock drawn whatever `held_by_ratio` says → fails at *"no lock"*.
     #[test]
     fn ratio_on_h_holds_it_to_w() {
         let mut s = scene();
@@ -4292,6 +4293,7 @@ mod tests {
         );
         let mut p = Panel::new(s.app, transform_card);
         p.app.session.selection.set(vec![r]);
+        assert_eq!(p.runs(icon::ASPECT_RATIO).len(), 1, "the fixture: a lock");
         // H's unit is the right-hand `px`.
         let units = p.runs("px");
         let unit = *units
@@ -4310,6 +4312,7 @@ mod tests {
             }),
             "a ratio on H"
         );
+        assert!(p.runs(icon::ASPECT_RATIO).is_empty(), "no lock");
         p.retype("2 : 1", "4:1", egui::Key::Enter);
         assert_eq!(
             ondin_core::edit::resizable_size(p.app.session.doc.get(r).unwrap().kind()),

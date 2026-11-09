@@ -4245,20 +4245,27 @@ impl OndinApp {
                     .session
                     .display_node(id)
                     .is_some_and(|n| n.proportions_locked());
-                // W exactly as wide as X and H the rest, so the rows share an edge.
-                let wide = egui::vec2(fw, 28.0);
-                let rest = egui::vec2(
-                    ui.available_width() - fw - 28.0 - ui::CARD_COL_GAP * 2.0,
-                    28.0,
-                );
                 let now = size;
                 // The lock stands aside while either side is a keyword or percentage.
                 let both_px = size_menu
                     .as_ref()
                     .is_none_or(|m| m.w == SizeMode::Px && m.h == SizeMode::Px);
+                // A ratio holds the proportions itself, so the lock is not drawn and
+                // H takes its place, room for a ratio such as `16 : 9`.
                 let held_by_ratio = size_menu
                     .as_ref()
                     .is_some_and(|m| m.w == SizeMode::Ratio || m.h == SizeMode::Ratio);
+                // W exactly as wide as X and H the rest, so the rows share an edge.
+                let wide = egui::vec2(fw, 28.0);
+                let lock_w = if held_by_ratio {
+                    0.0
+                } else {
+                    28.0 + ui::CARD_COL_GAP
+                };
+                let rest = egui::vec2(
+                    ui.available_width() - fw - ui::CARD_COL_GAP - lock_w,
+                    28.0,
+                );
                 let pairs = locked && both_px;
                 let paired = |want: Size, drove_x: bool| {
                     if pairs {
@@ -4396,10 +4403,9 @@ impl OndinApp {
                     } else {
                         ui::FieldButton::Disabled
                     };
-                    if ui::field_button(ui, glyph, 28.0, state)
-                        .on_hover_text(if held_by_ratio {
-                            "Proportions are held by the ratio — set its side to px to lock them"
-                        } else if !both_px {
+                    if !held_by_ratio
+                        && ui::field_button(ui, glyph, 28.0, state)
+                        .on_hover_text(if !both_px {
                             "Proportions do not lock while a side is sized by a keyword or %"
                         } else if locked {
                             "Unlock proportions — Shift while dragging a handle also releases it"

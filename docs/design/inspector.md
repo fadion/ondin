@@ -45,7 +45,7 @@ frame with a layout; `auto` for a group with one; `%` for an in-flow kind that l
 - **`px`** writes the picked axis only. For text it goes through `baked_ops` and keeps the stored mode: W gives an auto-width label `AutoHeight`, H fixes the box.
 - Typing writes px, or `%` in `%` mode; a click in and out writes nothing; a typed size keeps a text's stored sizing mode.
 - **Ratio** (`layout::side_mode`): picked on one side, it holds that side to the other at the drawn W : H; picked on W while H holds it, it moves to W; any other mode on that side takes it off. The field shows the ratio (`container::ratio_words`, `16 : 9`, or a decimal where no fraction with a denominator up to 32 names it) and takes `16:9`, `16/9` or `1.78`; scrubbing steps the quotient by 0.01. The hover names the side's drawn size. Typing the other side resizes both.
-- The lock is disabled while either side is a keyword, `%` or a ratio, with the reason on hover. Multi W/H are plain fields.
+- The lock is disabled while either side is a keyword or `%`, with the reason on hover. While either side is a ratio it is not drawn, since the ratio holds the proportions itself, and H takes its width. Multi W/H are plain fields.
 
 **X/Y of an in-flow item are disabled** with the reason on hover: its container places it, and
 `keep_flex_sizes` drops a typed translation. On the multi card they are disabled while any outermost

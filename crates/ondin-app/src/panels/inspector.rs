@@ -1475,16 +1475,29 @@ impl OndinApp {
         // A mask draws nothing, so it is a fact about what the layer is.
         self.inspector_mask(ui, id);
         // Cards run from the layer in its parent, to its children, to paint. None is
-        // gated on kind: each draws nothing for a selection it cannot describe.
-        self.inspector_frame_templates(ui);
+        // gated on kind: each draws nothing for a selection it cannot describe. A
+        // chart is a frame whose children and layout its description owns, so the
+        // frame's own cards for those give way to the Chart card.
+        let is_chart = self
+            .session
+            .doc
+            .get(id)
+            .is_some_and(|n| n.chart().is_some());
+        if !is_chart {
+            self.inspector_frame_templates(ui);
+        }
         self.inspector_align(ui);
         self.inspector_transform(ui, id, world, size0);
         // Under the numbers it changes the meaning of: a pinned layer's X and W
         // are where its insets put it.
         self.inspector_insets(ui);
         self.inspector_item(ui);
-        self.inspector_container(ui);
-        self.inspector_layout_grids(ui);
+        if is_chart {
+            self.inspector_chart(ui, id);
+        } else {
+            self.inspector_container(ui);
+            self.inspector_layout_grids(ui);
+        }
         // A selected path gets the corner radius without entering point editing,
         // writing to every corner.
         if matches!(node_kind, NodeKind::Path { .. }) {
@@ -1506,8 +1519,9 @@ impl OndinApp {
             let fresh = self.paint_subject_changed();
             self.inspector_paint_panels(ui, PaintScope::Node(id), fresh);
         }
-        // A container gets the colours of what is inside it (`group_color_scope`).
-        if is_container {
+        // A container gets the colours of what is inside it (`group_color_scope`);
+        // a chart's are its series', in the Chart card.
+        if is_container && !is_chart {
             self.inspector_group_colors(ui);
         }
         // Under the paint panels: an effect applies to the painted layer (§6.4).
@@ -2540,6 +2554,18 @@ impl OndinApp {
     /// The result is selected. The refusal is the dropdown's, since `Ctrl+E`
     /// bypasses its disabled state; only the count refusal is worded for this verb.
     pub(crate) fn flatten_selection(&mut self) {
+        // A selection of charts flattens each chart, as the card's *Flatten chart*.
+        let ids = self.session.selection.ids().to_vec();
+        if !ids.is_empty()
+            && ids.iter().all(|id| {
+                self.session
+                    .doc
+                    .get(*id)
+                    .is_some_and(|n| n.chart().is_some())
+            })
+        {
+            return self.flatten_charts(&ids);
+        }
         let mirrored = matches!(self.session.selection.ids(), [one] if build::is_mirrored_path(&self.session.doc, *one));
         if self.selected_boolean().is_none()
             && !mirrored
@@ -10265,6 +10291,10 @@ impl OndinApp {
                 return mixed.then(|| self.mixed_row(target).0);
             }
             PaintSlot::GroupColor(key) => return self.group_color_shown(key),
+            PaintSlot::Chart(colour) => {
+                let chart = self.session.chart_drawn(id)?;
+                return super::chart::colour_of(chart, colour).map(Brush::Solid);
+            }
             // Read off the image fill as drawn, so the picker tracks a live drag.
             PaintSlot::Duotone(i, end) => {
                 let img = self.slot_brush(id, PaintSlot::Fill(i))?;
@@ -10314,7 +10344,8 @@ impl OndinApp {
             | PaintSlot::TextColor
             | PaintSlot::Duotone(..)
             | PaintSlot::VarCell(..)
-            | PaintSlot::Pref(_) => unreachable!("answered above"),
+            | PaintSlot::Pref(_)
+            | PaintSlot::Chart(_) => unreachable!("answered above"),
         }
     }
     /// The brush at a location, read through the preview so the picker tracks a live
@@ -10450,6 +10481,17 @@ impl OndinApp {
         // only its `%` moved and detaches it otherwise.
         let doc = &self.session.doc;
         match slot {
+            // The whole description with the one colour replaced, solid.
+            PaintSlot::Chart(colour) => match (
+                self.session.chart_drawn(id),
+                paint::stops_of(&brush).first(),
+            ) {
+                (Some(chart), Some((_, c))) => Transaction(vec![Operation::SetChart {
+                    id,
+                    chart: Some(Box::new(super::chart::with_colour(chart, colour, *c))),
+                }]),
+                _ => Transaction(Vec::new()),
+            },
             // The image fill's own write, with one end of its duotone replaced.
             PaintSlot::Duotone(i, end) => {
                 let Some((_, colour)) = paint::stops_of(&brush).first().copied() else {
@@ -10785,6 +10827,10 @@ impl OndinApp {
             }
             PaintSlot::Grid(_) => ("Layout grid", icon::COLUMNS),
             PaintSlot::VarCell(..) => ("Variable", icon::BRACKETS_CURLY),
+            PaintSlot::Chart(super::paint::ChartColour::Series(_)) => {
+                ("Series colour", icon::CHART)
+            }
+            PaintSlot::Chart(super::paint::ChartColour::Node(_)) => ("Node colour", icon::CHART),
         };
         self.session.name_step(label, glyph);
     }

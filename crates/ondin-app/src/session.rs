@@ -493,6 +493,10 @@ pub struct EditorSession {
     /// *clear* back to the box centre is expressible; the outer says whether an
     /// edit is live.
     pivot_preview: Option<(NodeId, Option<Pivot>)>,
+    /// The chart description a live edit is showing, and its chart. A
+    /// description is not a node property `RenderOverrides` patches, so the
+    /// card and the picker read it here ([`Self::chart_drawn`]).
+    chart_preview: Option<(NodeId, Box<ondin_core::chart::Chart>)>,
     /// Whether the document has edits not yet written to `path`.
     dirty: bool,
     /// The revision a write now in flight will put on disk, if one is
@@ -759,6 +763,7 @@ impl EditorSession {
             session_preview: None,
             preview_holds_gesture: false,
             pivot_preview: None,
+            chart_preview: None,
             dirty: false,
             saving: None,
             run: None,
@@ -1194,6 +1199,21 @@ impl EditorSession {
             None,
         )
         .unwrap_or_default();
+        // A chart's description changes what its parts are, which no patch can
+        // say: the parts it would generate are drawn in their place.
+        self.chart_preview = None;
+        for op in &tx.0 {
+            if let Operation::SetChart {
+                id,
+                chart: Some(chart),
+            } = op
+                && let Some(parts) =
+                    ondin_core::chart::preview(&self.doc, &self.resolved, *id, chart)
+            {
+                self.overrides.replace_chart(*id, &parts);
+                self.chart_preview = Some((*id, chart.clone()));
+            }
+        }
         self.drawn = next_revision();
         self.preview_holds_gesture = true;
         // From the gesture's own operations, never the follows: a `SetPivot` on a
@@ -1320,6 +1340,16 @@ impl EditorSession {
         self.session_preview = None;
         self.preview_holds_gesture = false;
         self.pivot_preview = None;
+        self.chart_preview = None;
+    }
+
+    /// Chart `id`'s description as drawn: the live edit's while one previews it,
+    /// else the document's.
+    pub fn chart_drawn(&self, id: NodeId) -> Option<&ondin_core::chart::Chart> {
+        match &self.chart_preview {
+            Some((at, chart)) if *at == id => Some(chart),
+            _ => self.doc.get(id)?.chart(),
+        }
     }
 
     /// Commit a transaction, reporting failure through the status line instead
@@ -4011,5 +4041,45 @@ mod tests {
         s.undo();
         let said = crate::input::keys_for(&s.status().text, true);
         assert_eq!(said, "Undo · on “Ctrl+K menu”");
+    }
+
+    /// A previewed `SetChart` draws the parts the new description generates in
+    /// place of the chart's own, and the card reads the previewed description.
+    /// flip: `set_preview`'s chart loop removed → fails at "the committed parts hidden".
+    #[test]
+    fn a_previewed_chart_draws_its_new_parts_in_place_of_its_own() {
+        use ondin_core::chart::{Chart, ChartKind};
+        let mut s = EditorSession::new();
+        let id = s.ids.mint();
+        let page = s.doc.first_page();
+        let index = s.doc.get(page).map_or(0, |n| n.children().len());
+        let tx = ondin_core::edit::create_chart(
+            id,
+            page,
+            index,
+            Affine::IDENTITY,
+            Point::new(-4000.0, 0.0),
+            Point::new(-3520.0, 280.0),
+            ondin_core::peniko::Color::WHITE,
+            Chart::sample(ChartKind::Column),
+        );
+        assert!(s.commit(tx));
+        let own = s.doc.get(id).map_or(0, |n| n.children().len());
+        assert!(own > 0, "settle generated the parts");
+        let mut bar = s.doc.get(id).and_then(|n| n.chart()).cloned().unwrap();
+        bar.kind = ChartKind::Bar;
+        s.set_preview(&Transaction(vec![Operation::SetChart {
+            id,
+            chart: Some(Box::new(bar)),
+        }]));
+        assert_eq!(
+            s.overrides.children_of(id),
+            Some(&[][..]),
+            "the committed parts hidden"
+        );
+        assert!(s.overrides.ghosts_of(id).count() > 0, "the new parts drawn");
+        assert_eq!(s.chart_drawn(id).map(|c| c.kind), Some(ChartKind::Bar));
+        s.clear_preview();
+        assert_eq!(s.chart_drawn(id).map(|c| c.kind), Some(ChartKind::Column));
     }
 }

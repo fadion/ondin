@@ -105,9 +105,10 @@ Charts*.
   Compare and the snapshot see the change that was made, not the whole chart rebuilt.
 - **Previews.** A resize drag needs nothing of its own: the layout reflows the parts as the frame
   is dragged (*Laid out, not placed*), and the release regenerates for the new size. Scrubbing an
-  option field regenerates on every frame into `RenderOverrides::chart`, a replacement for the
-  frame's parts drawn in their place, since a preview cannot otherwise add a tick or a bar.
-  Nothing enters the document until release (invariant 5).
+  option field regenerates on every frame (`chart::preview`) into
+  `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the frame's own,
+  since a patch cannot add a tick or a bar. Nothing enters the document until release
+  (invariant 5).
 
 ### Laid out, not placed
 
@@ -243,11 +244,12 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 All live in the chart's own inspector card (*The Chart card*). Each is shown only for the kinds
 it applies to; switching kind keeps the others' values.
 
-- **Style presets.** A preset is a set of option values written over the description in one step,
-  not a link: *Clean* (the default), *Soft* (rounded marks, light dashed grid), *Bold* (heavy marks,
-  no grid, large values), *Minimal* (no axes, no grid, no legend: a sparkline when the chart is
-  small), *Outline* (stroked marks, no fill). The preset cells are drawn by `chart::generate`
-  itself on the chart's own data, so what a cell shows is what it does.
+- **Style presets** (`chart::Preset`). A preset is a set of option values written over the
+  description's style fields in one step, not a link: *Clean* (the defaults), *Soft* (rounded
+  marks and slices, filled points, a dashed value grid), *Bold* (heavy marks, no grid, large
+  values outside), *Minimal* (no axes, no grid, no legend: a sparkline when the chart is small).
+  Data, palette, text family and number formats are left alone. The preset cells are drawn by
+  `chart::generate` itself on the chart's own data, so what a cell shows is what it does.
 - **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
   *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a colour collection's group, its
   variables bound to the series in order, so a mode switch recolours the chart. Picking a palette
@@ -324,29 +326,40 @@ A chart has no title or caption of its own: a text layer next to it does that, a
 
 ### The Chart card
 
-The chart's inspector card, in the Type card's place, so a chart frame shows identity, Align,
-Transform, Position, Item, **Chart**, Appearance (the frame's ground and opacity), Stroke,
-Effects, Export. A frame's *Frame templates* and *Layout grid* cards and its Container card are not
-shown. Built from the inspector's existing primitives; its sections are `ui::eyebrow` heads in the
-order below, each closable as the inspector's other sections are:
+The chart's inspector card (`panels/chart.rs`), after Item, so a chart frame shows identity,
+Align, Transform, Position, Item, **Chart**, Appearance (the frame's ground and opacity), Fill,
+Stroke, Effects, Export. A frame's *Frame templates*, *Layout grid* and Container cards, and the
+group colours of what is inside it, are not shown (`inspector_single`'s `is_chart`). Every edit is
+one `SetChart` of the whole description; a scrubbed number previews through
+`EditorSession::set_preview`, which draws the parts the new description generates in place of the
+chart's own (`RenderOverrides::replace_chart`: the children hidden by the child-order patch, the
+new parts as ghosts) and remembers the description (`EditorSession::chart_drawn`) for the card
+and the picker. Its sections are `ui::fold_head`s in the order below, their folds kept in
+`collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart::FOLDED`):
 
 - **Type** — a full-width `ComboBox` with the kind's glyph and name (`ui::combo_chevron`,
-  `ui::menu_rows`, each row its glyph), then the variants on `ui::segmented`. Undo step *Chart
-  type*.
-- **Style** — the five preset cells in a row, `inspector::template_cell`'s cell, each the chart
-  drawn small. Undo step *Chart style*.
-- **Data** — the summary (*3 series · 12 rows*), *Edit data…* (`ui::field_button`), the source
-  line when linked (*Linked to a file*, below), and the mapping: *Category* (or *X* and *Y*) as a
-  dropdown of columns.
-- **Series** — one row per series column: swatch (the fill picker, bindable), name (read from the
-  column header, renamed here or there alike), the eye, and for lines its dash. The palette
-  dropdown sits in the head. A Sankey shows *Nodes* here instead: one row per node name, its
-  swatch and its name, the total flowing through it at the row's end.
-- **Marks**, **Axes**, **Values**, **Legend** — the options above, as `ui::value_field*`,
-  `ui::switch_row`, `ui::segmented` and dropdown rows, two to a line where they pair (min and max,
-  size and weight). Each field's undo step is its label (*Bar radius*, *Legend position*).
-- **Text** — family, weight and the four sizes, as the Type card's rows.
-- At the foot, **Flatten chart** (`ui::field_button`), with `Ctrl+E` in its tooltip.
+  `ui::menu_rows`, each row its glyph, `rail::chart_glyph`), then the variants on
+  `ui::segmented`. A switch to or from a Sankey re-reads the mapping off the table's columns.
+  Undo step *Chart type*.
+- **Style** — the preset cells in a row, each the chart generated with the preset at 320 × 200
+  and its fills and strokes rasterised small (`style_picture`, through `rasterize_paths`; text
+  left out), cached with the generator's left-out values while the description and the drawn
+  size are unchanged (`ChartCardCache`). The preset the options are exactly at lights. Undo step
+  *Chart style*.
+- **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), the left-out line (*2
+  values left out*, the reasons in its tooltip) or the refusal (*Too many marks: …*, *Flows loop
+  back: …*) in the warning ink, and the mapping: *Category* (*X* for a scatter) or a Sankey's
+  *From*, *To* and *Value* as dropdowns of columns.
+- **Series** — the palette dropdown, then one row per column but the category: its swatch,
+  which opens the picker on `PaintSlot::Chart` (solid colours), its name, and the eye, which
+  shows the column as a series or hides it (a hidden series keeps its place and colour). A
+  Sankey shows *Nodes* here instead: one row per node name in `chart::sankey_nodes`' order with
+  its swatch. Picking a palette puts every series and node back on it (`chart::with_palette`).
+- **Marks**, **Axes**, **Values**, **Legend** — the options above for the kind, as
+  `ui::value_field`, `ui::switch_row`, `ui::segmented` and dropdown rows, number fields two to a
+  line. Each field's undo step is its label (*Bar radius*, *Legend position*).
+- **Text** — the four sizes and the weight.
+- At the foot, **Flatten chart** (`ui::action_button`), with `Ctrl+E` in its tooltip.
 
 A multi-selection of charts shows the Chart card when every chart is the same kind, writing each;
 the data rows are left out there (*Edit data one chart at a time*).

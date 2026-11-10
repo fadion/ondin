@@ -319,6 +319,18 @@ pub enum PaintSlot {
     /// A colour in the Settings modal's draft, not the document
     /// ([`PaintSlot::pref_scoped`]); node-less, as [`PaintSlot::Canvas`] is.
     Pref(PrefColour),
+    /// One colour of a chart's description on the slot's node (the Chart card's
+    /// Series rows): solid, written as a `SetChart`.
+    Chart(ChartColour),
+}
+
+/// Which colour of a chart a [`PaintSlot::Chart`] edits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChartColour {
+    /// A series, by its column.
+    Series(ondin_core::chart::ColumnId),
+    /// A Sankey node, by its place in `chart::sankey_nodes`' order.
+    Node(usize),
 }
 
 /// Which Settings colour a [`PaintSlot::Pref`] edits (`prefs::CanvasPrefs`).
@@ -490,6 +502,7 @@ impl PaintSlot {
                 | PaintSlot::Duotone(..)
                 | PaintSlot::VarCell(..)
                 | PaintSlot::Pref(_)
+                | PaintSlot::Chart(_)
         )
     }
 

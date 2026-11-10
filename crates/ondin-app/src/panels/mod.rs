@@ -6,6 +6,7 @@
 
 pub(crate) mod bind_others;
 pub(crate) mod binding;
+mod chart;
 mod component;
 pub(crate) mod credit;
 pub(crate) mod dashboard;
@@ -23,6 +24,7 @@ mod typography;
 pub(crate) mod variables;
 pub(crate) mod variants;
 
+pub(crate) use chart::{ChartCardCache, FOLDED as CHART_FOLDED};
 /// The Component card's property readings, cached per revision.
 pub(crate) use component::PropCache;
 /// A main's documentation link: the card's edit buffer, the link a main shows,

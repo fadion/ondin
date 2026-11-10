@@ -20,11 +20,13 @@ a *Landed:* line saying what is in and what is next, so the next session resumes
   not yet drawn: axis titles, tick marks, the value axis line, dashed gridlines, a slice's corner
   radius, a series' own point shape, a Sankey's *Gradient* flows. Goldens through `goldens.rs`'
   `chart_page`.
-- **The Chart card** — type, style presets, data summary and mapping, series (*Nodes* for a
-  Sankey), marks, axes, values, legend, text, palettes (*From variables* included), flatten and
-  its `Ctrl+E` door, `RenderOverrides::chart` for scrub previews. Bound colours: the variable flows learn the description's colours
-  (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
-  stops refusing a bound one.
+- **The Chart card, what is left** — *Landed:* the card's sections, presets, previews, series and
+  node swatches, flatten. Next: the *Outline* preset (stroked, unfilled marks: an option the
+  generator needs first); *From variables* and bindable swatches, where the variable flows learn
+  the description's colours (`variable::reads`, `remove_ops`' detach, `detached`, a kit's
+  rebind) and `Chart::validate` stops refusing a bound one; a series' dash and point shape on its
+  row; a node's total on its row; the text family; number format prefix, suffix, decimals and
+  percent; an axis range; a multi-selection of charts of one kind.
 - **The data window** — the `TABLE` glyph, the grid, its keyboard, range selection, TSV copy and
   paste, the header and row menus, the undo steps; opening on a new chart, and a double-click on
   a chart opening it at the clicked mark's cell.

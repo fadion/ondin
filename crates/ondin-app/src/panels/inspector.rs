@@ -2014,7 +2014,7 @@ impl OndinApp {
                         for (e, why) in &choices {
                             let (label, tag) = shown(*e);
                             let row = ui::MenuRow::new("", label)
-                                .checked(*e == current)
+                                .selected(*e == current)
                                 .accel(tag.as_deref())
                                 .enabled(why.is_none());
                             let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);

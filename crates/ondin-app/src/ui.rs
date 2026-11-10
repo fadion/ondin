@@ -471,6 +471,9 @@ pub struct MenuRow<'a> {
     /// passes `Some(true)` on one row and `Some(false)` on the rest, so the pointer
     /// cannot paint a second ground.
     pub highlight: Option<bool>,
+    /// The chosen row of a dropdown that holds one value: lit as a ComboBox's
+    /// `selectable_label` is (the selection ground and ink), with no tick column.
+    pub selected: bool,
 }
 
 impl<'a> MenuRow<'a> {
@@ -484,7 +487,12 @@ impl<'a> MenuRow<'a> {
             danger: false,
             enabled: true,
             highlight: None,
+            selected: false,
         }
+    }
+    pub fn selected(mut self, on: bool) -> Self {
+        self.selected = on;
+        self
     }
     pub fn accel(mut self, accel: Option<&'a str>) -> Self {
         self.accel = accel;
@@ -528,8 +536,12 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     // `&& enabled` keeps a stale highlight off a row that went dim.
     let hovered = row.highlight.unwrap_or_else(|| resp.hovered()) && row.enabled;
     let on = row.checked == Some(true);
+    let lit = row.selected && row.enabled;
     let p = ui.painter();
-    if hovered {
+    if lit {
+        let selection = ui.visuals().selection.bg_fill;
+        p.rect_filled(rect, ui.visuals().widgets.inactive.corner_radius, selection);
+    } else if hovered {
         p.rect_filled(rect, egui::CornerRadius::same(4), color::hover());
     }
     // Three tiers: disabled, resting, on or hovered.
@@ -544,6 +556,10 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             color::danger(),
             color::danger().gamma_multiply(0.55),
         ),
+        _ if lit => {
+            let ink = ui.visuals().selection.stroke.color;
+            (ink, ink, theme::text::faint())
+        }
         _ if on => (color::accent(), color::text(), theme::text::faint()),
         _ if hovered => (color::text(), color::text(), theme::text::faint()),
         _ => (

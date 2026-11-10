@@ -3967,6 +3967,7 @@ mod tests {
                                     enabled: true,
                                     danger: false,
                                     highlight: None,
+                                    selected: false,
                                 },
                                 ROW_H,
                             );

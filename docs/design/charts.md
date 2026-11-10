@@ -256,7 +256,8 @@ it applies to; switching kind keeps the others' values.
 - **Style presets** (`chart::Preset`). A preset is a set of option values written over the
   description's style fields in one step, not a link: *Clean* (the defaults), *Soft* (rounded
   marks and slices, filled points, a dashed value grid), *Bold* (heavy marks, no grid, large
-  values outside), *Minimal* (no axes, no grid, no legend: a sparkline when the chart is small).
+  values outside), *Minimal* (no axes, no grid, no legend: a sparkline when the chart is small),
+  *Outline* (outlined marks at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`).
   Data, palette, text family and number formats are left alone. The preset cells are drawn by
   `chart::generate` itself on the chart's own data, so what a cell shows is what it does.
 - **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
@@ -265,7 +266,12 @@ it applies to; switching kind keeps the others' values.
   recolours every series; a series' own swatch, once edited, is its own.
 - **Marks**:
   - *Bars* (Column, Bar): group gap (% of a band), bar gap (% of a bar), corner radius on the end
-    away from the baseline or all corners, stroke.
+    away from the baseline or all corners.
+  - *Outline marks* (every kind, `Options::outline`): bars, slices, points and Sankey nodes drawn
+    as an inside stroke of the given width in their colour over a 14% tint of it
+    (`chart::OUTLINE_TINT`; a bound colour keeps its binding at that alpha). The stroke is inside
+    so a mark keeps the size its value gives it. Lines are strokes already and areas keep their
+    opacity; a legend swatch stays solid.
   - *Lines* (Line, Area): width, curve (Straight, Smooth, Step), points (None, Hollow, Filled) and
     their size, per-series dash, area opacity, *Connect gaps*.
   - *Slices* (Pie): hole (% of the radius, 0 for a pie), pad angle, corner radius, start angle,

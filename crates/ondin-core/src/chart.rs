@@ -16,7 +16,7 @@ pub mod table_io;
 
 pub use colours::{sankey_nodes, series_fill, with_node_fill, with_palette, with_series_fill};
 pub use generate::{Generated, Part, Refusal, generate, palette};
-pub use preset::Preset;
+pub use preset::{OUTLINE_WIDTH, Preset};
 pub use settle::{preview, settle, settle_all, settle_round, stale};
 pub use table_io::grouped;
 
@@ -400,11 +400,19 @@ pub struct Options {
     pub values: Values,
     pub legend: Legend,
     pub text: ChartText,
+    /// Marks drawn as an inside stroke of this width in their colour over a
+    /// [`OUTLINE_TINT`] of it: bars, slices, points and Sankey nodes. `None` fills
+    /// them solid. Lines are strokes already, and areas keep their opacity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<f64>,
     /// Space between the frame's edge and the chart, and between the legend and
     /// the body.
     pub padding: f64,
     pub gap: f64,
 }
+
+/// The share of a mark's colour an outlined mark is filled with.
+pub const OUTLINE_TINT: f32 = 0.14;
 
 impl Default for Options {
     fn default() -> Self {
@@ -430,6 +438,7 @@ impl Default for Options {
             values: Values::default(),
             legend: Legend::default(),
             text: ChartText::default(),
+            outline: None,
             padding: 16.0,
             gap: 12.0,
         }
@@ -468,8 +477,6 @@ pub struct Bars {
     pub radius: f64,
     /// Whether the radius rounds every corner, not only the end away from the baseline.
     pub radius_all: bool,
-    /// A stroke width; 0 for none.
-    pub stroke: f64,
 }
 
 impl Default for Bars {
@@ -480,7 +487,6 @@ impl Default for Bars {
             bar_gap: 10.0,
             radius: 2.0,
             radius_all: false,
-            stroke: 0.0,
         }
     }
 }
@@ -1223,7 +1229,7 @@ impl Options {
         let ok = pct(b.group_gap)
             && pct(b.bar_gap)
             && px(b.radius)
-            && size(b.stroke)
+            && self.outline.is_none_or(|w| w > 0.0 && size(w))
             && size(l.width)
             && size(l.point_size)
             && unit(l.area_opacity)

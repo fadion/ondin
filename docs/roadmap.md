@@ -17,7 +17,6 @@ takes the first phase listed, and deletes it here when it lands. A phase left pa
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
 - **What is left of charts** — every phase has landed; these pieces of the design have not:
-  - The *Outline* preset (stroked, unfilled marks: an option the generator needs first).
   - *From variables* and bindable swatches: the variable flows learn the description's colours
     (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
     stops refusing a bound one.

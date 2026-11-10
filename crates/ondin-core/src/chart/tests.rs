@@ -345,3 +345,43 @@ fn a_gradient_flow_runs_from_its_source_colour_to_its_target_colour() {
         assert_ne!(from, to, "a flow between two colours");
     }
 }
+
+/// *Outline* draws every kind's marks as an inside stroke in their colour over
+/// a tint of it, and *Clean* fills them solid with no stroke.
+/// flip: `mark_paint` ignoring `Options::outline` → fails at "stroked".
+#[test]
+fn outlined_marks_are_stroked_over_a_tint() {
+    let roles = [
+        (ChartKind::Column, PartRole::Bar),
+        (ChartKind::Pie, PartRole::Slice),
+        (ChartKind::Scatter, PartRole::Point),
+        (ChartKind::Sankey, PartRole::SankeyNode),
+    ];
+    for (kind, role) in roles {
+        let mut chart = Chart::sample(kind);
+        chart.options = Preset::Outline.apply(&chart.options);
+        assert_eq!(chart.validate(), Ok(()), "{kind:?}");
+        let g = draw(&chart);
+        let marks: Vec<&Part> = g.parts.iter().filter(|p| p.key.role == role).collect();
+        assert!(!marks.is_empty(), "{kind:?}");
+        for m in marks {
+            let stroke = m.strokes.first().expect("stroked");
+            assert_eq!(stroke.align, crate::node::StrokeAlign::Inside, "{kind:?}");
+            let (Some(crate::Brush::Solid(ink)), Some(crate::Brush::Solid(tint))) =
+                (stroke.brush.literal(), m.fills[0].brush.literal())
+            else {
+                panic!("{kind:?}: solid paints");
+            };
+            assert!((tint.components[3] - OUTLINE_TINT * ink.components[3]).abs() < 1e-4);
+        }
+        let clean = draw(&Chart::sample(kind));
+        assert!(
+            clean
+                .parts
+                .iter()
+                .filter(|p| p.key.role == role)
+                .all(|p| p.strokes.is_empty()),
+            "{kind:?}: Clean fills solid"
+        );
+    }
+}

@@ -443,6 +443,38 @@ fn fill(brush: BrushSource) -> Vec<Fill> {
     }]
 }
 
+/// A mark's paint in `brush`: filled solid, or outlined as `Options::outline`
+/// says, the stroke laid inside so a mark keeps the size its value gives it.
+fn mark_paint(o: &super::Options, brush: &BrushSource) -> (Vec<Fill>, Vec<Stroke>) {
+    let Some(width) = o.outline else {
+        return (fill(brush.clone()), Vec::new());
+    };
+    let mut stroke = line_stroke(brush.clone(), width, super::Dash::Solid);
+    stroke.align = crate::node::StrokeAlign::Inside;
+    (fill(tinted(brush, super::OUTLINE_TINT)), vec![stroke])
+}
+
+/// `brush` at `k` of its alpha; a bound colour keeps its binding.
+fn tinted(brush: &BrushSource, k: f32) -> BrushSource {
+    match brush {
+        BrushSource::Bound { var, alpha } => BrushSource::Bound {
+            var: *var,
+            alpha: alpha * k,
+        },
+        BrushSource::Literal(crate::Brush::Solid(c)) => {
+            BrushSource::Literal(crate::Brush::Solid(c.multiply_alpha(k)))
+        }
+        BrushSource::Literal(crate::Brush::Gradient(g)) => {
+            let mut g = g.clone();
+            for s in g.gradient.stops.iter_mut() {
+                s.color = s.color.multiply_alpha(k);
+            }
+            BrushSource::Literal(crate::Brush::Gradient(g))
+        }
+        other => other.clone(),
+    }
+}
+
 fn pct(v: f64) -> Option<LengthPct> {
     Some(LengthPct::Percent(v))
 }
@@ -550,6 +582,14 @@ impl Out<'_> {
             let p = self.parts.last_mut().expect("pushed");
             // Turned about its box's centre, the way layout turns a placed box.
             p.transform = crate::container::placed_at(at, b, Affine::rotate(turn));
+        }
+    }
+
+    /// The part [`Self::rect`] just pushed, repainted as a mark ([`mark_paint`]).
+    fn as_mark(&mut self, o: &super::Options) {
+        let p = self.parts.last_mut().expect("pushed");
+        if let Some(brush) = p.fills.first().map(|f| f.brush.clone()) {
+            (p.fills, p.strokes) = mark_paint(o, &brush);
         }
     }
 
@@ -1584,6 +1624,7 @@ fn bar_marks(chart: &Chart, data: &Data, ax: &Axes, totals: &[f64], out: &mut Ou
                     insets,
                 },
             );
+            out.as_mark(o);
             if o.values.position != ValuePosition::Off {
                 values_parts.push((s.column.0, c, raw, bx, end_up));
             }
@@ -2204,6 +2245,7 @@ fn sankey(
                 },
             },
         );
+        out.as_mark(o);
         let text = label_text(nd);
         if text.is_empty() {
             continue;
@@ -2502,14 +2544,15 @@ fn scatter(
             };
             let bx = Rect::from_center_size(at, (d, d));
             let kind = point_kind(c.shape, bx.size());
+            let (fills, strokes) = mark_paint(o, &c.fill);
             out.parts.push(Part {
                 key: key(PartRole::Point, c.id, *row as u32),
                 parent: Some(series_key),
                 name: format!("{} · row {}", c.name, row + 1),
                 kind,
                 transform: Affine::translate(bx.origin().to_vec2()),
-                fills: fill(c.fill.clone()),
-                strokes: Vec::new(),
+                fills,
+                strokes,
                 opacity: p.opacity as f32,
                 insets: centred(
                     at.x / plot.width.max(1e-9) * 100.0,
@@ -2744,14 +2787,15 @@ fn pie(
         } else {
             Vec::new()
         };
+        let (fills, strokes) = mark_paint(o, &s.fill);
         out.path_rounded(
             key(PartRole::Slice, 0, s.index),
             series_key,
             format!("Slice · {}", s.name),
             (path, radii),
             Size::new(side, side),
-            fill(s.fill.clone()),
-            Vec::new(),
+            fills,
+            strokes,
             1.0,
         );
     }
@@ -3094,7 +3138,7 @@ fn lines(
                             )],
                         )
                     } else {
-                        (fill(s.fill.clone()), Vec::new())
+                        mark_paint(o, &s.fill)
                     };
                     out.parts.push(Part {
                         key: key(PartRole::Point, s.column.0, *c as u32),

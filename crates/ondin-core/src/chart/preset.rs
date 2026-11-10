@@ -4,7 +4,7 @@
 
 use super::{LegendPosition, Options, PointStyle, ValuePosition};
 
-/// The five presets, in the card's order.
+/// The presets, in the card's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Preset {
     /// The defaults: solid gridlines, a legend on top, no values.
@@ -15,10 +15,22 @@ pub enum Preset {
     Bold,
     /// No axes, no grid, no legend: a sparkline when the chart is small.
     Minimal,
+    /// Marks stroked in their colour over a light tint of it, and thin lines.
+    Outline,
 }
 
+/// The stroke the *Outline* preset gives marks and lines, and the one the
+/// card's *Outline marks* starts at.
+pub const OUTLINE_WIDTH: f64 = 1.5;
+
 impl Preset {
-    pub const ALL: [Preset; 4] = [Preset::Clean, Preset::Soft, Preset::Bold, Preset::Minimal];
+    pub const ALL: [Preset; 5] = [
+        Preset::Clean,
+        Preset::Soft,
+        Preset::Bold,
+        Preset::Minimal,
+        Preset::Outline,
+    ];
 
     /// The preset's name as the UI says it.
     pub fn label(self) -> &'static str {
@@ -27,6 +39,7 @@ impl Preset {
             Preset::Soft => "Soft",
             Preset::Bold => "Bold",
             Preset::Minimal => "Minimal",
+            Preset::Outline => "Outline",
         }
     }
 
@@ -54,6 +67,7 @@ impl Preset {
         o.legend.position = clean.legend.position;
         o.values.position = clean.values.position;
         o.text.value_size = clean.text.value_size;
+        o.outline = clean.outline;
         match self {
             Preset::Clean => {}
             Preset::Soft => {
@@ -79,6 +93,10 @@ impl Preset {
                 o.value_axis.grid.show = false;
                 o.category_axis.grid.show = false;
                 o.legend.position = LegendPosition::Off;
+            }
+            Preset::Outline => {
+                o.outline = Some(OUTLINE_WIDTH);
+                o.lines.width = OUTLINE_WIDTH;
             }
         }
         o

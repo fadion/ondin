@@ -27,13 +27,13 @@ pub(crate) const FOLDED: [&str; 5] = [
 ];
 
 /// A Style cell's height: the picture and its name under it.
-const STYLE_CELL_H: f32 = 64.0;
-/// The picture inside a Style cell.
-const STYLE_PICTURE: egui::Vec2 = egui::vec2(56.0, 34.0);
+/// Past two control heights, so it reads (and audits) as a tile, not a control.
+const STYLE_CELL_H: f32 = 58.0;
+/// The picture inside a Style cell, narrow enough for five cells to a row.
+const STYLE_PICTURE: egui::Vec2 = egui::vec2(44.0, 28.0);
 /// The size a Style cell's chart is generated at before it is drawn small, so
 /// its marks keep a chart's proportions rather than a thumbnail's.
 const STYLE_CHART: kurbo::Size = kurbo::Size::new(320.0, 200.0);
-
 /// What the card measured of its chart, kept while the description stays the same:
 /// the Style cells' pictures and the generator's left-out values.
 pub(crate) struct ChartCardCache {
@@ -777,32 +777,18 @@ impl OndinApp {
                         |c, v| c.options.bars.bar_gap = v,
                     );
                 });
-                self.chart_pair(ui, |app, ui, w| {
-                    app.chart_number(
-                        ui,
-                        id,
-                        chart,
-                        w,
-                        "Radius",
-                        "Bar radius",
-                        Scrub::whole(0.25).range(0.0..=100.0),
-                        0,
-                        |c| c.options.bars.radius,
-                        |c, v| c.options.bars.radius = v,
-                    );
-                    app.chart_number(
-                        ui,
-                        id,
-                        chart,
-                        w,
-                        "Stroke",
-                        "Bar stroke",
-                        Scrub::fine(0.1, 1).range(0.0..=20.0),
-                        1,
-                        |c| c.options.bars.stroke,
-                        |c, v| c.options.bars.stroke = v,
-                    );
-                });
+                self.chart_number(
+                    ui,
+                    id,
+                    chart,
+                    ui.available_width(),
+                    "Radius",
+                    "Bar radius",
+                    Scrub::whole(0.25).range(0.0..=100.0),
+                    0,
+                    |c| c.options.bars.radius,
+                    |c, v| c.options.bars.radius = v,
+                );
                 let all = chart.options.bars.radius_all;
                 self.chart_switch(ui, id, chart, "Round every corner", all, |c, on| {
                     c.options.bars.radius_all = on;
@@ -1142,6 +1128,29 @@ impl OndinApp {
                     move |c, i| c.options.flows.labels = labels[i],
                 );
             }
+        }
+        let outline = chart.options.outline;
+        self.chart_switch(
+            ui,
+            id,
+            chart,
+            "Outline marks",
+            outline.is_some(),
+            |c, on| c.options.outline = on.then_some(chart::OUTLINE_WIDTH),
+        );
+        if outline.is_some() {
+            self.chart_number(
+                ui,
+                id,
+                chart,
+                ui.available_width(),
+                "Stroke",
+                "Outline width",
+                Scrub::fine(0.1, 1).range(0.1..=20.0),
+                1,
+                |c| c.options.outline.unwrap_or(chart::OUTLINE_WIDTH),
+                |c, v| c.options.outline = Some(v.max(0.1)),
+            );
         }
     }
 

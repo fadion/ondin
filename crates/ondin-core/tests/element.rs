@@ -169,17 +169,14 @@ fn a_button_and_a_link_do_not_nest() {
     assert!(why.starts_with("Inside a button"), "{why}");
 }
 
-/// A heading or a button is one paragraph; a link may hold several.
+/// A text of several paragraphs may be a heading, a button or a link: the
+/// export writes its paragraphs as block spans inside one.
 #[test]
-fn a_heading_is_one_paragraph() {
+fn a_heading_may_hold_several_paragraphs() {
     let f = fixture();
-    assert_eq!(
-        element::refusal(&f.doc, f.copy, HtmlElement::H1).as_deref(),
-        Some("A heading is one paragraph — this text has 2")
-    );
-    assert!(element::refusal(&f.doc, f.copy, HtmlElement::Button).is_some());
-    assert_eq!(element::refusal(&f.doc, f.copy, HtmlElement::Link), None);
-    assert_eq!(element::refusal(&f.doc, f.terms, HtmlElement::H1), None);
+    for e in [HtmlElement::H1, HtmlElement::Button, HtmlElement::Link] {
+        assert_eq!(element::refusal(&f.doc, f.copy, e), None, "{e:?}");
+    }
 }
 
 /// A top-level frame holds one main, never inside a header or the like, and a
@@ -207,6 +204,31 @@ fn a_page_has_one_main() {
         .unwrap();
     assert!(element::refusal(&f.doc, f.card, HtmlElement::Main).is_some());
     assert!(element::refusal(&f.doc, f.card, HtmlElement::Footer).is_some());
+}
+
+/// A main sits only inside plain boxes: a list or a link around it is refused
+/// as a landmark is, and neither may be set around one.
+/// flip: `bars_main` listing only the landmarks → fails at "inside a list".
+#[test]
+fn the_main_sits_only_in_plain_boxes() {
+    for around in [HtmlElement::List, HtmlElement::Link, HtmlElement::Section] {
+        let mut f = fixture();
+        f.doc
+            .apply(&Transaction(vec![set(f.site, around)]))
+            .unwrap();
+        assert!(
+            element::refusal(&f.doc, f.card, HtmlElement::Main).is_some(),
+            "inside a list, a link or a section: {around:?}"
+        );
+        let mut f = fixture();
+        f.doc
+            .apply(&Transaction(vec![set(f.card, HtmlElement::Main)]))
+            .unwrap();
+        assert!(
+            element::refusal(&f.doc, f.site, around).is_some(),
+            "around the main: {around:?}"
+        );
+    }
 }
 
 /// A list's children are its items: Automatic reads `li` there. Elsewhere a

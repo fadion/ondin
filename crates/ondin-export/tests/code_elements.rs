@@ -199,6 +199,65 @@ fn automatic_writes_the_tag_the_menu_shows() {
     );
 }
 
+/// A heading of two paragraphs writes each as a span inside it.
+#[test]
+fn a_heading_holds_its_paragraphs_as_spans() {
+    let (doc, res, made) = doc_of(&[(0, text("Six ways\nfaster"), "Title")], &[(1, H::H1)]);
+    let out = Target::Html.export(&doc, &res, &[made[0]]);
+    let html = file(&out, "index.html");
+    assert!(html.contains("<h1 class=\"title\">"), "{html}");
+    assert!(
+        !html.contains("<p ") && html.matches("<span class=\"title-p").count() == 2,
+        "phrasing only: {html}"
+    );
+    assert!(out.elements.is_empty(), "{:?}", out.elements);
+}
+
+/// A main drawn as a picture is not the page's main, so a later one is.
+///
+/// flip: `Walk::write_element` leaving `main_written` set on a picture →
+/// fails at "the second frame is the main".
+#[test]
+fn a_main_drawn_as_a_picture_leaves_the_main_to_another() {
+    let rect = NodeKind::Rect {
+        size: Size::new(10.0, 10.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
+    };
+    let (mut doc, _, made) = doc_of(
+        &[
+            (0, frame(), "Hero"), // 1
+            (1, rect, "Shape"),   // 2
+            (0, frame(), "Body"), // 3
+        ],
+        &[(1, H::Main)],
+    );
+    doc.apply(&Transaction(vec![
+        Operation::SetMask {
+            id: made[2],
+            mask: true,
+        },
+        Operation::SetElement {
+            id: made[3],
+            element: Some(H::Main),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = Target::Html.export(&doc, &res, &[made[0]]);
+    let html = file(&out, "index.html");
+    assert!(
+        html.contains("<main class=\"body\">"),
+        "the second frame is the main: {html}"
+    );
+    assert_eq!(
+        out.elements.len(),
+        1,
+        "the picture is reported: {:?}",
+        out.elements
+    );
+}
+
 /// A link moved into a button, and a second main, are written as Automatic
 /// and reported.
 ///
@@ -284,4 +343,52 @@ fn a_components_root_takes_its_element_in_its_own_file() {
     assert!(card.contains("<section"), "the component's root: {card}");
     let app = file(&out, "App.tsx");
     assert!(!app.contains("<section"), "{app}");
+}
+
+/// A use of a component whose root is a link, inside a frame that is a link,
+/// keeps its own `a`: invalid HTML the export cannot rewrite, so it reports it.
+///
+/// flip: `Walk::component` leaving an unmarked interactive root out of
+/// `interactive` → fails at "reported".
+#[test]
+fn an_interactive_use_inside_a_link_is_reported() {
+    let (mut doc, _, made) = doc_of(
+        &[(0, frame(), "Chip"), (0, frame(), "Wrap")],
+        &[(1, H::Link), (2, H::Link)],
+    );
+    let (chip, wrap) = (made[1], made[2]);
+    let inst = IdSource::new(0xE5).mint();
+    doc.apply(&Transaction(vec![
+        Operation::SetComponent {
+            id: chip,
+            component: true,
+        },
+        Operation::CreateNode {
+            id: inst,
+            parent: wrap,
+            index: 0,
+            kind: frame(),
+            transform: Some(Affine::translate((5.0, 5.0))),
+            name: Some("Chip".into()),
+        },
+        Operation::SetLink {
+            id: inst,
+            link: Some(chip),
+        },
+        Operation::SetElement {
+            id: inst,
+            element: Some(H::Link),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[wrap]);
+    assert!(out.inlined.is_empty(), "a use: {:?}", out.inlined);
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a.contains("Chip, which is interactive, sits inside a button or a link")),
+        "reported: {:?}",
+        out.approximated
+    );
 }

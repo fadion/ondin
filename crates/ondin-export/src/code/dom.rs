@@ -110,8 +110,9 @@ pub(crate) struct StateStyle {
 }
 
 /// What a marked set's root is written with: the prop forcing a state, its
-/// rest value, the `disabled` prop, the value tied to Disabled, the element,
-/// and the name the props the component does not name are gathered under.
+/// rest value, the `disabled` prop, the value tied to Disabled, the element and
+/// a link's address, and the name the props the component does not name are
+/// gathered under.
 #[derive(Debug, Clone)]
 pub(crate) struct Live {
     pub prop: String,
@@ -119,6 +120,7 @@ pub(crate) struct Live {
     pub disabled: String,
     pub disabled_value: Option<String>,
     pub element: RootElement,
+    pub href: String,
     pub spread: String,
 }
 
@@ -975,6 +977,7 @@ mod tests {
                 disabled: "disabled".into(),
                 disabled_value: None,
                 element,
+                href: String::new(),
                 spread: "rest".into(),
             };
             for state in Interaction::ALL {

@@ -859,6 +859,52 @@ fn a_root_holding_an_interactive_use_is_written_plain() {
     );
 }
 
+/// A marked set's Link roots carry their address, and roots of any other
+/// element are written as it, focusable, in React as in plain HTML.
+///
+/// flip: `as_element` leaving out the address → fails at "the address";
+/// `Walk::component` writing a marked root's element only through
+/// `as_element` → fails at "a nav".
+#[test]
+fn a_marked_roots_element_and_address_reach_react() {
+    let mut ids = IdSource::new(0x60);
+    let mut doc = Document::new(ids.mint());
+    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 0.0, |_, _, _| {});
+    set_element(&mut doc, row, RootElement::Link);
+    let roots = doc.get(row).unwrap().children().to_vec();
+    let href = roots
+        .iter()
+        .map(|r| Operation::SetHref {
+            id: *r,
+            href: "/go".into(),
+        })
+        .collect();
+    doc.apply(&Transaction(href)).unwrap();
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    let tsx = file(&out, "components/Row.tsx");
+    assert!(
+        tsx.contains("<a {...rest}") && tsx.contains(" href=\"/go\" "),
+        "the address: {tsx}"
+    );
+
+    let mut ids = IdSource::new(0x61);
+    let mut doc = Document::new(ids.mint());
+    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 0.0, |_, _, _| {});
+    let ops = ondin_core::element::set_ops(&doc, row, Some(ondin_core::element::HtmlElement::Nav));
+    doc.apply(&Transaction(ops)).unwrap();
+    let inst = instance_of(&mut doc, &mut ids, rest);
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    let tsx = file(&out, "components/Row.tsx");
+    assert!(
+        tsx.contains("<nav {...rest} className=") && tsx.contains(" tabIndex={0} "),
+        "a nav: {tsx}"
+    );
+    assert!(out.elements.is_empty(), "{:?}", out.elements);
+}
+
 /// Two variants that share a root class but differ in a state get a root class
 /// each, so each state's rule reaches its own: *Tone* Primary and Ghost look
 /// alike at rest, and hover blue and green.

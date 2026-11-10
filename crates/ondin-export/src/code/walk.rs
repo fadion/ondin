@@ -477,6 +477,27 @@ impl Walk<'_> {
             None => self.element_of(node),
             Some(_) => None,
         };
+        // A use keeps the elements its component wrote, so one inside a button,
+        // or an interactive one inside a link, is invalid HTML that only a
+        // report can flag.
+        if let Some(i) = used.as_ref().and_then(|u| u.instance.as_ref()) {
+            let comps = self.components.as_ref().expect("components are on");
+            let interactive = comps.interactive.contains(&i.component);
+            let why = if self.inside.contains(&HtmlElement::Button) {
+                Some(" sits inside a button, which holds only text and pictures")
+            } else if interactive && self.inside.iter().any(|a| a.interactive()) {
+                Some(", which is interactive, sits inside a button or a link")
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                self.report.approximate(format!(
+                    "instance {}: its {}{why}, so the HTML is invalid",
+                    label(node),
+                    i.component
+                ));
+            }
+        }
         if let Some(e) = element {
             self.inside.push(e);
         }
@@ -1236,6 +1257,12 @@ impl Walk<'_> {
                     .find(|(_, s)| **s == Interaction::Disabled)
                     .map(|(v, _)| v.clone()),
                 element: *element,
+                // Every root holds the set's one element; the default's address
+                // stands for them.
+                href: doc
+                    .get(default)
+                    .map(|n| n.href().to_string())
+                    .unwrap_or_default(),
             });
         }
 
@@ -1258,17 +1285,20 @@ impl Walk<'_> {
         {
             let Some(node) = doc.get(*t) else { continue };
             // Each variant's tree is drawn alone, so each may hold the main. A
-            // marked set's root is written by `as_element`, but what it is still
-            // bars what may sit inside it.
+            // marked set's button or link root is written by `as_element`, but
+            // what it is still bars what may sit inside it; any other element
+            // is written here, as an unmarked root's is.
             self.main_written = false;
             let element = match &marked {
-                Some(_) => variant::root_element(doc, owner_id).element(),
+                Some(_) => variant::root_element(doc, owner_id)
+                    .element()
+                    .or_else(|| self.element_of(node)),
                 None => self.element_of(node),
             };
             self.inside.extend(element);
             let mut root = self.css_element(node, Place::Root);
             self.inside.clear();
-            if let (Some(e), None) = (element, &marked) {
+            if let Some(e) = element.filter(|e| marked.is_none() || !e.interactive()) {
                 self.write_element(&mut root, node, e);
             }
             root.takes_class = true;
@@ -1357,6 +1387,13 @@ impl Walk<'_> {
             for (_, root) in &mut bodies {
                 as_element(root, &live);
             }
+        } else if doc
+            .get(default)
+            .and_then(Node::element)
+            .is_some_and(HtmlElement::interactive)
+        {
+            let comps = self.components.as_mut().expect("components are on");
+            comps.interactive.insert(name.clone());
         }
         self.classes = classes;
         self.inside = outer_inside;
@@ -2492,10 +2529,8 @@ impl Walk<'_> {
             Some("a button or a link cannot sit inside another".into())
         } else if e == H::Main && self.main_written {
             Some("a page has one main".into())
-        } else if e == H::Main
-            && around(&|a| matches!(a, H::Article | H::Aside | H::Header | H::Footer | H::Nav))
-        {
-            Some("the main cannot sit inside a landmark".into())
+        } else if e == H::Main && around(&|a| a.bars_main()) {
+            Some("the main sits only inside plain boxes".into())
         } else if matches!(e, H::Header | H::Footer)
             && around(&|a| matches!(a, H::Header | H::Footer))
         {
@@ -2528,6 +2563,10 @@ impl Walk<'_> {
                 label(node),
                 e.tag()
             ));
+            // A picture holds no layers, so the page's main is still to come.
+            if e == H::Main {
+                self.main_written = false;
+            }
             return;
         }
         el.tag = e.tag();
@@ -3045,6 +3084,9 @@ fn as_element(root: &mut Element, live: &Live) {
         }
         RootElement::Link => {
             root.tag = "a";
+            if !live.href.is_empty() {
+                root.attrs.insert(0, ("href", live.href.clone()));
+            }
             reset_first(root, LINK_RESET);
         }
         RootElement::Plain => {
@@ -3592,6 +3634,7 @@ mod tests {
             disabled: "disabled".into(),
             disabled_value: None,
             element: RootElement::Button,
+            href: String::new(),
             spread: "rest".into(),
         };
         as_element(&mut root, &live);

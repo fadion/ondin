@@ -388,9 +388,11 @@ fn a_frame_is_the_union_of_its_members_and_moves_none_of_them() {
 
 /// A group becomes a frame of its children's union and back, in its own slot:
 /// the children keep their ids and where they are drawn, the container its name,
-/// and a frame's own fill comes back on a rectangle under the children.
+/// and a frame's own fill comes back on a rectangle under the children. Its
+/// HTML element and address come along.
 /// flip: `convert_container` without the `shift` on each child → fails at "a
-/// stayed put" on the way to a frame.
+/// stayed put" on the way to a frame; `carried_settings` without the element →
+/// fails at "its element and address".
 #[test]
 fn a_group_and_a_frame_convert_into_each_other_in_place() {
     let mut f = Fixture::new();
@@ -400,10 +402,20 @@ fn a_group_and_a_frame_convert_into_each_other_in_place() {
     let above = f.add(f.artboard, rect(5.0, 5.0), (0.0, 0.0));
     let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
     f.commit(tx);
-    f.commit(Transaction(vec![Operation::SetName {
-        id: g,
-        name: "Card".into(),
-    }]));
+    f.commit(Transaction(vec![
+        Operation::SetName {
+            id: g,
+            name: "Card".into(),
+        },
+        Operation::SetElement {
+            id: g,
+            element: Some(ondin_core::element::HtmlElement::Link),
+        },
+        Operation::SetHref {
+            id: g,
+            href: "/card".into(),
+        },
+    ]));
     let before = [f.world_origin(a), f.world_origin(b)];
 
     let (tx, fr) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
@@ -416,6 +428,11 @@ fn a_group_and_a_frame_convert_into_each_other_in_place() {
     );
     let frame = f.doc.get(fr).unwrap();
     assert_eq!(frame.name(), "Card");
+    assert_eq!(
+        (frame.element(), frame.href()),
+        (Some(ondin_core::element::HtmlElement::Link), "/card"),
+        "its element and address"
+    );
     assert!(
         matches!(frame.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(130.0, 60.0))
     );

@@ -141,16 +141,10 @@ impl HtmlElement {
         )
     }
 
-    /// A sectioning element or landmark that may not hold the page's main.
-    fn bars_main(self) -> bool {
-        matches!(
-            self,
-            HtmlElement::Article
-                | HtmlElement::Aside
-                | HtmlElement::Header
-                | HtmlElement::Footer
-                | HtmlElement::Nav
-        )
+    /// An element that may not hold the page's main: every one but the main
+    /// itself, since HTML lets a main sit only in `div`s (and `body`, `form`).
+    pub fn bars_main(self) -> bool {
+        self != HtmlElement::Main
     }
 
     fn header_or_footer(self) -> bool {
@@ -253,14 +247,6 @@ fn quoted(doc: &Document, id: NodeId) -> String {
     }
 }
 
-/// The paragraphs of a text, or 1 for any other layer.
-fn paragraphs(kind: &NodeKind) -> usize {
-    match kind {
-        NodeKind::Text { content, .. } => content.split('\n').count(),
-        _ => 1,
-    }
-}
-
 /// Why `id` cannot be `element`, or `None` when it can: the reasons the menu
 /// shows on a disabled row, naming the nearest ancestor that causes one, else
 /// the first such layer in Layers order. `element` is one [`offered`] for the
@@ -313,14 +299,6 @@ pub fn refusal(doc: &Document, id: NodeId, element: HtmlElement) -> Option<Strin
             "Inside a button a layer is written as a span — {} has an element",
             quoted(doc, d)
         ));
-    }
-    let paras = paragraphs(node.kind());
-    if paras > 1 && (element.heading() || element == HtmlElement::Button) {
-        let what = match element {
-            HtmlElement::Button => "A button",
-            _ => "A heading",
-        };
-        return Some(format!("{what} is one paragraph — this text has {paras}"));
     }
     if element == HtmlElement::Main {
         let top = top_of(doc, id);
@@ -412,7 +390,11 @@ pub fn is_href(typed: &str) -> bool {
     if typed.is_empty() {
         return true;
     }
-    if typed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    // A browser reads `\` as `/`, so `/\host` would be another site's address.
+    if typed
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+    {
         return false;
     }
     let lower = typed.to_ascii_lowercase();
@@ -453,6 +435,8 @@ mod tests {
             "https://",
             "two words",
             "//cdn.example",
+            "/\\evil.example",
+            "\\\\evil.example",
             "ftp://x",
         ] {
             assert!(!is_href(bad), "{bad}");

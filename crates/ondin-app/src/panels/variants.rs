@@ -1247,13 +1247,24 @@ impl OndinApp {
                             }),
                         })
                         .collect();
-                    let current = variant::RootElement::ALL.iter().position(|e| *e == shown);
+                    // A root set to another element (Navigation) shows its name
+                    // and no current row, so Plain is a change, not a no-op.
+                    let other = ondin_core::kit::default_variant(doc, set)
+                        .and_then(|d| doc.get(d))
+                        .and_then(|n| n.element())
+                        .filter(|e| {
+                            variant::RootElement::of(Some(*e)) == variant::RootElement::Plain
+                        });
+                    let current = match other {
+                        Some(_) => None,
+                        None => variant::RootElement::ALL.iter().position(|e| *e == shown),
+                    };
                     let w = ui.available_width();
                     let picked = dropdown(
                         ui,
                         ("set-element", set),
                         w,
-                        shown.label(),
+                        other.map_or(shown.label(), |e| e.label()),
                         &choices,
                         current,
                         None,

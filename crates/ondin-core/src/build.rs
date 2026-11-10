@@ -1008,6 +1008,19 @@ fn carried_settings(node: &crate::Node, new: NodeId, to_frame: bool) -> Vec<Oper
             visible: false,
         });
     }
+    // A frame and a group are offered the same elements.
+    if let Some(element) = node.element() {
+        ops.push(Operation::SetElement {
+            id: new,
+            element: Some(element),
+        });
+    }
+    if !node.href().is_empty() {
+        ops.push(Operation::SetHref {
+            id: new,
+            href: node.href().to_string(),
+        });
+    }
     if let Some(var) = node.visible_var() {
         ops.push(Operation::SetVisibleVar {
             id: new,

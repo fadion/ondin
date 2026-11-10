@@ -836,7 +836,8 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   each value chip is `ui::label_button_noted`, its note `rest` or the tied selector, and an *Element*
   dropdown (Button, Link, Plain; undo step *Element*) shows under its chips. It writes the roots'
   element (`element::set_ops`, Plain as Automatic), the field the identity card's *Element* row
-  shows, and greys a choice `element::refusal` refuses on any root, with the reason. Each `unpaired_states` entry is a warning note
+  shows; roots set there to another element show its name (*Navigation*) with no row current, so
+  Plain is a change. It greys a choice `element::refusal` refuses on any root, with the reason. Each `unpaired_states` entry is a warning note
   (*Large, Focus does not pair*, the sentence in its tooltip) with *Select it* (the layer, else the
   variant), as the clash note is.
 - **A variant** gets the Component card with *Variant in* and the set as a link, its derived read-only

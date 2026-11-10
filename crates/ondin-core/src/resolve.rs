@@ -1015,33 +1015,36 @@ impl Resolved {
         self.ink_bounds.get(&id).copied()
     }
 
-    /// Whether `id` draws something whose ink cannot be measured: a leaf with an
-    /// extent, or a boolean with an outline or a placeholder, that has no
-    /// [`Self::ink_bounds`]. Each stored number is bounded, but nested transforms
-    /// multiply, so its world box can pass `f64::MAX`; the renderer skips such a
-    /// layer rather than hand the GPU coordinates it cannot hold.
+    /// Whether `id` paints something of its own whose box cannot be measured: a
+    /// leaf with an extent, or a boolean with an outline or a placeholder, that
+    /// has no [`Self::ink_bounds`], or a frame with no [`Self::world_bounds`].
+    /// Each stored number is bounded, but transforms multiply, so a world box can
+    /// pass `f64::MAX`; the renderer skips such a layer rather than draw it.
     ///
     /// Derived from the caches on asking rather than kept, so `rebuild` and
-    /// `update` cannot disagree on it. `false` for a layer with children other
-    /// than a boolean: they answer for themselves.
+    /// `update` cannot disagree on it. `false` for a group or the root: their
+    /// children answer for themselves.
     pub fn ink_overflows(&self, doc: &Document, id: NodeId) -> bool {
-        if self.ink_bounds.contains_key(&id) {
-            return false;
-        }
         let Some(node) = doc.get(id) else {
             return false;
         };
-        match node.kind() {
-            NodeKind::Boolean { .. } => {
-                self.boolean.get(&id).is_some_and(|p| !p.is_empty()) || self.failed.contains(&id)
-            }
-            _ if !node.children().is_empty() => false,
-            NodeKind::Root | NodeKind::Group => false,
-            _ => geometry::local_bounds(
+        let has_extent = || {
+            geometry::local_bounds(
                 kind_in(&self.used, node),
                 self.text.get(&id).map(Arc::as_ref),
             )
-            .is_some(),
+            .is_some()
+        };
+        match node.kind() {
+            // A frame paints its own fill whatever it holds, and a frame that
+            // does not clip has ink from its children, so its own box answers.
+            NodeKind::Artboard { .. } => !self.world_bounds.contains_key(&id) && has_extent(),
+            _ if self.ink_bounds.contains_key(&id) => false,
+            NodeKind::Boolean { .. } => {
+                self.boolean.get(&id).is_some_and(|p| !p.is_empty()) || self.failed.contains(&id)
+            }
+            NodeKind::Root | NodeKind::Group => false,
+            _ => node.children().is_empty() && has_extent(),
         }
     }
 

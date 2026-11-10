@@ -228,7 +228,6 @@ fn a_layer_whose_ink_overflows_is_not_drawn() {
         name: None,
     }];
     let mut holder = root;
-    let mut groups = Vec::new();
     for _ in 0..51 {
         let g = ids.mint();
         ops.push(Operation::CreateNode {
@@ -239,7 +238,6 @@ fn a_layer_whose_ink_overflows_is_not_drawn() {
             transform: Some(Affine::scale(1e6)),
             name: None,
         });
-        groups.push(g);
         holder = g;
     }
     ops.push(Operation::CreateNode {
@@ -268,8 +266,8 @@ fn a_layer_whose_ink_overflows_is_not_drawn() {
         "the fixture's own claim: the ellipse's ink is past measuring"
     );
     assert!(
-        !res.ink_overflows(&doc, plain) && !res.ink_overflows(&doc, groups[0]),
-        "control: an ordinary layer and a container are not flagged"
+        !res.ink_overflows(&doc, plain),
+        "control: an ordinary layer is not flagged"
     );
 
     let vp = Viewport {
@@ -286,6 +284,168 @@ fn a_layer_whose_ink_overflows_is_not_drawn() {
         &mut painter,
     );
     assert_eq!(painter.fills.len(), 1, "only the ordinary rect is drawn");
+}
+
+/// A filled ellipse a million units wide under one group of `scale(scale)`, and
+/// the number of fills the walk draws over a 100-pixel view of 100 units.
+fn fills_under_one_scaled_group(scale: f64) -> usize {
+    let mut ids = IdSource::new(0x0F2);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (g, e) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: g,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::scale(scale)),
+            name: None,
+        },
+        Operation::CreateNode {
+            id: e,
+            parent: g,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: Size::new(1e6, 1e6),
+                arc: Default::default(),
+            },
+            transform: Some(Affine::translate((-5e5, -5e5))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: e,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    let mut painter = RecordingPainter::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
+    painter.fills.len()
+}
+
+/// A shape whose ink is wider on the device than `scene::MAX_DEVICE_EXTENT` is
+/// not drawn — vello's GPU backend blanks the frame at 1e12 px — and one inside it
+/// is.
+/// flip: `paint_node` without the `too_large` test → fails at "a 1e12 px ellipse
+/// is skipped".
+#[test]
+fn a_layer_wider_than_the_device_limit_is_not_drawn() {
+    assert_eq!(
+        fills_under_one_scaled_group(100.0),
+        1,
+        "control: a 1e8 px ellipse is drawn"
+    );
+    assert_eq!(
+        fills_under_one_scaled_group(1e6),
+        0,
+        "a 1e12 px ellipse is skipped"
+    );
+}
+
+/// The fills drawn over a 100-unit view of a filled, rounded frame holding a
+/// filled rect, under `depth` groups of `scale(1e6)`.
+fn fills_of_a_frame_under(depth: usize) -> usize {
+    let mut ids = IdSource::new(0x0F3);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, child) = (ids.mint(), ids.mint());
+    let fill = || {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
+            visible: true,
+        }])
+    };
+    let mut ops = Vec::new();
+    let mut holder = root;
+    for _ in 0..depth {
+        let g = ids.mint();
+        ops.push(Operation::CreateNode {
+            id: g,
+            parent: holder,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::scale(1e6)),
+            name: None,
+        });
+        holder = g;
+    }
+    ops.extend([
+        Operation::CreateNode {
+            id: frame,
+            parent: holder,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(1e6, 1e6),
+                corner_radii: RoundedRectRadii::from_single_radius(1e5),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((-5e5, -5e5))),
+            name: None,
+        },
+        Operation::CreateNode {
+            id: child,
+            parent: frame,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((5e5, 5e5))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: frame,
+            fills: fill(),
+        },
+        Operation::SetFills {
+            id: child,
+            fills: fill(),
+        },
+    ]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    let mut painter = RecordingPainter::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
+    painter.fills.len()
+}
+
+/// A frame paints its own fill whatever it holds, so a frame too large to draw
+/// is skipped with its children, whether its box passes the device limit or
+/// overflows outright.
+/// flip: `ink_overflows`' frame arm removed → fails at "an overflowed frame".
+#[test]
+fn a_frame_too_large_to_draw_is_skipped() {
+    assert_eq!(fills_of_a_frame_under(0), 2, "control: frame and child");
+    assert_eq!(fills_of_a_frame_under(1), 0, "a 1e12 px frame");
+    assert_eq!(fills_of_a_frame_under(51), 0, "an overflowed frame");
 }
 
 #[test]
@@ -2566,6 +2726,43 @@ fn a_second_mask_ends_the_first_ones_run_instead_of_nesting() {
         "the second mask replaced the first rather than stacking on it"
     );
     assert_eq!(painter.depth, 0, "every pushed layer was popped");
+}
+
+/// An alpha mask scaled far past `scene::MAX_DEVICE_EXTENT` is still painted:
+/// skipping a mask would erase what it masks.
+/// flip: `paint_node`'s skip without `!node.mask()` → fails at the fill count.
+#[test]
+fn an_alpha_mask_too_large_to_draw_is_still_painted() {
+    let (mut doc, _res, near, _far) = two_rect_doc();
+    set_mask(&mut doc, near);
+    doc.apply(&Transaction(vec![
+        Operation::SetMaskMode {
+            id: near,
+            mode: ondin_core::MaskMode::Alpha,
+        },
+        Operation::SetGeometry {
+            id: near,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(1e6, 1e6)),
+        },
+        Operation::SetTransform {
+            id: near,
+            transform: Affine::scale(1e6),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let wide = res.ink_bounds(near).expect("a measurable mask");
+    assert!(
+        wide.width() > 1e11,
+        "the fixture's own claim: the mask is far past the device limit at any \
+         zoom the recorder uses ({wide:?})"
+    );
+    let painter = record(&doc, &res);
+    assert_eq!(
+        painter.fills.len(),
+        2,
+        "the masked layer and the mask's own ink, however large"
+    );
 }
 
 /// **An alpha mask draws its own ink, inside a composite layer, after the run.**

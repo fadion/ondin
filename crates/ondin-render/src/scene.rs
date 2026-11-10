@@ -1752,13 +1752,24 @@ fn paint_node_pass<P: ScenePainter>(
     {
         return;
     }
-    // A layer whose ink overflowed has no box to cull on, and drawing it would
-    // hand the GPU coordinates past what it can hold. The preview's exemptions
-    // above apply: its cached answer describes the committed layer.
-    if !ov.moved(id)
+    // A layer too large to draw is skipped: one whose box overflowed has none to
+    // cull on, and one past `MAX_DEVICE_EXTENT` costs the GPU a stalled, blank
+    // frame. Asked of what the layer paints itself — a leaf's or boolean's ink, a
+    // frame's own box, which takes its children with it — and never of a mask,
+    // whose skip would erase what it masks. The preview's exemptions above apply:
+    // the cached box describes the committed layer.
+    let own_box = match node.kind() {
+        NodeKind::Artboard { .. } => Some(res.world_bounds(id)),
+        NodeKind::Boolean { .. } => Some(res.ink_bounds(id)),
+        _ if node.children().is_empty() => Some(res.ink_bounds(id)),
+        _ => None,
+    };
+    if let Some(own_box) = own_box
+        && !node.mask()
+        && !ov.moved(id)
         && ov.ghosts_of(id).next().is_none()
         && !walk.grown(doc, ov, id)
-        && res.ink_overflows(doc, id)
+        && (res.ink_overflows(doc, id) || own_box.is_some_and(|b| too_large(b, base)))
     {
         return;
     }
@@ -2252,6 +2263,21 @@ pub(crate) fn blends(mode: BlendMode) -> bool {
 fn sub_pixel(ink: Rect, base: Affine) -> bool {
     let device = base.transform_rect_bbox(ink);
     device.width() < 0.5 && device.height() < 0.5
+}
+
+/// The widest ink, in device pixels, the walk hands a backend.
+///
+/// vello's GPU cost grows with a curve's device extent: a filled ellipse takes
+/// about 4 ms at 1e10 px and 90 ms at 3e11, and at 1e12 the whole frame comes back
+/// blank after most of a second. A shape within `build::GEOMETRY_LIMIT` at the
+/// canvas's largest zoom (256×) and 3× display scaling stays under 8e8, so only a
+/// scale — the layer's own or its groups' — carries a layer past it.
+pub const MAX_DEVICE_EXTENT: f64 = 1e9;
+
+/// Whether `ink` is wider or taller than [`MAX_DEVICE_EXTENT`] on the device.
+fn too_large(ink: Rect, base: Affine) -> bool {
+    let device = base.transform_rect_bbox(ink);
+    device.width().max(device.height()) > MAX_DEVICE_EXTENT
 }
 
 /// The colour matrices of `stack`'s `Filters` rows when applying them to

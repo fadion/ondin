@@ -132,6 +132,7 @@ Alt or Shift down is not the tool. The Shift chords, the pencil's `Shift+P`, the
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |
 | `I` | Eyedropper — one shot; a second `I` hands back to the tool it was armed from (`choose_tool`) | ✅ Figma |
+| `J` | Chart — draws the kind the rail's chart slot shows | ✅ Illustrator |
 | `Q` | Lasso select — not a tool: toggles the marquee between box and loop for Select and Node (`ViewSwitch::Lasso`); under a tool that draws no marquee (anything but Select, Scale and Node) it also arms Select | ✅ no tool held the letter |
 
 **`C` is unbound** (§15 D268): Crop's letter until image editing replaced the crop tool, which has

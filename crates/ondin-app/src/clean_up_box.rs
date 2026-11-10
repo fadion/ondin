@@ -548,7 +548,7 @@ fn finding_row(ui: &mut egui::Ui, doc: &Document, page: NodeId, f: &Finding) -> 
         Subject::Layer(id) => {
             let (glyph, tint) = doc
                 .get(id)
-                .map(|n| crate::panels::layers::node_glyph(n.kind()))
+                .map(crate::panels::layers::node_glyph)
                 .map_or((icon::SQUARE, theme::text::dim()), |(g, t)| (g, t.colour()));
             (glyph, tint, layer_name(doc, id))
         }

@@ -308,7 +308,7 @@ fn substring_hit(name: &str, needle: &str) -> Vec<Range<usize>> {
         .unwrap_or_default()
 }
 
-const TOOLS: [Tool; 19] = [
+const TOOLS: [Tool; 20] = [
     Tool::Select,
     Tool::Hand,
     Tool::Scale,
@@ -323,6 +323,7 @@ const TOOLS: [Tool; 19] = [
     Tool::Line,
     Tool::Spiral,
     Tool::Arc,
+    Tool::Chart,
     Tool::Pen,
     Tool::Pencil,
     Tool::Node,
@@ -812,7 +813,7 @@ impl OndinApp {
             .take(cap)
             .filter_map(|id| {
                 let node = doc.get(id)?;
-                let (glyph, tint) = crate::panels::layers::node_icon(node.kind());
+                let (glyph, tint) = crate::panels::layers::node_icon(node);
                 let mut path = Vec::new();
                 let mut cursor = node.parent();
                 while let Some(p) = cursor.filter(|p| *p != root) {

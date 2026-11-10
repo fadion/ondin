@@ -560,9 +560,9 @@ fn element_tag(doc: &ondin_core::Document, node: &ondin_core::Node) -> Option<&'
     }
 }
 
-/// The layers-tree icon (glyph + resting colour) for a node kind.
-pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
-    let (glyph, ink) = node_glyph(kind);
+/// The layers-tree icon (glyph + resting colour) for a node.
+pub(crate) fn node_icon(node: &ondin_core::Node) -> (&'static str, egui::Color32) {
+    let (glyph, ink) = node_glyph(node);
     (glyph, ink.colour())
 }
 
@@ -583,8 +583,18 @@ impl GlyphInk {
     }
 }
 
-/// [`node_icon`] with the ink as its role.
-pub(crate) fn node_glyph(kind: &NodeKind) -> (&'static str, GlyphInk) {
+/// [`node_icon`] with the ink as its role. A chart wears the chart glyph, since
+/// it is a frame only in how it is built.
+pub(crate) fn node_glyph(node: &ondin_core::Node) -> (&'static str, GlyphInk) {
+    match node.chart() {
+        Some(_) => (icon::CHART, GlyphInk::Accent),
+        None => kind_glyph(node.kind()),
+    }
+}
+
+/// The glyph of a kind before any node has it (the container-kind menu's rows):
+/// [`node_glyph`] for a node that is not a chart.
+pub(crate) fn kind_glyph(kind: &NodeKind) -> (&'static str, GlyphInk) {
     use GlyphInk::{Accent, Muted};
     match kind {
         NodeKind::Root => (icon::SELECTION, Muted),
@@ -613,7 +623,7 @@ pub(crate) fn node_glyph(kind: &NodeKind) -> (&'static str, GlyphInk) {
 ///
 /// The one name-match rule: the panel's filter keeps these plus their ancestors,
 /// and the command palette lists them. The page's root can match; callers that
-/// list layers drop it.
+/// list layers drop it. A chart's parts never match.
 pub(crate) fn name_hits(doc: &ondin_core::Document, page: NodeId, needle: &str) -> Vec<NodeId> {
     let needle = needle.to_lowercase();
     let mut out = Vec::new();
@@ -626,7 +636,10 @@ pub(crate) fn name_hits(doc: &ondin_core::Document, page: NodeId, needle: &str) 
             out.push(id);
         }
         // Pushed in child order so the last child, the panel's top row, pops first.
-        stack.extend(node.children().iter().copied());
+        // A chart's parts are not layers the panel lists.
+        if node.chart().is_none() {
+            stack.extend(node.children().iter().copied());
+        }
     }
     out
 }
@@ -1421,7 +1434,9 @@ impl OndinApp {
         let Some(node) = self.session.doc.get(id) else {
             return;
         };
+        // A chart is one row: its parts are derived and never listed.
         let children: Vec<NodeId> = match shown {
+            _ if node.chart().is_some() => Vec::new(),
             Some(rows) => node
                 .children()
                 .iter()
@@ -1439,11 +1454,12 @@ impl OndinApp {
                 depth,
                 has_children,
                 // A boolean takes a drop like a group does: its children are its
-                // operands.
-                container: matches!(
-                    node.kind(),
-                    NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
-                ),
+                // operands. A chart takes none: only its regeneration writes inside.
+                container: node.chart().is_none()
+                    && matches!(
+                        node.kind(),
+                        NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
+                    ),
                 expanded,
             });
             if !expanded {
@@ -1710,7 +1726,7 @@ impl OndinApp {
                         .session
                         .doc
                         .get(*id)
-                        .is_some_and(|n| !n.children().is_empty())
+                        .is_some_and(|n| n.chart().is_none() && !n.children().is_empty())
             })
             .collect()
     }
@@ -1783,7 +1799,7 @@ impl OndinApp {
         let bound_eye = node.visible_var().is_some();
         let locked = node.locked();
         let name = node.name().to_string();
-        let (glyph, mut glyph_col) = node_icon(node.kind());
+        let (glyph, mut glyph_col) = node_icon(node);
         // A main or an instance wears the hexagon in place of its kind's glyph (§15
         // D981): filled for a main (`ui::paint_hexagon_filled`), outline for an
         // instance, neutral selected or not.
@@ -5473,7 +5489,7 @@ mod drop_indent_tests {
         // Names and glyphs are asked of the document, not written out.
         let named = |id: NodeId, doc: &ondin_core::Document| {
             let n = doc.get(id).expect("in the tree");
-            (n.name().to_string(), node_icon(n.kind()).0.to_string())
+            (n.name().to_string(), node_icon(n).0.to_string())
         };
         let (group_name, group_glyph) = named(f.group, &f.app.session.doc);
         let (frame_name, frame_glyph) = named(f.frame, &f.app.session.doc);

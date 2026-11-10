@@ -768,6 +768,8 @@ const BINDINGS: &[Binding] = {
         bind(NONE, K::A, A::ChooseTool(Tool::Node)),
         bind(NONE, K::T, A::ChooseTool(Tool::Text)),
         bind(NONE, K::I, A::ChooseTool(Tool::Eyedropper)),
+        // Illustrator's chart letter; draws the kind the rail's chart slot shows.
+        bind(NONE, K::J, A::ChooseTool(Tool::Chart)),
         // A live text session's styling chords (`docs/shortcuts.md` §10).
         text(CTRL, K::B, TextChord::Bold),
         text(CTRL, K::I, TextChord::Italic),

@@ -75,6 +75,8 @@ pub struct ViewPrefs {
     pub rail_pencil: bool,
     /// The tool rail's builder slot shows the knife, last picked there.
     pub rail_knife: bool,
+    /// The chart kind the tool rail's chart slot shows and draws, last picked there.
+    pub rail_chart: ondin_core::chart::ChartKind,
 }
 
 impl Default for ViewPrefs {
@@ -101,6 +103,7 @@ impl Default for ViewPrefs {
             rail_line: crate::rail::Member::Line,
             rail_pencil: false,
             rail_knife: false,
+            rail_chart: ondin_core::chart::ChartKind::Column,
         }
     }
 }

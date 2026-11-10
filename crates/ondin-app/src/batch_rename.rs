@@ -186,7 +186,7 @@ impl Snapshot {
                     let Some(node) = doc.get(id) else { continue };
                     let selected = chosen.contains(&id);
                     if id != page {
-                        let (glyph, tint) = crate::panels::layers::node_glyph(node.kind());
+                        let (glyph, tint) = crate::panels::layers::node_glyph(node);
                         layers.push(Layer {
                             id,
                             name: node.name().to_string(),

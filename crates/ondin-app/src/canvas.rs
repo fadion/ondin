@@ -2233,7 +2233,8 @@ impl OndinApp {
                 | Tool::Star
                 | Tool::Line
                 | Tool::Spiral
-                | Tool::Arc => create_cursor(mods.alt),
+                | Tool::Arc
+                | Tool::Chart => create_cursor(mods.alt),
                 // A line drawn through shapes, as the pencil's is: the crosshair.
                 Tool::Knife => create_cursor(false),
                 // The same crosshair, badged with how many images are left to place.
@@ -4665,6 +4666,7 @@ impl OndinApp {
             Tool::Arc => "Add arc",
             Tool::Text => "Add text",
             Tool::Image => "Place image",
+            Tool::Chart => "Insert chart",
             _ => "Add shape",
         };
         self.session
@@ -4700,7 +4702,7 @@ impl OndinApp {
         else {
             return;
         };
-        let (from, to) = click_box(start, alt);
+        let (from, to) = click_box(start, alt, tools::click_size(shape));
         self.commit_create(id, shape, from, to);
     }
 
@@ -4725,6 +4727,16 @@ impl OndinApp {
             Tool::Frame => {
                 tools::create_artboard(id, parent, index, parent_world, start, corner, Color::WHITE)
             }
+            Tool::Chart => tools::create_chart(
+                id,
+                parent,
+                index,
+                parent_world,
+                start,
+                corner,
+                Color::WHITE,
+                ondin_core::chart::Chart::sample(self.rail.chart),
+            ),
             Tool::Slice => tools::create_slice(id, parent, index, parent_world, start, corner),
             Tool::Rect => tools::create_rect(
                 id,
@@ -11889,15 +11901,15 @@ fn centred_ends(start: Point, corner: Point) -> (Point, Point) {
     (start - (corner - start), corner)
 }
 
-/// The box a *click* with a shape tool makes: [`tools::CLICK_CREATE_SIZE`]
-/// square, with the click at its top-left corner, or — under Alt — at its centre.
+/// The box a *click* with a shape tool makes: `size` ([`tools::click_size`]),
+/// with the click at its top-left corner, or — under Alt — at its centre.
 ///
 /// Alt only moves the box: a click authors no extent, so doubling it (as a drag's
 /// Alt does) would give a 200-unit shape. Half a side, doubled back by
 /// [`centred_ends`], keeps one rule.
-fn click_box(start: Point, alt: bool) -> (Point, Point) {
-    let reach = tools::CLICK_CREATE_SIZE * if alt { 0.5 } else { 1.0 };
-    let corner = start + Vec2::new(reach, reach);
+fn click_box(start: Point, alt: bool, size: (f64, f64)) -> (Point, Point) {
+    let k = if alt { 0.5 } else { 1.0 };
+    let corner = start + Vec2::new(size.0 * k, size.1 * k);
     match alt {
         true => centred_ends(start, corner),
         false => (start, corner),
@@ -12056,15 +12068,51 @@ mod tests {
         );
     }
 
-    /// A click with a shape tool makes a `tools::CLICK_CREATE_SIZE` square with the press at its top-left.
+    /// A click with a shape tool makes a `tools::CLICK_CREATE_SIZE` square with the press at its top-left, and the chart tool its wider box.
     #[test]
     fn a_click_makes_a_default_square_from_the_press_corner() {
         let at = Point::new(40.0, 60.0);
-        let (from, to) = click_box(at, false);
+        let (from, to) = click_box(at, false, tools::click_size(Tool::Rect));
         assert_eq!(from, at);
         assert_eq!(
             (to.x - from.x, to.y - from.y),
             (tools::CLICK_CREATE_SIZE, tools::CLICK_CREATE_SIZE)
+        );
+        let (from, to) = click_box(at, false, tools::click_size(Tool::Chart));
+        assert_eq!((to.x - from.x, to.y - from.y), tools::CHART_CLICK_SIZE);
+    }
+
+    /// A click with the chart tool on bare canvas makes a chart of the slot's kind,
+    /// selected and generated, and a marquee over the page offers the chart, not
+    /// its parts.
+    /// flip: `marquee_range`'s chart arm removed → fails at "the chart, not its parts".
+    #[test]
+    fn the_chart_tool_clicks_a_chart_that_picks_whole() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.rail.chart = ondin_core::chart::ChartKind::Pie;
+        app.choose_tool(Tool::Chart);
+        app.click_create(Point::new(-5000.0, -5000.0), false);
+        let [id] = *app.session.selection.ids() else {
+            panic!("one layer selected");
+        };
+        let node = app.session.doc.get(id).expect("created");
+        assert_eq!(
+            node.parent(),
+            Some(app.session.doc.first_page()),
+            "on bare canvas"
+        );
+        assert_eq!(
+            node.chart().map(|c| c.kind),
+            Some(ondin_core::chart::ChartKind::Pie)
+        );
+        assert!(!node.children().is_empty(), "settle generated the parts");
+        assert_eq!(app.tool, Tool::Select, "the tool hands back to Select");
+        let range = app.marquee_candidates();
+        assert!(range.contains(&id), "the chart, not its parts");
+        assert!(
+            node.children().iter().all(|c| !range.contains(c)),
+            "the chart, not its parts"
         );
     }
 
@@ -12072,7 +12120,7 @@ mod tests {
     #[test]
     fn alt_centres_the_default_box_without_resizing_it() {
         let at = Point::new(40.0, 60.0);
-        let (from, to) = click_box(at, true);
+        let (from, to) = click_box(at, true, tools::click_size(Tool::Rect));
         assert_eq!(from.midpoint(to), at, "not centred on the press");
         assert_eq!(
             (to.x - from.x, to.y - from.y),

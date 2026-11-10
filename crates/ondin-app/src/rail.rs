@@ -12,6 +12,7 @@ use crate::theme::{self, icon};
 use crate::tools::Tool;
 use crate::ui;
 use eframe::egui;
+use ondin_core::chart::ChartKind;
 
 /// How long a press on a grouped slot is held before its members open.
 pub(crate) const HOLD_S: f64 = 0.45;
@@ -30,6 +31,8 @@ pub(crate) enum Group {
     Pen,
     /// The tools that reshape what is drawn rather than draw.
     Builder,
+    /// The seven chart kinds, each arming [`Tool::Chart`].
+    Chart,
 }
 
 /// One tool a grouped slot can stand for. Stored lowercase in the view prefs, for
@@ -48,6 +51,33 @@ pub(crate) enum Member {
     Pencil,
     ShapeBuilder,
     Knife,
+    /// One chart kind; the slot's last pick is `Rail::chart`, not this.
+    Chart(ChartKind),
+}
+
+/// The chart slot's members, in [`ChartKind::ALL`]'s order.
+const CHART_MEMBERS: [Member; 7] = [
+    Member::Chart(ChartKind::Column),
+    Member::Chart(ChartKind::Bar),
+    Member::Chart(ChartKind::Line),
+    Member::Chart(ChartKind::Area),
+    Member::Chart(ChartKind::Pie),
+    Member::Chart(ChartKind::Scatter),
+    Member::Chart(ChartKind::Sankey),
+];
+
+/// A chart kind's glyph, wherever the kind is named: the rail, the Chart card's
+/// type menu.
+pub(crate) fn chart_glyph(kind: ChartKind) -> &'static str {
+    match kind {
+        ChartKind::Column => icon::CHART_COLUMN,
+        ChartKind::Bar => icon::CHART_BAR,
+        ChartKind::Line => icon::CHART_LINE,
+        ChartKind::Area => icon::CHART_AREA,
+        ChartKind::Pie => icon::CHART_DONUT,
+        ChartKind::Scatter => icon::CHART_SCATTER,
+        ChartKind::Sankey => icon::CHART_SANKEY,
+    }
 }
 
 impl Group {
@@ -60,6 +90,7 @@ impl Group {
             Self::Line => &[Member::Line, Member::Spiral, Member::Arc],
             Self::Pen => &[Member::Pen, Member::Pencil],
             Self::Builder => &[Member::ShapeBuilder, Member::Knife],
+            Self::Chart => &CHART_MEMBERS,
         }
     }
 }
@@ -78,6 +109,7 @@ impl Member {
             Self::Pencil => icon::PENCIL_SIMPLE,
             Self::ShapeBuilder => icon::SHAPE_BUILDER,
             Self::Knife => icon::KNIFE_CUT,
+            Self::Chart(kind) => chart_glyph(kind),
         }
     }
 
@@ -96,6 +128,15 @@ impl Member {
                 "Shape builder — drag across overlaps to merge, Alt to remove (Shift+M)"
             }
             Self::Knife => "Knife — drag through shapes to cut them",
+            Self::Chart(kind) => match kind {
+                ChartKind::Column => "Column chart (J)",
+                ChartKind::Bar => "Bar chart (J)",
+                ChartKind::Line => "Line chart (J)",
+                ChartKind::Area => "Area chart (J)",
+                ChartKind::Pie => "Pie chart (J)",
+                ChartKind::Scatter => "Scatter chart (J)",
+                ChartKind::Sankey => "Sankey chart (J)",
+            },
         }
     }
 
@@ -113,6 +154,7 @@ impl Member {
             Self::Pencil => Tool::Pencil,
             Self::ShapeBuilder => Tool::ShapeBuilder,
             Self::Knife => Tool::Knife,
+            Self::Chart(_) => Tool::Chart,
         })
     }
 }
@@ -138,6 +180,8 @@ pub(crate) struct Rail {
     pub(crate) pencil: bool,
     /// The builder slot shows the knife when neither is armed.
     pub(crate) knife: bool,
+    /// The chart slot's kind: what it shows and what [`Tool::Chart`] draws.
+    pub(crate) chart: ChartKind,
     pub(crate) flyout: Option<Flyout>,
 }
 
@@ -169,6 +213,7 @@ impl OndinApp {
                 _ if self.rail.knife => Member::Knife,
                 _ => Member::ShapeBuilder,
             },
+            Group::Chart => Member::Chart(self.rail.chart),
         }
     }
 
@@ -184,6 +229,7 @@ impl OndinApp {
             Member::Pointer => self.tool == Tool::Select && !self.lasso,
             Member::Lasso => self.tool == Tool::Select && self.lasso,
             Member::Pen => self.tool == Tool::Pen || self.pen_bias,
+            Member::Chart(kind) => self.tool == Tool::Chart && self.rail.chart == kind,
             m => m.tool() == Some(self.tool),
         }
     }
@@ -202,6 +248,9 @@ impl OndinApp {
             }
             return;
         };
+        if let Member::Chart(kind) = member {
+            self.rail.chart = kind;
+        }
         self.choose_tool(tool);
     }
 

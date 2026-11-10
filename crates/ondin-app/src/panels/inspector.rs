@@ -1408,7 +1408,10 @@ impl OndinApp {
             .preview_world_transform(id)
             .unwrap_or(Affine::IDENTITY)
             .as_coeffs();
-        let (glyph, _) = super::layers_icon(node.kind());
+        let glyph = match self.session.doc.get(id) {
+            Some(n) => super::layers_icon(n).0,
+            None => super::layers::kind_glyph(node.kind()).0,
+        };
         let size0 = match node.kind() {
             NodeKind::Rect { size, .. }
             | NodeKind::Ellipse { size, .. }
@@ -1916,11 +1919,14 @@ impl OndinApp {
                 egui::ComboBox::from_id_salt("container-kind")
                     .icon(ui::combo_chevron)
                     .width(ui.available_width() - BOOL_ROW_H - BOOL_ROW_GAP)
-                    .selected_text(ui::glyph_and_text(super::layers_icon(&shown.1).0, shown.2))
+                    .selected_text(ui::glyph_and_text(
+                        super::layers::kind_glyph(&shown.1).0,
+                        shown.2,
+                    ))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);
                         for (frame, kind, label) in &kinds {
-                            let row = ui::glyph_and_text(super::layers_icon(kind).0, label);
+                            let row = ui::glyph_and_text(super::layers::kind_glyph(kind).0, label);
                             if ui.selectable_label(*frame == is_frame, row).clicked()
                                 && *frame != is_frame
                             {

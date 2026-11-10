@@ -37,14 +37,15 @@ resize, drop outlines, the transform origin (pivot), *Transform again*, *Repeat 
 ### The tool rail (`rail.rs`)
 
 `OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot, four
-shapes and the Line slot · the Pen slot, Text, Place image · the Builder slot and the eyedropper,
+shapes and the Line slot · the Pen slot, Text, Place image, the Chart slot · the Builder slot and the eyedropper,
 which act on what is drawn and are used less; at its foot the styles-and-variables
 and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
 subject. The four filled shape tools keep a slot each while the rail has room for them.
 
-- **Grouped slots.** Five slots stand for several tools each (`rail::Group::members`): Select is
+- **Grouped slots.** Six slots stand for several tools each (`rail::Group::members`): Select is
   Pointer and Lasso, Frame is Frame and Slice, Line is Line, Spiral and Arc, Pen is Pen and
-  Pencil, Builder is Shape builder and Knife. A member that cannot be armed now (the Shape
+  Pencil, Builder is Shape builder and Knife, Chart is the seven chart kinds, each arming
+  `Tool::Chart` with its kind (`charts.md`, *Making one*). A member that cannot be armed now (the Shape
   builder with nothing to build, `rail_usable`) still draws live, in the slot and the row, since
   the slot's other members always arm; its tooltip and a click on it say why instead of arming. A slot shows the armed tool when it is a member, else the member last picked
   (`rail_shown`), and carries a small `text::dim()` triangle in its bottom-right corner
@@ -53,7 +54,9 @@ subject. The four filled shape tools keep a slot each while the rail has room fo
   and Lasso arm Select with the switch off and on. The others remember through `Rail::slice`,
   `Rail::line`, `Rail::pencil` and `Rail::knife`, set in `choose_tool` (`remember_rail_pick`)
   however the tool was armed — slot, letter or palette — and kept in `prefs.view` (`rail_slice`,
-  `rail_line`, `rail_pencil`, `rail_knife`). The pen bias inside a node edit shows Pen.
+  `rail_line`, `rail_pencil`, `rail_knife`). The Chart slot's kind is `Rail::chart`
+  (`rail_chart`), set only by picking a member, since `J` and the palette's *Insert chart* arm
+  the kind it already shows. The pen bias inside a node edit shows Pen.
 - **Gestures** (`rail_group`, `rail_flyout`). A click arms what the slot shows. A press held
   `HOLD_S` (0.45 s) or a right-click opens the members as a row of icon buttons beside the slot
   (`ui::flyout_place`, a `ui::menu_frame` card, area `"rail-flyout"`), the shown member lit, each

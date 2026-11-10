@@ -1865,6 +1865,7 @@ impl OndinApp {
                 line: view.rail_line,
                 pencil: view.rail_pencil,
                 knife: view.rail_knife,
+                chart: view.rail_chart,
                 flyout: None,
             },
             clones: None,
@@ -3561,7 +3562,8 @@ impl OndinApp {
     }
 
     /// The layers a marquee or Ctrl+A can pick: the direct children of every frame and
-    /// the root's own non-frame children.
+    /// the root's own non-frame children. A chart on the page is picked whole, never
+    /// its parts.
     ///
     /// Locked layers are filtered here, once for every caller: the lock is enforced only
     /// at selection time. A row click or a frame's tag can still select one.
@@ -3591,8 +3593,10 @@ impl OndinApp {
     fn marquee_range(&self) -> Vec<NodeId> {
         let mut ids = Vec::new();
         for artboard in self.root_artboards() {
-            if let Some(node) = self.session.doc.get(artboard) {
-                ids.extend(node.children().iter().copied());
+            match self.session.doc.get(artboard) {
+                Some(node) if node.chart().is_some() => ids.push(artboard),
+                Some(node) => ids.extend(node.children().iter().copied()),
+                None => {}
             }
         }
         if let Some(root) = self.session.doc.get(self.session.page) {
@@ -8377,6 +8381,7 @@ impl OndinApp {
             rail_line: self.rail.line,
             rail_pencil: self.rail.pencil,
             rail_knife: self.rail.knife,
+            rail_chart: self.rail.chart,
         };
         if now != self.prefs.view {
             self.prefs.view = now;
@@ -8742,6 +8747,7 @@ impl OndinApp {
                 "Place image — pick files, then click to place each (Ctrl+Shift+K)",
             ),
             // No crop button: `Tool::ImageEdit` needs a subject (double-click or `Enter`).
+            E::Group(Group::Chart),
             E::Sep,
             // The tools that act on the selection rather than draw, used less than
             // the ones above.

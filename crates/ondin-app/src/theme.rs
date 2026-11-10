@@ -1066,6 +1066,25 @@ pub mod icon {
     /// rising into a hexagon outline. Not [`ARROW_UP_RIGHT`] (go to the main) nor
     /// [`UPLOAD_SIMPLE`] (publish).
     pub const PUSH_TO_MAIN: &str = "\u{f05d}";
+    /// A chart — the rail's Chart slot, a chart's layers row, the palette: three
+    /// ascending columns on a baseline. [`CHART_COLUMN`]'s columns are of mixed
+    /// height, so the tool and the kind read apart.
+    pub const CHART: &str = "\u{f05e}";
+    /// The Column chart kind: three columns of mixed height on a baseline.
+    pub const CHART_COLUMN: &str = "\u{f05f}";
+    /// The Bar chart kind: three bars off a vertical baseline.
+    pub const CHART_BAR: &str = "\u{f060}";
+    /// The Line chart kind: a polyline over two axes.
+    pub const CHART_LINE: &str = "\u{f061}";
+    /// The Area chart kind: the line closed down to the baseline.
+    pub const CHART_AREA: &str = "\u{f062}";
+    /// The Pie chart kind: a ring with a gap. Not [`CHART_PIE_SLICE`], which
+    /// means an arc's sweep.
+    pub const CHART_DONUT: &str = "\u{f063}";
+    /// The Scatter chart kind: dots over two axes.
+    pub const CHART_SCATTER: &str = "\u{f064}";
+    /// The Sankey chart kind: one node bar whose two flows part to two bars.
+    pub const CHART_SANKEY: &str = "\u{f065}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1404,6 +1423,14 @@ pub mod icon {
         ("wifi-slash", WIFI_SLASH),
         ("quotes", QUOTES),
         ("push-to-main", PUSH_TO_MAIN),
+        ("chart", CHART),
+        ("chart-column", CHART_COLUMN),
+        ("chart-bar", CHART_BAR),
+        ("chart-line", CHART_LINE),
+        ("chart-area", CHART_AREA),
+        ("chart-donut", CHART_DONUT),
+        ("chart-scatter", CHART_SCATTER),
+        ("chart-sankey", CHART_SANKEY),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

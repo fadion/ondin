@@ -2423,7 +2423,7 @@ impl OndinApp {
                             Some(_) => ui::Tick::Dead,
                             None => ui::Tick::Open(list.on[i]),
                         };
-                        let glyph = super::layers::node_glyph(node.kind()).0;
+                        let glyph = super::layers::node_glyph(node).0;
                         let resp = ui::tick_row(
                             ui,
                             w,

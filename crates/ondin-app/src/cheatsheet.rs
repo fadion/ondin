@@ -144,6 +144,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         Tool::Node,
         Tool::Text,
         Tool::Eyedropper,
+        Tool::Chart,
     ]
     .into_iter()
     .map(Item::Tool)

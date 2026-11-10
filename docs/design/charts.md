@@ -294,9 +294,11 @@ A chart has no title or caption of its own: a text layer next to it does that, a
   `J`, the chart tool's letter in Illustrator; it arms the slot's shown member. Each member wears
   its kind's glyph.
 - **The gesture** is the frame tool's: drag a box with the create box and size pill, or click for
-  a 480 × 280 chart at the click. The new chart has the kind's sample table (*Category*, three
-  series, six rows: *Jan*–*Jun*; a Sankey's *From*, *To*, *Value* with eight flows over three
-  columns), the *Clean* preset and the *Ondin* palette, and the data window
+  a 480 × 280 chart at the click (`tools::CHART_CLICK_SIZE`), on a white ground, named for its
+  kind (*Column chart*). The new chart has the kind's sample table (`Chart::sample`: *Category*,
+  three series, six rows: *Jan*–*Jun*; a scatter's numeric *Hours* and two Y series; a Sankey's
+  *From*, *To*, *Value* with eight flows over three columns), the *Clean* preset and the *Ondin*
+  palette, and the data window
   opens on it with the first cell selected, so typing or pasting replaces the sample. Undo step
   *Insert chart*.
 - **Other doors**: the palette's *Insert chart* (aliases *chart*, *graph*, *plot*), which arms
@@ -306,16 +308,19 @@ A chart has no title or caption of its own: a text layer next to it does that, a
 
 ### On the canvas and in the layers tree
 
-- **A chart selects as one layer.** A click on any part selects the chart frame;
-  `query::steps_into` does not step into it, and the marquee and the lasso take the frame whole.
-  The parts are not hit-tested on their own.
+- **A chart selects as one layer.** `query::hit_test` answers a hit on any part with its chart
+  frame, once, so a click, a hover, a double-click and `Enter` all meet the frame and never step
+  inside it; the marquee and `Ctrl+A` offer a chart on the page whole (`marquee_range`), never
+  its parts.
 - **Double-click opens the data window** with the cell behind the clicked mark selected (the
   bar's value, the slice's value, the point's row); on a tick label or the legend it selects that
   column's header.
 - **Resize** is the frame's: the chart lays itself out again into the new size, its type staying
   the size it is.
 - **The layers tree** shows a chart as one row with the chart glyph and no disclosure; its parts
-  are not listed. After a flatten the row is a frame and its tree opens.
+  are not listed, matched by the layer search or the palette, and the row takes no drop. A
+  chart wears `CHART` wherever a layer's glyph is shown (`layers::node_glyph`). After a flatten
+  the row is a frame and its tree opens.
 
 ### The Chart card
 

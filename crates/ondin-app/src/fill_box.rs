@@ -765,7 +765,7 @@ fn fill_row(ui: &mut egui::Ui, doc: &Document, b: &FillBox, i: usize) -> RowOut 
     let y = rect.center().y;
     let (glyph, tint) = doc
         .get(r.node)
-        .map(|n| crate::panels::layers::node_glyph(n.kind()))
+        .map(crate::panels::layers::node_glyph)
         .map_or((icon::SQUARE, theme::text::dim()), |(g, t)| (g, t.colour()));
     ui.painter().text(
         egui::pos2(inner.left() + 8.0, y),

@@ -9,12 +9,12 @@
 pub use ondin_core::edit::{
     ARC_DEFAULT_STEPS, ARC_MAX_STEPS, MAX_SKEW, POLYGON_DEFAULT_SIDES, Resize,
     SPIRAL_DEFAULT_HALF_TURNS, SPIRAL_MAX_HALF_TURNS, STAR_DEFAULT_POINTS, Scaling, SelectionBox,
-    SideDrag, align_points, arc_sweep, bend_segment, create_arc, create_artboard, create_ellipse,
-    create_image, create_image_in_box, create_line, create_paths, create_polygon, create_rect,
-    create_slice, create_spiral, create_star, create_text, crop_resized, croppable_fill,
-    distribute_points, gesture_text_sizing, insert_point, join_ends, join_paths, join_runs,
-    joinable_ends, line_ends_world, map_subpaths, move_line_end, move_points, paired_size,
-    path_join_ends, path_subpaths, pen_anchors, pen_close_snap, pen_outline, pen_path,
+    SideDrag, align_points, arc_sweep, bend_segment, create_arc, create_artboard, create_chart,
+    create_ellipse, create_image, create_image_in_box, create_line, create_paths, create_polygon,
+    create_rect, create_slice, create_spiral, create_star, create_text, crop_resized,
+    croppable_fill, distribute_points, gesture_text_sizing, insert_point, join_ends, join_paths,
+    join_runs, joinable_ends, line_ends_world, map_subpaths, move_line_end, move_points,
+    paired_size, path_join_ends, path_subpaths, pen_anchors, pen_close_snap, pen_outline, pen_path,
     point_spacings, points_box, proportions_locked, pull_handle, redundant_points, remove_points,
     remove_segments, resizable_size, resize_box_to, resize_layer, resize_points, resize_selection,
     resize_to, resized_text_sizing, reverse_subpaths, rewrite_path, rewrite_points, rotate_node,
@@ -79,6 +79,10 @@ pub enum Tool {
     /// runs out. Arming it with nothing loaded opens the file dialog, so the rail button
     /// and `Ctrl+Shift+K` are the same action.
     Image,
+    /// Draws a chart of the kind the rail's Chart slot shows (`Rail::chart`): a
+    /// box dragged out as a frame's, or [`CHART_CLICK_SIZE`] at a click, on the
+    /// kind's sample table.
+    Chart,
     /// Image editing: the layer's box becomes a window onto its picture. Dragging a
     /// handle crops, dragging the picture pans it, and a card holds the rest.
     ///
@@ -110,6 +114,7 @@ impl Tool {
                 | Tool::Text
                 // A drag draws the box the image fills; a click places it fitted.
                 | Tool::Image
+                | Tool::Chart
         )
     }
 
@@ -121,7 +126,7 @@ impl Tool {
     /// a default line, spiral or arc would invent a direction.
     pub fn click_makes(self) -> Option<ClickCreate> {
         match self {
-            Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => {
+            Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star | Tool::Chart => {
                 Some(ClickCreate::DefaultBox)
             }
             Tool::Image => Some(ClickCreate::FittedImage),
@@ -162,7 +167,7 @@ impl Tool {
 /// What a plain click with a creation tool makes ([`Tool::click_makes`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClickCreate {
-    /// A [`CLICK_CREATE_SIZE`] square carrying the tool's own defaults.
+    /// A [`click_size`] box carrying the tool's own defaults.
     DefaultBox,
     /// The loaded picture at its intrinsic size, shrunk only if it exceeds the
     /// frame it lands in ([`ondin_core::edit::fitted_image_size`]).
@@ -175,6 +180,19 @@ pub enum ClickCreate {
 /// The square a shape tool's *click* gets, in world units so a click makes the same
 /// shape at every zoom ([`ClickCreate::DefaultBox`]).
 pub const CLICK_CREATE_SIZE: f64 = 100.0;
+
+/// The box a chart's click gets: wide enough for six categories' labels and a
+/// legend, in world units as [`CLICK_CREATE_SIZE`] is.
+pub const CHART_CLICK_SIZE: (f64, f64) = (480.0, 280.0);
+
+/// The box a click with `tool` makes ([`ClickCreate::DefaultBox`]): a chart's
+/// [`CHART_CLICK_SIZE`], every other shape's [`CLICK_CREATE_SIZE`] square.
+pub fn click_size(tool: Tool) -> (f64, f64) {
+    match tool {
+        Tool::Chart => CHART_CLICK_SIZE,
+        _ => (CLICK_CREATE_SIZE, CLICK_CREATE_SIZE),
+    }
+}
 
 /// The count `↑`/`↓` step while `shape` is drawn: sides or points, a spiral's half
 /// turns, an arc's [`ondin_core::edit::ARC_STEP_DEG`] steps.
@@ -233,6 +251,7 @@ mod tests {
             Tool::Line,
             Tool::Spiral,
             Tool::Arc,
+            Tool::Chart,
         ] {
             assert!(tool.drags_a_box(), "{tool:?}");
         }
@@ -264,6 +283,7 @@ mod tests {
             (Tool::Ellipse, Some(DefaultBox)),
             (Tool::Polygon, Some(DefaultBox)),
             (Tool::Star, Some(DefaultBox)),
+            (Tool::Chart, Some(DefaultBox)),
             (Tool::Image, Some(FittedImage)),
             (Tool::Text, Some(TextNode)),
             // Box tools deliberately without a click answer, then non-creation tools.

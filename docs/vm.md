@@ -365,8 +365,10 @@ The split that survives contact with an agent:
 - **Bulk and procedural work goes through one `eval` tool.** §13 decision 2 already predicted this:
   the world-space facade "also enables a future MCP `eval` tool for free".
 
-`/ai` gains a property worth naming: the agent emits tier-2 Luau, the operator can *read it before it
-runs*, and it lands as one undoable step. Natural language in, reviewable code out, ordinary undo.
+`/ai` is a door into the assistant (`ai.md`): a configured agent harness, reached first through its
+chat window. It gains a property worth naming: the agent emits tier-2 Luau, the operator can *read
+it before it runs*, and it lands as one undoable step. Natural language in, reviewable code out,
+ordinary undo. `/ai` is built after the assistant.
 
 ## 12. Non-goals
 
@@ -377,7 +379,8 @@ runs*, and it lands as one undoable step. Natural language in, reviewable code o
 - **Links between a document's scripts and the library's.** Copies only (§10, §15 D1100).
 - **Plugins and UI extension.** A script mutates the document; it does not add panels, tools or
   chrome. Different feature, different security design.
-- **An embedded model.** §13 already says Ondin embeds no model; `/ai` targets a configured provider.
+- **An embedded model.** §13 already says Ondin embeds no model; `/ai` goes to the configured
+  agent harness (`ai.md`).
 - **Async, coroutines, or anything that yields across frames.** §8.
 - **Binding the interaction layer.** §6.
 
@@ -406,8 +409,9 @@ These are the parts worth arguing about before anything is built.
    checker is Luau's separate analysis library, which `mlua` is believed not to expose (unverified,
    §10) — so in-app checking is not free; a generated `.d.luau` gives luau-lsp the types either way.
 6. **Completion and history in the bar.** Not designed. Interacts with the registry from §9.
-7. **`/ai` invocation mechanics** remain deferred exactly as §13 leaves them — provider vs. connected
-   client, keys, streaming into the bar.
+7. **`/ai` in the bar.** Its mechanics are the assistant's (`ai.md`): the configured harness, its
+   own sign-in, its streaming. What is open is only how a request and its proposed script look in
+   the bar, and that waits until the assistant is built.
 8. **The parameter header's shape** (§10). Designed for and not in the first build, but to be settled
    up front.
 9. **Reaching outside the document — parked** (§15 D1100 (7)). The maintainer's case: one base design

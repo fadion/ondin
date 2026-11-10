@@ -36,7 +36,11 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
-  disclosure, schema place, kit scripts.
+  disclosure, schema place, kit scripts. `/ai` is built after the assistant.
+- **The assistant** — `ai.md`. Waits on `ondin-mcp` serving its Phase 1 reads. Then: finding and
+  probing each harness, the sealed spawn per harness and its stream parser, `propose_edit` and its
+  card, the chat window, attaching layers from the canvas and the layers tree, Settings'
+  *Assistant* section, the agent log. Open in `ai.md` §9.
 - **MCP and headless (M6)** — `architecture.md` §8, §10; `ondin-mcp` is a stub. Its Phase 2 tools
   are the registry's verbs (`ondin_core::verbs`), held to them by a test; each tool's schema shows
   `verbs::example` for its model parameters. Also owed:

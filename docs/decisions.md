@@ -164,6 +164,7 @@ Decided non-goals are in `docs/non-goals.md`.
 
 ## Agents and Command Mode
 
+- **AI comes through a configured agent harness, never an embedded model or a provider key of Ondin's own** (2026-11-10). The person picks a headless coding agent they already use and are signed in to; Ondin starts it, points it at its own MCP endpoint and shows the turn in a chat window, with layers attached from the canvas (`ai.md`). The harness holds the model, the account and the billing. Command Mode's `/ai` is a door into the same assistant and is built after it.
 - **Leap labels outline what they label** (2026-11-10): dashed for a group or frame with a dark label, solid for any other layer with the yellow label, and the first typed letter keeps outlines only on what it still matches (`foundations.md` §13). In a tight spot the question is *the group, or the layer inside it?*, and line style and label lightness answer it without hue.
 
 ## Distribution

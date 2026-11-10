@@ -152,7 +152,7 @@ A modal, keyboard-driven workflow where an operator navigates the node tree and 
 - **Command line over the document.** An embedded bar evaluates property expressions into transactions: `.width = parent.width - 20`, `.x += 15`, `sk.x = .x + 5`. One command = one transaction = one undo step.
 - **Leap labels** (vimium/easymotion style). A shortcut overlays short home-row hint labels on nodes in view; typing a label selects the node. Labels double as CLI handles (`sk.width` addresses the node labelled `SK` without selecting it). Drawn as transient overlays via `RenderOverrides`; the candidate set is topmost hit-testable nodes (same policy as `hit_test`), not every ancestor. Each labelled node is outlined on its bounds, outset 3px, while the labels show: a group or frame dashed with a dark label, any other node solid with the yellow label, so a group is told from the layer inside it by lightness, not hue. The first typed letter keeps outlines only on the nodes it still matches and fades the rest. Outlines never take the selection's colour; each line is two inks, dark inside and light outside, so it reads on any artwork.
 - **Structural navigation.** `hjkl`/arrows move child / parent / next / previous sibling. Structural (children order = z-order), not spatial; leap labels are the spatial instrument.
-- **`/ai`.** The same bar accepts natural-language delegation. The request is routed to an agent that reads through the same Snapshot (including `get_selection`) and writes through the same operations as any MCP client, so its edits are ordinary transactions and `undo` works. Ondin embeds no model: `/ai` targets a configured provider or a connected agent (mechanics deferred).
+- **`/ai`.** The same bar accepts natural-language delegation, as a door into the assistant (`docs/ai.md`): a configured agent harness that reads through the same Snapshot (including `get_selection`) and writes through the same operations as any MCP client, so its edits are ordinary transactions and `undo` works. Ondin embeds no model. `/ai` is built after the assistant.
 
 ### Decisions made
 
@@ -169,7 +169,7 @@ A modal, keyboard-driven workflow where an operator navigates the node tree and 
 
 Expression grammar, multi-select semantics and scripting are designed in `vm.md` (none of it built): Luau via `mlua` (Lua 5.4 has no compound assignment, which `.x += 15` needs); a terse bar grammar that desugars textually to Luau; `sel` is always a collection, and a read across a disagreeing selection reuses core's `PaintShown::Mixed` / `shared_corner_radius` answer; a script is one working copy, one commit, one undo step (one clone of the document per script, so reads see writes). A script may be stored in the `.ondin` file but is never run by it (no run on open, no re-run on change; §15 D1100), because a script the document re-runs is exactly the accidental constraint engine decision 1 forbids. MCP keeps typed read and single-edit tools and routes bulk work through one `eval` tool.
 
-Not designed: the keybinding scheme, and `/ai` invocation mechanics (provider vs. delegating to a connected MCP client; keys; streaming feedback).
+Not designed: the keybinding scheme, and how `/ai`'s request and reply look in the bar.
 
 ## 14. Deferred decisions
 

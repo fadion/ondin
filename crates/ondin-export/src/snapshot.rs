@@ -38,7 +38,9 @@ use std::collections::BTreeMap;
 ///   `Geometry::Arc`.
 /// - **16** `PaintSummary::Image` gained `duotone`, the two colours a duotone
 ///   maps onto, present while its amount is above zero.
-pub const SNAPSHOT_VERSION: u32 = 16;
+/// - **17** `NodeSnapshot::chart` on a chart frame and `NodeSnapshot::role` on
+///   each of its parts.
+pub const SNAPSHOT_VERSION: u32 = 17;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -137,6 +139,55 @@ pub struct NodeSnapshot {
     /// or is not a link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub href: Option<String>,
+    /// A chart frame's description, absent on every other layer. Its parts are
+    /// ordinary nodes beside it, which the chart's verbs edit and no other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart: Option<ChartSummary>,
+    /// A chart part's role in its chart (`"Bar"`, `"TickLabel"`, `"Legend"`),
+    /// absent outside a chart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+/// A chart's description as an agent reads it: what it draws, from which
+/// columns, without the table's cells.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChartSummary {
+    /// `"Column"`, `"Bar"`, `"Line"`, `"Area"`, `"Pie"`, `"Scatter"` or `"Sankey"`.
+    pub kind: String,
+    /// The kind's variant as the Chart card names it (`"Stacked"`, `"Donut"`),
+    /// absent for a Sankey.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// The table's header, in order.
+    pub columns: Vec<ColumnSummary>,
+    pub rows: usize,
+    /// Which columns it reads, by column id, in the form `set_chart` takes.
+    pub mapping: ondin_core::chart::Mapping,
+    /// One per series column, in the order drawn.
+    pub series: Vec<SeriesSummary>,
+    /// Whether the table is read from a linked file.
+    pub linked: bool,
+}
+
+/// One column of a chart's table.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ColumnSummary {
+    pub id: u32,
+    pub name: String,
+    /// Whether every non-empty cell is a number.
+    pub numeric: bool,
+}
+
+/// One series of a chart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SeriesSummary {
+    pub column: u32,
+    pub name: String,
+    pub visible: bool,
+    /// Its own colour, absent while it takes the palette's next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<PaintSummary>,
 }
 
 /// One effect, flattened for a reader that is not this program. `kind` is a
@@ -487,6 +538,45 @@ fn node_snapshot(
         href: (node.element() == Some(ondin_core::element::HtmlElement::Link)
             && !node.href().is_empty())
         .then(|| node.href().to_string()),
+        chart: node.chart().map(|c| chart_summary(doc, id, c)),
+        role: ondin_core::chart::owner(doc, id)
+            .and_then(|c| doc.get(c)?.chart()?.parts.iter().find(|(_, p)| *p == id))
+            .and_then(|(k, _)| serde_json::to_value(k.role).ok())
+            .and_then(|v| v.as_str().map(str::to_string)),
+    }
+}
+
+fn chart_summary(doc: &Document, id: NodeId, c: &ondin_core::chart::Chart) -> ChartSummary {
+    let t = &c.table;
+    ChartSummary {
+        kind: c.kind.label().to_string(),
+        variant: c.variant().map(str::to_string),
+        columns: t
+            .columns
+            .iter()
+            .map(|col| ColumnSummary {
+                id: col.id.0,
+                name: col.name.clone(),
+                numeric: t.is_numeric(col.id),
+            })
+            .collect(),
+        rows: t.rows.len(),
+        mapping: c.mapping.clone(),
+        series: c
+            .mapping
+            .series
+            .iter()
+            .map(|col| {
+                let style = c.series.iter().find(|s| s.column == *col);
+                SeriesSummary {
+                    column: col.0,
+                    name: t.column(*col).map_or_else(String::new, |x| x.name.clone()),
+                    visible: style.is_none_or(|s| s.visible),
+                    fill: style.map(|s| paint_summary(&doc.resolve_brush(id, &s.fill))),
+                }
+            })
+            .collect(),
+        linked: c.source.is_some(),
     }
 }
 

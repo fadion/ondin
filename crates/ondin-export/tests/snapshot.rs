@@ -749,3 +749,95 @@ fn a_bound_field_reports_its_drawn_value() {
     let rect = snap.nodes.iter().find(|n| n.id == wire(f.rect)).unwrap();
     assert!(!rect.visible, "hidden by its variable");
 }
+
+/// A chart frame carries its description — kind, variant, header, row count,
+/// mapping and series — and every part under it its role; nothing else does.
+///
+/// flip: `node_snapshot` leaving `role` out → fails at "every part has its role".
+#[test]
+fn a_chart_reports_its_description_and_its_parts_their_roles() {
+    use ondin_core::chart::{Chart, ChartKind, ColumnId, SeriesStyle, Stacking};
+    use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Resolved, Transaction};
+    let mut ids = IdSource::new(0xC8);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let page = doc.first_page();
+    let frame = ids.mint();
+    let mut chart = Chart::sample(ChartKind::Column);
+    chart.options.bars.stacking = Stacking::Stacked;
+    chart.series.push(SeriesStyle {
+        column: ColumnId(2),
+        fill: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x11, 0x22, 0x33))
+            .into(),
+        visible: false,
+        dash: Default::default(),
+        point: Default::default(),
+    });
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(480.0, 280.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::IDENTITY),
+            name: Some("Sales".into()),
+        },
+        Operation::SetChart {
+            id: frame,
+            chart: Some(Box::new(chart)),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::settled(&mut doc);
+    let snap = snapshot(&doc, &res);
+    let me = snap.nodes.iter().find(|n| n.id == wire(frame)).unwrap();
+    let c = me.chart.as_ref().expect("the frame carries its chart");
+    assert_eq!(me.role, None);
+    assert_eq!(
+        (c.kind.as_str(), c.variant.as_deref()),
+        ("Column", Some("Stacked"))
+    );
+    let header: Vec<&str> = c.columns.iter().map(|x| x.name.as_str()).collect();
+    assert_eq!(header, ["Category", "Revenue", "Costs", "Profit"]);
+    assert_eq!(
+        c.columns.iter().map(|x| x.numeric).collect::<Vec<_>>(),
+        [false, true, true, true]
+    );
+    assert_eq!(c.rows, 6);
+    assert_eq!(c.mapping.category, Some(ColumnId(0)));
+    assert_eq!(c.series.len(), 3);
+    assert!(
+        c.series[0].visible && c.series[0].fill.is_none(),
+        "{:?}",
+        c.series[0]
+    );
+    assert!(!c.series[1].visible);
+    assert!(
+        matches!(&c.series[1].fill, Some(PaintSummary::Solid { color, .. }) if color == "#112233"),
+        "{:?}",
+        c.series[1]
+    );
+    assert!(!c.linked);
+
+    let parts = &doc.get(frame).unwrap().chart().unwrap().parts;
+    assert!(parts.len() > 10, "the fixture settled: {}", parts.len());
+    for (k, id) in parts {
+        let n = snap.nodes.iter().find(|n| n.id == wire(*id)).unwrap();
+        let role = serde_json::to_value(k.role).unwrap();
+        assert_eq!(n.role.as_deref(), role.as_str(), "every part has its role");
+        assert!(n.chart.is_none());
+    }
+    assert!(
+        snap.nodes
+            .iter()
+            .any(|n| n.role.as_deref() == Some("Bar") && n.name == "Revenue · Jan"),
+        "a column reads as a bar"
+    );
+    let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
+    assert_eq!(snap, back);
+}

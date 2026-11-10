@@ -4,8 +4,9 @@ A chart is a frame that carries a chart description and whose children are ordin
 text generated from it: columns, bars, lines, areas, pies, scatters and Sankey flows drawn from
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
-was made with until it is flattened, which leaves the shapes and drops the description. Nothing
-of it is built; the work is in `roadmap.md`, *Now · Charts*.
+was made with until it is flattened, which leaves the shapes and drops the description. Built so
+far: the model, settle, and the generator for Column and Bar; the rest is in `roadmap.md`, *Now ·
+Charts*.
 
 ## Model
 
@@ -74,11 +75,14 @@ of it is built; the work is in `roadmap.md`, *Now · Charts*.
 
 ### Regeneration (`chart::generate`, `chart::settle`)
 
-- **`chart::generate(&Chart, size, &fonts) -> Vec<Part>`** is pure: it lays the chart out into the
-  frame's size and returns each part's key, kind, geometry, paint, name, parent frame and layout
-  (insets, display, item settings). It lives
-  in core so MCP, the CLI and Command Mode make the same chart. Label widths come from the same
-  parley layout a text node uses.
+- **`chart::generate(&Chart, size, family) -> Result<Generated, Refusal>`** is pure: it lays the
+  chart out into the frame's size and returns the frame's own `display` and each part's key,
+  parent key, kind, geometry, transform, paint, name and layout (insets, display, item settings),
+  parents first, plus the values it left out with their reasons. Every part carries both its place
+  at this size and the layout that keeps it there, so the parts draw right before any layout runs.
+  `family` stands in when the chart names none. It lives in core so MCP, the CLI and Command Mode
+  make the same chart. Label widths come from the same parley layout a text node uses. A chart
+  past its limits is a `Refusal` (*Too many marks*), and settle keeps the parts it has.
 - **`chart::settle`** runs after layout resolves, as `Document::settle_widths` picks modes by
   width: **the parts are derived state, written outside history**. After any commit, undo, redo
   or load that sets a chart's description or changes the size the frame is drawn at — its own
@@ -88,13 +92,17 @@ of it is built; the work is in `roadmap.md`, *Now · Charts*.
   why `SetChart` keeps a chart's own parts: an undone description must not put back a parts list a
   later regeneration replaced. Settle reads the **used** size from `Resolved`, because a chart
   filling a flex card is drawn at the card's width, not its stored one, and it owns the frame's
-  whole subtree: a descendant no part key names is deleted.
-- **Ids are kept by role.** Settle diffs the new parts against `parts` by `PartKey`
-  (`Bar { series, row }`, `Tick { axis, index }`, `Gridline { axis, index }`, `Label { … }`,
-  `LegendItem { series }`, …): a kept key keeps its `NodeId` and gets `SetGeometry` / `SetPaint`
-  / `SetTransform` only where it changed; a new key is created with a minted id; a missing one is
-  deleted. History, compare and the snapshot see the change that was made, not the whole chart
-  rebuilt.
+  whole subtree: a descendant no part key names is deleted. A chart is stale (`chart::stale`)
+  while `Chart::generated`, the size `SetChartParts` stamped, differs from its drawn size; a
+  changed description clears the stamp. `Resolved::settle` runs it after the width picks (so a
+  load, an export and compare settle as the app does) and the session after every commit, undo
+  and redo; new parts take ids under an actor of their own, past every id the document holds.
+- **Ids are kept by role.** Settle diffs the new parts against `parts` by `PartKey` (`role`,
+  then the series' column id or 0, then the row, tick or node index): a kept key keeps its
+  `NodeId` and gets `SetGeometry`, `SetFills`, `SetTransform`, `SetInsets` and the rest only where
+  it changed, and a move or a reorder where its place did; a text whose kind changes is made
+  again under the same id; a new key is created with a minted id; a missing one is deleted.
+  Compare and the snapshot see the change that was made, not the whole chart rebuilt.
 - **Previews.** A resize drag needs nothing of its own: the layout reflows the parts as the frame
   is dragged (*Laid out, not placed*), and the release regenerates for the new size. Scrubbing an
   option field regenerates on every frame into `RenderOverrides::chart`, a replacement for the
@@ -109,18 +117,28 @@ and regeneration only has to redo what layout cannot: the tick values, which lab
 or turned, which value labels fit.
 
 - **The structure.** The chart frame is a flex column with the chart's padding and gap: *Legend*
-  (a frame, a flex row that wraps, so a narrow chart puts its legend on two lines) and *Body* (a
-  frame, `flex-grow: 1`, a grid of `auto 1fr` columns and `1fr auto` rows). The Body's cells are
-  *Value axis* (tick labels and the axis title), *Plot*, and *Category axis* under the plot; a
-  bar chart swaps the two axes' places. A legend placed left or right makes the chart a flex row.
+  (a frame 100% wide and `fit-content` tall, a flex row that wraps, so a narrow chart puts its
+  legend on two lines; each *Legend · ‹series›* a `fit-content` flex row of swatch and label) and
+  *Body* (a frame 100% across, `flex-grow: 1` from a basis of 0, a grid). The Body's grid gives
+  each axis a px track as thick as its labels, which only regeneration changes, and the plot
+  `minmax(0, 1fr)` both ways: a bare `1fr` keeps the plot's stored size as its least, so a chart
+  made smaller would not shrink its plot. Its cells, each 100% of its area, are *Value axis*
+  (tick labels), *Plot*, and *Category axis* under the plot; a bar chart swaps the two axes'
+  places, and an axis's *side* moves its track to the other edge. A legend placed left or right
+  makes the chart a flex row.
 - **Inside the plot, marks are pinned by percentage insets** of the plot (`container::Insets`,
   `LengthPct::Percent`). A column's left and right insets are its slot's edges in the band, its
   top inset its value, its bottom inset the baseline, so a wider or taller plot stretches the
-  column and keeps it on its value. A gridline is a 1 px `Rect` pinned at its value between left
-  0 and right 0. A point, a tick label and a category label are centred on their percentage by
-  both insets and auto margins (layout's absolute-centring), so they keep their size while
-  their place follows the plot. A pie or donut sits in a square frame (`aspect-ratio: 1`)
-  centred in the plot.
+  column and keeps it on its value. A gridline, and the baseline at zero, is a 1 px `Rect` centred
+  on its value and pinned between left 0 and right 0. A point, a tick label and a category label
+  are centred on their percentage by both insets and auto margins (layout's absolute-centring),
+  so they keep their size while their place follows the plot; a tick label is pinned the axis gap
+  from the plot on the other axis, a turned category label as deep as its turned box reaches. A
+  pie or donut sits in a square frame (`aspect-ratio: 1`) centred in the plot.
+- **Value labels** sit outside, inside or at the end of their bar. In a stack only the outermost
+  segment each way takes an outside label; the segments it covers take theirs inside, and a label
+  that does not fit inside is left out. A value label writes as many places as the value has, up
+  to three; a 100% chart's labels and ticks are whole percentages of each category's total.
 - **Every container is a frame**, unpainted and unclipped, never a group, because a group takes
   no insets. The tree, bottom to top: *Legend*, then in the Body *Value axis*, *Category axis*
   and *Plot*; in the Plot, *Ground* (a `Rect`, absent when unpainted), *Grid*, one *Series

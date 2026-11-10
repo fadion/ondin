@@ -300,6 +300,8 @@ pub enum Operation {
     SetChartParts {
         id: NodeId,
         parts: Vec<(crate::chart::PartKey, NodeId)>,
+        /// The size they were generated at (`Chart::generated`).
+        at: Option<[f64; 2]>,
     },
     /// The HTML element a code export writes a layer as (`crate::element`),
     /// never drawn; `None` is Automatic. Refused for an element the layer's
@@ -1088,9 +1090,11 @@ impl Operation {
                     (a, b) => a == b,
                 })
             }
-            Operation::SetChartParts { id, parts } => {
-                node(id).is_some_and(|n| n.chart.as_ref().is_some_and(|c| c.parts == *parts))
-            }
+            Operation::SetChartParts { id, parts, at } => node(id).is_some_and(|n| {
+                n.chart
+                    .as_ref()
+                    .is_some_and(|c| c.parts == *parts && c.generated == *at)
+            }),
             Operation::SetHref { id, href } => node(id).is_some_and(|n| n.href == *href),
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)

@@ -738,8 +738,9 @@ impl Resolved {
     /// what that moved laid out again, until nothing moves: a querying frame
     /// nested in another can be widened by the outer one's pick. Each round
     /// settles at least the next level down, so the depth of nested queries
-    /// bounds it; [`MAX_SETTLE_ROUNDS`] is the backstop. Answers every layer it
-    /// laid out again.
+    /// bounds it; [`MAX_SETTLE_ROUNDS`] is the backstop. Then every stale chart
+    /// regenerated at its drawn size ([`crate::chart::settle_all`]). Answers every
+    /// layer it laid out again.
     pub fn settle(&mut self, doc: &mut Document) -> DirtySet {
         let mut all = DirtySet::default();
         for _ in 0..MAX_SETTLE_ROUNDS {
@@ -750,6 +751,8 @@ impl Resolved {
             self.update(doc, &more);
             all.0.extend(more.0);
         }
+        // Then the charts, at the sizes the picks left them (`chart::settle`).
+        all.0.extend(crate::chart::settle_all(doc, self).0);
         all
     }
 

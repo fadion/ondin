@@ -2090,6 +2090,8 @@ impl Document {
                     }
                     if let Some(now) = &node.chart {
                         c.parts = now.parts.clone();
+                        // Stale once the description differs, so settle regenerates.
+                        c.generated = now.generated.filter(|_| now.same_description(c));
                     }
                     c.validate().map_err(OpError::BadChart)?;
                 }
@@ -2099,14 +2101,16 @@ impl Document {
                     chart: old,
                 })
             }
-            Operation::SetChartParts { id, parts } => {
+            Operation::SetChartParts { id, parts, at } => {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
                 let chart = node.chart.as_mut().ok_or(OpError::WrongKindForOp)?;
                 let old = std::mem::replace(&mut chart.parts, parts.clone());
+                let old_at = std::mem::replace(&mut chart.generated, *at);
                 chart.validate().map_err(OpError::BadChart)?;
                 Ok(Operation::SetChartParts {
                     id: *id,
                     parts: old,
+                    at: old_at,
                 })
             }
             Operation::SetHref { id, href } => {

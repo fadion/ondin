@@ -847,6 +847,139 @@ fn svg_matches_its_golden() {
     check_golden("every-kind.svg", &svg(&doc, &res, doc.first_page(), None));
 }
 
+/// Charts through the SVG writer: a grouped column chart with value labels, a
+/// stacked one and a bar chart, each settled at its size, and a flattened copy
+/// of the first resized wider and shorter, which pins the reflow: its bars and
+/// gridlines follow the plot, its labels keep their size, and its ticks stay
+/// those it was flattened with.
+#[test]
+fn charts_match_their_golden() {
+    use ondin_core::chart::{
+        Chart, ChartKind, Column, ColumnId, Mapping, Stacking, Table, ValuePosition,
+    };
+    let col = |id, name: &str| Column {
+        id: ColumnId(id),
+        name: name.into(),
+    };
+    let rows = [
+        ["Jan", "42", "30", "12"],
+        ["Feb", "48", "32", "16"],
+        ["Mar", "45", "34", "-11"],
+        ["Apr", "56", "36", "20"],
+    ];
+    let chart = |kind, stacking, values| {
+        let mut c = Chart {
+            kind,
+            table: Table {
+                columns: vec![
+                    col(0, "Month"),
+                    col(1, "Revenue"),
+                    col(2, "Costs"),
+                    col(3, "Profit"),
+                ],
+                rows: rows
+                    .iter()
+                    .map(|r| r.iter().map(|s| s.to_string()).collect())
+                    .collect(),
+            },
+            mapping: Mapping {
+                category: Some(ColumnId(0)),
+                series: vec![ColumnId(1), ColumnId(2), ColumnId(3)],
+                ..Mapping::default()
+            },
+            series: vec![],
+            nodes: vec![],
+            options: Default::default(),
+            source: None,
+            parts: vec![],
+            generated: None,
+        };
+        c.options.bars.stacking = stacking;
+        c.options.values.position = values;
+        c
+    };
+    let mut ids = IdSource::new(0xC6);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let page = doc.first_page();
+    let mut ops = Vec::new();
+    let mut frames = Vec::new();
+    for (i, (kind, stacking, values, w, h)) in [
+        (
+            ChartKind::Column,
+            Stacking::Apart,
+            ValuePosition::Outside,
+            480.0,
+            280.0,
+        ),
+        (
+            ChartKind::Column,
+            Stacking::Stacked,
+            ValuePosition::Inside,
+            400.0,
+            220.0,
+        ),
+        (
+            ChartKind::Bar,
+            Stacking::Apart,
+            ValuePosition::Off,
+            320.0,
+            240.0,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = ids.mint();
+        frames.push(id);
+        ops.push(Operation::CreateNode {
+            id,
+            parent: page,
+            index: i,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, h),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((0.0, 320.0 * i as f64))),
+            name: Some(format!("Chart {}", i + 1)),
+        });
+        ops.push(Operation::SetChart {
+            id,
+            chart: Some(Box::new(chart(kind, stacking, values))),
+        });
+    }
+    doc.apply(&Transaction(ops)).unwrap();
+    let mut res = Resolved::settled(&mut doc);
+    assert!(ondin_core::chart::stale(&doc, &res).is_empty(), "settled");
+
+    // A copy of the first, flattened and then resized.
+    let copy = doc.capture_subtree(frames[0]).unwrap();
+    let (copy, top) = ondin_core::document::remap_subtree(&copy, &mut ids).unwrap();
+    doc.apply(&Transaction(vec![
+        Operation::InsertSubtree {
+            parent: page,
+            index: 3,
+            nodes: copy,
+        },
+        Operation::SetTransform {
+            id: top,
+            transform: Affine::translate((560.0, 0.0)),
+        },
+    ]))
+    .unwrap();
+    doc.apply(&Transaction(vec![
+        ondin_core::chart::flatten(&doc, top).unwrap(),
+        Operation::SetGeometry {
+            id: top,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(640.0, 200.0)),
+        },
+    ]))
+    .unwrap();
+    res = Resolved::settled(&mut doc);
+    check_golden("charts.svg", &svg(&doc, &res, page, None));
+}
+
 /// The JSON snapshot, byte for byte, produced the way `ondin export --json` does.
 #[test]
 fn json_snapshot_matches_its_golden() {

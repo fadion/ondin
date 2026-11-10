@@ -63,6 +63,7 @@ fn sample() -> Chart {
         options: Default::default(),
         source: None,
         parts: Vec::new(),
+        generated: None,
     }
 }
 
@@ -105,6 +106,7 @@ fn fixture() -> F {
                 Operation::SetChartParts {
                     id: chart,
                     parts: vec![(key(PartRole::Bar, 0), bar)],
+                    at: None,
                 },
                 create(card, page, frame(100.0, 100.0)),
             ]),
@@ -182,6 +184,7 @@ fn a_part_is_written_only_by_its_charts_regeneration() {
                 Operation::SetChartParts {
                     id: f.chart,
                     parts: vec![(key(PartRole::Bar, 0), f.bar)],
+                    at: None,
                 },
             ]),
         )
@@ -219,6 +222,7 @@ fn a_description_keeps_the_parts_a_regeneration_wrote() {
             Operation::SetChartParts {
                 id: f.chart,
                 parts: vec![(key(PartRole::Bar, 0), new_bar)],
+                at: None,
             },
         ]))
         .expect("a regeneration replaces the part");
@@ -472,4 +476,112 @@ fn a_remapped_chart_names_its_copied_parts() {
     let bar = copy.iter().find(|n| n.parent() == Some(root)).unwrap().id();
     assert_eq!(chart.parts, vec![(key(PartRole::Bar, 0), bar)]);
     let _ = f.page;
+}
+
+/// A page holding one chart made from `sample()`, not yet settled.
+fn unsettled(w: f64, h: f64) -> (Document, NodeId) {
+    let mut ids = IdSource::new(0xC5);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let chart = ids.mint();
+    doc.apply(&Transaction(vec![
+        create(chart, doc.first_page(), frame(w, h)),
+        Operation::SetChart {
+            id: chart,
+            chart: Some(Box::new(sample())),
+        },
+    ]))
+    .unwrap();
+    (doc, chart)
+}
+
+fn part(doc: &Document, chart: NodeId, role: PartRole, series: u32, index: u32) -> Option<NodeId> {
+    let k = PartKey {
+        role,
+        series,
+        index,
+    };
+    doc.get(chart)?
+        .chart()?
+        .parts
+        .iter()
+        .find(|(p, _)| *p == k)
+        .map(|(_, id)| *id)
+}
+
+/// Settle makes a chart's parts, stamps the size, and has nothing more to do;
+/// the parts saved and loaded are the same parts.
+#[test]
+fn settle_makes_the_parts_once() {
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    assert_eq!(ondin_core::chart::stale(&doc, &res), vec![chart]);
+    let dirty = ondin_core::chart::settle_all(&mut doc, &mut res);
+    assert!(!dirty.0.is_empty(), "parts were made");
+    assert!(
+        ondin_core::chart::stale(&doc, &res).is_empty(),
+        "and stamped"
+    );
+    let c = doc.get(chart).unwrap().chart().unwrap();
+    assert_eq!(c.generated, Some([480.0, 280.0]));
+    // Two series over three months: six bars, each where the table says.
+    let bars: Vec<_> = c
+        .parts
+        .iter()
+        .filter(|(k, _)| k.role == PartRole::Bar)
+        .collect();
+    assert_eq!(bars.len(), 6);
+    let bar = part(&doc, chart, PartRole::Bar, 1, 2).expect("Revenue · Mar");
+    assert_eq!(doc.get(bar).unwrap().name(), "Revenue · Mar");
+    let fresh = ondin_core::Resolved::rebuild(&doc);
+    assert_eq!(
+        res.world_bounds(bar),
+        fresh.world_bounds(bar),
+        "settled equals rebuilt"
+    );
+    let again = io::load(&io::save(&doc).unwrap()).unwrap();
+    assert!(ondin_core::chart::stale(&again, &ondin_core::Resolved::rebuild(&again)).is_empty());
+}
+
+/// **Laid out, not placed**: resized and not regenerated, a bar reflows to
+/// where regeneration at the new size puts it, and regeneration keeps its id.
+/// flip: a bar written without its percentage insets → fails at "the bar
+/// moved and widened".
+#[test]
+fn a_resized_chart_reflows_before_it_regenerates() {
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let bar = part(&doc, chart, PartRole::Bar, 2, 1).expect("Costs · Feb");
+    let before = res.world_bounds(bar).unwrap();
+    // Wider only: the value axis's ticks do not change, so nothing but the
+    // bands moves.
+    doc.apply(&Transaction(vec![Operation::SetGeometry {
+        id: chart,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(720.0, 280.0)),
+    }]))
+    .unwrap();
+    let res = ondin_core::Resolved::rebuild(&doc);
+    let reflowed = res.world_bounds(bar).unwrap();
+    assert!(
+        reflowed.width() > before.width() * 1.3 && reflowed.x0 > before.x0 * 1.3,
+        "the fixture: the bar moved and widened, {before:?} to {reflowed:?}"
+    );
+    assert_eq!(ondin_core::chart::stale(&doc, &res), vec![chart]);
+    let mut res = res;
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    assert_eq!(
+        part(&doc, chart, PartRole::Bar, 2, 1),
+        Some(bar),
+        "the bar keeps its id"
+    );
+    let regenerated = res.world_bounds(bar).unwrap();
+    let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+    assert!(
+        near(reflowed.x0, regenerated.x0)
+            && near(reflowed.x1, regenerated.x1)
+            && near(reflowed.y0, regenerated.y0)
+            && near(reflowed.y1, regenerated.y1),
+        "the layout is the preview: {reflowed:?} reflowed, {regenerated:?} regenerated"
+    );
 }

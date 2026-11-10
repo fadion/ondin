@@ -1644,7 +1644,7 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
-        self.settle_widths((self.revision, revision));
+        self.settle_derived((self.revision, revision));
         if let Some(again) = watch.and_then(|w| w.finish(&self.doc, &self.resolved)) {
             self.last_transform = Some(again);
         }
@@ -1798,7 +1798,7 @@ impl EditorSession {
         self.ink
             .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
-        self.settle_widths((self.revision, revision));
+        self.settle_derived((self.revision, revision));
         self.keep_page();
         self.dirty = true;
         // `finish_save` above all must see it, or it marks the session clean over a
@@ -1886,10 +1886,20 @@ impl EditorSession {
 
     /// After a resolve: give the document the laid-out widths its width queries
     /// pick by and lay out again what that moved, until nothing moves
-    /// (`Resolved::settle`); the ink of what moved recorded with the edit's.
-    fn settle_widths(&mut self, revs: (u64, u64)) {
+    /// (`Resolved::settle`), then every stale chart regenerated
+    /// (`chart::settle_round`, outside history); the ink of what moved recorded
+    /// with the edit's.
+    fn settle_derived(&mut self, revs: (u64, u64)) {
         for _ in 0..ondin_core::resolve::MAX_SETTLE_ROUNDS {
             let more = self.doc.settle_widths(&self.resolved);
+            if more.0.is_empty() {
+                break;
+            }
+            self.ink.record(revs, &self.doc, &self.resolved, &more);
+            self.resolved.update(&self.doc, &more);
+        }
+        for _ in 0..ondin_core::resolve::MAX_SETTLE_ROUNDS {
+            let more = ondin_core::chart::settle_round(&mut self.doc, &self.resolved);
             if more.0.is_empty() {
                 break;
             }

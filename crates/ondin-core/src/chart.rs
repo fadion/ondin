@@ -7,6 +7,13 @@
 //! regeneration is a transaction carrying [`crate::Operation::SetChartParts`] for
 //! its chart; nothing else writes under a chart frame.
 
+mod generate;
+pub mod scale;
+mod settle;
+
+pub use generate::{Generated, Part, Refusal, generate, palette};
+pub use settle::{settle, settle_all, settle_round, stale};
+
 use crate::id::NodeId;
 use crate::node::{Node, NodeKind};
 use crate::op::Operation;
@@ -55,6 +62,10 @@ pub struct Chart {
     /// file's own spelling (`NodeId::to_wire`).
     #[serde(default, skip_serializing_if = "Vec::is_empty", with = "wire_parts")]
     pub parts: Vec<(PartKey, NodeId)>,
+    /// The size the parts were generated at, written with them; `None` once the
+    /// description changes, so the next settle regenerates ([`stale`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated: Option<[f64; 2]>,
 }
 
 /// `serde(with)` for [`Chart::parts`]: each id as the save format spells a node
@@ -904,6 +915,12 @@ impl Chart {
                 return Err(ChartRule::DuplicatePart);
             }
         }
+        if self
+            .generated
+            .is_some_and(|s| !s.iter().all(|v| v.is_finite() && *v >= 0.0))
+        {
+            return Err(ChartRule::BadOption);
+        }
         Ok(())
     }
 
@@ -934,6 +951,7 @@ impl Chart {
             options,
             source,
             parts: _,
+            generated: _,
         } = self;
         *kind == other.kind
             && *table == other.table

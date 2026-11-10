@@ -63,10 +63,11 @@ impl OffsetCard {
     /// Whether the path is still one this card left it as: what it opened on or
     /// what it last committed. An undo, a redo, a landed *Simplify* or any other
     /// edit makes it neither, and the card's next write would undo that edit.
-    fn owns(&self, doc: &ondin_core::Document) -> bool {
+    /// Read as drawn, as the card opened on it.
+    fn owns(&self, doc: &ondin_core::Document, res: &ondin_core::Resolved) -> bool {
         let Some(NodeKind::Path {
             path, corner_radii, ..
-        }) = doc.get(self.id).map(|n| n.kind())
+        }) = res.used_kind(doc, self.id)
         else {
             return false;
         };
@@ -457,7 +458,7 @@ impl OndinApp {
         if self
             .offset_card
             .as_ref()
-            .is_some_and(|c| !c.owns(&self.session.doc))
+            .is_some_and(|c| !c.owns(&self.session.doc, &self.session.resolved))
         {
             // Not committed: what it would write is from before the change.
             self.drop_offset_card();
@@ -623,7 +624,11 @@ impl OndinApp {
             corner_radii,
             corner_smoothing,
             mirror,
-        }) = self.session.doc.get(id).map(|n| n.kind().clone())
+        }) = self
+            .session
+            .resolved
+            .used_kind(&self.session.doc, id)
+            .cloned()
         else {
             return;
         };
@@ -661,7 +666,7 @@ impl OndinApp {
                 .data(|d| d.get_temp::<bool>(latch))
                 .unwrap_or(false)
         });
-        if held && card.owns(&self.session.doc) {
+        if held && card.owns(&self.session.doc, &self.session.resolved) {
             card.settle();
             let tx = card.tx();
             if !tx.0.is_empty() && card.writes() != card.wrote {

@@ -3415,7 +3415,12 @@ pub fn rewrite_path(
     }])
 }
 
-/// The path `id` holds, as world-space subpaths, with its world transform.
+/// The path `id` is drawn as, as world-space subpaths, with its world transform.
+///
+/// **Drawn, not stored**: a path pinned on both edges of an axis is drawn with
+/// its points stretched (`container::inset_stretch`), and an edit must act on
+/// what is on screen. The edit's `SetGeometry` then writes the drawn points back
+/// as the stored ones, in the edit's own undo step.
 pub fn path_subpaths(
     doc: &Document,
     res: &Resolved,
@@ -3423,7 +3428,7 @@ pub fn path_subpaths(
 ) -> Option<(Affine, Vec<PenSubpath>)> {
     let NodeKind::Path {
         path, corner_radii, ..
-    } = doc.get(id)?.kind()
+    } = res.used_kind(doc, id)?
     else {
         return None;
     };
@@ -3498,9 +3503,11 @@ pub fn join_paths(
 
 /// A point edit of the path `id` written back: `subpaths` is `base` edited, both in
 /// world space. A path mirrored across its own axes is made symmetric again first
-/// (`symmetry::symmetric_edit`), so editing one side moves its image.
+/// (`symmetry::symmetric_edit`), so editing one side moves its image. Compared
+/// against the path as drawn, as [`path_subpaths`] reads it.
 pub fn rewrite_points(
     doc: &Document,
+    res: &Resolved,
     id: NodeId,
     world: Affine,
     base: &[PenSubpath],
@@ -3511,7 +3518,7 @@ pub fn rewrite_points(
         corner_radii,
         mirror,
         ..
-    }) = doc.get(id).map(|n| n.kind())
+    }) = res.used_kind(doc, id)
     else {
         return Transaction(Vec::new());
     };

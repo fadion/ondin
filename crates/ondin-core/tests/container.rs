@@ -290,6 +290,68 @@ fn resizing_a_stretched_child_moves_its_far_inset() {
     assert_eq!(s.bounds(child), Rect::new(10.0, 0.0, 210.0, 50.0));
 }
 
+/// A path pinned on both sides follows its frame's resize by stretching its
+/// points; its drawn points written back as its own (the node tool's first edit,
+/// the Position card's unpin) draw it where it was, the insets untouched.
+/// flip: `inset_stretch` answering no for a path → fails at "stretched with the
+/// frame"; `baked_ops` writing no path geometry → fails at "the drawn points are
+/// its own".
+#[test]
+fn a_pinned_path_stretches_with_its_frame_and_writing_it_back_keeps_it() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 200.0), (0.0, 0.0));
+    let mut p = ondin_core::kurbo::BezPath::new();
+    p.move_to((0.0, 40.0));
+    p.line_to((50.0, 0.0));
+    p.line_to((100.0, 40.0));
+    let kind = NodeKind::Path {
+        path: p,
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
+    };
+    let path = s.add(f, kind, (10.0, 10.0));
+    let insets = Insets {
+        left: px(10.0),
+        right: px(190.0),
+        ..Default::default()
+    };
+    s.pin(path, insets);
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(10.0, 10.0, 110.0, 50.0),
+        "pinned where drawn"
+    );
+    s.resize(f, 400.0, 200.0);
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(10.0, 10.0, 210.0, 50.0),
+        "stretched with the frame"
+    );
+
+    let drawn = s.res.used_kind(&s.doc, path).unwrap().clone();
+    let NodeKind::Path { path: points, .. } = &drawn else {
+        panic!("drawn as a path");
+    };
+    let local = s.res.used_local(&s.doc, path).unwrap();
+    let node = s.doc.get(path).unwrap().clone();
+    s.commit(ondin_core::build::baked_ops(path, &node, local, &drawn));
+    let NodeKind::Path { path: stored, .. } = s.doc.get(path).unwrap().kind() else {
+        panic!("still a path");
+    };
+    assert_eq!(stored, points, "the drawn points are its own");
+    assert_eq!(
+        *s.doc.get(path).unwrap().insets(),
+        insets,
+        "the insets untouched"
+    );
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(10.0, 10.0, 210.0, 50.0),
+        "drawn where it was"
+    );
+}
+
 /// Rounding a stretched rect's corners leaves it stretched. A corner radius is
 /// applied to a kind still at its *stored* size, so treating it as a resize — as
 /// `keep_insets` did until `GeometryPatch::resizes` — re-pinned the far edge at

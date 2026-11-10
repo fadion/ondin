@@ -1064,6 +1064,120 @@ fn insets_and_hugging_match_the_canvas() {
     holds("insets", &doc, &res);
 }
 
+/// Paths pinned on both edges of an axis stretch in the page as on the canvas:
+/// a filled area and a stroked line drawn 100 wide and pinned to a 200-wide
+/// span, their stroke unscaled, and a flat rule pinned on all four edges, which
+/// stretches across only. The page is shot at the frame's own size, so this pins
+/// the stretched drawing, not the resize; the markup check pins that it can.
+/// flip: the unstretched axis's offset left fractional → 26.7 at the line.
+#[test]
+fn stretched_paths_match_the_canvas() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 240.0, 160.0, "Board");
+    let path = |pts: &[(f64, f64)], close: bool| {
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to(pts[0]);
+        for q in &pts[1..] {
+            p.line_to(*q);
+        }
+        if close {
+            p.close_path();
+        }
+        NodeKind::Path {
+            path: p,
+            corner_radii: vec![],
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        }
+    };
+    let pin = |d: &mut Doc, id, insets| d.apply(vec![Operation::SetInsets { id, insets }]);
+    let area = d.add(
+        Some(f),
+        path(
+            &[
+                (0.0, 40.0),
+                (30.0, 10.0),
+                (60.0, 25.0),
+                (100.0, 0.0),
+                (100.0, 40.0),
+            ],
+            true,
+        ),
+        Affine::translate((20.0, 20.0)),
+        "Area",
+    );
+    d.fill(area, solid(60, 120, 220, 255));
+    pin(
+        &mut d,
+        area,
+        Insets {
+            left: Some(LengthPct::Percent(10.0)),
+            right: Some(LengthPct::Px(20.0)),
+            top: Some(LengthPct::Px(20.0)),
+            bottom: Some(LengthPct::Percent(50.0)),
+            ..Default::default()
+        },
+    );
+    let line = d.add(
+        Some(f),
+        path(&[(0.0, 30.0), (40.0, 0.0), (100.0, 20.0)], false),
+        Affine::translate((20.0, 90.0)),
+        "Line",
+    );
+    d.stroke(line, 3.0, StrokeAlign::Center, StrokeSides::All);
+    pin(
+        &mut d,
+        line,
+        Insets {
+            left: Some(LengthPct::Px(20.0)),
+            right: Some(LengthPct::Px(20.0)),
+            ..Default::default()
+        },
+    );
+    let rule = d.add(
+        Some(f),
+        path(&[(0.0, 0.0), (100.0, 0.0)], false),
+        Affine::translate((20.0, 140.0)),
+        "Rule",
+    );
+    d.stroke(rule, 2.0, StrokeAlign::Center, StrokeSides::All);
+    pin(
+        &mut d,
+        rule,
+        Insets {
+            left: Some(LengthPct::Px(10.0)),
+            right: Some(LengthPct::Px(10.0)),
+            top: Some(LengthPct::Px(140.0)),
+            bottom: Some(LengthPct::Px(20.0)),
+            ..Default::default()
+        },
+    );
+    let (doc, res) = d.done();
+    let width = |id| {
+        ondin_core::geometry::local_bounds(res.used_kind(&doc, id).unwrap(), None)
+            .unwrap()
+            .width()
+            .round()
+    };
+    assert_eq!(
+        (width(area), width(line), width(rule)),
+        (196.0, 200.0, 220.0),
+        "the fixture: all three drawn stretched"
+    );
+    let origins: Vec<NodeId> = doc.get(doc.first_page()).unwrap().children().to_vec();
+    let html: String = html_of(&doc, &res, &origins)
+        .files
+        .iter()
+        .map(|f| String::from_utf8_lossy(&f.bytes).into_owned())
+        .collect();
+    assert!(
+        html.contains("preserveAspectRatio=\"none\"")
+            && html.contains("vector-effect=\"non-scaling-stroke\""),
+        "written as stretching pictures"
+    );
+    holds("stretched-paths", &doc, &res);
+}
+
 /// What CSS cannot draw goes to inline SVG and still matches: a star, a path and
 /// an inner shadow, beside a group with no layout.
 #[test]

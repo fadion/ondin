@@ -176,10 +176,13 @@ impl OndinApp {
         });
     }
 
-    /// The card fresh on `id` as it is stored now.
+    /// The card fresh on `id` as it is drawn now (a stretched path's drawn points).
     fn read_cleanup(&self, id: NodeId) -> Option<CleanupCard> {
-        let node = self.session.doc.get(id)?;
-        let kind = node.kind().clone();
+        let kind = self
+            .session
+            .resolved
+            .used_kind(&self.session.doc, id)?
+            .clone();
         let NodeKind::Path {
             path,
             corner_radii,
@@ -228,7 +231,7 @@ impl OndinApp {
         let id = card.id;
         let n = self.cleanup_numbers;
         let (world, subpaths) = self.edited_subpaths(id)?;
-        let stored = self.stored_path(id);
+        let stored = self.drawn_path(id);
         match row {
             Row::Simplify => {
                 let (_, fitted) = card.fitted.as_ref()?;
@@ -331,7 +334,7 @@ impl OndinApp {
             self.cleanup = Some(card);
             return self.close_cleanup();
         }
-        let now = self.session.doc.get(card.id).map(|n| n.kind());
+        let now = self.session.resolved.used_kind(&self.session.doc, card.id);
         if now != Some(&card.basis) {
             let Some(fresh) = self.read_cleanup(card.id) else {
                 self.cleanup = Some(card);

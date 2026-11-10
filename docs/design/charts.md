@@ -107,14 +107,7 @@ or turned, which value labels fit.
   *Nodes*), and *Values*. Part names say what they are: *Revenue · Mar*, *Tick 200*, *Legend ·
   Revenue*. The live chart and the flattened one have the same tree.
 - **Lines, areas, slices and flows are paths pinned on both edges** of the plot (or of the pie's
-  square). Today a path keeps its size under two insets (`layout.md`, *What stretches*); charts
-  need that rule changed. **A path pinned on both edges of an axis stretches**: its points are
-  scaled into the used box on that axis, and its stroke width is not. The node tool entered on a
-  stretched path first writes the drawn points back as the stored ones, with the insets
-  re-derived by `build::keep_insets`, in the same undo step as the first edit, so editing always
-  acts on what is on screen. Code export writes such a path as an inline `<svg>` with
-  `preserveAspectRatio="none"` and `vector-effect: non-scaling-stroke`, which is the same rule
-  in CSS.
+  square), which stretch with it, their stroke width unscaled (`layout.md`, *What stretches*).
 - **What a flattened chart keeps.** Resized after a flatten, it reflows exactly as the live chart
   does during a drag: columns stretch, labels stay their size and follow their places, the
   legend wraps. What it no longer does is regenerate, so its tick values and the labels shown stay

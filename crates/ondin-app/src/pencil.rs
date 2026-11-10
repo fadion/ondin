@@ -250,7 +250,7 @@ impl OndinApp {
                     run.reverse();
                 }
                 edit.subpaths[edit.active] = run;
-                let current = self.stored_path(edit.id);
+                let current = self.drawn_path(edit.id);
                 let tx = tools::rewrite_path(edit.id, edit.world, &edit.subpaths, current);
                 (edit.id, tx)
             }

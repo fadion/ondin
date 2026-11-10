@@ -383,7 +383,8 @@ impl OndinApp {
     /// A mirrored path's own axes, where they cross in its space, and its world
     /// transform; `None` for a path that is not mirrored.
     pub(crate) fn path_mirror(&self, id: NodeId) -> Option<(PathMirror, Point, Affine)> {
-        let NodeKind::Path { path, mirror, .. } = self.session.doc.get(id)?.kind() else {
+        let s = &self.session;
+        let NodeKind::Path { path, mirror, .. } = s.resolved.used_kind(&s.doc, id)? else {
             return None;
         };
         if mirror.is_none() {
@@ -484,7 +485,8 @@ impl OndinApp {
         base: &[PenSubpath],
         subpaths: Vec<PenSubpath>,
     ) -> Transaction {
-        crate::tools::rewrite_points(&self.session.doc, id, world, base, subpaths)
+        let s = &self.session;
+        crate::tools::rewrite_points(&s.doc, &s.resolved, id, world, base, subpaths)
     }
 
     /// Where adding a point at `t` along the segment leaving `at` on `id` adds one,
@@ -503,7 +505,7 @@ impl OndinApp {
         };
         let Some(NodeKind::Path {
             path, corner_radii, ..
-        }) = self.session.doc.get(id).map(|n| n.kind())
+        }) = self.session.resolved.used_kind(&self.session.doc, id)
         else {
             return vec![(at, t)];
         };
@@ -590,9 +592,8 @@ impl OndinApp {
             path, corner_radii, ..
         } = self
             .session
-            .doc
-            .get(id)
-            .map(|n| n.kind())
+            .resolved
+            .used_kind(&self.session.doc, id)
             .expect("a mirrored path")
         else {
             return out;
@@ -783,7 +784,9 @@ impl OndinApp {
         else {
             return;
         };
-        let Some(NodeKind::Path { path, .. }) = self.session.doc.get(id).map(|n| n.kind()) else {
+        let Some(NodeKind::Path { path, .. }) =
+            self.session.resolved.used_kind(&self.session.doc, id)
+        else {
             return;
         };
         let b = path.control_box();
@@ -1384,7 +1387,7 @@ mod tests {
             ((), s)
         };
         subs[0].anchors[1].at.x -= 7.0;
-        let tx = crate::tools::rewrite_path(id, world, &subs, app.stored_path(id));
+        let tx = crate::tools::rewrite_path(id, world, &subs, app.drawn_path(id));
         assert!(app.session.commit(tx));
         assert!(mirror_of(&app, id).is_none(), "dropped");
         app.undo();

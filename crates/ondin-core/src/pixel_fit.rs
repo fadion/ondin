@@ -339,7 +339,7 @@ fn fit_path(
     fitted.moved += moved;
     let NodeKind::Path {
         path, corner_radii, ..
-    } = doc.get(id)?.kind()
+    } = res.used_kind(doc, id)?
     else {
         return None;
     };

@@ -5201,7 +5201,7 @@ impl OndinApp {
                 (target.id, target.world, list, None)
             }
         };
-        let mut tx = tools::rewrite_path(host, host_world, &subpaths, self.stored_path(host));
+        let mut tx = tools::rewrite_path(host, host_world, &subpaths, self.drawn_path(host));
         if tx.0.is_empty() {
             return false;
         }
@@ -5268,7 +5268,7 @@ impl OndinApp {
         .find_map(|id| {
             let NodeKind::Path {
                 path, corner_radii, ..
-            } = self.session.doc.get(*id)?.kind()
+            } = self.session.resolved.used_kind(&self.session.doc, *id)?
             else {
                 return None;
             };
@@ -6688,7 +6688,7 @@ impl OndinApp {
             return;
         };
         let (list, pairs) = tools::split_at_points(&subpaths, &points);
-        let tx = tools::rewrite_path(id, world, &list, self.stored_path(id));
+        let tx = tools::rewrite_path(id, world, &list, self.drawn_path(id));
         self.name_step_as(crate::menu::Item::SplitAtPoint);
         if tx.0.is_empty() || !self.session.commit(tx) {
             return;
@@ -6777,7 +6777,7 @@ impl OndinApp {
         let Some((list, seam)) = tools::join_ends(&subpaths, a, b) else {
             return;
         };
-        let tx = tools::rewrite_path(id, world, &list, self.stored_path(id));
+        let tx = tools::rewrite_path(id, world, &list, self.drawn_path(id));
         self.name_step_as(crate::menu::Item::Join);
         if !tx.0.is_empty() && self.session.commit(tx) {
             self.points.set_segment(id, seam);
@@ -6802,7 +6802,7 @@ impl OndinApp {
             self.delete_selection();
             return;
         }
-        let tx = tools::rewrite_path(id, world, &left, self.stored_path(id));
+        let tx = tools::rewrite_path(id, world, &left, self.drawn_path(id));
         if !tx.0.is_empty() && self.session.commit(tx) {
             // The cut renumbers, so the set is dropped rather than remapped.
             self.points.clear();
@@ -6894,10 +6894,12 @@ impl OndinApp {
         );
     }
 
-    /// The **committed** outline and radii of `id`, for `rewrite_path`'s no-op
-    /// comparison — both, so a radius scrubbed away and back is no undo step.
-    pub(crate) fn stored_path(&self, id: NodeId) -> Option<(&ondin_core::kurbo::BezPath, &[f64])> {
-        match self.session.doc.get(id)?.kind() {
+    /// The **committed** outline and radii of `id` as drawn, for `rewrite_path`'s
+    /// no-op comparison — both, so a radius scrubbed away and back is no undo step.
+    /// Drawn, as `edited_subpaths` reads it, so a click on a stretched path writes
+    /// nothing.
+    pub(crate) fn drawn_path(&self, id: NodeId) -> Option<(&ondin_core::kurbo::BezPath, &[f64])> {
+        match self.session.resolved.used_kind(&self.session.doc, id)? {
             NodeKind::Path {
                 path, corner_radii, ..
             } => Some((path, corner_radii)),
@@ -6964,7 +6966,7 @@ impl OndinApp {
             false => picked,
         };
         tools::reverse_subpaths(&mut subpaths, &which);
-        let tx = tools::rewrite_path(id, world, &subpaths, self.stored_path(id));
+        let tx = tools::rewrite_path(id, world, &subpaths, self.drawn_path(id));
         self.name_step_as(crate::menu::Item::ReverseSubpaths);
         if tx.0.is_empty() || !self.session.commit(tx) {
             return;
@@ -7019,7 +7021,7 @@ impl OndinApp {
                 } else {
                     edit.subpaths[edit.active] = sub;
                 }
-                let current = self.stored_path(edit.id);
+                let current = self.drawn_path(edit.id);
                 let tx = tools::rewrite_path(edit.id, edit.world, &edit.subpaths, current);
                 (edit.id, tx, "Extended path")
             }
@@ -15724,6 +15726,111 @@ mod headless_app_tests {
         // The rects stay selectable, which the fourth case below needs.
         let _ = a;
         (app, id)
+    }
+
+    /// **The node tool edits a stretched path as drawn**: a path pinned on both
+    /// edges is drawn with its points stretched, its anchors are where they are
+    /// drawn, and the first edit writes the drawn points back as the stored ones
+    /// in its own undo step, the insets left drawing it where it is. A nudge of
+    /// nothing writes nothing.
+    /// flip: `path_subpaths` reading the stored kind → fails at "the anchor where
+    /// it is drawn"; `rewrite_points` comparing the stored kind → fails at "a
+    /// nudge of nothing writes nothing".
+    #[test]
+    fn the_node_tool_edits_a_stretched_path_as_drawn() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(900);
+        let (frame, id) = (ids.mint(), ids.mint());
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to((0.0, 0.0));
+        p.line_to((100.0, 0.0));
+        p.line_to((100.0, 50.0));
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::CreateNode {
+                    id: frame,
+                    parent: app.session.doc.first_page(),
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: ondin_core::kurbo::Size::new(300.0, 200.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: Some(Affine::IDENTITY),
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id,
+                    parent: frame,
+                    index: 0,
+                    kind: NodeKind::Path {
+                        path: p,
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                        mirror: ondin_core::symmetry::PathMirror::NONE,
+                    },
+                    transform: Some(Affine::translate((20.0, 20.0))),
+                    name: None,
+                },
+                Operation::SetInsets {
+                    id,
+                    insets: ondin_core::container::Insets {
+                        left: Some(ondin_core::container::LengthPct::Px(20.0)),
+                        right: Some(ondin_core::container::LengthPct::Px(80.0)),
+                        ..Default::default()
+                    },
+                },
+            ]))
+            .expect("add the pinned path");
+        app.tool = Tool::Node;
+        app.session.selection.set_one(id);
+        let (_, subs) = app.edited_subpaths(id).expect("a path");
+        assert_eq!(
+            subs[0].anchors[1].at,
+            Point::new(220.0, 20.0),
+            "the anchor where it is drawn: 100 wide stretched to 200"
+        );
+
+        let depth = app.session.history.undo_depth();
+        app.points.set_one(id, (0, 2));
+        app.nudge_points(Vec2::ZERO);
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth,
+            "a nudge of nothing writes nothing"
+        );
+
+        app.nudge_points(Vec2::new(0.0, 10.0));
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
+        let NodeKind::Path { path, .. } = app.session.doc.get(id).unwrap().kind() else {
+            panic!("still a path");
+        };
+        let stored: Vec<Point> = path
+            .elements()
+            .iter()
+            .filter_map(|e| e.end_point())
+            .collect();
+        assert_eq!(
+            stored,
+            vec![
+                Point::new(0.0, 0.0),
+                Point::new(200.0, 0.0),
+                Point::new(200.0, 60.0)
+            ],
+            "the drawn points written back, the nudge on the last"
+        );
+        let (_, subs) = app.edited_subpaths(id).expect("a path");
+        let drawn: Vec<Point> = subs[0].anchors.iter().map(|a| a.at).collect();
+        assert_eq!(
+            drawn,
+            vec![
+                Point::new(20.0, 20.0),
+                Point::new(220.0, 20.0),
+                Point::new(220.0, 80.0)
+            ],
+            "drawn where it was, the nudged point moved"
+        );
     }
 
     /// The node arrow's badge says what a press there would do with the keys

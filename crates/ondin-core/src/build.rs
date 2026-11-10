@@ -291,7 +291,8 @@ pub fn reparent_preserving_world(
 /// The operations that write `local` and `kind` into `node` as its own: a
 /// `SetTransform` where `local` differs, and a `SetGeometry` where `kind` differs
 /// and has a size to write (a shape's or frame's size, a text's sizing via
-/// [`kept_text_mode`]; not a path's, group's or image's).
+/// [`kept_text_mode`], a stretched path's points or line's end; not a group's or
+/// image's).
 ///
 /// The one spelling of "keep it where it is drawn" for every edit that takes a
 /// layer out of whatever was placing it.
@@ -315,6 +316,15 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
             NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(
                 kept_text_mode(node, kind, *sizing),
             )),
+            // A path or a line its insets stretched: the drawn points.
+            NodeKind::Path {
+                path, corner_radii, ..
+            } => Some(crate::GeometryPatch::Path {
+                path: path.clone(),
+                corner_radii: corner_radii.clone(),
+                mirror: None,
+            }),
+            NodeKind::Line { end } => Some(crate::GeometryPatch::LineEnd(*end)),
             _ => None,
         };
         if let Some(geometry) = geometry

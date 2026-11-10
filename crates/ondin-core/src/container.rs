@@ -38,10 +38,13 @@
 //!   place an edit to a child's drawn placement becomes new insets.
 //!
 //! **What stretches** is a kind whose size is a field: `Rect`, `Ellipse`,
-//! `Polygon`, `Star`, `Artboard`, and `Text` through its [`TextSizing`]. A path, a
-//! line or a boolean is positioned by its insets and keeps its size — stretching
-//! one means scaling its points, and pen-editing a stretched path then needs the
-//! inverse; that is later work. **A group or a boolean takes no insets at all**
+//! `Polygon`, `Star`, `Artboard`, and `Text` through its [`TextSizing`]. **Between
+//! two insets, a path and a line stretch too** ([`inset_stretch`]): their points
+//! are scaled into the used box, so the stroke keeps its width. That is insets
+//! only — a flex or grid container still keeps a path's size, since stretching
+//! every path in a laid column would redraw documents nobody changed. An arc is
+//! positioned and keeps its size: scaled unevenly it is no longer an arc.
+//! **A group or a boolean takes no insets at all**
 //! yet: its box is its children's, which [`crate::Resolved`] measures *after* it
 //! places them, so there is nothing to place it by. The field is stored on either
 //! and inert, as `Node::grids` is on a layer nobody offers grids for.
@@ -303,6 +306,27 @@ pub fn can_stretch(kind: &NodeKind) -> bool {
     )
 }
 
+/// Which axes `kind` stretches on when pinned on both edges of one: both for a
+/// kind [`can_stretch`] says has a size, and for a path or a line each axis its
+/// box has length on. A flat axis has nothing to scale, so a horizontal rule
+/// pinned top and bottom keeps its place by its top inset, as an arc does.
+pub fn inset_stretch(kind: &NodeKind) -> (bool, bool) {
+    if can_stretch(kind) {
+        return (true, true);
+    }
+    match kind {
+        NodeKind::Path { .. } | NodeKind::Line { .. } => geometry::local_bounds(kind, None)
+            .map_or((false, false), |b| {
+                (b.width() > FLAT_EXTENT, b.height() > FLAT_EXTENT)
+            }),
+        _ => (false, false),
+    }
+}
+
+/// The extent below which a path's axis is flat and does not stretch: scaling
+/// from a box this thin multiplies its float noise into the drawing.
+const FLAT_EXTENT: f64 = 1e-6;
+
 /// Whether `kind` can be placed by insets at all — every kind with a box of its
 /// own. A group and a boolean take their box from their children and are not
 /// (see the module doc).
@@ -318,11 +342,43 @@ pub fn takes_insets(kind: &NodeKind) -> bool {
 /// A size kind takes the size whole. **Text keeps its sizing mode's meaning** as
 /// far as it can: a stretched width is a wrap width, so auto-width text wraps at
 /// it (`AutoHeight`); a stretched height has nowhere to go but a fixed box, so the
-/// node becomes `Fixed` at its current width and the stretched height. Anything
-/// else comes back unchanged — [`can_stretch`] is the gate, and this is only asked
-/// behind it.
+/// node becomes `Fixed` at its current width and the stretched height. A path or
+/// a line has its points scaled about its box's origin on each stretched axis, so
+/// its corner radii and its stroke stay in units. Anything else comes back
+/// unchanged — [`can_stretch`] and [`inset_stretch`] are the gates, and this is
+/// only asked behind one.
 pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind {
     let mut out = kind.clone();
+    if matches!(kind, NodeKind::Path { .. } | NodeKind::Line { .. }) {
+        let Some(b) = geometry::local_bounds(kind, None) else {
+            return out;
+        };
+        let scale = |on: bool, from: f64, to: f64| {
+            if on && from > FLAT_EXTENT {
+                to / from
+            } else {
+                1.0
+            }
+        };
+        let (sx, sy) = (
+            scale(stretched.0, b.width(), size.width),
+            scale(stretched.1, b.height(), size.height),
+        );
+        match &mut out {
+            // A rounded path's box is its rounded outline's, a little inside the
+            // points', so the scaled box can miss `size` by a fraction of a radius;
+            // `place` measures the result again rather than assuming it.
+            NodeKind::Path { path, .. } => path.apply_affine(
+                Affine::translate(b.origin().to_vec2())
+                    * Affine::scale_non_uniform(sx, sy)
+                    * Affine::translate(-b.origin().to_vec2()),
+            ),
+            // A line starts at its origin, so it scales about that.
+            NodeKind::Line { end } => *end = Point::new(end.x * sx, end.y * sy),
+            _ => {}
+        }
+        return out;
+    }
     match &mut out {
         NodeKind::Rect { size: s, .. }
         | NodeKind::Ellipse { size: s, .. }
@@ -450,13 +506,13 @@ pub fn place(
     }
     let bx = geometry::local_bounds(kind, None)?;
     let implicit = slot_of(stored, bx);
-    let stretchy = can_stretch(kind);
+    let stretchy = inset_stretch(kind);
     let (x, w) = insets
         .horizontal()
-        .resolve(frame.width, bx.width(), implicit.x, stretchy);
+        .resolve(frame.width, bx.width(), implicit.x, stretchy.0);
     let (y, h) = insets
         .vertical()
-        .resolve(frame.height, bx.height(), implicit.y, stretchy);
+        .resolve(frame.height, bx.height(), implicit.y, stretchy.1);
     let stretched = (w != bx.width(), h != bx.height());
     let (used_kind, used_box) = if stretched.0 || stretched.1 {
         let k = resized(kind, Size::new(w, h), stretched);
@@ -479,13 +535,13 @@ pub fn place(
 /// axis are rewritten.
 pub fn inverse(insets: &Insets, frame: Size, local: Affine, bx: Rect, kind: &NodeKind) -> Insets {
     let slot = slot_of(local, bx);
-    let stretchy = can_stretch(kind);
+    let stretchy = inset_stretch(kind);
     let h = insets
         .horizontal()
-        .inverse(frame.width, slot.x, bx.width(), stretchy);
+        .inverse(frame.width, slot.x, bx.width(), stretchy.0);
     let v = insets
         .vertical()
-        .inverse(frame.height, slot.y, bx.height(), stretchy);
+        .inverse(frame.height, slot.y, bx.height(), stretchy.1);
     Insets {
         left: h.start,
         right: h.end,
@@ -3508,6 +3564,10 @@ mod tests {
         Some(LengthPct::Px(v))
     }
 
+    fn pct(v: f64) -> Option<LengthPct> {
+        Some(LengthPct::Percent(v))
+    }
+
     /// The slot the used transform puts the box's top-left in, and the used size.
     fn placed(insets: Insets, stored: Affine, kind: &NodeKind) -> (Point, Size) {
         let (local, used) = place(&insets, FRAME, stored, kind).expect("placed");
@@ -3533,11 +3593,25 @@ mod tests {
         assert_eq!(size, Size::new(100.0, 50.0));
     }
 
-    /// Both insets on an axis stretch a kind with a size (§15 D874's first
-    /// ruling) and over-constrain one without: a path keeps its size and the end
-    /// inset is ignored, CSS's rule.
+    fn path_of(points: &[(f64, f64)]) -> NodeKind {
+        let mut path = kurbo::BezPath::new();
+        path.move_to(points[0]);
+        for p in &points[1..] {
+            path.line_to(*p);
+        }
+        NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
+        }
+    }
+
+    /// Both insets on an axis stretch a kind with a size, and a path or a line
+    /// too, by its points; an arc is over-constrained and its end inset ignored,
+    /// CSS's rule.
     #[test]
-    fn two_insets_stretch_a_sized_kind_and_are_over_constrained_for_a_path() {
+    fn two_insets_stretch_a_sized_kind_a_path_and_a_line_and_not_an_arc() {
         let insets = Insets {
             left: px(10.0),
             right: px(20.0),
@@ -3546,21 +3620,88 @@ mod tests {
         let (slot, size) = placed(insets, Affine::IDENTITY, &rect(100.0, 50.0));
         assert_eq!((slot.x, size.width), (10.0, 270.0), "300 less 10 less 20");
 
-        let mut line = kurbo::BezPath::new();
-        line.move_to((0.0, 0.0));
-        line.line_to((100.0, 50.0));
-        let path = NodeKind::Path {
-            path: line,
-            corner_radii: Vec::new(),
-            corner_smoothing: 0.0,
-            mirror: crate::symmetry::PathMirror::NONE,
-        };
+        let path = path_of(&[(0.0, 0.0), (100.0, 50.0)]);
         let (slot, size) = placed(insets, Affine::IDENTITY, &path);
+        assert_eq!((slot.x, size.width), (10.0, 270.0), "a path stretches");
+        assert_eq!(size.height, 50.0, "on the pinned axis only");
+
+        let line = NodeKind::Line {
+            end: Point::new(100.0, 50.0),
+        };
+        let (slot, size) = placed(insets, Affine::IDENTITY, &line);
+        assert_eq!((slot.x, size.width), (10.0, 270.0), "a line stretches");
+
+        let arc = NodeKind::Arc {
+            end: Point::new(100.0, 0.0),
+            sweep: 90.0,
+        };
+        let (slot, size) = placed(insets, Affine::IDENTITY, &arc);
         assert_eq!(
             (slot.x, size.width),
             (10.0, 100.0),
-            "a path cannot stretch: its left holds and its right is ignored"
+            "an arc cannot stretch: its left holds and its right is ignored"
         );
+    }
+
+    /// A stretched path's points are scaled into the used box, each keeping its
+    /// place as a share of the box, so its stroke (on the transform) keeps its
+    /// width. A path offset from its origin and pinned in percent lands its box
+    /// on the percentages.
+    #[test]
+    fn a_stretched_path_scales_its_points_into_the_used_box() {
+        let kind = path_of(&[(20.0, 10.0), (60.0, 30.0), (120.0, 10.0)]);
+        let insets = Insets {
+            left: pct(10.0),
+            right: pct(30.0),
+            top: px(0.0),
+            bottom: px(0.0),
+            ..Default::default()
+        };
+        let (local, used) = place(&insets, FRAME, Affine::IDENTITY, &kind).expect("placed");
+        let Some(NodeKind::Path { path, .. }) = used else {
+            panic!("a stretched path has a used kind");
+        };
+        let world: Vec<Point> = path
+            .elements()
+            .iter()
+            .filter_map(|e| e.end_point())
+            .map(|p| local * p)
+            .collect();
+        let near = |a: Point, b: Point| (a - b).hypot() < 1e-9;
+        assert!(
+            near(world[0], Point::new(30.0, 0.0)),
+            "left 10% of 300, top 0: {world:?}"
+        );
+        assert!(
+            near(world[1], Point::new(102.0, 200.0)),
+            "40% across 180 from 30, the bottom"
+        );
+        assert!(
+            near(world[2], Point::new(210.0, 0.0)),
+            "right 30% leaves 210"
+        );
+        assert_eq!(
+            local.as_coeffs()[..4],
+            [1.0, 0.0, 0.0, 1.0],
+            "the transform is not scaled"
+        );
+    }
+
+    /// An axis a path has no length on does not stretch: a horizontal rule pinned
+    /// on all four edges stretches across and keeps its place by its top inset.
+    #[test]
+    fn a_flat_axis_does_not_stretch() {
+        let rule = path_of(&[(0.0, 0.0), (100.0, 0.0)]);
+        assert_eq!(inset_stretch(&rule), (true, false));
+        let insets = Insets {
+            left: px(0.0),
+            right: px(0.0),
+            top: px(40.0),
+            bottom: px(40.0),
+            ..Default::default()
+        };
+        let (slot, size) = placed(insets, Affine::IDENTITY, &rule);
+        assert_eq!((slot, size), (Point::new(0.0, 40.0), Size::new(300.0, 0.0)));
     }
 
     /// `margin: auto` between two insets centres at the box's own size, and one
@@ -3756,28 +3897,24 @@ mod tests {
         assert!(out.margin_auto.is_none());
     }
 
-    /// **A path pinned on both sides of an axis stores its true end distance**
-    /// (§15 D938). A path cannot stretch, so between two plain insets its end inset
-    /// is ignored when placing — and `with_edge`'s `0` placeholder for the second
-    /// edge survived `inverse`, which returned early for a placement that had not
-    /// moved. Stored `right: 0`, 180 px from the edge: un-pinning the left then
-    /// jumped the path flush right, and centring between the two moved it to x 110.
+    /// **A kind that cannot stretch, pinned on both sides of an axis, stores its
+    /// true end distance**: its end inset is ignored when placing, and
+    /// `with_edge`'s `0` placeholder for the second edge must not survive
+    /// `inverse`. Stored `right: 0`, 180 px from the edge, un-pinning the left
+    /// would jump the arc flush right, and centring would move it to x 110.
     ///
-    /// **Flip run**, `inverse`'s end check dropped: fails on *"the true distance"*,
-    /// `Px(0)` against `Px(180)`, the predicted site.
+    /// flip: `inverse`'s end check dropped → fails at *"the true distance"*.
     #[test]
-    fn a_path_pinned_on_both_sides_stores_its_true_end_distance() {
-        let mut path = kurbo::BezPath::new();
-        path.move_to((0.0, 0.0));
-        path.line_to((100.0, 0.0));
-        path.line_to((50.0, 50.0));
-        path.close_path();
-        let kind = NodeKind::Path {
-            path,
-            corner_radii: Vec::new(),
-            corner_smoothing: 0.0,
-            mirror: crate::symmetry::PathMirror::NONE,
+    fn an_arc_pinned_on_both_sides_stores_its_true_end_distance() {
+        let kind = NodeKind::Arc {
+            end: Point::new(100.0, 0.0),
+            sweep: 90.0,
         };
+        assert_eq!(
+            inset_stretch(&kind),
+            (false, false),
+            "the fixture: an arc keeps its size"
+        );
         let bx = geometry::local_bounds(&kind, None).unwrap();
         let at = Affine::translate((20.0, 10.0));
         let mut insets = Insets::default();

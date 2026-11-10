@@ -1883,9 +1883,7 @@ impl Walk<'_> {
                             el.set(prop, "auto");
                         }
                     }
-                    if !container::can_stretch(kind) {
-                        stretched = (false, false);
-                    }
+                    stretched = stretched_axes(stretched, insets, kind);
                 } else {
                     el.set("left", px(slot.x));
                     el.set("top", px(slot.y));
@@ -2995,6 +2993,37 @@ impl Walk<'_> {
         pic.set("height", px(ink.height()));
         pic.set("transform-origin", "0 0");
         let at_ink = Affine::translate(ink.origin().to_vec2());
+        // A path or a line stretched between its insets: a box the insets place,
+        // and the picture filling it as the canvas stretches the points — the
+        // geometry box as the view, scaled unevenly, the stroke not scaled.
+        // An axis it does not stretch on keeps the ink as its view, at its size,
+        // so a flat rule (no height to scale) still draws. Its offset into the
+        // box is a whole number, the view starting that far out: Chrome snaps a
+        // replaced element's box to the pixel, and a fractional `top` moved the
+        // stroke by up to half a pixel.
+        if pic.markup.is_some()
+            && let Some((mut holder, g, on)) = self.stretching_holder(node, ink, world, place)
+        {
+            let span = |on: bool, g0: f64, g1: f64, len: f64| match on {
+                true => (g0, g1, "0".to_string(), "100%".to_string()),
+                false => {
+                    let out = g0.ceil();
+                    (g0 - out, len, px(-out), px(len - (g0 - out)))
+                }
+            };
+            let (x0, x1, left, width) = span(on.0, g.x0, g.x1, ink.width());
+            let (y0, y1, top, height) = span(on.1, g.y0, g.y1, ink.height());
+            if let Some(m) = pic.markup.take() {
+                pic.markup = Some(stretched_markup(&m, Rect::new(x0, y0, x1, y1)));
+            }
+            pic.set("left", left);
+            pic.set("top", top);
+            pic.set("width", width);
+            pic.set("height", height);
+            pic.set("overflow", "visible");
+            holder.children.push(Child::Element(Box::new(pic)));
+            return Some(holder);
+        }
         match place {
             // A component's root is only ever a CSS element (`Walk::why_inline`).
             Place::Free { .. } | Place::Root => {
@@ -3023,6 +3052,52 @@ impl Walk<'_> {
                 Some(holder)
             }
         }
+    }
+
+    /// For a picture of a path or a line that its insets stretch, the box they
+    /// place it in, its geometry box in the picture's own space (`ink`'s corner
+    /// at `0 0`) and the axes stretched. `None` for anything else, and for a layer drawn turned,
+    /// skewed or scaled: its picture is in world axes, which stretching the box
+    /// would not follow, so it keeps its size as it did, and the report says so.
+    fn stretching_holder(
+        &mut self,
+        node: &Node,
+        ink: Rect,
+        world: Affine,
+        place: Place,
+    ) -> Option<(Element, Rect, (bool, bool))> {
+        let Place::Free { boxed: true, .. } = place else {
+            return None;
+        };
+        let kind = self.res.used_kind_of(node).clone();
+        let insets = node.insets();
+        if !matches!(kind, NodeKind::Path { .. } | NodeKind::Line { .. }) || !insets.is_authored() {
+            return None;
+        }
+        let both = (
+            insets.left.is_some() && insets.right.is_some(),
+            insets.top.is_some() && insets.bottom.is_some(),
+        );
+        let stretched = stretched_axes(both, insets, &kind);
+        if !(stretched.0 || stretched.1) {
+            return None;
+        }
+        let [a, b, c, d, ..] = world.as_coeffs();
+        if (a - 1.0).abs() > 1e-9 || b.abs() > 1e-9 || c.abs() > 1e-9 || (d - 1.0).abs() > 1e-9 {
+            self.report.approximate(format!(
+                "{} {}: stretched between its insets while turned or scaled, \
+                 written at its drawn size",
+                kind_word(node),
+                label(node)
+            ));
+            return None;
+        }
+        let bx = self.box_rect(node)?;
+        let view = bx + (world.translation() - ink.origin().to_vec2());
+        let class = self.classes.mint(&format!("{} box", node.name()), "box");
+        let mut holder = Element::new("div", class);
+        self.place(&mut holder, node, &kind, Some(bx), place);
+        Some((holder, view, stretched))
     }
 }
 
@@ -3154,6 +3229,47 @@ fn set_transform(el: &mut Element, t: Affine) {
     } else if let Some(m) = css::matrix(t) {
         el.set("transform", m);
     }
+}
+
+/// Which of the axes `both` says carry two insets stretch the layer, as
+/// `container::place` lays it: one the kind stretches on (`inset_stretch`) and
+/// with no auto margin, which centres at the layer's own size instead.
+fn stretched_axes(both: (bool, bool), insets: &container::Insets, kind: &NodeKind) -> (bool, bool) {
+    let can = container::inset_stretch(kind);
+    let m = insets.margin_auto;
+    (
+        both.0 && can.0 && !(m.left || m.right),
+        both.1 && can.1 && !(m.top || m.bottom),
+    )
+}
+
+/// An inline `<svg>` from the SVG writer made to stretch: `view` as its view box,
+/// drawn unevenly into whatever box CSS gives it (`preserveAspectRatio="none"`),
+/// its shapes' strokes kept at their width (`vector-effect`), which is the
+/// canvas's rule for a stretched path.
+fn stretched_markup(svg: &str, view: Rect) -> String {
+    let open_end = svg.find('>').unwrap_or(svg.len());
+    let (open, rest) = svg.split_at(open_end);
+    let open = match (
+        open.find("viewBox=\""),
+        open.find("viewBox=\"")
+            .and_then(|s| open[s + 9..].find('"').map(|e| s + 9 + e)),
+    ) {
+        (Some(s), Some(e)) => format!(
+            "{}viewBox=\"{} {} {} {}\" preserveAspectRatio=\"none\"{}",
+            &open[..s],
+            fmt(view.min_x()),
+            fmt(view.min_y()),
+            fmt(view.width()),
+            fmt(view.height()),
+            &open[e + 1..]
+        ),
+        _ => open.to_string(),
+    };
+    let rest = rest
+        .replace("<path ", "<path vector-effect=\"non-scaling-stroke\" ")
+        .replace("<line ", "<line vector-effect=\"non-scaling-stroke\" ");
+    open + &rest
 }
 
 /// One axis of insets. Answers whether both are set, which stretches the layer.

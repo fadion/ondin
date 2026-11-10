@@ -16,36 +16,31 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-1. **Paths that stretch** — a `Path` or `Line` pinned on both edges of an axis scales its points
-   into the used box, its stroke width unscaled (insets only: flex and grid still keep a path's
-   size); the node tool writes the drawn points back before its first edit; code export's
-   stretching `<svg>`. Changes `layout.md`'s *What stretches*. Charts lay their lines, areas,
-   slices and flows out on it, so it lands first.
-2. **The model** — `Node::chart` on a frame, `chart::Chart` and its table, `SetChart`,
-   `chart::check` (parts written only by their chart, the placement refusals), `chart::flatten`,
-   the DTO and its schema bump, the clipboard dropping the link.
-3. **The generator, part tree and bars** — `chart::generate`'s scaffold: the part tree on the
-   container layout (flex column, legend, the Body grid, percentage insets in the plot), nice
-   ticks, number formats, label thinning and turning; Column and Bar with their variants and
-   stacking. `chart::settle` as a commit pass after layout, keeping ids by `PartKey`. Goldens
-   through the SVG writer, and at three sizes, flattened, to pin the reflow.
-4. **The generator, the other kinds** — Line and Area (straight, the monotone curve, step,
-   stacking, gaps), Pie and Donut (*Other*, sorting, labels), Scatter and Bubble, Sankey
-   (columns, alignment, relaxation passes, ribbons, loop refusal), the limits and the left-out
-   values. Goldens per kind.
-5. **Making and selecting** — the nine glyphs, the rail's Chart slot and `J`, the create gesture
-   and sample tables, a chart selecting as one layer, double-click to its cell, the layers row,
-   `RenderOverrides::chart` for scrub previews.
-6. **The Chart card** — type, style presets, data summary and mapping, series (*Nodes* for a
-   Sankey), marks, axes, values, legend, text, palettes (*From variables* included), flatten and
-   its `Ctrl+E` door.
-7. **The data window** — the grid, its keyboard, range selection, TSV copy and paste, the header
-   and row menus, the undo steps.
-8. **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the
-   link with the tokens link's path rules, watching, the pill and *Update*, relink and unlink.
-9. **Elsewhere** — the snapshot's `chart`, the four verbs, code export writing the chart's layout,
-   compare's rows, the context menu, the palette rows, `control_audit` for the card and the
-   window.
+- **The model** — `Node::chart` on a frame, `chart::Chart` and its table, `SetChart`,
+  `chart::check` (parts written only by their chart, the placement refusals), `chart::flatten`,
+  the DTO (joining the unreleased v15, so no bump of its own), the clipboard dropping the link.
+- **The generator, part tree and bars** — `chart::generate`'s scaffold: the part tree on the
+  container layout (flex column, legend, the Body grid, percentage insets in the plot), nice
+  ticks, number formats, label thinning and turning; Column and Bar with their variants and
+  stacking. `chart::settle` as a commit pass after layout, keeping ids by `PartKey`. Goldens
+  through the SVG writer, and at three sizes, flattened, to pin the reflow.
+- **The generator, the other kinds** — Line and Area (straight, the monotone curve, step,
+  stacking, gaps), Pie and Donut (*Other*, sorting, labels), Scatter and Bubble, Sankey
+  (columns, alignment, relaxation passes, ribbons, loop refusal), the limits and the left-out
+  values. Goldens per kind.
+- **Making and selecting** — the nine glyphs, the rail's Chart slot and `J`, the create gesture
+  and sample tables, a chart selecting as one layer, double-click to its cell, the layers row,
+  `RenderOverrides::chart` for scrub previews.
+- **The Chart card** — type, style presets, data summary and mapping, series (*Nodes* for a
+  Sankey), marks, axes, values, legend, text, palettes (*From variables* included), flatten and
+  its `Ctrl+E` door.
+- **The data window** — the grid, its keyboard, range selection, TSV copy and paste, the header
+  and row menus, the undo steps.
+- **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the
+  link with the tokens link's path rules, watching, the pill and *Update*, relink and unlink.
+- **Elsewhere** — the snapshot's `chart`, the four verbs, code export writing the chart's layout,
+  compare's rows, the context menu, the palette rows, `control_audit` for the card and the
+  window.
 
 ## Now · Icon packs
 

@@ -58,10 +58,12 @@ pub fn affine_is_finite(t: Affine) -> bool {
 /// The largest magnitude a stored length or coordinate may have: a node's size,
 /// a path's points, a transform's coefficients, a pivot.
 ///
-/// A million document units is far past any design, while a shape with no ceiling
-/// (a 1e50-wide ellipse) overflows the GPU renderer's buffers and the canvas draws
-/// nothing. The operations and the loader clamp to it rather than refuse, so a
-/// gesture past it stops at it; the app's numeric fields stop at it too.
+/// A million document units is far past any design, while a number with no
+/// ceiling stalls every pass that walks a shape's extent. It bounds each stored
+/// number, not their products: a scale on a large shape can still reach a size
+/// the GPU cannot draw, which the scene walk skips (`scene::MAX_DEVICE_EXTENT`).
+/// The operations and the loader clamp to it rather than refuse, so a gesture
+/// past it commits at it; the app's numeric fields stop at it too.
 pub const GEOMETRY_LIMIT: f64 = 1_000_000.0;
 
 /// `v` held to ±[`GEOMETRY_LIMIT`]. A `NaN` passes through, so callers test
@@ -70,10 +72,18 @@ pub fn clamp_coord(v: f64) -> f64 {
     v.clamp(-GEOMETRY_LIMIT, GEOMETRY_LIMIT)
 }
 
-/// `t` with every coefficient held to ±[`GEOMETRY_LIMIT`]: the translation, and
-/// the linear part, since a huge scale on a small shape is the same huge shape.
+/// `t` with every coefficient held to ±[`GEOMETRY_LIMIT`]: the translation one
+/// by one, and the linear part scaled as a whole until its largest coefficient
+/// is at the limit, so a rotation, skew or mirror keeps its shape.
 pub fn clamp_affine(t: Affine) -> Affine {
-    Affine::new(t.as_coeffs().map(clamp_coord))
+    let [a, b, c, d, e, f] = t.as_coeffs();
+    let largest = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
+    let k = if largest > GEOMETRY_LIMIT {
+        GEOMETRY_LIMIT / largest
+    } else {
+        1.0
+    };
+    Affine::new([a * k, b * k, c * k, d * k, clamp_coord(e), clamp_coord(f)])
 }
 
 /// Whether `t` can be inverted without manufacturing a value the file cannot

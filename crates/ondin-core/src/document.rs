@@ -4924,6 +4924,71 @@ mod tests {
         assert_eq!(pad, crate::build::GEOMETRY_LIMIT, "the loaded padding");
     }
 
+    /// A write past the limit onto a layer already at it changes nothing, so a
+    /// nudge or a drag at the edge is no undo step.
+    /// flip: `changes_nothing`'s `SetTransform` arm comparing the raw transform →
+    /// fails at "a nudge past the limit".
+    #[test]
+    fn a_write_past_the_limit_onto_a_layer_at_it_changes_nothing() {
+        let lim = crate::build::GEOMETRY_LIMIT;
+        let (mut doc, _root, ab) = base();
+        let r = IdSource::new(0xC20).mint();
+        let mut n = stroked_flex(r, 1e50);
+        n.transform = Affine::translate((lim, 0.0));
+        insert(&mut doc, vec![n.clone()], ab).expect("a rect at the limit");
+        let nudge = Operation::SetTransform {
+            id: r,
+            transform: Affine::translate((lim + 1.0, 0.0)),
+        };
+        assert!(nudge.changes_nothing(&doc), "a nudge past the limit");
+        let strokes = Operation::SetStrokes {
+            id: r,
+            strokes: n.paint.strokes.clone(),
+        };
+        assert!(strokes.changes_nothing(&doc), "a stroke past the limit");
+        let display = Operation::SetDisplay {
+            id: r,
+            display: n.display.clone(),
+        };
+        assert!(display.changes_nothing(&doc), "a gap past the limit");
+        let back = Operation::SetTransform {
+            id: r,
+            transform: Affine::translate((lim - 1.0, 0.0)),
+        };
+        assert!(
+            !back.changes_nothing(&doc),
+            "control: a nudge back is a change"
+        );
+    }
+
+    /// A transform past the limit keeps its shape: the linear part is scaled as a
+    /// whole, so a rotation keeps its angle and a matrix its handedness.
+    /// flip: `clamp_affine` clamping each coefficient on its own → fails at "the
+    /// angle".
+    #[test]
+    fn a_clamped_transform_keeps_its_shape() {
+        use crate::build::{GEOMETRY_LIMIT, clamp_affine};
+        let turned = Affine::rotate(30f64.to_radians()) * Affine::scale(2e6);
+        let [a, b, ..] = clamp_affine(turned).as_coeffs();
+        assert!(
+            (b.atan2(a).to_degrees() - 30.0).abs() < 1e-9,
+            "the angle: {}",
+            b.atan2(a).to_degrees()
+        );
+        let skewed = Affine::new([2e6, 1e6, 1e6, 0.6e6, 0.0, 0.0]);
+        let clamped = clamp_affine(skewed);
+        assert!(
+            clamped.determinant().signum() == skewed.determinant().signum(),
+            "the handedness"
+        );
+        assert!(
+            clamped.as_coeffs()[..4]
+                .iter()
+                .all(|v| v.abs() <= GEOMETRY_LIMIT),
+            "and within the limit"
+        );
+    }
+
     /// The pivot arm's twin for **paint** (§15 D831): `op_set_fills` and
     /// `op_set_strokes` ask `build::brush_is_finite` (§15 D451), and so must this
     /// door, which a paste reaches.

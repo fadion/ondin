@@ -1630,8 +1630,8 @@ pub struct Fill {
     pub visible: bool,
 }
 
-/// The largest magnitude of a stroke's width, a per-side width, a dash length,
-/// spacing or offset, in world units.
+/// The largest magnitude of a stroke's width, a per-side width, or a dash length
+/// or spacing, in world units.
 ///
 /// A stroke draws its outline offset by half its width, so a 1e50 stroke on a
 /// small shape is a 1e50 shape and the GPU renderer draws nothing. The
@@ -1883,13 +1883,13 @@ impl DashStyle {
 }
 
 impl Stroke {
-    /// The width, per-side widths, dashes and dash offset held to
-    /// ±[`MAX_STROKE_WIDTH`]. Asked after the finite check: a clamp passes `NaN`
-    /// through.
+    /// The width, per-side widths and dashes held to ±[`MAX_STROKE_WIDTH`]. Not
+    /// the dash offset: it is a phase along the pattern, which no value of it
+    /// widens, and a clamp would shift the dashes. Asked after the finite check:
+    /// a clamp passes `NaN` through.
     pub fn clamp_lengths(&mut self) {
         let c = |v: &mut f64| *v = v.clamp(-MAX_STROKE_WIDTH, MAX_STROKE_WIDTH);
         c(&mut self.width);
-        c(&mut self.dash_offset);
         self.dashes.iter_mut().for_each(c);
         if let StrokeSides::Custom {
             top,

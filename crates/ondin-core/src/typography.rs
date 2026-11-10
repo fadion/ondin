@@ -662,7 +662,9 @@ pub struct TextStyle {
 /// Smallest font size the fields accept. Zero is not a size, and a negative one
 /// is not a drawing.
 pub const MIN_FONT_SIZE: f64 = 1.0;
-/// Largest font size the fields accept — a cap on the control, not on the model.
+/// Largest font size: the fields stop at it, and a character attribute set or
+/// scaled through [`TextStyle`] is clamped to it. A whole style written by an
+/// operation or read from a file is not.
 pub const MAX_FONT_SIZE: f64 = 1000.0;
 
 impl Default for TextStyle {

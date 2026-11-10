@@ -1029,9 +1029,12 @@ impl Operation {
             Operation::SetStyleName { id, name } => {
                 doc.styles().get(*id).is_some_and(|s| s.name == *name)
             }
-            Operation::SetStyleValue { id, value } => {
-                doc.styles().get(*id).is_some_and(|s| s.value == *value)
-            }
+            // What `apply` would store: the value with its lengths clamped.
+            Operation::SetStyleValue { id, value } => doc.styles().get(*id).is_some_and(|s| {
+                let mut stored = value.clone();
+                stored.clamp_lengths();
+                s.value == stored
+            }),
             Operation::SetStyleOrigin { id, origin } => {
                 doc.styles().get(*id).is_some_and(|s| s.origin == *origin)
             }
@@ -1128,8 +1131,11 @@ impl Operation {
                 node(id).is_some_and(|n| n.origin() == origin.as_ref())
             }
 
+            // This arm and the pivot, stroke and layout arms below compare what
+            // `apply` stores, which is clamped to the geometry and stroke limits:
+            // a write past the limit onto a layer already at it changes nothing.
             Operation::SetTransform { id, transform } => {
-                node(id).is_some_and(|n| n.transform() == *transform)
+                node(id).is_some_and(|n| n.transform() == crate::build::clamp_affine(*transform))
             }
             // **Asked of the result rather than of the patch**, which makes this
             // arm exact for every patch shape: a patch that does not match the
@@ -1229,7 +1235,9 @@ impl Operation {
                 node(id).is_some_and(|n| n.opacity() == *opacity)
             }
             Operation::SetBlend { id, blend } => node(id).is_some_and(|n| n.blend() == *blend),
-            Operation::SetPivot { id, pivot } => node(id).is_some_and(|n| n.pivot() == *pivot),
+            Operation::SetPivot { id, pivot } => {
+                node(id).is_some_and(|n| n.pivot() == pivot.map(crate::node::Pivot::clamped))
+            }
             Operation::SetClip { id, clip } => node(id).is_some_and(|n| n.clip() == *clip),
             Operation::SetMask { id, mask } => node(id).is_some_and(|n| n.mask() == *mask),
             Operation::SetMaskMode { id, mode } => node(id).is_some_and(|n| n.mask_mode() == *mode),
@@ -1241,9 +1249,18 @@ impl Operation {
             Operation::SetFills { id, fills } => {
                 node(id).is_some_and(|n| n.kind().takes_paint() && n.paint().fills == *fills)
             }
-            Operation::SetStrokes { id, strokes } => {
-                node(id).is_some_and(|n| n.kind().takes_paint() && n.paint().strokes == *strokes)
-            }
+            Operation::SetStrokes { id, strokes } => node(id).is_some_and(|n| {
+                n.kind().takes_paint()
+                    && n.paint()
+                        .strokes
+                        .iter()
+                        .cloned()
+                        .eq(strokes.iter().map(|k| {
+                            let mut k = k.clone();
+                            k.value.clamp_lengths();
+                            k
+                        }))
+            }),
             // The root is the one kind `op_set_effects` refuses; the rest carry
             // the stack whether they paint or not.
             Operation::SetEffects { id, effects } => node(id)
@@ -1252,11 +1269,23 @@ impl Operation {
                 node(id).is_some_and(|n| n.exports() == exports)
             }
             Operation::SetLayoutGrids { id, grids } => node(id).is_some_and(|n| n.grids() == grids),
-            Operation::SetInsets { id, insets } => node(id).is_some_and(|n| n.insets() == insets),
-            Operation::SetDisplay { id, display } => {
-                node(id).is_some_and(|n| n.display() == display.as_ref())
-            }
-            Operation::SetLayoutItem { id, item } => node(id).is_some_and(|n| n.item() == item),
+            Operation::SetInsets { id, insets } => node(id).is_some_and(|n| {
+                let mut stored = *insets;
+                stored.clamp_lengths();
+                *n.insets() == stored
+            }),
+            Operation::SetDisplay { id, display } => node(id).is_some_and(|n| {
+                let mut stored = display.clone();
+                if let Some(d) = &mut stored {
+                    d.clamp_lengths();
+                }
+                n.display() == stored.as_ref()
+            }),
+            Operation::SetLayoutItem { id, item } => node(id).is_some_and(|n| {
+                let mut stored = *item;
+                stored.clamp_lengths();
+                *n.item() == stored
+            }),
             Operation::SetComponent { id, component } => {
                 node(id).is_some_and(|n| n.component() == *component)
             }

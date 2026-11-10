@@ -54,6 +54,7 @@ A **variable** is a named, typed value — **colour, number, string or boolean**
 
 **Deletion and leaving a document**
 - Deleting a variable in use **detaches** every field bound to it to the value it resolved to, as ops in the deleting transaction (as a deleted main, §5.3d). Deleting a style detaches its users likewise.
+- **A chart's colours bind in its description**, and its parts draw the same binding. The chart frame is the user every flow counts, detaches and rebinds, never a part (`charts.md`, *A chart's colours bind*): its colours are fills to the scope, and a detach rewrites the description and the parts together through `chart::rebind_ops`.
 - A paste into another document rebinds to a variable of the same name and type whose scope takes the field, the namesake in the collection of the same name first (`CarriedVar::collection`), else detaches to the resolved value; within a document the binding is kept. A copied frame's modes map by name within the collection of the same name, else the first (`CarriedMode`), else *Inherit*; a kit mode is kept, one of the target's own kit becomes the document mode it maps from. Its width queries map their keys the same way, each keeping its width; a query left with no mode, spanning two collections, or over a collection already queried goes. `variable::detached` drops queries with modes. *Paste properties* uses the same rule through `variable::rebind(t, carried, v, field)`; presets hold nothing bindable.
 - A ghost (drag preview) resolves in the default mode; the snapshot reports the resolved value.
 

@@ -2951,7 +2951,7 @@ fn chart_valid(a: &Args<'_>, chart: &crate::chart::Chart) -> Result<(), VerbErro
     chart.validate().map_err(|rule| {
         let param = match rule {
             R::UnknownColumn => "mapping",
-            R::BadOption | R::BoundColour => "options",
+            R::BadOption => "options",
             _ => "table",
         };
         let param = if a.verb.params.iter().any(|p| p.name == param) {

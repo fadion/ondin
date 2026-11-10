@@ -543,6 +543,7 @@ impl OndinApp {
         // *Solid* writes the colour drawn, ending it.
         let key = match slot {
             PaintSlot::VarCell(var, mode) => Some(FaceTarget::Cell(var, mode)),
+            PaintSlot::Chart(_) => Some(FaceTarget::Field(FieldKey::Paint { id: node, slot })),
             _ => super::binding::paint_item(slot)
                 .map(|_| FaceTarget::Field(FieldKey::Paint { id: node, slot })),
         };

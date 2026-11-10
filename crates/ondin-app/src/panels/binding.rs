@@ -877,6 +877,14 @@ impl OndinApp {
     /// `key` bound to `var`, or detached for `None`, on every layer its card edits
     /// (`build::bind_field_ops`).
     fn field_tx(&self, key: FieldKey, var: Option<VarId>) -> Transaction {
+        // A chart's colour lives in its description, not in a layer's list.
+        if let FieldKey::Paint {
+            id,
+            slot: PaintSlot::Chart(colour),
+        } = key
+        {
+            return self.chart_bind_tx(id, colour, var, None);
+        }
         match key.bound() {
             Some(field) => ondin_core::build::bind_field_ops(
                 &self.session.doc,
@@ -991,6 +999,10 @@ impl OndinApp {
     pub(crate) fn field_var(&self, key: FieldKey) -> Option<VarId> {
         let doc = &self.session.doc;
         match key {
+            FieldKey::Paint {
+                id,
+                slot: PaintSlot::Chart(colour),
+            } => self.chart_binding(id, colour).map(|(v, _)| v),
             FieldKey::Paint { slot, .. } => {
                 let (target, index) = paint_item(slot)?;
                 let mut vars = self.field_ids(key).into_iter().map(|n| {
@@ -1129,9 +1141,12 @@ impl OndinApp {
     /// A bound paint field's own `%` — the binding's alpha, when every target is
     /// bound to one variable at one alpha. `None` for anything else.
     pub(crate) fn field_alpha(&self, key: FieldKey) -> Option<f32> {
-        let FieldKey::Paint { slot, .. } = key else {
+        let FieldKey::Paint { id, slot } = key else {
             return None;
         };
+        if let PaintSlot::Chart(colour) = slot {
+            return self.chart_binding(id, colour).map(|(_, a)| a);
+        }
         let (target, index) = paint_item(slot)?;
         self.field_var(key)?;
         let doc = &self.session.doc;
@@ -1154,6 +1169,13 @@ impl OndinApp {
     /// each target's binding.
     pub(crate) fn rebind_alpha_tx(&self, id: NodeId, slot: PaintSlot, alpha: f32) -> Transaction {
         let key = FieldKey::Paint { id, slot };
+        if let PaintSlot::Chart(colour) = slot {
+            let var = self.chart_binding(id, colour).map(|(v, _)| v);
+            return match var {
+                Some(var) => self.chart_bind_tx(id, colour, Some(var), Some(alpha)),
+                None => Transaction::default(),
+            };
+        }
         let Some((target, index)) = paint_item(slot) else {
             return Transaction::default();
         };
@@ -1997,6 +2019,14 @@ impl OndinApp {
     pub(crate) fn field_value(&self, key: FieldKey) -> Option<Cell> {
         let doc = &self.session.doc;
         match key {
+            FieldKey::Paint {
+                id,
+                slot: PaintSlot::Chart(colour),
+            } => {
+                let chart = self.session.chart_drawn(id)?;
+                let c = super::chart::colour_of(doc, id, chart, colour)?;
+                Some(Cell::Color(c.with_alpha(1.0)))
+            }
             FieldKey::Paint { id, slot } => {
                 let (target, index) = paint_item(slot)?;
                 let node = doc.get(id)?;
@@ -3140,6 +3170,61 @@ mod tests {
             "Solid off a binding detaches to the colour drawn"
         );
         assert!(app.picker.as_ref().is_some_and(|p| !p.browse));
+    }
+
+    /// A chart's series colour binds through the picker's field key, reads
+    /// back as bound with its `%`, and detaches to the colour it draws.
+    /// flip: `field_tx` without its chart arm → fails at "the series is bound".
+    #[test]
+    fn a_chart_series_colour_binds_and_detaches() {
+        let (_ctx, mut app, _, brand, _) = fixture();
+        let chart = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        let tx = ondin_core::edit::create_chart(
+            chart,
+            page,
+            1,
+            ondin_core::kurbo::Affine::IDENTITY,
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            ondin_core::kurbo::Point::new(-3520.0, 280.0),
+            Color::WHITE,
+            ondin_core::chart::Chart::sample(ondin_core::chart::ChartKind::Column),
+        );
+        assert!(app.session.commit(tx));
+        let col = app
+            .session
+            .doc
+            .get(chart)
+            .unwrap()
+            .chart()
+            .unwrap()
+            .mapping
+            .series[0];
+        let colour = crate::panels::paint::ChartColour::Series(col);
+        let key = FieldKey::Paint {
+            id: chart,
+            slot: PaintSlot::Chart(colour),
+        };
+        app.bind_field(key, brand);
+        let fill = |app: &OndinApp| {
+            ondin_core::chart::series_fill(
+                app.session.doc.get(chart).unwrap().chart().unwrap(),
+                col,
+            )
+        };
+        assert_eq!(
+            fill(&app).and_then(|b| b.var()),
+            Some(brand),
+            "the series is bound"
+        );
+        assert_eq!(app.field_var(key), Some(brand));
+        assert_eq!(app.field_alpha(key), Some(1.0));
+        app.detach_field(key);
+        assert_eq!(
+            fill(&app),
+            Some(BrushSource::from(Color::WHITE)),
+            "detached to the colour drawn"
+        );
     }
 
     /// A bound fill's picker opens on the *Variables* face — the binding is

@@ -15,7 +15,8 @@ mod settle;
 pub mod table_io;
 
 pub use colours::{
-    sankey_nodes, sankey_totals, series_fill, with_node_fill, with_palette, with_series_fill,
+    bound_variables, sankey_nodes, sankey_totals, series_fill, with_node_fill, with_palette,
+    with_series_fill, with_variables,
 };
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::{OUTLINE_WIDTH, Preset};
@@ -875,8 +876,6 @@ pub enum ChartRule {
     DuplicateSeries,
     #[error("a chart option is out of range")]
     BadOption,
-    #[error("a chart's colours cannot bind variables yet")]
-    BoundColour,
     #[error("a chart's parts name a node twice or a role twice")]
     DuplicatePart,
 }
@@ -926,9 +925,6 @@ impl Chart {
             }
         }
         self.options.validate()?;
-        if self.brushes().any(|b| b.is_bound()) {
-            return Err(ChartRule::BoundColour);
-        }
         let mut keys = FxHashSet::default();
         let mut nodes = FxHashSet::default();
         for (k, id) in &self.parts {
@@ -958,6 +954,22 @@ impl Chart {
                 &o.category_axis.colour,
                 &o.category_axis.grid.colour,
                 &o.text.ink,
+            ])
+    }
+
+    /// [`Self::brushes`], to rewrite in place: a binding detached or rebound.
+    pub fn brushes_mut(&mut self) -> impl Iterator<Item = &mut BrushSource> + '_ {
+        let o = &mut self.options;
+        self.series
+            .iter_mut()
+            .map(|s| &mut s.fill)
+            .chain(self.nodes.iter_mut().map(|n| &mut n.fill))
+            .chain([
+                &mut o.value_axis.colour,
+                &mut o.value_axis.grid.colour,
+                &mut o.category_axis.colour,
+                &mut o.category_axis.grid.colour,
+                &mut o.text.ink,
             ])
     }
 
@@ -1389,6 +1401,77 @@ pub fn owner(doc: &crate::Document, id: NodeId) -> Option<NodeId> {
         at = n.parent;
     }
     None
+}
+
+/// The operations that rewrite chart `id`'s colour bindings by `map` (a
+/// binding's new paint at a node, `None` to keep it): its description, and the
+/// same rewrite on its parts' fills and strokes, which drew those bindings,
+/// under a `SetChartParts` of the parts they are at the size they were made
+/// for, so `guard` reads it as the chart's regeneration. A variable's delete
+/// and detach go through here, never through the parts alone. Empty when
+/// nothing changes.
+pub fn rebind_ops(
+    doc: &crate::Document,
+    id: NodeId,
+    map: &dyn Fn(NodeId, &BrushSource) -> Option<BrushSource>,
+) -> Vec<Operation> {
+    let Some(chart) = doc.get(id).and_then(|n| n.chart()) else {
+        return Vec::new();
+    };
+    let mut next = chart.clone();
+    let mut wrote = false;
+    for b in next.brushes_mut().filter(|b| b.is_bound()) {
+        if let Some(to) = map(id, b) {
+            *b = to;
+            wrote = true;
+        }
+    }
+    let mut ops = vec![];
+    for (_, part) in &chart.parts {
+        let Some(n) = doc.get(*part) else { continue };
+        let mut fills = n.paint.fills.clone();
+        let mut fills_wrote = false;
+        for f in fills.iter_mut() {
+            if f.value.brush.is_bound()
+                && let Some(to) = map(*part, &f.value.brush)
+            {
+                f.value.brush = to;
+                fills_wrote = true;
+            }
+        }
+        if fills_wrote {
+            ops.push(Operation::SetFills { id: *part, fills });
+        }
+        let mut strokes = n.paint.strokes.clone();
+        let mut strokes_wrote = false;
+        for s in strokes.iter_mut() {
+            if s.value.brush.is_bound()
+                && let Some(to) = map(*part, &s.value.brush)
+            {
+                s.value.brush = to;
+                strokes_wrote = true;
+            }
+        }
+        if strokes_wrote {
+            ops.push(Operation::SetStrokes { id: *part, strokes });
+        }
+    }
+    if !wrote && ops.is_empty() {
+        return Vec::new();
+    }
+    ops.insert(
+        0,
+        Operation::SetChart {
+            id,
+            chart: Some(Box::new(next)),
+        },
+    );
+    ops.push(Operation::SetChartParts {
+        id,
+        parts: chart.parts.clone(),
+        at: chart.generated,
+    });
+    ops
 }
 
 /// The charts `ops` regenerate: those it writes parts for.

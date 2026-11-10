@@ -354,6 +354,10 @@ impl Node {
                 .effects
                 .iter()
                 .any(|e| e.vars.iter().any(Option::is_some))
+            || self
+                .chart
+                .as_ref()
+                .is_some_and(|c| c.brushes().any(|b| b.is_bound()))
     }
     /// Refuse a node whose keyed lists (`props` included) repeat an item id
     /// within one list — `Document::apply`'s post-condition and the loader's

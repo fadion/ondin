@@ -1,25 +1,10 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: charts, icon packs
-and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+Open work only. **Now** is the work that lands before Command Mode and MCP: icon packs and code
+export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
-
-## Now · Charts
-
-Designed in `design/charts.md`. Built over several sessions, one phase at a time.
-
-### Work plan
-
-Phases in landing order; each is a session or less and ends green and committed. A session
-takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
-a *Landed:* line saying what is in and what is next, so the next session resumes there.
-
-- **What is left of charts** — every phase has landed; these pieces of the design have not:
-  - *From variables* and bindable swatches: the variable flows learn the description's colours
-    (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
-    stops refusing a bound one.
 
 ## Now · Icon packs
 

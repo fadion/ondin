@@ -10300,7 +10300,8 @@ impl OndinApp {
             PaintSlot::GroupColor(key) => return self.group_color_shown(key),
             PaintSlot::Chart(colour) => {
                 let chart = self.session.chart_drawn(id)?;
-                return super::chart::colour_of(chart, colour).map(Brush::Solid);
+                return super::chart::colour_of(&self.session.doc, id, chart, colour)
+                    .map(Brush::Solid);
             }
             // Read off the image fill as drawn, so the picker tracks a live drag.
             PaintSlot::Duotone(i, end) => {
@@ -10838,6 +10839,7 @@ impl OndinApp {
                 ("Series colour", icon::CHART)
             }
             PaintSlot::Chart(super::paint::ChartColour::Node(_)) => ("Node colour", icon::CHART),
+            PaintSlot::Chart(super::paint::ChartColour::Ink) => ("Chart text colour", icon::CHART),
         };
         self.session.name_step(label, glyph);
     }

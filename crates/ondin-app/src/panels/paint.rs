@@ -320,7 +320,7 @@ pub enum PaintSlot {
     /// ([`PaintSlot::pref_scoped`]); node-less, as [`PaintSlot::Canvas`] is.
     Pref(PrefColour),
     /// One colour of a chart's description on the slot's node (the Chart card's
-    /// Series rows): solid, written as a `SetChart`.
+    /// Series rows and its text ink): solid or bound, written as a `SetChart`.
     Chart(ChartColour),
 }
 
@@ -331,6 +331,8 @@ pub enum ChartColour {
     Series(ondin_core::chart::ColumnId),
     /// A Sankey node, by its place in `chart::sankey_nodes`' order.
     Node(usize),
+    /// The chart's labels' ink.
+    Ink,
 }
 
 /// Which Settings colour a [`PaintSlot::Pref`] edits (`prefs::CanvasPrefs`).

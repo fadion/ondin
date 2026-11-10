@@ -95,24 +95,38 @@ fn with_variant(chart: &Chart, i: usize) -> Chart {
     next
 }
 
-/// The colour a chart slot draws in, solid.
-pub(crate) fn colour_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core::peniko::Color> {
-    let fill = match colour {
-        ChartColour::Series(col) => chart::series_fill(chart, col)?,
-        ChartColour::Node(i) => chart::sankey_nodes(chart).into_iter().nth(i)?.1,
-    };
-    match fill.literal() {
-        Some(Brush::Solid(c)) => Some(*c),
+/// The paint a chart slot holds, bound or not.
+pub(crate) fn fill_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core::BrushSource> {
+    match colour {
+        ChartColour::Series(col) => chart::series_fill(chart, col),
+        ChartColour::Node(i) => Some(chart::sankey_nodes(chart).into_iter().nth(i)?.1),
+        ChartColour::Ink => Some(chart.options.text.ink.clone()),
+    }
+}
+
+/// The colour a chart slot draws in on chart `id`, solid, a binding read in
+/// the mode in force there.
+pub(crate) fn colour_of(
+    doc: &ondin_core::Document,
+    id: NodeId,
+    chart: &Chart,
+    colour: ChartColour,
+) -> Option<ondin_core::peniko::Color> {
+    let fill = fill_of(chart, colour)?;
+    match doc.resolve_brush(id, &fill).into_owned() {
+        Brush::Solid(c) => Some(c),
         _ => None,
     }
 }
 
-/// Series `col`'s colour, solid: the data window's header swatch.
+/// Series `col`'s colour on chart `id`, solid: the data window's header swatch.
 pub(crate) fn series_colour(
+    doc: &ondin_core::Document,
+    id: NodeId,
     chart: &Chart,
     col: chart::ColumnId,
 ) -> Option<ondin_core::peniko::Color> {
-    colour_of(chart, ChartColour::Series(col))
+    colour_of(doc, id, chart, ChartColour::Series(col))
 }
 
 /// `chart` with the slot's colour set to `c`.
@@ -121,13 +135,30 @@ pub(crate) fn with_colour(
     colour: ChartColour,
     c: ondin_core::peniko::Color,
 ) -> Chart {
-    let fill = ondin_core::BrushSource::Literal(Brush::Solid(c));
+    with_fill(
+        chart,
+        colour,
+        ondin_core::BrushSource::Literal(Brush::Solid(c)),
+    )
+}
+
+/// `chart` with the slot's paint set to `fill`, bound or not.
+pub(crate) fn with_fill(
+    chart: &Chart,
+    colour: ChartColour,
+    fill: ondin_core::BrushSource,
+) -> Chart {
     match colour {
         ChartColour::Series(col) => chart::with_series_fill(chart, col, fill),
         ChartColour::Node(i) => match chart::sankey_nodes(chart).into_iter().nth(i) {
             Some((name, _)) => chart::with_node_fill(chart, &name, fill),
             None => chart.clone(),
         },
+        ChartColour::Ink => {
+            let mut next = chart.clone();
+            next.options.text.ink = fill;
+            next
+        }
     }
 }
 
@@ -205,6 +236,54 @@ fn style_picture(
 }
 
 impl OndinApp {
+    /// Chart `id`'s slot `colour` as bound: its variable and `%`; `None` when
+    /// it holds a colour of its own.
+    pub(crate) fn chart_binding(
+        &self,
+        id: NodeId,
+        colour: ChartColour,
+    ) -> Option<(ondin_core::VarId, f32)> {
+        match fill_of(self.session.chart_drawn(id)?, colour)? {
+            ondin_core::BrushSource::Bound { var, alpha } => Some((var, alpha)),
+            ondin_core::BrushSource::Literal(_) => None,
+        }
+    }
+
+    /// The `SetChart` binding chart `id`'s slot `colour` to `var` at `alpha`
+    /// (its `%` kept when `None`), or for `var` `None` detaching it to the
+    /// colour it draws.
+    pub(crate) fn chart_bind_tx(
+        &self,
+        id: NodeId,
+        colour: ChartColour,
+        var: Option<ondin_core::VarId>,
+        alpha: Option<f32>,
+    ) -> Transaction {
+        let doc = &self.session.doc;
+        let Some(chart) = doc.get(id).and_then(|n| n.chart()) else {
+            return Transaction::default();
+        };
+        let Some(now) = fill_of(chart, colour) else {
+            return Transaction::default();
+        };
+        let fill = match var {
+            Some(var) => ondin_core::BrushSource::Bound {
+                var,
+                alpha: alpha.unwrap_or(match &now {
+                    ondin_core::BrushSource::Bound { alpha, .. } => *alpha,
+                    ondin_core::BrushSource::Literal(Brush::Solid(c)) => c.components[3],
+                    ondin_core::BrushSource::Literal(_) => 1.0,
+                }),
+            },
+            None if now.is_bound() => doc.resolve_brush(id, &now).into_owned().into(),
+            None => return Transaction::default(),
+        };
+        Transaction(vec![Operation::SetChart {
+            id,
+            chart: Some(Box::new(with_fill(chart, colour, fill))),
+        }])
+    }
+
     /// The Chart card, for one chart frame.
     pub(super) fn inspector_chart(&mut self, ui: &mut egui::Ui, id: NodeId) {
         self.inspector_charts(ui, &[id]);
@@ -310,6 +389,12 @@ impl OndinApp {
             Some(ondin_core::NodeKind::Artboard { size, .. }) => *size,
             _ => return,
         };
+        // Drawn in the colours its bindings read now, so a mode switch redraws it.
+        let mut drawn = chart.clone();
+        for b in drawn.brushes_mut().filter(|b| b.is_bound()) {
+            *b = self.session.doc.resolve_brush(id, b).into_owned().into();
+        }
+        let chart = &drawn;
         let key = description_key(id, chart, size);
         if self
             .chart_card
@@ -719,23 +804,70 @@ impl OndinApp {
             (Palette::Warm, "Warm"),
             (Palette::Mono, "Mono"),
         ];
-        let at = palettes
-            .iter()
-            .position(|(p, _)| *p == chart.options.palette)
-            .unwrap_or(0);
-        let names: Vec<&str> = palettes.iter().map(|(_, n)| *n).collect();
-        self.chart_menu(
-            ui,
-            id,
-            chart,
-            "chart-palette",
-            "Palette",
-            &names,
-            at,
-            |c, i| {
-                *c = chart::with_palette(c, palettes[i].0);
-            },
-        );
+        let groups = colour_groups(&self.session.doc);
+        let bound = chart::bound_variables(chart);
+        // A group lights while the series run through it in order; a palette
+        // while nothing is bound.
+        let lit_group = bound.as_ref().and_then(|b| {
+            groups.iter().position(|(_, vars)| {
+                b.iter()
+                    .enumerate()
+                    .all(|(i, v)| vars[i % vars.len()] == *v)
+            })
+        });
+        let shown = match (lit_group, &bound) {
+            (Some(g), _) => format!("From variables · {}", groups[g].0),
+            (None, Some(_)) => "From variables".to_string(),
+            (None, None) => palettes
+                .iter()
+                .find(|(p, _)| *p == chart.options.palette)
+                .map_or("Ondin", |(_, n)| *n)
+                .to_string(),
+        };
+        enum Pick {
+            Palette(Palette),
+            Group(usize),
+        }
+        let mut pick = None;
+        ui::labelled(ui, "Palette", |ui| {
+            egui::ComboBox::from_id_salt(("chart-palette", id))
+                .icon(ui::combo_chevron)
+                .width(ui.available_width())
+                .selected_text(ui::combo_text(&shown))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    for (p, name) in palettes {
+                        let on = bound.is_none() && p == chart.options.palette;
+                        if ui.selectable_label(on, name).clicked() {
+                            pick = Some(Pick::Palette(p));
+                        }
+                    }
+                    ui::menu_sep(ui);
+                    ui.label(ui::eyebrow("From variables"));
+                    if groups.is_empty() {
+                        ui.label(
+                            egui::RichText::new("No colour variables yet")
+                                .size(ui::SMALL_PT)
+                                .color(theme::text::muted()),
+                        );
+                    }
+                    for (g, (name, _)) in groups.iter().enumerate() {
+                        if ui.selectable_label(lit_group == Some(g), name).clicked() {
+                            pick = Some(Pick::Group(g));
+                        }
+                    }
+                });
+        });
+        match pick {
+            Some(Pick::Palette(p)) => {
+                self.chart_commit(id, "Palette", chart::with_palette(chart, p));
+            }
+            Some(Pick::Group(g)) if lit_group != Some(g) => {
+                let next = chart::with_variables(chart, &groups[g].1);
+                self.chart_commit(id, "Palette", next);
+            }
+            _ => {}
+        }
         let totals = chart::sankey_totals(chart);
         let rows: Vec<(ChartColour, String, Option<bool>)> = match chart.kind {
             ChartKind::Sankey => chart::sankey_nodes(chart)
@@ -769,7 +901,7 @@ impl OndinApp {
             ChartKind::Line | ChartKind::Area | ChartKind::Scatter
         );
         for (slot, name, shown) in rows {
-            let colour = colour_of(chart, slot).map(ui::color_to_egui);
+            let colour = colour_of(&self.session.doc, id, chart, slot).map(ui::color_to_egui);
             let total = match slot {
                 ChartColour::Node(i) => totals.get(i).map(|v| {
                     chart::scale::format(
@@ -778,46 +910,27 @@ impl OndinApp {
                         chart::scale::decimals_of(*v).min(3),
                     )
                 }),
-                ChartColour::Series(_) => None,
+                ChartColour::Series(_) | ChartColour::Ink => None,
             };
             let style_button = styled && matches!(slot, ChartColour::Series(_));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let buttons = usize::from(shown.is_some()) + usize::from(style_button);
                 let field = w - buttons as f32 * (ui::CONTROL_H + ui::CARD_COL_GAP);
-                ui::field_row(ui, egui::vec2(field, ui::CONTROL_H), |ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    let chip = match (colour, shown) {
-                        (_, Some(false)) | (None, _) => ui::Swatch::Mixed,
-                        (Some(c), _) => ui::Swatch::Solid(c),
-                    };
-                    let resp = ui::swatch(ui, 14.0, theme::color::field(), chip);
-                    if resp.clicked() && shown != Some(false) {
-                        self.open_picker(ui, id, PaintSlot::Chart(slot), resp.rect.left_top());
-                    }
-                    let ink = match shown {
-                        Some(false) => theme::text::off(),
-                        _ => color::text(),
-                    };
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if let Some(total) = &total {
-                            ui.label(
-                                egui::RichText::new(total)
-                                    .size(ui::CONTROL_PT)
-                                    .color(theme::text::muted()),
-                            )
-                            .on_hover_text("The node's total: the larger of what flows in and out");
-                        }
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&name).size(ui::CONTROL_PT).color(ink),
-                                )
-                                .truncate(),
-                            );
-                        });
-                    });
-                });
+                let swatch = match (colour, shown) {
+                    (_, Some(false)) | (None, _) => ui::Swatch::Mixed,
+                    (Some(c), _) => ui::Swatch::Solid(c),
+                };
+                self.chart_colour_row(
+                    ui,
+                    id,
+                    slot,
+                    field,
+                    swatch,
+                    &name,
+                    shown != Some(false),
+                    total.as_deref(),
+                );
                 if let (true, ChartColour::Series(col)) = (style_button, slot) {
                     self.chart_series_style(ui, id, chart, col);
                 }
@@ -838,6 +951,51 @@ impl OndinApp {
                 }
             });
         }
+    }
+
+    /// One colour of the chart as a field `width` wide: its swatch, which opens
+    /// the picker on the slot while `live`, its name (dim when not), and a
+    /// right-aligned `total`.
+    #[allow(clippy::too_many_arguments)]
+    fn chart_colour_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        slot: ChartColour,
+        width: f32,
+        swatch: ui::Swatch,
+        name: &str,
+        live: bool,
+        total: Option<&str>,
+    ) {
+        ui::field_row(ui, egui::vec2(width, ui::CONTROL_H), |ui| {
+            ui.spacing_mut().item_spacing.x = 7.0;
+            let resp = ui::swatch(ui, 14.0, theme::color::field(), swatch);
+            if resp.clicked() && live {
+                self.open_picker(ui, id, PaintSlot::Chart(slot), resp.rect.left_top());
+            }
+            let ink = if live {
+                color::text()
+            } else {
+                theme::text::off()
+            };
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(total) = total {
+                    ui.label(
+                        egui::RichText::new(total)
+                            .size(ui::CONTROL_PT)
+                            .color(theme::text::muted()),
+                    )
+                    .on_hover_text("The node's total: the larger of what flows in and out");
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(name).size(ui::CONTROL_PT).color(ink))
+                            .truncate(),
+                    );
+                });
+            });
+        });
     }
 
     /// A series row's style button: a menu of its line's dash (a line or area)
@@ -1896,6 +2054,21 @@ impl OndinApp {
             next.options.text.family = family;
             self.chart_commit(id, "Chart font", next);
         }
+        let ink = colour_of(&self.session.doc, id, chart, ChartColour::Ink)
+            .map_or(ui::Swatch::Mixed, |c| {
+                ui::Swatch::Solid(ui::color_to_egui(c))
+            });
+        let width = ui.available_width();
+        self.chart_colour_row(
+            ui,
+            id,
+            ChartColour::Ink,
+            width,
+            ink,
+            "Text colour",
+            true,
+            None,
+        );
         self.chart_pair(ui, |app, ui, w| {
             app.chart_number(
                 ui,
@@ -1981,6 +2154,32 @@ impl OndinApp {
             });
         }
     }
+}
+
+/// The colour variables a chart can take *From variables*, by group (the name
+/// before the last `/`, else the collection's name), each group's variables in
+/// the table's order: those that may bind a fill.
+fn colour_groups(doc: &ondin_core::Document) -> Vec<(String, Vec<ondin_core::VarId>)> {
+    use ondin_core::variable::{Field, VarKind, split_name};
+    let t = doc.variables();
+    let mut out: Vec<(String, Vec<ondin_core::VarId>)> = Vec::new();
+    for v in t
+        .iter()
+        .filter(|v| v.kind == VarKind::Color && v.binds(Field::Fill))
+    {
+        let (group, _) = split_name(&v.name);
+        let name = match group {
+            "" => t
+                .collection_of(v.id)
+                .map_or_else(|| "Colours".to_string(), |c| c.name.clone()),
+            g => g.to_string(),
+        };
+        match out.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, vars)) => vars.push(v.id),
+            None => out.push((name, vec![v.id])),
+        }
+    }
+    out
 }
 
 /// The range an axis starts at when *Auto range* is turned off: its data's

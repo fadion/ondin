@@ -98,7 +98,7 @@ enum Role {
     Unmapped,
 }
 
-fn role_of(chart: &Chart, col: ColumnId) -> Role {
+fn role_of(chart: &Chart, col: ColumnId, swatch: Option<egui::Color32>) -> Role {
     let m = &chart.mapping;
     if chart.kind == ChartKind::Sankey {
         return match col {
@@ -112,8 +112,7 @@ fn role_of(chart: &Chart, col: ColumnId) -> Role {
         return Role::Category;
     }
     if m.series.contains(&col) {
-        let colour = crate::panels::chart_colour(chart, col);
-        return Role::Series(colour.map(ui::color_to_egui));
+        return Role::Series(swatch);
     }
     Role::Unmapped
 }
@@ -375,6 +374,16 @@ impl OndinApp {
         let w = W.min(column.width() - 32.0).max(320.0);
         let anchor = egui::pos2(column.center().x, column.bottom() - MARGIN);
         let linked = chart.source.is_some();
+        // Each column's series swatch, a binding read where the chart is.
+        let swatches: Vec<Option<egui::Color32>> = chart
+            .table
+            .columns
+            .iter()
+            .map(|c| {
+                crate::panels::chart_colour(&self.session.doc, id, &chart, c.id)
+                    .map(ui::color_to_egui)
+            })
+            .collect();
         let mut act: Vec<Act> = Vec::new();
         let Some(mut state) = self.chart_data.take() else {
             return;
@@ -397,7 +406,7 @@ impl OndinApp {
                                     .color(theme::text::dim()),
                             );
                         }
-                        grid(ui, &chart, &mut state, linked, &mut act);
+                        grid(ui, &chart, &swatches, &mut state, linked, &mut act);
                     });
                 });
             });
@@ -483,7 +492,14 @@ fn head(ui: &mut egui::Ui, name: &str, linked: bool, act: &mut Vec<Act>) {
 
 /// The grid: the header row and the row gutter held at the viewport's edges
 /// over the scrolled cells.
-fn grid(ui: &mut egui::Ui, chart: &Chart, s: &mut ChartData, linked: bool, act: &mut Vec<Act>) {
+fn grid(
+    ui: &mut egui::Ui,
+    chart: &Chart,
+    swatches: &[Option<egui::Color32>],
+    s: &mut ChartData,
+    linked: bool,
+    act: &mut Vec<Act>,
+) {
     let t = &chart.table;
     let (nr, nc) = (t.rows.len(), t.columns.len());
     if !linked {
@@ -726,7 +742,7 @@ fn grid(ui: &mut egui::Ui, chart: &Chart, s: &mut ChartData, linked: bool, act: 
                 theme::text::faint(),
             );
             x += tag_g.size().x + 5.0;
-            let (ink, mark) = match role_of(chart, column.id) {
+            let (ink, mark) = match role_of(chart, column.id, swatches.get(c).copied().flatten()) {
                 Role::Category => (color::text(), Some("Category")),
                 Role::Named(n) => (color::text(), Some(n)),
                 Role::Series(colour) => {

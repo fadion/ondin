@@ -129,7 +129,12 @@ pub fn roots(doc: &Document, selection: Option<&[NodeId]>) -> Vec<NodeId> {
 /// bring the old colour back when one is switched on.
 pub fn census(doc: &Document, roots: &[NodeId]) -> Vec<Swatch> {
     let mut out: Vec<(Key, Swatch)> = Vec::new();
-    for id in subtree_nodes(doc, roots) {
+    // A chart's parts are written only by its regeneration, so a merge cannot
+    // recolour them.
+    let layers = subtree_nodes(doc, roots)
+        .into_iter()
+        .filter(|id| crate::chart::owner(doc, *id).is_none());
+    for id in layers {
         each_place(doc, id, |key| {
             let swatch = match out.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, s)) => s,

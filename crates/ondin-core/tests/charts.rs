@@ -798,3 +798,185 @@ fn a_mapping_is_guessed_from_the_column_types() {
         (Some(ColumnId(1)), Some(ColumnId(2)), Some(ColumnId(0)))
     );
 }
+
+/// A settled chart whose two series are bound *From variables* to `brand/a`
+/// and `brand/b` (red and blue), and the variables.
+fn bound_chart() -> (
+    Document,
+    ondin_core::Resolved,
+    NodeId,
+    [ondin_core::VarId; 2],
+) {
+    use ondin_core::variable::{Cell, CollectionId, VarKind, Variable};
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut ids = IdSource::new(0xC6);
+    let light = ids.mint_mode();
+    let vars = [ids.mint_var(), ids.mint_var()];
+    let var = |id, name: &str, c: ondin_core::peniko::Color| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Color,
+            cells: [(light, Cell::Color(c))].into(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    let bound = ondin_core::chart::with_variables(doc.get(chart).unwrap().chart().unwrap(), &vars);
+    doc.apply(&Transaction(vec![
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: ondin_core::Mode {
+                id: light,
+                name: "Light".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        var(
+            vars[0],
+            "brand/a",
+            ondin_core::peniko::Color::from_rgb8(255, 0, 0),
+        ),
+        var(
+            vars[1],
+            "brand/b",
+            ondin_core::peniko::Color::from_rgb8(0, 0, 255),
+        ),
+        Operation::SetChart {
+            id: chart,
+            chart: Some(Box::new(bound)),
+        },
+    ]))
+    .expect("a chart bound to two colour variables");
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    (doc, res, chart, vars)
+}
+
+/// A chart's colours bind: its parts draw the binding, the chart frame (not
+/// its parts) is the variable's one user, and the commit takes it.
+#[test]
+fn a_charts_colours_bind_to_variables() {
+    let (doc, _, chart, vars) = bound_chart();
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).expect("Revenue · Jan");
+    assert_eq!(
+        doc.get(bar).unwrap().paint().fills[0].brush.var(),
+        Some(vars[0]),
+        "the bar draws the binding"
+    );
+    assert_eq!(ondin_core::variable::users(&doc, vars[0]), vec![chart]);
+}
+
+/// Deleting a variable a chart's colour reads detaches the description and
+/// its parts to the colour they drew, in one step the commit takes; undo
+/// brings the variable and the binding back.
+/// flip: `detach_ops` leaving chart frames alone → fails at the commit.
+#[test]
+fn deleting_a_charts_variable_detaches_it_whole() {
+    let (mut doc, _, chart, vars) = bound_chart();
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
+    let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+    let tx = Transaction(ondin_core::variable::remove_ops(&doc, &[vars[0]]));
+    let undo = doc.apply(&tx).expect("the delete commits");
+    let c = doc.get(chart).unwrap().chart().unwrap();
+    assert_eq!(
+        ondin_core::chart::series_fill(c, ColumnId(1)).and_then(|b| b.literal().cloned()),
+        Some(ondin_core::Brush::Solid(red)),
+        "the description holds the colour it drew"
+    );
+    assert_eq!(
+        doc.get(bar).unwrap().paint().fills[0]
+            .brush
+            .literal()
+            .cloned(),
+        Some(ondin_core::Brush::Solid(red)),
+        "and so does the bar"
+    );
+    assert_eq!(
+        ondin_core::chart::series_fill(c, ColumnId(2)).and_then(|b| b.var()),
+        Some(vars[1]),
+        "the other binding stays"
+    );
+    doc.apply(&undo.inverse).expect("undo");
+    let c = doc.get(chart).unwrap().chart().unwrap();
+    assert_eq!(
+        ondin_core::chart::series_fill(c, ColumnId(1)).and_then(|b| b.var()),
+        Some(vars[0])
+    );
+}
+
+/// A variable scoped to fills binds a line chart's series, whose parts draw
+/// it as a stroke: the scope is judged on the description, not the parts.
+/// flip: `variable::check` judging the parts' scope too → the regeneration is refused.
+#[test]
+fn a_fill_scoped_colour_draws_a_charts_lines() {
+    let (mut doc, mut res, chart, vars) = bound_chart();
+    let mut v = doc.variables().get(vars[0]).unwrap().clone();
+    v.scope = Some(ondin_core::variable::Scope::of([
+        ondin_core::variable::Field::Fill,
+    ]));
+    let mut line = doc.get(chart).unwrap().chart().unwrap().clone();
+    line.kind = ChartKind::Line;
+    doc.apply(&Transaction(vec![
+        Operation::SetVariable { var: v },
+        Operation::SetChart {
+            id: chart,
+            chart: Some(Box::new(line)),
+        },
+    ]))
+    .expect("a fill colour binds a chart");
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let k = PartKey {
+        role: PartRole::Line,
+        series: 1,
+        index: 0,
+    };
+    let c = doc.get(chart).unwrap().chart().unwrap();
+    let line = c
+        .parts
+        .iter()
+        .find(|(p, _)| *p == k)
+        .map(|(_, id)| *id)
+        .unwrap();
+    assert_eq!(
+        doc.get(line).unwrap().paint().strokes[0].brush.var(),
+        Some(vars[0]),
+        "the lines draw the binding"
+    );
+}
+
+/// A chart leaving its document detaches its colours, description and parts.
+#[test]
+fn a_detached_chart_holds_its_colours() {
+    let (doc, _, chart, _) = bound_chart();
+    let node = ondin_core::variable::detached(&doc, doc.get(chart).unwrap().clone());
+    assert!(node.chart().unwrap().brushes().all(|b| !b.is_bound()));
+}
+
+/// Colour review's census leaves a chart's parts out: a merge may not write
+/// them. The chart frame's own ground stays in.
+#[test]
+fn colour_review_leaves_a_charts_parts_out() {
+    let (doc, _, chart, _) = bound_chart();
+    let roots = ondin_core::color_review::roots(&doc, None);
+    let census = ondin_core::color_review::census(&doc, &roots);
+    let parts: Vec<NodeId> = doc
+        .get(chart)
+        .unwrap()
+        .chart()
+        .unwrap()
+        .parts
+        .iter()
+        .map(|(_, id)| *id)
+        .collect();
+    assert!(!parts.is_empty());
+    assert!(
+        census
+            .iter()
+            .all(|s| s.nodes.iter().all(|n| !parts.contains(n))),
+        "no swatch names a part"
+    );
+}

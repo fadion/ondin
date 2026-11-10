@@ -336,7 +336,10 @@ impl OndinApp {
         }
         for id in ids {
             let Some(n) = doc.get(id) else { continue };
-            if n.link().is_some_and(|l| doc.in_vault(l)) {
+            // A chart's parts are written only by its regeneration.
+            if n.link().is_some_and(|l| doc.in_vault(l))
+                || ondin_core::chart::owner(doc, id).is_some()
+            {
                 continue;
             }
             let Some(value) = doc.resolve_var(id, var) else {

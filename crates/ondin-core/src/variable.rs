@@ -1532,6 +1532,12 @@ pub(crate) mod text_vars_serde {
 /// frozen copy was the other until step 4: it carries its table now, §15 D1064.)
 pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
     let id = node.id;
+    // A chart's colours too; its parts are detached as the nodes they are.
+    if let Some(chart) = node.chart.as_mut() {
+        for b in chart.brushes_mut().filter(|b| b.is_bound()) {
+            *b = doc.resolve_brush(id, b).into_owned().into();
+        }
+    }
     for f in node.paint.fills.iter_mut() {
         if f.brush.is_bound() {
             f.brush = doc.resolve_brush(id, &f.brush).into_owned().into();
@@ -1668,7 +1674,12 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .chain(n.text_vars.iter().flatten().copied())
             .chain(n.item.limit_vars.iter().flatten().copied())
             .chain(n.visible_var)
-            .chain(n.opacity_var);
+            .chain(n.opacity_var)
+            .chain(
+                n.chart
+                    .iter()
+                    .flat_map(|c| c.brushes().filter_map(|b| b.var())),
+            );
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
                 continue;
@@ -1824,6 +1835,31 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     .and_then(|b| b.literal().cloned())
                     .unwrap_or(crate::Brush::Solid(Color::TRANSPARENT))
             };
+            // A chart's colours by the fill's rule, its fallback the twin's; its
+            // parts, rebound one by one below, are made again from the result.
+            if let Some(chart) = n.chart.as_mut() {
+                let twin_chart = twin.and_then(|d| d.chart());
+                let fallbacks: Vec<BrushSource> = twin_chart
+                    .map(|c| c.brushes().cloned().collect())
+                    .unwrap_or_default();
+                let mut bound = false;
+                for (i, b) in chart.brushes_mut().enumerate() {
+                    if let BrushSource::Bound { var, alpha } = *b {
+                        bound = true;
+                        *b = match rebind(var, Field::Fill) {
+                            Some(var) => BrushSource::Bound { var, alpha },
+                            None => fallbacks
+                                .get(i)
+                                .filter(|f| !f.is_bound())
+                                .cloned()
+                                .unwrap_or(crate::Brush::Solid(Color::TRANSPARENT).into()),
+                        };
+                    }
+                }
+                if bound {
+                    chart.generated = None;
+                }
+            }
             for (i, f) in n.paint.fills.iter_mut().enumerate() {
                 if let BrushSource::Bound { var, alpha } = f.brush {
                     f.brush = match rebind(var, Field::Fill) {
@@ -2061,7 +2097,7 @@ pub fn users(doc: &crate::Document, var: VarId) -> Vec<NodeId> {
     let mut out: Vec<NodeId> = doc
         .node_map()
         .values()
-        .filter(|n| reads(n, &[var]))
+        .filter(|n| reads(n, &[var]) && !chart_part(doc, n.id))
         .map(|n| n.id)
         .collect();
     out.sort();
@@ -2085,6 +2121,13 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.text_vars.iter().any(|v| hit(*v))
         || hit(n.visible_var)
         || hit(n.opacity_var)
+        || n.chart().is_some_and(|c| c.brushes().any(|b| hit(b.var())))
+}
+
+/// Whether `id` is a chart's part, whose bindings are its chart's description's
+/// as drawn: counted, detached and rebound through the chart frame.
+fn chart_part(doc: &crate::Document, id: NodeId) -> bool {
+    crate::chart::owner(doc, id).is_some()
 }
 
 /// The operations that delete `vars` (D1038): **every field bound to one detaches
@@ -2223,7 +2266,7 @@ pub fn users_by_field(doc: &crate::Document, var: VarId) -> Vec<(Field, Vec<Node
             let mut ids: Vec<NodeId> = doc
                 .node_map()
                 .values()
-                .filter(|n| binds_in(n, &[var], f))
+                .filter(|n| binds_in(n, &[var], f) && !chart_part(doc, n.id))
                 .map(|n| n.id)
                 .collect();
             ids.sort();
@@ -2261,15 +2304,24 @@ fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec
         .node_map()
         .values()
         .filter(|n| {
-            Field::ALL
-                .into_iter()
-                .any(|f| bound_in(n, f).any(|v| gone(v, f)))
+            !chart_part(doc, n.id)
+                && Field::ALL
+                    .into_iter()
+                    .any(|f| bound_in(n, f).any(|v| gone(v, f)))
         })
         .map(|n| n.id)
         .collect();
     ids.sort();
     for id in ids {
         let n = doc.get(id).expect("listed from the document");
+        // A chart's colours detach in its description and its parts together.
+        if n.chart().is_some() {
+            ops.extend(crate::chart::rebind_ops(doc, id, &|at, b| {
+                b.var()
+                    .filter(|v| gone(*v, Field::Fill))
+                    .map(|_| doc.resolve_brush(at, b).into_owned().into())
+            }));
+        }
         let gone_as = |b: &BrushSource, f: Field| b.var().is_some_and(|v| gone(v, f));
         let gone_fill = |b: &BrushSource| gone_as(b, Field::Fill);
         let gone_stroke = |b: &BrushSource| gone_as(b, Field::Stroke);
@@ -3552,6 +3604,14 @@ pub(crate) fn check<'a>(
     in_vault: impl Fn(NodeId) -> bool,
 ) -> Result<(), VarRule> {
     check_table(t)?;
+    let nodes: Vec<&crate::Node> = nodes.into_iter().collect();
+    // A chart's parts draw its colours as fills and strokes alike; the scope is
+    // judged on the description, whose colours are fills.
+    let parts: rustc_hash::FxHashSet<NodeId> = nodes
+        .iter()
+        .filter_map(|n| n.chart())
+        .flat_map(|c| c.parts.iter().map(|(_, id)| *id))
+        .collect();
     for n in nodes {
         if in_vault(n.id) {
             let own = |v: VarId| t.get(v).is_some_and(|v| v.origin.is_none());
@@ -3600,7 +3660,8 @@ pub(crate) fn check<'a>(
                 None => true,
             })
         });
-        if !(fills && strokes && effects) {
+        let chart = n.chart().is_none_or(|c| c.brushes().all(colour_ok));
+        if !(fills && strokes && effects && chart) {
             return Err(VarRule::BadBinding(n.id));
         }
         if n.corner_vars.iter().any(Option::is_some) {
@@ -3673,9 +3734,10 @@ pub(crate) fn check<'a>(
             return Err(VarRule::BadBinding(n.id));
         }
         // And every binding inside its variable's scope, the kinds being right.
-        if Field::ALL
-            .into_iter()
-            .any(|f| bound_in(n, f).any(|v| t.get(v).is_some_and(|v| !v.binds(f))))
+        if !parts.contains(&n.id)
+            && Field::ALL
+                .into_iter()
+                .any(|f| bound_in(n, f).any(|v| t.get(v).is_some_and(|v| !v.binds(f))))
         {
             return Err(VarRule::OutOfScope(n.id));
         }
@@ -3746,7 +3808,18 @@ pub fn query_mode(t: &Variables, q: &Breakpoints, width: f64) -> Option<ModeId> 
 /// The variables `n` binds in fields of family `f`.
 pub fn bound_in(n: &crate::Node, f: Field) -> impl Iterator<Item = VarId> + '_ {
     let list: Vec<VarId> = match f {
-        Field::Fill => n.paint.fills.iter().filter_map(|x| x.brush.var()).collect(),
+        // A chart's colours are fills, whatever its parts draw them as.
+        Field::Fill => n
+            .paint
+            .fills
+            .iter()
+            .filter_map(|x| x.brush.var())
+            .chain(
+                n.chart()
+                    .into_iter()
+                    .flat_map(|c| c.brushes().filter_map(|b| b.var())),
+            )
+            .collect(),
         Field::Stroke => n
             .paint
             .strokes

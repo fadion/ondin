@@ -129,6 +129,47 @@ pub fn with_palette(chart: &Chart, p: super::Palette) -> Chart {
     next
 }
 
+/// `chart` with its series (a Sankey's nodes) bound to `vars` in order, round
+/// again past the last: *From variables*, so a mode switch recolours the chart.
+/// The palette stays what it was, for the series a later edit adds.
+pub fn with_variables(chart: &Chart, vars: &[crate::VarId]) -> Chart {
+    if vars.is_empty() {
+        return chart.clone();
+    }
+    let bound = |i: usize| BrushSource::Bound {
+        var: vars[i % vars.len()],
+        alpha: 1.0,
+    };
+    let mut next = chart.clone();
+    if chart.kind == super::ChartKind::Sankey {
+        for (i, (name, _)) in sankey_nodes(chart).into_iter().enumerate() {
+            next = with_node_fill(&next, &name, bound(i));
+        }
+    } else {
+        for (i, col) in chart.mapping.series.iter().enumerate() {
+            next = with_series_fill(&next, *col, bound(i));
+        }
+    }
+    next
+}
+
+/// The variables `chart`'s series (a Sankey's nodes) are bound to in order,
+/// when every one is bound; what *From variables* lights against.
+pub fn bound_variables(chart: &Chart) -> Option<Vec<crate::VarId>> {
+    let fills: Vec<BrushSource> = if chart.kind == super::ChartKind::Sankey {
+        sankey_nodes(chart).into_iter().map(|(_, f)| f).collect()
+    } else {
+        chart
+            .mapping
+            .series
+            .iter()
+            .filter_map(|c| series_fill(chart, *c))
+            .collect()
+    };
+    let vars: Option<Vec<crate::VarId>> = fills.iter().map(|f| f.var()).collect();
+    vars.filter(|v| !v.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +204,22 @@ mod tests {
                 "Search", "Signup", "Social", "Direct", "Bounce", "Trial", "Leave"
             ]
         );
+    }
+
+    /// *From variables* binds the series in order, round again past the last,
+    /// and reads back as those variables; a palette pick unbinds them.
+    #[test]
+    fn from_variables_binds_the_series_in_order() {
+        let chart = Chart::sample(ChartKind::Column);
+        let mut ids = crate::IdSource::new(1);
+        let vars = [ids.mint_var(), ids.mint_var()];
+        let bound = with_variables(&chart, &vars);
+        assert_eq!(
+            bound_variables(&bound),
+            Some(vec![vars[0], vars[1], vars[0]])
+        );
+        let back = with_palette(&bound, super::super::Palette::Ondin);
+        assert_eq!(bound_variables(&back), None);
     }
 
     /// A node's total is the larger of what flows in and what flows out.

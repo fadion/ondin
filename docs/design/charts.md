@@ -5,7 +5,7 @@ text generated from it: columns, bars, lines, areas, pies, scatters and Sankey f
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
 was made with until it is flattened, which leaves the shapes and drops the description. Built:
-everything below, but the pieces `roadmap.md` lists under *Now · Charts*.
+everything below.
 
 ## Model
 
@@ -59,9 +59,23 @@ everything below, but the pieces `roadmap.md` lists under *Now · Charts*.
 - **`series: Vec<SeriesStyle>`** — one per series column, keyed by its `ColumnId`: colour (a
   `BrushSource`, so a colour variable binds to it through the existing binding chrome), visible,
   and the per-series line dash and point shape. A column mapped as a series for the first time
-  takes the palette's next colour. **Bindings wait for the Chart card**: until the variable flows
-  (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) know a chart's colours,
-  `Chart::validate` refuses a bound one, so a delete can never leave one dangling.
+  takes the palette's next colour.
+- **A chart's colours bind** (`Chart::brushes`: series, nodes, the axes' and gridlines' colours
+  and the text ink). The parts are generated with the bound brush itself, so they read the
+  variable as any layer does and a mode switch recolours them with no regeneration; an outlined
+  mark's tint is the binding at 14% of its alpha. To the variable flows the **chart frame is
+  the user**, its parts never: `variable::reads`, `users` and `users_by_field` count the frame
+  once; `bound_in` lists the description's colours as fills, so the scope is judged on the
+  description, and `variable::check` skips the scope (not the kind) of a chart's listed parts,
+  which may draw a fill colour as a line's stroke. A delete or a scope that drops the binding
+  (`detach_ops`) detaches the description and its parts to the colour they drew through
+  `chart::rebind_ops`: one `SetChart`, the same rewrite on the parts' fills and strokes, and a
+  `SetChartParts` of the parts as they are, so `chart::guard` reads it as the chart's
+  regeneration. A copy carries the description's variables (`variable::carried`); a paste
+  rebinds them by the fill's rule and clears the stamp so settle remakes the parts
+  (`variable::land`), and a copy leaving its document detaches them (`detached`). A kit's rebind
+  never meets a chart, which cannot sit in a main. *Bind other uses* and Colour review leave a
+  chart's parts out, as no edit but the regeneration may write them.
 - **`nodes: Vec<NodeStyle>`** — a Sankey's node colours, keyed by node name, so a
   re-import or a reorder keeps them. A name seen for the first time takes the palette's next
   colour; a style whose name no row uses any more is dropped by the next regeneration.
@@ -261,9 +275,14 @@ it applies to; switching kind keeps the others' values.
   Data, palette, text family and number formats are left alone. The preset cells are drawn by
   `chart::generate` itself on the chart's own data, so what a cell shows is what it does.
 - **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
-  *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a colour collection's group, its
-  variables bound to the series in order, so a mode switch recolours the chart. Picking a palette
-  recolours every series; a series' own swatch, once edited, is its own.
+  *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a group of colour variables
+  that may bind a fill (the name before the last `/`, else the collection's name; its variables
+  in the table's order), bound to the series in order (a Sankey's nodes), round again past the
+  last (`chart::with_variables`), so a mode switch recolours the chart. The palette dropdown
+  lists the four palettes, then the groups under *From variables*; a group lights while the
+  series run through it in order (`chart::bound_variables`), and the dropdown reads *From
+  variables · ‹group›*. Picking a palette recolours and unbinds every series; a series' own
+  swatch, once edited, is its own.
 - **Marks**:
   - *Bars* (Column, Bar): group gap (% of a band), bar gap (% of a bar), corner radius on the end
     away from the baseline or all corners.
@@ -298,8 +317,9 @@ it applies to; switching kind keeps the others' values.
 - **Text**: one family and weight for the chart, a size each for tick labels, values, legend and
   axis titles, and the ink colour, from the Type controls the inspector already has. A chart starts
   with the document's default text family, as the Text tool's first node does.
-- **Colours** for axes, ticks, grid and text are `Paint` fills like the series', so they bind to
-  variables the same way.
+- **Colours** for axes, ticks, grid and text are `BrushSource`s like the series', so they bind to
+  variables the same way. The card edits the text ink; the axes' and gridlines' colours are the
+  description's, set through `set_chart`.
 
 A chart has no title or caption of its own: a text layer next to it does that, and stays free.
 
@@ -369,7 +389,9 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   back: …*) in the warning ink, and the mapping: *Category* (*X* for a scatter) or a Sankey's
   *From*, *To* and *Value* as dropdowns of columns.
 - **Series** — the palette dropdown, then one row per column but the category: its swatch,
-  which opens the picker on `PaintSlot::Chart` (solid colours), its name, and the eye, which
+  which opens the picker on `PaintSlot::Chart` (solid colours, and the *Variables* tab: a
+  binding written into the description, `chart_bind_tx`, *Solid* detaching it to the colour
+  drawn), its name, and the eye, which
   shows the column as a series or hides it (a hidden series keeps its place and colour). On a
   line, area or scatter chart a `…` button between them opens the series' style menu: its line's
   dash (*Solid*, *Dashed*, *Dotted*; not a scatter) and its points' shape (a line's unshaped
@@ -388,8 +410,9 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   *Thousands separator*, *Compact* and *Percent*, the same rows whatever is set so the popup
   keeps its size. The value axis, a scatter's X axis and the value labels each have one.
 - **Text** — the family (the Type card's family dropdown, `family_dropdown`; empty is the
-  document's default family and shows its name), the four sizes and the weight. Undo step
-  *Chart font*.
+  document's default family and shows its name), *Text colour* (the ink, a series row's swatch
+  field on `ChartColour::Ink`, bindable the same way), the four sizes and the weight. Undo steps
+  *Chart font* and *Chart text colour*.
 - At the foot, **Flatten chart** (`ui::action_button`), with `Ctrl+E` in its tooltip.
 
 A multi-selection of charts shows the Chart card when every chart is the same kind

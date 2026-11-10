@@ -415,7 +415,24 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
         "[Fill]" => reads::<Vec<Fill>>(v),
         "[Stroke]" => reads::<Vec<Stroke>>(v),
+        "ChartTable" => reads::<crate::chart::Table>(v),
+        // Patches, whose nulls reset what they name (`patched`).
+        "ChartMapping" => reads::<crate::chart::Mapping>(&without_nulls(v)),
+        "ChartOptions" => reads::<crate::chart::Options>(&without_nulls(v)),
         _ => Err(format!("no model type is called `{model}`")),
+    }
+}
+
+/// `v` with every null member of an object left out.
+fn without_nulls(v: &Value) -> Value {
+    match v {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .filter(|(_, v)| !v.is_null())
+                .map(|(k, v)| (k.clone(), without_nulls(v)))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 
@@ -516,6 +533,14 @@ pub fn example(model: &str) -> Option<Value> {
         )]),
         "[Fill]" => json(&vec![fill, image_fill]),
         "[Stroke]" => json(&vec![Stroke::default()]),
+        "ChartTable" => json(&crate::chart::Chart::sample(crate::chart::ChartKind::Column).table),
+        "ChartMapping" => {
+            json(&crate::chart::Chart::sample(crate::chart::ChartKind::Column).mapping)
+        }
+        "ChartOptions" => serde_json::json!({
+            "bars": { "stacking": "Stacked", "radius": 4.0 },
+            "legend": { "position": "Bottom" },
+        }),
         _ => return None,
     })
 }
@@ -2730,7 +2755,241 @@ pub static VERBS: &[Verb] = &[
             }]))
         },
     },
+    // --- charts -------------------------------------------------------------
+    Verb {
+        name: "insert_chart",
+        doc: "Make a chart of `kind` in `parent`, on its own table or the kind's sample; answers its frame",
+        params: &[
+            req("parent", NODE, "the frame, group or page to make it in"),
+            req("kind", ParamKind::Choice(CHART_KINDS), "what it draws"),
+            opt(
+                "table",
+                ParamKind::Model("ChartTable"),
+                "its data; the kind's sample table unless given",
+            ),
+            opt(
+                "mapping",
+                ParamKind::Model("ChartMapping"),
+                "which columns it reads, by id; read off the column types unless given",
+            ),
+            opt(
+                "x",
+                ParamKind::Number,
+                "its frame's left edge in the parent; 0 unless given",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "its frame's top edge in the parent; 0 unless given",
+            ),
+            opt("width", ParamKind::Number, "its width; 480 unless given"),
+            opt("height", ParamKind::Number, "its height; 280 unless given"),
+            opt(
+                "index",
+                INDEX,
+                "its place among the parent's children, 0 the bottom",
+            ),
+            opt("name", TEXT, "its name; Chart unless given"),
+        ],
+        run: |ctx, a| {
+            let parent = a.node("parent")?;
+            let count = node(ctx, parent)?.children().len();
+            let kind = chart_kind(a.choice("kind").unwrap_or_default());
+            let mut chart = crate::chart::Chart::sample(kind);
+            if let Some(table) = a.model_opt::<crate::chart::Table>("table")? {
+                chart.mapping = crate::chart::Mapping::guess(kind, &table);
+                chart.table = table;
+            }
+            if let Some(mapping) = a.model_opt("mapping")? {
+                chart.mapping = mapping;
+            }
+            chart_valid(a, &chart)?;
+            let mut size = [480.0, 280.0];
+            for (i, p) in ["width", "height"].into_iter().enumerate() {
+                match a.number(p) {
+                    Some(v) if v <= 0.0 || v > build::GEOMETRY_LIMIT => {
+                        let why = format!(
+                            "a side is more than 0 and at most {}",
+                            build::GEOMETRY_LIMIT
+                        );
+                        return Err(a.invalid(p, why));
+                    }
+                    Some(v) => size[i] = v,
+                    None => {}
+                }
+            }
+            let at = kurbo::Vec2::new(a.number("x").unwrap_or(0.0), a.number("y").unwrap_or(0.0));
+            let id = ctx.ids.mint();
+            let tx = Transaction(vec![
+                Operation::CreateNode {
+                    id,
+                    parent,
+                    index: a.index("index").unwrap_or(count).min(count),
+                    kind: NodeKind::Artboard {
+                        size: kurbo::Size::new(size[0], size[1]),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: Some(Affine::translate(at)),
+                    name: Some(a.text("name").unwrap_or("Chart").to_owned()),
+                },
+                Operation::SetChart {
+                    id,
+                    chart: Some(Box::new(chart)),
+                },
+            ]);
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "set_chart",
+        doc: "Change a chart's kind, or patch its mapping or options; its parts follow",
+        params: &[
+            req("node", NODE, "the chart"),
+            opt("kind", ParamKind::Choice(CHART_KINDS), "what it draws"),
+            opt(
+                "mapping",
+                ParamKind::Model("ChartMapping"),
+                "the roles to change, by column id; a null clears one",
+            ),
+            opt(
+                "options",
+                ParamKind::Model("ChartOptions"),
+                "the options to change, nested as the chart holds them; a null resets one",
+            ),
+        ],
+        run: |ctx, a| {
+            let (id, mut chart) = chart_of(ctx, a)?;
+            if a.get("kind").is_none() && a.get("mapping").is_none() && a.get("options").is_none() {
+                return Err(VerbError::Nothing(
+                    "`set_chart` changes `kind`, `mapping` or `options`",
+                ));
+            }
+            if let Some(word) = a.choice("kind") {
+                chart.kind = chart_kind(word);
+            }
+            if let Some(patch) = a.get("mapping") {
+                chart.mapping = patched(a, "mapping", &chart.mapping, patch)?;
+            }
+            if let Some(patch) = a.get("options") {
+                chart.options = patched(a, "options", &chart.options, patch)?;
+            }
+            chart_valid(a, &chart)?;
+            Ok(Done::ops(vec![Operation::SetChart {
+                id,
+                chart: Some(Box::new(chart)),
+            }]))
+        },
+    },
+    Verb {
+        name: "set_chart_data",
+        doc: "Replace a chart's table, keeping the mapping and series colours of each column whose name survives; unlinks its file",
+        params: &[
+            req("node", NODE, "the chart"),
+            req(
+                "table",
+                ParamKind::Model("ChartTable"),
+                "its new data; column ids are its own",
+            ),
+        ],
+        run: |ctx, a| {
+            let (id, chart) = chart_of(ctx, a)?;
+            let mut chart = chart.with_table(a.model("table")?);
+            chart.source = None;
+            chart_valid(a, &chart)?;
+            Ok(Done::ops(vec![Operation::SetChart {
+                id,
+                chart: Some(Box::new(chart)),
+            }]))
+        },
+    },
+    Verb {
+        name: "flatten_chart",
+        doc: "Drop charts' descriptions, leaving their parts as ordinary layers where they are",
+        params: &[req("nodes", NODES, "the charts")],
+        run: |ctx, a| {
+            let ops = a
+                .layers(ctx.doc, "nodes")?
+                .into_iter()
+                .map(|id| {
+                    crate::chart::flatten(ctx.doc, id).ok_or_else(|| {
+                        a.invalid("nodes", format!("`{}` is not a chart", id.to_wire()))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Done::ops(ops))
+        },
+    },
 ];
+
+/// The chart kinds by the word a verb takes, in [`crate::chart::ChartKind::ALL`]'s order.
+const CHART_KINDS: &[&str] = &["column", "bar", "line", "area", "pie", "scatter", "sankey"];
+
+/// The chart kind a [`CHART_KINDS`] word names; Column for none.
+fn chart_kind(word: &str) -> crate::chart::ChartKind {
+    CHART_KINDS
+        .iter()
+        .position(|w| *w == word)
+        .map_or(crate::chart::ChartKind::Column, |i| {
+            crate::chart::ChartKind::ALL[i]
+        })
+}
+
+/// The chart the `node` argument names and a copy of its description.
+fn chart_of(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<(NodeId, crate::chart::Chart), VerbError> {
+    let id = a.node("node")?;
+    let chart = node(ctx, id)?
+        .chart()
+        .ok_or_else(|| a.invalid("node", "not a chart"))?;
+    Ok((id, chart.clone()))
+}
+
+/// `chart`, refused as `SetChart` would refuse it, the reason said as a fault of
+/// the table, the mapping or the options a caller sent.
+fn chart_valid(a: &Args<'_>, chart: &crate::chart::Chart) -> Result<(), VerbError> {
+    use crate::chart::ChartRule as R;
+    chart.validate().map_err(|rule| {
+        let param = match rule {
+            R::UnknownColumn => "mapping",
+            R::BadOption | R::BoundColour => "options",
+            _ => "table",
+        };
+        let param = if a.verb.params.iter().any(|p| p.name == param) {
+            param
+        } else {
+            "node"
+        };
+        a.invalid(param, rule)
+    })
+}
+
+/// `own` with `patch` merged over it as a JSON merge patch (RFC 7396): an object
+/// merges key by key, a null sets the key back to its default, anything else
+/// replaces it.
+fn patched<T: serde::Serialize + serde::de::DeserializeOwned>(
+    a: &Args<'_>,
+    param: &'static str,
+    own: &T,
+    patch: &Value,
+) -> Result<T, VerbError> {
+    fn merge(into: &mut Value, patch: &Value) {
+        match (into, patch) {
+            (Value::Object(into), Value::Object(patch)) => {
+                for (k, v) in patch {
+                    if v.is_null() {
+                        into.remove(k);
+                    } else {
+                        merge(into.entry(k.clone()).or_insert(Value::Null), v);
+                    }
+                }
+            }
+            (into, patch) => *into = patch.clone(),
+        }
+    }
+    let mut v = serde_json::to_value(own).map_err(|e| a.invalid(param, e))?;
+    merge(&mut v, patch);
+    serde_json::from_value(v).map_err(|e| a.invalid(param, e))
+}
 
 /// One layer of `insert_subtree`'s tree: what `create_node` takes, the properties
 /// the single-layer verbs set, each in the same form, and the layers inside it.

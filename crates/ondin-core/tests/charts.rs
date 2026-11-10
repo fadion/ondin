@@ -738,7 +738,14 @@ fn a_replaced_table_keeps_the_columns_whose_names_survive() {
     };
     let got = c.with_table(table);
     assert_eq!(got.validate(), Ok(()));
-    let id = |name: &str| got.table.columns.iter().find(|x| x.name == name).unwrap().id;
+    let id = |name: &str| {
+        got.table
+            .columns
+            .iter()
+            .find(|x| x.name == name)
+            .unwrap()
+            .id
+    };
     assert_eq!(id("Revenue"), ColumnId(1), "Revenue keeps its id");
     assert_eq!(id("Month"), ColumnId(0));
     assert!(id("Profit").0 > 2, "a new column takes a fresh id");
@@ -752,7 +759,14 @@ fn a_replaced_table_keeps_the_columns_whose_names_survive() {
     };
     let got = c.with_table(fresh);
     assert_eq!(got.validate(), Ok(()));
-    let id = |name: &str| got.table.columns.iter().find(|x| x.name == name).unwrap().id;
+    let id = |name: &str| {
+        got.table
+            .columns
+            .iter()
+            .find(|x| x.name == name)
+            .unwrap()
+            .id
+    };
     assert_eq!(got.mapping.category, Some(id("City")), "guessed");
     assert_eq!(got.mapping.series, [id("Sales"), id("Visits")]);
     assert!(got.series.is_empty());
@@ -774,7 +788,10 @@ fn a_mapping_is_guessed_from_the_column_types() {
     assert_eq!(m.category, Some(ColumnId(1)));
     assert_eq!(m.series, [ColumnId(0), ColumnId(3)]);
     let m = Mapping::guess(ChartKind::Scatter, &t);
-    assert_eq!((m.category, m.series), (Some(ColumnId(0)), vec![ColumnId(3)]));
+    assert_eq!(
+        (m.category, m.series),
+        (Some(ColumnId(0)), vec![ColumnId(3)])
+    );
     let m = Mapping::guess(ChartKind::Sankey, &t);
     assert_eq!(
         (m.from, m.to, m.value),

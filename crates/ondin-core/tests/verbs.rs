@@ -2844,3 +2844,247 @@ fn a_script_refuses_a_stray_key_and_escapes_an_at_sign() {
     assert_eq!(content, "@home is here");
     assert_eq!(doc.get(t).unwrap().parent(), Some(page));
 }
+
+/// The description of chart `id` in `doc`.
+fn chart_of(doc: &Document, id: NodeId) -> ondin_core::chart::Chart {
+    doc.get(id).unwrap().chart().expect("a chart").clone()
+}
+
+/// `insert_chart` makes a 480 × 280 frame named *Chart* at its place on the
+/// kind's sample, or on a table given with its mapping read off the column
+/// types, and its parts follow once settled; a mapping naming no column of the
+/// table is refused as the mapping's fault.
+#[test]
+fn insert_chart_makes_a_chart_on_a_sample_or_a_table() {
+    use ondin_core::chart::{Chart, ChartKind, ColumnId};
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "line", "x": 40, "y": 24 }),
+    )[0];
+    let n = doc.get(c).unwrap();
+    assert_eq!(n.name(), "Chart");
+    assert!(
+        matches!(n.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(480.0, 280.0))
+    );
+    assert_eq!(n.transform(), Affine::translate((40.0, 24.0)));
+    let sample = Chart::sample(ChartKind::Line);
+    assert!(chart_of(&doc, c).same_description(&sample));
+    Resolved::settled(&mut doc);
+    assert!(chart_of(&doc, c).parts.len() > 10, "its parts follow");
+
+    let table = json!({
+        "columns": [{ "id": 0, "name": "City" }, { "id": 1, "name": "Sales" }],
+        "rows": [["Oslo", "4"], ["Rome", "7"]],
+    });
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "pie", "table": table,
+                "width": 300, "height": 300, "name": "Cities" }),
+    )[0];
+    let got = chart_of(&doc, c);
+    assert_eq!(got.kind, ChartKind::Pie);
+    assert_eq!(got.table.rows.len(), 2);
+    assert_eq!(
+        (got.mapping.category, got.mapping.series.as_slice()),
+        (Some(ColumnId(0)), &[ColumnId(1)][..]),
+        "the mapping is read off the column types"
+    );
+
+    let bad = json!({ "parent": page.to_wire(), "kind": "column", "mapping": { "category": 9 } });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "insert_chart", bad),
+        "mapping"
+    );
+    let flat = json!({ "parent": page.to_wire(), "kind": "column", "width": 0 });
+    assert_eq!(refused_param(&doc, &mut ids, "insert_chart", flat), "width");
+}
+
+/// `set_chart` changes the kind and patches the mapping and the options, leaving
+/// what the patch does not name; a null clears or resets what it names. It asks
+/// for something to change, and a chart.
+///
+/// flip: `patched` replacing the whole value with the patch → fails at "the
+/// category is kept".
+#[test]
+fn set_chart_patches_the_kind_mapping_and_options() {
+    use ondin_core::chart::{ChartKind, ColumnId, Stacking};
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "column" }),
+    )[0];
+    let gap = chart_of(&doc, c).options.bars.bar_gap;
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({
+            "node": c.to_wire(),
+            "kind": "bar",
+            "mapping": { "series": [1, 3] },
+            "options": { "bars": { "stacking": "Stacked" }, "legend": null },
+        }),
+    );
+    let got = chart_of(&doc, c);
+    assert_eq!(got.kind, ChartKind::Bar);
+    assert_eq!(got.mapping.series, [ColumnId(1), ColumnId(3)]);
+    assert_eq!(
+        got.mapping.category,
+        Some(ColumnId(0)),
+        "the category is kept"
+    );
+    assert_eq!(got.options.bars.stacking, Stacking::Stacked);
+    assert_eq!(got.options.bars.bar_gap, gap, "the bar gap is kept");
+    assert_eq!(got.options.legend, Default::default());
+
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "mapping": { "category": null } }),
+    );
+    assert_eq!(chart_of(&doc, c).mapping.category, None, "a null clears");
+
+    let none = json!({ "node": c.to_wire() });
+    assert!(matches!(
+        answer(&doc, &mut ids, "set_chart", none),
+        Err(VerbError::Nothing(_))
+    ));
+    let range = json!({ "node": c.to_wire(), "options": { "bars": { "group_gap": 500 } } });
+    assert_eq!(refused_param(&doc, &mut ids, "set_chart", range), "options");
+    let unknown = json!({ "node": c.to_wire(), "mapping": { "series": [42] } });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_chart", unknown),
+        "mapping"
+    );
+    let plain = json!({ "node": page.to_wire(), "kind": "pie" });
+    assert_eq!(refused_param(&doc, &mut ids, "set_chart", plain), "node");
+}
+
+/// `set_chart_data` replaces the table, keeping the mapping and series styles of
+/// each column whose name survives, and drops the linked file.
+#[test]
+fn set_chart_data_keeps_the_columns_whose_names_survive() {
+    use ondin_core::chart::{ColumnId, DataLink, SeriesStyle};
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "column" }),
+    )[0];
+    let mut linked = chart_of(&doc, c);
+    linked.source = Some(DataLink {
+        path: "C:/sales.csv".into(),
+        size: 1,
+        modified: 1,
+    });
+    linked.series.push(SeriesStyle {
+        column: ColumnId(1),
+        fill: ondin_core::Brush::Solid(Color::BLACK).into(),
+        visible: true,
+        dash: Default::default(),
+        point: Default::default(),
+    });
+    doc.apply(&Transaction(vec![Operation::SetChart {
+        id: c,
+        chart: Some(Box::new(linked)),
+    }]))
+    .unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart_data",
+        json!({
+            "node": c.to_wire(),
+            "table": {
+                "columns": [{ "id": 7, "name": "Revenue" }, { "id": 8, "name": "Category" }],
+                "rows": [["5", "Q1"], ["9", "Q2"]],
+            },
+        }),
+    );
+    let got = chart_of(&doc, c);
+    assert_eq!(got.table.columns[0].id, ColumnId(1), "Revenue keeps its id");
+    assert_eq!(got.mapping.category, Some(ColumnId(0)));
+    assert_eq!(got.mapping.series, [ColumnId(1)]);
+    assert_eq!(got.series.len(), 1, "its colour is kept");
+    assert_eq!(got.source, None, "the file no longer is its table");
+
+    let ragged = json!({
+        "node": c.to_wire(),
+        "table": { "columns": [{ "id": 0, "name": "A" }], "rows": [["1", "2"]] },
+    });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_chart_data", ragged),
+        "table"
+    );
+}
+
+/// `flatten_chart` drops the description and leaves the parts where they are;
+/// a layer that is not a chart is refused.
+#[test]
+fn flatten_chart_leaves_the_parts() {
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "area" }),
+    )[0];
+    Resolved::settled(&mut doc);
+    let children = doc.get(c).unwrap().children().to_vec();
+    assert!(!children.is_empty(), "the fixture settled");
+    run(
+        &mut doc,
+        &mut ids,
+        "flatten_chart",
+        json!({ "nodes": [c.to_wire()] }),
+    );
+    let n = doc.get(c).unwrap();
+    assert!(n.chart().is_none());
+    assert_eq!(n.children(), children.as_slice());
+    let again = json!({ "nodes": [c.to_wire()] });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "flatten_chart", again),
+        "nodes"
+    );
+}
+
+/// A verb writing a chart's part answers its edit, and the commit refuses it with
+/// the chart's sentence; the chart's own verbs reach the part instead.
+#[test]
+fn a_part_edited_by_a_verb_is_refused_at_the_commit() {
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "column" }),
+    )[0];
+    Resolved::settled(&mut doc);
+    let (_, bar) = *chart_of(&doc, c)
+        .parts
+        .iter()
+        .find(|(k, _)| k.role == ondin_core::chart::PartRole::Bar)
+        .unwrap();
+    for (verb, args) in [
+        ("set_fills", json!({ "node": bar.to_wire(), "fills": [] })),
+        ("set_name", json!({ "node": bar.to_wire(), "name": "Mine" })),
+        ("delete_node", json!({ "nodes": [bar.to_wire()] })),
+    ] {
+        let done = answer(&doc, &mut ids, verb, args).unwrap_or_else(|e| panic!("{verb}: {e}"));
+        let err = doc.apply(&done.tx).expect_err(verb);
+        assert_eq!(
+            err.to_string(),
+            "Part of a chart — edit the chart, or flatten it first",
+            "{verb}"
+        );
+    }
+}

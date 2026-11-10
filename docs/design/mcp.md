@@ -41,6 +41,7 @@ Phase 2 — write (1:1 with operations/composites):
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
 `set_effects`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
+`insert_chart(parent, kind, table?, mapping?, x?, y?, width?, height?)`, `set_chart(id, kind?, mapping?, options?)`, `set_chart_data(id, table)`, `flatten_chart(ids)`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 
@@ -75,6 +76,7 @@ Which of this is built: the `ondin-mcp` crate holds the tool list (`PHASE_1` to 
 - `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
 - `set_blend(ids, mode)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
+- A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten`. The snapshot's `chart` names the column ids they take.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.
 - `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct.
 

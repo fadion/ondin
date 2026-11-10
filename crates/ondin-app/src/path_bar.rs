@@ -784,7 +784,10 @@ impl OndinApp {
 fn bar_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())
-        .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
+        .stroke(egui::Stroke::new(
+            1.0,
+            theme::color::text_on(color::card(), 15),
+        ))
         .shadow(egui::epaint::Shadow {
             offset: [0, 6],
             blur: 18,

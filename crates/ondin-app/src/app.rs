@@ -17865,7 +17865,7 @@ mod close_confirmation_tests {
         );
         assert!(
             painted.iter().any(|r| r.fill == color::card()
-                && r.stroke.color == crate::theme::color::text_a(23)
+                && r.stroke.color == color::card().blend(color::divider())
                 && r.corner_radius == egui::CornerRadius::same(10)),
             "the card's own frame is missing — ground, hairline and corner: {:?}",
             painted

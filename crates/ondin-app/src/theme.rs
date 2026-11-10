@@ -304,6 +304,13 @@ pub mod color {
         Color32::from_rgba_premultiplied(at(r), at(g), at(b), alpha)
     }
 
+    /// [`text_a`] composited onto `ground`, opaque: the hairline of a card that
+    /// floats over other chrome. egui paints a frame's stroke beside its fill,
+    /// not on it, so a translucent one lets what lies under the card show through.
+    pub fn text_on(ground: Color32, alpha: u8) -> Color32 {
+        ground.blend(text_a(alpha))
+    }
+
     /// The accent at an alpha, for a wash over the chrome.
     pub fn accent_a(alpha: u8) -> Color32 {
         let [r, g, b, _] = accent().to_array();
@@ -1580,7 +1587,9 @@ fn install_style_into(style: &mut egui::Style) {
     v.extreme_bg_color = color::field(); // text-edit / input backgrounds
     v.faint_bg_color = color::card();
     v.hyperlink_color = color::accent();
-    v.window_stroke = Stroke::new(1.0, color::divider());
+    // Opaque on the window's own fill: a popup's stroke is painted beside its
+    // fill, so a translucent one shows the fields under a dropdown.
+    v.window_stroke = Stroke::new(1.0, color::card().blend(color::divider()));
     v.window_corner_radius = CornerRadius::same(6);
     // egui's default is darker and tighter than a menu's.
     v.popup_shadow = crate::ui::MENU_SHADOW;

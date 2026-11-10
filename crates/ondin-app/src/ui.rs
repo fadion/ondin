@@ -97,7 +97,10 @@ pub fn panel_frame(fill: egui::Color32, mx: i8, my: i8) -> egui::Frame {
 pub fn menu_frame(pad: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())
-        .stroke(egui::Stroke::new(MENU_BORDER, theme::color::text_a(15)))
+        .stroke(egui::Stroke::new(
+            MENU_BORDER,
+            theme::color::text_on(color::card(), 15),
+        ))
         .shadow(MENU_SHADOW)
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::same(pad as i8))
@@ -121,7 +124,7 @@ pub fn hover_card_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(color::raised())
         .corner_radius(6)
-        .stroke(egui::Stroke::new(1.0, color::text_a(20)))
+        .stroke(egui::Stroke::new(1.0, color::text_on(color::raised(), 20)))
 }
 
 /// How long the pointer rests on a rail panel's item before its hover card shows.
@@ -196,8 +199,12 @@ pub fn card_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())
         // The token, not its value, so retuning `color::divider()` moves the
-        // card's hairline too; no gate could catch a respelled copy.
-        .stroke(egui::Stroke::new(1.0, color::divider()))
+        // card's hairline too; no gate could catch a respelled copy. Made
+        // opaque on the fill, or what is under the card shows through it.
+        .stroke(egui::Stroke::new(
+            1.0,
+            color::card().blend(color::divider()),
+        ))
         .corner_radius(egui::CornerRadius::same(10))
         .shadow(egui::epaint::Shadow {
             offset: [0, 24],
@@ -1342,7 +1349,10 @@ pub const CARD_COL_GAP: f32 = 7.0;
 pub fn card_at<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> (R, egui::Rect) {
     let out = egui::Frame::NONE
         .fill(color::card())
-        .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
+        .stroke(egui::Stroke::new(
+            1.0,
+            theme::color::text_on(color::card(), 15),
+        ))
         .shadow(egui::epaint::Shadow {
             offset: [0, 6],
             blur: 18,
@@ -6553,6 +6563,30 @@ mod keyboard_focus_tests {
         let (edges, rings) = run(true);
         assert_eq!(rings, 1, "the error ring");
         assert_eq!(edges, 0, "no typing edge over the ring");
+    }
+
+    /// A card floating over chrome has an opaque hairline in both themes: egui
+    /// paints a frame's stroke beside its fill, so a translucent one shows the
+    /// fields under a dropdown as light ticks on its edge.
+    /// flip: `theme::apply` setting `window_stroke` to bare `divider()` → fails
+    /// at "egui's popups".
+    #[test]
+    fn a_floating_cards_hairline_is_opaque() {
+        use crate::theme::color::Theme;
+        for theme in [Theme::Dark, Theme::Light] {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            theme::apply(&ctx, theme);
+            let window = ctx.global_style().visuals.window_stroke.color;
+            for (what, c) in [
+                ("egui's popups", window),
+                ("menu_frame", menu_frame(MENU_PAD).stroke.color),
+                ("card_frame", card_frame().stroke.color),
+                ("hover_card_frame", hover_card_frame().stroke.color),
+            ] {
+                assert_eq!(c.a(), 255, "{what}, {theme:?}: {c:?}");
+            }
+        }
     }
 
     /// A focused slider steps on `←`/`→` (a hundredth, a tenth with `Shift`) and keeps the focus.

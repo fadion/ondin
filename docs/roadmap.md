@@ -1,7 +1,7 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: charts, and code
-export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+Open work only. **Now** is the work that lands before Command Mode and MCP: charts, icon packs
+and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
@@ -35,6 +35,28 @@ Designed in `design/charts.md`; nothing of it is built. In the order it can land
 - **Elsewhere** — the snapshot's `chart`, the four verbs, code export writing the chart's layout,
   compare's rows, the context menu, the palette rows, the nine glyphs, `control_audit` for the card and
   the window.
+
+## Now · Icon packs
+
+A kit of icon components that the assets browser's Icons tab shows beside the remote sets. It is
+a kit, not a second publishing path: *Make this a kit*, publishing, the vault and the update pill
+stay as `kits.md` has them. Not designed yet; the pieces:
+
+- **The flag** — a kit carries an explicit "show in the Icons tab" mark, never inferred from its
+  content. Settings ▸ Assets lists flagged library kits beside `sets::SETS`, off by default like
+  them. The kit stays in the insert picker too.
+- **Browsing** — the Icons tab's grid, search, set dropdown and size field take the flagged kits'
+  mains as icons. A set shows once, by its default variant.
+- **Inserting** — a click or drag goes through `kit::insert`, placing an instance sized to the
+  size field, one undo step. Resizing follows the author's constraints; nothing is assumed.
+- **To decide: recolouring.** A remote icon is one group with its `currentColor` written black;
+  an instance has no icon colour, only per-layer fill overrides or a bound variable. Leading
+  option: an icon kit binds its ink to one colour variable that the instance overrides.
+- **To decide: variants.** The tab has one variant dropdown and a set can have several
+  properties (weight × filled). Either the kit names the property the dropdown drives, or
+  icon kits allow one property.
+- **Strokes at size** — an outline icon set to scale thickens its strokes as it grows, one set
+  fixed does not. That is the author's constraints working, and `kits.md` should say so.
 
 ## Now · Code export (HTML/CSS, React, Vue)
 

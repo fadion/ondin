@@ -539,6 +539,8 @@ fn binding_fits(nodes: &FxHashMap<NodeId, Node>, owner: NodeId, bound: &Node) ->
 ///   it brought where they still fit, takes the property's first value where one
 ///   does not, and takes the **first free combination** when it brought none; a
 ///   node that left its set, or stopped being a main, drops its values;
+/// - **every root holds the set's one element**: a root that joined takes the
+///   roots' already there, else the default variant's;
 /// - **every variant carries its derived name** ([`derived_name`]) — written here,
 ///   before the propagation pass, so instances still holding the old name follow;
 /// - **properties sit on an owner**: a variant's move to its set, merged by name
@@ -690,6 +692,24 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
             let name = derived_name(&next);
             if scratch.get(v).is_some_and(|n| n.name != name) {
                 ops.push(Operation::SetName { id: v, name });
+            }
+        }
+        // A set has one element on all its roots: a root that joined takes the
+        // element of the roots already there, else the default variant's.
+        let before = match doc.get(s).is_some_and(|n| n.set.is_some()) {
+            true => variants(doc, s),
+            false => Vec::new(),
+        };
+        let source = vs
+            .iter()
+            .copied()
+            .find(|v| before.contains(v))
+            .or_else(|| crate::kit::default_variant(&scratch, s));
+        if let Some(element) = source.and_then(|v| scratch.get(v)).map(|n| n.element) {
+            for &v in &vs {
+                if scratch.get(v).is_some_and(|n| n.element != element) {
+                    ops.push(Operation::SetElement { id: v, element });
+                }
             }
         }
         // A variant's properties are its set's: merged by name and kind.

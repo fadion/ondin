@@ -339,6 +339,32 @@ fn a_set_has_one_element_on_every_root() {
     );
 }
 
+/// Each variant of a set is a tree of its own, so Main on every root refuses
+/// none of them, while a second main inside one variant is refused.
+/// flip: `refusal` counting mains over the set rather than the variant →
+/// fails at "the set's Main is not refused".
+#[test]
+fn each_variant_holds_its_own_main() {
+    let (mut doc, _, [rest, hover]) = set_of_two(false);
+    let ops = element::set_ops(&doc, rest, Some(HtmlElement::Main));
+    assert_eq!(ops.len(), 2, "the fixture: both roots");
+    doc.apply(&Transaction(ops)).unwrap();
+    for r in [rest, hover] {
+        assert_eq!(
+            element::refusal(&doc, r, HtmlElement::Main),
+            None,
+            "the set's Main is not refused"
+        );
+    }
+    let inner = IdSource::new(0xEA).mint();
+    doc.apply(&Transaction(vec![create(inner, rest, 0, frame(), "Inner")]))
+        .unwrap();
+    assert!(
+        element::refusal(&doc, inner, HtmlElement::Main).is_some(),
+        "a second main in one variant"
+    );
+}
+
 /// A v14 file's marked set keeps the element it was written as, now on its
 /// roots and their instances: absent (Button) and Link move, Plain is
 /// Automatic, and an unmarked set's is dropped.

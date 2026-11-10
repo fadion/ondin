@@ -373,6 +373,42 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
     assert!(f.doc.get(m).unwrap().variant().is_empty());
 }
 
+/// A main that joins a set takes the element its roots already hold, so the
+/// set keeps one element on every root.
+///
+/// flip: `settle` without its element rule → fails at "the set's element".
+#[test]
+fn a_main_moved_into_a_set_takes_its_element() {
+    use ondin_core::element::{self, HtmlElement};
+    let mut f = fixture();
+    f.commit(element::set_ops(&f.doc, f.s, Some(HtmlElement::Section)));
+    let m = f.ids.mint();
+    f.commit(vec![
+        create(m, f.root, 1, frame(50.0, 50.0), "Loose"),
+        Operation::SetComponent {
+            id: m,
+            component: true,
+        },
+        Operation::SetElement {
+            id: m,
+            element: Some(HtmlElement::Link),
+        },
+    ]);
+    f.commit(vec![Operation::Reparent {
+        id: m,
+        new_parent: f.s,
+        index: 2,
+    }]);
+    for v in variant::variants(&f.doc, f.s) {
+        assert_eq!(
+            f.doc.get(v).unwrap().element(),
+            Some(HtmlElement::Section),
+            "the set's element, on {}",
+            f.name(v)
+        );
+    }
+}
+
 /// Renaming a value renames the variants holding it, and through the compare
 /// rule the instances still carrying the variant's name (names are copied
 /// verbatim — §5.3d's rule under D979 (e), held by D982). Flip, run: `settle`

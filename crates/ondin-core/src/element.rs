@@ -301,7 +301,11 @@ pub fn refusal(doc: &Document, id: NodeId, element: HtmlElement) -> Option<Strin
         ));
     }
     if element == HtmlElement::Main {
-        let top = top_of(doc, id);
+        // Each variant of a set is written as a tree of its own, so each may
+        // hold a main: the count runs over the variant, else the top frame.
+        let variant = std::iter::successors(Some(id), |a| doc.get(*a).and_then(Node::parent))
+            .find(|a| crate::variant::set_of(doc, *a).is_some());
+        let top = variant.unwrap_or_else(|| top_of(doc, id));
         let others = std::iter::once(top).chain(below(doc, top));
         if let Some(m) = others
             .filter(|o| *o != id)

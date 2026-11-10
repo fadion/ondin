@@ -20,7 +20,6 @@ a *Landed:* line saying what is in and what is next, so the next session resumes
   - *From variables* and bindable swatches: the variable flows learn the description's colours
     (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
     stops refusing a bound one.
-  - In the data window: the header's chevron (its menu opens on a right-click only).
   - Import reads the file on the UI thread, as the tokens import does; the design asks for a
     worker.
 

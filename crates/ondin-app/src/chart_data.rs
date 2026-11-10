@@ -26,6 +26,8 @@ const ROW_H: f32 = ui::MENU_ROW_H;
 const GUTTER: f32 = 40.0;
 /// The space a cell's text keeps from its edges.
 const CELL_PAD: f32 = 6.0;
+/// The header's chevron: the width at its right edge a click opens the menu in.
+const CHEVRON_W: f32 = 18.0;
 /// The grid's focus id.
 const GRID_ID: &str = "chart-data-grid";
 /// The undo step every edit makes.
@@ -584,6 +586,14 @@ fn grid(ui: &mut egui::Ui, chart: &Chart, s: &mut ChartData, linked: bool, act: 
                 }
                 (None, Some(c)) if resp.secondary_clicked() => s.menu = Some(Menu::Header(c, p)),
                 (Some(r), None) if resp.secondary_clicked() => s.menu = Some(Menu::Row(r, p)),
+                // The chevron opens the same menu, under itself.
+                (None, Some(c)) if resp.clicked() && p.x >= cell_rect(0, c).right() - CHEVRON_W => {
+                    let at = egui::pos2(
+                        cell_rect(0, c).right() - CHEVRON_W,
+                        origin.y + view.min.y + ROW_H + ui::MENU_GAP,
+                    );
+                    s.menu = Some(Menu::Header(c, at));
+                }
                 (None, Some(c)) => {
                     // A header click selects its column.
                     s.anchor = (0, c);
@@ -742,9 +752,16 @@ fn grid(ui: &mut egui::Ui, chart: &Chart, s: &mut ChartData, linked: bool, act: 
                 name_g,
                 ink,
             );
+            clip.text(
+                egui::pos2(hr.right() - CHEVRON_W / 2.0, hr.center().y),
+                egui::Align2::CENTER_CENTER,
+                icon::CARET_DOWN,
+                theme::icon_font(ui::COMBO_CHEVRON_PT),
+                ui::combo_chevron_ink(),
+            );
             if let Some(m) = mark {
                 clip.text(
-                    egui::pos2(hr.right() - CELL_PAD, hr.center().y),
+                    egui::pos2(hr.right() - CHEVRON_W, hr.center().y),
                     egui::Align2::RIGHT_CENTER,
                     m,
                     egui::FontId::proportional(ui::SMALL_PT - 1.5),
@@ -1194,6 +1211,52 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    /// A click on a header's chevron opens the header menu; a click on its name
+    /// selects the column instead.
+    /// flip: dropping the chevron arm in the grid's click match → fails at "the chevron opens it".
+    #[test]
+    fn the_header_chevron_opens_its_menu() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        let grid = ctx
+            .read_response(egui::Id::new(GRID_ID))
+            .expect("the grid is drawn")
+            .rect;
+        let y = grid.top() + ROW_H / 2.0;
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            pass(&ctx, app, vec![egui::Event::PointerMoved(at)]);
+            pass(&ctx, app, vec![button(true)]);
+            pass(&ctx, app, vec![button(false)]);
+            pass(&ctx, app, Vec::new());
+        };
+        let menu = |app: &OndinApp| app.chart_data.as_ref().and_then(|d| d.menu);
+        click(&mut app, egui::pos2(grid.left() + GUTTER + 30.0, y));
+        assert!(menu(&app).is_none(), "a click on the name selects");
+        assert_eq!(app.chart_data.as_ref().map(|d| d.anchor), Some((0, 0)));
+        click(
+            &mut app,
+            egui::pos2(grid.left() + GUTTER + COL_W - CHEVRON_W / 2.0, y),
+        );
+        assert!(
+            matches!(menu(&app), Some(Menu::Header(0, _))),
+            "the chevron opens it"
+        );
     }
 
     /// The window opens on a new chart; typing replaces the cell under the cursor,

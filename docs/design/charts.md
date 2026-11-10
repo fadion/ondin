@@ -414,7 +414,7 @@ selecting anything else closes it.
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
   document). A header row of column names, each with its type tag (`Aa` text, `#` number) and
   its role (*Category*, a Sankey's *From*, *To* or *Value*, a series' swatch, or dim when
-  unmapped), and a row-number gutter, both held at the scrolled view's edges over the cells;
+  unmapped) and a dropdown chevron, and a row-number gutter, both held at the scrolled view's edges over the cells;
   cells on the field ground with its hairline at `ui::MENU_ROW_H`, numbers right-aligned, the
   selected range in the accent's tint and the cursor ringed in the accent. A column is a number
   column while every non-empty cell in it parses as one; the type is read, never set.
@@ -429,7 +429,9 @@ selecting anything else closes it.
 - **Commits**: each committed cell, paste, clear, insert, sort or delete is one `SetChart`, undo
   step *Edit chart data*. A cell being typed into is the window's own, dropped when the window
   closes or moves to another chart.
-- **Header menu** (right-click, on `ui::menu_frame`): *Rename*, *Use as category* / *Use as X*,
+- **Header menu** (on `ui::menu_frame`; a click on the chevron at the header's right edge opens
+  it under the header, a right-click anywhere on the header at the pointer; a click elsewhere on
+  the header selects the column): *Rename*, *Use as category* / *Use as X*,
   *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /

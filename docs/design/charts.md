@@ -5,7 +5,7 @@ text generated from it: columns, bars, lines, areas, pies, scatters and Sankey f
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
 was made with until it is flattened, which leaves the shapes and drops the description. Built so
-far: the model, settle, and the generator for Column and Bar; the rest is in `roadmap.md`, *Now ·
+far: the model, settle, and the generator for Column, Bar, Line, Area and Pie; the rest is in `roadmap.md`, *Now ·
 Charts*.
 
 ## Model
@@ -147,6 +147,8 @@ or turned, which value labels fit.
   Revenue*. The live chart and the flattened one have the same tree.
 - **Lines, areas, slices and flows are paths pinned on both edges** of the plot (or of the pie's
   square), which stretch with it, their stroke width unscaled (`layout.md`, *What stretches*).
+  Each is pinned by its own box's place as percentages of the plot, so a resized line lands point
+  for point where regeneration at the new size would draw it.
 - **What a flattened chart keeps.** Resized after a flatten, it reflows exactly as the live chart
   does during a drag: columns stretch, labels stay their size and follow their places, the
   legend wraps. What it no longer does is regenerate, so its tick values and the labels shown stay
@@ -168,7 +170,20 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 | **Sankey** | — | From + To text columns and a Value column: one row per flow between two named nodes |
 
 - **Smooth** is a monotone cubic (Fritsch–Carlson), so a smoothed line never overshoots a peak
-  the data does not have.
+  the data does not have. **Step** turns halfway between points. A line's points sit at the
+  centres of the category bands, as columns do.
+- **Lines and areas** are one series frame each: the area (a closed path down to the baseline or
+  to the stack beneath it, at the area opacity), the line over it (round joins and caps, the
+  series' dash), and the points (ellipses centred on their values; *Hollow* is white with the
+  series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
+  while *Start at zero* is on; an area's always holds zero.
+- **A pie** reads the first series by category, each slice its palette colour by category, and
+  its legend lists the slices. A zero is not drawn; *Group small slices* folds two or more slices
+  under its share into *Other* (the palette's last colour). The pie sits in a square frame
+  centred in the body at its own size, so it stays round as the chart resizes; each slice is a
+  wedge path pinned by its own box. Labels sit two thirds out on a pie, mid-ring on a donut, or
+  outside on a leader line, the pie shrunk to leave them room. **One slice of at most 100 is a
+  progress ring**: its share of 100 drawn over a *Track* in the value gridline colour.
 - **Values the kind cannot draw are left out, and said.** Negative values in a pie, text in a
   series column, a row with an empty category, a Sankey row whose value is not above zero or whose
   From is its To: the card's data line says *2 values left out* with the reasons in its tooltip. Column, bar and area charts draw negatives below the baseline;

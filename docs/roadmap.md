@@ -16,13 +16,11 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-- **The generator, the other kinds** — Line and Area (straight, the monotone curve, step,
-  stacking, gaps), Pie and Donut (*Other*, sorting, labels), Scatter and Bubble, Sankey
-  (columns, alignment, relaxation passes, ribbons, loop refusal), the limits and the left-out
-  values. The axis options Column and Bar do not draw yet: titles, tick marks, the value axis
-  line, dashed gridlines, a typed range's start-at-zero off. Goldens per kind in
-  `goldens/charts.svg`'s pattern. Today every kind but Column and Bar generates its legend and
-  an empty Body.
+- **The generator, the other kinds** — Scatter and Bubble, Sankey (columns, alignment,
+  relaxation passes, ribbons, loop refusal), the limits and the left-out values. The options the
+  generator does not draw yet: axis titles, tick marks, the value axis line, dashed gridlines, a
+  slice's corner radius. Goldens per kind through `goldens.rs`' `chart_page`. Today Scatter and
+  Sankey generate their legend and an empty Body. *Landed:* Column, Bar, Line, Area and Pie.
 - **Making and selecting** — the nine glyphs, the rail's Chart slot and `J`, the create gesture
   and sample tables, a chart selecting as one layer, double-click to its cell, the layers row,
   `RenderOverrides::chart` for scrub previews.

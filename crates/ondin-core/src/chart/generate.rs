@@ -19,7 +19,7 @@ use crate::container::{
 use crate::node::{Fill, NodeKind, Stroke, TextSizing};
 use crate::typography::TextStyle;
 use crate::variable::BrushSource;
-use kurbo::{Affine, Point, Rect, RoundedRectRadii, Size};
+use kurbo::{Affine, Point, Rect, RoundedRectRadii, Shape, Size};
 
 /// One generated node: its role, where it hangs, and everything it is.
 #[derive(Clone, Debug, PartialEq)]
@@ -181,7 +181,29 @@ fn read(chart: &Chart) -> Data {
 /// Lays `chart` out into `size` as parts. `family` is the document's default
 /// text family, used when the chart names none.
 pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Refusal> {
-    let data = read(chart);
+    let mut data = read(chart);
+    // A pie's slices are its legend's entries; every other kind's are its series.
+    let slices = (chart.kind == ChartKind::Pie).then(|| pie_slices(chart, &mut data));
+    let entries: Vec<Entry> = match &slices {
+        Some(s) => s
+            .iter()
+            .map(|s| Entry {
+                series: s.index,
+                name: s.name.clone(),
+                fill: s.fill.clone(),
+            })
+            .collect(),
+        None => data
+            .series
+            .iter()
+            .map(|s| Entry {
+                series: s.column.0,
+                name: s.name.clone(),
+                fill: s.fill.clone(),
+            })
+            .collect(),
+    };
+    let data = data;
     let o = &chart.options;
     let text = Text {
         family: if o.text.family.is_empty() {
@@ -200,7 +222,7 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
 
     let legend_at = match o.legend.position {
         LegendPosition::Off => None,
-        p if data.series.is_empty() || matches!(chart.kind, ChartKind::Sankey) => {
+        p if entries.is_empty() || matches!(chart.kind, ChartKind::Sankey) => {
             let _ = p;
             None
         }
@@ -217,7 +239,7 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     );
 
     // The legend first: its size decides the body's.
-    let legend = legend_at.map(|at| legend_items(&data, o.text.legend_size, &text, at, inner));
+    let legend = legend_at.map(|at| legend_items(&entries, o.text.legend_size, &text, at, inner));
     let legend_box = legend.as_ref().map_or(Size::ZERO, |l| l.size);
     let body = if row {
         Size::new(
@@ -269,6 +291,19 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     match chart.kind {
         ChartKind::Column | ChartKind::Bar => {
             bars(chart, &data, body, body_at, &mut out)?;
+        }
+        ChartKind::Line | ChartKind::Area => {
+            lines(chart, &data, body, body_at, &mut out)?;
+        }
+        ChartKind::Pie => {
+            pie(
+                chart,
+                slices.as_deref().unwrap_or(&[]),
+                body,
+                body_at,
+                row,
+                &mut out,
+            )?;
         }
         // The other kinds land with the generator's second half; until then a
         // body with nothing in it.
@@ -511,6 +546,53 @@ impl Out<'_> {
         );
     }
 
+    /// A path drawn in its parent's space, which is `plot` big: pinned on every
+    /// edge by its own box's place as percentages, so it stretches with the plot
+    /// (`container::inset_stretch`) and lands exactly where regeneration would.
+    #[allow(clippy::too_many_arguments)]
+    fn path(
+        &mut self,
+        key: PartKey,
+        parent: PartKey,
+        name: String,
+        path: kurbo::BezPath,
+        plot: Size,
+        fills: Vec<Fill>,
+        strokes: Vec<Stroke>,
+        opacity: f32,
+    ) {
+        if path.elements().is_empty() {
+            return;
+        }
+        let b = path.bounding_box();
+        let (w, h) = (plot.width.max(1e-9), plot.height.max(1e-9));
+        let insets = Insets {
+            left: pct(b.x0 / w * 100.0),
+            right: pct((1.0 - b.x1 / w) * 100.0),
+            top: pct(b.y0 / h * 100.0),
+            bottom: pct((1.0 - b.y1 / h) * 100.0),
+            margin_auto: AutoMargins::default(),
+        };
+        self.parts.push(Part {
+            key,
+            parent: Some(parent),
+            name,
+            kind: NodeKind::Path {
+                path,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::NONE,
+            },
+            transform: Affine::IDENTITY,
+            fills,
+            strokes,
+            opacity,
+            insets,
+            display: None,
+            item: LayoutItem::default(),
+        });
+    }
+
     fn legend(&mut self, l: &LegendLayout, at: Point, row: bool, align: super::Align) {
         let k = key(PartRole::Legend, 0, 0);
         let justify = match align {
@@ -629,7 +711,7 @@ struct LegendLayout {
 /// The legend's items placed in rows that wrap at the width (top or bottom), or
 /// in one column (left or right).
 fn legend_items(
-    data: &Data,
+    entries: &[Entry],
     size: f64,
     text: &Text,
     at: LegendPosition,
@@ -638,7 +720,7 @@ fn legend_items(
     let column = matches!(at, LegendPosition::Left | LegendPosition::Right);
     let mut items = Vec::new();
     let (mut x, mut y, mut line_h, mut widest) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    for s in &data.series {
+    for s in entries {
         let label = text.measure(&s.name, size);
         let w = SWATCH + SWATCH_GAP + label.width();
         let h = label.height().max(SWATCH);
@@ -671,7 +753,7 @@ fn legend_items(
         items: items
             .into_iter()
             .map(|(s, label, bx)| LegendItem {
-                series: s.column.0,
+                series: s.series,
                 name: s.name.clone(),
                 fill: s.fill.clone(),
                 label,
@@ -761,7 +843,70 @@ fn bars(
         hi = if hi > 0.0 { 1.0 } else { 0.0 };
         lo = if lo < 0.0 { -1.0 } else { 0.0 };
     }
+    let spec = AxisSpec {
+        horizontal,
+        lo,
+        hi,
+        // A bar's length is its value, so its axis always holds zero.
+        zero: true,
+        percent: stacking == Stacking::Percent,
+    };
+    let ax = axes(chart, data, body, body_at, out, spec);
+    bar_marks(chart, data, &ax, &totals, out);
+    ax.category_labels(data, out);
+    Ok(())
+}
 
+/// What a value axis spans and how it reads: across the plot for a bar chart,
+/// up it otherwise; whether it must hold zero; whether it writes shares.
+struct AxisSpec {
+    horizontal: bool,
+    lo: f64,
+    hi: f64,
+    zero: bool,
+    percent: bool,
+}
+
+/// The body grid built: the plot and what the marks need of it, and what the
+/// category labels are drawn with.
+struct Axes {
+    horizontal: bool,
+    t: Ticks,
+    plot: Size,
+    plot_key: PartKey,
+    /// The plot's length across the categories, and one category's band of it.
+    across_len: f64,
+    band: f64,
+    ca_show: bool,
+    every: usize,
+    cat_boxes: Vec<Rect>,
+    turn: f64,
+    side_box: Rect,
+    under_box: Rect,
+    left_at_end: bool,
+    bottom_at_top: bool,
+    tick_size: f64,
+}
+
+/// A categorical chart's body: its grid with the value axis's track and labels,
+/// the category axis's track, and the plot with its gridlines and baseline.
+fn axes(
+    chart: &Chart,
+    data: &Data,
+    body: Size,
+    body_at: Point,
+    out: &mut Out,
+    spec: AxisSpec,
+) -> Axes {
+    let o = &chart.options;
+    let AxisSpec {
+        horizontal,
+        lo,
+        hi,
+        zero,
+        percent,
+    } = spec;
+    let n_cat = data.categories.len();
     // The value axis's labels decide its thickness, and the category labels
     // the other axis's.
     let va = &o.value_axis;
@@ -769,13 +914,13 @@ fn bars(
     let tick_size = o.text.tick_size;
     let label_h = out.text.measure("0", tick_size).height();
     let mut value_fmt = va.format.clone();
-    if stacking == Stacking::Percent && !value_fmt.percent {
+    if percent {
         value_fmt.percent = true;
     }
     // A first guess of the plot's length along the value axis, for the count.
     let along = if horizontal { body.width } else { body.height } * 0.8;
     let mut axis_va = va.clone();
-    axis_va.start_at_zero = true;
+    axis_va.start_at_zero = zero || va.start_at_zero;
     let t = ticks_for(&axis_va, lo, hi, along, label_h);
     let tick_text: Vec<String> = t
         .values
@@ -961,7 +1106,6 @@ fn bars(
 
     // Along the value axis, as a share of the plot from its start: up from the
     // bottom for columns, right from the left for bars.
-    let along_len = if horizontal { plot.width } else { plot.height };
     let across_len = if horizontal { plot.height } else { plot.width };
     let value_share = |v: f64| t.t(v);
 
@@ -1057,8 +1201,40 @@ fn bars(
         );
     }
 
-    // The bars.
-    let band = across_len / n_cat.max(1) as f64;
+    Axes {
+        horizontal,
+        t,
+        plot,
+        plot_key,
+        across_len,
+        band: across_len / n_cat.max(1) as f64,
+        ca_show,
+        every,
+        cat_boxes,
+        turn,
+        side_box,
+        under_box,
+        left_at_end,
+        bottom_at_top,
+        tick_size,
+    }
+}
+
+/// Column and bar marks: one series frame of bars each, and the value labels.
+fn bar_marks(chart: &Chart, data: &Data, ax: &Axes, totals: &[f64], out: &mut Out) {
+    let o = &chart.options;
+    let (horizontal, plot, plot_key, across_len) =
+        (ax.horizontal, ax.plot, ax.plot_key, ax.across_len);
+    let stacking = o.bars.stacking;
+    let (n_cat, n_ser) = (data.categories.len(), data.series.len());
+    let value_share = |v: f64| ax.t.t(v);
+    let shown = |c: usize, v: f64| -> f64 {
+        match stacking {
+            Stacking::Percent if totals[c] > 0.0 => v / totals[c],
+            _ => v,
+        }
+    };
+    let band = ax.band;
     let group_gap = (o.bars.group_gap / 100.0).clamp(0.0, 0.95);
     let group = band * (1.0 - group_gap);
     let slots = match stacking {
@@ -1219,9 +1395,24 @@ fn bars(
             );
         }
     }
+}
 
-    // Category labels, every `every`th, centred on their band.
-    if ca_show {
+impl Axes {
+    /// The category labels, every `every`th, centred on their band.
+    fn category_labels(&self, data: &Data, out: &mut Out) {
+        let (horizontal, left_at_end, bottom_at_top) =
+            (self.horizontal, self.left_at_end, self.bottom_at_top);
+        let (band, across_len, every, turn, tick_size) = (
+            self.band,
+            self.across_len,
+            self.every,
+            self.turn,
+            self.tick_size,
+        );
+        let (side_box, under_box, cat_boxes) = (self.side_box, self.under_box, &self.cat_boxes);
+        if !self.ca_show {
+            return;
+        }
         let cat_axis_key = key(PartRole::CategoryAxis, 0, 0);
         let frame = if horizontal { side_box } else { under_box };
         for (c, name) in data.categories.iter().enumerate() {
@@ -1289,8 +1480,699 @@ fn bars(
             }
         }
     }
-    let _ = along_len;
+}
+
+/// One legend entry: a series, or a pie's slice.
+struct Entry {
+    /// The series' column id, or the slice's place.
+    series: u32,
+    name: String,
+    fill: BrushSource,
+}
+
+/// One slice of a pie as drawn: its place, category, value and colour.
+struct Slice {
+    index: u32,
+    name: String,
+    value: f64,
+    fill: BrushSource,
+}
+
+/// The name a pie's folded small slices go by.
+const OTHER: &str = "Other";
+
+/// A pie's slices: the first series' values by category, a negative left out
+/// and said, a zero left out, sorted if asked, and those under *Group small
+/// slices*' share folded into *Other*. Colours run through the palette by
+/// category.
+fn pie_slices(chart: &Chart, data: &mut Data) -> Vec<Slice> {
+    let o = &chart.options.slices;
+    let colours = palette(chart.options.palette);
+    let Some(s) = data.series.first() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut left = Vec::new();
+    for (c, v) in s.values.iter().enumerate() {
+        let Some(v) = v else { continue };
+        if *v < 0.0 {
+            left.push(format!(
+                "{}, {}: a pie cannot draw a negative value",
+                s.name, data.categories[c]
+            ));
+            continue;
+        }
+        if *v == 0.0 {
+            continue;
+        }
+        out.push(Slice {
+            index: c as u32,
+            name: data.categories[c].clone(),
+            value: *v,
+            fill: rgb(colours[c % colours.len()]),
+        });
+    }
+    data.left_out.extend(left);
+    if o.sort {
+        out.sort_by(|a, b| b.value.total_cmp(&a.value));
+    }
+    if let Some(below) = o.group_below {
+        let total: f64 = out.iter().map(|s| s.value).sum();
+        let small = |s: &Slice| total > 0.0 && s.value / total * 100.0 < below;
+        let folded: f64 = out.iter().filter(|s| small(s)).map(|s| s.value).sum();
+        if out.iter().filter(|s| small(s)).count() > 1 {
+            out.retain(|s| !small(s));
+            out.push(Slice {
+                index: super::MAX_ROWS as u32,
+                name: OTHER.into(),
+                value: folded,
+                fill: rgb(*colours.last().expect("a palette has colours")),
+            });
+        }
+    }
+    out
+}
+
+/// A pie or a donut: its slices in a square frame centred in the body, each a
+/// wedge path pinned by its own box, and their labels inside or outside with a
+/// leader line.
+fn pie(
+    chart: &Chart,
+    slices: &[Slice],
+    body: Size,
+    body_at: Point,
+    row: bool,
+    out: &mut Out,
+) -> Result<(), Refusal> {
+    let o = &chart.options;
+    let so = &o.slices;
+    if slices.len() > super::MAX_SLICES {
+        return Err(Refusal::TooManyMarks {
+            count: slices.len(),
+            what: "slices",
+        });
+    }
+    let body_key = key(PartRole::Body, 0, 0);
+    out.frame(
+        body_key,
+        None,
+        "Body",
+        Rect::from_origin_size(body_at, body),
+        None,
+        body_item(row),
+    );
+    let side = body.width.min(body.height).max(0.0);
+    let frame = Rect::from_center_size(
+        Rect::from_origin_size(Point::ZERO, body).center(),
+        (side, side),
+    );
+    let pie_key = key(PartRole::PieFrame, 0, 0);
+    // Centred at its own size: the pie keeps round as the body resizes.
+    out.frame_pinned(
+        pie_key,
+        Some(body_key),
+        "Pie",
+        frame,
+        None,
+        LayoutItem::default(),
+        centred(50.0, 50.0),
+    );
+    let outside = o.values.position != ValuePosition::Off && o.values.pie_outside;
+    let size = o.text.value_size;
+    let centre = Point::new(side / 2.0, side / 2.0);
+    // Room for labels outside: the widest, and a leader line's length.
+    let labels: Vec<String> = slices.iter().map(|s| pie_label(chart, s, slices)).collect();
+    let widest = labels
+        .iter()
+        .map(|l| out.text.measure(l, size).width())
+        .fold(0.0, f64::max);
+    let r = if outside {
+        (side / 2.0 - widest - LEADER).max(side / 4.0)
+    } else {
+        side / 2.0
+    };
+    let hole = if so.donut {
+        r * (so.hole / 100.0).clamp(0.0, 0.95)
+    } else {
+        0.0
+    };
+    // One slice of at most 100 is a progress ring: its share of 100, over a
+    // track of what is left.
+    let ring = slices.len() == 1 && slices[0].value <= 100.0;
+    let total: f64 = if ring {
+        100.0
+    } else {
+        slices.iter().map(|s| s.value).sum()
+    };
+    let series_key = key(PartRole::Series, 0, 0);
+    out.frame_pinned(
+        series_key,
+        Some(pie_key),
+        "Slices",
+        Rect::from_origin_size(Point::ZERO, Size::new(side, side)),
+        None,
+        LayoutItem::default(),
+        fill_insets(),
+    );
+    let pad = so.pad_angle.to_radians();
+    let mut a = so.start_angle.to_radians() - std::f64::consts::FRAC_PI_2;
+    if ring {
+        out.path(
+            key(PartRole::Ground, 0, 0),
+            series_key,
+            "Track".into(),
+            wedge(centre, r, hole, a, a + std::f64::consts::TAU),
+            Size::new(side, side),
+            fill(o.value_axis.grid.colour.clone()),
+            Vec::new(),
+            1.0,
+        );
+    }
+    let mut mids = Vec::new();
+    for s in slices {
+        let sweep = if total > 0.0 {
+            s.value / total * std::f64::consts::TAU
+        } else {
+            0.0
+        };
+        let (a0, a1) = if slices.len() > 1 {
+            (a + pad / 2.0, a + sweep - pad / 2.0)
+        } else {
+            (a, a + sweep)
+        };
+        mids.push((a + sweep / 2.0, s));
+        a += sweep;
+        if a1 <= a0 {
+            continue;
+        }
+        out.path(
+            key(PartRole::Slice, 0, s.index),
+            series_key,
+            format!("Slice · {}", s.name),
+            wedge(centre, r, hole, a0, a1),
+            Size::new(side, side),
+            fill(s.fill.clone()),
+            Vec::new(),
+            1.0,
+        );
+    }
+
+    if o.values.position != ValuePosition::Off {
+        let values_key = key(PartRole::Values, 0, 0);
+        out.frame_pinned(
+            values_key,
+            Some(pie_key),
+            "Values",
+            Rect::from_origin_size(Point::ZERO, Size::new(side, side)),
+            None,
+            LayoutItem::default(),
+            fill_insets(),
+        );
+        for ((mid, s), text) in mids.into_iter().zip(&labels) {
+            let b = out.text.measure(text, size);
+            let dir = kurbo::Vec2::new(mid.cos(), mid.sin());
+            let at = if outside {
+                let from = centre + dir * r;
+                let to = centre + dir * (r + LEADER * 0.6);
+                let mut lead = kurbo::BezPath::new();
+                lead.move_to(from);
+                lead.line_to(to);
+                out.path(
+                    key(PartRole::LeaderLine, 0, s.index),
+                    values_key,
+                    format!("Leader · {}", s.name),
+                    lead,
+                    Size::new(side, side),
+                    Vec::new(),
+                    vec![line_stroke(o.text.ink.clone(), 1.0, super::Dash::Solid)],
+                    1.0,
+                );
+                // Beside the leader's end, on the side it points to.
+                let end = centre + dir * (r + LEADER * 0.75);
+                let x = if dir.x >= 0.0 {
+                    end.x
+                } else {
+                    end.x - b.width()
+                };
+                Point::new(x, end.y - b.height() / 2.0)
+            } else {
+                // At the middle of the ring, or two thirds out on a pie.
+                let at_r = if hole > 0.0 {
+                    (r + hole) / 2.0
+                } else {
+                    r * 0.62
+                };
+                let p = centre + dir * at_r;
+                Point::new(p.x - b.width() / 2.0, p.y - b.height() / 2.0)
+            };
+            let bx = Rect::from_origin_size(at, b.size());
+            out.label(
+                key(PartRole::ValueLabel, 0, s.index),
+                values_key,
+                format!("Value {text}"),
+                text,
+                size,
+                Point::new(at.x - b.x0, at.y - b.y0),
+                centred(
+                    bx.center().x / side.max(1e-9) * 100.0,
+                    bx.center().y / side.max(1e-9) * 100.0,
+                ),
+                0.0,
+            );
+        }
+    }
     Ok(())
+}
+
+/// The room a pie's outside labels leave for their leader lines.
+const LEADER: f64 = 16.0;
+
+/// What a slice's label says: its value, its share or its category.
+fn pie_label(chart: &Chart, s: &Slice, slices: &[Slice]) -> String {
+    let f = &chart.options.values.format;
+    match chart.options.values.pie {
+        super::PieLabel::Category => s.name.clone(),
+        super::PieLabel::Percent => {
+            // A progress ring's share is of 100, as it is drawn.
+            let total: f64 = match slices {
+                [one] if one.value <= 100.0 => 100.0,
+                _ => slices.iter().map(|s| s.value).sum(),
+            };
+            let mut f = f.clone();
+            f.percent = true;
+            scale::format(s.value / total.max(1e-12), &f, 0)
+        }
+        super::PieLabel::Value => scale::format(s.value, f, scale::decimals_of(s.value).min(3)),
+    }
+}
+
+/// A ring's wedge from `a0` to `a1` (radians, clockwise from three o'clock on
+/// screen) between radii `inner` and `outer` about `c`; a pie's when `inner` is 0.
+fn wedge(c: Point, outer: f64, inner: f64, a0: f64, a1: f64) -> kurbo::BezPath {
+    let mut p = kurbo::BezPath::new();
+    let on = |r: f64, a: f64| c + kurbo::Vec2::new(a.cos(), a.sin()) * r;
+    let arc = |p: &mut kurbo::BezPath, r: f64, from: f64, to: f64| {
+        let a = kurbo::Arc::new(c, (r, r), from, to - from, 0.0);
+        a.to_cubic_beziers(0.01, |p1, p2, p3| p.curve_to(p1, p2, p3));
+    };
+    p.move_to(on(outer, a0));
+    arc(&mut p, outer, a0, a1);
+    if inner > 0.0 {
+        p.line_to(on(inner, a1));
+        arc(&mut p, inner, a1, a0);
+    } else if a1 - a0 < std::f64::consts::TAU - 1e-9 {
+        p.line_to(c);
+    }
+    p.close_path();
+    p
+}
+
+/// Line and area charts: per series its area (an area chart), its line and its
+/// points, each a path or a shape pinned by percentage insets of the plot.
+fn lines(
+    chart: &Chart,
+    data: &Data,
+    body: Size,
+    body_at: Point,
+    out: &mut Out,
+) -> Result<(), Refusal> {
+    let o = &chart.options;
+    let l = &o.lines;
+    let area = chart.kind == ChartKind::Area;
+    let stacking = if area {
+        l.area_stacking
+    } else {
+        Stacking::Apart
+    };
+    let n_cat = data.categories.len();
+    let points_on = l.points != super::PointStyle::None;
+    if points_on {
+        let marks = n_cat * data.series.len();
+        if marks > super::MAX_MARKS {
+            return Err(Refusal::TooManyMarks {
+                count: marks,
+                what: "points",
+            });
+        }
+    }
+
+    // Each series' drawn values: its own, or stacked on the ones below it (an
+    // empty cell stacks as zero), or as shares of the category's total.
+    let totals: Vec<f64> = (0..n_cat)
+        .map(|c| {
+            data.series
+                .iter()
+                .filter_map(|s| s.values[c])
+                .map(f64::abs)
+                .sum::<f64>()
+        })
+        .collect();
+    // Positives stack up from zero and negatives down, apart, as bars do.
+    let mut ups = vec![0.0f64; n_cat];
+    let mut downs = vec![0.0f64; n_cat];
+    let mut layers: Vec<(Vec<Option<f64>>, Vec<f64>)> = Vec::new();
+    for s in &data.series {
+        let mut top = Vec::with_capacity(n_cat);
+        let mut base = vec![0.0; n_cat];
+        for c in 0..n_cat {
+            let v = s.values[c];
+            let v = match stacking {
+                Stacking::Percent if totals[c] > 0.0 => v.map(|v| v / totals[c]),
+                _ => v,
+            };
+            match (stacking, v) {
+                (Stacking::Apart, _) | (_, None) => {
+                    // A gap stands on what is under it, so the next run joins there.
+                    base[c] = if stacking == Stacking::Apart {
+                        0.0
+                    } else {
+                        ups[c]
+                    };
+                    top.push(v);
+                }
+                (_, Some(v)) if v >= 0.0 => {
+                    base[c] = ups[c];
+                    ups[c] += v;
+                    top.push(Some(ups[c]));
+                }
+                (_, Some(v)) => {
+                    base[c] = downs[c];
+                    downs[c] += v;
+                    top.push(Some(downs[c]));
+                }
+            }
+        }
+        layers.push((top, base));
+    }
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (top, base) in &layers {
+        for (t, b) in top.iter().zip(base) {
+            if let Some(t) = t {
+                lo = lo.min(*t);
+                hi = hi.max(*t);
+                if area {
+                    lo = lo.min(*b);
+                    hi = hi.max(*b);
+                }
+            }
+        }
+    }
+    if !lo.is_finite() {
+        (lo, hi) = (0.0, 1.0);
+    }
+    let spec = AxisSpec {
+        horizontal: false,
+        lo,
+        hi,
+        // An area fills down to its baseline, so its axis holds zero.
+        zero: area,
+        percent: stacking == Stacking::Percent,
+    };
+    let ax = axes(chart, data, body, body_at, out, spec);
+    let plot = ax.plot;
+    let at =
+        |c: usize, v: f64| Point::new((c as f64 + 0.5) * ax.band, (1.0 - ax.t.t(v)) * plot.height);
+
+    for (si, s) in data.series.iter().enumerate() {
+        let (top, base) = &layers[si];
+        let style = chart.series.iter().find(|st| st.column == s.column);
+        let series_key = key(PartRole::Series, s.column.0, 0);
+        out.frame_pinned(
+            series_key,
+            Some(ax.plot_key),
+            &format!("Series {}", s.name),
+            Rect::from_origin_size(Point::ZERO, plot),
+            None,
+            LayoutItem::default(),
+            fill_insets(),
+        );
+        // The runs a line draws: broken at an empty cell unless gaps connect.
+        let mut runs: Vec<Vec<(usize, f64)>> = vec![Vec::new()];
+        for (c, v) in top.iter().enumerate() {
+            match v {
+                Some(v) => runs.last_mut().expect("one run").push((c, *v)),
+                None if !l.connect_gaps && !runs.last().expect("one run").is_empty() => {
+                    runs.push(Vec::new())
+                }
+                None => {}
+            }
+        }
+        runs.retain(|r| !r.is_empty());
+
+        if area {
+            let mut path = kurbo::BezPath::new();
+            for run in &runs {
+                let pts: Vec<Point> = run.iter().map(|(c, v)| at(*c, *v)).collect();
+                curve(&mut path, &pts, l.curve);
+                // Back along what it stands on, right to left.
+                let floor: Vec<Point> = run.iter().rev().map(|(c, _)| at(*c, base[*c])).collect();
+                if let Some(first) = floor.first() {
+                    path.line_to(*first);
+                }
+                let mut back = kurbo::BezPath::new();
+                curve(
+                    &mut back,
+                    &floor,
+                    if stacking == Stacking::Apart {
+                        super::Curve::Straight
+                    } else {
+                        l.curve
+                    },
+                );
+                for el in back.elements().iter().skip(1) {
+                    path.push(*el);
+                }
+                path.close_path();
+            }
+            out.path(
+                key(PartRole::Area, s.column.0, 0),
+                series_key,
+                format!("Area · {}", s.name),
+                path,
+                plot,
+                fill(s.fill.clone()),
+                Vec::new(),
+                l.area_opacity as f32,
+            );
+        }
+        let mut path = kurbo::BezPath::new();
+        for run in &runs {
+            let pts: Vec<Point> = run.iter().map(|(c, v)| at(*c, *v)).collect();
+            curve(&mut path, &pts, l.curve);
+        }
+        let dash = style.map_or(super::Dash::Solid, |st| st.dash);
+        out.path(
+            key(PartRole::Line, s.column.0, 0),
+            series_key,
+            format!("Line · {}", s.name),
+            path,
+            plot,
+            Vec::new(),
+            vec![line_stroke(s.fill.clone(), l.width, dash)],
+            1.0,
+        );
+        if points_on {
+            let size = l.point_size;
+            let hollow = l.points == super::PointStyle::Hollow;
+            for run in &runs {
+                for (c, v) in run {
+                    let p = at(*c, *v);
+                    let bx = Rect::from_center_size(p, (size, size));
+                    let (fills, strokes) = if hollow {
+                        (
+                            fill(BrushSource::Literal(crate::Brush::Solid(
+                                peniko::Color::WHITE,
+                            ))),
+                            vec![line_stroke(
+                                s.fill.clone(),
+                                (l.width).min(size / 3.0),
+                                super::Dash::Solid,
+                            )],
+                        )
+                    } else {
+                        (fill(s.fill.clone()), Vec::new())
+                    };
+                    out.parts.push(Part {
+                        key: key(PartRole::Point, s.column.0, *c as u32),
+                        parent: Some(series_key),
+                        name: format!("{} · {}", s.name, data.categories[*c]),
+                        kind: NodeKind::Ellipse {
+                            size: bx.size(),
+                            arc: Default::default(),
+                        },
+                        transform: Affine::translate(bx.origin().to_vec2()),
+                        fills,
+                        strokes,
+                        opacity: 1.0,
+                        insets: centred(
+                            p.x / plot.width.max(1e-9) * 100.0,
+                            p.y / plot.height.max(1e-9) * 100.0,
+                        ),
+                        display: None,
+                        item: LayoutItem::default(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Value labels sit above their point.
+    if o.values.position != ValuePosition::Off {
+        let values_key = key(PartRole::Values, 0, 0);
+        out.frame_pinned(
+            values_key,
+            Some(ax.plot_key),
+            "Values",
+            Rect::from_origin_size(Point::ZERO, plot),
+            None,
+            LayoutItem::default(),
+            fill_insets(),
+        );
+        let size = o.text.value_size;
+        for (si, s) in data.series.iter().enumerate() {
+            for (c, v) in layers[si].0.iter().enumerate() {
+                let (Some(v), Some(raw)) = (v, s.values[c]) else {
+                    continue;
+                };
+                let mut f = o.values.format.clone();
+                if stacking == Stacking::Percent {
+                    f.percent = true;
+                }
+                let decimals = if f.percent {
+                    0
+                } else {
+                    scale::decimals_of(raw).min(3)
+                };
+                let shown_v = if stacking == Stacking::Percent {
+                    raw / totals[c].max(1e-12)
+                } else {
+                    raw
+                };
+                let text = scale::format(shown_v, &f, decimals);
+                let b = out.text.measure(&text, size);
+                let p = at(c, *v);
+                let lift = VALUE_GAP + l.point_size.max(l.width) / 2.0;
+                let top_y = p.y - lift - b.height();
+                let mut insets = centred_x(p.x / plot.width.max(1e-9) * 100.0);
+                insets.top = pct(top_y / plot.height.max(1e-9) * 100.0);
+                out.label(
+                    key(PartRole::ValueLabel, s.column.0, c as u32),
+                    values_key,
+                    format!("Value {text}"),
+                    &text,
+                    size,
+                    Point::new(p.x - b.width() / 2.0 - b.x0, top_y - b.y0),
+                    insets,
+                    0.0,
+                );
+            }
+        }
+    }
+    ax.category_labels(data, out);
+    Ok(())
+}
+
+/// `pts` appended to `path` as `curve` draws them, starting with a move.
+///
+/// *Smooth* is a monotone cubic (Fritsch–Carlson): each point's tangent is
+/// limited so the curve never overshoots a value the data does not have.
+/// *Step* turns halfway between points.
+fn curve(path: &mut kurbo::BezPath, pts: &[Point], curve: super::Curve) {
+    let Some(first) = pts.first() else { return };
+    path.move_to(*first);
+    match curve {
+        super::Curve::Straight => {
+            for p in &pts[1..] {
+                path.line_to(*p);
+            }
+        }
+        super::Curve::Step => {
+            for w in pts.windows(2) {
+                let mid = (w[0].x + w[1].x) / 2.0;
+                path.line_to((mid, w[0].y));
+                path.line_to((mid, w[1].y));
+                path.line_to(w[1]);
+            }
+        }
+        super::Curve::Smooth => {
+            let n = pts.len();
+            if n < 3 {
+                for p in &pts[1..] {
+                    path.line_to(*p);
+                }
+                return;
+            }
+            let slope = |i: usize| (pts[i + 1].y - pts[i].y) / (pts[i + 1].x - pts[i].x);
+            let d: Vec<f64> = (0..n - 1).map(slope).collect();
+            let mut m = vec![0.0; n];
+            m[0] = d[0];
+            m[n - 1] = d[n - 2];
+            for i in 1..n - 1 {
+                m[i] = if d[i - 1] * d[i] <= 0.0 {
+                    0.0
+                } else {
+                    (d[i - 1] + d[i]) / 2.0
+                };
+            }
+            for i in 0..n - 1 {
+                if d[i] == 0.0 {
+                    m[i] = 0.0;
+                    m[i + 1] = 0.0;
+                    continue;
+                }
+                let (a, b) = (m[i] / d[i], m[i + 1] / d[i]);
+                let s = a * a + b * b;
+                if s > 9.0 {
+                    let t = 3.0 / s.sqrt();
+                    m[i] = t * a * d[i];
+                    m[i + 1] = t * b * d[i];
+                }
+            }
+            for i in 0..n - 1 {
+                let (p0, p1) = (pts[i], pts[i + 1]);
+                let h = (p1.x - p0.x) / 3.0;
+                path.curve_to(
+                    (p0.x + h, p0.y + m[i] * h),
+                    (p1.x - h, p1.y - m[i + 1] * h),
+                    (p1.x, p1.y),
+                );
+            }
+        }
+    }
+}
+
+/// A series line's stroke: round joins and caps, dashed as the series says.
+fn line_stroke(brush: BrushSource, width: f64, dash: super::Dash) -> Stroke {
+    let (dashes, cap) = match dash {
+        super::Dash::Solid => (Vec::new(), kurbo::Cap::Round),
+        super::Dash::Dashed => (vec![width * 3.0, width * 2.0], kurbo::Cap::Butt),
+        super::Dash::Dotted => (vec![0.0, width * 2.0], kurbo::Cap::Round),
+    };
+    Stroke {
+        brush,
+        width,
+        width_var: None,
+        join: kurbo::Join::Round,
+        cap,
+        dashes,
+        dash_offset: 0.0,
+        sides: crate::node::StrokeSides::All,
+        miter_limit: 4.0,
+        dash_fit: false,
+        align: crate::node::StrokeAlign::Center,
+        visible: true,
+    }
+}
+
+/// Insets centring a box on (`x`, `y`) percent of its parent.
+fn centred(x: f64, y: f64) -> Insets {
+    let mut i = centred_x(x);
+    let v = centred_y(y);
+    i.top = v.top;
+    i.bottom = v.bottom;
+    i.margin_auto.top = true;
+    i.margin_auto.bottom = true;
+    i
 }
 
 /// Insets of 0 on every side: a container covering its parent.

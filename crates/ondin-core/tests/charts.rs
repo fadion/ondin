@@ -585,3 +585,59 @@ fn a_resized_chart_reflows_before_it_regenerates() {
         "the layout is the preview: {reflowed:?} reflowed, {regenerated:?} regenerated"
     );
 }
+
+/// A line is a path pinned on both edges of the plot by its own box: resized
+/// and not regenerated, it stretches to the path regeneration draws, point for
+/// point, its stroke unscaled.
+/// flip: `inset_stretch` answering no for a path → fails at "every point".
+#[test]
+fn a_line_stretches_to_the_path_regeneration_draws() {
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut c = doc.get(chart).unwrap().chart().unwrap().clone();
+    c.kind = ChartKind::Line;
+    doc.apply(&Transaction(vec![Operation::SetChart {
+        id: chart,
+        chart: Some(Box::new(c)),
+    }]))
+    .unwrap();
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let line = part(&doc, chart, PartRole::Line, 1, 0).expect("Line · Revenue");
+    let drawn = |doc: &Document, res: &ondin_core::Resolved| -> Vec<ondin_core::kurbo::Point> {
+        let NodeKind::Path { path, .. } = res.used_kind(doc, line).unwrap() else {
+            panic!("a path");
+        };
+        let world = res.world_transform(line).unwrap();
+        path.elements()
+            .iter()
+            .filter_map(|e| e.end_point())
+            .map(|p| world * p)
+            .collect()
+    };
+    doc.apply(&Transaction(vec![Operation::SetGeometry {
+        id: chart,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(720.0, 280.0)),
+    }]))
+    .unwrap();
+    res = ondin_core::Resolved::rebuild(&doc);
+    let reflowed = drawn(&doc, &res);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    assert_eq!(part(&doc, chart, PartRole::Line, 1, 0), Some(line), "kept");
+    let regenerated = drawn(&doc, &res);
+    assert_eq!(reflowed.len(), regenerated.len());
+    assert!(
+        reflowed
+            .iter()
+            .zip(&regenerated)
+            .all(|(a, b)| (*a - *b).hypot() < 0.01),
+        "every point: {reflowed:?} reflowed, {regenerated:?} regenerated"
+    );
+    let NodeKind::Path { .. } = doc.get(line).unwrap().kind() else {
+        panic!("a path");
+    };
+    assert_eq!(
+        doc.get(line).unwrap().paint().strokes[0].value.width,
+        2.0,
+        "the stroke stays its width"
+    );
+}

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="800" viewBox="0 0 480 800">
+  <clipPath id="clip-c7_2"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 1" clip-path="url(#clip-c7_2)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Jan">
+        <rect data-name="Swatch · Jan" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Jan" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jan</tspan></text>
+      </g>
+      <g data-name="Legend · Feb" transform="matrix(1 0 0 1 48.671875 0)">
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
+      </g>
+      <g data-name="Legend · Apr" transform="matrix(1 0 0 1 97.625 0)">
+        <rect data-name="Swatch · Apr" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
+      </g>
+      <g data-name="Legend · May" transform="matrix(1 0 0 1 145.78125 0)">
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
+      </g>
+      <g data-name="Legend · Jun" transform="matrix(1 0 0 1 197.921875 0)">
+        <rect data-name="Swatch · Jun" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Jun" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jun</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Pie" transform="matrix(1 0 0 1 113.259766 0)">
+        <g data-name="Slices">
+          <path data-name="Slice · Jan" d="M110.7402,0 C139.4958,0 167.1238,11.1853 187.7803,31.1901 L110.7402,110.7402 Z" fill="#3b6fe0"/>
+          <path data-name="Slice · Feb" d="M187.7803,31.1901 C215.5943,58.1264 227.3198,97.6337 218.704,135.3823 L110.7402,110.7402 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Apr" d="M218.704,135.3823 C207.795,183.1775 166.759,218.1119 117.8354,221.2529 L110.7402,110.7402 Z" fill="#d94e7a"/>
+          <path data-name="Slice · May" d="M117.8354,221.2529 C90.3627,223.0167 63.218,214.4846 41.6948,197.3204 C20.1716,180.1563 5.8132,155.5907 1.4195,128.4144 L110.7402,110.7402 Z" fill="#8a63d2"/>
+          <path data-name="Slice · Jun" d="M1.4195,128.4144 C-3.7608,96.3722 5.3772,63.6705 26.4175,38.9553 C47.4579,14.2401 78.282,0 110.7402,0 L110.7402,110.7402 Z" fill="#c9a227"/>
+        </g>
+        <g data-name="Values">
+          <text data-name="Value 12" transform="matrix(1 0 0 1 130.914363 40.444322)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">12</tspan></text>
+          <text data-name="Value 16" transform="matrix(1 0 0 1 170.913653 84.550085)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">16</tspan></text>
+          <text data-name="Value 20" transform="matrix(1 0 0 1 148.422938 156.365526)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">20</tspan></text>
+          <text data-name="Value 23" transform="matrix(1 0 0 1 61.180617 157.765174)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">23</tspan></text>
+          <text data-name="Value 27" transform="matrix(1 0 0 1 51.993361 59.578771)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">27</tspan></text>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_3"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 2" transform="matrix(1 0 0 1 0 320)" clip-path="url(#clip-c7_3)">
+    <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Pie" transform="matrix(1 0 0 1 70.148438 0)">
+        <g data-name="Slices">
+          <path data-name="Slice · Jun" d="M125.103,39.7421 C163.2386,40.2413 196.2844,66.2925 205.6724,103.2579 L173.0034,111.5547 C167.3706,89.3755 147.5432,73.7448 124.6618,73.4452 Z" fill="#c9a227"/>
+          <path data-name="Slice · May" d="M206.1874,105.4029 C213.6649,138.4489 200.623,172.7595 173.0826,192.4946 L153.4495,165.0968 C169.9738,153.2557 177.7989,132.6693 173.3124,112.8417 Z" fill="#8a63d2"/>
+          <path data-name="Slice · Apr" d="M171.2728,193.756 C145.6977,211.0879 112.6887,213.0345 85.2538,198.8288 L100.7523,168.8973 C117.2132,177.4207 137.0186,176.2527 152.3637,165.8536 Z" fill="#d94e7a"/>
+          <path data-name="Slice · Feb" d="M83.3083,197.7889 C60.3681,185.1383 44.6165,162.5379 40.6878,136.637 L74.0127,131.5822 C76.3699,147.1227 85.8209,160.683 99.585,168.2733 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Other" d="M40.3856,134.4518 C37.4115,110.6594 44.7142,86.7267 60.4646,68.6478 C76.2151,50.5688 98.9215,40.0559 122.897,39.7421 L123.3382,73.4452 C108.9529,73.6336 95.329,79.9413 85.8788,90.7887 C76.4285,101.636 72.0469,115.9956 73.8313,130.2711 Z" fill="#7a7a7a"/>
+        </g>
+        <g data-name="Values">
+          <path data-name="Leader · Jun" d="M176.168,57.8252 L182.1113,50.2861" fill="none" stroke="#595959" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+          <text data-name="Value 21%" transform="matrix(1 0 0 1 183.597164 41.746573)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">21%</tspan></text>
+          <path data-name="Leader · May" d="M202.7667,153.9403 L211.7403,157.3513" fill="none" stroke="#595959" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+          <text data-name="Value 19%" transform="matrix(1 0 0 1 213.983662 151.549267)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">19%</tspan></text>
+          <path data-name="Leader · Apr" d="M128.9608,208.119 L129.5259,217.7023" fill="none" stroke="#595959" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+          <text data-name="Value 18%" transform="matrix(1 0 0 1 129.667206 213.44339)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">18%</tspan></text>
+          <path data-name="Leader · Feb" d="M54.8688,172.1818 L46.9929,177.671" fill="none" stroke="#595959" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+          <text data-name="Value 15%" transform="matrix(1 0 0 1 23.222673 172.388461)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">15%</tspan></text>
+          <path data-name="Leader · Other" d="M60.4646,68.6478 L53.2263,62.3417" fill="none" stroke="#595959" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+          <text data-name="Value 27%" transform="matrix(1 0 0 1 27.681851 54.110389)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">27%</tspan></text>
+        </g>
+      </g>
+    </g>
+    <g data-name="Legend" transform="matrix(1 0 0 1 416.296875 16)">
+      <g data-name="Legend · Jun" transform="matrix(1 0 0 1 5.34375 0)">
+        <rect data-name="Swatch · Jun" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Jun" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jun</tspan></text>
+      </g>
+      <g data-name="Legend · May" transform="matrix(1 0 0 1 3.78125 20.515625)">
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
+      </g>
+      <g data-name="Legend · Apr" transform="matrix(1 0 0 1 5.78125 41.046875)">
+        <rect data-name="Swatch · Apr" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
+      </g>
+      <g data-name="Legend · Feb" transform="matrix(1 0 0 1 5.375 61.5625)">
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
+      </g>
+      <g data-name="Legend · Other" transform="matrix(1 0 0 1 0 82.078125)">
+        <rect data-name="Swatch · Other" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#7a7a7a"/>
+        <text data-name="Label · Other" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Other</tspan></text>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_4"><rect x="0" y="0" width="160" height="160"/></clipPath>
+  <g data-name="Chart 3" transform="matrix(1 0 0 1 0 640)" clip-path="url(#clip-c7_4)">
+    <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Pie">
+        <g data-name="Slices">
+          <path data-name="Track" d="M64,0 C91.7265,0 116.2997,17.8535 124.8676,44.2229 C133.4356,70.5924 124.0495,99.4799 101.6183,115.7771 C79.1871,132.0743 48.8129,132.0743 26.3817,115.7771 C3.9505,99.4799 -5.4356,70.5924 3.1324,44.2229 C11.7003,17.8535 36.2735,0 64,0 L64,12.8 C41.8188,12.8 22.1603,27.0828 15.3059,48.1783 C8.4515,69.2739 15.9604,92.3839 33.9054,105.4217 C51.8504,118.4594 76.1496,118.4594 94.0946,105.4217 C112.0396,92.3839 119.5485,69.2739 112.6941,48.1783 C105.8397,27.0828 86.1812,12.8 64,12.8 Z" fill="#e6e6e6"/>
+          <path data-name="Slice · Jan" d="M64,0 C93.2161,0 118.7236,19.7856 125.9893,48.0838 C133.2551,76.3821 120.4345,106.0086 94.8322,120.0836 L88.6658,108.8669 C109.1476,97.6069 119.4041,73.9057 113.5915,51.2671 C107.7789,28.6285 87.3729,12.8 64,12.8 Z" fill="#3b6fe0"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

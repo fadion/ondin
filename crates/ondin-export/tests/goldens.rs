@@ -847,6 +847,151 @@ fn svg_matches_its_golden() {
     check_golden("every-kind.svg", &svg(&doc, &res, doc.first_page(), None));
 }
 
+/// A page holding `charts`, each a frame of its size, one under the other, and
+/// settled as a load settles them.
+fn chart_page(charts: Vec<(ondin_core::chart::Chart, f64, f64)>) -> (Document, Resolved) {
+    let mut ids = IdSource::new(0xC7);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let page = doc.first_page();
+    let mut ops = Vec::new();
+    let mut y = 0.0;
+    for (i, (chart, w, h)) in charts.into_iter().enumerate() {
+        let id = ids.mint();
+        ops.push(Operation::CreateNode {
+            id,
+            parent: page,
+            index: i,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, h),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((0.0, y))),
+            name: Some(format!("Chart {}", i + 1)),
+        });
+        ops.push(Operation::SetChart {
+            id,
+            chart: Some(Box::new(chart)),
+        });
+        y += h + 40.0;
+    }
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::settled(&mut doc);
+    assert!(ondin_core::chart::stale(&doc, &res).is_empty(), "settled");
+    (doc, res)
+}
+
+/// Three series over six months, Costs missing in March and Profit negative
+/// there, as a chart of `kind`.
+fn sample_chart(kind: ondin_core::chart::ChartKind) -> ondin_core::chart::Chart {
+    use ondin_core::chart::{Chart, Column, ColumnId, Mapping, Table};
+    let col = |id, name: &str| Column {
+        id: ColumnId(id),
+        name: name.into(),
+    };
+    let rows = [
+        ["Jan", "42", "30", "12"],
+        ["Feb", "48", "32", "16"],
+        ["Mar", "45", "", "-11"],
+        ["Apr", "56", "36", "20"],
+        ["May", "61", "38", "23"],
+        ["Jun", "68", "41", "27"],
+    ];
+    Chart {
+        kind,
+        table: Table {
+            columns: vec![
+                col(0, "Month"),
+                col(1, "Revenue"),
+                col(2, "Costs"),
+                col(3, "Profit"),
+            ],
+            rows: rows
+                .iter()
+                .map(|r| r.iter().map(|s| s.to_string()).collect())
+                .collect(),
+        },
+        mapping: Mapping {
+            category: Some(ColumnId(0)),
+            series: vec![ColumnId(1), ColumnId(2), ColumnId(3)],
+            ..Mapping::default()
+        },
+        series: vec![],
+        nodes: vec![],
+        options: Default::default(),
+        source: None,
+        parts: vec![],
+        generated: None,
+    }
+}
+
+/// Line and area charts through the SVG writer: straight lines with hollow
+/// points broken at the gap, a smooth one with value labels, a step one
+/// connecting the gap, and overlapping, stacked and 100% areas.
+#[test]
+fn line_and_area_charts_match_their_golden() {
+    use ondin_core::chart::{ChartKind, Curve, PointStyle, Stacking, ValuePosition};
+    let mut straight = sample_chart(ChartKind::Line);
+    straight.options.lines.points = PointStyle::Hollow;
+    let mut smooth = straight.clone();
+    smooth.options.lines.curve = Curve::Smooth;
+    smooth.options.values.position = ValuePosition::Outside;
+    let mut step = sample_chart(ChartKind::Line);
+    step.options.lines.curve = Curve::Step;
+    step.options.lines.connect_gaps = true;
+    let area = sample_chart(ChartKind::Area);
+    let mut stacked = sample_chart(ChartKind::Area);
+    stacked.options.lines.area_stacking = Stacking::Stacked;
+    let mut percent = stacked.clone();
+    percent.options.lines.area_stacking = Stacking::Percent;
+    percent.options.lines.curve = Curve::Smooth;
+    let (doc, res) = chart_page(vec![
+        (straight, 480.0, 280.0),
+        (smooth, 480.0, 280.0),
+        (step, 320.0, 200.0),
+        (area, 480.0, 280.0),
+        (stacked, 480.0, 280.0),
+        (percent, 320.0, 200.0),
+    ]);
+    check_golden("charts-lines.svg", &svg(&doc, &res, doc.first_page(), None));
+}
+
+/// Pies through the SVG writer: a pie with its values inside (March's negative
+/// left out), a sorted, padded donut with *Other* and its shares outside on
+/// leader lines, and a one-row donut drawn as a progress ring.
+#[test]
+fn pie_charts_match_their_golden() {
+    use ondin_core::chart::{ChartKind, LegendPosition, PieLabel, ValuePosition};
+    let mut pie = sample_chart(ChartKind::Pie);
+    pie.mapping.series = vec![ondin_core::chart::ColumnId(3)];
+    pie.options.values.position = ValuePosition::Inside;
+    let mut donut = sample_chart(ChartKind::Pie);
+    donut.options.slices.donut = true;
+    donut.options.slices.sort = true;
+    donut.options.slices.pad_angle = 1.5;
+    donut.options.slices.group_below = Some(15.0);
+    donut.options.values.position = ValuePosition::Inside;
+    donut.options.values.pie = PieLabel::Percent;
+    donut.options.values.pie_outside = true;
+    donut.options.legend.position = LegendPosition::Right;
+    let mut ring = sample_chart(ChartKind::Pie);
+    ring.table.rows.truncate(1);
+    ring.options.slices.donut = true;
+    ring.options.slices.hole = 80.0;
+    ring.options.legend.position = LegendPosition::Off;
+    let left_out = ondin_core::chart::generate(&pie, Size::new(480.0, 280.0), "Inter")
+        .unwrap()
+        .left_out;
+    assert_eq!(left_out.len(), 1, "March's negative: {left_out:?}");
+    let (doc, res) = chart_page(vec![
+        (pie, 480.0, 280.0),
+        (donut, 480.0, 280.0),
+        (ring, 160.0, 160.0),
+    ]);
+    check_golden("charts-pies.svg", &svg(&doc, &res, doc.first_page(), None));
+}
+
 /// Charts through the SVG writer: a grouped column chart with value labels, a
 /// stacked one and a bar chart, each settled at its size, and a flattened copy
 /// of the first resized wider and shorter, which pins the reflow: its bars and

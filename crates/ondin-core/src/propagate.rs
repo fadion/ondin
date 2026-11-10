@@ -165,7 +165,10 @@ fn mode(op: &Operation) -> Mode {
         // A main's description is the main's; an instance reads it through its
         // link, and so is its documentation address.
         | Operation::SetDescription { .. }
-        | Operation::SetDocLink { .. } => Mode::Skip,
+        | Operation::SetDocLink { .. }
+        // A chart never sits in a main or a copy (`chart::check`).
+        | Operation::SetChart { .. }
+        | Operation::SetChartParts { .. } => Mode::Skip,
     }
 }
 

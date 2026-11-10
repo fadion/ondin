@@ -2111,6 +2111,7 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            chart: None,
             element: None,
             href: String::new(),
             origin: None,

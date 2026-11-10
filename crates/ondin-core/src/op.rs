@@ -286,6 +286,21 @@ pub enum Operation {
         id: NodeId,
         credit: Option<Box<crate::credit::Credit>>,
     },
+    /// A frame's chart description (`crate::chart`); `None` flattens it, leaving
+    /// its parts as ordinary layers. A chart keeps its own `parts` and ignores
+    /// the ones given; a frame with no chart takes them. Refused on anything but
+    /// a frame and for a description `Chart::validate` refuses.
+    SetChart {
+        id: NodeId,
+        chart: Option<Box<crate::chart::Chart>>,
+    },
+    /// A chart's parts by role, and the mark of its regeneration: a transaction
+    /// carrying this for a chart may write that chart's parts (`chart::guard`).
+    /// Refused on a node that is not a chart.
+    SetChartParts {
+        id: NodeId,
+        parts: Vec<(crate::chart::PartKey, NodeId)>,
+    },
     /// The HTML element a code export writes a layer as (`crate::element`),
     /// never drawn; `None` is Automatic. Refused for an element the layer's
     /// kind is not offered.
@@ -636,6 +651,8 @@ impl Operation {
             | Operation::SetExports { id, .. }
             | Operation::SetCredit { id, .. }
             | Operation::SetElement { id, .. }
+            | Operation::SetChart { id, .. }
+            | Operation::SetChartParts { id, .. }
             | Operation::SetHref { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
@@ -745,6 +762,8 @@ impl Operation {
             | Operation::SetExports { id, .. }
             | Operation::SetCredit { id, .. }
             | Operation::SetElement { id, .. }
+            | Operation::SetChart { id, .. }
+            | Operation::SetChartParts { id, .. }
             | Operation::SetHref { id, .. }
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
@@ -894,6 +913,10 @@ impl Operation {
             | Operation::SetDocLink { .. }
             | Operation::SetCredit { .. }
             | Operation::SetElement { .. }
+            // A chart's description draws nothing itself; its parts do, written
+            // beside it by the regeneration.
+            | Operation::SetChart { .. }
+            | Operation::SetChartParts { .. }
             | Operation::SetHref { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
@@ -1057,6 +1080,16 @@ impl Operation {
             Operation::SetCredit { id, credit } => node(id).is_some_and(|n| n.credit == *credit),
             Operation::SetElement { id, element } => {
                 node(id).is_some_and(|n| n.element == *element)
+            }
+            // Its parts are the chart's own, so only the description is compared.
+            Operation::SetChart { id, chart } => {
+                node(id).is_some_and(|n| match (&n.chart, chart) {
+                    (Some(a), Some(b)) => a.same_description(b),
+                    (a, b) => a == b,
+                })
+            }
+            Operation::SetChartParts { id, parts } => {
+                node(id).is_some_and(|n| n.chart.as_ref().is_some_and(|c| c.parts == *parts))
             }
             Operation::SetHref { id, href } => node(id).is_some_and(|n| n.href == *href),
             Operation::SetFillStyle { id, style } => {
@@ -1705,6 +1738,13 @@ pub enum OpError {
     /// ends.
     #[error("node {0:?} {1}")]
     BadLink(NodeId, crate::component::LinkRule),
+    /// The sentence is the one the UI and an agent read.
+    #[error("Part of a chart — edit the chart, or flatten it first")]
+    ChartPart(NodeId),
+    #[error("node {0:?} {1}")]
+    ChartPlacement(NodeId, crate::chart::PlacementRule),
+    #[error("{0}")]
+    BadChart(crate::chart::ChartRule),
     /// A vault rule broken (§15 D1012, `crate::kit::check`) — an origin outside
     /// the vault or a vault node without one, a vault child that is not a main or
     /// a set — or a vault opened twice or closed while it held something.

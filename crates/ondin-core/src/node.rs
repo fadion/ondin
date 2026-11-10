@@ -135,6 +135,9 @@ pub struct Node {
     /// Where an inserted icon or photo came from and what its licence asks
     /// for (`crate::credit`). Every copy keeps it; never drawn.
     pub(crate) credit: Option<Box<crate::credit::Credit>>,
+    /// The chart this frame draws (`crate::chart`): its children are the parts
+    /// generated from it. Only on an `Artboard` (`crate::chart::check`).
+    pub(crate) chart: Option<Box<crate::chart::Chart>>,
     /// The HTML element a code export writes this layer as (`crate::element`);
     /// `None` is Automatic. An instance's follow its main's and never differ.
     pub(crate) element: Option<crate::element::HtmlElement>,
@@ -227,6 +230,10 @@ impl Node {
     /// The credit this layer came with from the assets browser, if any.
     pub fn credit(&self) -> Option<&crate::credit::Credit> {
         self.credit.as_deref()
+    }
+    /// The chart this frame draws, `None` for every other layer.
+    pub fn chart(&self) -> Option<&crate::chart::Chart> {
+        self.chart.as_deref()
     }
     /// The HTML element a code export writes this layer as; `None` is Automatic.
     pub fn element(&self) -> Option<crate::element::HtmlElement> {

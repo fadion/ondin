@@ -85,6 +85,8 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         doc_link: _,
         // Follows the picture it credits, so a reset puts back the main's.
         credit,
+        // Never in a main or a copy (`chart::check`).
+        chart: _,
         // Never an override by hand, but a reset puts back the main's all the same.
         element,
         href,

@@ -23,6 +23,7 @@
 pub mod blend;
 pub mod boolean;
 pub mod build;
+pub mod chart;
 pub mod clean_up;
 pub mod color_review;
 pub mod component;

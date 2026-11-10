@@ -191,6 +191,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         description: String::new(),
         doc_link: String::new(),
         credit: None,
+        chart: None,
         element: None,
         href: String::new(),
         origin: None,
@@ -1435,8 +1436,12 @@ impl Document {
         let mut inverse_ops: Vec<Operation> = Vec::with_capacity(tx.0.len());
         let mut dirty = DirtySet::default();
         let mut numbering = Numbering::default();
+        // The charts this transaction regenerates, the only ones whose parts it
+        // may write (`chart::guard`), judged per op against the tree it meets.
+        let regenerated = crate::chart::regenerated(&tx.0);
 
         for op in &tx.0 {
+            crate::chart::guard(self, op, &regenerated)?;
             let inverse = self.apply_one(op, &mut dirty, &mut numbering)?;
             inverse_ops.push(inverse);
         }
@@ -1472,6 +1477,10 @@ impl Document {
         // than `dirty`, because a delete dirties the deleted node, not the
         // instance pointing at it (`component::check`).
         crate::component::check(&self.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
+
+        // Where a chart may sit, over the whole document for the same reason.
+        crate::chart::check(&self.nodes, self.vault, self.guides.iter().map(|g| g.owner))
+            .map_err(|(id, rule)| OpError::ChartPlacement(id, rule))?;
 
         // The vault's rules (§15 D1012): an origin on every vault node and on
         // nothing else, a main or a set at each of its children. After the last op
@@ -2067,6 +2076,39 @@ impl Document {
                     element: old,
                 })
             }
+            // Nor by a chart's description: the parts it draws are written by
+            // the regeneration beside it. **A chart keeps its parts** under a new
+            // description, so undoing an edit never puts back a parts list a later
+            // regeneration replaced; only a chart made from none (a flatten undone)
+            // takes the parts it is given.
+            Operation::SetChart { id, chart } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let mut chart = chart.clone();
+                if let Some(c) = &mut chart {
+                    if !matches!(node.kind, NodeKind::Artboard { .. }) {
+                        return Err(OpError::WrongKindForOp);
+                    }
+                    if let Some(now) = &node.chart {
+                        c.parts = now.parts.clone();
+                    }
+                    c.validate().map_err(OpError::BadChart)?;
+                }
+                let old = std::mem::replace(&mut node.chart, chart);
+                Ok(Operation::SetChart {
+                    id: *id,
+                    chart: old,
+                })
+            }
+            Operation::SetChartParts { id, parts } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let chart = node.chart.as_mut().ok_or(OpError::WrongKindForOp)?;
+                let old = std::mem::replace(&mut chart.parts, parts.clone());
+                chart.validate().map_err(OpError::BadChart)?;
+                Ok(Operation::SetChartParts {
+                    id: *id,
+                    parts: old,
+                })
+            }
             Operation::SetHref { id, href } => {
                 if !crate::element::is_href(href) {
                     return Err(OpError::BadHref);
@@ -2438,6 +2480,7 @@ impl Document {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            chart: None,
             element: None,
             href: String::new(),
             origin: None,
@@ -4009,6 +4052,17 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             doc_link: n.doc_link.clone(),
             // An asset's credit travels with every copy of it.
             credit: n.credit.clone(),
+            // Its parts are the copied children, so their keys follow the new
+            // ids; a part not copied is dropped, and the next settle makes it.
+            chart: n.chart.as_ref().map(|c| {
+                let mut c = c.clone();
+                c.parts = c
+                    .parts
+                    .iter()
+                    .filter_map(|(k, id)| map.get(id).map(|to| (*k, *to)))
+                    .collect();
+                c
+            }),
             // What the layer is in code travels with it, as its name does.
             element: n.element,
             href: n.href.clone(),
@@ -4299,6 +4353,7 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             credit: None,
+            chart: None,
             element: None,
             href: String::new(),
             origin: None,

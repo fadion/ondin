@@ -22,13 +22,21 @@ of it is built; the work is in `roadmap.md`, *Now · Charts*.
 - **The children are the chart's parts**, real nodes: `Rect`s, `Path`s, `Ellipse`s and `Text`s
   inside named frames (*Laid out, not placed*, below). Every renderer, writer, the snapshot, the clipboard, the contrast
   check and the vision simulation draw them as they draw any layer, with no per-chart code.
-- **The parts are derived, and nothing else writes them.** `chart::check` runs after the last op
-  of every transaction (as `component::check` does) and refuses one that changes a part, or adds
-  a child to or reorders a chart frame, unless the same transaction is the chart's own regeneration:
-  `OpError::ChartPart`, said as *Part of a chart — edit the chart, or flatten it first*. An agent
-  setting a bar's colour gets the refusal rather than a colour the next commit overwrites.
+- **The parts are derived, and nothing else writes them.** A regeneration is a transaction
+  carrying `SetChartParts` for its chart (the parts by role, and the mark that it ran).
+  `chart::guard` judges every op of every transaction against the tree it meets and refuses one
+  that writes a node under a chart frame, adds or moves a child into one, or sets the frame's
+  `display`, unless the transaction regenerates that chart: `OpError::ChartPart`, said as *Part of
+  a chart — edit the chart, or flatten it first*. An agent setting a bar's colour gets the refusal
+  rather than a colour the next commit overwrites. The chart frame's own fields, and creating,
+  moving, copying or deleting it whole, are not part edits.
+- **`SetChart`** writes the whole description (`None` flattens), refused off a frame and for a
+  description `Chart::validate` refuses: the table's limits and shape, a mapping naming columns the
+  table has, every option finite and in range. The loader holds a file to the same rule and refuses
+  it rather than loading the parts as plain shapes.
 - **Where a chart may sit.** Anywhere a frame may, except inside a main component, an instance,
-  a kit main, a boolean or a mask (*A chart can't be part of a component — flatten it first*). An
+  a kit main, a boolean or a mask (*A chart can't be part of a component — flatten it first*;
+  `chart::check`, over the whole document after every transaction and on load). An
   instance resized away from its main would regenerate parts its main does not have, and a linked
   copy has no meaning for a part that is rebuilt. A chart frame's own `display`, and the layout
   of everything inside it, are written only by its regeneration. It sets no variable modes or
@@ -38,22 +46,31 @@ of it is built; the work is in `roadmap.md`, *Now · Charts*.
 ### The description (`chart::Chart`)
 
 - **`kind`** — `Column`, `Bar`, `Line`, `Area`, `Pie`, `Scatter`, `Sankey` (*Chart types*,
-  below), with the kind's `variant`.
-- **`table`** — the data (*The table*, below).
+  below). The variant lives in the options of the kind's family, so switching kind keeps it:
+  `bars.stacking` (Grouped, Stacked, 100%), `lines.curve` (Straight, Smooth, Step),
+  `lines.area_stacking` (Overlapping, Stacked, 100%), `slices.donut`, and a scatter is a bubble
+  chart while its mapping has a size column.
+- **`table`** — `Table { columns: Vec<Column { id, name }>, rows: Vec<Vec<String>> }`: every cell
+  is text, one per column, and a column is a number column while every non-empty cell parses as
+  one (`chart::parse_number`).
 - **`mapping`** — which column is the category (or, for a scatter, X), which columns are series,
   for a scatter the optional size and group columns, and for a Sankey the *From*, *To* and
   *Value* columns. Columns are named by `ColumnId`, so a rename keeps the mapping.
-- **`series: Vec<Keyed<Series>>`** — one per series column, keyed by its `ColumnId`: colour (a
-  `Paint` fill, so a colour variable binds to it through the existing binding chrome), visible,
+- **`series: Vec<SeriesStyle>`** — one per series column, keyed by its `ColumnId`: colour (a
+  `BrushSource`, so a colour variable binds to it through the existing binding chrome), visible,
   and the per-series line dash and point shape. A column mapped as a series for the first time
-  takes the palette's next colour.
-- **`nodes: Vec<Keyed<NodeStyle>>`** — a Sankey's node colours, keyed by node name, so a
+  takes the palette's next colour. **Bindings wait for the Chart card**: until the variable flows
+  (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) know a chart's colours,
+  `Chart::validate` refuses a bound one, so a delete can never leave one dangling.
+- **`nodes: Vec<NodeStyle>`** — a Sankey's node colours, keyed by node name, so a
   re-import or a reorder keeps them. A name seen for the first time takes the palette's next
   colour; a style whose name no row uses any more is dropped by the next regeneration.
 - **`options`** — every kind's options at once (*Options*, below), so switching kind and back
   keeps what was set.
 - **`source: Option<chart::DataLink>`** — the linked file, if any (*Import and the linked file*).
-- **`parts: Vec<(PartKey, NodeId)>`** — the generated nodes by role. Never shown.
+- **`parts: Vec<(PartKey, NodeId)>`** — the generated nodes by role (`PartKey { role, series,
+  index }`), ids saved in the file's wire spelling. Never shown. A copy's keys follow its new ids
+  (`document::remap_subtree`).
 
 ### Regeneration (`chart::generate`, `chart::settle`)
 
@@ -62,12 +79,16 @@ of it is built; the work is in `roadmap.md`, *Now · Charts*.
   (insets, display, item settings). It lives
   in core so MCP, the CLI and Command Mode make the same chart. Label widths come from the same
   parley layout a text node uses.
-- **`chart::settle`** is a commit pass, run after layout resolves (as `style::settle` writes style
-  values into the lists that read them). Any transaction that sets a chart's description or changes
-  the size the frame is drawn at — its own resize, a parent's layout giving it a new used width, a
-  font arriving — regenerates it in the same transaction, so one undo step holds the edit and its
-  parts. It reads the **used** size from `Resolved`, because a chart filling a flex card is drawn at
-  the card's width, not its stored one.
+- **`chart::settle`** runs after layout resolves, as `Document::settle_widths` picks modes by
+  width: **the parts are derived state, written outside history**. After any commit, undo, redo
+  or load that sets a chart's description or changes the size the frame is drawn at — its own
+  resize, a parent's layout giving it a new used width, a font arriving — settle regenerates it in
+  a transaction of its own carrying `SetChartParts`, applied to the document directly. The undo
+  step holds only the edit; undoing it changes the description back and settle follows. That is
+  why `SetChart` keeps a chart's own parts: an undone description must not put back a parts list a
+  later regeneration replaced. Settle reads the **used** size from `Resolved`, because a chart
+  filling a flex card is drawn at the card's width, not its stored one, and it owns the frame's
+  whole subtree: a descendant no part key names is deleted.
 - **Ids are kept by role.** Settle diffs the new parts against `parts` by `PartKey`
   (`Bar { series, row }`, `Tick { axis, index }`, `Gridline { axis, index }`, `Label { … }`,
   `LegendItem { series }`, …): a kept key keeps its `NodeId` and gets `SetGeometry` / `SetPaint`
@@ -361,9 +382,10 @@ frame's usual rows.
 
 ## Elsewhere
 
-- **Save format**: `chart` on the frame's DTO, the table as a column list and an array of rows.
-  The schema is bumped (`io.md`, the ladder): an older build would load the parts as plain shapes
-  and drop the description on its next save, so it must refuse the file instead.
+- **Save format**: `chart` on the frame's DTO, the table as a column list and an array of rows,
+  in v15 (`io.md`, the ladder). v15 had not shipped, so no bump of its own: a v14 reader already
+  refuses the file by its version rather than loading the parts as plain shapes and dropping the
+  description on its next save.
 - **MCP snapshot**: a chart frame carries `chart` (kind, variant, mapping, series, the table's
   header and row count) beside its parts, each part with its `role`; `snapshot_version` bumps.
   The verbs `insert_chart`, `set_chart`, `set_chart_data` and `flatten_chart` join the registry

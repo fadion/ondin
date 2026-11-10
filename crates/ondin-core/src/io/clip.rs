@@ -129,7 +129,16 @@ pub fn write_carrying(
     from: Option<Rect>,
     heading: &str,
 ) -> Result<String, IoError> {
-    let dto_of = |t: &Vec<Node>| t.iter().map(NodeDto::from_node).collect();
+    // A chart's linked file stays behind (`Chart::copied`).
+    let dto_of = |t: &Vec<Node>| {
+        t.iter()
+            .map(|n| {
+                let mut d = NodeDto::from_node(n);
+                d.chart = d.chart.map(|c| Box::new(c.copied()));
+                d
+            })
+            .collect()
+    };
     let dto = ClipDto {
         schema_version: CURRENT_SCHEMA_VERSION,
         subtrees: subtrees.iter().map(dto_of).collect(),
@@ -184,9 +193,17 @@ fn parse(json: &str) -> Result<Payload, IoError> {
         if dto_nodes.is_empty() {
             return Err(IoError::Integrity("empty subtree on the clipboard".into()));
         }
+        // A chart's linked file is dropped here, at the door, whatever wrote the
+        // copy (`write_carrying` drops it too): pasted content must not make this
+        // document read a file the copy chose.
         let nodes = dto_nodes
             .into_iter()
-            .map(NodeDto::into_node)
+            .map(|d| {
+                NodeDto::into_node(d).map(|mut n| {
+                    n.chart = n.chart.map(|c| Box::new(c.copied()));
+                    n
+                })
+            })
             .collect::<Result<Vec<Node>, _>>()?;
         // Checked here because `remap_subtree` answers `None` for a malformed
         // template and its caller skips it, so one bad subtree would vanish unnamed.

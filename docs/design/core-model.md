@@ -86,6 +86,7 @@ pub struct Node {
     props: Vec<Keyed<Property>>, // component properties a main or set defines
     origin: Option<kit::Origin>, // where a VAULT node was vendored from — §5.3e; vault nodes only
     credit: Option<Box<credit::Credit>>, // an inserted icon's or photo's provenance and attribution; never drawn
+    chart: Option<Box<chart::Chart>>,   // a frame's chart description; its children are the generated parts (charts.md)
     element: Option<HtmlElement>, // the HTML element code export writes it as; None = Automatic; never drawn
     href: String,              // a link's address, empty = none; kept while the element is not a link
     modes: Vec<ModeId>,        // the modes a FRAME or page sets for itself and contents, at most one per

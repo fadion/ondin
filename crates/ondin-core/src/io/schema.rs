@@ -366,6 +366,11 @@ pub(crate) struct NodeDto {
         deserialize_with = "lenient"
     )]
     pub element: Option<crate::element::HtmlElement>,
+    /// The frame's chart (`crate::chart`), absent on every other layer. New in
+    /// v15. One `Chart::validate` refuses refuses the file: dropping it would
+    /// leave its parts as plain shapes that no regeneration owns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart: Option<Box<crate::chart::Chart>>,
     /// The address a link goes to, absent when empty. New in v15. One not in
     /// `element::is_href`'s form is emptied on load, never refused.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -525,6 +530,7 @@ impl NodeDto {
             doc_link: n.doc_link().to_string(),
             credit: n.credit.clone(),
             element: n.element,
+            chart: n.chart.clone(),
             href: n.href.clone(),
             origin: n.origin().map(|o| OriginDto {
                 kit: o.kit.clone(),
@@ -577,6 +583,11 @@ impl NodeDto {
             .blend
             .filter(|b| b.allowed_on(&self.kind))
             .unwrap_or_else(|| BlendMode::default_for(&self.kind));
+        let chart = self.chart;
+        if let Some(c) = &chart {
+            c.validate()
+                .map_err(|e| IoError::Integrity(format!("node {id:?}: {e}")))?;
+        }
         // Dropped, like `clip`, on a kind it does not apply to.
         let element = self
             .element
@@ -661,6 +672,7 @@ impl NodeDto {
                 .unwrap_or_default(),
             credit: self.credit.map(|c| Box::new(c.normalized())),
             element,
+            chart,
             href: match crate::element::is_href(&self.href) {
                 true => self.href,
                 false => String::new(),
@@ -909,6 +921,11 @@ impl DocumentDto {
             if !page_ids.contains(&owner) && !matches!(kind, Some(NodeKind::Artboard { .. })) {
                 return Err(IoError::Integrity(format!(
                     "guide {id:?} is scoped to {owner:?}, which is not a frame or a page in this document"
+                )));
+            }
+            if nodes.get(&owner).is_some_and(|n| n.chart.is_some()) {
+                return Err(IoError::Integrity(format!(
+                    "guide {id:?} is scoped to {owner:?}, which is a chart"
                 )));
             }
             guides.push(Guide {
@@ -1236,6 +1253,9 @@ fn verify_integrity(
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
     // And the vault's (§15 D1012), `Document::apply`'s post-condition at this door.
     crate::kit::check(nodes, vault)
+        .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
+    // And where a chart may sit; a guide on a chart is refused with the guides.
+    crate::chart::check(nodes, vault, [])
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
 
     Ok(())

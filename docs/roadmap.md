@@ -16,13 +16,11 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-- **The model** — `Node::chart` on a frame, `chart::Chart` and its table, `SetChart`,
-  `chart::check` (parts written only by their chart, the placement refusals), `chart::flatten`,
-  the DTO (joining the unreleased v15, so no bump of its own), the clipboard dropping the link.
 - **The generator, part tree and bars** — `chart::generate`'s scaffold: the part tree on the
   container layout (flex column, legend, the Body grid, percentage insets in the plot), nice
   ticks, number formats, label thinning and turning; Column and Bar with their variants and
-  stacking. `chart::settle` as a commit pass after layout, keeping ids by `PartKey`. Goldens
+  stacking. `chart::settle` after layout and outside history (`Document::settle_widths`'s
+  pattern: after commit, undo, redo and load), keeping ids by `PartKey`. Goldens
   through the SVG writer, and at three sizes, flattened, to pin the reflow.
 - **The generator, the other kinds** — Line and Area (straight, the monotone curve, step,
   stacking, gaps), Pie and Donut (*Other*, sorting, labels), Scatter and Bubble, Sankey
@@ -33,7 +31,9 @@ a *Landed:* line saying what is in and what is next, so the next session resumes
   `RenderOverrides::chart` for scrub previews.
 - **The Chart card** — type, style presets, data summary and mapping, series (*Nodes* for a
   Sankey), marks, axes, values, legend, text, palettes (*From variables* included), flatten and
-  its `Ctrl+E` door.
+  its `Ctrl+E` door. Bound colours: the variable flows learn the description's colours
+  (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
+  stops refusing a bound one.
 - **The data window** — the grid, its keyboard, range selection, TSV copy and paste, the header
   and row menus, the undo steps.
 - **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the

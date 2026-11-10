@@ -162,6 +162,10 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D304** SVG and JSON goldens are byte-compared; PNG goldens are not.
 - **D1095** The MCP tool list covers the model as it is: reads, writes, components, variables, styles, kits and the library. **D1097** Invariant 10 covers document-level actions on §8.3's queue.
 
+## Agents and Command Mode
+
+- **Leap labels outline what they label** (2026-11-10): dashed for a group or frame with a dark label, solid for any other layer with the yellow label, and the first typed letter keeps outlines only on what it still matches (`foundations.md` §13). In a tight spot the question is *the group, or the layer inside it?*, and line style and label lightness answer it without hue.
+
 ## Distribution
 
 - **D952** The window draws its own title bar on Windows and Linux and keeps the system's on macOS.

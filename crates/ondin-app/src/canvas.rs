@@ -2898,6 +2898,22 @@ impl OndinApp {
             return;
         };
         let chain = ondin_core::group_chain(&self.session.doc, leaf, self.entered_group);
+        // A chart reached opens its data at the cell behind the clicked mark.
+        if chain.is_empty()
+            && let Some(chart) = self.session.doc.get(leaf).and_then(|n| n.chart())
+        {
+            let key = ondin_core::chart_part_at(
+                &self.session.resolved,
+                &self.session.doc,
+                self.session.page,
+                leaf,
+                world,
+            );
+            let cell = crate::chart_data::cell_of(chart, key);
+            self.session.selection.set_one(leaf);
+            self.open_chart_data(leaf, cell);
+            return;
+        }
         if let [outermost, rest @ ..] = chain.as_slice() {
             self.entered_group = Some(*outermost);
             self.session
@@ -4683,6 +4699,10 @@ impl OndinApp {
                 // Slices are cut in runs, so the tool stays on.
                 self.session
                     .info("Slice cut; it exports PNG at 1× until you change it");
+            } else if shape == Tool::Chart {
+                // Typing or pasting replaces the sample from the first cell.
+                self.choose_tool(Tool::Select);
+                self.open_chart_data(id, (0, 0));
             } else {
                 self.choose_tool(Tool::Select);
                 self.session.info("Created shape");

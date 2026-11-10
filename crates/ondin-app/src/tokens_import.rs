@@ -64,7 +64,7 @@ pub(crate) struct TokensImport {
 }
 
 /// A file's modification time in whole seconds and its size.
-type Stat = Option<(u64, u64)>;
+pub(crate) type Stat = Option<(u64, u64)>;
 
 /// When the linked file was last looked at, and what its look found.
 #[derive(Default)]
@@ -82,7 +82,7 @@ pub(crate) struct TokensWatch {
 
 /// The most of a tokens file read: far past any real one, short of a stream
 /// that never ends.
-const MAX_READ: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_READ: u64 = 16 * 1024 * 1024;
 
 /// Whether a path a document carries may be looked at: absolute, on a local
 /// drive and not a device name. The document is untrusted, and on Windows even
@@ -118,7 +118,7 @@ fn local_path(path: &Path) -> bool {
 
 /// The linked file's text: a regular local file, read to at most `cap` bytes;
 /// `None` for anything else — a share, a device, a pipe, a stream with no end.
-fn read_linked(path: &Path, cap: u64) -> Option<String> {
+pub(crate) fn read_linked(path: &Path, cap: u64) -> Option<String> {
     use std::io::Read;
     if !local_path(path) || !std::fs::metadata(path).ok()?.is_file() {
         return None;
@@ -133,7 +133,7 @@ fn read_linked(path: &Path, cap: u64) -> Option<String> {
 }
 
 /// A file's [`Stat`]; `None` when it cannot be read or is not a local file.
-fn on_disk(path: &Path) -> Stat {
+pub(crate) fn on_disk(path: &Path) -> Stat {
     if !local_path(path) {
         return None;
     }
@@ -147,7 +147,7 @@ fn on_disk(path: &Path) -> Stat {
 }
 
 /// `tokens.json · kestrel-web/design`: the file and the two folders above it.
-fn where_label(path: &Path) -> (String, String) {
+pub(crate) fn where_label(path: &Path) -> (String, String) {
     let name = path.file_name().map_or_else(
         || "tokens.json".to_string(),
         |n| n.to_string_lossy().into_owned(),

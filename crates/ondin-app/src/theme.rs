@@ -1085,6 +1085,9 @@ pub mod icon {
     pub const CHART_SCATTER: &str = "\u{f064}";
     /// The Sankey chart kind: one node bar whose two flows part to two bars.
     pub const CHART_SANKEY: &str = "\u{f065}";
+    /// A chart's data: a table with a header row — the data window and *Edit
+    /// data…*.
+    pub const TABLE: &str = "\u{f066}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1431,6 +1434,7 @@ pub mod icon {
         ("chart-donut", CHART_DONUT),
         ("chart-scatter", CHART_SCATTER),
         ("chart-sankey", CHART_SANKEY),
+        ("table", TABLE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

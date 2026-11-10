@@ -225,6 +225,17 @@ the same order as `double_click_pick`.
 |---|---|
 | Clip content ✓ | one frame; ticked from `Node::clip`; dims on lock |
 
+A chart (a frame carrying a chart description, `design/charts.md`) has its own head in place of
+*Clip content*:
+
+| Row | Shown / enabled |
+|---|---|
+| Edit data… | one chart; opens the data window |
+| Import chart data… | one chart; dims on lock |
+| Update chart data | while its linked file changed on disk; dims on lock |
+| Unlink data file | while linked; dims on lock |
+| Flatten chart | promoted from Structure; dims on lock |
+
 ### 5.2 Group
 
 | Row | Shown / enabled |

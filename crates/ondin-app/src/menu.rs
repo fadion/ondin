@@ -153,6 +153,16 @@ pub enum Item {
     EnterGroup,
     /// §5.3 — the operands stay selectable and editable.
     EnterBoolean,
+    /// A chart's table in the data window (`chart_data`).
+    EditChartData,
+    /// A file's table into the chart, through the import box (`chart_import`).
+    ImportChartData,
+    /// The chart's linked file read again, while it changed on disk.
+    UpdateChartData,
+    /// The chart keeps its table and drops its file.
+    UnlinkChartData,
+    /// The chart's parts kept as layers, its description dropped.
+    FlattenChart,
     /// §5.3 — the base operand is bottom of the list, so this reorders to index 0.
     MakeBaseOperand,
     /// §5.8 — the layer align aligns to, the base operand of a boolean, and which
@@ -598,6 +608,11 @@ impl Item {
     pub const ALL: &'static [Item] = &[
         Item::EnterGroup,
         Item::EnterBoolean,
+        Item::EditChartData,
+        Item::ImportChartData,
+        Item::UpdateChartData,
+        Item::UnlinkChartData,
+        Item::FlattenChart,
         Item::MakeBaseOperand,
         Item::MakeKeyLayer,
         Item::ClipContent,
@@ -736,6 +751,11 @@ impl Item {
         match self {
             Item::EnterGroup => s("Enter group", icon::SIGN_IN, None, Group::Head),
             Item::EnterBoolean => s("Enter boolean", icon::SIGN_IN, None, Group::Head),
+            Item::EditChartData => s("Edit data…", icon::TABLE, None, Group::Head),
+            Item::ImportChartData => s("Import chart data…", icon::IMPORT, None, Group::Head),
+            Item::UpdateChartData => s("Update chart data", icon::IMPORT, None, Group::Head),
+            Item::UnlinkChartData => s("Unlink data file", icon::LINK_SIMPLE, None, Group::Head),
+            Item::FlattenChart => s("Flatten chart", icon::STACK_SIMPLE, None, Group::Structure),
             Item::MakeBaseOperand => s(
                 "Make this the base operand",
                 icon::DIAMOND,
@@ -1816,6 +1836,9 @@ pub struct LayerState {
     /// then cannot spell "locked but not effectively locked".
     pub locked_by_ancestor: bool,
     pub clips: bool,
+    /// The layer is a chart: whether it links a file, and whether that file
+    /// changed on disk.
+    pub chart: Option<ChartLink>,
     /// This layer is a mask, or a container holding one — the question
     /// `inspector::mask_action` asks to decide whether the verb makes or releases.
     pub masked: bool,
@@ -1851,6 +1874,13 @@ pub struct LayerState {
     pub mirrored: bool,
     /// Every selected layer is a slice, so *Slice selection* has nothing new to cut.
     pub all_slices: bool,
+}
+
+/// A chart's file, as its context menu reads it ([`LayerState::chart`]).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct ChartLink {
+    pub linked: bool,
+    pub changed: bool,
 }
 
 impl LayerState {
@@ -2440,6 +2470,17 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
 
     if one {
         match cx.kinds.first() {
+            Some(Kind::Frame) if let Some(link) = st.chart => {
+                rows.push(Row::new(Item::EditChartData));
+                rows.push(Row::new(Item::ImportChartData).dim_if(locked, why));
+                if link.changed {
+                    rows.push(Row::new(Item::UpdateChartData).dim_if(locked, why));
+                }
+                if link.linked {
+                    rows.push(Row::new(Item::UnlinkChartData).dim_if(locked, why));
+                }
+                rows.push(Row::new(Item::FlattenChart).promote().dim_if(locked, why));
+            }
             Some(Kind::Frame) => {
                 // No *Background…* row: a frame's fill is its paint list, which the
                 // inspector's Fill row already edits (§15 D800).
@@ -2537,6 +2578,9 @@ pub const DIVIDE_NEEDS: &str = "Divide needs overlapping shapes, or a shape and 
 pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::EnterGroup, "Needs one group"),
     (Item::EnterBoolean, "Needs one boolean"),
+    (Item::EditChartData, "Select a chart"),
+    (Item::ImportChartData, "Select a chart"),
+    (Item::FlattenChart, "Select a chart"),
     (Item::MakeBaseOperand, "Needs a layer inside a boolean"),
     (Item::ClipContent, "Needs one frame"),
     (Item::EditText, "Needs a text layer"),
@@ -3331,6 +3375,10 @@ impl OndinApp {
                 .parent()
                 .is_some_and(|p| ondin_core::is_effectively_locked(&self.session.doc, p)),
             clips: node.clip(),
+            chart: node.chart().map(|_| ChartLink {
+                linked: self.chart_link_state(id).is_some(),
+                changed: self.chart_link_state(id) == Some(crate::chart_import::LinkState::Changed),
+            }),
             masked: node.mask()
                 || node
                     .children()
@@ -3596,6 +3644,40 @@ impl OndinApp {
             Item::EnterGroup | Item::EnterBoolean => {
                 if let Some(id) = hit {
                     self.enter_container(id, world);
+                }
+            }
+            // The chart under the menu, or the one selected chart from the palette.
+            Item::EditChartData
+            | Item::ImportChartData
+            | Item::UpdateChartData
+            | Item::UnlinkChartData
+            | Item::FlattenChart => {
+                let chart = hit.or(self.session.selection.single()).filter(|id| {
+                    self.session
+                        .doc
+                        .get(*id)
+                        .is_some_and(|n| n.chart().is_some())
+                });
+                let Some(id) = chart else {
+                    return self.session.info("Select a chart");
+                };
+                match item {
+                    Item::EditChartData => self.open_chart_data(id, (0, 0)),
+                    Item::ImportChartData => self.import_chart_data_dialog(id),
+                    Item::UpdateChartData => {
+                        let path = self
+                            .session
+                            .doc
+                            .get(id)
+                            .and_then(|n| n.chart())
+                            .and_then(|c| c.source.as_ref())
+                            .map(|s| s.path.clone());
+                        if let Some(path) = path {
+                            self.update_linked_charts(&path);
+                        }
+                    }
+                    Item::UnlinkChartData => self.unlink_chart_data(id),
+                    _ => self.flatten_charts(&[id]),
                 }
             }
             // Inside a boolean the key is child order (a reorder to index 0);

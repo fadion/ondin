@@ -1117,6 +1117,12 @@ pub struct OndinApp {
     pub(crate) fill_content: Option<crate::fill_box::FillBox>,
     /// The design tokens review, while it is open (`tokens_import.rs`).
     pub(crate) tokens_import: Option<crate::tokens_import::TokensImport>,
+    /// The chart data window, while it is open on the selected chart.
+    pub(crate) chart_data: Option<crate::chart_data::ChartData>,
+    /// The chart import box, while it is open.
+    pub(crate) chart_import: Option<crate::chart_import::ChartImport>,
+    /// What the watch last saw of the files charts link.
+    pub(crate) chart_watch: crate::chart_import::ChartWatch,
     /// The find and replace box, kept while closed so it reopens as it was left.
     pub(crate) find: crate::find::FindBox,
     /// The Colour review card, at the palette's place (`colour_review.rs`).
@@ -1849,6 +1855,9 @@ impl OndinApp {
             clean_up: None,
             fill_content: None,
             tokens_import: None,
+            chart_data: None,
+            chart_import: None,
+            chart_watch: Default::default(),
             find: Default::default(),
             colour_review: Default::default(),
             repeat: Default::default(),
@@ -2334,6 +2343,7 @@ impl OndinApp {
         self.watch_kits(&ctx);
         self.watch_disk(&ctx);
         self.watch_tokens(&ctx);
+        self.watch_chart_links(&ctx);
         self.poll_imports();
         // Before the bar and the canvas's next frame read the envelope.
         self.tend_warp();
@@ -2371,6 +2381,8 @@ impl OndinApp {
         self.clean_up_ui(&ctx, canvas);
         self.fill_content_ui(&ctx, canvas);
         self.tokens_import_ui(&ctx, canvas);
+        self.chart_import_ui(&ctx, canvas);
+        self.chart_data_ui(&ctx);
         self.trace_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
@@ -7065,6 +7077,12 @@ impl OndinApp {
                 .as_deref()
                 .and_then(|p| p.file_name())
                 .map_or_else(|| file.name.clone(), |n| n.to_string_lossy().into_owned());
+            // A table onto a chart is its data, and a `.csv` or `.tsv` elsewhere a new
+            // chart; a `.json` anywhere but on a chart stays the tokens import's.
+            let at = self.drop_point(ctx);
+            if self.drop_chart_data(file, &name, at) {
+                return;
+            }
             if name.to_ascii_lowercase().ends_with(".json") {
                 match (&file.path, &file.bytes) {
                     (Some(path), _) => self.open_tokens_import(path.clone(), false),
@@ -7857,6 +7875,7 @@ impl OndinApp {
                         self.publish_button(ui);
                     }
                     self.tokens_pill(ui);
+                    self.chart_link_pill(ui);
                     self.kit_update_pill(ui);
                     // In a kit opened by *Go to main*, the way back.
                     self.kit_back_link(ui);

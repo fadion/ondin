@@ -578,6 +578,16 @@ fn with_a_rect(ctx: &egui::Context) -> OndinApp {
     app
 }
 
+/// A column chart on bare canvas, selected.
+fn with_a_chart(ctx: &egui::Context) -> OndinApp {
+    let mut app = OndinApp::headless(ctx);
+    app.insert_chart_at(
+        ondin_core::kurbo::Point::new(-4000.0, 0.0),
+        ondin_core::chart::Chart::sample(ondin_core::chart::ChartKind::Column),
+    );
+    app
+}
+
 /// A text layer's kind saying `content`, at the defaults; batch rename's tests too.
 pub(crate) fn text_kind(content: &str) -> NodeKind {
     NodeKind::Text {
@@ -1041,6 +1051,21 @@ fn sweep_on(theme: Theme) {
     let mut app = with_auto_layout(&ctx);
     let found = inspector(&ctx, &mut app);
     check("auto layout", app, found);
+    // Every section open, so each kind of row the card has is measured.
+    let mut app = with_a_chart(&ctx);
+    app.close_chart_data();
+    for key in crate::panels::CHART_FOLDED {
+        app.collapsed_panels.remove(key);
+    }
+    let found = inspector(&ctx, &mut app);
+    check("chart card", app, found);
+    let mut app = with_a_chart(&ctx);
+    app.close_chart_data();
+    let found = opened(&ctx, &mut app, |_, a| {
+        let id = a.session.selection.ids()[0];
+        a.open_chart_data(id, (0, 0));
+    });
+    check("chart data", app, found);
 
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| a.stroke_menu = Some(0));

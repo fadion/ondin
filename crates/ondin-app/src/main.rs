@@ -82,6 +82,8 @@ mod atomic;
 mod batch_rename;
 mod blend;
 mod canvas;
+mod chart_data;
+mod chart_import;
 mod cheatsheet;
 mod chrome;
 mod clean_up_box;

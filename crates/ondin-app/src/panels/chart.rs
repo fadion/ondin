@@ -101,6 +101,14 @@ pub(crate) fn colour_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core
     }
 }
 
+/// Series `col`'s colour, solid: the data window's header swatch.
+pub(crate) fn series_colour(
+    chart: &Chart,
+    col: chart::ColumnId,
+) -> Option<ondin_core::peniko::Color> {
+    colour_of(chart, ChartColour::Series(col))
+}
+
 /// `chart` with the slot's colour set to `c`.
 pub(crate) fn with_colour(
     chart: &Chart,
@@ -500,7 +508,7 @@ impl OndinApp {
             let mut next = chart.clone();
             next.kind = kind;
             if kind == ChartKind::Sankey || chart.kind == ChartKind::Sankey {
-                next.mapping = guessed_mapping(kind, &chart.table);
+                next.mapping = chart::Mapping::guess(kind, &chart.table);
             }
             self.chart_commit(id, "Chart type", next);
         }
@@ -555,6 +563,14 @@ impl OndinApp {
                 .size(ui::SMALL_PT)
                 .color(theme::text::muted()),
         );
+        let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+        if ui::action_button(ui, icon::TABLE, "Edit data…", ui::FieldButton::Off, size)
+            .on_hover_text("Open the chart's table under the canvas")
+            .clicked()
+        {
+            self.open_chart_data(id, (0, 0));
+        }
+        self.chart_source_line(ui, id);
         if let Some(cache) = self.chart_card.as_ref().filter(|c| c.id == id) {
             if let Some(why) = &cache.refusal {
                 ui.label(
@@ -1584,41 +1600,6 @@ impl OndinApp {
                 n => format!("Flattened {n} charts; their shapes are layers now"),
             });
         }
-    }
-}
-
-/// A mapping for `kind` read off `table`'s columns, for a switch between a
-/// Sankey and the kinds that read categories: a Sankey's From and To are the
-/// first two text columns and its Value the first number column; the others
-/// take the first column as the category and every number column as a series.
-fn guessed_mapping(kind: ChartKind, table: &chart::Table) -> chart::Mapping {
-    let numeric: Vec<chart::ColumnId> = table
-        .columns
-        .iter()
-        .map(|c| c.id)
-        .filter(|c| table.is_numeric(*c))
-        .collect();
-    if kind == ChartKind::Sankey {
-        let mut text = table
-            .columns
-            .iter()
-            .map(|c| c.id)
-            .filter(|c| !numeric.contains(c));
-        return chart::Mapping {
-            from: text.next(),
-            to: text.next(),
-            value: numeric.first().copied(),
-            ..chart::Mapping::default()
-        };
-    }
-    let category = table.columns.first().map(|c| c.id);
-    chart::Mapping {
-        category,
-        series: numeric
-            .into_iter()
-            .filter(|c| Some(*c) != category)
-            .collect(),
-        ..chart::Mapping::default()
     }
 }
 

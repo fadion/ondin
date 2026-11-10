@@ -4,9 +4,8 @@ A chart is a frame that carries a chart description and whose children are ordin
 text generated from it: columns, bars, lines, areas, pies, scatters and Sankey flows drawn from
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
-was made with until it is flattened, which leaves the shapes and drops the description. Built so
-far: the model, settle, and the generator for every kind; the rest is in `roadmap.md`, *Now ·
-Charts*.
+was made with until it is flattened, which leaves the shapes and drops the description. Built:
+everything below, but the pieces `roadmap.md` lists under *Now · Charts*.
 
 ## Model
 
@@ -325,9 +324,11 @@ A chart has no title or caption of its own: a text layer next to it does that, a
   frame, once, so a click, a hover, a double-click and `Enter` all meet the frame and never step
   inside it; the marquee and `Ctrl+A` offer a chart on the page whole (`marquee_range`), never
   its parts.
-- **Double-click opens the data window** with the cell behind the clicked mark selected (the
-  bar's value, the slice's value, the point's row); on a tick label or the legend it selects that
-  column's header.
+- **Double-click opens the data window** with the cell behind the clicked mark selected
+  (`query::chart_part_at` finds the part, `chart_data::cell_of` its cell): a bar's, point's or
+  value label's series at its row, a slice's value, a category label's row, a flow's row, a
+  Sankey node's first row naming it; a line, an area or a legend entry its column's first row.
+  Anything else selects the first cell.
 - **Resize** is the frame's: the chart lays itself out again into the new size, its type staying
   the size it is.
 - **The layers tree** shows a chart as one row with the chart glyph and no disclosure; its parts
@@ -385,50 +386,67 @@ selecting anything else closes it.
 
 - **Head**: the table glyph, *Chart data*, the chart's name, *Import…*, ✕. Under it the toolbar:
   *Add row*, *Add column*, and the source line when linked.
-- **The grid**: a header row of column names, each with its type tag (`Aa` text, `#` number) and
-  its role (*Category*, a series' swatch, or dim when unmapped); a row-number gutter; cells in
-  `ui::text_field`'s ground at `ui::MENU_ROW_H`, numbers right-aligned. A column is a number
+- **The grid** is one focusable region that locks the arrows, `Tab` and `Escape` while it has
+  the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
+  document). A header row of column names, each with its type tag (`Aa` text, `#` number) and
+  its role (*Category*, a Sankey's *From*, *To* or *Value*, a series' swatch, or dim when
+  unmapped), and a row-number gutter, both held at the scrolled view's edges over the cells;
+  cells on the field ground with its hairline at `ui::MENU_ROW_H`, numbers right-aligned, the
+  selected range in the accent's tint and the cursor ringed in the accent. A column is a number
   column while every non-empty cell in it parses as one; the type is read, never set.
 - **Keyboard**, the spreadsheet's: arrows move; typing starts an edit replacing the cell, `F2` or
-  `Enter` edits it in place; `Enter` commits and moves down, `Tab` commits and moves right,
-  `Shift` the other way; `Escape` abandons an edit, and a second closes the window; `Delete`
-  clears the selected cells; `Shift`+arrows and a drag select a range. `Ctrl+C` / `Ctrl+X` /
-  `Ctrl+V` read and write tab-separated text, so a range pasted from a spreadsheet lands as cells,
-  growing the table to fit. `Ctrl+Z` is the document's undo.
-- **Commits**: each committed cell, paste, clear, insert or delete is one undo step, *Edit chart
-  data*. A cell being typed into is a `ui::Draft`, dropped if the chart is deselected mid-edit.
-- **Header menu** (right-click or the header's chevron, on `ui::menu_frame`): *Rename*, *Use as
-  category* / *Use as X*, *Show as series* (a switch), *Insert column left* / *right*, *Sort
-  ascending* / *descending*, *Delete column*. **Row menu** on the gutter: *Insert row above* /
+  `Enter` edits it in place (a `ui::text_field` over the cell); `Enter` commits and moves down,
+  `Tab` commits and moves right, `Shift` the other way; `Escape` abandons an edit, and with none
+  closes the window; `Delete` and `Backspace` clear the selected cells; `Shift`+arrows, a
+  `Shift`-click and a drag select a range, a header click its column. `Ctrl+C` / `Ctrl+X` /
+  `Ctrl+V` read and write tab-separated text, so a range pasted from a spreadsheet lands as cells
+  from the range's corner, growing the table to fit (`chart_data::pasted`). A double-click edits
+  a cell or renames a header.
+- **Commits**: each committed cell, paste, clear, insert, sort or delete is one `SetChart`, undo
+  step *Edit chart data*. A cell being typed into is the window's own, dropped when the window
+  closes or moves to another chart.
+- **Header menu** (right-click, on `ui::menu_frame`): *Rename*, *Use as category* / *Use as X*,
+  *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
+  (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
+  mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /
   *below*, *Delete row*.
+- **While the import box is up** the window gives up the keyboard and is not drawn; it takes the
+  keyboard back after.
 - **Linked**, the grid is read-only and says so in a line over it (*Edited in sales.csv — unlink
   to edit here*); the mapping, series and options stay editable.
 
 ### Import and the linked file
 
-- **Doors**: *Import…* in the data window's head; the palette's *Import chart data…* (dim with
-  *Select a chart* without one); a `.csv`, `.tsv` or `.json` dropped onto a chart. A `.json`
-  dropped anywhere but on a chart stays the tokens import's door.
-- **CSV** (RFC 4180): the delimiter is detected among comma, semicolon and tab; the first row is
+- **Doors**: *Import…* in the data window's head; the context menu's and the palette's *Import
+  chart data…* (the palette's dim with *Select a chart* without one); a `.csv`, `.tsv` or `.json`
+  dropped onto a chart (`chart_import::drop_chart_data`). A `.csv` or `.tsv` dropped on bare
+  canvas makes a chart there from it, linked (*Making one*); a `.json` dropped anywhere but on a
+  chart stays the tokens import's door.
+- **The readers** are core's (`chart::table_io`), each holding the table's limits and noting what
+  it cut. **CSV** (RFC 4180): the delimiter is detected among comma, semicolon and tab; the first row is
   the header unless it parses as numbers. **TSV** the same with tab. **JSON** is an array of
-  objects; every key seen becomes a column, in first-seen order; numbers are numbers, strings are
+  objects; every key seen becomes a column, in first-seen order (each object read in its own key
+  order, which `serde_json`'s sorted map would lose); numbers are numbers, strings are
   text, `true`/`false` are text, `null` is empty, and a nested object or array leaves its cell
   empty and is named in the note. Anything else is refused: *Not an array of objects*. Numbers
   written with a thousands separator (`1,234.5`) parse; a decimal comma does not.
-- **The import box**, batch rename's modal: the import glyph, *Import chart data*, the file name
-  and its two parent folders; the first 20 rows as they will land, each column's type tag; *First
-  row is the header* (a switch, CSV only); an info note for anything left out; foot *Keep this file
-  linked*, *Cancel*, *Replace data*. Replacing keeps the mapping and series colours for every
-  column whose name the new table also has (`Chart::with_table`). Undo step *Import chart data*.
-- **A linked chart** stores `DataLink { path, stamp }` (path, size and modified time as last read)
-  in its own description; the table is always the document's own copy, so a chart whose file is
-  gone still draws. **The path is the document's, so untrusted**: the tokens link's rules hold
-  (`styles-variables.md`, *A linked file*) — absolute, on a local drive, a regular file of at most
-  16 MB, read on a worker.
-- **Watching**, as the tokens link: every `WATCH_EVERY` (45 s) and when the window regains focus,
-  each linked path is `stat`ed. A change shows the pill *sales.csv changed · Update charts* (with
-  the count when several charts link it) beside the tokens and kit pills, and the Data section's
-  source line says *Changed on disk* with *Update*. Updating reads the file and replaces each
+- **The import box**, the tokens review's modal canvas card (`settings::canvas_card`): *Import
+  chart data*, the file name and its two parent folders; the first 20 rows as they will land,
+  each column's type tag; *First row is the header* (a switch, CSV and TSV); an info note for
+  anything left out; foot *Keep this file linked* (absent for a browser drop, which has no
+  path), *Cancel*, *Replace data*; `Enter` replaces. Replacing keeps the mapping and series
+  colours for every column whose name the new table also has (`Chart::with_table`). Undo step
+  *Import chart data*; the status line says *Imported sales.csv · 12 rows, 3 series*.
+- **A linked chart** stores `DataLink { path, size, modified }` (as last read) in its own
+  description; the table is always the document's own copy, so a chart whose file is gone still
+  draws. **The path is the document's, so untrusted**: the tokens link's rules hold
+  (`styles-variables.md`, *A linked file*; `tokens_import::read_linked`) — absolute, on a local
+  drive, a regular file of at most 16 MB, read on the UI thread as the tokens import reads.
+- **Watching**, as the tokens link (`watch_chart_links`): every `WATCH_EVERY` (45 s), when the
+  window regains focus, and when a new path is linked, each linked path is `stat`ed. A change
+  shows the pill *sales.csv changed · Update chart* (*Update 2 charts* when several link it) after
+  the tokens pill, and the Data section's source line says *Changed on disk* with *Update*.
+  Updating reads the file and replaces each
   linked chart's table in one undo step, *Update chart data*. **A file's contents enter the
   document only on the user's click**, never on its own: an opened document's link can name any
   file on the machine, and the next save would carry what it read.
@@ -451,9 +469,11 @@ selecting anything else closes it.
 
 ### Context menu
 
-On a chart (`context-menus.md`): *Edit data…*, *Import chart data…*, *Update chart data* (while
-its file changed), *Unlink data file* (while linked), a separator, *Flatten chart*, then the
-frame's usual rows.
+On a chart (`context-menus.md`, `menu::head_rows`): *Edit data…*, *Import chart data…*, *Update
+chart data* (while its file changed), *Unlink data file* (while linked), and *Flatten chart* in
+the structure group, then the frame's usual rows. The palette lists the same rows for a selected
+chart, and *Edit data…*, *Import chart data…* and *Flatten chart* dim with *Select a chart*
+without one (`menu::KIND_VERBS`).
 
 ## Elsewhere
 

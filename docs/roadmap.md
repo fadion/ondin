@@ -16,20 +16,17 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-- **The Chart card, what is left** — *Landed:* the card's sections, presets, previews, series and
-  node swatches, flatten. Next: the *Outline* preset (stroked, unfilled marks: an option the
-  generator needs first); *From variables* and bindable swatches, where the variable flows learn
-  the description's colours (`variable::reads`, `remove_ops`' detach, `detached`, a kit's
-  rebind) and `Chart::validate` stops refusing a bound one; a series' dash and point shape on its
-  row; a node's total on its row; the text family; number format prefix, suffix, decimals and
-  percent; an axis range; a multi-selection of charts of one kind.
-- **The data window** — the `TABLE` glyph, the grid, its keyboard, range selection, TSV copy and
-  paste, the header and row menus, the undo steps; opening on a new chart, and a double-click on
-  a chart opening it at the clicked mark's cell.
-- **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the
-  link with the tokens link's path rules, watching, the pill and *Update*, relink and unlink.
-- **Elsewhere** — the context menu, the palette rows, `control_audit` for the card and the
-  window.
+- **What is left of charts** — every phase has landed; these pieces of the design have not:
+  - The *Outline* preset (stroked, unfilled marks: an option the generator needs first).
+  - *From variables* and bindable swatches: the variable flows learn the description's colours
+    (`variable::reads`, `remove_ops`' detach, `detached`, a kit's rebind) and `Chart::validate`
+    stops refusing a bound one.
+  - On the card: a series' dash and point shape on its row, a node's total on its row, the text
+    family, the number format's prefix, suffix, decimals and percent, an axis range, and a
+    multi-selection of charts of one kind.
+  - In the data window: the header's chevron (its menu opens on a right-click only).
+  - Import reads the file on the UI thread, as the tokens import does; the design asks for a
+    worker.
 
 ## Now · Icon packs
 

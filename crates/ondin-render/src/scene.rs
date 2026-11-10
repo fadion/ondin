@@ -1754,21 +1754,22 @@ fn paint_node_pass<P: ScenePainter>(
     }
     // A layer too large to draw is skipped: one whose box overflowed has none to
     // cull on, and one past `MAX_DEVICE_EXTENT` costs the GPU a stalled, blank
-    // frame. Asked of what the layer paints itself — a leaf's or boolean's ink, a
-    // frame's own box, which takes its children with it — and never of a mask,
-    // whose skip would erase what it masks. The preview's exemptions above apply:
-    // the cached box describes the committed layer.
+    // frame. Asked of what the layer paints itself — a leaf's or boolean's ink
+    // before its effects (a shadow is shifted inside a buffer cut to the view, so
+    // its offset costs nothing), a frame's own box, which takes its children with
+    // it — and never of a mask, whose skip would erase what it masks. The cache
+    // describes the committed layer, so a previewed one is measured as drawn,
+    // below.
+    let previewed = ov.moved(id) || walk.grown(doc, ov, id);
     let own_box = match node.kind() {
         NodeKind::Artboard { .. } => Some(res.world_bounds(id)),
-        NodeKind::Boolean { .. } => Some(res.ink_bounds(id)),
-        _ if node.children().is_empty() => Some(res.ink_bounds(id)),
+        NodeKind::Boolean { .. } => Some(res.inner_ink(id)),
+        _ if node.children().is_empty() => Some(res.inner_ink(id)),
         _ => None,
     };
     if let Some(own_box) = own_box
         && !node.mask()
-        && !ov.moved(id)
-        && ov.ghosts_of(id).next().is_none()
-        && !walk.grown(doc, ov, id)
+        && !previewed
         && (res.ink_overflows(doc, id) || own_box.is_some_and(|b| too_large(b, base)))
     {
         return;
@@ -1833,6 +1834,9 @@ fn paint_node_pass<P: ScenePainter>(
         base,
         filters: Vec::new(),
     };
+    if previewed && !node.mask() && drawn_too_large(&painted, node.children().is_empty(), world) {
+        return;
+    }
 
     // The snapped transform is this node's own ink, never its children's (passing
     // it down would compound the rounding). A layer a chrome ghost is glued to opts
@@ -2278,6 +2282,33 @@ pub const MAX_DEVICE_EXTENT: f64 = 1e9;
 fn too_large(ink: Rect, base: Affine) -> bool {
     let device = base.transform_rect_bbox(ink);
     device.width().max(device.height()) > MAX_DEVICE_EXTENT
+}
+
+/// The size skip for a previewed layer, measured from what it draws this frame
+/// rather than the committed cache: a frame's own box, a boolean's outline or a
+/// leaf's parts, before effects. Ink that cannot be measured counts as too large.
+fn drawn_too_large(painted: &Painted<'_>, leaf: bool, world: Affine) -> bool {
+    // Whether the layer has an extent at all, apart from its measured ink: the
+    // ink helpers answer `None` both for nothing to draw and for an overflow.
+    let (extent, ink) = match painted.kind {
+        NodeKind::Artboard { .. } => {
+            let local = geometry::local_bounds(painted.kind, None);
+            let ink = local.and_then(|b| geometry::measurable(world.transform_rect_bbox(b)));
+            (local.is_some(), ink)
+        }
+        NodeKind::Boolean { .. } => (
+            painted.path.is_some_and(|p| !p.is_empty()),
+            painted
+                .path
+                .and_then(|p| geometry::world_ink_of_path(p, &painted.paint, painted.kind, world)),
+        ),
+        _ if leaf => (
+            geometry::local_bounds(painted.kind, painted.text).is_some(),
+            geometry::world_ink_of_parts(painted.kind, &painted.paint, world, painted.text),
+        ),
+        _ => return false,
+    };
+    extent && ink.is_none_or(|b| too_large(b, painted.base))
 }
 
 /// The colour matrices of `stack`'s `Filters` rows when applying them to

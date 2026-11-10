@@ -286,9 +286,15 @@ fn a_layer_whose_ink_overflows_is_not_drawn() {
     assert_eq!(painter.fills.len(), 1, "only the ordinary rect is drawn");
 }
 
-/// A filled ellipse a million units wide under one group of `scale(scale)`, and
-/// the number of fills the walk draws over a 100-pixel view of 100 units.
+/// `fills_of_the_scaled_ellipse` with no preview.
 fn fills_under_one_scaled_group(scale: f64) -> usize {
+    fills_of_the_scaled_ellipse(scale, None)
+}
+
+/// A filled ellipse a million units wide under one group of `scale(scale)`, and
+/// the number of fills the walk draws over a 100-pixel view of 100 units, under
+/// a preview setting the ellipse's transform to `preview` when one is given.
+fn fills_of_the_scaled_ellipse(scale: f64, preview: Option<Affine>) -> usize {
     let mut ids = IdSource::new(0x0F2);
     let root = ids.mint();
     let mut doc = Document::new(root);
@@ -327,15 +333,22 @@ fn fills_under_one_scaled_group(scale: f64) -> usize {
         view: Rect::new(0.0, 0.0, 100.0, 100.0),
         pixel_size: (100, 100),
     };
-    let mut painter = RecordingPainter::default();
-    scene::build(
-        &doc,
-        &res,
-        &vp,
-        &RenderOverrides::default(),
-        doc.first_page(),
-        &mut painter,
+    let ov = match preview {
+        Some(transform) => RenderOverrides::from_transaction(
+            &doc,
+            &res,
+            &Transaction(vec![Operation::SetTransform { id: e, transform }]),
+        )
+        .expect("a preview"),
+        None => RenderOverrides::default(),
+    };
+    assert_eq!(
+        preview.is_some(),
+        ov.moved(e),
+        "the fixture's preview state"
     );
+    let mut painter = RecordingPainter::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut painter);
     painter.fills.len()
 }
 
@@ -446,6 +459,95 @@ fn a_frame_too_large_to_draw_is_skipped() {
     assert_eq!(fills_of_a_frame_under(0), 2, "control: frame and child");
     assert_eq!(fills_of_a_frame_under(1), 0, "a 1e12 px frame");
     assert_eq!(fills_of_a_frame_under(51), 0, "an overflowed frame");
+}
+
+/// A layer the commit skips as too large is skipped through a preview that
+/// keeps its size or overflows it, and drawn through one that shrinks it under
+/// the limit.
+/// flip: `paint_node` without the `drawn_too_large` test → fails at "a nudge";
+/// `drawn_too_large` reading an overflowed leaf's `None` ink as nothing to draw
+/// → fails at "an overflowed preview".
+#[test]
+fn a_previewed_layer_is_sized_as_drawn() {
+    assert_eq!(fills_under_one_scaled_group(1e6), 0, "control: skipped");
+    let nudged = Affine::translate((-5e5 + 1.0, -5e5));
+    assert_eq!(fills_of_the_scaled_ellipse(1e6, Some(nudged)), 0, "a nudge");
+    let overflowed = Affine::scale(1e300);
+    assert_eq!(
+        fills_of_the_scaled_ellipse(1e6, Some(overflowed)),
+        0,
+        "an overflowed preview"
+    );
+    let shrunk = Affine::translate((-50.0, -50.0)) * Affine::scale(1e-4);
+    assert_eq!(
+        fills_of_the_scaled_ellipse(1e6, Some(shrunk)),
+        1,
+        "a 1e8 px preview is drawn"
+    );
+}
+
+/// A 10-unit filled square with a drop shadow `dy` units down, over a 100-unit
+/// view at one pixel a unit: the fills the walk draws.
+fn fills_of_a_square_casting(dy: f64) -> usize {
+    let mut ids = IdSource::new(0x0F4);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let r = ids.mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: r,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((10.0, 10.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::WHITE).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id: r,
+            effects: keyed_by_position([shadow(dy)]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    assert!(
+        res.ink_bounds(r).is_some_and(|b| b.height() >= dy),
+        "the fixture's own claim: the ink reaches the shadow"
+    );
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    let mut painter = RecordingPainter::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
+    painter.fills.len()
+}
+
+/// A shadow cast past `scene::MAX_DEVICE_EXTENT` leaves the layer's fill drawn:
+/// the size skip asks the ink before effects.
+/// flip: `paint_node`'s skip asking `ink_bounds` → fails at "a far shadow".
+#[test]
+fn a_far_shadow_does_not_skip_its_layer() {
+    let near = fills_of_a_square_casting(4.0);
+    assert!(near >= 1, "control: the square is drawn");
+    assert_eq!(fills_of_a_square_casting(1e10), near, "a far shadow");
 }
 
 #[test]

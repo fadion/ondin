@@ -595,8 +595,8 @@ pub struct Resolved {
     ///
     /// What an effect layer must hold before its own padding is added; the only
     /// box usable by a caller with a different effect stack in hand (the renderer
-    /// during a preview). Only the `Group`/`Root` arm of `scene::effect_bounds`
-    /// reads it.
+    /// during a preview), and the box the renderer's size skip asks of a leaf or
+    /// a boolean, whose effects are drawn in a buffer cut to the view.
     inner_ink: FxHashMap<NodeId, Rect>,
     /// Every node whose subtree, the node included, holds a layer or a shadow that
     /// blends ([`Self::blends_within`]). Kept as the ink is, children first, so the
@@ -1016,10 +1016,12 @@ impl Resolved {
     }
 
     /// Whether `id` paints something of its own whose box cannot be measured: a
-    /// leaf with an extent, or a boolean with an outline or a placeholder, that
-    /// has no [`Self::ink_bounds`], or a frame with no [`Self::world_bounds`].
-    /// Each stored number is bounded, but transforms multiply, so a world box can
-    /// pass `f64::MAX`; the renderer skips such a layer rather than draw it.
+    /// leaf with an extent, or a boolean with an outline or a placeholder, whose
+    /// [`Self::inner_ink`] is missing or not a number, or a frame with no
+    /// [`Self::world_bounds`]. Each stored number is bounded, but transforms
+    /// multiply, so a world box can pass `f64::MAX`; the renderer skips such a
+    /// layer rather than draw it. Ink before effects, because an effect that
+    /// overflows is drawn inside a buffer cut to the view and leaves the fill.
     ///
     /// Derived from the caches on asking rather than kept, so `rebuild` and
     /// `update` cannot disagree on it. `false` for a group or the root: their
@@ -1039,7 +1041,13 @@ impl Resolved {
             // A frame paints its own fill whatever it holds, and a frame that
             // does not clip has ink from its children, so its own box answers.
             NodeKind::Artboard { .. } => !self.world_bounds.contains_key(&id) && has_extent(),
-            _ if self.ink_bounds.contains_key(&id) => false,
+            _ if self
+                .inner_ink
+                .get(&id)
+                .is_some_and(|b| geometry::measurable(*b).is_some()) =>
+            {
+                false
+            }
             NodeKind::Boolean { .. } => {
                 self.boolean.get(&id).is_some_and(|p| !p.is_empty()) || self.failed.contains(&id)
             }

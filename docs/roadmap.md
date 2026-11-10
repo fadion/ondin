@@ -25,11 +25,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,
   TypeScript or Vue compiler runs in the tests. A CI leg parsing the emitted `.tsx` with `tsc`
   and the `.vue` files with `@vue/compiler-sfc` would catch output that does not compile.
-- **One main across a page and the components it uses** — in React and Vue a component renders
-  into its page, but the walk counts a component file's main apart from the page's, so a page main
-  beside a use of a component holding one writes two, unreported. Nesting through a use (a use in a
-  button, an interactive use in a link) is reported, not prevented: the menu's `element::refusal`
-  does not look into a used component.
 
 ## Later
 

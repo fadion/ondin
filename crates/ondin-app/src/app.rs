@@ -935,6 +935,8 @@ pub struct OndinApp {
     pub(crate) kit_review: crate::kits::updates::KitReview,
     /// When the kits this document uses were last looked at on disk (`kits::updates`).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
+    /// When the open document's file was last looked at ([`Self::watch_disk`]).
+    pub(crate) disk_watch: crate::library::disk::Watch,
     /// When the linked `tokens.json` was last looked at (`tokens_import.rs`).
     pub(crate) tokens_watch: crate::tokens_import::TokensWatch,
     /// The *Stop sharing* dialog's count of the documents using the kit (`kits::users`).
@@ -1769,6 +1771,7 @@ impl OndinApp {
             kit_summary: None,
             kit_review: Default::default(),
             kit_watch: Default::default(),
+            disk_watch: Default::default(),
             tokens_watch: Default::default(),
             kit_users: None,
             kit_button: egui::Rect::NOTHING,
@@ -2320,6 +2323,7 @@ impl OndinApp {
         self.vision_chrome(&ctx);
 
         self.watch_kits(&ctx);
+        self.watch_disk(&ctx);
         self.watch_tokens(&ctx);
         self.poll_imports();
         // Before the bar and the canvas's next frame read the envelope.
@@ -6698,23 +6702,80 @@ impl OndinApp {
         }
     }
 
-    /// Read the open document's file again in place of the session, its unsaved
-    /// changes and undo steps dropped: *Changed on disk*'s *Reload*.
+    /// *Changed on disk*'s *Reload*: [`Self::read_again`], and a failure holds
+    /// autosave, saying why.
     fn reload_from_disk(&mut self) {
-        let Some(path) = self.session.path.clone() else {
-            return;
-        };
-        match read_opened(&path, &self.library.root, self.prefs.history_size > 0) {
-            // The same file's tab is in front, so the adopt replaces it in place.
-            Ok(opened) => {
-                self.adopt_opened_with(&path, opened);
-                self.session.info("Reloaded from disk");
-            }
+        match self.read_again() {
+            Ok(()) => self.session.info("Reloaded from disk"),
             Err(why) => {
                 self.session.clash = crate::session::Clash::Held;
                 self.session.fail(why);
             }
         }
+    }
+
+    /// Read the open document's file again in place of the session, its unsaved
+    /// changes and undo steps dropped.
+    fn read_again(&mut self) -> Result<(), String> {
+        let Some(path) = self.session.path.clone() else {
+            return Ok(());
+        };
+        let opened = read_opened(&path, &self.library.root, self.prefs.history_size > 0)?;
+        // The same file's tab is in front, so the adopt replaces it in place.
+        self.adopt_opened_with(&path, opened);
+        Ok(())
+    }
+
+    /// Look at the open document's file while it is open: every
+    /// `disk::WATCH_EVERY` seconds and when the window gets the focus back, as the
+    /// kits it uses are. A clean document whose file changed is read again, since
+    /// nothing here is lost; one with unsaved changes asks now (*Changed on
+    /// disk*), before more edits land on the old version.
+    pub(crate) fn watch_disk(&mut self, ctx: &egui::Context) {
+        let (now, focused) = ctx.input(|i| (i.time, i.viewport().focused.unwrap_or(true)));
+        if let Some(wait) = self.watch_disk_at(now, focused) {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+
+    /// [`Self::watch_disk`] at the input clock's `now`, answering how long until
+    /// the next look — `None` when there is nothing to watch.
+    pub(crate) fn watch_disk_at(&mut self, now: f64, focused: bool) -> Option<f64> {
+        use crate::library::disk::WATCH_EVERY;
+        let due = self.disk_watch.due(now, focused);
+        // Unstamped, or a question already out.
+        if self.session.disk.is_none() || self.session.clash != crate::session::Clash::Clear {
+            return None;
+        }
+        if let Err(wait) = due {
+            return Some(wait);
+        }
+        // A write of its own in flight would read as a change; a modal, a text
+        // edit or a drag holds ids or input a reload would pull away.
+        if self.session.is_saving()
+            || self.modal_is_up()
+            || self.text.is_some()
+            || !matches!(self.drag, Drag::None)
+        {
+            return Some(WATCH_EVERY);
+        }
+        let session = &mut self.session;
+        let changed = match (session.path.as_deref(), session.disk.as_mut()) {
+            (Some(path), Some(stamp)) => stamp.check(path),
+            _ => false,
+        };
+        if !changed {
+            return Some(WATCH_EVERY);
+        }
+        if self.session.is_dirty() {
+            self.session.clash = crate::session::Clash::Ask;
+        } else if self.read_again().is_ok() {
+            let name = self.shown_title();
+            self.session
+                .info(format!("Reloaded “{name}”: it changed on disk"));
+        }
+        // A failed read (a file still being written) is looked at again next time.
+        Some(WATCH_EVERY)
     }
 
     /// The in-app confirmation shown after a cancelled close of the window, listing
@@ -13065,6 +13126,67 @@ mod library_wiring_tests {
         assert_eq!(app.session.clash, Clash::Clear);
         app.session.mark_unsaved();
         assert!(app.save_file(false), "and the next save goes ahead");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The watch reads a clean document's changed file again, at its interval or
+    /// when the window gets the focus back, and not between.
+    ///
+    /// flip: `Watch::due` ignoring the regained focus → fails at "the focus
+    /// coming back looks".
+    #[test]
+    fn the_watch_reads_a_clean_documents_changed_file_again() {
+        let ctx = egui::Context::default();
+        let (mut app, _, root) = app_with_a_changed_file(&ctx, "watch-clean");
+        app.session.mark_clean();
+        // The first look is due at once: spent unstamped, so the next is the
+        // interval's or the focus's.
+        let stamp = app.session.disk.take();
+        assert_eq!(
+            app.watch_disk_at(0.0, true),
+            None,
+            "unstamped: nothing to watch"
+        );
+        app.session.disk = stamp;
+        assert!(
+            app.watch_disk_at(1.0, true).is_some_and(|w| w > 0.0),
+            "not due yet"
+        );
+        assert_ne!(
+            app.session.doc.meta().name.as_deref(),
+            Some("Theirs"),
+            "not between looks"
+        );
+        app.watch_disk_at(2.0, false);
+        app.watch_disk_at(3.0, true);
+        assert_eq!(
+            app.session.doc.meta().name.as_deref(),
+            Some("Theirs"),
+            "the focus coming back looks"
+        );
+        assert!(!app.session.is_dirty());
+        assert_eq!(app.session.clash, crate::session::Clash::Clear);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The watch asks about a dirty document's changed file rather than reading it
+    /// again, and the file keeps their version.
+    ///
+    /// flip: `watch_disk_at` reading again whatever the dirt → fails at "asks".
+    #[test]
+    fn the_watch_asks_about_a_dirty_documents_changed_file() {
+        let ctx = egui::Context::default();
+        let (mut app, path, root) = app_with_a_changed_file(&ctx, "watch-dirty");
+        assert!(app.session.is_dirty(), "fixture: dirty");
+        app.watch_disk_at(0.0, true);
+        assert_eq!(app.session.clash, crate::session::Clash::Ask, "asks");
+        assert!(app.session.is_dirty(), "the changes are kept");
+        assert_eq!(name_on_disk(&path).as_deref(), Some("Theirs"));
+        assert_eq!(
+            app.watch_disk_at(100.0, true),
+            None,
+            "one question at a time"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

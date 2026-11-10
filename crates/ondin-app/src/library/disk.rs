@@ -11,6 +11,35 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+/// How often the open document's file is looked at while it is open
+/// (`OndinApp::watch_disk`), as the kits it uses are.
+pub const WATCH_EVERY: f64 = 45.0;
+
+/// When the open document's file was last looked at.
+#[derive(Default)]
+pub struct Watch {
+    /// The input clock's time of the next look; 0 before the first.
+    next: f64,
+    /// Whether the window had the focus last frame: a look is due the moment it
+    /// comes back, as the file was most likely changed in another program.
+    focused: bool,
+}
+
+impl Watch {
+    /// Whether a look is due at the input clock's `now`: every [`WATCH_EVERY`]
+    /// seconds, and when the window gets the focus back. `Err` is the wait until
+    /// the next one.
+    pub fn due(&mut self, now: f64, focused: bool) -> Result<(), f64> {
+        let regained = focused && !self.focused;
+        self.focused = focused;
+        if now < self.next && !regained {
+            return Err(self.next - now);
+        }
+        self.next = now + WATCH_EVERY;
+        Ok(())
+    }
+}
+
 /// The library's own rewrites of a closed or parked document's file (a rename, a
 /// move, a kit mark: `store::rewrite`), as the digest read and the digest written.
 /// A stamp follows them, so a tab holding the file does not take the library's

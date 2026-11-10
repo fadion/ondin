@@ -437,7 +437,8 @@ selecting anything else closes it.
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
   document). A header row of column names, each with its type tag (`Aa` text, `#` number) and
   its role (*Category*, a Sankey's *From*, *To* or *Value*, a series' swatch, or dim when
-  unmapped) and a dropdown chevron, and a row-number gutter, both held at the scrolled view's edges over the cells;
+  unmapped) and a dropdown chevron, the name cut with an ellipsis short of the role and the
+  chevron, and a row-number gutter, both held at the scrolled view's edges over the cells;
   cells on the field ground with its hairline at `ui::MENU_ROW_H`, numbers right-aligned, the
   selected range in the accent's tint and the cursor ringed in the accent. A column is a number
   column while every non-empty cell in it parses as one; the type is read, never set.

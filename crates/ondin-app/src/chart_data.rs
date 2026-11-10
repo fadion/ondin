@@ -758,11 +758,24 @@ fn grid(
                 }
                 Role::Unmapped => (theme::text::dim(), None),
             };
-            let name_g = clip.layout_no_wrap(
+            let mark_g = mark.map(|m| {
+                clip.layout_no_wrap(
+                    m.to_string(),
+                    egui::FontId::proportional(ui::SMALL_PT - 1.5),
+                    theme::text::faint(),
+                )
+            });
+            // The name stops short of the role mark and the chevron, an ellipsis
+            // where it is cut.
+            let name_right =
+                hr.right() - CHEVRON_W - mark_g.as_ref().map_or(0.0, |g| g.size().x + 4.0);
+            let mut job = egui::text::LayoutJob::simple_singleline(
                 column.name.clone(),
                 egui::FontId::proportional(ui::SMALL_PT),
                 ink,
             );
+            job.wrap = egui::text::TextWrapping::truncate_at_width((name_right - x).max(0.0));
+            let name_g = clip.layout_job(job);
             clip.galley(
                 egui::pos2(x, hr.center().y - name_g.size().y / 2.0),
                 name_g,
@@ -775,12 +788,13 @@ fn grid(
                 theme::icon_font(ui::COMBO_CHEVRON_PT),
                 ui::combo_chevron_ink(),
             );
-            if let Some(m) = mark {
-                clip.text(
-                    egui::pos2(hr.right() - CHEVRON_W, hr.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    m,
-                    egui::FontId::proportional(ui::SMALL_PT - 1.5),
+            if let Some(g) = mark_g {
+                clip.galley(
+                    egui::pos2(
+                        hr.right() - CHEVRON_W - g.size().x,
+                        hr.center().y - g.size().y / 2.0,
+                    ),
+                    g,
                     theme::text::faint(),
                 );
             }
@@ -1227,6 +1241,53 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    /// A header name too long for its cell stops short of the role mark.
+    /// flip: the header's name galley laid out with `layout_no_wrap` → fails at "clear of the mark".
+    #[test]
+    fn a_long_header_name_stops_short_of_its_role_mark() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut sample = Chart::sample(ChartKind::Column);
+        let long = "A category name far too long for one header cell";
+        sample.table.columns[0].name = long.into();
+        app.insert_chart_at(ondin_core::kurbo::Point::new(-4000.0, 0.0), sample);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                ..Default::default()
+            };
+            out = ctx
+                .run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut frame))
+                .shapes;
+        }
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text().starts_with(s) => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        let at = |s: &str| out.iter().find_map(|c| find(&c.shape, s));
+        let name = at("A category name").expect("the header's name is drawn");
+        let mark = at("Category").expect("the role mark is drawn");
+        assert!(
+            (name.center().y - mark.center().y).abs() < ROW_H / 2.0,
+            "the same header: {name:?} {mark:?}"
+        );
+        assert!(
+            name.right() <= mark.left(),
+            "clear of the mark: {name:?} {mark:?}"
+        );
     }
 
     /// A click on a header's chevron opens the header menu; a click on its name

@@ -1597,6 +1597,32 @@ pub fn create_artboard(
     ])
 }
 
+/// Create a chart spanning world points `a`..`b` under `parent`: a frame with
+/// `background` as its ground, named for its kind, carrying `chart`. Its parts
+/// are not written here; the next settle generates them.
+#[allow(clippy::too_many_arguments)]
+pub fn create_chart(
+    id: NodeId,
+    parent: NodeId,
+    index: usize,
+    parent_world: Affine,
+    a: Point,
+    b: Point,
+    background: Color,
+    chart: crate::chart::Chart,
+) -> Transaction {
+    let name = format!("{} chart", chart.kind.label());
+    let mut tx = create_artboard(id, parent, index, parent_world, a, b, background);
+    if let Some(Operation::CreateNode { name: n, .. }) = tx.0.first_mut() {
+        *n = Some(name);
+    }
+    tx.0.push(Operation::SetChart {
+        id,
+        chart: Some(Box::new(chart)),
+    });
+    tx
+}
+
 /// Create a slice spanning world points `a`..`b` under `parent`, its corners
 /// rounded to whole world units so a raster export is never cut on half a pixel,
 /// and carrying one export spec, PNG at 1×, so *Export all* takes it at once.

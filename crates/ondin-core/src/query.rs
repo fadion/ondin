@@ -18,7 +18,8 @@ pub fn nodes_in_view(res: &Resolved, page: NodeId, view: Rect) -> Vec<NodeId> {
 }
 
 /// Topmost-first nodes on `page` whose painted area contains `p` (world space),
-/// skipping nodes that are hidden or locked (directly or via an ancestor).
+/// skipping nodes that are hidden or locked (directly or via an ancestor). A
+/// chart's part answers as its chart frame, once: a chart is picked whole.
 ///
 /// `slop` is a picking allowance in **world** units, and only the kinds with nothing but
 /// a stroke to aim at spend it (see [`geometry::contains_local`]). It is the caller's
@@ -36,10 +37,12 @@ pub fn hit_test(res: &Resolved, doc: &Document, page: NodeId, p: Point, slop: f6
         .filter(|id| is_effectively_interactable(doc, *id))
         .filter(|id| !masked_away(doc, res, *id, p))
         .filter(|id| hits_own_shape(res, doc, *id, p, slop))
+        .map(|id| crate::chart::owner(doc, id).unwrap_or(id))
         .collect();
 
     // Topmost first: later paint order = larger child-index path.
     hits.sort_by_key(|id| std::cmp::Reverse(paint_path(doc, *id)));
+    hits.dedup();
     hits
 }
 
@@ -879,5 +882,44 @@ mod tests {
             "an `inside` that is not on the chain leaves it unchanged, which is \
              how the caller knows the click landed outside the isolation"
         );
+    }
+
+    /// A point over a chart's bars and its ground hits the chart frame, once, and
+    /// none of its parts.
+    /// flip: the `chart::owner` map in `hit_test` removed → fails at "the chart, once".
+    #[test]
+    fn a_chart_is_hit_whole() {
+        let mut ids = IdSource::new(0xC4A7);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let page = doc.first_page();
+        let chart = ids.mint();
+        let tx = crate::edit::create_chart(
+            chart,
+            page,
+            0,
+            Affine::IDENTITY,
+            kurbo::Point::ZERO,
+            kurbo::Point::new(480.0, 280.0),
+            peniko::Color::WHITE,
+            crate::chart::Chart::sample(crate::chart::ChartKind::Column),
+        );
+        doc.apply(&tx).expect("the chart builds");
+        let res = Resolved::settled(&mut doc);
+        let parts = doc.get(chart).map_or(0, |n| n.children().len());
+        assert!(parts > 0, "settle generated the parts");
+        // Low in the plot, where the first category's columns stand on the baseline.
+        let mut over_marks = 0;
+        for x in (40..440).step_by(4) {
+            let p = kurbo::Point::new(f64::from(x), 230.0);
+            let hits = hit_test(&res, &doc, page, p, 0.0);
+            assert_eq!(hits, vec![chart], "the chart, once, at {p:?}");
+            over_marks += usize::from(
+                res.candidates_intersecting(page, Rect::from_center_size(p, (1.0, 1.0)))
+                    .iter()
+                    .any(|id| crate::chart::owner(&doc, *id) == Some(chart)),
+            );
+        }
+        assert!(over_marks > 0, "the probe crossed the chart's parts");
     }
 }

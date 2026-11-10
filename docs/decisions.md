@@ -177,6 +177,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D956/D976** A `v*` tag builds and publishes every platform. Build steps hold a read-only token; one `publish` job writes. Every action in a job that holds a write token or the package signing key (`release.yml`'s `publish`, `pages.yml`'s steps after the key import) is pinned by commit, since a tag can be moved.
 - **D957** Signed apt and dnf repositories are rebuilt on GitHub Pages. `install.sh` pins the key fingerprint.
 - **D969** The Windows data folder is `OndinData`, because `%LocalAppData%\Ondin` belongs to the installer.
+- **There is only ever one Ondin window per machine**: a later launch hands its file to the running window, which opens it in a tab and comes forward. Tabs are how one window holds several files; a second window defeats them, and two windows holding one file saved over each other. Command-line runs open no window and are not covered.
 
 ## Interface
 
@@ -197,7 +198,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **A layer's context menu fits without a large monitor, using submenus**: the other-format copies and the two alternate clipboards are one *Copy/Paste as ▸*, the four boolean operations one *Boolean ▸*, the six aligns one *Align ▸* (distribute stays off), the chord-driven restacks sit behind *Arrange ▸*, Flip H/V (one click in the inspector) and *Zoom to selection* are off it, and *Rename*/*Batch rename…* share the one row `Ctrl+R` stands for.
 - **D749** The dashboard's default page is set only in Settings.
 - **Which page is current is view state, never saved in the file**: switching pages is no edit and no undo step, each page's camera and selection are kept for the sitting only, and the library remembers per machine the page a document was left on.
-- **D768** Open and Recover never replace an open document: each opens in a tab of its own, or brings forward the tab already holding that file. A document is never open twice in one window, by any spelling of its path, since two sessions saving one file would overwrite each other. Two Ondin processes can still each open it.
+- **D768** Open and Recover never replace an open document: each opens in a tab of its own, or brings forward the tab already holding that file. A document is never open twice in one window, by any spelling of its path, since two sessions saving one file would overwrite each other.
 - **The colour picker's tabs are Solid · Gradient · Variables**; the gradient kind (Linear, Radial, Angular) is a menu on the geometry row's preview chip. A tab per kind does not fit beside *Variables* at 10pt, and a menu adds no row, so every face keeps one height and another kind costs one menu row.
 - **The open picker is the gradient editing mode**: no tool of its own. While it shows a gradient fill or stroke of the one selected layer, the canvas draws that gradient's handles in place of the selection box.
 - **The eyedropper picks what is seen**, anywhere in the window: on the canvas the rendered pixel, composited over the ground, with egui's overlays never in it; elsewhere a frame of the window frozen while armed, chrome included. Hovering previews nothing on the canvas, since the next sample would read the preview.

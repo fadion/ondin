@@ -57,10 +57,6 @@ pub(crate) struct Tabs {
     /// that closes it is spent, so the strip's and the canvas's left-button doors
     /// stand down for it.
     pub(crate) menu_was_up: bool,
-    /// A window opened while another Ondin runs keeps its tabs to itself: it
-    /// neither brings back the last quit's tabs, which the other window may hold
-    /// open, nor writes its own over that window's list.
-    pub(crate) private: bool,
 }
 
 pub(crate) struct Tab {
@@ -889,9 +885,6 @@ impl OndinApp {
     /// changed, so the next launch brings them back. Once a frame, like the view
     /// switches: every door that changes a tab would otherwise have to.
     pub(crate) fn remember_tabs(&mut self) {
-        if self.tabs.private {
-            return;
-        }
         let front = self.front_tab();
         let mut paths = Vec::with_capacity(self.tabs.list.len());
         let mut front_at = None;

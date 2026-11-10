@@ -4,11 +4,9 @@
 //!
 //! The handler is installed when `NSApplicationWillFinishLaunchingNotification` is
 //! posted: AppKit installs its own handlers before that, so one installed there
-//! wins, and a cold launch's event comes after it. The paths queue here until a
-//! frame takes them; one that comes while the window is idle wakes it.
+//! wins, and a cold launch's event comes after it. The paths queue in `opens`.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
@@ -23,11 +21,6 @@ const CORE_EVENT_CLASS: u32 = u32::from_be_bytes(*b"aevt");
 const OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
 /// `keyDirectObject`, `'----'`: the event's list of files.
 const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
-
-/// Paths opened by the OS and not yet taken by a frame, oldest first.
-static PENDING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-/// The window's context, once it exists, so an event can wake an idle window.
-static WAKE: OnceLock<egui::Context> = OnceLock::new();
 
 define_class!(
     // SAFETY: `NSObject` has no subclassing requirements, and `Handler` has no `Drop`.
@@ -63,10 +56,7 @@ define_class!(
             if paths.is_empty() {
                 return;
             }
-            pending().extend(paths);
-            if let Some(ctx) = WAKE.get() {
-                ctx.request_repaint();
-            }
+            crate::opens::push(paths);
         }
     }
 );
@@ -114,27 +104,6 @@ pub(crate) fn install() {
     std::mem::forget(handler);
 }
 
-/// Give the queue the window's context, so a later event wakes it.
-pub(crate) fn wake_with(ctx: &egui::Context) {
-    let _ = WAKE.set(ctx.clone());
-}
-
-/// Take the paths queued so far, oldest first.
-pub(crate) fn take() -> Vec<PathBuf> {
-    std::mem::take(&mut *pending())
-}
-
-/// Take the oldest queued path alone, leaving the rest for a frame.
-pub(crate) fn take_first() -> Option<PathBuf> {
-    let mut q = pending();
-    (!q.is_empty()).then(|| q.remove(0))
-}
-
-/// The queue, poisoned or not: a list of paths has no invariant to break.
-fn pending() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,47 +137,5 @@ mod tests {
             paths_of(&file("/tmp/c.ondin")),
             [PathBuf::from("/tmp/c.ondin")]
         );
-    }
-
-    /// A file the OS asks to open while a modal is up waits in the queue, and
-    /// opens on the first frame without one.
-    ///
-    /// flip: the frame taking the queue before its modal check → fails at "still
-    /// queued".
-    #[test]
-    fn a_finder_open_waits_out_a_modal() {
-        let dir = std::env::temp_dir().join(format!("ondin-open-event-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("held.ondin");
-        let mut ids = ondin_core::IdSource::new(7);
-        let doc = ondin_core::Document::new(ids.mint());
-        crate::library::store::write_document(&path, &doc).unwrap();
-
-        let ctx = egui::Context::default();
-        let mut app = crate::app::OndinApp::headless(&ctx);
-        // The one headless app that takes the queue, so no other test's frame
-        // drains it.
-        app.os_opens = true;
-        app.confirming_close = true;
-        pending().push(path.clone());
-        for _ in 0..3 {
-            let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
-        }
-        assert_eq!(
-            pending().as_slice(),
-            std::slice::from_ref(&path),
-            "still queued"
-        );
-        assert_ne!(app.session.path.as_deref(), Some(path.as_path()));
-
-        app.confirming_close = false;
-        let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
-        assert!(pending().is_empty(), "taken");
-        assert_eq!(
-            app.session.path.as_deref(),
-            Some(path.as_path()),
-            "and opened"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

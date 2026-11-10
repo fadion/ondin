@@ -2,7 +2,7 @@
 
 How an occupied page frame is picked (name tag and edge), how a moved layer changes frame or reorders in a
 layout, where duplicates, pastes and Alt-drag copies land, what the clipboard carries (including
-between windows), and the hand-kept lists of transient state. Part of §9.4.
+through the system clipboard), and the hand-kept lists of transient state. Part of §9.4.
 
 ## 9.4 Frame name tags and picking
 
@@ -109,7 +109,8 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   `build::missing_image_ops` (only what the target lacks), **before** the layers using them.
 - The clipboard survives opening another document (pasting a picture across documents is supported).
   Duplicate carries no entries.
-- **Across `ondin` windows**: `copy_selection` writes the system clipboard as text — layer names, then
+- **Through the system clipboard** (after a relaunch, or from another build or machine):
+  `copy_selection` writes the system clipboard as text — layer names, then
   `io::clip::FENCE`, then the JSON payload. Every paste door asks `OndinApp::take_clipboard`:
   `Layers` (ours, or an adopted foreign payload), `Foreign`, or `Unreadable` (an Ondin copy this build
   cannot read — never pasted as a text layer). A foreign parent id fails `Document::contains`, and a

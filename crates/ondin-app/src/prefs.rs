@@ -451,7 +451,6 @@ pub struct Prefs {
     pub layers_folded: bool,
     /// Private mode (`crate::private`): every drawn name masked. A preference, so
     /// a restart in the middle of a shared screen does not come back revealing.
-    /// Written only by [`Prefs::save_private`]; any other save keeps the file's.
     pub private: bool,
     /// How tall the Pages section's list was dragged to, in points; `None` fits
     /// up to six rows.
@@ -487,11 +486,6 @@ pub struct Prefs {
     /// preferences file cannot make a real app stop saving.
     #[serde(skip)]
     pub ephemeral: bool,
-    /// Set in a window that keeps its tabs private (another Ondin was running at
-    /// launch): a save keeps the tab fields the file already holds, which the other
-    /// window writes. Never written.
-    #[serde(skip)]
-    pub tabs_private: bool,
     /// Set when `prefs.json` exists but could not be read.
     ///
     /// A latch on writing: an unparseable file makes [`Prefs::load`] answer
@@ -625,7 +619,6 @@ impl Default for Prefs {
             // strings would be nav and sort ids matching nothing.
             base_folder: None,
             ephemeral: false,
-            tabs_private: false,
             // False: `Default` is also a first launch's value, which must write.
             // Only `load_from` sets it.
             unreadable: false,
@@ -689,39 +682,15 @@ impl Prefs {
         }
     }
 
-    /// `private` as the file has it now, which another window may have switched;
-    /// `None` when there is nothing readable there.
-    pub fn private_on_disk() -> Option<bool> {
-        Self::private_in(&path()?)
-    }
-
-    /// [`Self::private_on_disk`] against an explicit path.
-    fn private_in(path: &std::path::Path) -> Option<bool> {
-        /// Only the one field, so the rest of the file is not built.
-        #[derive(Deserialize)]
-        struct Private {
-            #[serde(default)]
-            private: bool,
-        }
-        let bytes = std::fs::read(path).ok()?;
-        Some(serde_json::from_slice::<Private>(&bytes).ok()?.private)
-    }
-
     /// Write them, ignoring failure. Called after each change rather than at
     /// shutdown, which the app cannot rely on.
     pub fn save(&self) {
-        self.save_located(path, false);
-    }
-
-    /// [`Self::save`] when this window has just turned private mode on or off:
-    /// its own `private` is written, where every other save keeps the file's.
-    pub fn save_private(&self) {
-        self.save_located(path, true);
+        self.save_located(path);
     }
 
     /// [`Self::save`] with the real location supplied by `locate`, so a test can
     /// check the `ephemeral` guard against a temp path instead of the real file.
-    fn save_located(&self, locate: impl FnOnce() -> Option<PathBuf>, own_private: bool) {
+    fn save_located(&self, locate: impl FnOnce() -> Option<PathBuf>) {
         // First, before anything touches the filesystem; a return rather than a
         // debug assertion because the damage of a headless write is silent and
         // permanent. See [`Prefs::ephemeral`].
@@ -729,7 +698,7 @@ impl Prefs {
             return;
         }
         let Some(path) = locate() else { return };
-        self.write_to(&path, own_private);
+        self.write_to(&path);
     }
 
     /// `save` against an explicit path, past the `ephemeral` guard: that flag
@@ -737,44 +706,20 @@ impl Prefs {
     /// the latch would be one edit from overwriting the real file.
     #[cfg(test)]
     pub fn save_to(&self, path: &std::path::Path) {
-        self.write_to(path, false);
+        self.write_to(path);
     }
 
-    /// Write to `path`, past the `ephemeral` guard; this value's `private` only
-    /// when `own_private`.
-    fn write_to(&self, path: &std::path::Path, own_private: bool) {
+    /// Write to `path`, past the `ephemeral` guard.
+    fn write_to(&self, path: &std::path::Path) {
         // With [`Self::unreadable`] set every field is a default a parse failure
         // produced, `base_folder` included; writing it back would destroy a file
         // that could still be repaired by hand.
         if self.unreadable {
             return;
         }
-        // Fields another window may have written since this one loaded are kept as
-        // the file has them: `private`, which any window can switch and none
-        // re-reads, unless this save is that switch; and the tab fields, in a
-        // window keeping its tabs private, which another window owns.
-        let mut owned;
-        let mut this = self;
-        if (!own_private || self.tabs_private)
-            && let Some(disk) = std::fs::read(path)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<Prefs>(&b).ok())
-        {
-            owned = self.clone();
-            if !own_private {
-                owned.private = disk.private;
-            }
-            if self.tabs_private {
-                owned.open_tabs = disk.open_tabs;
-                owned.front_tab = disk.front_tab;
-                owned.pinned_tabs = disk.pinned_tabs;
-                owned.tabs_remembered = disk.tabs_remembered;
-            }
-            this = &owned;
-        }
         // Atomic (`crate::atomic`): this record is written from more places than
         // any other, so it has the most chances to meet a crash mid-write.
-        if let Ok(bytes) = serde_json::to_vec_pretty(this) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
             let _ = crate::atomic::write(path, &bytes);
         }
     }
@@ -870,84 +815,6 @@ mod tests {
         );
     }
 
-    /// A window keeping its tabs private saves everything of its own but the tab
-    /// fields, which keep what the other window wrote.
-    /// flip: `write_to` without its `tabs_private` arm → fails at "the other
-    /// window's tabs".
-    #[test]
-    fn a_private_window_keeps_the_other_windows_tabs() {
-        let dir = std::env::temp_dir().join(format!("ondin-prefs-private-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let at = dir.join("prefs.json");
-        let theirs = Prefs {
-            open_tabs: vec![PathBuf::from("/x/theirs.ondin")],
-            front_tab: Some(0),
-            tabs_remembered: true,
-            ..Default::default()
-        };
-        theirs.save_to(&at);
-        let mine = Prefs {
-            tabs_private: true,
-            reopen_last: !theirs.reopen_last,
-            ..Default::default()
-        };
-        mine.save_to(&at);
-        let back: Prefs = serde_json::from_slice(&std::fs::read(&at).unwrap()).unwrap();
-        assert_eq!(back.open_tabs, theirs.open_tabs, "the other window's tabs");
-        assert_eq!(back.front_tab, Some(0));
-        assert_eq!(
-            back.reopen_last, mine.reopen_last,
-            "and this window's own change"
-        );
-        assert!(
-            !serde_json::to_string(&back)
-                .unwrap()
-                .contains("tabs_private")
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Private mode switched on in one window survives another window's save of
-    /// its own preferences; only a save that is the switch writes `private`.
-    /// flip: `write_to` without its `owned.private = disk.private` → fails at
-    /// "another window's save".
-    #[test]
-    fn private_mode_survives_another_windows_save() {
-        let dir = std::env::temp_dir().join(format!("ondin-prefs-mode-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let at = dir.join("prefs.json");
-        let read = || serde_json::from_slice::<Prefs>(&std::fs::read(&at).unwrap()).unwrap();
-        let theirs = Prefs {
-            private: true,
-            ..Default::default()
-        };
-        theirs.write_to(&at, true);
-        assert!(read().private, "the fixture's file holds private mode");
-        assert_eq!(
-            Prefs::private_in(&at),
-            Some(true),
-            "a running window sees it"
-        );
-        for tabs_private in [true, false] {
-            let mine = Prefs {
-                tabs_private,
-                reopen_last: !theirs.reopen_last,
-                ..Default::default()
-            };
-            mine.save_to(&at);
-            let back = read();
-            assert!(
-                back.private,
-                "another window's save, tabs_private {tabs_private}"
-            );
-            assert_eq!(back.reopen_last, mine.reopen_last, "and its own change");
-        }
-        Prefs::default().write_to(&at, true);
-        assert!(!read().private, "the switch itself writes");
-        assert_eq!(Prefs::private_in(&at), Some(false), "and is seen off");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// An ephemeral `save` writes nothing and never asks where the file lives;
     /// an ordinary one writes.
     /// flip: removing the `if self.ephemeral { return; }` from `save_located` →
@@ -963,13 +830,10 @@ mod tests {
             ephemeral: true,
             ..Default::default()
         };
-        headless.save_located(
-            || {
-                asked.set(true);
-                Some(path.clone())
-            },
-            false,
-        );
+        headless.save_located(|| {
+            asked.set(true);
+            Some(path.clone())
+        });
         assert!(
             !asked.get(),
             "an ephemeral save never asks where the file lives"
@@ -978,7 +842,7 @@ mod tests {
 
         // Control: the same call without the flag writes, so the closure is the
         // path a real save takes.
-        Prefs::default().save_located(|| Some(path.clone()), false);
+        Prefs::default().save_located(|| Some(path.clone()));
         assert!(path.exists(), "an ordinary save writes the file");
         let _ = std::fs::remove_dir_all(&dir);
     }

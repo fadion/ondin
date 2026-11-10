@@ -18,11 +18,12 @@
 //! pointing at the old data: the residual risk is losing the new version, never
 //! tearing a file.
 //!
-//! Two Ondin instances can write one path: there is no single-instance check, and
-//! `instances`' lock files only count running copies for the updater. [`temp_for`]
-//! therefore carries the process id and a per-process counter, so a second writer
-//! is a lost update rather than a torn file (a shared temp name let one writer's
-//! handle follow the file through the other's rename and extend it).
+//! Two processes can still write one path: a headless `ondin` command beside the
+//! window (`one_window` keeps only windows to one), or another machine through a
+//! synced folder. [`temp_for`] therefore carries the process id and a per-process
+//! counter, so a second writer is a lost update rather than a torn file (a shared
+//! temp name let one writer's handle follow the file through the other's rename
+//! and extend it).
 //!
 //! Three kinds of file deliberately do not use this. The derived caches (cover
 //! PNGs, font data) are regenerated or re-fetched when they fail to parse, and are

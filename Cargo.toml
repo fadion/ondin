@@ -209,11 +209,18 @@ libc = "0.2"
 # process's working set, beside `Threading`'s `GetProcessTimes` for its CPU time —
 # two calls, where a system-information crate would add a second Windows binding
 # tree to the lock.
+#
+# **`Win32_Storage_FileSystem`, `Win32_System_IO` and `Win32_System_Pipes` are the
+# one window's** (`one_window.rs`): the named pipe a later launch hands its file
+# over, which std can connect to but not create.
 windows-sys = { version = "0.52.0", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Credentials",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
   "Win32_System_JobObjects",
+  "Win32_System_Pipes",
   "Win32_System_ProcessStatus",
   "Win32_System_Registry",
   "Win32_System_Threading",

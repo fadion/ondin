@@ -43,10 +43,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 
 ## Later · Platform and dependencies
 
-- **One file in two Ondin processes.** A second launch (`ondin <file>`, or a double-click on Windows
-  and Linux) opens a file another process already has open, and the two save over each other; one
-  window guards only its own tabs (`tab_of_file`). Needs a lock beside the file, or
-  single-instance forwarding of the open to the running window.
 - **egui 0.36** is blocked by vello requiring wgpu 29 (check — last asked 2026-09-03). Re-derive
   `ui::menu_rows`' button-style arithmetic when it moves.
 
@@ -58,7 +54,8 @@ Ideas worth weighing, not yet decided or scheduled.
   synthetic pointer and key events, and screenshot the window. Agents never launch the GUI because
   the window takes the user's mouse and keyboard; a window that accepts input only through the
   channel (hidden or offscreen) would let an agent check chrome against the real app instead of
-  throwaway probe tests.
+  throwaway probe tests. It could grow from the local socket the window already listens on for
+  open requests (`one_window`).
 - **Multiplayer without a server.** The host's app holds the session and peers join by link, peer
   to peer over QUIC with NAT traversal and an end-to-end encrypted relay when no direct path exists.
   Edits merge per property, a delete beats an edit, and each person's undo takes back only their

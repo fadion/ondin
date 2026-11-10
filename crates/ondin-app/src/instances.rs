@@ -2,8 +2,9 @@
 //!
 //! Asked before an update is applied: Velopack's updater ends every process running
 //! from the install folder on Windows and swaps the app under them elsewhere, which
-//! would kill a second window's unsaved work or an `ondin export` a script awaits. So
-//! the restart is refused while [`others`] counts anything.
+//! would kill an `ondin export` a script awaits. So the restart is refused while
+//! [`others`] counts anything. There is only one window (`one_window`); the others
+//! counted are command-line runs, and a launch still handing its file over.
 //!
 //! Each GUI or headless run holds an exclusive lock on a file of its own in
 //! `machine_dir::root()/instances` ([`register`]); the OS drops the lock however the

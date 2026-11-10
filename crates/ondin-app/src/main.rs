@@ -122,8 +122,10 @@ mod menu;
 mod meter;
 mod minimap;
 mod mirror;
+mod one_window;
 #[cfg(target_os = "macos")]
 mod open_event;
+mod opens;
 mod pages;
 mod palette;
 mod panels;
@@ -947,7 +949,25 @@ fn main() {
     // headless export alike, since the updater stops both.
     instances::register();
     let result = match parse(&args) {
-        Ok(Command::Gui { open }) => run_gui(open).map_err(|e| format!("ondin gui failed: {e}")),
+        Ok(Command::Gui { open }) => match one_window::claim(open.as_deref()) {
+            one_window::Claim::Window => {
+                run_gui(open).map_err(|e| format!("ondin gui failed: {e}"))
+            }
+            one_window::Claim::Forwarded => {
+                log::info!(target: "ondin", "handed to the running window: {open:?}");
+                Ok(())
+            }
+            one_window::Claim::Unanswered => {
+                let why = "Ondin is already running but did not answer. Close it and try again.";
+                rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title("Ondin")
+                    .set_description(why)
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
+                Err(why.to_owned())
+            }
+        },
         Ok(Command::Export {
             file,
             format,
@@ -1491,13 +1511,11 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
             #[cfg(target_os = "macos")]
             quit::install(&cc.egui_ctx);
             // A launch by the OS's open event has queued its files by now, as AppKit
-            // delivers it before the window is made; the first opens as `ondin <file>`
-            // does, and a frame takes the rest.
-            #[cfg(target_os = "macos")]
-            let open = {
-                open_event::wake_with(&cc.egui_ctx);
-                open.or_else(open_event::take_first)
-            };
+            // delivers it before the window is made, and so has a later launch that
+            // came while the window was being made; the first opens as
+            // `ondin <file>` does, and a frame takes the rest.
+            opens::wake_with(&cc.egui_ctx);
+            let open = open.or_else(opens::take_first);
             Ok(Box::new(app::OndinApp::new(cc, open)))
         }),
     )

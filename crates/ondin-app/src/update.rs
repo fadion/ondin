@@ -901,7 +901,7 @@ mod tests {
 
     /// 🚨 **Another Ondin running holds the update back, at the click and again
     /// at the exit** (§15 D970): the updater stops every process running from
-    /// the install, and a second window's unsaved work was never asked about.
+    /// the install, a headless `ondin export` among them.
     ///
     /// **Flip-check, run**: `restart_with` ignoring the count fails on *"the
     /// click is refused"*; `on_exit_with` ignoring it fails on *"a window opened

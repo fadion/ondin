@@ -656,9 +656,6 @@ pub struct OndinApp {
     pub(crate) layers_hover: Option<NodeId>,
     /// The top bar's resource meter.
     pub(crate) meter: crate::meter::Meter,
-    /// When this window last looked for private mode switched in another
-    /// ([`OndinApp::poll_private`]), and whether another Ondin was running then.
-    private_polled: Option<(std::time::Instant, bool)>,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
     pub(crate) opacity_entry: Option<OpacityEntry>,
@@ -1073,10 +1070,9 @@ pub struct OndinApp {
     /// Whether each clipboard key's press arrived, and what was held with Ctrl
     /// (`input::witness_swallowed_presses`).
     clip_keys: crate::input::ClipWitness,
-    /// Whether this app opens the files the OS asks for (`open_event::take`). A
-    /// headless app does not: the queue is process-wide, and a test's frame would
-    /// take another test's file.
-    #[cfg(target_os = "macos")]
+    /// Whether this app opens the files asked for from outside the window
+    /// (`opens::take`). A headless app does not: the queue is process-wide, and a
+    /// test's frame would take another test's file.
     pub(crate) os_opens: bool,
     /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
     /// mode is: a launch into blurred artwork would look like a broken renderer.
@@ -1347,9 +1343,6 @@ pub(crate) struct ContextMenu {
     pub leaving: Option<(crate::menu::Item, f64)>,
 }
 
-/// How often a window looks for private mode switched in another while one runs.
-const PRIVATE_POLL: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// How long the selection chrome stays away after the last keystroke, or after a
 /// scrub lets go ([`ChromeHold`]).
 const CHROME_HOLD_SECS: f64 = 1.5;
@@ -1602,8 +1595,7 @@ impl OndinApp {
     }
 
     /// Decide what the window shows on the first frame. The tabs open at the last
-    /// quit come back, each only a path until it is shown, unless another Ondin is
-    /// running ([`crate::tabs::Tabs::private`]); in front goes `open` when
+    /// quit come back, each only a path until it is shown; in front goes `open` when
     /// the command line named a document, else the tab that was in front when
     /// `reopen_last` is on and its document still loads, else the library.
     fn open_at_launch(&mut self, open: Option<&std::path::Path>) {
@@ -1617,13 +1609,7 @@ impl OndinApp {
         // Collected before the reopen; a later frame's modal asks over whatever opens.
         self.recovery.pending =
             crate::library::recovery::pending(&self.library.root, &self.library.entries);
-        // Another window may hold the last quit's documents open, and two sessions
-        // saving one file overwrite each other.
-        self.tabs.private = crate::instances::others() > 0;
-        self.prefs.tabs_private = self.tabs.private;
-        if !self.tabs.private {
-            self.restore_tabs();
-        }
+        self.restore_tabs();
         if let Some(path) = open {
             self.open_path(path);
             return;
@@ -1655,17 +1641,8 @@ impl OndinApp {
         };
         CLIPBOARD_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
         let mut app = Self::with(ctx, CanvasRenderer::headless(), FontService::inert(), prefs);
-        app.leave_os_opens();
+        app.os_opens = false;
         app
-    }
-
-    /// Stop this app taking the files the OS asks to open (`os_opens`).
-    #[cfg(test)]
-    fn leave_os_opens(&mut self) {
-        #[cfg(target_os = "macos")]
-        {
-            self.os_opens = false;
-        }
     }
 
     /// The one field list, so the two constructors cannot drift.
@@ -1726,7 +1703,6 @@ impl OndinApp {
             layers_flat: Default::default(),
             layers_hover: None,
             meter: Default::default(),
-            private_polled: None,
             opacity_entry: None,
             renaming_layer: None,
             layers_focus_step: None,
@@ -1840,7 +1816,6 @@ impl OndinApp {
             peeking: false,
             peek_key: None,
             clip_keys: Default::default(),
-            #[cfg(target_os = "macos")]
             os_opens: true,
             pixel_preview: false,
             show_layers: view.layers,
@@ -1960,6 +1935,9 @@ impl eframe::App for OndinApp {
     ///
     /// [`Self::handle_close_request`]: OndinApp::handle_close_request
     fn on_exit(&mut self) {
+        // First: a launch from now on waits for this process to end rather than
+        // handing its file to a window that will not open it.
+        crate::one_window::closing();
         // The tab in front; a parked one recorded its view as it was parked.
         if self.tabs.active.is_some() {
             self.remember_view();
@@ -2008,7 +1986,6 @@ impl OndinApp {
         // took must not turn a later reset into a push.
         crate::ui::take_push(&ctx);
         // Before anything draws a name.
-        self.poll_private(&ctx);
         crate::private::set(self.prefs.private);
         // Before anything paints: an open Settings modal, on either screen, previews
         // its own pick.
@@ -2063,12 +2040,22 @@ impl OndinApp {
         // `disk_results` or ticks (`go_to_dashboard` compensates one). A library file
         // read off the frame lands here, before the screen it switches to is drawn.
         self.poll_open(ui.ctx());
-        // Files the OS asked to open while the window runs, on either screen, as
-        // `ondin <file>` opens them; a modal holds them back, as it does a drop.
-        #[cfg(target_os = "macos")]
-        if self.os_opens && !self.modal_is_up() {
-            for path in crate::open_event::take() {
-                self.open_path(&path);
+        // Files asked for from outside while the window runs (the OS, a later
+        // launch), on either screen, as `ondin <file>` opens them; a modal holds
+        // them back, as it does a drop. A later launch also brings the window
+        // forward, modal or not.
+        if self.os_opens {
+            if crate::opens::take_raise() {
+                let ctx = ui.ctx();
+                if ctx.input(|i| i.viewport().minimized) == Some(true) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            if !self.modal_is_up() {
+                for path in crate::opens::take() {
+                    self.open_path(&path);
+                }
             }
         }
         // Before every early return, so an export landing behind the library, a
@@ -4667,10 +4654,11 @@ impl OndinApp {
     /// Copy the selection into the in-app clipboard, and put a text stand-in on the
     /// **system** clipboard: `egui_winit` emits `Event::Paste`, Ctrl+V's only form, only
     /// for a non-empty clipboard. The layer names on the first line, then the payload past
-    /// `ondin_core::io::clip::FENCE`, so another `ondin` window pastes layers.
+    /// `ondin_core::io::clip::FENCE`, so Ondin pastes layers from the system
+    /// clipboard too: after a relaunch, or from another build or machine.
     ///
     /// Returns that text, or `None` for a guide copy or nothing copied; only tests
-    /// modelling a second window read it.
+    /// modelling a paste from outside read it.
     fn copy_selection(&mut self, ctx: &egui::Context) -> Option<String> {
         // Guides are never selected alongside layers.
         if self.copy_guides(ctx) {
@@ -8287,48 +8275,12 @@ impl OndinApp {
     /// masked. Turning it on closes whatever is showing a real name to edit.
     pub(crate) fn set_private(&mut self, on: bool) {
         self.prefs.private = on;
-        self.prefs.save_private();
+        self.prefs.save();
         self.follow_private(on);
     }
 
-    /// Every [`PRIVATE_POLL`] while another Ondin runs, take up private mode as
-    /// the preferences file has it, so a window switched in another masks too;
-    /// the wake keeps an idle window following.
-    fn poll_private(&mut self, ctx: &egui::Context) {
-        if self.prefs.ephemeral {
-            return;
-        }
-        // A repaint request lasts one pass, so a pass between two polls asks again.
-        if let Some((at, others)) = self.private_polled
-            && let Some(left) = PRIVATE_POLL.checked_sub(at.elapsed())
-        {
-            if others {
-                ctx.request_repaint_after(left);
-            }
-            return;
-        }
-        let others = crate::instances::others() > 0;
-        self.private_polled = Some((std::time::Instant::now(), others));
-        if !others {
-            return;
-        }
-        ctx.request_repaint_after(PRIVATE_POLL);
-        if let Some(on) = crate::prefs::Prefs::private_on_disk() {
-            self.take_private(on);
-        }
-    }
-
-    /// Private mode as another window left it in the preferences file, taken up
-    /// here without saving.
-    fn take_private(&mut self, on: bool) {
-        if on != self.prefs.private {
-            self.prefs.private = on;
-            self.follow_private(on);
-        }
-    }
-
-    /// Private mode taken up, saved or not: the switch set, and turning it on
-    /// closes whatever is showing a real name to edit.
+    /// Private mode taken up: the switch set, and turning it on closes whatever is
+    /// showing a real name to edit.
     fn follow_private(&mut self, on: bool) {
         crate::private::set(on);
         if on {
@@ -13125,16 +13077,15 @@ mod library_wiring_tests {
         }
     }
 
-    /// Private mode found switched on in another window masks this one and
-    /// closes a rename in progress, as the switch here would, without saving.
-    /// flip: `take_private` setting the flag alone → fails at "masked".
+    /// Turning private mode on masks the window and closes a rename in progress.
+    /// flip: `set_private` setting the flag alone → fails at "masked".
     #[test]
-    fn private_mode_from_another_window_is_taken_up() {
+    fn private_mode_masks_and_closes_a_rename() {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let id = ondin_core::IdSource::new(0x9417).mint();
         app.renaming_layer = Some((id, "Secret".into()));
-        app.take_private(true);
+        app.set_private(true);
         let masked = crate::private::on();
         crate::private::set(false);
         assert!(app.prefs.private && masked, "masked");

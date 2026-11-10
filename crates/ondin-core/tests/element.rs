@@ -318,25 +318,24 @@ fn a_set_has_one_element_on_every_root() {
 }
 
 /// A v14 file's marked set keeps the element it was written as, now on its
-/// roots: absent (Button) and Link move, Plain is Automatic, and an unmarked
-/// set's is dropped.
+/// roots and their instances: absent (Button) and Link move, Plain is
+/// Automatic, and an unmarked set's is dropped.
 ///
 /// flip: `set_element_onto_roots` skipping the absent key → fails at
-/// "absent is a button".
+/// "absent is a button"; skipping the linked copies → fails at "an instance
+/// follows its main".
 #[test]
 fn a_v14_sets_element_moves_onto_its_roots() {
-    let (doc, s, [rest, hover]) = set_of_two(true);
-    let clear = Transaction(vec![
-        Operation::SetElement {
-            id: rest,
-            element: None,
-        },
-        Operation::SetElement {
-            id: hover,
-            element: None,
-        },
-    ]);
-    let mut doc = doc;
+    let (mut doc, s, [rest, hover]) = set_of_two(true);
+    let page = doc.first_page();
+    let (tx, copy) =
+        ondin_core::build::place_instance(&doc, &mut IdSource::new(0xE9), s, page, None).unwrap();
+    doc.apply(&tx).unwrap();
+    let clear = Transaction(
+        [rest, hover, copy]
+            .map(|id| Operation::SetElement { id, element: None })
+            .to_vec(),
+    );
     doc.apply(&clear).unwrap();
     let saved = String::from_utf8(io::save(&doc).unwrap()).unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&saved).unwrap();
@@ -366,6 +365,15 @@ fn a_v14_sets_element_moves_onto_its_roots() {
     assert_eq!(
         loaded.get(hover).unwrap().element(),
         Some(HtmlElement::Button)
+    );
+    assert_eq!(
+        loaded.get(copy).unwrap().element(),
+        Some(HtmlElement::Button),
+        "an instance follows its main, or it reads as an override"
+    );
+    assert!(
+        ondin_core::reset::overrides(&loaded, copy).is_empty(),
+        "and carries none"
     );
     assert_eq!(
         with(Some("link")).get(rest).unwrap().element(),

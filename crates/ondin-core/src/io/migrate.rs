@@ -408,9 +408,10 @@ fn migrate_13_to_14(value: &mut Value) {
 /// published document's number moves too.
 ///
 /// A set's `element` (Button, Link, Plain; absent is Button) moves onto its
-/// variant roots, where v15 keeps a layer's HTML element: a set with an
-/// interaction state writes `button` or `a` on each root, Plain writing nothing
-/// (Automatic). A set without states never read it, so it is dropped.
+/// variant roots and every instance of them, where v15 keeps a layer's HTML
+/// element: a set with an interaction state writes `button` or `a` on each,
+/// Plain writing nothing (Automatic). A set without states never read it, so it
+/// is dropped.
 fn migrate_14_to_15(value: &mut Value) {
     value["schema_version"] = Value::from(15u32);
     set_element_onto_roots(value);
@@ -461,10 +462,31 @@ fn set_element_onto_roots(value: &mut Value) {
         }
     }
     for (children, tag) in writes {
+        // The roots, then every copy linked to one, however deeply nested: a
+        // copy's element is its main's, so one left without it reads as an
+        // override.
+        let mut tagged: Vec<Value> = nodes
+            .iter()
+            .filter(|n| {
+                n.get("id").is_some_and(|id| children.contains(id))
+                    && n.get("component").and_then(Value::as_bool) == Some(true)
+            })
+            .filter_map(|n| n.get("id").cloned())
+            .collect();
+        loop {
+            let more: Vec<Value> = nodes
+                .iter()
+                .filter(|n| n.get("link").is_some_and(|l| tagged.contains(l)))
+                .filter_map(|n| n.get("id").cloned())
+                .filter(|id| !tagged.contains(id))
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            tagged.extend(more);
+        }
         for node in nodes.iter_mut() {
-            let is_root = node.get("id").is_some_and(|id| children.contains(id))
-                && node.get("component").and_then(Value::as_bool) == Some(true);
-            if is_root {
+            if node.get("id").is_some_and(|id| tagged.contains(id)) {
                 node["element"] = Value::from(tag);
             }
         }

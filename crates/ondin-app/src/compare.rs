@@ -277,7 +277,8 @@ pub(crate) fn rows(
     then_res: &Resolved,
     now_res: &Resolved,
 ) -> (Vec<Group>, Vec<Row>, Vec<Change>) {
-    let d = diff::diff(then, now);
+    let mut d = diff::diff(then, now);
+    charts_whole(&mut d, then, now);
     let mut groups = Vec::new();
     let mut rows: Vec<Row> = Vec::new();
     for page in &d.pages {
@@ -356,6 +357,113 @@ pub(crate) fn rows(
         }
     }
     (groups, rows, d.document)
+}
+
+/// `d` with every chart taken whole: its parts are what its regeneration made of
+/// it, so none is listed, and the chart frame is, changed, with *Chart data
+/// changed* or *Chart options changed* for what its description changed, in
+/// place of the description's fields. An added or removed chart counts no layers
+/// inside it, its parts being none of the user's.
+fn charts_whole(d: &mut diff::Diff, then: &Document, now: &Document) {
+    use ondin_core::chart;
+    let is_chart = |id: NodeId| {
+        [then, now]
+            .iter()
+            .any(|doc| doc.get(id).is_some_and(|n| n.chart().is_some()))
+    };
+    for page in &mut d.pages {
+        let listed: HashSet<NodeId> = page
+            .layers
+            .iter()
+            .filter_map(|l| NodeId::from_wire(&l.id))
+            .collect();
+        let mut placed: HashSet<NodeId> = HashSet::new();
+        let mut out = Vec::with_capacity(page.layers.len());
+        for layer in std::mem::take(&mut page.layers) {
+            // Owned as the layer is now: a flattened chart's former part that was
+            // edited since is the user's layer, and keeps its change.
+            let owner = NodeId::from_wire(&layer.id).and_then(|id| match now.contains(id) {
+                true => chart::owner(now, id),
+                false => chart::owner(then, id),
+            });
+            match owner {
+                None => out.push(layer),
+                Some(c) if listed.contains(&c) || !placed.insert(c) => {}
+                Some(c) => out.push(chart_layer(c, then, now)),
+            }
+        }
+        for layer in &mut out {
+            let Some(id) = NodeId::from_wire(&layer.id).filter(|id| is_chart(*id)) else {
+                continue;
+            };
+            if layer.status == Status::Changed {
+                // The description's fields as the save format spells them (`chart
+                // table rows`, `chart parts`), said in the chart's words instead.
+                layer
+                    .changes
+                    .retain(|c| c.what != "chart" && !c.what.starts_with("chart "));
+                let was = then.get(id).and_then(|n| n.chart());
+                let is = now.get(id).and_then(|n| n.chart());
+                layer.changes.extend(description_changes(was, is));
+            } else {
+                layer.inside = 0;
+            }
+        }
+        page.layers = out;
+    }
+}
+
+/// Chart `id`'s entry, changed, with no changes of its own yet: its trail read
+/// from the document that has it.
+fn chart_layer(id: NodeId, then: &Document, now: &Document) -> diff::LayerDiff {
+    let doc = if now.contains(id) { now } else { then };
+    let mut trail = Vec::new();
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| doc.get(a)).filter(|n| !doc.is_page(n.id())) {
+        trail.push(n.name().to_string());
+        at = n.parent();
+    }
+    trail.reverse();
+    diff::LayerDiff {
+        id: id.to_wire(),
+        trail,
+        kind: "Frame".into(),
+        status: Status::Changed,
+        inside: 0,
+        changes: Vec::new(),
+    }
+}
+
+/// What changed between a chart's two descriptions, as lines with no values:
+/// its table, everything else, or the description gained or lost.
+fn description_changes(
+    was: Option<&ondin_core::chart::Chart>,
+    is: Option<&ondin_core::chart::Chart>,
+) -> Vec<Change> {
+    let line = |what: &str| Change {
+        what: what.into(),
+        before: None,
+        after: None,
+    };
+    match (was, is) {
+        (Some(was), Some(is)) => {
+            let mut out = Vec::new();
+            if was.table != is.table {
+                out.push(line("Chart data changed"));
+            }
+            let same_table = ondin_core::chart::Chart {
+                table: is.table.clone(),
+                ..was.clone()
+            };
+            if !same_table.same_description(is) {
+                out.push(line("Chart options changed"));
+            }
+            out
+        }
+        (Some(_), None) => vec![line("Chart flattened")],
+        (None, Some(_)) => vec![line("Made a chart")],
+        (None, None) => Vec::new(),
+    }
 }
 
 /// For each of a page's listed `layers`, the index of the listed layer whose row it
@@ -2051,6 +2159,70 @@ mod tests {
         assert_eq!(c.changed_on(first), 4, "card, price, note and box");
         assert_eq!(c.changed_on(second), 1);
         let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A chart whose data changed is one changed row, the frame's, saying *Chart
+    /// data changed*, though its regeneration rewrote its parts; an option changed
+    /// since adds *Chart options changed*.
+    ///
+    /// flip: `rows` without `charts_whole` → fails at the page's count, the parts
+    /// folded under the frame's row but each counted.
+    #[test]
+    fn a_chart_is_marked_whole_with_what_its_description_changed() {
+        use ondin_core::chart::{Chart, ChartKind, Stacking};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let first = app.session.page;
+        let frame = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            boxed(frame, first, "Sales", (0.0, 0.0), true),
+            Operation::SetGeometry {
+                id: frame,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(480.0, 280.0)),
+            },
+            Operation::SetChart {
+                id: frame,
+                chart: Some(Box::new(Chart::sample(ChartKind::Column))),
+            },
+        ])));
+        let version =
+            std::env::temp_dir().join(format!("ondin-compare-chart-{}.ondin", std::process::id()));
+        std::fs::write(&version, ondin_core::io::save(&app.session.doc).unwrap()).unwrap();
+        let set = |app: &mut OndinApp, edit: &dyn Fn(&mut Chart)| {
+            let mut c = app.session.doc.get(frame).unwrap().chart().unwrap().clone();
+            edit(&mut c);
+            assert!(app.session.commit(Transaction(vec![Operation::SetChart {
+                id: frame,
+                chart: Some(Box::new(c)),
+            }])));
+        };
+        set(&mut app, &|c| c.table.rows[0][1] = "90".into());
+        let then = load(&version).unwrap();
+        let raw = diff::diff(&then, &app.session.doc);
+        assert!(
+            raw.pages[0].layers.iter().any(|l| l.id != frame.to_wire()),
+            "the fixture: its parts were regenerated"
+        );
+
+        let lines = |app: &mut OndinApp| {
+            app.compare_with(pick(&version, "Before"), None);
+            let c = app.session.compare.as_deref().expect("the compare opens");
+            let rows: Vec<&Row> = c.rows.iter().filter(|r| !r.is_page).collect();
+            assert_eq!(rows.len(), 1, "one row for the chart: {rows:#?}");
+            assert_eq!((rows[0].id, rows[0].status), (frame, Status::Changed));
+            assert_eq!(c.changed_on(first), 1, "the page counts the chart once");
+            let out: Vec<String> = rows[0].all_lines().iter().map(|l| l.what.clone()).collect();
+            app.leave_compare();
+            out
+        };
+        assert_eq!(lines(&mut app), ["Chart data changed"]);
+        set(&mut app, &|c| c.options.bars.stacking = Stacking::Stacked);
+        assert_eq!(
+            lines(&mut app),
+            ["Chart data changed", "Chart options changed"]
+        );
+        let _ = std::fs::remove_file(&version);
     }
 
     /// A layer that was there before and moved into a new frame keeps its own row

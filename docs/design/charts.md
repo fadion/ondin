@@ -301,7 +301,7 @@ it applies to; switching kind keeps the others' values.
     Centre), order (Automatic, Table order), flow colour (Source, Target, Gradient, Neutral),
     flow opacity, labels (Name, Name and value, Off).
 - **Axes** (not Pie or Sankey): per axis, *Show*, its line (off by default on the value axis, whose
-  gridlines carry it), its tick marks, its labels and their angle (Auto,
+  gridlines carry it), its tick marks, the colour both draw in, its labels and their angle (Auto,
   0°, 45°, 90°; Auto turns them 45° and then thins them to every *n*th when they would touch),
   a title, and for a value axis its range (Auto or a typed min and max), *Start at zero* (always
   on for columns and bars, whose length is the value), the tick count (Auto aims for five on
@@ -318,8 +318,9 @@ it applies to; switching kind keeps the others' values.
   axis titles, and the ink colour, from the Type controls the inspector already has. A chart starts
   with the document's default text family, as the Text tool's first node does.
 - **Colours** for axes, ticks, grid and text are `BrushSource`s like the series', so they bind to
-  variables the same way. The card edits the text ink; the axes' and gridlines' colours are the
-  description's, set through `set_chart`.
+  variables the same way, and the card edits each. A Sankey's *Neutral* flows draw in the value
+  axis's colour and a progress ring's *Track* in the value gridlines', so their rows on the card
+  write those two.
 
 A chart has no title or caption of its own: a text layer next to it does that, and stays free.
 
@@ -381,9 +382,10 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   Undo step *Chart type*.
 - **Style** — the preset cells in a row, each the chart generated with the preset at 320 × 200
   and its fills and strokes rasterised small (`style_picture`, through `rasterize_paths`; text
-  left out), cached with the generator's left-out values while the description and the drawn
-  size are unchanged (`ChartCardCache`). The preset the options are exactly at lights. Undo step
-  *Chart style*.
+  left out), cached with the generator's left-out values while the description, its bound
+  colours resolved, and the drawn size are unchanged (`ChartCardCache`), so a bound variable's
+  new value or a mode switch redraws them (`style_pictures_follow_a_bound_variables_value`). The
+  preset the options are exactly at lights. Undo step *Chart style*.
 - **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), the left-out line (*2
   values left out*, the reasons in its tooltip) or the refusal (*Too many marks: …*, *Flows loop
   back: …*) in the warning ink, and the mapping: *Category* (*X* for a scatter) or a Sankey's
@@ -392,13 +394,17 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   which opens the picker on `PaintSlot::Chart` (solid colours, and the *Variables* tab: a
   binding written into the description, `chart_bind_tx`, *Solid* detaching it to the colour
   drawn), its name, and the eye, which
-  shows the column as a series or hides it (a hidden series keeps its place and colour). On a
+  shows the column as a series or hides it (a hidden series keeps its place and colour). A bound
+  colour row (a series', a node's, and the card's other colour rows) shows its variable's name
+  right-aligned in a capsule (`binding::capsule`, at most half the row, `binding::chip_tip` its
+  tooltip). On a
   line, area or scatter chart a `…` button between them opens the series' style menu: its line's
   dash (*Solid*, *Dashed*, *Dotted*; not a scatter) and its points' shape (a line's unshaped
   points are circles; a scatter's take the chart's shape), undo steps *Series dash* and *Series
   point shape*. A Sankey shows *Nodes* here instead: one row per node name in
   `chart::sankey_nodes`' order with its swatch and, right-aligned in the muted ink, its total
-  (`chart::sankey_totals`: the larger of what flows in and out) in the values' number format.
+  (`chart::sankey_totals`: the larger of what flows in and out) in the values' number format,
+  a bound node's capsule before it.
   Picking a palette puts every series and node back on it (`chart::with_palette`).
 - **Marks**, **Axes**, **Values**, **Legend** — the options above for the kind, as
   `ui::value_field`, `ui::switch_row`, `ui::segmented` and dropdown rows, number fields two to a
@@ -409,6 +415,13 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   written through the format, opening on *Prefix* and *Suffix*, *Decimals* (Auto, 0–3), and
   *Thousands separator*, *Compact* and *Percent*, the same rows whatever is set so the popup
   keeps its size. The value axis, a scatter's X axis and the value labels each have one.
+  The chart's own colours are colour rows (`chart_slot_row`, *Text colour*'s row): in Axes, per
+  axis, *Value* / *Category axis colour* after its tick-marks switch while it draws a line or
+  ticks, and *Value* / *Category gridline colour* after the dashed-gridlines switch while
+  gridlines show; in Marks, *Neutral colour* after *Flow colour* while a Sankey's flows are
+  Neutral, and *Track colour* last on a pie drawn as a progress ring (`ChartCardCache::track`,
+  read off the generated parts). Undo steps *Chart axis colour*, *Chart gridline colour*,
+  *Neutral flow colour* and *Track colour*.
 - **Text** — the family (the Type card's family dropdown, `family_dropdown`; empty is the
   document's default family and shows its name), *Text colour* (the ink, a series row's swatch
   field on `ChartColour::Ink`, bindable the same way), the four sizes and the weight. Undo steps

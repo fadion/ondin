@@ -48,6 +48,9 @@ pub(crate) struct ChartCardCache {
     thumbs: Vec<(Preset, egui::TextureHandle)>,
     left_out: Vec<String>,
     refusal: Option<String>,
+    /// Whether the chart draws a progress ring's track, which the Marks section
+    /// then offers a colour for.
+    track: bool,
 }
 
 /// The kinds' variants as the Type section's segments name them, with the
@@ -101,6 +104,19 @@ pub(crate) fn fill_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core::
         ChartColour::Series(col) => chart::series_fill(chart, col),
         ChartColour::Node(i) => Some(chart::sankey_nodes(chart).into_iter().nth(i)?.1),
         ChartColour::Ink => Some(chart.options.text.ink.clone()),
+        ChartColour::Axis(value) => Some(axis_of(chart, value).colour.clone()),
+        ChartColour::Grid(value) => Some(axis_of(chart, value).grid.colour.clone()),
+        ChartColour::Neutral => Some(chart.options.value_axis.colour.clone()),
+        ChartColour::Track => Some(chart.options.value_axis.grid.colour.clone()),
+    }
+}
+
+/// The value axis when `value`, else the category axis.
+fn axis_of(chart: &Chart, value: bool) -> &chart::Axis {
+    if value {
+        &chart.options.value_axis
+    } else {
+        &chart.options.category_axis
     }
 }
 
@@ -154,9 +170,20 @@ pub(crate) fn with_fill(
             Some((name, _)) => chart::with_node_fill(chart, &name, fill),
             None => chart.clone(),
         },
-        ChartColour::Ink => {
+        ChartColour::Ink
+        | ChartColour::Axis(_)
+        | ChartColour::Grid(_)
+        | ChartColour::Neutral
+        | ChartColour::Track => {
             let mut next = chart.clone();
-            next.options.text.ink = fill;
+            let o = &mut next.options;
+            *match colour {
+                ChartColour::Axis(true) | ChartColour::Neutral => &mut o.value_axis.colour,
+                ChartColour::Axis(false) => &mut o.category_axis.colour,
+                ChartColour::Grid(true) | ChartColour::Track => &mut o.value_axis.grid.colour,
+                ChartColour::Grid(false) => &mut o.category_axis.grid.colour,
+                _ => &mut o.text.ink,
+            } = fill;
             next
         }
     }
@@ -404,8 +431,12 @@ impl OndinApp {
             return;
         }
         let family = ondin_core::typography::TextStyle::default().font_family;
-        let (left_out, refusal) = match chart::generate(chart, size, &family) {
-            Ok(g) => (g.left_out, None),
+        let (left_out, refusal, track) = match chart::generate(chart, size, &family) {
+            Ok(g) => {
+                let track =
+                    chart.kind == ChartKind::Pie && g.parts.iter().any(|p| p.name == "Track");
+                (g.left_out, None, track)
+            }
             Err(chart::Refusal::TooManyMarks { count, what }) => (
                 Vec::new(),
                 Some(format!(
@@ -413,9 +444,10 @@ impl OndinApp {
                     chart::grouped(count),
                     chart::grouped(chart::MAX_MARKS)
                 )),
+                false,
             ),
             Err(chart::Refusal::LoopsBack(path)) => {
-                (Vec::new(), Some(format!("Flows loop back: {path}")))
+                (Vec::new(), Some(format!("Flows loop back: {path}")), false)
             }
         };
         let ppp = ctx.pixels_per_point();
@@ -439,6 +471,7 @@ impl OndinApp {
             thumbs,
             left_out,
             refusal,
+            track,
         });
     }
 
@@ -910,7 +943,7 @@ impl OndinApp {
                         chart::scale::decimals_of(*v).min(3),
                     )
                 }),
-                ChartColour::Series(_) | ChartColour::Ink => None,
+                _ => None,
             };
             let style_button = styled && matches!(slot, ChartColour::Series(_));
             ui.horizontal(|ui| {
@@ -953,9 +986,26 @@ impl OndinApp {
         }
     }
 
+    /// One of the chart's own colours (not a series') as a full-width
+    /// [`Self::chart_colour_row`] named `name`.
+    fn chart_slot_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        slot: ChartColour,
+        name: &str,
+    ) {
+        let swatch = colour_of(&self.session.doc, id, chart, slot).map_or(ui::Swatch::Mixed, |c| {
+            ui::Swatch::Solid(ui::color_to_egui(c))
+        });
+        let width = ui.available_width();
+        self.chart_colour_row(ui, id, slot, width, swatch, name, true, None);
+    }
+
     /// One colour of the chart as a field `width` wide: its swatch, which opens
-    /// the picker on the slot while `live`, its name (dim when not), and a
-    /// right-aligned `total`.
+    /// the picker on the slot while `live`, its name (dim when not), a
+    /// right-aligned `total`, and, bound, its variable's name in a capsule.
     #[allow(clippy::too_many_arguments)]
     fn chart_colour_row(
         &mut self,
@@ -987,6 +1037,18 @@ impl OndinApp {
                             .color(theme::text::muted()),
                     )
                     .on_hover_text("The node's total: the larger of what flows in and out");
+                }
+                if let Some((var, _)) = self.chart_binding(id, slot) {
+                    let doc = &self.session.doc;
+                    let var_name = doc.variables().get(var).map_or("", |v| v.name.as_str());
+                    let max_w = (ui.available_width() / 2.0).max(0.0);
+                    let w = super::binding::capsule_width(ui, var_name, max_w);
+                    let (rect, resp) = ui.allocate_exact_size(
+                        egui::vec2(w, ui.available_height()),
+                        egui::Sense::hover(),
+                    );
+                    super::binding::capsule(ui, rect.left_center(), var_name, max_w);
+                    resp.on_hover_text(super::binding::chip_tip(doc, id, var));
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(
@@ -1293,6 +1355,13 @@ impl OndinApp {
                         |c, v| c.options.slices.group_below = Some(v),
                     );
                 }
+                if self
+                    .chart_card
+                    .as_ref()
+                    .is_some_and(|c| c.id == id && c.track)
+                {
+                    self.chart_slot_row(ui, id, chart, ChartColour::Track, "Track colour");
+                }
             }
             ChartKind::Scatter => {
                 self.chart_pair(ui, |app, ui, w| {
@@ -1456,6 +1525,9 @@ impl OndinApp {
                     at,
                     move |c, i| c.options.flows.colour = colours[i],
                 );
+                if chart.options.flows.colour == FlowColour::Neutral {
+                    self.chart_slot_row(ui, id, chart, ChartColour::Neutral, "Neutral colour");
+                }
                 let labels = [NodeLabels::Name, NodeLabels::NameAndValue, NodeLabels::Off];
                 let at = labels
                     .iter()
@@ -1572,6 +1644,14 @@ impl OndinApp {
                     put(c, a);
                 },
             );
+            if axis.line || axis.ticks {
+                let name = if value {
+                    "Value axis colour"
+                } else {
+                    "Category axis colour"
+                };
+                self.chart_slot_row(ui, id, chart, ChartColour::Axis(value), name);
+            }
             self.chart_switch(
                 ui,
                 id,
@@ -1605,6 +1685,12 @@ impl OndinApp {
                         put(c, a);
                     },
                 );
+                let name = if value {
+                    "Value gridline colour"
+                } else {
+                    "Category gridline colour"
+                };
+                self.chart_slot_row(ui, id, chart, ChartColour::Grid(value), name);
             }
             let angles = [
                 LabelAngle::Auto,
@@ -2054,21 +2140,7 @@ impl OndinApp {
             next.options.text.family = family;
             self.chart_commit(id, "Chart font", next);
         }
-        let ink = colour_of(&self.session.doc, id, chart, ChartColour::Ink)
-            .map_or(ui::Swatch::Mixed, |c| {
-                ui::Swatch::Solid(ui::color_to_egui(c))
-            });
-        let width = ui.available_width();
-        self.chart_colour_row(
-            ui,
-            id,
-            ChartColour::Ink,
-            width,
-            ink,
-            "Text colour",
-            true,
-            None,
-        );
+        self.chart_slot_row(ui, id, chart, ChartColour::Ink, "Text colour");
         self.chart_pair(ui, |app, ui, w| {
             app.chart_number(
                 ui,
@@ -2545,5 +2617,272 @@ mod tests {
                 assert_eq!(variants(&next).map(|(_, at)| at), Some(i), "{kind:?} {i}");
             }
         }
+    }
+
+    /// One frame of the app, its shapes returned; tall enough that the whole
+    /// card is on screen, since a label out of view is not painted.
+    fn shapes(ctx: &egui::Context, app: &mut OndinApp) -> Vec<egui::epaint::ClippedShape> {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 4000.0),
+            )),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame))
+            .shapes
+    }
+
+    /// Whether a text shape reading `s` is among `shapes`.
+    fn drawn(shapes: &[egui::epaint::ClippedShape], s: &str) -> bool {
+        fn find(shape: &egui::Shape, s: &str) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text() == s,
+                egui::Shape::Vec(v) => v.iter().any(|x| find(x, s)),
+                _ => false,
+            }
+        }
+        shapes.iter().any(|c| find(&c.shape, s))
+    }
+
+    /// A colour variable `name` holding `c` in a new mode of the first
+    /// collection; returns it and the mode.
+    fn colour_var(
+        app: &mut OndinApp,
+        name: &str,
+        c: ondin_core::peniko::Color,
+    ) -> (ondin_core::VarId, ondin_core::variable::ModeId) {
+        use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: name.into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(c))].into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ])));
+        (var, mode)
+    }
+
+    /// Each axis and gridline slot writes its own colour and no other; the
+    /// Sankey's neutral and the ring's track are the value axis's and the
+    /// value gridlines'.
+    /// flip: `with_fill` writing `Axis(false)` to the value axis → fails at "the category axis".
+    #[test]
+    fn axis_and_gridline_slots_write_their_own_colour() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Column);
+        let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        let lit =
+            |c: ondin_core::peniko::Color| -> ondin_core::BrushSource { Brush::Solid(c).into() };
+        let before = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        let tx = app.slot_transaction(
+            id,
+            PaintSlot::Chart(ChartColour::Axis(false)),
+            Brush::Solid(red),
+        );
+        assert!(app.commit_edit(tx));
+        let o = &app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .unwrap()
+            .options;
+        assert_eq!(o.category_axis.colour, lit(red), "the category axis");
+        assert_eq!(o.value_axis.colour, before.options.value_axis.colour);
+        assert_eq!(
+            o.category_axis.grid.colour,
+            before.options.category_axis.grid.colour
+        );
+        let blue = ondin_core::peniko::Color::from_rgb8(0, 0, 255);
+        let tx = app.slot_transaction(
+            id,
+            PaintSlot::Chart(ChartColour::Grid(true)),
+            Brush::Solid(blue),
+        );
+        assert!(app.commit_edit(tx));
+        let chart = app.session.doc.get(id).and_then(|n| n.chart()).unwrap();
+        assert_eq!(
+            chart.options.value_axis.grid.colour,
+            lit(blue),
+            "the value gridlines"
+        );
+        assert_eq!(chart.options.category_axis.colour, lit(red), "kept");
+        assert_eq!(fill_of(chart, ChartColour::Track), Some(lit(blue)));
+        assert_eq!(
+            fill_of(chart, ChartColour::Neutral),
+            Some(chart.options.value_axis.colour.clone())
+        );
+    }
+
+    /// The Axes section offers an axis's colour while it draws a line or ticks
+    /// and its gridlines' colour while they show; a Sankey on Neutral flows
+    /// offers its neutral colour, and a progress ring its track's.
+    /// flip: `chart_axis_rows` dropping the gridline colour row → fails at "Value gridline colour".
+    #[test]
+    fn the_card_offers_axis_gridline_neutral_and_track_colours() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Column);
+        app.collapsed_panels.remove("Chart axes");
+        app.collapsed_panels.remove("Chart marks");
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        for row in ["Value gridline colour", "Category axis colour"] {
+            assert!(drawn(&out, row), "{row}");
+        }
+        // A new chart's value axis has no line or ticks, its category axis no gridlines.
+        for row in [
+            "Value axis colour",
+            "Category gridline colour",
+            "Track colour",
+            "Neutral colour",
+        ] {
+            assert!(!drawn(&out, row), "no {row}");
+        }
+        let mut chart = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        chart.options.value_axis.ticks = true;
+        app.chart_commit(id, "Value tick marks", chart);
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "Value axis colour"), "the ticks' colour");
+
+        let (mut app, id) = charted(&ctx, ChartKind::Sankey);
+        app.collapsed_panels.remove("Chart marks");
+        let mut chart = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        chart.options.flows.colour = FlowColour::Neutral;
+        app.chart_commit(id, "Flow colour", chart);
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "Neutral colour"), "Neutral colour");
+
+        let (mut app, id) = charted(&ctx, ChartKind::Pie);
+        app.collapsed_panels.remove("Chart marks");
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(
+            !drawn(&out, "Track colour"),
+            "a pie of several slices has no track"
+        );
+        let mut chart = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        chart.table.rows.truncate(1);
+        chart.table.rows[0][1] = "64".into();
+        app.chart_commit(id, "Edit chart data", chart);
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "Track colour"), "a ring's track");
+    }
+
+    /// A bound series row names its variable in a capsule beside the series name.
+    /// flip: `chart_colour_row` skipping the capsule → fails at "the variable's name".
+    #[test]
+    fn a_bound_series_row_names_its_variable() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Column);
+        let (var, _) = colour_var(&mut app, "brand/500", ondin_core::peniko::Color::WHITE);
+        let col = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .unwrap()
+            .mapping
+            .series[0];
+        let tx = app.chart_bind_tx(id, ChartColour::Series(col), Some(var), None);
+        assert!(app.commit_edit(tx));
+        assert_eq!(
+            app.chart_binding(id, ChartColour::Series(col)).map(|b| b.0),
+            Some(var)
+        );
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "brand/500"), "the variable's name");
+    }
+
+    /// The Style cells redraw when a variable a series is bound to changes value.
+    /// flip: `refresh_chart_cache` keying on the description as written, not as
+    /// resolved → fails at "redrawn".
+    #[test]
+    fn style_pictures_follow_a_bound_variables_value() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Column);
+        let (var, mode) = colour_var(&mut app, "brand/500", ondin_core::peniko::Color::WHITE);
+        let col = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .unwrap()
+            .mapping
+            .series[0];
+        let tx = app.chart_bind_tx(id, ChartColour::Series(col), Some(var), None);
+        assert!(app.commit_edit(tx));
+        for _ in 0..3 {
+            shapes(&ctx, &mut app);
+        }
+        let key = |app: &OndinApp| app.chart_card.as_ref().map(|c| c.key);
+        let was = key(&app);
+        assert!(was.is_some(), "the card measured its chart");
+        let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        assert!(
+            app.commit_edit(Transaction(vec![Operation::SetVariableCell {
+                id: var,
+                mode,
+                cell: ondin_core::variable::Cell::Color(red),
+            }]))
+        );
+        for _ in 0..3 {
+            shapes(&ctx, &mut app);
+        }
+        assert_ne!(key(&app), was, "redrawn");
     }
 }

@@ -320,7 +320,8 @@ pub enum PaintSlot {
     /// ([`PaintSlot::pref_scoped`]); node-less, as [`PaintSlot::Canvas`] is.
     Pref(PrefColour),
     /// One colour of a chart's description on the slot's node (the Chart card's
-    /// Series rows and its text ink): solid or bound, written as a `SetChart`.
+    /// Series rows, its text ink, axes and gridlines): solid or bound, written as
+    /// a `SetChart`.
     Chart(ChartColour),
 }
 
@@ -333,6 +334,14 @@ pub enum ChartColour {
     Node(usize),
     /// The chart's labels' ink.
     Ink,
+    /// An axis's line and ticks: the value axis when `true`, else the category axis.
+    Axis(bool),
+    /// An axis's gridlines, the value axis's when `true`.
+    Grid(bool),
+    /// A Sankey's *Neutral* flows, which draw in the value axis's colour.
+    Neutral,
+    /// A progress ring's track, which draws in the value gridlines' colour.
+    Track,
 }
 
 /// Which Settings colour a [`PaintSlot::Pref`] edits (`prefs::CanvasPrefs`).

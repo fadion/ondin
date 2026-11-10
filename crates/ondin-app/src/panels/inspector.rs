@@ -10840,6 +10840,16 @@ impl OndinApp {
             }
             PaintSlot::Chart(super::paint::ChartColour::Node(_)) => ("Node colour", icon::CHART),
             PaintSlot::Chart(super::paint::ChartColour::Ink) => ("Chart text colour", icon::CHART),
+            PaintSlot::Chart(super::paint::ChartColour::Axis(_)) => {
+                ("Chart axis colour", icon::CHART)
+            }
+            PaintSlot::Chart(super::paint::ChartColour::Grid(_)) => {
+                ("Chart gridline colour", icon::CHART)
+            }
+            PaintSlot::Chart(super::paint::ChartColour::Neutral) => {
+                ("Neutral flow colour", icon::CHART)
+            }
+            PaintSlot::Chart(super::paint::ChartColour::Track) => ("Track colour", icon::CHART),
         };
         self.session.name_step(label, glyph);
     }

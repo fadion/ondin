@@ -490,12 +490,10 @@ pub(crate) fn chip(
 }
 
 /// A variable's name as [`chip`]'s resting capsule, for a row that names a
-/// variable without binding anything: left-centred at `at`, as wide as the name
+/// variable without being its field: left-centred at `at`, as wide as the name
 /// (to `max_w`, its groups elided). Returns where it was painted.
 pub(crate) fn capsule(ui: &egui::Ui, at: egui::Pos2, name: &str, max_w: f32) -> egui::Rect {
-    let font = egui::FontId::proportional(ui::SMALL_PT);
-    let shown = elide_groups(ui, name, &font, max_w - 16.0);
-    let galley = ui.painter().layout_no_wrap(shown, font, color::text());
+    let galley = capsule_galley(ui, name, max_w);
     let cap = egui::Rect::from_min_size(
         egui::pos2(at.x, at.y - CHIP_H / 2.0),
         egui::vec2(galley.size().x + 16.0, CHIP_H),
@@ -508,6 +506,20 @@ pub(crate) fn capsule(ui: &egui::Ui, at: egui::Pos2, name: &str, max_w: f32) -> 
         color::text(),
     );
     cap
+}
+
+/// How wide [`capsule`] paints `name` within `max_w`, for a row that places it
+/// by its right edge.
+pub(crate) fn capsule_width(ui: &egui::Ui, name: &str, max_w: f32) -> f32 {
+    capsule_galley(ui, name, max_w).size().x + 16.0
+}
+
+/// [`capsule`]'s text: `name` with its groups elided to fit `max_w` less the
+/// capsule's insets.
+fn capsule_galley(ui: &egui::Ui, name: &str, max_w: f32) -> std::sync::Arc<egui::Galley> {
+    let font = egui::FontId::proportional(ui::SMALL_PT);
+    let shown = elide_groups(ui, name, &font, max_w - 16.0);
+    ui.painter().layout_no_wrap(shown, font, color::text())
 }
 
 /// The rest of a [`ui::field_row`]'s content box, for a chip: allocated at

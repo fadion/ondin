@@ -1211,7 +1211,10 @@ impl EditorSession {
                     ondin_core::chart::preview(&self.doc, &self.resolved, *id, chart)
             {
                 self.overrides.replace_chart(*id, &parts);
-                self.chart_preview = Some((*id, chart.clone()));
+                // The first is the card's own chart; the rest follow it.
+                if self.chart_preview.is_none() {
+                    self.chart_preview = Some((*id, chart.clone()));
+                }
             }
         }
         self.drawn = next_revision();

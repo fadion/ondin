@@ -370,17 +370,35 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   *From*, *To* and *Value* as dropdowns of columns.
 - **Series** — the palette dropdown, then one row per column but the category: its swatch,
   which opens the picker on `PaintSlot::Chart` (solid colours), its name, and the eye, which
-  shows the column as a series or hides it (a hidden series keeps its place and colour). A
-  Sankey shows *Nodes* here instead: one row per node name in `chart::sankey_nodes`' order with
-  its swatch. Picking a palette puts every series and node back on it (`chart::with_palette`).
+  shows the column as a series or hides it (a hidden series keeps its place and colour). On a
+  line, area or scatter chart a `…` button between them opens the series' style menu: its line's
+  dash (*Solid*, *Dashed*, *Dotted*; not a scatter) and its points' shape (a line's unshaped
+  points are circles; a scatter's take the chart's shape), undo steps *Series dash* and *Series
+  point shape*. A Sankey shows *Nodes* here instead: one row per node name in
+  `chart::sankey_nodes`' order with its swatch and, right-aligned in the muted ink, its total
+  (`chart::sankey_totals`: the larger of what flows in and out) in the values' number format.
+  Picking a palette puts every series and node back on it (`chart::with_palette`).
 - **Marks**, **Axes**, **Values**, **Legend** — the options above for the kind, as
   `ui::value_field`, `ui::switch_row`, `ui::segmented` and dropdown rows, number fields two to a
-  line. Each field's undo step is its label (*Bar radius*, *Legend position*).
-- **Text** — the four sizes and the weight.
+  line. Each field's undo step is its label (*Bar radius*, *Legend position*). A value axis (and
+  a scatter's X) has *Auto range*; turned off it starts at the extent the data already draws on
+  nice steps, zero held where the kind holds it, with *Min* and *Max* fields that refuse to
+  cross. The number format is one control, *Format*: a dropdown whose closed face is 12,345.6
+  written through the format, opening on *Prefix* and *Suffix*, *Decimals* (Auto, 0–3), and
+  *Thousands separator*, *Compact* and *Percent*, the same rows whatever is set so the popup
+  keeps its size. The value axis, a scatter's X axis and the value labels each have one.
+- **Text** — the family (the Type card's family dropdown, `family_dropdown`; empty is the
+  document's default family and shows its name), the four sizes and the weight. Undo step
+  *Chart font*.
 - At the foot, **Flatten chart** (`ui::action_button`), with `Ctrl+E` in its tooltip.
 
-A multi-selection of charts shows the Chart card when every chart is the same kind, writing each;
-the data rows are left out there (*Edit data one chart at a time*).
+A multi-selection of charts shows the Chart card when every chart is the same kind
+(`selected_charts`), drawn from the first and writing each in one step: the kind, and every
+option the edit changed (`chart::Options::carried`, a diff of the first chart's options carried
+onto each), so each keeps its own data and the options left alone. The Data section says *Edit
+data one chart at a time* and the Series section is left out. A selection of charts only drops
+the frame's own cards and group colours as one chart does. A scrub previews every chart, the
+render overrides minting each chart's ghost ids past the others'.
 
 ### The data window (`chart_data.rs`)
 

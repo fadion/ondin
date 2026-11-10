@@ -1317,6 +1317,42 @@ impl OndinApp {
         }
     }
 
+    /// A family dropdown `width` wide and `height` tall: `head` closed, and
+    /// [`Self::family_list`] open on `current`. Returns the family picked and
+    /// the combo's response, for its tooltip. The Type card's own row adds its
+    /// reset and binding doors around the same pieces.
+    pub(crate) fn family_dropdown(
+        &mut self,
+        ui: &mut egui::Ui,
+        salt: impl std::hash::Hash + std::fmt::Debug,
+        size: egui::Vec2,
+        head: impl Into<egui::WidgetText>,
+        current: &str,
+    ) -> (Option<String>, egui::Response) {
+        let mut chosen = None;
+        // A combo paints exactly `interact_size.y`; the `scope` keeps that off the rows below.
+        let resp = ui
+            .scope(|ui| {
+                ui.spacing_mut().interact_size.y = size.y;
+                ui.spacing_mut().button_padding.y = 0.0;
+                egui::ComboBox::from_id_salt(salt)
+                    .icon(ui::combo_chevron)
+                    .width(size.x)
+                    // The popup holds a search field, so a click inside must not dismiss it.
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .height(FAMILY_POPUP_H)
+                    .selected_text(head)
+                    .show_ui(ui, |ui| {
+                        ui::menu_rows(ui);
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        chosen = self.family_list(ui, current);
+                    })
+                    .response
+            })
+            .inner;
+        (chosen, resp)
+    }
+
     /// The family dropdown's body: a search field over every family, each row in
     /// its own face. Returns the row clicked, having closed the popup.
     ///

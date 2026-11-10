@@ -346,6 +346,29 @@ fn a_gradient_flow_runs_from_its_source_colour_to_its_target_colour() {
     }
 }
 
+/// An edit carried to another chart sets what changed and keeps what that chart
+/// had of its own, including an option set back to its skipped default.
+#[test]
+fn an_options_edit_carries_only_what_changed() {
+    let before = Options::default();
+    let mut after = before.clone();
+    after.bars.radius = 9.0;
+    after.value_axis.format.prefix = "$".into();
+    let mut onto = before.clone();
+    onto.bars.group_gap = 50.0;
+    onto.outline = Some(3.0);
+    let got = Options::carried(&before, &after, &onto);
+    assert_eq!(got.bars.radius, 9.0);
+    assert_eq!(got.value_axis.format.prefix, "$");
+    assert_eq!(got.bars.group_gap, 50.0, "its own gap kept");
+    assert_eq!(got.outline, Some(3.0), "its own outline kept");
+
+    let mut outlined = before.clone();
+    outlined.outline = Some(2.0);
+    let got = Options::carried(&outlined, &before, &onto);
+    assert_eq!(got.outline, None, "turned off is carried");
+}
+
 /// *Outline* draws every kind's marks as an inside stroke in their colour over
 /// a tint of it, and *Clean* fills them solid with no stroke.
 /// flip: `mark_paint` ignoring `Options::outline` → fails at "stroked".

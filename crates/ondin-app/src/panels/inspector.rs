@@ -1242,27 +1242,18 @@ impl OndinApp {
                                 .color(theme::text::faint()),
                         );
                     }
-                    ui.scope(|ui| {
-                        ui.spacing_mut().interact_size.y = ui::CONTROL_H;
-                        ui.spacing_mut().button_padding.y = 0.0;
-                        egui::ComboBox::from_id_salt(("replace-font", name.as_str()))
-                            .icon(ui::combo_chevron)
-                            .width(ui.available_width())
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .height(super::typography::FAMILY_POPUP_H)
-                            .selected_text(
-                                egui::RichText::new("Replace with…").color(theme::text::faint()),
-                            )
-                            .show_ui(ui, |ui| {
-                                ui::menu_rows(ui);
-                                ui.spacing_mut().item_spacing.y = 3.0;
-                                // Opens on the stand-in, the likeliest replacement.
-                                let current = drawn_in.as_deref().unwrap_or("");
-                                if let Some(to) = app.family_list(ui, current) {
-                                    pick = Some((name.clone(), to));
-                                }
-                            });
-                    });
+                    // Opens on the stand-in, the likeliest replacement.
+                    let current = drawn_in.as_deref().unwrap_or("");
+                    let (to, _) = app.family_dropdown(
+                        ui,
+                        ("replace-font", name.as_str()),
+                        egui::vec2(ui.available_width(), ui::CONTROL_H),
+                        egui::RichText::new("Replace with…").color(theme::text::faint()),
+                        current,
+                    );
+                    if let Some(to) = to {
+                        pick = Some((name.clone(), to));
+                    }
                     ui.add_space(MISSING_FONT_GAP);
                 }
             },
@@ -1354,14 +1345,28 @@ impl OndinApp {
         });
         self.inspector_component(ui, super::component::ComponentPart::Cards);
         // Same panels, same order as on a single layer; each draws nothing unless
-        // the selection has something it describes.
-        self.inspector_frame_templates(ui);
+        // the selection has something it describes. Charts drop the frame's own
+        // cards as one chart does, and share a Chart card while one kind.
+        let all_charts = self.session.selection.ids().iter().all(|id| {
+            self.session
+                .doc
+                .get(*id)
+                .is_some_and(|n| n.chart().is_some())
+        });
+        if !all_charts {
+            self.inspector_frame_templates(ui);
+        }
         self.inspector_align(ui);
         self.inspector_multi_transform(ui);
         self.inspector_insets(ui);
         self.inspector_item(ui);
-        self.inspector_container(ui);
-        self.inspector_layout_grids(ui);
+        if let Some(charts) = self.selected_charts() {
+            self.inspector_charts(ui, &charts);
+        }
+        if !all_charts {
+            self.inspector_container(ui);
+            self.inspector_layout_grids(ui);
+        }
         self.inspector_multi_appearance(ui);
         // One text layer among others gets its own Type card; several get the
         // card that writes them all.
@@ -1387,7 +1392,9 @@ impl OndinApp {
         }
         let fresh = self.paint_subject_changed();
         self.inspector_paint_panels(ui, PaintScope::Selection, fresh);
-        self.inspector_group_colors(ui);
+        if !all_charts {
+            self.inspector_group_colors(ui);
+        }
         // Under the paint panels: an effect applies to the painted layer (§6.4).
         let subjects = self.session.selection.ids().to_vec();
         self.inspector_effects(ui, &subjects);

@@ -57,6 +57,34 @@ pub fn sankey_nodes(chart: &Chart) -> Vec<(String, BrushSource)> {
     out
 }
 
+/// Each of [`sankey_nodes`]' nodes' value, in its order: the larger of what flows
+/// in and what flows out, as the generator sizes the node.
+pub fn sankey_totals(chart: &Chart) -> Vec<f64> {
+    let names: Vec<String> = sankey_nodes(chart).into_iter().map(|(n, _)| n).collect();
+    let t = &chart.table;
+    let m = &chart.mapping;
+    let at = |c: Option<ColumnId>| c.and_then(|c| t.index_of(c));
+    let (Some(fc), Some(tc), Some(vc)) = (at(m.from), at(m.to), at(m.value)) else {
+        return Vec::new();
+    };
+    let (mut ins, mut outs) = (vec![0.0; names.len()], vec![0.0; names.len()]);
+    let index = |name: &str| names.iter().position(|n| n == name);
+    for row in &t.rows {
+        let (from, to) = (row[fc].trim(), row[tc].trim());
+        let Some(v) = parse_number(&row[vc]).filter(|v| *v > 0.0) else {
+            continue;
+        };
+        if from == to {
+            continue;
+        }
+        if let (Some(a), Some(b)) = (index(from), index(to)) {
+            outs[a] += v;
+            ins[b] += v;
+        }
+    }
+    ins.iter().zip(&outs).map(|(i, o)| i.max(*o)).collect()
+}
+
 /// `chart` with series `column` drawn in `fill`, its style made if it had none.
 pub fn with_series_fill(chart: &Chart, column: ColumnId, fill: BrushSource) -> Chart {
     let mut next = chart.clone();
@@ -135,5 +163,16 @@ mod tests {
                 "Search", "Signup", "Social", "Direct", "Bounce", "Trial", "Leave"
             ]
         );
+    }
+
+    /// A node's total is the larger of what flows in and what flows out.
+    #[test]
+    fn a_sankey_nodes_total_is_its_larger_side() {
+        let mut chart = Chart::sample(ChartKind::Sankey);
+        chart.table.rows = [["A", "B", "10"], ["B", "C", "4"], ["A", "C", "1,000"]]
+            .iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect();
+        assert_eq!(sankey_totals(&chart), vec![1010.0, 10.0, 1004.0]);
     }
 }

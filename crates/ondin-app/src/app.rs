@@ -747,6 +747,9 @@ pub struct OndinApp {
     /// The Chart card's Style pictures and left-out values for the chart it last
     /// showed, kept while that description is unchanged.
     pub(crate) chart_card: Option<crate::panels::ChartCardCache>,
+    /// The other charts a multi-selection's Chart card writes with the one it
+    /// shows; empty on one chart. Set by the card each frame it draws.
+    pub(crate) chart_others: Vec<NodeId>,
     /// How far each instance asked about has drifted from its main (`reset::drift`),
     /// cached against the session revision for the Component card's per-frame counts.
     pub(crate) drift_cache: (
@@ -1759,6 +1762,7 @@ impl OndinApp {
                 .chain(crate::panels::CHART_FOLDED)
                 .collect(),
             chart_card: None,
+            chart_others: Vec::new(),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
             child_drift_cache: (u64::MAX, Default::default()),

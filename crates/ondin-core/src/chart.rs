@@ -14,7 +14,9 @@ pub mod scale;
 mod settle;
 pub mod table_io;
 
-pub use colours::{sankey_nodes, series_fill, with_node_fill, with_palette, with_series_fill};
+pub use colours::{
+    sankey_nodes, sankey_totals, series_fill, with_node_fill, with_palette, with_series_fill,
+};
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::{OUTLINE_WIDTH, Preset};
 pub use settle::{preview, settle, settle_all, settle_round, stale};
@@ -1203,6 +1205,60 @@ impl Mapping {
 }
 
 impl Options {
+    /// `onto` with every option that differs between `before` and `after` set
+    /// as `after` has it, the rest left as `onto` has them: one chart's edit
+    /// carried to the others of a multi-selection, each keeping its own.
+    pub fn carried(before: &Options, after: &Options, onto: &Options) -> Options {
+        use serde_json::Value;
+        fn diff(before: &Value, after: &Value) -> Option<Value> {
+            match (before, after) {
+                (Value::Object(b), Value::Object(a)) => {
+                    let mut patch = serde_json::Map::new();
+                    for (k, av) in a {
+                        let d = match b.get(k) {
+                            Some(bv) => diff(bv, av),
+                            None => Some(av.clone()),
+                        };
+                        if let Some(d) = d {
+                            patch.insert(k.clone(), d);
+                        }
+                    }
+                    // A key `after` skips is at its default.
+                    for k in b.keys().filter(|k| !a.contains_key(*k)) {
+                        patch.insert(k.clone(), Value::Null);
+                    }
+                    (!patch.is_empty()).then_some(Value::Object(patch))
+                }
+                (b, a) => (b != a).then(|| a.clone()),
+            }
+        }
+        fn merge(into: &mut Value, patch: &Value) {
+            match (into, patch) {
+                (Value::Object(into), Value::Object(patch)) => {
+                    for (k, v) in patch {
+                        if v.is_null() {
+                            into.remove(k);
+                        } else {
+                            merge(into.entry(k.clone()).or_insert(Value::Null), v);
+                        }
+                    }
+                }
+                (into, patch) => *into = patch.clone(),
+            }
+        }
+        let (Ok(b), Ok(a), Ok(mut o)) = (
+            serde_json::to_value(before),
+            serde_json::to_value(after),
+            serde_json::to_value(onto),
+        ) else {
+            return onto.clone();
+        };
+        if let Some(patch) = diff(&b, &a) {
+            merge(&mut o, &patch);
+        }
+        serde_json::from_value(o).unwrap_or_else(|_| onto.clone())
+    }
+
     fn validate(&self) -> Result<(), ChartRule> {
         let len = |v: f64, max: f64| v.is_finite() && (0.0..=max).contains(&v);
         let unit = |v: f64| len(v, 1.0);

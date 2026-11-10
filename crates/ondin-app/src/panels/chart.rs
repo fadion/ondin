@@ -31,6 +31,12 @@ pub(crate) const FOLDED: [&str; 5] = [
 const STYLE_CELL_H: f32 = 58.0;
 /// The picture inside a Style cell, narrow enough for five cells to a row.
 const STYLE_PICTURE: egui::Vec2 = egui::vec2(44.0, 28.0);
+/// The number the *Format* dropdown writes as its sample.
+const FORMAT_SAMPLE: f64 = 12_345.6;
+/// The *Format* dropdown's popup width: two text fields to a row.
+const FORMAT_POPUP_W: f32 = 220.0;
+/// The series style menu's width, past its longest row.
+const SERIES_MENU_W: f32 = 140.0;
 /// The size a Style cell's chart is generated at before it is drawn small, so
 /// its marks keep a chart's proportions rather than a thumbnail's.
 const STYLE_CHART: kurbo::Size = kurbo::Size::new(320.0, 200.0);
@@ -198,26 +204,40 @@ fn style_picture(
     Some(ctx.load_texture("chart-style", image, egui::TextureOptions::LINEAR))
 }
 
-/// A count with thousands separators, as the card's sentences write one.
-fn grouped(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
-}
-
 impl OndinApp {
-    /// The Chart card, for a chart frame.
+    /// The Chart card, for one chart frame.
     pub(super) fn inspector_chart(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        self.inspector_charts(ui, &[id]);
+    }
+
+    /// The charts of a multi-selection, when every selected layer is a chart and
+    /// all are one kind; `None` otherwise.
+    pub(super) fn selected_charts(&self) -> Option<Vec<NodeId>> {
+        let ids = self.session.selection.ids();
+        let doc = &self.session.doc;
+        let kind = doc.get(*ids.first()?)?.chart()?.kind;
+        ids.iter()
+            .all(|id| {
+                doc.get(*id)
+                    .and_then(|n| n.chart())
+                    .is_some_and(|c| c.kind == kind)
+            })
+            .then(|| ids.to_vec())
+    }
+
+    /// The Chart card over `ids`, the first the one it shows: every edit writes
+    /// each ([`Self::chart_tx`]). Several charts leave out the Data and Series
+    /// sections, which belong to one chart's table.
+    pub(super) fn inspector_charts(&mut self, ui: &mut egui::Ui, ids: &[NodeId]) {
+        let Some(&id) = ids.first() else {
+            return;
+        };
         let Some(chart) = self.session.chart_drawn(id).cloned() else {
             return;
         };
+        self.chart_others = ids[1..].to_vec();
         self.refresh_chart_cache(ui.ctx(), id, &chart);
+        let several = ids.len() > 1;
         self.panel(ui, "Chart", None, |app, ui| {
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
             app.chart_section(ui, "Chart type", "Type", |app, ui| {
@@ -227,16 +247,26 @@ impl OndinApp {
                 app.chart_style_rows(ui, id, &chart);
             });
             app.chart_section(ui, "Chart data", "Data", |app, ui| {
-                app.chart_data_rows(ui, id, &chart);
+                if several {
+                    ui.label(
+                        egui::RichText::new("Edit data one chart at a time")
+                            .size(ui::SMALL_PT)
+                            .color(theme::text::muted()),
+                    );
+                } else {
+                    app.chart_data_rows(ui, id, &chart);
+                }
             });
-            let series = if chart.kind == ChartKind::Sankey {
-                "Nodes"
-            } else {
-                "Series"
-            };
-            app.chart_section(ui, "Chart series", series, |app, ui| {
-                app.chart_series_rows(ui, id, &chart);
-            });
+            if !several {
+                let series = if chart.kind == ChartKind::Sankey {
+                    "Nodes"
+                } else {
+                    "Series"
+                };
+                app.chart_section(ui, "Chart series", series, |app, ui| {
+                    app.chart_series_rows(ui, id, &chart);
+                });
+            }
             app.chart_section(ui, "Chart marks", "Marks", |app, ui| {
                 app.chart_mark_rows(ui, id, &chart);
             });
@@ -268,9 +298,10 @@ impl OndinApp {
             .on_hover_text(tip)
             .clicked()
             {
-                app.flatten_charts(&[id]);
+                app.flatten_charts(ids);
             }
         });
+        self.chart_others.clear();
     }
 
     /// Rebuild [`ChartCardCache`] when the description or the drawn size moved.
@@ -294,8 +325,8 @@ impl OndinApp {
                 Vec::new(),
                 Some(format!(
                     "Too many marks: {} {what}, at most {}",
-                    grouped(count),
-                    grouped(chart::MAX_MARKS)
+                    chart::grouped(count),
+                    chart::grouped(chart::MAX_MARKS)
                 )),
             ),
             Err(chart::Refusal::LoopsBack(path)) => {
@@ -355,10 +386,46 @@ impl OndinApp {
             return;
         }
         self.session.name_step(label, icon::CHART);
-        self.commit_edit(Transaction(vec![Operation::SetChart {
-            id,
-            chart: Some(Box::new(next)),
-        }]));
+        let tx = self.chart_tx(id, next);
+        self.commit_edit(tx);
+    }
+
+    /// `next` written over chart `id`, and the change carried to every other
+    /// chart the card writes ([`OndinApp::chart_others`]): the kind, and each
+    /// option that changed, each chart keeping its own data and the rest.
+    fn chart_tx(&self, id: NodeId, next: Chart) -> Transaction {
+        let doc = &self.session.doc;
+        let mut ops = Vec::new();
+        if let Some(before) = doc.get(id).and_then(|n| n.chart()) {
+            for other in &self.chart_others {
+                let Some(own) = doc.get(*other).and_then(|n| n.chart()) else {
+                    continue;
+                };
+                let mut carried = own.clone();
+                if next.kind != before.kind {
+                    carried.kind = next.kind;
+                    if next.kind == ChartKind::Sankey || own.kind == ChartKind::Sankey {
+                        carried.mapping = chart::Mapping::guess(next.kind, &own.table);
+                    }
+                }
+                carried.options =
+                    chart::Options::carried(&before.options, &next.options, &own.options);
+                if carried != *own {
+                    ops.push(Operation::SetChart {
+                        id: *other,
+                        chart: Some(Box::new(carried)),
+                    });
+                }
+            }
+        }
+        ops.insert(
+            0,
+            Operation::SetChart {
+                id,
+                chart: Some(Box::new(next)),
+            },
+        );
+        Transaction(ops)
     }
 
     /// A number field over one option: scrubbed, it previews; released or
@@ -389,10 +456,7 @@ impl OndinApp {
         .on_hover_text(label);
         let mut next = chart.clone();
         set(&mut next, v);
-        let tx = Transaction(vec![Operation::SetChart {
-            id,
-            chart: Some(Box::new(next)),
-        }]);
+        let tx = self.chart_tx(id, next);
         self.named_valve(label, icon::CHART, &resp, tx);
     }
 
@@ -672,6 +736,7 @@ impl OndinApp {
                 *c = chart::with_palette(c, palettes[i].0);
             },
         );
+        let totals = chart::sankey_totals(chart);
         let rows: Vec<(ChartColour, String, Option<bool>)> = match chart.kind {
             ChartKind::Sankey => chart::sankey_nodes(chart)
                 .into_iter()
@@ -699,15 +764,27 @@ impl OndinApp {
                 .collect(),
         };
         let w = ui.available_width();
+        let styled = matches!(
+            chart.kind,
+            ChartKind::Line | ChartKind::Area | ChartKind::Scatter
+        );
         for (slot, name, shown) in rows {
             let colour = colour_of(chart, slot).map(ui::color_to_egui);
+            let total = match slot {
+                ChartColour::Node(i) => totals.get(i).map(|v| {
+                    chart::scale::format(
+                        *v,
+                        &chart.options.values.format,
+                        chart::scale::decimals_of(*v).min(3),
+                    )
+                }),
+                ChartColour::Series(_) => None,
+            };
+            let style_button = styled && matches!(slot, ChartColour::Series(_));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                let field = w - if shown.is_some() {
-                    ui::CONTROL_H + ui::CARD_COL_GAP
-                } else {
-                    0.0
-                };
+                let buttons = usize::from(shown.is_some()) + usize::from(style_button);
+                let field = w - buttons as f32 * (ui::CONTROL_H + ui::CARD_COL_GAP);
                 ui::field_row(ui, egui::vec2(field, ui::CONTROL_H), |ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
                     let chip = match (colour, shown) {
@@ -722,13 +799,28 @@ impl OndinApp {
                         Some(false) => theme::text::off(),
                         _ => color::text(),
                     };
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&name).size(ui::CONTROL_PT).color(ink),
-                        )
-                        .truncate(),
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(total) = &total {
+                            ui.label(
+                                egui::RichText::new(total)
+                                    .size(ui::CONTROL_PT)
+                                    .color(theme::text::muted()),
+                            )
+                            .on_hover_text("The node's total: the larger of what flows in and out");
+                        }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&name).size(ui::CONTROL_PT).color(ink),
+                                )
+                                .truncate(),
+                            );
+                        });
+                    });
                 });
+                if let (true, ChartColour::Series(col)) = (style_button, slot) {
+                    self.chart_series_style(ui, id, chart, col);
+                }
                 if let (Some(on), ChartColour::Series(col)) = (shown, slot) {
                     let (glyph, tip) = if on {
                         (icon::EYE, "Hide this series")
@@ -745,6 +837,99 @@ impl OndinApp {
                     }
                 }
             });
+        }
+    }
+
+    /// A series row's style button: a menu of its line's dash (a line or area)
+    /// and its points' shape, each pick one step.
+    fn chart_series_style(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        col: chart::ColumnId,
+    ) {
+        let style = chart.series.iter().find(|s| s.column == col);
+        let dash = style.map_or(chart::Dash::Solid, |s| s.dash);
+        let point = style.and_then(|s| s.point);
+        let lined = chart.kind != ChartKind::Scatter;
+        let tip = if lined {
+            "Line and point style"
+        } else {
+            "Point shape"
+        };
+        let button = ui::field_button(ui, icon::DOTS_THREE, ui::CONTROL_H, ui::FieldButton::Off)
+            .on_hover_text(tip);
+        // The dash, or the point shape (`Err`) picked.
+        let mut pick: Option<Result<chart::Dash, Option<PointShape>>> = None;
+        egui::Popup::menu(&button)
+            .align(egui::RectAlign::BOTTOM_END)
+            .gap(ui::MENU_GAP)
+            .show(|ui| {
+                ui::popup_rows(ui);
+                ui.set_min_width(SERIES_MENU_W);
+                if lined {
+                    ui.label(ui::eyebrow("Line"));
+                    for (d, name) in [
+                        (chart::Dash::Solid, "Solid"),
+                        (chart::Dash::Dashed, "Dashed"),
+                        (chart::Dash::Dotted, "Dotted"),
+                    ] {
+                        if ui.selectable_label(d == dash, name).clicked() && d != dash {
+                            pick = Some(Ok(d));
+                        }
+                    }
+                    ui.label(ui::eyebrow("Points"));
+                }
+                // A line's unshaped points are circles, so it lists Circle once;
+                // a scatter's take the chart's shape.
+                let shapes: &[(Option<PointShape>, &str)] = if lined {
+                    &[
+                        (None, "Circle"),
+                        (Some(PointShape::Square), "Square"),
+                        (Some(PointShape::Diamond), "Diamond"),
+                        (Some(PointShape::Triangle), "Triangle"),
+                    ]
+                } else {
+                    &[
+                        (None, "Chart's shape"),
+                        (Some(PointShape::Circle), "Circle"),
+                        (Some(PointShape::Square), "Square"),
+                        (Some(PointShape::Diamond), "Diamond"),
+                        (Some(PointShape::Triangle), "Triangle"),
+                    ]
+                };
+                let point = match point {
+                    Some(PointShape::Circle) if lined => None,
+                    p => p,
+                };
+                for (p, name) in shapes {
+                    let on = *p == point;
+                    if ui.selectable_label(on, *name).clicked() && !on {
+                        pick = Some(Err(*p));
+                    }
+                }
+            });
+        if let Some(pick) = pick {
+            let mut next = chart.clone();
+            if !next.series.iter().any(|s| s.column == col)
+                && let Some(fill) = chart::series_fill(chart, col)
+            {
+                next = chart::with_series_fill(&next, col, fill);
+            }
+            let s = next.series.iter_mut().find(|s| s.column == col);
+            let label = match (pick, s) {
+                (Ok(d), Some(s)) => {
+                    s.dash = d;
+                    "Series dash"
+                }
+                (Err(p), Some(s)) => {
+                    s.point = p;
+                    "Series point shape"
+                }
+                (_, None) => return,
+            };
+            self.chart_commit(id, label, next);
         }
     }
 
@@ -1333,6 +1518,72 @@ impl OndinApp {
                         },
                     );
                 }
+                let auto_range = axis.range.is_none();
+                self.chart_switch(
+                    ui,
+                    id,
+                    chart,
+                    if value { "Auto range" } else { "Auto X range" },
+                    auto_range,
+                    move |c, on| {
+                        let mut a = pick(c);
+                        a.range = (!on).then(|| auto_extent(c, value));
+                        put(c, a);
+                    },
+                );
+                if let Some((lo, hi)) = axis.range {
+                    let step = ((hi - lo).abs() / 100.0).max(0.01);
+                    let places = chart::scale::decimals_of(step).min(3);
+                    let decimals = usize::from(places);
+                    let scrub = Scrub::fine(step, u32::from(places));
+                    self.chart_pair(ui, |app, ui, w| {
+                        app.chart_number(
+                            ui,
+                            id,
+                            chart,
+                            w,
+                            "Min",
+                            if value { "Axis minimum" } else { "X minimum" },
+                            scrub.clone(),
+                            decimals,
+                            move |c| pick(c).range.map_or(lo, |r| r.0),
+                            move |c, v| {
+                                let mut a = pick(c);
+                                if let Some(r) = a.range.as_mut().filter(|r| v < r.1) {
+                                    r.0 = v;
+                                }
+                                put(c, a);
+                            },
+                        );
+                        app.chart_number(
+                            ui,
+                            id,
+                            chart,
+                            w,
+                            "Max",
+                            if value { "Axis maximum" } else { "X maximum" },
+                            scrub,
+                            decimals,
+                            move |c| pick(c).range.map_or(hi, |r| r.1),
+                            move |c, v| {
+                                let mut a = pick(c);
+                                if let Some(r) = a.range.as_mut().filter(|r| v > r.0) {
+                                    r.1 = v;
+                                }
+                                put(c, a);
+                            },
+                        );
+                    });
+                }
+                if value {
+                    self.chart_format(ui, id, chart, "chart-value-format", |c| {
+                        &mut c.options.value_axis.format
+                    });
+                } else {
+                    self.chart_format(ui, id, chart, "chart-x-format", |c| {
+                        &mut c.options.category_axis.format
+                    });
+                }
                 let auto = axis.tick_count.is_none();
                 self.chart_switch(
                     ui,
@@ -1378,37 +1629,145 @@ impl OndinApp {
         value: bool,
         label: &'static str,
     ) {
-        let stored = if value {
-            &chart.options.value_axis.title
-        } else {
-            &chart.options.category_axis.title
-        };
-        let key = egui::Id::new(("chart-axis-title", id, value));
+        let width = ui.available_width();
+        self.chart_text(
+            ui,
+            id,
+            chart,
+            ("chart-axis-title", value),
+            width,
+            "Title",
+            &format!("{label} title"),
+            "Axis title",
+            move |c| {
+                if value {
+                    &mut c.options.value_axis.title
+                } else {
+                    &mut c.options.category_axis.title
+                }
+            },
+        );
+    }
+
+    /// A text option typed into a field `width` wide, committed as `label` when
+    /// the field lets go; `slot` finds the text in a description.
+    #[allow(clippy::too_many_arguments)]
+    fn chart_text(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        salt: impl Hash + std::fmt::Debug,
+        width: f32,
+        hint: &str,
+        tip: &str,
+        label: &'static str,
+        slot: impl Fn(&mut Chart) -> &mut String,
+    ) {
+        let mut probe = chart.clone();
+        let stored = slot(&mut probe).clone();
+        let key = egui::Id::new(("chart-text", id, salt));
         let mut text = ui
             .data(|d| d.get_temp::<String>(key))
             .unwrap_or_else(|| stored.clone());
-        let resp = ui::text_field(
-            ui,
-            egui::vec2(ui.available_width(), ui::CONTROL_H),
-            &mut text,
-            "Title",
-        )
-        .on_hover_text(format!("{label} title"));
+        let resp = ui::text_field(ui, egui::vec2(width, ui::CONTROL_H), &mut text, hint)
+            .on_hover_text(tip);
         if resp.has_focus() {
             ui.data_mut(|d| d.insert_temp(key, text.clone()));
         } else {
             ui.data_mut(|d| d.remove::<String>(key));
         }
-        if ui::defocus_commits(&resp) && text != *stored {
+        if ui::defocus_commits(&resp) && text != stored {
             let mut next = chart.clone();
-            let title: String = text.chars().take(chart::MAX_TEXT_CHARS).collect();
-            if value {
-                next.options.value_axis.title = title;
-            } else {
-                next.options.category_axis.title = title;
-            }
-            self.chart_commit(id, "Axis title", next);
+            *slot(&mut next) = text.chars().take(chart::MAX_TEXT_CHARS).collect();
+            self.chart_commit(id, label, next);
         }
+    }
+
+    /// The *Format* dropdown over one number format: closed, a sample written
+    /// through it; open, its prefix and suffix, decimals, and the three
+    /// switches, the same rows whatever is set so the popup keeps its size.
+    fn chart_format(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        salt: &'static str,
+        slot: fn(&mut Chart) -> &mut chart::NumberFormat,
+    ) {
+        let mut probe = chart.clone();
+        let f = slot(&mut probe).clone();
+        let sample = chart::scale::format(FORMAT_SAMPLE, &f, 1);
+        ui::labelled(ui, "Format", |ui| {
+            egui::ComboBox::from_id_salt((salt, id))
+                .icon(ui::combo_chevron)
+                .width(ui.available_width())
+                // The popup holds text fields, so a click inside must not dismiss it.
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .selected_text(ui::combo_text(&sample))
+                .show_ui(ui, |ui| {
+                    ui.set_width(FORMAT_POPUP_W);
+                    ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
+                    let half = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+                        self.chart_text(
+                            ui,
+                            id,
+                            chart,
+                            (salt, "prefix"),
+                            half,
+                            "Prefix",
+                            "Written before the number, as $",
+                            "Number prefix",
+                            move |c| &mut slot(c).prefix,
+                        );
+                        self.chart_text(
+                            ui,
+                            id,
+                            chart,
+                            (salt, "suffix"),
+                            half,
+                            "Suffix",
+                            "Written after the number, as kg",
+                            "Number suffix",
+                            move |c| &mut slot(c).suffix,
+                        );
+                    });
+                    let at = f.decimals.map_or(0, |d| usize::from(d.min(3)) + 1);
+                    ui.label(ui::eyebrow("Decimals"));
+                    self.chart_segments(
+                        ui,
+                        id,
+                        chart,
+                        "Decimals",
+                        &["Auto", "0", "1", "2", "3"],
+                        at,
+                        move |c, i| slot(c).decimals = i.checked_sub(1).map(|d| d as u8),
+                    );
+                    for (name, on, set) in [
+                        (
+                            "Thousands separator",
+                            f.thousands,
+                            (|f, on| f.thousands = on) as fn(&mut chart::NumberFormat, bool),
+                        ),
+                        ("Compact", f.compact, |f, on| f.compact = on),
+                        ("Percent", f.percent, |f, on| f.percent = on),
+                    ] {
+                        self.chart_switch(ui, id, chart, name, on, move |c, on| {
+                            set(slot(c), on);
+                        });
+                    }
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} → {sample}",
+                            chart::scale::format(FORMAT_SAMPLE, &chart::NumberFormat::default(), 1)
+                        ))
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::muted()),
+                    );
+                });
+        });
     }
 
     fn chart_value_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
@@ -1469,19 +1828,8 @@ impl OndinApp {
                 move |c, i| c.options.values.position = places[i],
             );
         }
-        let f = &chart.options.values.format;
-        self.chart_switch(
-            ui,
-            id,
-            chart,
-            "Thousands separator",
-            f.thousands,
-            |c, on| {
-                c.options.values.format.thousands = on;
-            },
-        );
-        self.chart_switch(ui, id, chart, "Compact (1.2k)", f.compact, |c, on| {
-            c.options.values.format.compact = on;
+        self.chart_format(ui, id, chart, "chart-values-format", |c| {
+            &mut c.options.values.format
         });
     }
 
@@ -1525,6 +1873,29 @@ impl OndinApp {
     }
 
     fn chart_text_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
+        // Empty is the document's default family, which the chart is drawn in.
+        let shown = match chart.options.text.family.as_str() {
+            "" => ondin_core::typography::TextStyle::default().font_family,
+            f => f.to_string(),
+        };
+        let head = if self.fonts.family_status(&shown) == crate::fonts::FamilyStatus::Missing {
+            ui::glyph_and_text_tinted(icon::TEXT_AA, &shown, color::warn())
+        } else {
+            ui::glyph_and_text(icon::TEXT_AA, &shown)
+        };
+        let (picked, _) = self.family_dropdown(
+            ui,
+            ("chart-family", id),
+            egui::vec2(ui.available_width(), ui::CONTROL_H),
+            head,
+            &shown,
+        );
+        if let Some(family) = picked.filter(|f| *f != shown) {
+            self.fonts.ensure_loaded(&family);
+            let mut next = chart.clone();
+            next.options.text.family = family;
+            self.chart_commit(id, "Chart font", next);
+        }
         self.chart_pair(ui, |app, ui, w| {
             app.chart_number(
                 ui,
@@ -1610,6 +1981,82 @@ impl OndinApp {
             });
         }
     }
+}
+
+/// The range an axis starts at when *Auto range* is turned off: its data's
+/// extent on nice steps, with zero where the kind or *Start at zero* holds it,
+/// so the chart looks as it did until a bound is typed. `value` is the value
+/// axis; the other is a scatter's X.
+fn auto_extent(chart: &Chart, value: bool) -> (f64, f64) {
+    let t = &chart.table;
+    let numbers = |col: chart::ColumnId| -> Vec<Option<f64>> {
+        t.index_of(col).map_or_else(Vec::new, |i| {
+            t.rows.iter().map(|r| chart::parse_number(&r[i])).collect()
+        })
+    };
+    let shown: Vec<chart::ColumnId> = chart
+        .mapping
+        .series
+        .iter()
+        .copied()
+        .filter(|c| {
+            chart
+                .series
+                .iter()
+                .find(|s| s.column == *c)
+                .is_none_or(|s| s.visible)
+        })
+        .collect();
+    let o = &chart.options;
+    let stacking = match chart.kind {
+        ChartKind::Column | ChartKind::Bar => o.bars.stacking,
+        ChartKind::Area => o.lines.area_stacking,
+        _ => Stacking::Apart,
+    };
+    let mut seen: Vec<f64> = Vec::new();
+    if !value {
+        seen.extend(
+            chart
+                .mapping
+                .category
+                .map_or_else(Vec::new, numbers)
+                .into_iter()
+                .flatten(),
+        );
+    } else if stacking == Stacking::Percent {
+        seen.extend([0.0, 1.0]);
+    } else if stacking == Stacking::Stacked {
+        let mut ups = vec![0.0; t.rows.len()];
+        let mut downs = vec![0.0; t.rows.len()];
+        for col in &shown {
+            for (r, v) in numbers(*col).into_iter().enumerate() {
+                match v {
+                    Some(v) if v >= 0.0 => ups[r] += v,
+                    Some(v) => downs[r] += v,
+                    None => {}
+                }
+            }
+        }
+        seen.extend(ups.into_iter().chain(downs));
+    } else {
+        for col in &shown {
+            seen.extend(numbers(*col).into_iter().flatten());
+        }
+    }
+    let axis = if value {
+        &o.value_axis
+    } else {
+        &o.category_axis
+    };
+    let zero = axis.start_at_zero
+        || (value && !matches!(chart.kind, ChartKind::Line | ChartKind::Scatter));
+    if zero {
+        seen.push(0.0);
+    }
+    let lo = seen.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = seen.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let ticks = chart::scale::ticks(lo, hi, axis.tick_count.unwrap_or(5), None);
+    (ticks.min, ticks.max)
 }
 
 /// Series `col` shown or hidden: a shown column not yet mapped joins the
@@ -1793,6 +2240,96 @@ mod tests {
         assert_eq!(node.children().len(), parts, "the parts stay");
         app.session.undo();
         assert!(app.session.doc.get(id).and_then(|n| n.chart()).is_some());
+    }
+
+    /// Two charts of one kind selected show one Chart card, and an edit through
+    /// it writes both in one step, each keeping its own other options.
+    /// flip: `chart_tx` skipping `chart_others` → fails at "the second chart took the radius".
+    #[test]
+    fn a_multi_selection_of_charts_edits_each() {
+        let ctx = egui::Context::default();
+        let (mut app, a) = charted(&ctx, ChartKind::Column);
+        let b = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        let index = app.session.doc.get(page).map_or(0, |n| n.children().len());
+        let mut own = Chart::sample(ChartKind::Column);
+        own.options.bars.group_gap = 55.0;
+        let tx = ondin_core::edit::create_chart(
+            b,
+            page,
+            index,
+            Affine::IDENTITY,
+            kurbo::Point::new(-4000.0, 400.0),
+            kurbo::Point::new(-3520.0, 680.0),
+            ondin_core::peniko::Color::WHITE,
+            own,
+        );
+        assert!(app.session.commit(tx));
+        app.session.selection.set_one(a);
+        app.session.selection.add(b);
+        for _ in 0..3 {
+            pass(&ctx, &mut app);
+        }
+        assert!(app.cards_shown.contains(&"Chart"), "{:?}", app.cards_shown);
+        assert!(!app.cards_shown.contains(&"Container"));
+        assert_eq!(app.selected_charts(), Some(vec![a, b]));
+
+        let lead = app
+            .session
+            .doc
+            .get(a)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        let mut next = lead.clone();
+        next.options.bars.radius = 9.0;
+        app.chart_others = vec![b];
+        app.chart_commit(a, "Bar radius", next);
+        app.chart_others.clear();
+        let chart = |app: &OndinApp, id| {
+            app.session
+                .doc
+                .get(id)
+                .and_then(|n| n.chart())
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(chart(&app, a).options.bars.radius, 9.0);
+        assert_eq!(
+            chart(&app, b).options.bars.radius,
+            9.0,
+            "the second chart took the radius"
+        );
+        assert_eq!(
+            chart(&app, b).options.bars.group_gap,
+            55.0,
+            "and kept its own gap"
+        );
+        app.session.undo();
+        assert_eq!(
+            chart(&app, b).options.bars.radius,
+            lead.options.bars.radius,
+            "one step"
+        );
+    }
+
+    /// *Auto range* turned off starts at the range the data already draws: zero
+    /// to a nice step past the largest value, or past the largest stack.
+    #[test]
+    fn auto_range_off_starts_at_the_datas_extent() {
+        let mut chart = Chart::sample(ChartKind::Column);
+        let most = chart
+            .table
+            .rows
+            .iter()
+            .flat_map(|r| r.iter().filter_map(|c| chart::parse_number(c)))
+            .fold(0.0, f64::max);
+        let (lo, hi) = auto_extent(&chart, true);
+        assert_eq!(lo, 0.0);
+        assert!(hi >= most && hi < most * 2.0, "{hi} for {most}");
+        chart.options.bars.stacking = Stacking::Stacked;
+        let (_, stacked) = auto_extent(&chart, true);
+        assert!(stacked > hi, "a stack reaches past one series: {stacked}");
     }
 
     /// The Type section's variants round-trip: each segment written reads back

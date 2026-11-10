@@ -416,6 +416,18 @@ impl RenderOverrides {
         }
         self.order.insert(chart, Vec::new());
         self.ghosts.retain(|g| g.parent != chart);
+        // Past another chart's preview parts, so two charts previewed together
+        // never share an id.
+        fn last_seq(n: &GhostNode) -> u64 {
+            let own = if n.id.actor == PREVIEW_ACTOR {
+                n.id.seq
+            } else {
+                0
+            };
+            n.children.iter().map(last_seq).fold(own, u64::max)
+        }
+        let taken = self.ghosts.iter().map(|g| last_seq(&g.node)).max();
+        ids.skip_to(taken.map_or(1, |s| s + 1));
         for (index, node) in under(parts, None, &mut ids).into_iter().enumerate() {
             self.ghosts.push(Ghost {
                 parent: chart,

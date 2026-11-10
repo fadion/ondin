@@ -836,21 +836,14 @@ impl OndinApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = COL_GAP;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().interact_size.y = FIELD_H;
-                ui.spacing_mut().button_padding.y = 0.0;
-                let combo = egui::ComboBox::from_id_salt("settings-default-font")
-                    .icon(ui::combo_chevron)
-                    .width(DEFAULT_FONT_W)
-                    // The popup holds a search field, so a click inside must not dismiss it.
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .height(crate::panels::FAMILY_POPUP_H)
-                    .selected_text(head)
-                    .show_ui(ui, |ui| {
-                        ui::menu_rows(ui);
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        chosen = self.family_list(ui, current);
-                    })
-                    .response;
+                let (picked, combo) = self.family_dropdown(
+                    ui,
+                    "settings-default-font",
+                    egui::vec2(DEFAULT_FONT_W, FIELD_H),
+                    head,
+                    current,
+                );
+                chosen = picked;
                 if missing {
                     combo.on_hover_text(
                         "This font is not installed and cannot be downloaded — \

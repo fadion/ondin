@@ -40,6 +40,11 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   *Fit content*. A frame sized by an auto grid track, or a flex item that does not grow, is also
   measured empty under containment and gets no caption. Ask layout whether the width comes from
   content, not each setting in turn.
+- **Unmeasurable layers still reach vello.** The scene walk's cull (`ondin-render` `scene.rs`,
+  `paint_node` and the second walk) skips a layer only when `Resolved::ink_bounds` is `Some` and
+  off-view. A layer whose world extent overflows (nested scales) has `None` and is drawn anyway.
+  Whether vello then blanks the frame is unverified. Direction: skip a leaf or boolean whose ink is
+  unmeasurable rather than drawing it.
 
 ## Later · Platform and dependencies
 

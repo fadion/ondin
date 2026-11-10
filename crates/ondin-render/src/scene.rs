@@ -3609,7 +3609,7 @@ fn lay_dashed<P: ScenePainter>(
 ///
 /// Gated, since this gives up the backend's expander: the ink must be at least as
 /// wide as the shape is thin, which fires before the bug starts, never after.
-/// `ui::MAX_STROKE_WIDTH` is 10 000, so such widths must work. Closed paths only
+/// `node::MAX_STROKE_WIDTH` is 10 000, so such widths must work. Closed paths only
 /// (read off the path: per-side strokes lie along open edges of a closed kind) and
 /// solid strokes only (the plug would fill a dashed shape solid).
 ///

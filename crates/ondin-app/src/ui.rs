@@ -1870,11 +1870,9 @@ fn head_drop(ui: &mut egui::Ui, d: HeadDrop<'_>) -> egui::Response {
 pub const FIELD_PAD_X: f32 = 9.0;
 
 /// Largest stroke weight, per-side width, and dash length or spacing the fields
-/// accept, in world units.
-///
-/// A cap on what can be typed or scrubbed, not on the model, which allows any
-/// positive width.
-pub const MAX_STROKE_WIDTH: f64 = 10_000.0;
+/// accept, in world units: the model's own limit, so a field never offers a
+/// number the model would clamp.
+pub const MAX_STROKE_WIDTH: f64 = ondin_core::node::MAX_STROKE_WIDTH;
 
 /// The recessed ground a value field or list row sits on.
 pub fn field_frame() -> egui::Frame {

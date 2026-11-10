@@ -901,8 +901,8 @@ impl Document {
     }
 
     /// The width a stroke whose width is bound to `var` is drawn at, at `id` in
-    /// table `t` (§15 D1073): the variable's number in the mode in force, never
-    /// below 0; a missing or non-number value 0.
+    /// table `t` (§15 D1073): the variable's number in the mode in force, within
+    /// `0..=`[`crate::node::MAX_STROKE_WIDTH`]; a missing or non-number value 0.
     pub fn stroke_width_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -910,7 +910,7 @@ impl Document {
         var: crate::variable::VarId,
     ) -> f64 {
         match self.resolve_var_in(t, id, var) {
-            Some(crate::variable::Value::Number(x)) => x.max(0.0),
+            Some(crate::variable::Value::Number(x)) => x.clamp(0.0, crate::node::MAX_STROKE_WIDTH),
             _ => 0.0,
         }
     }
@@ -965,7 +965,8 @@ impl Document {
 
     /// `display` with the slots `vars` binds read from table `t`, in the mode in
     /// force at `id` — each a variable's number, never below 0 (the layout
-    /// engine's floor on a literal), the other slots as they are — and a flex
+    /// engine's floor on a literal) nor past [`crate::build::GEOMETRY_LIMIT`], the
+    /// other slots as they are — and a flex
     /// layout's bound direction and wrap read too. `vars` is named so a preview
     /// can resolve a binding it has not committed.
     ///
@@ -1003,7 +1004,9 @@ impl Document {
         for (k, var) in vars.iter().enumerate() {
             if let Some(v) = var {
                 s[k] = match self.resolve_var_in(t, id, *v) {
-                    Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                    Some(crate::variable::Value::Number(x)) => {
+                        x.clamp(0.0, crate::build::GEOMETRY_LIMIT)
+                    }
                     _ => 0.0,
                 };
             }
@@ -1035,8 +1038,9 @@ impl Document {
     }
 
     /// `item` with the limits its `limit_vars` binds read from table `t`, in the
-    /// mode in force at `id` — each its variable's number in px, never below 0.
-    /// The item is passed so a preview can resolve one it has not committed.
+    /// mode in force at `id` — each its variable's number in px, never below 0 nor
+    /// past [`crate::build::GEOMETRY_LIMIT`]. The item is passed so a preview can
+    /// resolve one it has not committed.
     pub fn limits_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -1046,7 +1050,9 @@ impl Document {
         for (k, var) in item.limit_vars.into_iter().enumerate() {
             let Some(v) = var else { continue };
             let x = match self.resolve_var_in(t, id, v) {
-                Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                Some(crate::variable::Value::Number(x)) => {
+                    x.clamp(0.0, crate::build::GEOMETRY_LIMIT)
+                }
                 _ => 0.0,
             };
             *item.limit_mut(k) = crate::container::Dimension::Px(x);
@@ -1974,7 +1980,9 @@ impl Document {
                 if self.styles.styles.contains_key(&style.id) {
                     return Err(OpError::DuplicateStyle(style.id));
                 }
-                self.styles.styles.insert(style.id, style.clone());
+                let mut stored = style.clone();
+                stored.value.clamp_lengths();
+                self.styles.styles.insert(style.id, stored);
                 Ok(Operation::RemoveStyle { id: style.id })
             }
             Operation::RemoveStyle { id } => {
@@ -2079,7 +2087,9 @@ impl Document {
                 if s.slot() != value.slot() {
                     return Err(OpError::WrongKindForOp);
                 }
-                let old = std::mem::replace(&mut s.value, value.clone());
+                let mut value = value.clone();
+                value.clamp_lengths();
+                let old = std::mem::replace(&mut s.value, value);
                 Ok(Operation::SetStyleValue {
                     id: *id,
                     value: old,
@@ -2649,13 +2659,22 @@ impl Document {
             stack.extend(n.children.iter().map(|c| (*c, barred)));
         }
 
-        // Held to the geometry limit as `op_create` holds a new node; a history
-        // step's nodes are already within it.
+        // Held to the geometry and stroke limits as the operations that write
+        // each field hold them; a history step's nodes are already within them.
         for n in nodes {
             let mut n = n.clone();
             n.kind.clamp_geometry();
             n.transform = clamp_affine(n.transform);
             n.pivot = n.pivot.map(Pivot::clamped);
+            n.paint
+                .strokes
+                .iter_mut()
+                .for_each(|s| s.value.clamp_lengths());
+            n.insets.clamp_lengths();
+            if let Some(d) = &mut n.display {
+                d.clamp_lengths();
+            }
+            n.item.clamp_lengths();
             dirty.0.insert(n.id);
             self.nodes.insert(n.id, n);
         }
@@ -3033,7 +3052,9 @@ impl Document {
         if !is_paintable(&node.kind) {
             return Err(OpError::WrongKindForOp);
         }
-        let old = std::mem::replace(&mut node.paint.strokes, strokes.to_vec());
+        let mut strokes = strokes.to_vec();
+        strokes.iter_mut().for_each(|s| s.value.clamp_lengths());
+        let old = std::mem::replace(&mut node.paint.strokes, strokes);
         dirty.0.insert(id);
         Ok(Operation::SetStrokes { id, strokes: old })
     }
@@ -3136,7 +3157,9 @@ impl Document {
             return Err(OpError::NonFinite);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        let old = std::mem::replace(&mut node.insets, *insets);
+        let mut insets = *insets;
+        insets.clamp_lengths();
+        let old = std::mem::replace(&mut node.insets, insets);
         dirty.0.insert(id);
         Ok(Operation::SetInsets { id, insets: old })
     }
@@ -3171,7 +3194,11 @@ impl Document {
             return Err(OpError::BadLayout);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        let old = std::mem::replace(&mut node.display, display.clone());
+        let mut display = display.clone();
+        if let Some(d) = &mut display {
+            d.clamp_lengths();
+        }
+        let old = std::mem::replace(&mut node.display, display);
         dirty.0.insert(id);
         Ok(Operation::SetDisplay { id, display: old })
     }
@@ -3199,7 +3226,9 @@ impl Document {
             return Err(OpError::BadLayout);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        let old = std::mem::replace(&mut node.item, *item);
+        let mut item = *item;
+        item.clamp_lengths();
+        let old = std::mem::replace(&mut node.item, item);
         let parent = node.parent;
         dirty.0.insert(id);
         if let Some(p) = parent {
@@ -4756,6 +4785,143 @@ mod tests {
             Vec2::new(-lim, 0.0),
             "the loaded position"
         );
+    }
+
+    /// A rect carrying a stroke and a flex layout, both with every length set to
+    /// `v`.
+    fn stroked_flex(id: NodeId, v: f64) -> Node {
+        use crate::container::{Display, Flex};
+        let mut n = node(
+            id,
+            None,
+            vec![],
+            NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        n.paint.strokes = crate::keyed_by_position([Stroke {
+            width: v,
+            dashes: vec![v, 2.0],
+            ..Stroke::default()
+        }]);
+        n.display = Some(Display::Flex(Flex {
+            row_gap: v,
+            padding: [v, 0.0, 0.0, 0.0],
+            ..Flex::default()
+        }));
+        n
+    }
+
+    /// The stroke width and the first padding of `id`'s stored values.
+    fn stroke_and_padding(doc: &Document, id: NodeId) -> (f64, f64) {
+        let n = doc.get(id).unwrap();
+        let pad = n.display().map_or(f64::NAN, |d| d.spacing()[2]);
+        (n.paint().strokes[0].value.width, pad)
+    }
+
+    /// Strokes, layouts, insets, item sizes and a strokes style written past their
+    /// limits land at them rather than being refused.
+    /// flip: `op_set_strokes` without `clamp_lengths` → fails at "the stroke width".
+    #[test]
+    fn oversized_strokes_and_layout_land_at_their_limits_through_the_operations() {
+        use crate::container::{Dimension, Insets, LayoutItem, LengthPct};
+        use crate::node::MAX_STROKE_WIDTH;
+        let lim = crate::build::GEOMETRY_LIMIT;
+        let (mut doc, _root, ab) = base();
+        let mut ids = IdSource::new(0xC1D);
+        let r = ids.mint();
+        insert(&mut doc, vec![stroked_flex(r, 1.0)], ab).expect("a rect");
+        let big = stroked_flex(r, 1e50);
+        let style = ids.mint_style();
+        doc.apply(&Transaction(vec![
+            Operation::SetStrokes {
+                id: r,
+                strokes: big.paint.strokes.clone(),
+            },
+            Operation::SetDisplay {
+                id: r,
+                display: big.display.clone(),
+            },
+            Operation::SetLayoutItem {
+                id: r,
+                item: LayoutItem {
+                    width: Dimension::Px(1e50),
+                    ..LayoutItem::default()
+                },
+            },
+            Operation::SetInsets {
+                id: r,
+                insets: Insets {
+                    top: Some(LengthPct::Px(-1e50)),
+                    ..Insets::default()
+                },
+            },
+            Operation::AddStyle {
+                style: crate::style::Style {
+                    id: style,
+                    name: "wide".into(),
+                    value: crate::style::StyleValue::Strokes(big.paint.strokes.clone()),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .expect("clamped, not refused");
+
+        let n = doc.get(r).unwrap();
+        let stroke = &n.paint().strokes[0].value;
+        assert_eq!(stroke.width, MAX_STROKE_WIDTH, "the stroke width");
+        assert_eq!(stroke.dashes, vec![MAX_STROKE_WIDTH, 2.0], "the dashes");
+        let d = n.display().unwrap();
+        assert_eq!(d.spacing()[1], lim, "the row gap");
+        assert_eq!(stroke_and_padding(&doc, r).1, lim, "the padding");
+        assert_eq!(n.item().width, Dimension::Px(lim), "the item width");
+        assert_eq!(n.insets.top, Some(LengthPct::Px(-lim)), "the inset");
+        let crate::style::StyleValue::Strokes(s) = &doc.styles.styles[&style].value else {
+            unreachable!()
+        };
+        assert_eq!(s[0].value.width, MAX_STROKE_WIDTH, "the style's stroke");
+    }
+
+    /// A subtree inserted with a stroke and a layout past their limits lands at
+    /// them.
+    /// flip: `op_insert_subtree` without the strokes' `clamp_lengths` → fails at
+    /// "the stroke width".
+    #[test]
+    fn an_inserted_subtree_holds_strokes_and_layout_to_their_limits() {
+        let (mut doc, _root, ab) = base();
+        let r = IdSource::new(0xC1E).mint();
+        insert(&mut doc, vec![stroked_flex(r, 1e50)], ab).expect("clamped, not refused");
+        let (width, pad) = stroke_and_padding(&doc, r);
+        assert_eq!(width, crate::node::MAX_STROKE_WIDTH, "the stroke width");
+        assert_eq!(pad, crate::build::GEOMETRY_LIMIT, "the padding");
+    }
+
+    /// A file written with a stroke and a padding past their limits opens at them.
+    /// flip: the node DTO's conversion without the strokes' `clamp_lengths` →
+    /// fails at "the loaded stroke width".
+    #[test]
+    fn a_file_with_strokes_and_layout_past_their_limits_loads_at_them() {
+        let (mut doc, _root, ab) = base();
+        let r = IdSource::new(0xC1F).mint();
+        insert(&mut doc, vec![stroked_flex(r, 4321.0)], ab).expect("a rect");
+        let json = String::from_utf8(crate::io::save(&doc).unwrap()).unwrap();
+        assert_eq!(
+            json.matches("4321.0").count(),
+            4,
+            "width, dash, gap and padding are in the file"
+        );
+        let loaded = crate::io::load(json.replace("4321.0", "1e50").as_bytes()).expect("it loads");
+        let (width, pad) = stroke_and_padding(&loaded, r);
+        assert_eq!(
+            width,
+            crate::node::MAX_STROKE_WIDTH,
+            "the loaded stroke width"
+        );
+        assert_eq!(pad, crate::build::GEOMETRY_LIMIT, "the loaded padding");
     }
 
     /// The pivot arm's twin for **paint** (§15 D831): `op_set_fills` and

@@ -46,6 +46,7 @@
 //! places them, so there is nothing to place it by. The field is stored on either
 //! and inert, as `Node::grids` is on a layer nobody offers grids for.
 
+use crate::build::clamp_coord;
 use crate::geometry;
 use crate::node::{NodeKind, TextSizing};
 use kurbo::{Affine, Point, Rect, Size, Vec2};
@@ -88,6 +89,13 @@ impl LengthPct {
     fn is_finite(self) -> bool {
         match self {
             LengthPct::Px(v) | LengthPct::Percent(v) => v.is_finite(),
+        }
+    }
+
+    fn clamped(self) -> Self {
+        match self {
+            LengthPct::Px(v) => LengthPct::Px(clamp_coord(v)),
+            LengthPct::Percent(v) => LengthPct::Percent(clamp_coord(v)),
         }
     }
 }
@@ -149,6 +157,18 @@ impl Insets {
             .into_iter()
             .flatten()
             .all(LengthPct::is_finite)
+    }
+
+    /// Every set length held to ±`build::GEOMETRY_LIMIT`, as stored geometry is.
+    pub fn clamp_lengths(&mut self) {
+        for side in [
+            &mut self.top,
+            &mut self.right,
+            &mut self.bottom,
+            &mut self.left,
+        ] {
+            *side = side.map(LengthPct::clamped);
+        }
     }
 
     fn horizontal(&self) -> AxisInsets {
@@ -669,6 +689,17 @@ impl Flex {
             && self.column_gap.is_finite()
             && self.padding.iter().all(|p| p.is_finite())
     }
+
+    fn clamp_lengths(&mut self) {
+        clamp_spacing(&mut self.row_gap, &mut self.column_gap, &mut self.padding);
+    }
+}
+
+/// A container's gaps and padding held to ±`build::GEOMETRY_LIMIT`.
+fn clamp_spacing(row_gap: &mut f64, column_gap: &mut f64, padding: &mut [f64; 4]) {
+    for v in [row_gap, column_gap].into_iter().chain(padding.iter_mut()) {
+        *v = clamp_coord(*v);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +738,16 @@ impl TrackBreadth {
         }
     }
 
+    /// A length or percentage held to ±`build::GEOMETRY_LIMIT`. An `fr` is a
+    /// share of what is left, not a length, so it keeps any finite value.
+    fn clamped(self) -> Self {
+        match self {
+            TrackBreadth::Px(v) => TrackBreadth::Px(clamp_coord(v)),
+            TrackBreadth::Percent(v) => TrackBreadth::Percent(clamp_coord(v)),
+            other => other,
+        }
+    }
+
     /// CSS's own refusal: no length, percentage or `fr` below zero.
     fn is_valid(self) -> bool {
         match self {
@@ -735,6 +776,16 @@ impl TrackSize {
         match self {
             TrackSize::Breadth(b) => b.is_finite(),
             TrackSize::MinMax { min, max } => min.is_finite() && max.is_finite(),
+        }
+    }
+
+    fn clamped(self) -> Self {
+        match self {
+            TrackSize::Breadth(b) => TrackSize::Breadth(b.clamped()),
+            TrackSize::MinMax { min, max } => TrackSize::MinMax {
+                min: min.clamped(),
+                max: max.clamped(),
+            },
         }
     }
 
@@ -810,6 +861,13 @@ impl Track {
         match self {
             Track::Size(s) => s.is_finite(),
             Track::Repeat { tracks, .. } => tracks.iter().all(|s| s.is_finite()),
+        }
+    }
+
+    fn clamp_lengths(&mut self) {
+        match self {
+            Track::Size(s) => *s = s.clamped(),
+            Track::Repeat { tracks, .. } => tracks.iter_mut().for_each(|s| *s = s.clamped()),
         }
     }
 
@@ -951,6 +1009,14 @@ impl Grid {
             && self.column_gap.is_finite()
             && self.padding.iter().all(|p| p.is_finite())
             && self.columns.iter().chain(&self.rows).all(Track::is_finite)
+    }
+
+    fn clamp_lengths(&mut self) {
+        clamp_spacing(&mut self.row_gap, &mut self.column_gap, &mut self.padding);
+        self.columns
+            .iter_mut()
+            .chain(&mut self.rows)
+            .for_each(Track::clamp_lengths);
     }
 
     /// Every track one CSS accepts. The operation that writes a grid refuses
@@ -1627,6 +1693,15 @@ impl Display {
         }
     }
 
+    /// Gaps, padding and track lengths held to ±`build::GEOMETRY_LIMIT`, as
+    /// stored geometry is; `fr` shares keep their value.
+    pub fn clamp_lengths(&mut self) {
+        match self {
+            Display::Flex(f) => f.clamp_lengths(),
+            Display::Grid(g) => g.clamp_lengths(),
+        }
+    }
+
     /// Every value one CSS accepts — [`Grid::is_valid`]'s tracks, and padding and
     /// gaps that are not negative.
     ///
@@ -1736,6 +1811,14 @@ impl Dimension {
         match self {
             Dimension::Px(v) | Dimension::Percent(v) => v.is_finite(),
             Dimension::Auto | Dimension::FitContent => true,
+        }
+    }
+
+    fn clamped(self) -> Self {
+        match self {
+            Dimension::Px(v) => Dimension::Px(clamp_coord(v)),
+            Dimension::Percent(v) => Dimension::Percent(clamp_coord(v)),
+            other => other,
         }
     }
 
@@ -1969,6 +2052,22 @@ impl LayoutItem {
             && self.grow.is_finite()
             && self.shrink.is_finite()
             && self.aspect_ratio.is_none_or(|r| r.ratio.is_finite())
+    }
+
+    /// Sizes, limits and basis held to ±`build::GEOMETRY_LIMIT`, as stored
+    /// geometry is. Grow, shrink and the aspect ratio are ratios and keep theirs.
+    pub fn clamp_lengths(&mut self) {
+        for d in [
+            &mut self.width,
+            &mut self.height,
+            &mut self.min_width,
+            &mut self.min_height,
+            &mut self.max_width,
+            &mut self.max_height,
+            &mut self.basis,
+        ] {
+            *d = d.clamped();
+        }
     }
 
     /// Every value one CSS accepts: no grid line 0 and no `span 0`, and — since

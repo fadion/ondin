@@ -35,7 +35,7 @@ Decided non-goals are in `docs/non-goals.md`.
 ## Operations and the commit
 
 - **D421** Finiteness is enforced at `Document::apply` (`OpError::NonFinite`); the loader does not check. Derived bounds are guarded too.
-- **Stored geometry is clamped to one limit, `build::GEOMETRY_LIMIT`, at the operations and the loader, never refused**, so a drag past it stops there rather than failing mid-gesture; the app's fields share the number (`ui::FIELD_LIMIT`). World-space extent is not bounded by it.
+- **Stored geometry and layout lengths are clamped to one limit, `build::GEOMETRY_LIMIT`, and stroke lengths to `node::MAX_STROKE_WIDTH`, at the operations and the loader, never refused**, so a drag past it stops there rather than failing mid-gesture; the app's fields share the numbers (`ui::FIELD_LIMIT`, `ui::MAX_STROKE_WIDTH`). World-space extent is not bounded by it.
 - **D428** A transaction that changes nothing is not an undo step: `Operation::changes_nothing` is exhaustive, with no wildcard arm. It cannot see real ops that net to zero, so planners guard those themselves.
 - **An undo step carries the name its door gave at the commit** (the command's menu name, or the MCP tool's), never one derived from its operations. The open session's history is uncapped.
 - **D416** `io::MAX_TREE_DEPTH` (256) bounds the tree at load and at the op layer, because a stack overflow kills unsaved work.

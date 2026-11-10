@@ -581,6 +581,21 @@ impl NodeDto {
         let element = self
             .element
             .filter(|e| crate::element::offered(&self.kind).is_some_and(|o| o.contains(e)));
+        // Held to the stroke and geometry limits, not refused, as the operations
+        // hold them.
+        let mut paint = self.paint;
+        paint
+            .strokes
+            .iter_mut()
+            .for_each(|s| s.value.clamp_lengths());
+        let mut insets = self.insets;
+        insets.clamp_lengths();
+        let mut display = self.display;
+        if let Some(d) = &mut display {
+            d.clamp_lengths();
+        }
+        let mut item = self.item;
+        item.clamp_lengths();
         Ok(Node {
             id,
             parent,
@@ -607,7 +622,7 @@ impl NodeDto {
             // Not gated on `mask`: the mode is remembered while the mask is off.
             mask_mode: self.mask_mode,
             fill_rule: self.fill_rule,
-            paint: self.paint,
+            paint,
             pivot: self.pivot.map(crate::node::Pivot::clamped),
             // Dropped rather than refused (§15 D492): refusing the document over
             // an export preset would lose the artwork to save the recipe, and an
@@ -626,9 +641,9 @@ impl NodeDto {
                 })
                 .collect(),
             grids: self.grids,
-            insets: self.insets,
-            display: self.display,
-            item: self.item,
+            insets,
+            display,
+            item,
             component: self.component,
             link,
             swap,
@@ -950,6 +965,7 @@ impl DocumentDto {
                     crate::effect::clamp_blur(&mut k.value);
                 }
             }
+            s.value.clamp_lengths();
             styles.push(s);
         }
         let styles = crate::style::Styles::from_list(styles);

@@ -1630,6 +1630,15 @@ pub struct Fill {
     pub visible: bool,
 }
 
+/// The largest magnitude of a stroke's width, a per-side width, a dash length,
+/// spacing or offset, in world units.
+///
+/// A stroke draws its outline offset by half its width, so a 1e50 stroke on a
+/// small shape is a 1e50 shape and the GPU renderer draws nothing. The
+/// operations and the loader clamp to it, as they clamp geometry to
+/// `build::GEOMETRY_LIMIT`, and the app's stroke fields stop at it.
+pub const MAX_STROKE_WIDTH: f64 = 10_000.0;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     /// Bindable as a fill's is.
@@ -1874,6 +1883,25 @@ impl DashStyle {
 }
 
 impl Stroke {
+    /// The width, per-side widths, dashes and dash offset held to
+    /// ±[`MAX_STROKE_WIDTH`]. Asked after the finite check: a clamp passes `NaN`
+    /// through.
+    pub fn clamp_lengths(&mut self) {
+        let c = |v: &mut f64| *v = v.clamp(-MAX_STROKE_WIDTH, MAX_STROKE_WIDTH);
+        c(&mut self.width);
+        c(&mut self.dash_offset);
+        self.dashes.iter_mut().for_each(c);
+        if let StrokeSides::Custom {
+            top,
+            right,
+            bottom,
+            left,
+        } = &mut self.sides
+        {
+            [top, right, bottom, left].into_iter().for_each(c);
+        }
+    }
+
     /// Which of the panel's four dash cells this stroke's pattern is.
     pub fn dash_style(&self) -> DashStyle {
         match self.dashes.as_slice() {

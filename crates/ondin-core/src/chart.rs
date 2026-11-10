@@ -668,7 +668,8 @@ pub struct Axis {
     pub title: String,
     /// A typed min and max; `None` is Auto.
     pub range: Option<(f64, f64)>,
-    /// Always on for columns and bars, whose length is the value.
+    /// Off by default; columns, bars and areas hold zero whatever it says, since
+    /// their length is the value.
     pub start_at_zero: bool,
     /// `None` aims for five ticks on 1-2-5 steps.
     pub tick_count: Option<u32>,
@@ -688,7 +689,7 @@ impl Default for Axis {
             angle: LabelAngle::Auto,
             title: String::new(),
             range: None,
-            start_at_zero: true,
+            start_at_zero: false,
             tick_count: None,
             side: AxisSide::Start,
             format: NumberFormat::default(),

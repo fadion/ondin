@@ -957,6 +957,47 @@ fn line_and_area_charts_match_their_golden() {
     check_golden("charts-lines.svg", &svg(&doc, &res, doc.first_page(), None));
 }
 
+/// Scatters through the SVG writer: two Y series over a numeric X, and the
+/// first split by a group column into bubbles sized by a third, drawn as
+/// diamonds with vertical gridlines; a row whose X is not a number is left out.
+#[test]
+fn scatter_charts_match_their_golden() {
+    use ondin_core::chart::{ChartKind, ColumnId, PointShape};
+    let mut plain = sample_chart(ChartKind::Scatter);
+    plain.table.rows = (0..24)
+        .map(|i| {
+            let x = 150.0 + (i as f64 * 37.0) % 50.0;
+            let y = x * 0.6 - 40.0 + (i as f64 * 13.0) % 17.0;
+            vec![
+                format!("{x}"),
+                format!("{y:.1}"),
+                format!("{}", 10 + i % 7 * 9),
+                ["North", "South", "East"][i % 3].to_string(),
+            ]
+        })
+        .collect();
+    plain
+        .table
+        .rows
+        .push(vec!["n/a".into(), "1".into(), "2".into(), "North".into()]);
+    plain.mapping.series = vec![ColumnId(1), ColumnId(2)];
+    let mut bubble = plain.clone();
+    bubble.mapping.series = vec![ColumnId(1)];
+    bubble.mapping.size = Some(ColumnId(2));
+    bubble.mapping.group = Some(ColumnId(3));
+    bubble.options.points.shape = PointShape::Diamond;
+    bubble.options.category_axis.grid.show = true;
+    let left_out = ondin_core::chart::generate(&plain, Size::new(480.0, 280.0), "Inter")
+        .unwrap()
+        .left_out;
+    assert_eq!(left_out.len(), 1, "the row whose X is n/a: {left_out:?}");
+    let (doc, res) = chart_page(vec![(plain, 480.0, 280.0), (bubble, 480.0, 280.0)]);
+    check_golden(
+        "charts-scatter.svg",
+        &svg(&doc, &res, doc.first_page(), None),
+    );
+}
+
 /// Pies through the SVG writer: a pie with its values inside (March's negative
 /// left out), a sorted, padded donut with *Other* and its shares outside on
 /// leader lines, and a one-row donut drawn as a progress ring.

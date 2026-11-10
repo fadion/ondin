@@ -5,7 +5,7 @@ text generated from it: columns, bars, lines, areas, pies, scatters and Sankey f
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
 was made with until it is flattened, which leaves the shapes and drops the description. Built so
-far: the model, settle, and the generator for Column, Bar, Line, Area and Pie; the rest is in `roadmap.md`, *Now ·
+far: the model, settle, and the generator for every kind but Sankey; the rest is in `roadmap.md`, *Now ·
 Charts*.
 
 ## Model
@@ -177,6 +177,15 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   series' dash), and the points (ellipses centred on their values; *Hollow* is white with the
   series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
   while *Start at zero* is on; an area's always holds zero.
+- **A scatter** reads its category column as X, numbers on a tick axis like the value axis (a row
+  whose X is not a number is left out and said), and each series column as a Y series; with a
+  group column, the first series split into one series per group value, coloured through the
+  palette in first-seen order. With a size column it is a bubble chart: a bubble's side is the
+  largest size times the square root of its share of the largest value, so its area follows the
+  value, and a row with no size is left out. Points are circles, squares, or diamond and triangle
+  paths, centred on their place at their own size. Vertical gridlines follow the category axis's
+  *Gridlines*. *Start at zero* is off by default on every axis; columns, bars and areas hold zero
+  whatever it says.
 - **A pie** reads the first series by category, each slice its palette colour by category, and
   its legend lists the slices. A zero is not drawn; *Group small slices* folds two or more slices
   under its share into *Other* (the palette's last colour). The pie sits in a square frame

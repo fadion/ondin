@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="600" viewBox="0 0 480 600">
+  <clipPath id="clip-c7_2"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 1" clip-path="url(#clip-c7_2)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Revenue">
+        <rect data-name="Swatch · Revenue" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
+      </g>
+      <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Value axis">
+        <text data-name="Tick 0" transform="matrix(1 0 0 1 11.413574 195.516113)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0</tspan></text>
+        <text data-name="Tick 20" transform="matrix(1 0 0 1 4.705078 155.081934)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">20</tspan></text>
+        <text data-name="Tick 40" transform="matrix(1 0 0 1 4.307617 114.647754)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">40</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 4.592285 74.213574)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 4.608398 33.779395)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+        <text data-name="Tick 100" transform="matrix(1 0 0 1 0 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">100</tspan></text>
+      </g>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 24.359375 202.171875)">
+        <text data-name="Tick 150" transform="matrix(1 0 0 1 -8.969727 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">150</tspan></text>
+        <text data-name="Tick 160" transform="matrix(1 0 0 1 75.611963 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">160</tspan></text>
+        <text data-name="Tick 170" transform="matrix(1 0 0 1 160.725391 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">170</tspan></text>
+        <text data-name="Tick 180" transform="matrix(1 0 0 1 245.078809 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">180</tspan></text>
+        <text data-name="Tick 190" transform="matrix(1 0 0 1 329.800146 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">190</tspan></text>
+        <text data-name="Tick 200" transform="matrix(1 0 0 1 413.353271 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">200</tspan></text>
+      </g>
+      <g data-name="Plot" transform="matrix(1 0 0 1 24.359375 0)">
+        <g data-name="Grid">
+          <rect data-name="Gridline 0" transform="matrix(1 0 0 1 0 201.670898)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 20" transform="matrix(1 0 0 1 0 161.236719)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 40" transform="matrix(1 0 0 1 0 120.802539)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 60" transform="matrix(1 0 0 1 0 80.368359)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 80" transform="matrix(1 0 0 1 0 39.93418)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 100" transform="matrix(1 0 0 1 0 -0.5)" x="0" y="0" width="423.647" height="1" fill="#e6e6e6"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 201.670898)" x="0" y="0" width="423.647" height="1" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series Revenue">
+          <ellipse data-name="Revenue · row 1" transform="matrix(1 0 0 1 -4 97.085449)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 2" transform="matrix(1 0 0 1 309.49876 25.921293)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 3" transform="matrix(1 0 0 1 199.350547 49.777459)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 4" transform="matrix(1 0 0 1 89.202334 73.633625)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 5" transform="matrix(1 0 0 1 402.701094 36.838521)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 6" transform="matrix(1 0 0 1 292.552881 26.325635)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 7" transform="matrix(1 0 0 1 182.404668 50.181801)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 8" transform="matrix(1 0 0 1 72.256455 74.037967)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 9" transform="matrix(1 0 0 1 385.755215 37.242863)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 10" transform="matrix(1 0 0 1 275.607002 26.729977)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 11" transform="matrix(1 0 0 1 165.458789 50.586143)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 12" transform="matrix(1 0 0 1 55.310576 74.442309)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 13" transform="matrix(1 0 0 1 368.809336 37.647205)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 14" transform="matrix(1 0 0 1 258.661123 27.134318)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 15" transform="matrix(1 0 0 1 148.51291 50.990484)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 16" transform="matrix(1 0 0 1 38.364697 74.84665)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 17" transform="matrix(1 0 0 1 351.863457 38.051547)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 18" transform="matrix(1 0 0 1 241.715244 61.907713)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 19" transform="matrix(1 0 0 1 131.567031 51.394826)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 20" transform="matrix(1 0 0 1 21.418818 75.250992)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 21" transform="matrix(1 0 0 1 334.917578 38.455889)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 22" transform="matrix(1 0 0 1 224.769365 62.312055)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 23" transform="matrix(1 0 0 1 114.621152 51.799168)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+          <ellipse data-name="Revenue · row 24" transform="matrix(1 0 0 1 4.472939 75.655334)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
+        </g>
+        <g data-name="Series Costs">
+          <ellipse data-name="Costs · row 1" transform="matrix(1 0 0 1 -4 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 2" transform="matrix(1 0 0 1 309.49876 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 3" transform="matrix(1 0 0 1 199.350547 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 4" transform="matrix(1 0 0 1 89.202334 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 5" transform="matrix(1 0 0 1 402.701094 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 6" transform="matrix(1 0 0 1 292.552881 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 7" transform="matrix(1 0 0 1 182.404668 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 8" transform="matrix(1 0 0 1 72.256455 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 9" transform="matrix(1 0 0 1 385.755215 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 10" transform="matrix(1 0 0 1 275.607002 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 11" transform="matrix(1 0 0 1 165.458789 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 12" transform="matrix(1 0 0 1 55.310576 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 13" transform="matrix(1 0 0 1 368.809336 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 14" transform="matrix(1 0 0 1 258.661123 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 15" transform="matrix(1 0 0 1 148.51291 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 16" transform="matrix(1 0 0 1 38.364697 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 17" transform="matrix(1 0 0 1 351.863457 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 18" transform="matrix(1 0 0 1 241.715244 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 19" transform="matrix(1 0 0 1 131.567031 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 20" transform="matrix(1 0 0 1 21.418818 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 21" transform="matrix(1 0 0 1 334.917578 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 22" transform="matrix(1 0 0 1 224.769365 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 23" transform="matrix(1 0 0 1 114.621152 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 24" transform="matrix(1 0 0 1 4.472939 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_3"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 2" transform="matrix(1 0 0 1 0 320)" clip-path="url(#clip-c7_3)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · North">
+        <rect data-name="Swatch · North" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · North" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">North</tspan></text>
+      </g>
+      <g data-name="Legend · South" transform="matrix(1 0 0 1 59.96875 0)">
+        <rect data-name="Swatch · South" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · South" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">South</tspan></text>
+      </g>
+      <g data-name="Legend · East" transform="matrix(1 0 0 1 120.96875 0)">
+        <rect data-name="Swatch · East" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · East" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">East</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Value axis">
+        <text data-name="Tick 50" transform="matrix(1 0 0 1 0.29541 195.516113)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">50</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 0 144.973389)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 70" transform="matrix(1 0 0 1 0.768066 94.430664)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">70</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 0.016113 43.887939)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+        <text data-name="Tick 90" transform="matrix(1 0 0 1 0 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">90</tspan></text>
+      </g>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 19.765625 202.171875)">
+        <text data-name="Tick 150" transform="matrix(1 0 0 1 -8.969727 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">150</tspan></text>
+        <text data-name="Tick 160" transform="matrix(1 0 0 1 76.53042 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">160</tspan></text>
+        <text data-name="Tick 170" transform="matrix(1 0 0 1 162.562305 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">170</tspan></text>
+        <text data-name="Tick 180" transform="matrix(1 0 0 1 247.83418 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">180</tspan></text>
+        <text data-name="Tick 190" transform="matrix(1 0 0 1 333.473975 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">190</tspan></text>
+        <text data-name="Tick 200" transform="matrix(1 0 0 1 417.945557 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">200</tspan></text>
+      </g>
+      <g data-name="Plot" transform="matrix(1 0 0 1 19.765625 0)">
+        <g data-name="Grid">
+          <rect data-name="Gridline 50" transform="matrix(1 0 0 1 0 201.670898)" x="0" y="0" width="428.2393" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 60" transform="matrix(1 0 0 1 0 151.128174)" x="0" y="0" width="428.2393" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 70" transform="matrix(1 0 0 1 0 100.585449)" x="0" y="0" width="428.2393" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 80" transform="matrix(1 0 0 1 0 50.042725)" x="0" y="0" width="428.2393" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 90" transform="matrix(1 0 0 1 0 -0.5)" x="0" y="0" width="428.2393" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 150" transform="matrix(1 0 0 1 -0.5 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Gridline 160" transform="matrix(1 0 0 1 85.147852 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Gridline 170" transform="matrix(1 0 0 1 170.795703 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Gridline 180" transform="matrix(1 0 0 1 256.443555 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Gridline 190" transform="matrix(1 0 0 1 342.091406 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Gridline 200" transform="matrix(1 0 0 1 427.739258 0)" x="0" y="0" width="1" height="202.1709" fill="#e6e6e6"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 454.384521)" x="0" y="0" width="428.2393" height="1" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series North">
+          <path data-name="North · row 1" transform="matrix(1 0 0 1 -7.905694 194.265204)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 4" transform="matrix(1 0 0 1 79.00573 128.334432)" d="M15.2069,0 L30.4138,15.2069 L15.2069,30.4138 L0,15.2069 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 7" transform="matrix(1 0 0 1 168.425273 64.911777)" d="M20,0 L40,20 L20,40 L0,20 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 10" transform="matrix(1 0 0 1 269.409154 13.05346)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 13" transform="matrix(1 0 0 1 358.310051 35.034792)" d="M18.5405,0 L37.081,18.5405 L18.5405,37.081 L0,18.5405 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 16" transform="matrix(1 0 0 1 31.926678 135.676654)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 19" transform="matrix(1 0 0 1 120.080738 70.988516)" d="M16.9558,0 L33.9116,16.9558 L16.9558,33.9116 L0,16.9558 Z" fill="#3b6fe0" opacity="0.8"/>
+          <path data-name="North · row 22" transform="matrix(1 0 0 1 223.343505 107.331718)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#3b6fe0" opacity="0.8"/>
+        </g>
+        <g data-name="Series South">
+          <path data-name="South · row 2" transform="matrix(1 0 0 1 305.999803 13.36326)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 5" transform="matrix(1 0 0 1 394.153863 34.597754)" d="M16.9558,0 L33.9116,16.9558 L16.9558,33.9116 L0,16.9558 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 8" transform="matrix(1 0 0 1 69.177372 136.646498)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 11" transform="matrix(1 0 0 1 156.088797 70.715726)" d="M15.2069,0 L30.4138,15.2069 L15.2069,30.4138 L0,15.2069 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 14" transform="matrix(1 0 0 1 245.50834 7.293071)" d="M20,0 L40,20 L20,40 L0,20 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 17" transform="matrix(1 0 0 1 346.49222 41.357386)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 20" transform="matrix(1 0 0 1 7.153859 129.04426)" d="M18.5405,0 L37.081,18.5405 L18.5405,37.081 L0,18.5405 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 23" transform="matrix(1 0 0 1 109.009745 78.057948)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#f08c2e" opacity="0.8"/>
+        </g>
+        <g data-name="Series East">
+          <path data-name="East · row 3" transform="matrix(1 0 0 1 192.326087 70.672166)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 6" transform="matrix(1 0 0 1 281.226984 6.730866)" d="M18.5405,0 L37.081,18.5405 L18.5405,37.081 L0,18.5405 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 9" transform="matrix(1 0 0 1 383.08287 41.667186)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 12" transform="matrix(1 0 0 1 42.997671 128.607222)" d="M16.9558,0 L33.9116,16.9558 L16.9558,33.9116 L0,16.9558 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 15" transform="matrix(1 0 0 1 146.260439 79.027792)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 18" transform="matrix(1 0 0 1 233.171863 99.019651)" d="M15.2069,0 L30.4138,15.2069 L15.2069,30.4138 L0,15.2069 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 21" transform="matrix(1 0 0 1 322.591406 35.596997)" d="M20,0 L40,20 L20,40 L0,20 Z" fill="#2ea88a" opacity="0.8"/>
+          <path data-name="East · row 24" transform="matrix(1 0 0 1 -4.663971 135.366854)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#2ea88a" opacity="0.8"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

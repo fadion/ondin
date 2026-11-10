@@ -184,8 +184,9 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     let mut data = read(chart);
     // A pie's slices are its legend's entries; every other kind's are its series.
     let slices = (chart.kind == ChartKind::Pie).then(|| pie_slices(chart, &mut data));
-    let entries: Vec<Entry> = match &slices {
-        Some(s) => s
+    let clouds = (chart.kind == ChartKind::Scatter).then(|| scatter_clouds(chart, &mut data));
+    let entries: Vec<Entry> = match (&slices, &clouds) {
+        (Some(s), _) => s
             .iter()
             .map(|s| Entry {
                 series: s.index,
@@ -193,7 +194,15 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
                 fill: s.fill.clone(),
             })
             .collect(),
-        None => data
+        (_, Some(c)) => c
+            .iter()
+            .map(|c| Entry {
+                series: c.id,
+                name: c.name.clone(),
+                fill: c.fill.clone(),
+            })
+            .collect(),
+        _ => data
             .series
             .iter()
             .map(|s| Entry {
@@ -294,6 +303,16 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
         }
         ChartKind::Line | ChartKind::Area => {
             lines(chart, &data, body, body_at, &mut out)?;
+        }
+        ChartKind::Scatter => {
+            scatter(
+                chart,
+                &data,
+                clouds.as_deref().unwrap_or(&[]),
+                body,
+                body_at,
+                &mut out,
+            )?;
         }
         ChartKind::Pie => {
             pie(
@@ -850,6 +869,7 @@ fn bars(
         // A bar's length is its value, so its axis always holds zero.
         zero: true,
         percent: stacking == Stacking::Percent,
+        x: None,
     };
     let ax = axes(chart, data, body, body_at, out, spec);
     bar_marks(chart, data, &ax, &totals, out);
@@ -865,6 +885,8 @@ struct AxisSpec {
     hi: f64,
     zero: bool,
     percent: bool,
+    /// A scatter's X domain: the category axis read as numbers.
+    x: Option<(f64, f64)>,
 }
 
 /// The body grid built: the plot and what the marks need of it, and what the
@@ -886,6 +908,9 @@ struct Axes {
     left_at_end: bool,
     bottom_at_top: bool,
     tick_size: f64,
+    /// A scatter's X ticks and their text; `None` reads categories.
+    x: Option<Ticks>,
+    x_text: Vec<String>,
 }
 
 /// A categorical chart's body: its grid with the value axis's track and labels,
@@ -905,6 +930,7 @@ fn axes(
         hi,
         zero,
         percent,
+        x,
     } = spec;
     let n_cat = data.categories.len();
     // The value axis's labels decide its thickness, and the category labels
@@ -951,18 +977,43 @@ fn axes(
         0.0
     };
 
+    // A scatter's X axis is numbers on ticks, spaced for labels four high.
+    let x_ticks = x.map(|(lo, hi)| {
+        let fit = ((body.width - va_thick) / (label_h * 4.0)).floor().max(1.0) as u32;
+        let count = ca.tick_count.unwrap_or(5.min(fit));
+        let (lo, hi) = if ca.start_at_zero {
+            (lo.min(0.0), hi.max(0.0))
+        } else {
+            (lo, hi)
+        };
+        scale::ticks(lo, hi, count, ca.range)
+    });
+    let x_text: Vec<String> = x_ticks.as_ref().map_or_else(Vec::new, |xt| {
+        xt.values
+            .iter()
+            .map(|v| scale::format(*v, &ca.format, xt.decimals()))
+            .collect()
+    });
     // Category labels: flat, or turned and thinned where they would touch.
-    let cat_boxes: Vec<Rect> = data
-        .categories
-        .iter()
-        .map(|c| out.text.measure(c, tick_size))
-        .collect();
+    let cat_boxes: Vec<Rect> = match &x_ticks {
+        Some(_) => x_text
+            .iter()
+            .map(|s| out.text.measure(s, tick_size))
+            .collect(),
+        None => data
+            .categories
+            .iter()
+            .map(|c| out.text.measure(c, tick_size))
+            .collect(),
+    };
     let band_len_guess = if horizontal {
         body.height
     } else {
         body.width - va_thick
     } / n_cat.max(1) as f64;
-    let (turn, every) = if horizontal {
+    let (turn, every) = if x_ticks.is_some() {
+        (0.0, 1)
+    } else if horizontal {
         (0.0, thin_every(label_h * 1.2, band_len_guess))
     } else {
         category_turn(ca.angle, &cat_boxes, band_len_guess, label_h)
@@ -1185,6 +1236,25 @@ fn axes(
             );
         }
     }
+    if let Some(xt) = &x_ticks
+        && ca.show
+        && ca.grid.show
+    {
+        for (i, v) in xt.values.iter().enumerate() {
+            let (bx, insets) = rule_at(true, xt.t(*v), plot);
+            out.rect(
+                key(PartRole::Gridline, 1, i as u32),
+                grid_key,
+                format!("Gridline {}", x_text[i]),
+                bx,
+                Spec {
+                    fill: ca.grid.colour.clone(),
+                    radii: RoundedRectRadii::default(),
+                    insets,
+                },
+            );
+        }
+    }
     if ca.show && ca.line {
         // The baseline, at zero.
         let (bx, insets) = rule_at(horizontal, value_share(0.0), plot);
@@ -1217,6 +1287,8 @@ fn axes(
         left_at_end,
         bottom_at_top,
         tick_size,
+        x: x_ticks,
+        x_text,
     }
 }
 
@@ -1415,14 +1487,40 @@ impl Axes {
         }
         let cat_axis_key = key(PartRole::CategoryAxis, 0, 0);
         let frame = if horizontal { side_box } else { under_box };
-        for (c, name) in data.categories.iter().enumerate() {
-            if c % every != 0 {
-                continue;
-            }
-            let b = cat_boxes[c];
-            let centre = (c as f64 + 0.5) * band;
-            let k = key(PartRole::CategoryLabel, 0, c as u32);
-            let label_name = format!("Category {name}");
+        // A scatter's X axis writes number ticks at their place; any other,
+        // every `every`th category at its band's centre.
+        let items: Vec<(f64, &String, Rect, PartKey, String)> = match &self.x {
+            Some(xt) => self
+                .x_text
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    (
+                        xt.t(xt.values[i]) * across_len,
+                        s,
+                        cat_boxes[i],
+                        key(PartRole::TickLabel, 1, i as u32),
+                        format!("Tick {s}"),
+                    )
+                })
+                .collect(),
+            None => data
+                .categories
+                .iter()
+                .enumerate()
+                .filter(|(c, _)| c % every == 0)
+                .map(|(c, name)| {
+                    (
+                        (c as f64 + 0.5) * band,
+                        name,
+                        cat_boxes[c],
+                        key(PartRole::CategoryLabel, 0, c as u32),
+                        format!("Category {name}"),
+                    )
+                })
+                .collect(),
+        };
+        for (centre, name, b, k, label_name) in items {
             if horizontal {
                 let x = if left_at_end {
                     AXIS_GAP - b.x0
@@ -1488,6 +1586,235 @@ struct Entry {
     series: u32,
     name: String,
     fill: BrushSource,
+}
+
+/// One series of a scatter as drawn: a Y column, or one group's rows of the
+/// first Y column, with its points as (x, y, size, row).
+struct Cloud {
+    /// The Y column's id, or past every column id for a group.
+    id: u32,
+    name: String,
+    fill: BrushSource,
+    points: Vec<ScatterPoint>,
+}
+
+/// A scatter's point: x, y, its bubble size, and the row it came from.
+type ScatterPoint = (f64, f64, Option<f64>, usize);
+
+/// The id a scatter's `n`th group draws under, clear of every column id.
+fn group_id(n: usize) -> u32 {
+    super::MAX_COLUMNS as u32 + n as u32
+}
+
+/// A scatter's series: X read off the category column as numbers (a row whose
+/// X is not a number left out and said), Y off each series column, or off the
+/// first split by the group column; a bubble's size off the size column, a row
+/// with none left out.
+fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
+    let t = &chart.table;
+    let m = &chart.mapping;
+    let colours = palette(chart.options.palette);
+    let xs: Vec<Option<f64>> = data.categories.iter().map(|c| parse_number(c)).collect();
+    let mut left = Vec::new();
+    for (i, x) in xs.iter().enumerate() {
+        if x.is_none() {
+            left.push(format!(
+                "Row {}: “{}” is not a number",
+                i + 1,
+                data.categories[i]
+            ));
+        }
+    }
+    let rows: Vec<usize> = {
+        // The table's rows that survived `read` (an empty X), in order.
+        let cat = m.category.and_then(|c| t.index_of(c));
+        (0..t.rows.len())
+            .filter(|r| cat.is_none_or(|c| !t.rows[*r][c].trim().is_empty()))
+            .collect()
+    };
+    let column = |id: Option<ColumnId>| -> Vec<Option<String>> {
+        let at = id.and_then(|c| t.index_of(c));
+        rows.iter()
+            .map(|r| at.map(|a| t.rows[*r][a].trim().to_string()))
+            .collect()
+    };
+    let sizes: Vec<Option<f64>> = column(m.size)
+        .into_iter()
+        .map(|c| c.and_then(|c| parse_number(&c)))
+        .collect();
+    let bubble = m.size.is_some();
+    let mut out = Vec::new();
+    let groups = column(m.group);
+    match (m.group.is_some(), data.series.first()) {
+        (true, Some(s)) => {
+            let mut names: Vec<String> = Vec::new();
+            for (i, g) in groups.iter().enumerate() {
+                let g = g.clone().unwrap_or_default();
+                let n = match names.iter().position(|n| *n == g) {
+                    Some(n) => n,
+                    None => {
+                        names.push(g.clone());
+                        out.push(Cloud {
+                            id: group_id(names.len() - 1),
+                            name: if g.is_empty() { "(none)".into() } else { g },
+                            fill: rgb(colours[(names.len() - 1) % colours.len()]),
+                            points: Vec::new(),
+                        });
+                        names.len() - 1
+                    }
+                };
+                if let (Some(x), Some(y)) = (xs[i], s.values[i]) {
+                    if bubble && sizes[i].is_none() {
+                        left.push(format!("Row {}: no size", rows[i] + 1));
+                        continue;
+                    }
+                    out[n].points.push((x, y, sizes[i], rows[i]));
+                }
+            }
+        }
+        _ => {
+            for s in &data.series {
+                let mut points = Vec::new();
+                for (i, y) in s.values.iter().enumerate() {
+                    if let (Some(x), Some(y)) = (xs[i], y) {
+                        if bubble && sizes[i].is_none() {
+                            continue;
+                        }
+                        points.push((x, *y, sizes[i], rows[i]));
+                    }
+                }
+                out.push(Cloud {
+                    id: s.column.0,
+                    name: s.name.clone(),
+                    fill: s.fill.clone(),
+                    points,
+                });
+            }
+        }
+    }
+    data.left_out.extend(left);
+    out
+}
+
+/// A scatter or bubble chart: numbers on both axes, each series' points at
+/// their place, kept at their size as the plot resizes.
+fn scatter(
+    chart: &Chart,
+    data: &Data,
+    clouds: &[Cloud],
+    body: Size,
+    body_at: Point,
+    out: &mut Out,
+) -> Result<(), Refusal> {
+    let o = &chart.options;
+    let p = &o.points;
+    let marks: usize = clouds.iter().map(|c| c.points.len()).sum();
+    if marks > super::MAX_MARKS {
+        return Err(Refusal::TooManyMarks {
+            count: marks,
+            what: "points",
+        });
+    }
+    let all = || clouds.iter().flat_map(|c| c.points.iter());
+    let span = |f: fn(&ScatterPoint) -> f64| {
+        let (lo, hi) = all()
+            .map(f)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| {
+                (a.min(v), b.max(v))
+            });
+        if lo.is_finite() { (lo, hi) } else { (0.0, 1.0) }
+    };
+    let (x_lo, x_hi) = span(|p| p.0);
+    let (y_lo, y_hi) = span(|p| p.1);
+    let spec = AxisSpec {
+        horizontal: false,
+        lo: y_lo,
+        hi: y_hi,
+        zero: false,
+        percent: false,
+        x: Some((x_lo, x_hi)),
+    };
+    let ax = axes(chart, data, body, body_at, out, spec);
+    let plot = ax.plot;
+    let xt = ax.x.as_ref().expect("a scatter's X axis is numeric");
+    let largest = all()
+        .filter_map(|p| p.2)
+        .fold(0.0f64, |a, v| a.max(v.abs()));
+    for c in clouds {
+        let series_key = key(PartRole::Series, c.id, 0);
+        out.frame_pinned(
+            series_key,
+            Some(ax.plot_key),
+            &format!("Series {}", c.name),
+            Rect::from_origin_size(Point::ZERO, plot),
+            None,
+            LayoutItem::default(),
+            fill_insets(),
+        );
+        for (x, y, size, row) in &c.points {
+            let at = Point::new(xt.t(*x) * plot.width, (1.0 - ax.t.t(*y)) * plot.height);
+            // A bubble's area follows its size, so its side follows the root.
+            let d = match size {
+                Some(s) if largest > 0.0 => (p.max_size * (s.abs() / largest).sqrt()).max(1.0),
+                _ => p.size,
+            };
+            let bx = Rect::from_center_size(at, (d, d));
+            let kind = point_kind(p.shape, bx.size());
+            out.parts.push(Part {
+                key: key(PartRole::Point, c.id, *row as u32),
+                parent: Some(series_key),
+                name: format!("{} · row {}", c.name, row + 1),
+                kind,
+                transform: Affine::translate(bx.origin().to_vec2()),
+                fills: fill(c.fill.clone()),
+                strokes: Vec::new(),
+                opacity: p.opacity as f32,
+                insets: centred(
+                    at.x / plot.width.max(1e-9) * 100.0,
+                    at.y / plot.height.max(1e-9) * 100.0,
+                ),
+                display: None,
+                item: LayoutItem::default(),
+            });
+        }
+    }
+    ax.category_labels(data, out);
+    Ok(())
+}
+
+/// A point's shape at `size`: a circle, a square, or a diamond or triangle
+/// path, which its centring insets keep at its size.
+fn point_kind(shape: super::PointShape, size: Size) -> NodeKind {
+    let (w, h) = (size.width, size.height);
+    let path = |pts: &[(f64, f64)]| {
+        let mut p = kurbo::BezPath::new();
+        p.move_to(pts[0]);
+        for q in &pts[1..] {
+            p.line_to(*q);
+        }
+        p.close_path();
+        NodeKind::Path {
+            path: p,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: crate::symmetry::PathMirror::NONE,
+        }
+    };
+    match shape {
+        super::PointShape::Circle => NodeKind::Ellipse {
+            size,
+            arc: Default::default(),
+        },
+        super::PointShape::Square => NodeKind::Rect {
+            size,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        super::PointShape::Diamond => {
+            path(&[(w / 2.0, 0.0), (w, h / 2.0), (w / 2.0, h), (0.0, h / 2.0)])
+        }
+        super::PointShape::Triangle => path(&[(w / 2.0, 0.0), (w, h), (0.0, h)]),
+    }
 }
 
 /// One slice of a pie as drawn: its place, category, value and colour.
@@ -1887,6 +2214,7 @@ fn lines(
         // An area fills down to its baseline, so its axis holds zero.
         zero: area,
         percent: stacking == Stacking::Percent,
+        x: None,
     };
     let ax = axes(chart, data, body, body_at, out, spec);
     let plot = ax.plot;

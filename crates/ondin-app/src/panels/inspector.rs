@@ -847,11 +847,8 @@ impl OndinApp {
                     }
                 } else {
                     // Buffered, committed once on defocus, as a layer's name is.
-                    let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
-                    let mut name = match &self.name_edit {
-                        Some((_, buf)) if editing => buf.clone(),
-                        _ => name0.clone(),
-                    };
+                    let mut name = ui::Draft::live(&mut self.name_edit, ui.ctx(), id)
+                        .map_or_else(|| name0.clone(), |d| d.text.clone());
                     #[expect(
                         clippy::disallowed_methods,
                         reason = "the card head's name, a heading edited in place"
@@ -867,14 +864,14 @@ impl OndinApp {
                     }
                     // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
                     if resp.gained_focus() || resp.changed() {
-                        self.name_edit = Some((id, name.clone()));
+                        self.name_edit = Some(ui::Draft::new(ui.ctx(), id, name.clone()));
                     }
                     if resp.lost_focus()
-                        && let Some((nid, val)) = self.name_edit.take()
-                        && nid == id
+                        && let Some(d) = self.name_edit.take()
+                        && d.key == id
                         && ui::defocus_commits(&resp)
                     {
-                        let name = val.trim().to_string();
+                        let name = d.text.trim().to_string();
                         if !name.is_empty() && name != name0 {
                             self.session.name_step("Rename page", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
@@ -1764,11 +1761,8 @@ impl OndinApp {
                     }
                 } else {
                     // Name — buffered, committed once on defocus.
-                    let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
-                    let mut name = match &self.name_edit {
-                        Some((_, buf)) if editing => buf.clone(),
-                        _ => name0.to_string(),
-                    };
+                    let mut name = ui::Draft::live(&mut self.name_edit, ui.ctx(), id)
+                        .map_or_else(|| name0.to_string(), |d| d.text.clone());
                     #[expect(
                         clippy::disallowed_methods,
                         reason = "the card head's name, a heading edited in place"
@@ -1784,15 +1778,15 @@ impl OndinApp {
                     }
                     // The I-beam is kept: the frameless field has no other cue.
                     if resp.gained_focus() || resp.changed() {
-                        self.name_edit = Some((id, name.clone()));
+                        self.name_edit = Some(ui::Draft::new(ui.ctx(), id, name.clone()));
                     }
                     // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
                     if resp.lost_focus()
-                        && let Some((nid, val)) = self.name_edit.take()
-                        && nid == id
+                        && let Some(d) = self.name_edit.take()
+                        && d.key == id
                         && ui::defocus_commits(&resp)
                     {
-                        let name = val.trim().to_string();
+                        let name = d.text.trim().to_string();
                         if !name.is_empty() && name != name0 {
                             self.session.name_step("Rename", icon::CURSOR_TEXT);
                             self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
@@ -2062,25 +2056,12 @@ impl OndinApp {
             .get(id)
             .map(|n| n.href().to_string())
             .unwrap_or_default();
-        let draft_id = egui::Id::new(("link-address", id));
-        // A draft remembers the pass its field was last drawn in. One that
-        // missed a pass lost its focus unseen (the selection moved on), so it
-        // is dropped rather than shown later as if saved; a refused one stays.
-        let pass = ui.ctx().cumulative_pass_nr();
-        let draft = ui
-            .data(|d| d.get_temp::<(String, bool, u64)>(draft_id))
-            .filter(|(_, refused, seen)| *refused || seen + 1 >= pass);
-        let (mut text, refused) = match draft {
-            Some((text, refused, _)) => {
-                ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), refused, pass)));
-                (text, refused)
-            }
-            None => {
-                ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
-                (saved.clone(), false)
-            }
+        let (mut text, refused) = match ui::Draft::live(&mut self.href_edit, ui.ctx(), id) {
+            Some(d) => (d.text.clone(), d.refused.is_some()),
+            None => (saved.clone(), false),
         };
         let mut commit = None;
+        let draft = &mut self.href_edit;
         ui.horizontal(|ui| {
             ui::disable_unless(ui, enabled, |ui| {
                 let w = ui.available_width();
@@ -2095,16 +2076,16 @@ impl OndinApp {
                 // Typing only keeps the draft; the commit is the defocus below.
                 // valve-gate-not-a-commit
                 if resp.changed() {
-                    ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), false, pass)));
+                    *draft = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
                 }
                 if resp.lost_focus() {
                     if !ui::defocus_commits(&resp) {
-                        ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
+                        *draft = None;
                     } else if ondin_core::element::is_href(text.trim()) {
-                        ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
+                        *draft = None;
                         commit = Some(text.trim().to_string());
                     } else {
-                        ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), true, pass)));
+                        *draft = Some(ui::Draft::new(ui.ctx(), id, text.clone()).refuse(()));
                     }
                 }
                 resp.on_hover_text("Link address");
@@ -13900,8 +13881,8 @@ mod mask_card_tests {
     /// A link address draft whose field went undrawn for a pass (the selection
     /// moved on mid-typing) is dropped rather than shown later as if saved; one
     /// drawn every pass stays.
-    /// flip: `link_address_row` keeping a draft whatever pass it was last seen
-    /// in → fails at "the stale draft".
+    /// flip: `Draft::live` keeping a draft whatever pass it was last seen in →
+    /// fails at "the stale draft".
     #[test]
     fn a_link_address_draft_left_unseen_is_dropped() {
         let ctx = egui::Context::default();
@@ -13947,21 +13928,23 @@ mod mask_card_tests {
                 })
                 .collect::<Vec<_>>()
         };
-        let draft_id = egui::Id::new(("link-address", frame));
         texts(&mut app);
-        let pass = ctx.cumulative_pass_nr();
-        ctx.data_mut(|d| d.insert_temp(draft_id, ("/typed".to_string(), false, pass)));
+        app.href_edit = Some(crate::ui::Draft::new(&ctx, frame, "/typed".into()));
         let drawn = texts(&mut app);
         assert!(
             drawn.iter().any(|s| s == "/typed"),
             "the control: a draft drawn every pass shows: {drawn:?}"
         );
-        ctx.data_mut(|d| d.insert_temp(draft_id, ("/stale".to_string(), false, 0u64)));
+        // The selection moves on mid-typing, then comes back.
+        app.session.selection.set(vec![]);
+        texts(&mut app);
+        app.session.selection.set(vec![frame]);
         let drawn = texts(&mut app);
         assert!(
-            !drawn.iter().any(|s| s == "/stale"),
+            !drawn.iter().any(|s| s == "/typed"),
             "the stale draft: {drawn:?}"
         );
+        assert!(app.href_edit.is_none(), "and it is gone");
     }
 
     /// The fit button beside a frame's kind dropdown resizes the frame to its

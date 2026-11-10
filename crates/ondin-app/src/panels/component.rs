@@ -775,10 +775,10 @@ impl OndinApp {
         };
         // Private mode masks a description as it does a name: hidden, not typed.
         let private = crate::private::on();
-        let mut text = match &self.desc_edit {
-            Some((d, buf)) if *d == id => buf.clone(),
-            _ if private => String::new(),
-            _ => saved.clone(),
+        let mut text = match ui::Draft::live(&mut self.desc_edit, ui.ctx(), id) {
+            Some(d) => d.text.clone(),
+            None if private => String::new(),
+            None => saved.clone(),
         };
         let hint = match private {
             true => "Description hidden in private mode",
@@ -820,15 +820,15 @@ impl OndinApp {
             ui::typing_edge(ui, framed.response.rect);
         }
         if resp.gained_focus() || resp.changed() {
-            self.desc_edit = Some((id, text.clone()));
+            self.desc_edit = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
         }
         // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
         if resp.lost_focus()
-            && let Some((d, val)) = self.desc_edit.take()
-            && d == id
+            && let Some(d) = self.desc_edit.take()
+            && d.key == id
             && ui::defocus_commits(&resp)
         {
-            let text = val.trim().to_string();
+            let text = d.text.trim().to_string();
             if text != saved {
                 self.session.name_step("Description", icon::NOTE);
                 self.commit_edit(Transaction(vec![Operation::SetDescription {
@@ -850,12 +850,12 @@ impl OndinApp {
             return;
         };
         let inherited = doc_link_of(doc, id).to_string();
-        let edit = self.link_edit.as_ref().filter(|e| e.id == id);
-        let refused = edit.and_then(|e| e.refused);
+        let edit = ui::Draft::live(&mut self.link_edit, ui.ctx(), id).cloned();
+        let refused = edit.as_ref().and_then(|e| e.refused);
         let private = crate::private::on();
         let field_id = ui.id().with(("doc-link", id));
         let focused = ui.ctx().memory(|m| m.has_focus(field_id));
-        let mut text = match edit {
+        let mut text = match &edit {
             Some(e) => e.text.clone(),
             None if focused => saved.clone(),
             None => ondin_core::link_host(&saved).to_string(),
@@ -936,41 +936,30 @@ impl OndinApp {
         }
         if resp.gained_focus() && edit.is_none() {
             // The host was drawn this frame; the whole address from the next.
-            self.link_edit = Some(LinkEdit {
-                id,
-                text: saved.clone(),
-                refused: None,
-            });
+            self.link_edit = Some(ui::Draft::new(ui.ctx(), id, saved.clone()));
+        // Typing only keeps the draft; the commit is the defocus below.
+        // valve-gate-not-a-commit
         } else if resp.changed() {
-            self.link_edit = Some(LinkEdit {
-                id,
-                text: text.clone(),
-                refused: None,
-            });
+            self.link_edit = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
         }
         if resp.lost_focus() {
             if !ui::defocus_commits(&resp) {
                 self.link_edit = None;
-            } else if let Some(e) = self.link_edit.take().filter(|e| e.id == id) {
+            } else if let Some(e) = self.link_edit.take().filter(|e| e.key == id) {
                 match ondin_core::web_link(&e.text) {
                     Ok(url) if url == saved => {}
                     Ok(url) => {
                         self.session.name_step("Link", icon::GLOBE);
                         self.commit_edit(Transaction(vec![Operation::SetDocLink { id, url }]));
                     }
-                    Err(why) => {
-                        self.link_edit = Some(LinkEdit {
-                            refused: Some(why),
-                            ..e
-                        })
-                    }
+                    Err(why) => self.link_edit = Some(e.refuse(why)),
                 }
             }
         }
         if let Some(why) = self
             .link_edit
             .as_ref()
-            .filter(|e| e.id == id)
+            .filter(|e| e.key == id)
             .and_then(|e| e.refused)
         {
             ui::field_refusal(ui, &why.to_string());
@@ -1997,15 +1986,6 @@ const DESC_GAP: f32 = 2.0;
 const FIELD_PT: f32 = ui::CONTROL_PT;
 /// The side of the buttons on a heading and in the link field.
 const LINK_H: f32 = 22.0;
-
-/// An in-progress edit of a main's link field (`OndinApp::link_field`); `refused`
-/// is set once a commit was turned down, and keeps the typed text on show.
-#[derive(Clone, Debug)]
-pub(crate) struct LinkEdit {
-    pub id: NodeId,
-    pub text: String,
-    pub refused: Option<ondin_core::LinkRefusal>,
-}
 
 /// The documentation link a main shows: its own, else its set's; empty when
 /// neither has one.

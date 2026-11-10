@@ -578,12 +578,16 @@ pub struct OndinApp {
     /// flag, because a flag whose panel was skipped would swallow `Escape` with nothing
     /// on screen.
     pub(crate) popover_heard: bool,
-    /// In-progress name edit (node id + buffer); commits once, on defocus.
-    pub(crate) name_edit: Option<(NodeId, String)>,
+    /// In-progress name edit on a card head; commits once, on defocus.
+    pub(crate) name_edit: Option<crate::ui::Draft<NodeId>>,
     /// In-progress description edit on a component card; commits once, on defocus.
-    pub(crate) desc_edit: Option<(NodeId, String)>,
-    /// In-progress link edit on a component card, kept past a refused commit.
-    pub(crate) link_edit: Option<crate::panels::LinkEdit>,
+    pub(crate) desc_edit: Option<crate::ui::Draft<NodeId>>,
+    /// In-progress documentation link edit on a component card, kept past a
+    /// refused commit.
+    pub(crate) link_edit: Option<crate::ui::Draft<NodeId, ondin_core::LinkRefusal>>,
+    /// In-progress link address edit on the identity card, kept past a refused
+    /// commit.
+    pub(crate) href_edit: Option<crate::ui::Draft<NodeId>>,
     /// System and web fonts, loaded into core on demand.
     pub(crate) fonts: FontService,
     /// The background update check and the staged update it offers a restart for.
@@ -1690,6 +1694,7 @@ impl OndinApp {
             name_edit: None,
             desc_edit: None,
             link_edit: None,
+            href_edit: None,
             fonts,
             updater: Default::default(),
             spell: crate::spell::Speller::off(),
@@ -6488,6 +6493,7 @@ impl OndinApp {
         self.name_edit = None;
         self.desc_edit = None;
         self.link_edit = None;
+        self.href_edit = None;
         self.collapsed.clear();
         self.layer_filter = None;
         self.layer_drag = None;

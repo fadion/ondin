@@ -6090,6 +6090,64 @@ pub fn defocus_commits(resp: &egui::Response) -> bool {
     resp.lost_focus() && !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape))
 }
 
+/// A text field's typed, uncommitted text, kept from pass to pass: the layer
+/// it is for (`key`), the text, and why a commit was refused, if one was. It
+/// lives only while its field is drawn: a field that stops being drawn (the
+/// selection moved on mid-typing) never reports losing focus, so a draft that
+/// missed a pass is gone rather than shown later as if saved. A refused one
+/// stays until it is fixed or `Escape` drops it.
+#[derive(Clone, Debug)]
+pub struct Draft<K, R = ()> {
+    pub key: K,
+    pub text: String,
+    pub refused: Option<R>,
+    seen: u64,
+}
+
+impl<K: PartialEq + Copy, R> Draft<K, R> {
+    /// A draft for `key` holding `text`, seen this pass.
+    pub fn new(ctx: &egui::Context, key: K, text: String) -> Self {
+        Self {
+            key,
+            text,
+            refused: None,
+            seen: ctx.cumulative_pass_nr(),
+        }
+    }
+
+    /// This draft with its commit refused for `why`.
+    pub fn refuse(self, why: R) -> Self {
+        Self {
+            refused: Some(why),
+            ..self
+        }
+    }
+
+    /// The draft in `slot` for `key` when it is still live, marked seen this
+    /// pass. Its field calls this every pass it is drawn; a draft that missed
+    /// one, refused aside, is dropped from `slot` whichever field asks.
+    pub fn live<'a>(
+        slot: &'a mut Option<Self>,
+        ctx: &egui::Context,
+        key: K,
+    ) -> Option<&'a mut Self> {
+        let pass = ctx.cumulative_pass_nr();
+        if slot
+            .as_ref()
+            .is_some_and(|d| d.refused.is_none() && d.seen + 1 < pass)
+        {
+            *slot = None;
+        }
+        match slot {
+            Some(d) if d.key == key => {
+                d.seen = pass;
+                Some(d)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Select the whole of a hex field the moment it takes focus, so typing replaces
 /// the colour (as `DragValue` does; a plain `TextEdit` drops a caret). Call with
 /// the field's own response: stored after the field has run, it takes effect next
@@ -6587,6 +6645,36 @@ mod keyboard_focus_tests {
                 assert_eq!(c.a(), 255, "{what}, {theme:?}: {c:?}");
             }
         }
+    }
+
+    /// A draft lives while its field asks for it every pass, is dropped once a
+    /// pass goes by unasked, whichever field asks next, and a refused one stays.
+    /// flip: `Draft::live` without its missed-pass drop → fails at "dropped".
+    #[test]
+    fn a_draft_lives_only_while_its_field_is_drawn() {
+        let ctx = egui::Context::default();
+        let pass = |ctx: &egui::Context| {
+            let _ = ctx.run_ui(Default::default(), |_| {});
+        };
+        let mut slot = Some(Draft::<u32>::new(&ctx, 1, "typed".into()));
+        pass(&ctx);
+        assert!(
+            Draft::live(&mut slot, &ctx, 1).is_some(),
+            "kept while drawn"
+        );
+        assert!(Draft::live(&mut slot, &ctx, 2).is_none(), "another key's");
+        pass(&ctx);
+        pass(&ctx);
+        assert!(Draft::live(&mut slot, &ctx, 2).is_none());
+        assert!(slot.is_none(), "dropped after a missed pass");
+
+        let mut slot = Some(Draft::<u32>::new(&ctx, 1, "bad".into()).refuse(()));
+        pass(&ctx);
+        pass(&ctx);
+        assert!(
+            Draft::live(&mut slot, &ctx, 1).is_some(),
+            "a refused one stays"
+        );
     }
 
     /// A focused slider steps on `←`/`→` (a hundredth, a tenth with `Shift`) and keeps the focus.

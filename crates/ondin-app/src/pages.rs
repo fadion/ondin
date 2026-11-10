@@ -252,6 +252,7 @@ impl OndinApp {
         self.name_edit = None;
         self.desc_edit = None;
         self.link_edit = None;
+        self.href_edit = None;
         self.renaming_layer = None;
         self.layer_drag = None;
         self.layers_range_anchor = None;

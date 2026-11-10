@@ -5,7 +5,7 @@ text generated from it: columns, bars, lines, areas, pies, scatters and Sankey f
 a table typed in, pasted or imported from a CSV or JSON file. The parts are laid out with the
 container layout, so a chart resizes as a layout does, live or flattened. The chart stays editable through the options it
 was made with until it is flattened, which leaves the shapes and drops the description. Built so
-far: the model, settle, and the generator for every kind but Sankey; the rest is in `roadmap.md`, *Now ·
+far: the model, settle, and the generator for every kind; the rest is in `roadmap.md`, *Now ·
 Charts*.
 
 ## Model
@@ -216,9 +216,12 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   where depth put them, *Right* counts depth from the end, *Centre* moves a node with nothing
   flowing in next to the first node it feeds.
 - **Order within a column** starts in table order (the first row naming a node places it) and is
-  improved by a fixed number of relaxation passes, each moving nodes toward the weighted centre
-  of what they connect to and then pushing overlaps apart. A fixed count, not a convergence
-  test, so the same table always draws the same chart. *Order: Table order* skips the passes.
+  improved by six relaxation passes (`RELAX_PASSES`), alternately left to right toward what flows
+  in and right to left toward what flows out, each moving nodes toward the flow-weighted centre
+  of what they connect to and then pushing overlaps apart down and back up from the bottom. A
+  fixed count, not a convergence test, so the same table always draws the same chart. *Order:
+  Table order* skips the passes. One height scale serves every column, so a value is as tall
+  everywhere; a node's place and height are pinned in percent of the body and its width stays.
 - **Flows** are ribbons, each a filled path between two cubic curves, as thick as its value,
   stacked on each node in the order of the nodes at their other ends so ribbons cross as little
   as they can.
@@ -228,7 +231,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 - **Colours belong to nodes.** The Series section is *Nodes* for a Sankey: one row per node name
   with its swatch, bindable like a series'. A flow is coloured by its *Source* node (the default),
   its *Target*, a *Gradient* between the two (a linear-gradient fill across the ribbon), or one
-  *Neutral* colour, at the flow opacity.
+  *Neutral* colour (the value axis's colour), at the flow opacity. *Gradient* is drawn in the
+  source's colour until the generator writes gradient fills (`roadmap.md`).
 - **Labels** are the node's name, or name and value, beside the node: outside for the first and
   last columns, on the side away from the chart's middle for the rest. There is no legend and
   there are no axes.

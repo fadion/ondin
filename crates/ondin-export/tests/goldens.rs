@@ -957,6 +957,47 @@ fn line_and_area_charts_match_their_golden() {
     check_golden("charts-lines.svg", &svg(&doc, &res, doc.first_page(), None));
 }
 
+/// Sankeys through the SVG writer: eight flows over four columns, relaxed and
+/// justified, and the same table in table order with values in the labels and
+/// flows in their target's colour.
+#[test]
+fn sankey_charts_match_their_golden() {
+    use ondin_core::chart::{ChartKind, ColumnId, FlowColour, Mapping, NodeLabels};
+    let mut relaxed = sample_chart(ChartKind::Sankey);
+    relaxed.table.rows = [
+        ["Search", "Signup", "1200"],
+        ["Social", "Signup", "600"],
+        ["Direct", "Signup", "400"],
+        ["Search", "Bounce", "800"],
+        ["Signup", "Trial", "1500"],
+        ["Signup", "Leave", "700"],
+        ["Trial", "Paid", "900"],
+        ["Trial", "Churn", "600"],
+    ]
+    .iter()
+    .map(|r| {
+        let mut row: Vec<String> = r.iter().map(|s| s.to_string()).collect();
+        row.push(String::new());
+        row
+    })
+    .collect();
+    relaxed.mapping = Mapping {
+        from: Some(ColumnId(0)),
+        to: Some(ColumnId(1)),
+        value: Some(ColumnId(2)),
+        ..Mapping::default()
+    };
+    let mut table = relaxed.clone();
+    table.options.flows.relax = false;
+    table.options.flows.labels = NodeLabels::NameAndValue;
+    table.options.flows.colour = FlowColour::Target;
+    let (doc, res) = chart_page(vec![(relaxed, 560.0, 300.0), (table, 560.0, 300.0)]);
+    check_golden(
+        "charts-sankey.svg",
+        &svg(&doc, &res, doc.first_page(), None),
+    );
+}
+
 /// Scatters through the SVG writer: two Y series over a numeric X, and the
 /// first split by a group column into bubbles sized by a third, drawn as
 /// diamonds with vertical gridlines; a row whose X is not a number is left out.

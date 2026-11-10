@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="640" viewBox="0 0 560 640">
+  <clipPath id="clip-c7_2"><rect x="0" y="0" width="560" height="300"/></clipPath>
+  <g data-name="Chart 1" clip-path="url(#clip-c7_2)">
+    <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Flows">
+        <path data-name="Flow · Search → Signup" d="M57.8203,73.4667 C122.0029,73.4667 122.0029,82.103 186.1855,82.103 L186.1855,177.303 C122.0029,177.303 122.0029,168.6667 57.8203,168.6667 Z" fill="#3b6fe0" opacity="0.4"/>
+        <path data-name="Flow · Social → Signup" d="M57.8203,178.6667 C122.0029,178.6667 122.0029,177.303 186.1855,177.303 L186.1855,224.903 C122.0029,224.903 122.0029,226.2667 57.8203,226.2667 Z" fill="#2ea88a" opacity="0.4"/>
+        <path data-name="Flow · Direct → Signup" d="M57.8203,236.2667 C122.0029,236.2667 122.0029,224.903 186.1855,224.903 L186.1855,256.6364 C122.0029,256.6364 122.0029,268 57.8203,268 Z" fill="#d94e7a" opacity="0.4"/>
+        <path data-name="Flow · Search → Bounce" d="M57.8203,10 C262.3682,10 262.3682,0 466.916,0 L466.916,63.4667 C262.3682,63.4667 262.3682,73.4667 57.8203,73.4667 Z" fill="#3b6fe0" opacity="0.4"/>
+        <path data-name="Flow · Signup → Trial" d="M198.1855,82.103 C262.3682,82.103 262.3682,103.68 326.5508,103.68 L326.5508,222.68 C262.3682,222.68 262.3682,201.103 198.1855,201.103 Z" fill="#f08c2e" opacity="0.4"/>
+        <path data-name="Flow · Signup → Leave" d="M198.1855,201.103 C332.5508,201.103 332.5508,154.8667 466.916,154.8667 L466.916,210.4 C332.5508,210.4 332.5508,256.6364 198.1855,256.6364 Z" fill="#f08c2e" opacity="0.4"/>
+        <path data-name="Flow · Trial → Paid" d="M338.5508,103.68 C402.7334,103.68 402.7334,73.4667 466.916,73.4667 L466.916,144.8667 C402.7334,144.8667 402.7334,175.08 338.5508,175.08 Z" fill="#c9a227" opacity="0.4"/>
+        <path data-name="Flow · Trial → Churn" d="M338.5508,175.08 C402.7334,175.08 402.7334,220.4 466.916,220.4 L466.916,268 C402.7334,268 402.7334,222.68 338.5508,222.68 Z" fill="#c9a227" opacity="0.4"/>
+      </g>
+      <g data-name="Nodes">
+        <rect data-name="Node · Search" transform="matrix(1 0 0 1 45.820312 10)" x="0" y="0" width="12" height="158.6667" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Search" transform="matrix(1 0 0 1 0 82.073568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Search</tspan></text>
+        <rect data-name="Node · Signup" transform="matrix(1 0 0 1 186.185547 82.10303)" x="0" y="0" width="12" height="174.5333" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Signup" transform="matrix(1 0 0 1 140.6875 162.109931)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Signup</tspan></text>
+        <rect data-name="Node · Social" transform="matrix(1 0 0 1 45.820312 178.666667)" x="0" y="0" width="12" height="47.6" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Social" transform="matrix(1 0 0 1 5.519531 195.206901)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Social</tspan></text>
+        <rect data-name="Node · Direct" transform="matrix(1 0 0 1 45.820312 236.266667)" x="0" y="0" width="12" height="31.7333" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Direct" transform="matrix(1 0 0 1 6.158203 244.873568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Direct</tspan></text>
+        <rect data-name="Node · Bounce" transform="matrix(1 0 0 1 466.916016 0)" x="0" y="0" width="12" height="63.4667" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · Bounce" transform="matrix(1 0 0 1 484.916016 24.473568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Bounce</tspan></text>
+        <rect data-name="Node · Trial" transform="matrix(1 0 0 1 326.550781 103.68)" x="0" y="0" width="12" height="119" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Trial" transform="matrix(1 0 0 1 344.550781 155.920234)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Trial</tspan></text>
+        <rect data-name="Node · Leave" transform="matrix(1 0 0 1 466.916016 154.866667)" x="0" y="0" width="12" height="55.5333" rx="2" fill="#4aa8d8"/>
+        <text data-name="Label · Leave" transform="matrix(1 0 0 1 484.916016 175.373568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Leave</tspan></text>
+        <rect data-name="Node · Paid" transform="matrix(1 0 0 1 466.916016 73.466667)" x="0" y="0" width="12" height="71.4" rx="2" fill="#7a7a7a"/>
+        <text data-name="Label · Paid" transform="matrix(1 0 0 1 484.916016 101.906901)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Paid</tspan></text>
+        <rect data-name="Node · Churn" transform="matrix(1 0 0 1 466.916016 220.4)" x="0" y="0" width="12" height="47.6" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Churn" transform="matrix(1 0 0 1 484.916016 236.940234)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Churn</tspan></text>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_3"><rect x="0" y="0" width="560" height="300"/></clipPath>
+  <g data-name="Chart 2" transform="matrix(1 0 0 1 0 340)" clip-path="url(#clip-c7_3)">
+    <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Flows">
+        <path data-name="Flow · Search → Signup" d="M91.2246,0 C145.5166,0 145.5166,0 199.8086,0 L199.8086,95.2 C145.5166,95.2 145.5166,95.2 91.2246,95.2 Z" fill="#f08c2e" opacity="0.4"/>
+        <path data-name="Flow · Social → Signup" d="M91.2246,168.6667 C145.5166,168.6667 145.5166,95.2 199.8086,95.2 L199.8086,142.8 C145.5166,142.8 145.5166,216.2667 91.2246,216.2667 Z" fill="#f08c2e" opacity="0.4"/>
+        <path data-name="Flow · Direct → Signup" d="M91.2246,226.2667 C145.5166,226.2667 145.5166,142.8 199.8086,142.8 L199.8086,174.5333 C145.5166,174.5333 145.5166,258 91.2246,258 Z" fill="#f08c2e" opacity="0.4"/>
+        <path data-name="Flow · Search → Bounce" d="M91.2246,95.2 C266.1006,95.2 266.1006,0 440.9766,0 L440.9766,63.4667 C266.1006,63.4667 266.1006,158.6667 91.2246,158.6667 Z" fill="#8a63d2" opacity="0.4"/>
+        <path data-name="Flow · Signup → Trial" d="M211.8086,0 C266.1006,0 266.1006,0 320.3926,0 L320.3926,119 C266.1006,119 266.1006,119 211.8086,119 Z" fill="#c9a227" opacity="0.4"/>
+        <path data-name="Flow · Signup → Leave" d="M211.8086,119 C326.3926,119 326.3926,73.4667 440.9766,73.4667 L440.9766,129 C326.3926,129 326.3926,174.5333 211.8086,174.5333 Z" fill="#4aa8d8" opacity="0.4"/>
+        <path data-name="Flow · Trial → Paid" d="M332.3926,0 C386.6846,0 386.6846,139 440.9766,139 L440.9766,210.4 C386.6846,210.4 386.6846,71.4 332.3926,71.4 Z" fill="#7a7a7a" opacity="0.4"/>
+        <path data-name="Flow · Trial → Churn" d="M332.3926,71.4 C386.6846,71.4 386.6846,220.4 440.9766,220.4 L440.9766,268 C386.6846,268 386.6846,119 332.3926,119 Z" fill="#3b6fe0" opacity="0.4"/>
+      </g>
+      <g data-name="Nodes">
+        <rect data-name="Node · Search" transform="matrix(1 0 0 1 79.224609 0)" x="0" y="0" width="12" height="158.6667" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Search" transform="matrix(1 0 0 1 0 72.073568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Search 2000</tspan></text>
+        <rect data-name="Node · Signup" transform="matrix(1 0 0 1 199.808594 0)" x="0" y="0" width="12" height="174.5333" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Signup" transform="matrix(1 0 0 1 121.158203 80.006901)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Signup 2200</tspan></text>
+        <rect data-name="Node · Social" transform="matrix(1 0 0 1 79.224609 168.666667)" x="0" y="0" width="12" height="47.6" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Social" transform="matrix(1 0 0 1 12.966797 185.206901)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Social 600</tspan></text>
+        <rect data-name="Node · Direct" transform="matrix(1 0 0 1 79.224609 226.266667)" x="0" y="0" width="12" height="31.7333" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Direct" transform="matrix(1 0 0 1 13.294922 234.873568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Direct 400</tspan></text>
+        <rect data-name="Node · Bounce" transform="matrix(1 0 0 1 440.976562 0)" x="0" y="0" width="12" height="63.4667" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · Bounce" transform="matrix(1 0 0 1 458.976562 24.473568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Bounce 800</tspan></text>
+        <rect data-name="Node · Trial" transform="matrix(1 0 0 1 320.392578 0)" x="0" y="0" width="12" height="119" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Trial" transform="matrix(1 0 0 1 338.392578 52.240234)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Trial 1500</tspan></text>
+        <rect data-name="Node · Leave" transform="matrix(1 0 0 1 440.976562 73.466667)" x="0" y="0" width="12" height="55.5333" rx="2" fill="#4aa8d8"/>
+        <text data-name="Label · Leave" transform="matrix(1 0 0 1 458.976562 93.973568)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Leave 700</tspan></text>
+        <rect data-name="Node · Paid" transform="matrix(1 0 0 1 440.976562 139)" x="0" y="0" width="12" height="71.4" rx="2" fill="#7a7a7a"/>
+        <text data-name="Label · Paid" transform="matrix(1 0 0 1 458.976562 167.440234)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Paid 900</tspan></text>
+        <rect data-name="Node · Churn" transform="matrix(1 0 0 1 440.976562 220.4)" x="0" y="0" width="12" height="47.6" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Churn" transform="matrix(1 0 0 1 458.976562 236.940234)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Churn 600</tspan></text>
+      </g>
+    </g>
+  </g>
+</svg>

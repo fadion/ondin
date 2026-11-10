@@ -16,11 +16,10 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-- **The generator, the other kinds** — Sankey (columns, alignment, relaxation passes, ribbons,
-  loop refusal, node colours by name). The options the generator does not draw yet: axis titles,
-  tick marks, the value axis line, dashed gridlines, a slice's corner radius, a series' own point
-  shape. Goldens per kind through `goldens.rs`' `chart_page`. Today Sankey generates an empty
-  Body. *Landed:* Column, Bar, Line, Area, Pie and Scatter.
+- **The generator's remaining options** — every kind is generated; these options are stored and
+  not yet drawn: axis titles, tick marks, the value axis line, dashed gridlines, a slice's corner
+  radius, a series' own point shape, a Sankey's *Gradient* flows. Goldens through `goldens.rs`'
+  `chart_page`.
 - **Making and selecting** — the nine glyphs, the rail's Chart slot and `J`, the create gesture
   and sample tables, a chart selecting as one layer, double-click to its cell, the layers row,
   `RenderOverrides::chart` for scrub previews.

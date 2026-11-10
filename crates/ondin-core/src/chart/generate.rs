@@ -54,6 +54,9 @@ pub struct Generated {
 pub enum Refusal {
     /// More marks than [`super::MAX_MARKS`]: the count and what they are.
     TooManyMarks { count: usize, what: &'static str },
+    /// A Sankey whose flows lead back to a node already passed, named as the
+    /// loop runs: `Signup → Search → Signup`.
+    LoopsBack(String),
 }
 
 /// The gap between an axis's labels and the plot.
@@ -297,12 +300,18 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     if legend_first {
         emit_legend(&mut out);
     }
+    let mut sankey_left = Vec::new();
     match chart.kind {
         ChartKind::Column | ChartKind::Bar => {
             bars(chart, &data, body, body_at, &mut out)?;
         }
         ChartKind::Line | ChartKind::Area => {
             lines(chart, &data, body, body_at, &mut out)?;
+        }
+        ChartKind::Sankey => {
+            let mut left = Vec::new();
+            sankey(chart, &mut left, body, body_at, &mut out)?;
+            sankey_left = left;
         }
         ChartKind::Scatter => {
             scatter(
@@ -324,16 +333,6 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
                 &mut out,
             )?;
         }
-        // The other kinds land with the generator's second half; until then a
-        // body with nothing in it.
-        _ => out.frame(
-            key(PartRole::Body, 0, 0),
-            None,
-            "Body",
-            Rect::from_origin_size(body_at, body),
-            None,
-            body_item(row),
-        ),
     }
     if !legend_first {
         emit_legend(&mut out);
@@ -354,10 +353,12 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
         padding: [pad; 4],
         ..Flex::default()
     });
+    let mut left_out = data.left_out;
+    left_out.extend(sankey_left);
     Ok(Generated {
         display,
         parts,
-        left_out: data.left_out,
+        left_out,
     })
 }
 
@@ -1586,6 +1587,495 @@ struct Entry {
     series: u32,
     name: String,
     fill: BrushSource,
+}
+
+/// The relaxation passes a Sankey's order takes: a fixed count, not a
+/// convergence test, so the same table always draws the same chart.
+const RELAX_PASSES: usize = 6;
+/// The gap between a Sankey node and its label.
+const NODE_LABEL_GAP: f64 = 6.0;
+
+/// A Sankey node: its name, value, column and place.
+struct Node {
+    name: String,
+    value: f64,
+    column: usize,
+    y: f64,
+    h: f64,
+    fill: BrushSource,
+}
+
+/// A Sankey flow: from and to node indices, its value, and its ribbon's ends
+/// as offsets down each node.
+struct Flow {
+    from: usize,
+    to: usize,
+    value: f64,
+    sy: f64,
+    ty: f64,
+}
+
+/// A Sankey: flows between named nodes, the nodes in columns by depth, the
+/// order in each column relaxed toward what the nodes connect to, the flows as
+/// ribbons as thick as their value. Rows that cannot be drawn are pushed onto
+/// `left` with their reasons.
+fn sankey(
+    chart: &Chart,
+    left: &mut Vec<String>,
+    body: Size,
+    body_at: Point,
+    out: &mut Out,
+) -> Result<(), Refusal> {
+    let o = &chart.options;
+    let f = &o.flows;
+    let t = &chart.table;
+    let m = &chart.mapping;
+    let at = |c: Option<ColumnId>| c.and_then(|c| t.index_of(c));
+    let (Some(fc), Some(tc), Some(vc)) = (at(m.from), at(m.to), at(m.value)) else {
+        body_frame(out, body, body_at);
+        return Ok(());
+    };
+
+    // Nodes in first-seen order; same-named flows added up.
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut flows: Vec<Flow> = Vec::new();
+    let colours = palette(o.palette);
+    let index = |name: &str, nodes: &mut Vec<Node>| -> usize {
+        if let Some(i) = nodes.iter().position(|n| n.name == name) {
+            return i;
+        }
+        let i = nodes.len();
+        let fill = chart
+            .nodes
+            .iter()
+            .find(|s| s.name == name)
+            .map_or_else(|| rgb(colours[i % colours.len()]), |s| s.fill.clone());
+        nodes.push(Node {
+            name: name.to_string(),
+            value: 0.0,
+            column: 0,
+            y: 0.0,
+            h: 0.0,
+            fill,
+        });
+        i
+    };
+    for (r, row) in t.rows.iter().enumerate() {
+        let (from, to) = (row[fc].trim(), row[tc].trim());
+        if from.is_empty() || to.is_empty() {
+            left.push(format!("Row {}: no From or To", r + 1));
+            continue;
+        }
+        if from == to {
+            left.push(format!("Row {}: {from} flows into itself", r + 1));
+            continue;
+        }
+        let Some(v) = parse_number(&row[vc]).filter(|v| *v > 0.0) else {
+            left.push(format!("Row {}: a flow's value must be above zero", r + 1));
+            continue;
+        };
+        let (a, b) = (index(from, &mut nodes), index(to, &mut nodes));
+        match flows.iter_mut().find(|fl| fl.from == a && fl.to == b) {
+            Some(fl) => fl.value += v,
+            None => flows.push(Flow {
+                from: a,
+                to: b,
+                value: v,
+                sy: 0.0,
+                ty: 0.0,
+            }),
+        }
+    }
+    if nodes.len() > super::MAX_SANKEY_NODES {
+        return Err(Refusal::TooManyMarks {
+            count: nodes.len(),
+            what: "nodes",
+        });
+    }
+    if flows.len() > super::MAX_FLOWS {
+        return Err(Refusal::TooManyMarks {
+            count: flows.len(),
+            what: "flows",
+        });
+    }
+    if let Some(cycle) = find_loop(nodes.len(), &flows) {
+        let mut names: Vec<&str> = cycle.iter().map(|i| nodes[*i].name.as_str()).collect();
+        names.push(names[0]);
+        return Err(Refusal::LoopsBack(names.join(" → ")));
+    }
+
+    // Columns by depth, then aligned.
+    let n = nodes.len();
+    let ins = |i: usize| flows.iter().filter(move |fl| fl.to == i);
+    let outs = |i: usize| flows.iter().filter(move |fl| fl.from == i);
+    let mut depth = vec![0usize; n];
+    // Longest path from a source: repeat until stable, at most n rounds (no loop).
+    for _ in 0..n {
+        let mut moved = false;
+        for fl in &flows {
+            if depth[fl.to] < depth[fl.from] + 1 {
+                depth[fl.to] = depth[fl.from] + 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    let last = depth.iter().copied().max().unwrap_or(0);
+    let mut height = vec![0usize; n];
+    for _ in 0..n {
+        let mut moved = false;
+        for fl in &flows {
+            if height[fl.from] < height[fl.to] + 1 {
+                height[fl.from] = height[fl.to] + 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    for i in 0..n {
+        let sink = outs(i).next().is_none();
+        let source = ins(i).next().is_none();
+        nodes[i].column = match f.align {
+            super::FlowAlign::Left => depth[i],
+            super::FlowAlign::Right => last - height[i],
+            super::FlowAlign::Justify if sink => last,
+            super::FlowAlign::Justify => depth[i],
+            super::FlowAlign::Centre if source => outs(i)
+                .map(|fl| depth[fl.to])
+                .min()
+                .map_or(0, |d| d.saturating_sub(1)),
+            super::FlowAlign::Centre => depth[i],
+        };
+        nodes[i].value = ins(i)
+            .map(|fl| fl.value)
+            .sum::<f64>()
+            .max(outs(i).map(|fl| fl.value).sum::<f64>());
+    }
+    let columns = last + 1;
+
+    // Room for the labels outside the first and last columns.
+    let label_text = |nd: &Node| match f.labels {
+        super::NodeLabels::Name => nd.name.clone(),
+        super::NodeLabels::NameAndValue => format!(
+            "{} {}",
+            nd.name,
+            scale::format(
+                nd.value,
+                &o.values.format,
+                scale::decimals_of(nd.value).min(2)
+            )
+        ),
+        super::NodeLabels::Off => String::new(),
+    };
+    let size = o.text.legend_size;
+    let widest = |col: usize| {
+        nodes
+            .iter()
+            .filter(|nd| nd.column == col)
+            .map(|nd| out.text.measure(&label_text(nd), size).width())
+            .fold(0.0, f64::max)
+    };
+    let (room_l, room_r) = if f.labels == super::NodeLabels::Off {
+        (0.0, 0.0)
+    } else {
+        (
+            widest(0) + NODE_LABEL_GAP,
+            if columns > 1 {
+                widest(last) + NODE_LABEL_GAP
+            } else {
+                0.0
+            },
+        )
+    };
+    let plot = body;
+    let nw = f.node_width.min(plot.width / 4.0).max(1.0);
+    let span = (plot.width - room_l - room_r - nw).max(0.0);
+    let x_of = |col: usize| {
+        room_l
+            + if columns > 1 {
+                span * col as f64 / (columns - 1) as f64
+            } else {
+                span / 2.0
+            }
+    };
+
+    // Heights: one scale for every column, so a value is as tall everywhere.
+    let gap = f.node_gap;
+    let ky = (0..columns)
+        .filter_map(|c| {
+            let members: Vec<&Node> = nodes.iter().filter(|nd| nd.column == c).collect();
+            let total: f64 = members.iter().map(|nd| nd.value).sum();
+            (total > 0.0).then(|| {
+                (plot.height - gap * (members.len() as f64 - 1.0).max(0.0)).max(0.0) / total
+            })
+        })
+        .fold(f64::INFINITY, f64::min);
+    let ky = if ky.is_finite() { ky } else { 0.0 };
+    for nd in nodes.iter_mut() {
+        nd.h = nd.value * ky;
+    }
+    // Table order first, stacked from the top of each column.
+    let mut order: Vec<Vec<usize>> = vec![Vec::new(); columns];
+    for (i, nd) in nodes.iter().enumerate() {
+        order[nd.column].push(i);
+    }
+    let settle = |nodes: &mut Vec<Node>, col: &[usize]| {
+        // Overlaps pushed down, then back up from the bottom.
+        let mut ids = col.to_vec();
+        ids.sort_by(|a, b| nodes[*a].y.total_cmp(&nodes[*b].y));
+        let mut y = 0.0;
+        for &i in &ids {
+            nodes[i].y = nodes[i].y.max(y);
+            y = nodes[i].y + nodes[i].h + gap;
+        }
+        let mut bottom = plot.height;
+        for &i in ids.iter().rev() {
+            if nodes[i].y + nodes[i].h > bottom {
+                nodes[i].y = (bottom - nodes[i].h).max(0.0);
+            }
+            bottom = nodes[i].y - gap;
+        }
+    };
+    for col in &order {
+        let mut y = 0.0;
+        for &i in col {
+            nodes[i].y = y;
+            y += nodes[i].h + gap;
+        }
+    }
+    if f.relax {
+        let centre = |nd: &Node| nd.y + nd.h / 2.0;
+        for pass in 0..RELAX_PASSES {
+            let cols: Vec<usize> = if pass % 2 == 0 {
+                (1..columns).collect()
+            } else {
+                (0..columns.saturating_sub(1)).rev().collect()
+            };
+            for c in cols {
+                for &i in &order[c] {
+                    let (mut sum, mut weight) = (0.0, 0.0);
+                    for fl in &flows {
+                        let other = if fl.to == i && pass % 2 == 0 {
+                            Some(fl.from)
+                        } else if fl.from == i && pass % 2 == 1 {
+                            Some(fl.to)
+                        } else {
+                            None
+                        };
+                        if let Some(o) = other {
+                            sum += centre(&nodes[o]) * fl.value;
+                            weight += fl.value;
+                        }
+                    }
+                    if weight > 0.0 {
+                        nodes[i].y = sum / weight - nodes[i].h / 2.0;
+                    }
+                }
+                settle(&mut nodes, &order[c]);
+            }
+        }
+    }
+
+    // Ribbons stack on each node in the order of the nodes at their other ends,
+    // so they cross as little as they can.
+    let mut by_source: Vec<usize> = (0..flows.len()).collect();
+    by_source.sort_by(|a, b| {
+        let (fa, fb) = (&flows[*a], &flows[*b]);
+        fa.from
+            .cmp(&fb.from)
+            .then(nodes[fa.to].y.total_cmp(&nodes[fb.to].y))
+    });
+    let mut down = vec![0.0f64; n];
+    for &k in &by_source {
+        let s = flows[k].from;
+        flows[k].sy = down[s];
+        down[s] += flows[k].value * ky;
+    }
+    let mut by_target: Vec<usize> = (0..flows.len()).collect();
+    by_target.sort_by(|a, b| {
+        let (fa, fb) = (&flows[*a], &flows[*b]);
+        fa.to
+            .cmp(&fb.to)
+            .then(nodes[fa.from].y.total_cmp(&nodes[fb.from].y))
+    });
+    let mut down = vec![0.0f64; n];
+    for &k in &by_target {
+        let d = flows[k].to;
+        flows[k].ty = down[d];
+        down[d] += flows[k].value * ky;
+    }
+
+    let body_key = body_frame(out, body, body_at);
+    let flows_key = key(PartRole::Flows, 0, 0);
+    out.frame_pinned(
+        flows_key,
+        Some(body_key),
+        "Flows",
+        Rect::from_origin_size(Point::ZERO, plot),
+        None,
+        LayoutItem::default(),
+        fill_insets(),
+    );
+    let neutral = o.value_axis.colour.clone();
+    for (k, fl) in flows.iter().enumerate() {
+        let (a, b) = (&nodes[fl.from], &nodes[fl.to]);
+        let th = fl.value * ky;
+        let x0 = x_of(a.column) + nw;
+        let x1 = x_of(b.column);
+        let (y0, y1) = (a.y + fl.sy, b.y + fl.ty);
+        let mid = (x0 + x1) / 2.0;
+        let mut p = kurbo::BezPath::new();
+        p.move_to((x0, y0));
+        p.curve_to((mid, y0), (mid, y1), (x1, y1));
+        p.line_to((x1, y1 + th));
+        p.curve_to((mid, y1 + th), (mid, y0 + th), (x0, y0 + th));
+        p.close_path();
+        // A gradient flow is drawn in its source's colour until the generator
+        // writes gradient fills.
+        let brush = match f.colour {
+            super::FlowColour::Source | super::FlowColour::Gradient => a.fill.clone(),
+            super::FlowColour::Target => b.fill.clone(),
+            super::FlowColour::Neutral => neutral.clone(),
+        };
+        out.path(
+            key(PartRole::Flow, 0, k as u32),
+            flows_key,
+            format!("Flow · {} → {}", a.name, b.name),
+            p,
+            plot,
+            fill(brush),
+            Vec::new(),
+            f.opacity as f32,
+        );
+    }
+    let nodes_key = key(PartRole::Nodes, 0, 0);
+    out.frame_pinned(
+        nodes_key,
+        Some(body_key),
+        "Nodes",
+        Rect::from_origin_size(Point::ZERO, plot),
+        None,
+        LayoutItem::default(),
+        fill_insets(),
+    );
+    let (w, h) = (plot.width.max(1e-9), plot.height.max(1e-9));
+    for (i, nd) in nodes.iter().enumerate() {
+        let x = x_of(nd.column);
+        let bx = Rect::new(x, nd.y, x + nw, nd.y + nd.h);
+        // Its place and height follow the plot; its width stays.
+        out.rect(
+            key(PartRole::SankeyNode, 0, i as u32),
+            nodes_key,
+            format!("Node · {}", nd.name),
+            bx,
+            Spec {
+                fill: nd.fill.clone(),
+                radii: RoundedRectRadii::from_single_radius(
+                    f.node_radius.min(nw / 2.0).min(nd.h / 2.0).max(0.0),
+                ),
+                insets: Insets {
+                    left: pct(x / w * 100.0),
+                    top: pct(nd.y / h * 100.0),
+                    bottom: pct((1.0 - (nd.y + nd.h) / h) * 100.0),
+                    ..Insets::default()
+                },
+            },
+        );
+        let text = label_text(nd);
+        if text.is_empty() {
+            continue;
+        }
+        let b = out.text.measure(&text, size);
+        // Outside on the first and last columns; elsewhere away from the middle.
+        let on_left = if nd.column == 0 && columns > 1 {
+            true
+        } else if nd.column == last {
+            false
+        } else {
+            x + nw / 2.0 < plot.width / 2.0
+        };
+        let cy = nd.y + nd.h / 2.0;
+        let mut insets = centred_y(cy / h * 100.0);
+        let lx = if on_left {
+            let right = x - NODE_LABEL_GAP;
+            insets.right = pct((1.0 - right / w) * 100.0);
+            right - b.width()
+        } else {
+            let left = x + nw + NODE_LABEL_GAP;
+            insets.left = pct(left / w * 100.0);
+            left
+        };
+        out.label(
+            key(PartRole::NodeLabel, 0, i as u32),
+            nodes_key,
+            format!("Label · {}", nd.name),
+            &text,
+            size,
+            Point::new(lx - b.x0, cy - b.height() / 2.0 - b.y0),
+            insets,
+            0.0,
+        );
+    }
+    Ok(())
+}
+
+/// The Body frame with nothing laid out in it, for the kinds that draw straight
+/// into it.
+fn body_frame(out: &mut Out, body: Size, body_at: Point) -> PartKey {
+    let k = key(PartRole::Body, 0, 0);
+    out.frame(
+        k,
+        None,
+        "Body",
+        Rect::from_origin_size(body_at, body),
+        None,
+        body_item(false),
+    );
+    k
+}
+
+/// The nodes of a loop among `flows`, in the order it runs, if there is one.
+fn find_loop(n: usize, flows: &[Flow]) -> Option<Vec<usize>> {
+    // 0 unvisited, 1 on the current path, 2 done.
+    let mut state = vec![0u8; n];
+    let mut path = Vec::new();
+    fn visit(
+        i: usize,
+        flows: &[Flow],
+        state: &mut [u8],
+        path: &mut Vec<usize>,
+    ) -> Option<Vec<usize>> {
+        state[i] = 1;
+        path.push(i);
+        for fl in flows.iter().filter(|fl| fl.from == i) {
+            match state[fl.to] {
+                1 => {
+                    let at = path.iter().position(|p| *p == fl.to).expect("on the path");
+                    return Some(path[at..].to_vec());
+                }
+                0 => {
+                    if let Some(c) = visit(fl.to, flows, state, path) {
+                        return Some(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        path.pop();
+        state[i] = 2;
+        None
+    }
+    (0..n).find_map(|i| {
+        if state[i] == 0 {
+            visit(i, flows, &mut state, &mut path)
+        } else {
+            None
+        }
+    })
 }
 
 /// One series of a scatter as drawn: a Y column, or one group's rows of the

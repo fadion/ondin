@@ -58,7 +58,7 @@ Read the file for the exact wording before relying on one.
 | `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, the contrast check mode, the vision simulation, top-bar menus, the command palette, batch rename, clean up, fill with content, the assets browser and credits, find and replace in text, colour review, the shortcut cheatsheet, focus mode, the peek (`\` held), private mode, present mode |
 | `app-compare.md` | 9.4 | Compare with a version: the read-only mode, its marks, bar, Then/Swipe and changes card |
 | `app-image-editing.md` | 9.4 | Image fills and image editing |
-| `charts.md` | — | Charts: a frame carrying a chart description, its generated parts, the Chart card, the data window, import and the linked data file, flatten (the model, settle and the generator for every kind but Sankey built) |
+| `charts.md` | — | Charts: a frame carrying a chart description, its generated parts, the Chart card, the data window, import and the linked data file, flatten (the model, settle and the generator for every kind built) |
 | `inspector.md` | 9.4 | The inspector cards |
 | `type-panel.md` | 9.4 | The Type panel and typography popup |
 | `font-picker.md` | 9.4 | The font picker |

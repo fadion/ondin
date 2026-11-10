@@ -641,3 +641,52 @@ fn a_line_stretches_to_the_path_regeneration_draws() {
         "the stroke stays its width"
     );
 }
+
+/// A Sankey adds up same-named flows, leaves out a row it cannot draw and says
+/// why, and refuses a table whose flows loop back, naming the loop.
+/// flip: `find_loop` answering `None` → fails at "the loop is refused".
+#[test]
+fn a_sankey_adds_flows_leaves_out_rows_and_refuses_a_loop() {
+    use ondin_core::chart::{Refusal, generate};
+    let mut c = sample();
+    c.kind = ChartKind::Sankey;
+    c.table.rows = [
+        ["Search", "Signup", "520"],
+        ["Search", "Signup", "480"],
+        ["Signup", "Trial", "900"],
+        ["Trial", "Trial", "5"],
+        ["Signup", "Leave", "-3"],
+    ]
+    .iter()
+    .map(|r| r.iter().map(|s| s.to_string()).collect())
+    .collect();
+    c.mapping = Mapping {
+        from: Some(ColumnId(0)),
+        to: Some(ColumnId(1)),
+        value: Some(ColumnId(2)),
+        ..Mapping::default()
+    };
+    let g = generate(&c, Size::new(480.0, 280.0), "Inter").expect("drawn");
+    let flows = g
+        .parts
+        .iter()
+        .filter(|p| p.key.role == PartRole::Flow)
+        .count();
+    assert_eq!(flows, 2, "the two Search → Signup rows are one flow");
+    assert_eq!(
+        g.left_out.len(),
+        2,
+        "a flow into itself and one below zero: {:?}",
+        g.left_out
+    );
+    c.table
+        .rows
+        .push(vec!["Trial".into(), "Search".into(), "10".into()]);
+    assert_eq!(
+        generate(&c, Size::new(480.0, 280.0), "Inter"),
+        Err(Refusal::LoopsBack(
+            "Search → Signup → Trial → Search".into()
+        )),
+        "the loop is refused"
+    );
+}

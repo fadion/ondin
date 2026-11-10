@@ -1,10 +1,40 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: components and
-layout, and code export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+Open work only. **Now** is the work that lands before Command Mode and MCP: charts, and code
+export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
+
+## Now · Charts
+
+Designed in `design/charts.md`; nothing of it is built. In the order it can land:
+
+- **The model** — `Node::chart` on a frame, `chart::Chart` and its table, `SetChart`,
+  `chart::check` (parts written only by their chart, the placement refusals), the DTO and its
+  schema bump, the clipboard dropping the link.
+- **Paths that stretch** — a `Path` pinned on both edges of an axis scales its points into the
+  used box, its stroke width unscaled; the node tool writes the drawn points back before its first
+  edit; code export's stretching `<svg>`. Changes `layout.md`'s *What stretches*. Charts lay
+  their lines, areas, slices and flows out on it, so it lands first.
+- **The generator** — `chart::generate` for the seven kinds and their variants: the part tree on
+  the container layout (flex column, the Body grid, percentage insets in the plot), nice ticks,
+  number formats, label thinning and turning, stacking, the monotone curve, pie geometry and
+  *Other*, the Sankey's columns, relaxation passes, ribbons and loop refusal, the limits.
+  `chart::settle` as a commit pass after layout, keeping ids by `PartKey`. Goldens per kind
+  through the SVG writer, and at three sizes each, flattened, to pin the reflow.
+- **Making and selecting** — the rail's Chart slot and `J`, the create gesture and sample tables,
+  a chart selecting as one layer, double-click to its cell, the layers row, `RenderOverrides::chart`
+  for scrub previews.
+- **The Chart card** — type, style presets, data summary and mapping, series (*Nodes* for a
+  Sankey), marks, axes, values, legend, text, palettes (*From variables* included), flatten.
+- **The data window** — the grid, its keyboard, range selection, TSV copy and paste, the header
+  and row menus, the undo steps.
+- **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the
+  link with the tokens link's path rules, watching, the pill and *Update*, relink and unlink.
+- **Elsewhere** — the snapshot's `chart`, the four verbs, code export writing the chart's layout,
+  compare's rows, the context menu, the palette rows, the nine glyphs, `control_audit` for the card and
+  the window.
 
 ## Now · Code export (HTML/CSS, React, Vue)
 

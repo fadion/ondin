@@ -117,6 +117,21 @@ multiplayer is one of its considerations.
 - **Code layers, and importing HTML/CSS or framework code as layers** — too complex fully, messy partly; SVG import is untouched (§15 D1099).
 - **The code fidelity check in the app** — it needs an external browser and cannot check React or Vue; `ondin check code` stays the way to run it.
 - **Live interaction states in present mode** — hover and press on the canvas are prototyping; the states exist for code export.
+
+## Charts
+
+- **Chart kinds past the seven** (radar, heatmap, treemap, funnel, gauge, candlestick, maps) — a flattened chart or plain shapes draw them (`charts.md`).
+- **Sankey loops** (flows back to a node already passed) — refused with the loop named; a loop needs ribbons that turn backwards.
+- **Combo charts and a second value axis** — two charts stacked in one frame do it without a dual-scale design.
+- **A time scale** — the category axis is categorical; dates read as labels in table order.
+- **Editing one part of a live chart** — series and value options cover the tweaks; past them, flatten.
+- **A chart inside a component, an instance or a kit** — a resized instance would regenerate parts its main lacks; flatten first.
+- **Data from a URL, formulas in the table, and data bound to variables** — the table is values, from typing, pasting or a local file.
+- **Interactivity** (hover readouts, tooltips, animation) — a chart is a picture of its data, on the canvas and in code export.
+- **A chart's own title or caption** — a text layer beside it does that.
+- **Saved user presets** — duplicate a styled chart and replace its data.
+- **Refreshing a linked file without a click** — an opened document's link can name any file on the machine (`charts.md`, *Import and the linked file*).
+
 ## Tests and goldens
 
 - **`f32_pipeline` for `OptimizeQuality`, and keeping strokes out of the PNG fixture** (§15 D304).

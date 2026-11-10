@@ -1039,6 +1039,77 @@ fn scatter_charts_match_their_golden() {
     );
 }
 
+/// The axis and mark options through the SVG writer: a column chart with both
+/// axis titles, tick marks, its value axis line and a dashed grid; a bar chart
+/// with the same, its category axis on the right; a line chart whose series
+/// wear their own point shapes; a scatter with titles and a series' own shape
+/// over the chart's; a rounded, padded donut; and a Sankey with gradient flows.
+#[test]
+fn chart_options_match_their_golden() {
+    use ondin_core::chart::{
+        AxisSide, Chart, ChartKind, ColumnId, Dash, FlowColour, PointShape, PointStyle, SeriesStyle,
+    };
+    let dressed = |kind| {
+        let mut c = sample_chart(kind);
+        let o = &mut c.options;
+        o.value_axis.title = "Amount".into();
+        o.category_axis.title = "Month".into();
+        o.value_axis.ticks = true;
+        o.category_axis.ticks = true;
+        o.value_axis.line = true;
+        o.value_axis.grid.dashed = true;
+        c
+    };
+    let columns = dressed(ChartKind::Column);
+    let mut bars = dressed(ChartKind::Bar);
+    bars.options.category_axis.side = AxisSide::End;
+    // A series in its palette colour, wearing `point`.
+    let style = |col: u32, point| {
+        let [r, g, b] = ondin_core::chart::palette(Default::default())[col as usize - 1];
+        SeriesStyle {
+            column: ColumnId(col),
+            fill: ondin_core::variable::BrushSource::Literal(Brush::Solid(Color::from_rgb8(
+                r, g, b,
+            ))),
+            visible: true,
+            dash: Dash::Solid,
+            point,
+        }
+    };
+    let mut lines = sample_chart(ChartKind::Line);
+    lines.options.lines.points = PointStyle::Filled;
+    lines.options.lines.point_size = 8.0;
+    lines.options.value_axis.grid.dashed = true;
+    lines.series = vec![
+        style(1, Some(PointShape::Square)),
+        style(2, Some(PointShape::Triangle)),
+        style(3, None),
+    ];
+    let mut scatter = Chart::sample(ChartKind::Scatter);
+    scatter.options.value_axis.title = "Score".into();
+    scatter.options.category_axis.title = "Hours".into();
+    scatter.options.points.shape = PointShape::Square;
+    scatter.series = vec![style(1, None), style(2, Some(PointShape::Diamond))];
+    let mut donut = sample_chart(ChartKind::Pie);
+    donut.options.slices.donut = true;
+    donut.options.slices.pad_angle = 2.0;
+    donut.options.slices.radius = 4.0;
+    let mut sankey = Chart::sample(ChartKind::Sankey);
+    sankey.options.flows.colour = FlowColour::Gradient;
+    let (doc, res) = chart_page(vec![
+        (columns, 480.0, 280.0),
+        (bars, 480.0, 280.0),
+        (lines, 480.0, 280.0),
+        (scatter, 480.0, 280.0),
+        (donut, 320.0, 240.0),
+        (sankey, 560.0, 300.0),
+    ]);
+    check_golden(
+        "charts-options.svg",
+        &svg(&doc, &res, doc.first_page(), None),
+    );
+}
+
 /// Pies through the SVG writer: a pie with its values inside (March's negative
 /// left out), a sorted, padded donut with *Other* and its shares outside on
 /// leader lines, and a one-row donut drawn as a progress ring.

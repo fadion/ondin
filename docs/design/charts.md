@@ -121,21 +121,28 @@ or turned, which value labels fit.
   (a frame 100% wide and `fit-content` tall, a flex row that wraps, so a narrow chart puts its
   legend on two lines; each *Legend · ‹series›* a `fit-content` flex row of swatch and label) and
   *Body* (a frame 100% across, `flex-grow: 1` from a basis of 0, a grid). The Body's grid gives
-  each axis a px track as thick as its labels, which only regeneration changes, and the plot
+  each axis a px track as thick as its labels and tick marks, which only regeneration changes,
+  an axis with a title a second px track past it as thick as the title, and the plot
   `minmax(0, 1fr)` both ways: a bare `1fr` keeps the plot's stored size as its least, so a chart
   made smaller would not shrink its plot. Its cells, each 100% of its area, are *Value axis*
-  (tick labels), *Plot*, and *Category axis* under the plot; a bar chart swaps the two axes'
-  places, and an axis's *side* moves its track to the other edge. A legend placed left or right
-  makes the chart a flex row.
+  (tick labels, tick marks and title, spanning the title's track), *Plot*, and *Category axis*
+  under the plot; a bar chart swaps the two axes' places, and an axis's *side* moves its tracks
+  to the other edge. A title is centred along its axis at the frame's far edge, a side axis's
+  turned a quarter to read upwards. A legend placed left or right makes the chart a flex row.
 - **Inside the plot, marks are pinned by percentage insets** of the plot (`container::Insets`,
   `LengthPct::Percent`). A column's left and right insets are its slot's edges in the band, its
   top inset its value, its bottom inset the baseline, so a wider or taller plot stretches the
-  column and keeps it on its value. A gridline, and the baseline at zero, is a 1 px `Rect` centred
-  on its value and pinned between left 0 and right 0. A point, a tick label and a category label
-  are centred on their percentage by both insets and auto margins (layout's absolute-centring),
-  so they keep their size while their place follows the plot; a tick label is pinned the axis gap
-  from the plot on the other axis, a turned category label as deep as its turned box reaches. A
-  pie or donut sits in a square frame (`aspect-ratio: 1`) centred in the plot.
+  column and keeps it on its value. A gridline, and an axis line, is a 1 px `Rect` centred on its
+  value and pinned between left 0 and right 0; a dashed gridline is a line path with the dash on
+  its stroke, pinned the same way. The category axis line is the baseline at zero, or the plot's
+  edge on its axis's side when zero is out of range; the value axis line runs along the plot's
+  edge on its axis's side. A point, a tick label, a tick mark and a category label are centred on
+  their percentage by both insets and auto margins (layout's absolute-centring), so they keep
+  their size while their place follows the plot; a tick mark (4 px) is pinned against the plot,
+  a tick label the axis gap past the tick marks on the other axis, a turned category label as
+  deep as its turned box reaches. Value tick marks sit at the ticks, category ones at every
+  category's centre (a scatter's at its X ticks). A pie or donut sits in a square frame
+  (`aspect-ratio: 1`) centred in the plot.
 - **Value labels** sit outside, inside or at the end of their bar. In a stack only the outermost
   segment each way takes an outside label; the segments it covers take theirs inside, and a label
   that does not fit inside is left out. A value label writes as many places as the value has, up
@@ -175,8 +182,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   centres of the category bands, as columns do.
 - **Lines and areas** are one series frame each: the area (a closed path down to the baseline or
   to the stack beneath it, at the area opacity), the line over it (round joins and caps, the
-  series' dash), and the points (ellipses centred on their values; *Hollow* is white with the
-  series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
+  series' dash), and the points (centred on their values in the series' own point shape, a
+  circle when it has none; *Hollow* is white with the series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
   while *Start at zero* is on; an area's always holds zero.
 - **A scatter** reads its category column as X, numbers on a tick axis like the value axis (a row
   whose X is not a number is left out and said), and each series column as a Y series; with a
@@ -184,14 +191,16 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   palette in first-seen order. With a size column it is a bubble chart: a bubble's side is the
   largest size times the square root of its share of the largest value, so its area follows the
   value, and a row with no size is left out. Points are circles, squares, or diamond and triangle
-  paths, centred on their place at their own size. Vertical gridlines follow the category axis's
+  paths, centred on their place at their own size: a series' own shape, else the chart's (a
+  group takes its series'). Vertical gridlines follow the category axis's
   *Gridlines*. *Start at zero* is off by default on every axis; columns, bars and areas hold zero
   whatever it says.
 - **A pie** reads the first series by category, each slice its palette colour by category, and
   its legend lists the slices. A zero is not drawn; *Group small slices* folds two or more slices
   under its share into *Other* (the palette's last colour). The pie sits in a square frame
   centred in the body at its own size, so it stays round as the chart resizes; each slice is a
-  wedge path pinned by its own box. Labels sit two thirds out on a pie, mid-ring on a donut, or
+  wedge path pinned by its own box; its corner radius rounds the wedge's corners as a path's
+  per-anchor radii, and the box is the rounded outline's. Labels sit two thirds out on a pie, mid-ring on a donut, or
   outside on a leader line, the pie shrunk to leave them room. **One slice of at most 100 is a
   progress ring**: its share of 100 drawn over a *Track* in the value gridline colour.
 - **Values the kind cannot draw are left out, and said.** Negative values in a pie, text in a
@@ -232,8 +241,9 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 - **Colours belong to nodes.** The Series section is *Nodes* for a Sankey: one row per node name
   with its swatch, bindable like a series'. A flow is coloured by its *Source* node (the default),
   its *Target*, a *Gradient* between the two (a linear-gradient fill across the ribbon), or one
-  *Neutral* colour (the value axis's colour), at the flow opacity. *Gradient* is drawn in the
-  source's colour until the generator writes gradient fills (`roadmap.md`).
+  *Neutral* colour (the value axis's colour), at the flow opacity. A *Gradient* runs across the
+  ribbon from the source node's edge to the target's; a node colour bound to a variable has no
+  stop to give, so such a flow takes its source's paint.
 - **Labels** are the node's name, or name and value, beside the node: outside for the first and
   last columns, on the side away from the chart's middle for the rest. There is no legend and
   there are no axes.
@@ -266,7 +276,8 @@ it applies to; switching kind keeps the others' values.
   - *Flows* (Sankey): node width, node gap, node corner radius, alignment (Justify, Left, Right,
     Centre), order (Automatic, Table order), flow colour (Source, Target, Gradient, Neutral),
     flow opacity, labels (Name, Name and value, Off).
-- **Axes** (not Pie or Sankey): per axis, *Show*, its line, its ticks, its labels and their angle (Auto,
+- **Axes** (not Pie or Sankey): per axis, *Show*, its line (off by default on the value axis, whose
+  gridlines carry it), its tick marks, its labels and their angle (Auto,
   0°, 45°, 90°; Auto turns them 45° and then thins them to every *n*th when they would touch),
   a title, and for a value axis its range (Auto or a typed min and max), *Start at zero* (always
   on for columns and bars, whose length is the value), the tick count (Auto aims for five on

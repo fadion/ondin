@@ -68,6 +68,10 @@ const SWATCH_GAP: f64 = 6.0;
 const SWATCH: f64 = 10.0;
 /// The space between a value label and its bar.
 const VALUE_GAP: f64 = 4.0;
+/// A tick mark's length, out from the plot into its axis's track.
+const TICK_LEN: f64 = 4.0;
+/// A dashed gridline's dash and gap.
+const GRID_DASH: [f64; 2] = [3.0, 3.0];
 
 /// The palettes' colours, in the order series take them.
 pub fn palette(p: super::Palette) -> &'static [[u8; 3]] {
@@ -566,6 +570,54 @@ impl Out<'_> {
         );
     }
 
+    /// A gridline across the plot at `share` along the value axis (see
+    /// [`rule_at`]): a 1 px rect, or a dashed line when the grid is dashed, since
+    /// a dash is a stroke's. The line is flat on one axis, so pinned on both
+    /// edges it keeps its place by its near inset.
+    #[allow(clippy::too_many_arguments)]
+    fn gridline(
+        &mut self,
+        key: PartKey,
+        parent: PartKey,
+        name: String,
+        horizontal: bool,
+        share: f64,
+        plot: Size,
+        grid: &super::Gridlines,
+    ) {
+        if !grid.dashed {
+            let (bx, insets) = rule_at(horizontal, share, plot);
+            let radii = RoundedRectRadii::default();
+            let fill = grid.colour.clone();
+            self.rect(
+                key,
+                parent,
+                name,
+                bx,
+                Spec {
+                    fill,
+                    radii,
+                    insets,
+                },
+            );
+            return;
+        }
+        let mut p = kurbo::BezPath::new();
+        if horizontal {
+            let x = share * plot.width;
+            p.move_to((x, 0.0));
+            p.line_to((x, plot.height));
+        } else {
+            let y = (1.0 - share) * plot.height;
+            p.move_to((0.0, y));
+            p.line_to((plot.width, y));
+        }
+        let mut stroke = line_stroke(grid.colour.clone(), 1.0, super::Dash::Solid);
+        stroke.dashes = GRID_DASH.to_vec();
+        stroke.cap = kurbo::Cap::Butt;
+        self.path(key, parent, name, p, plot, Vec::new(), vec![stroke], 1.0);
+    }
+
     /// A path drawn in its parent's space, which is `plot` big: pinned on every
     /// edge by its own box's place as percentages, so it stretches with the plot
     /// (`container::inset_stretch`) and lands exactly where regeneration would.
@@ -581,10 +633,36 @@ impl Out<'_> {
         strokes: Vec<Stroke>,
         opacity: f32,
     ) {
+        self.path_rounded(
+            key,
+            parent,
+            name,
+            (path, Vec::new()),
+            plot,
+            fills,
+            strokes,
+            opacity,
+        );
+    }
+
+    /// [`Self::path`] with a corner radius per anchor, pinned by the box of the
+    /// rounded outline it draws, since that is the box layout stretches.
+    #[allow(clippy::too_many_arguments)]
+    fn path_rounded(
+        &mut self,
+        key: PartKey,
+        parent: PartKey,
+        name: String,
+        (path, corner_radii): (kurbo::BezPath, Vec<f64>),
+        plot: Size,
+        fills: Vec<Fill>,
+        strokes: Vec<Stroke>,
+        opacity: f32,
+    ) {
         if path.elements().is_empty() {
             return;
         }
-        let b = path.bounding_box();
+        let b = crate::geometry::round_corners(&path, &corner_radii).bounding_box();
         let (w, h) = (plot.width.max(1e-9), plot.height.max(1e-9));
         let insets = Insets {
             left: pct(b.x0 / w * 100.0),
@@ -599,7 +677,7 @@ impl Out<'_> {
             name,
             kind: NodeKind::Path {
                 path,
-                corner_radii: Vec::new(),
+                corner_radii,
                 corner_smoothing: 0.0,
                 mirror: crate::symmetry::PathMirror::NONE,
             },
@@ -909,6 +987,10 @@ struct Axes {
     left_at_end: bool,
     bottom_at_top: bool,
     tick_size: f64,
+    /// The category labels' distance from the plot, past any tick marks.
+    ca_gap: f64,
+    /// The category axis's tick mark colour, when it draws them.
+    ca_ticks: Option<BrushSource>,
     /// A scatter's X ticks and their text; `None` reads categories.
     x: Option<Ticks>,
     x_text: Vec<String>,
@@ -968,15 +1050,27 @@ fn axes(
         .collect();
     let va_show = va.show && va.labels;
     let ca_show = ca.show && ca.labels;
+    // Tick marks stand between the plot and the labels, pushing them out.
+    let va_tick = if va.show && va.ticks { TICK_LEN } else { 0.0 };
+    let ca_tick = if ca.show && ca.ticks { TICK_LEN } else { 0.0 };
+    let (va_gap, ca_gap) = (AXIS_GAP + va_tick, AXIS_GAP + ca_tick);
     let va_thick = if va_show {
         if horizontal {
-            label_h + AXIS_GAP
+            label_h + va_gap
         } else {
-            tick_boxes.iter().map(Rect::width).fold(0.0, f64::max) + AXIS_GAP
+            tick_boxes.iter().map(Rect::width).fold(0.0, f64::max) + va_gap
         }
     } else {
-        0.0
+        va_tick
     };
+    // A title's text and box, in its own track past its axis's labels.
+    let title_of = |a: &Axis| {
+        let t = a.title.trim();
+        (a.show && !t.is_empty()).then(|| (t.to_string(), out.text.measure(t, o.text.title_size)))
+    };
+    let (va_title, ca_title) = (title_of(va), title_of(ca));
+    let title_thick =
+        |t: &Option<(String, Rect)>| t.as_ref().map_or(0.0, |(_, b)| b.height() + AXIS_GAP);
 
     // A scatter's X axis is numbers on ticks, spaced for labels four high.
     let x_ticks = x.map(|(lo, hi)| {
@@ -1020,25 +1114,33 @@ fn axes(
         category_turn(ca.angle, &cat_boxes, band_len_guess, label_h)
     };
     let ca_thick = if !ca_show {
-        0.0
+        ca_tick
     } else if horizontal {
-        cat_boxes.iter().map(Rect::width).fold(0.0, f64::max) + AXIS_GAP
+        cat_boxes.iter().map(Rect::width).fold(0.0, f64::max) + ca_gap
     } else {
         let (s, c) = turn.sin_cos();
         cat_boxes
             .iter()
             .map(|b| b.width() * s.abs() + b.height() * c.abs())
             .fold(0.0, f64::max)
-            + AXIS_GAP
+            + ca_gap
     };
 
     // The body grid: the value axis beside the plot, the category axis under it
-    // (a bar chart has them the other way round).
-    let (left_w, bottom_h) = if horizontal {
+    // (a bar chart has them the other way round), each title in a track past
+    // its axis's. An axis frame spans its title's track too.
+    let (side_title, under_title) = if horizontal {
+        (&ca_title, &va_title)
+    } else {
+        (&va_title, &ca_title)
+    };
+    let (side_axis_w, under_axis_h) = if horizontal {
         (ca_thick, va_thick)
     } else {
         (va_thick, ca_thick)
     };
+    let (side_title_w, under_title_h) = (title_thick(side_title), title_thick(under_title));
+    let (left_w, bottom_h) = (side_axis_w + side_title_w, under_axis_h + under_title_h);
     let left_at_end = if horizontal {
         ca.side == AxisSide::End
     } else {
@@ -1060,16 +1162,29 @@ fn axes(
         min: TrackBreadth::Px(0.0),
         max: TrackBreadth::Fr(1.0),
     });
-    let columns = if left_at_end {
-        vec![fr.clone(), px_track(left_w)]
-    } else {
-        vec![px_track(left_w), fr.clone()]
+    // An axis's tracks out from the plot: its labels', then its title's.
+    let outward = |axis: f64, title: &Option<(String, Rect)>, title_w: f64| {
+        let mut t = vec![px_track(axis)];
+        if title.is_some() {
+            t.push(px_track(title_w));
+        }
+        t
     };
-    let rows = if bottom_at_top {
-        vec![px_track(bottom_h), fr.clone()]
-    } else {
-        vec![fr, px_track(bottom_h)]
+    let side_tracks = outward(side_axis_w, side_title, side_title_w);
+    let under_tracks = outward(under_axis_h, under_title, under_title_h);
+    let (side_span, under_span) = (side_tracks.len() as u16, under_tracks.len() as u16);
+    let lay = |at_end: bool, mut tracks: Vec<Track>| {
+        if at_end {
+            tracks.insert(0, fr.clone());
+        } else {
+            tracks.reverse();
+            tracks.push(fr.clone());
+        }
+        tracks
     };
+    let columns = lay(left_at_end, side_tracks);
+    let rows = lay(!bottom_at_top, under_tracks);
+    let (n_cols, n_rows) = (columns.len() as i16, rows.len() as i16);
     let body_key = key(PartRole::Body, 0, 0);
     out.frame(
         body_key,
@@ -1088,19 +1203,21 @@ fn axes(
             ) && !data.series.is_empty(),
         ),
     );
-    let (plot_col, side_col) = if left_at_end { (1, 2) } else { (2, 1) };
-    let (plot_row, under_row) = if bottom_at_top { (2, 1) } else { (1, 2) };
-    let cell = |col: i16, row: i16| LayoutItem {
+    let (plot_col, side_col) = if left_at_end { (1, 2) } else { (n_cols, 1) };
+    let (plot_row, under_row) = if bottom_at_top { (n_rows, 1) } else { (1, 2) };
+    let lines = |start: i16, span: u16| GridLines {
+        start: GridPlacement::Line(start),
+        end: if span > 1 {
+            GridPlacement::Span(span)
+        } else {
+            GridPlacement::Auto
+        },
+    };
+    let cell = |(col, col_span): (i16, u16), (row, row_span): (i16, u16)| LayoutItem {
         width: Dimension::Percent(100.0),
         height: Dimension::Percent(100.0),
-        grid_column: GridLines {
-            start: GridPlacement::Line(col),
-            end: GridPlacement::Auto,
-        },
-        grid_row: GridLines {
-            start: GridPlacement::Line(row),
-            end: GridPlacement::Auto,
-        },
+        grid_column: lines(col, col_span),
+        grid_row: lines(row, row_span),
         ..LayoutItem::default()
     };
     let plot_x = if left_at_end { 0.0 } else { left_w };
@@ -1137,7 +1254,7 @@ fn axes(
         axis_name(side_role),
         side_box,
         None,
-        cell(side_col, plot_row),
+        cell((side_col, side_span), (plot_row, 1)),
     );
     out.frame(
         under_key,
@@ -1145,7 +1262,7 @@ fn axes(
         axis_name(under_role),
         under_box,
         None,
-        cell(plot_col, under_row),
+        cell((plot_col, 1), (under_row, under_span)),
     );
     out.frame(
         plot_key,
@@ -1153,7 +1270,7 @@ fn axes(
         "Plot",
         plot_box,
         None,
-        cell(plot_col, plot_row),
+        cell((plot_col, 1), (plot_row, 1)),
     );
 
     // Along the value axis, as a share of the plot from its start: up from the
@@ -1175,36 +1292,81 @@ fn axes(
             let k = key(PartRole::TickLabel, 0, i as u32);
             if horizontal {
                 let cx = share * frame_w;
-                let at = Point::new(cx - b.width() / 2.0 - b.x0, AXIS_GAP - b.y0);
+                let at = Point::new(cx - b.width() / 2.0 - b.x0, va_gap - b.y0);
                 let at = if bottom_at_top {
-                    Point::new(at.x, frame_h - AXIS_GAP - b.height() - b.y0)
+                    Point::new(at.x, frame_h - va_gap - b.height() - b.y0)
                 } else {
                     at
                 };
                 let mut insets = centred_x(share * 100.0);
                 if bottom_at_top {
-                    insets.bottom = px(AXIS_GAP);
+                    insets.bottom = px(va_gap);
                 } else {
-                    insets.top = px(AXIS_GAP);
+                    insets.top = px(va_gap);
                 }
                 out.label(k, value_axis_key, name, s, tick_size, at, insets, 0.0);
             } else {
                 let cy = (1.0 - share) * frame_h;
                 let x = if left_at_end {
-                    AXIS_GAP - b.x0
+                    va_gap - b.x0
                 } else {
-                    frame_w - AXIS_GAP - b.width() - b.x0
+                    frame_w - va_gap - b.width() - b.x0
                 };
                 let at = Point::new(x, cy - b.height() / 2.0 - b.y0);
                 let mut insets = centred_y((1.0 - share) * 100.0);
                 if left_at_end {
-                    insets.left = px(AXIS_GAP);
+                    insets.left = px(va_gap);
                 } else {
-                    insets.right = px(AXIS_GAP);
+                    insets.right = px(va_gap);
                 }
                 out.label(k, value_axis_key, name, s, tick_size, at, insets, 0.0);
             }
         }
+    }
+    // Value tick marks, out from the plot's edge at each tick.
+    if va_tick > 0.0 {
+        let (frame, from_start) = if horizontal {
+            (under_box.size(), !bottom_at_top)
+        } else {
+            (side_box.size(), left_at_end)
+        };
+        for (i, v) in t.values.iter().enumerate() {
+            let share = value_share(*v);
+            let along = if horizontal { share } else { 1.0 - share };
+            let (bx, insets) = tick_mark(!horizontal, along, from_start, frame);
+            out.rect(
+                key(PartRole::Tick, 0, i as u32),
+                value_axis_key,
+                format!("Tick mark {}", tick_text[i]),
+                bx,
+                Spec {
+                    fill: va.colour.clone(),
+                    radii: RoundedRectRadii::default(),
+                    insets,
+                },
+            );
+        }
+    }
+    // Each title in its own track, centred on the plot along its axis.
+    let titles = [
+        (side_title, side_key, true, left_at_end),
+        (under_title, under_key, false, !bottom_at_top),
+    ];
+    for (title, axis_key, turned, edge) in titles {
+        let Some((text, b)) = title else { continue };
+        let series = u32::from(axis_key.role == PartRole::CategoryAxis);
+        let frame = if turned { side_box } else { under_box };
+        let (at, insets, turn) = title_place(*b, frame.size(), turned, edge);
+        out.label(
+            key(PartRole::AxisTitle, series, 0),
+            axis_key,
+            format!("Title {text}"),
+            text,
+            o.text.title_size,
+            at,
+            insets,
+            turn,
+        );
     }
 
     // The plot's grid and its lines.
@@ -1223,18 +1385,7 @@ fn axes(
             let share = value_share(*v);
             let name = format!("Gridline {}", tick_text[i]);
             let k = key(PartRole::Gridline, 0, i as u32);
-            let (bx, insets) = rule_at(horizontal, share, plot);
-            out.rect(
-                k,
-                grid_key,
-                name,
-                bx,
-                Spec {
-                    fill: va.grid.colour.clone(),
-                    radii: RoundedRectRadii::default(),
-                    insets,
-                },
-            );
+            out.gridline(k, grid_key, name, horizontal, share, plot, &va.grid);
         }
     }
     if let Some(xt) = &x_ticks
@@ -1242,30 +1393,60 @@ fn axes(
         && ca.grid.show
     {
         for (i, v) in xt.values.iter().enumerate() {
-            let (bx, insets) = rule_at(true, xt.t(*v), plot);
-            out.rect(
+            out.gridline(
                 key(PartRole::Gridline, 1, i as u32),
                 grid_key,
                 format!("Gridline {}", x_text[i]),
-                bx,
-                Spec {
-                    fill: ca.grid.colour.clone(),
-                    radii: RoundedRectRadii::default(),
-                    insets,
-                },
+                true,
+                xt.t(*v),
+                plot,
+                &ca.grid,
             );
         }
     }
     if ca.show && ca.line {
-        // The baseline, at zero.
-        let (bx, insets) = rule_at(horizontal, value_share(0.0), plot);
+        // The baseline at zero; at the plot's edge on its axis's side when zero
+        // is out of range.
+        let zero = value_share(0.0);
+        let at_zero = (-1e-9..=1.0 + 1e-9).contains(&zero);
+        let edge = if horizontal {
+            left_at_end
+        } else {
+            bottom_at_top
+        };
+        let share = if at_zero {
+            zero
+        } else {
+            f64::from(u8::from(edge))
+        };
+        let (bx, insets) = rule_at(horizontal, share, plot);
         out.rect(
             key(PartRole::AxisLine, 1, 0),
             grid_key,
-            "Baseline".into(),
+            if at_zero { "Baseline" } else { "Axis line" }.into(),
             bx,
             Spec {
                 fill: ca.colour.clone(),
+                radii: RoundedRectRadii::default(),
+                insets,
+            },
+        );
+    }
+    if va.show && va.line {
+        // Along the plot's edge on the value axis's side.
+        let edge = if horizontal {
+            bottom_at_top
+        } else {
+            left_at_end
+        };
+        let (bx, insets) = rule_at(!horizontal, f64::from(u8::from(edge)), plot);
+        out.rect(
+            key(PartRole::AxisLine, 0, 0),
+            grid_key,
+            "Value axis line".into(),
+            bx,
+            Spec {
+                fill: va.colour.clone(),
                 radii: RoundedRectRadii::default(),
                 insets,
             },
@@ -1288,6 +1469,8 @@ fn axes(
         left_at_end,
         bottom_at_top,
         tick_size,
+        ca_gap,
+        ca_ticks: (ca_tick > 0.0).then(|| ca.colour.clone()),
         x: x_ticks,
         x_text,
     }
@@ -1483,11 +1666,48 @@ impl Axes {
             self.tick_size,
         );
         let (side_box, under_box, cat_boxes) = (self.side_box, self.under_box, &self.cat_boxes);
+        let cat_axis_key = key(PartRole::CategoryAxis, 0, 0);
+        let frame = if horizontal { side_box } else { under_box };
+        // Tick marks: at a scatter's X ticks, else at every category's centre.
+        if let Some(colour) = &self.ca_ticks {
+            let at: Vec<(f64, String)> = match &self.x {
+                Some(xt) => xt
+                    .values
+                    .iter()
+                    .zip(&self.x_text)
+                    .map(|(v, s)| (xt.t(*v), s.clone()))
+                    .collect(),
+                None => data
+                    .categories
+                    .iter()
+                    .enumerate()
+                    .map(|(c, name)| ((c as f64 + 0.5) * band / across_len.max(1e-9), name.clone()))
+                    .collect(),
+            };
+            let from_start = if horizontal {
+                left_at_end
+            } else {
+                !bottom_at_top
+            };
+            for (i, (along, name)) in at.into_iter().enumerate() {
+                let (bx, insets) = tick_mark(horizontal, along, from_start, frame.size());
+                out.rect(
+                    key(PartRole::Tick, 1, i as u32),
+                    cat_axis_key,
+                    format!("Tick mark {name}"),
+                    bx,
+                    Spec {
+                        fill: colour.clone(),
+                        radii: RoundedRectRadii::default(),
+                        insets,
+                    },
+                );
+            }
+        }
         if !self.ca_show {
             return;
         }
-        let cat_axis_key = key(PartRole::CategoryAxis, 0, 0);
-        let frame = if horizontal { side_box } else { under_box };
+        let gap = self.ca_gap;
         // A scatter's X axis writes number ticks at their place; any other,
         // every `every`th category at its band's centre.
         let items: Vec<(f64, &String, Rect, PartKey, String)> = match &self.x {
@@ -1524,16 +1744,16 @@ impl Axes {
         for (centre, name, b, k, label_name) in items {
             if horizontal {
                 let x = if left_at_end {
-                    AXIS_GAP - b.x0
+                    gap - b.x0
                 } else {
-                    frame.width() - AXIS_GAP - b.width() - b.x0
+                    frame.width() - gap - b.width() - b.x0
                 };
                 let at = Point::new(x, centre - b.height() / 2.0 - b.y0);
                 let mut insets = centred_y(centre / across_len * 100.0);
                 if left_at_end {
-                    insets.left = px(AXIS_GAP);
+                    insets.left = px(gap);
                 } else {
-                    insets.right = px(AXIS_GAP);
+                    insets.right = px(gap);
                 }
                 out.label(
                     k,
@@ -1551,16 +1771,16 @@ impl Axes {
                 let (sn, cs) = turn.sin_cos();
                 let reach = b.width() * sn.abs() + b.height() * cs.abs();
                 let cy = if bottom_at_top {
-                    frame.height() - AXIS_GAP - reach / 2.0
+                    frame.height() - gap - reach / 2.0
                 } else {
-                    AXIS_GAP + reach / 2.0
+                    gap + reach / 2.0
                 };
                 let at = Point::new(
                     centre - b.width() / 2.0 - b.x0,
                     cy - b.height() / 2.0 - b.y0,
                 );
                 let mut insets = centred_x(centre / across_len * 100.0);
-                let edge = AXIS_GAP + reach / 2.0 - b.height() / 2.0;
+                let edge = gap + reach / 2.0 - b.height() / 2.0;
                 if bottom_at_top {
                     insets.bottom = px(edge);
                 } else {
@@ -1934,10 +2154,9 @@ fn sankey(
         p.line_to((x1, y1 + th));
         p.curve_to((mid, y1 + th), (mid, y0 + th), (x0, y0 + th));
         p.close_path();
-        // A gradient flow is drawn in its source's colour until the generator
-        // writes gradient fills.
         let brush = match f.colour {
-            super::FlowColour::Source | super::FlowColour::Gradient => a.fill.clone(),
+            super::FlowColour::Source => a.fill.clone(),
+            super::FlowColour::Gradient => flow_gradient(&a.fill, &b.fill, x0, x1),
             super::FlowColour::Target => b.fill.clone(),
             super::FlowColour::Neutral => neutral.clone(),
         };
@@ -2023,6 +2242,27 @@ fn sankey(
     Ok(())
 }
 
+/// A *Gradient* flow's fill: a linear gradient across the ribbon from `x0` (the
+/// source node's edge) in the source's colour to `x1` in the target's, in the
+/// ribbon's own space. A colour that is no literal solid (one bound to a
+/// variable) has no stop to give, so the flow takes the source's paint whole.
+fn flow_gradient(from: &BrushSource, to: &BrushSource, x0: f64, x1: f64) -> BrushSource {
+    let solid = |s: &BrushSource| match s.literal() {
+        Some(crate::Brush::Solid(c)) => Some(*c),
+        _ => None,
+    };
+    let (Some(a), Some(b)) = (solid(from), solid(to)) else {
+        return from.clone();
+    };
+    let stop = |offset: f32, color: peniko::Color| peniko::ColorStop {
+        offset,
+        color: peniko::color::DynamicColor::from_alpha_color(color),
+    };
+    let gradient =
+        peniko::Gradient::new_linear((x0, 0.0), (x1, 0.0)).with_stops([stop(0.0, a), stop(1.0, b)]);
+    BrushSource::Literal(crate::Brush::Gradient(crate::GradientBrush::from(gradient)))
+}
+
 /// The Body frame with nothing laid out in it, for the kinds that draw straight
 /// into it.
 fn body_frame(out: &mut Out, body: Size, body_at: Point) -> PartKey {
@@ -2085,6 +2325,8 @@ struct Cloud {
     id: u32,
     name: String,
     fill: BrushSource,
+    /// The series' own shape, else `Points::shape`; a group takes its series'.
+    shape: super::PointShape,
     points: Vec<ScatterPoint>,
 }
 
@@ -2133,6 +2375,14 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
         .map(|c| c.and_then(|c| parse_number(&c)))
         .collect();
     let bubble = m.size.is_some();
+    let shape_of = |col: ColumnId| {
+        chart
+            .series
+            .iter()
+            .find(|s| s.column == col)
+            .and_then(|s| s.point)
+            .unwrap_or(chart.options.points.shape)
+    };
     let mut out = Vec::new();
     let groups = column(m.group);
     match (m.group.is_some(), data.series.first()) {
@@ -2148,6 +2398,7 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
                             id: group_id(names.len() - 1),
                             name: if g.is_empty() { "(none)".into() } else { g },
                             fill: rgb(colours[(names.len() - 1) % colours.len()]),
+                            shape: shape_of(s.column),
                             points: Vec::new(),
                         });
                         names.len() - 1
@@ -2177,6 +2428,7 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
                     id: s.column.0,
                     name: s.name.clone(),
                     fill: s.fill.clone(),
+                    shape: shape_of(s.column),
                     points,
                 });
             }
@@ -2249,7 +2501,7 @@ fn scatter(
                 _ => p.size,
             };
             let bx = Rect::from_center_size(at, (d, d));
-            let kind = point_kind(p.shape, bx.size());
+            let kind = point_kind(c.shape, bx.size());
             out.parts.push(Part {
                 key: key(PartRole::Point, c.id, *row as u32),
                 parent: Some(series_key),
@@ -2482,11 +2734,21 @@ fn pie(
         if a1 <= a0 {
             continue;
         }
-        out.path(
+        let (path, corners) = wedge_corners(centre, r, hole, a0, a1);
+        let radii = if so.radius > 0.0 {
+            let mut radii = vec![0.0; corners.iter().max().map_or(0, |m| m + 1)];
+            for i in corners {
+                radii[i] = so.radius;
+            }
+            radii
+        } else {
+            Vec::new()
+        };
+        out.path_rounded(
             key(PartRole::Slice, 0, s.index),
             series_key,
             format!("Slice · {}", s.name),
-            wedge(centre, r, hole, a0, a1),
+            (path, radii),
             Size::new(side, side),
             fill(s.fill.clone()),
             Vec::new(),
@@ -2586,22 +2848,45 @@ fn pie_label(chart: &Chart, s: &Slice, slices: &[Slice]) -> String {
 /// A ring's wedge from `a0` to `a1` (radians, clockwise from three o'clock on
 /// screen) between radii `inner` and `outer` about `c`; a pie's when `inner` is 0.
 fn wedge(c: Point, outer: f64, inner: f64, a0: f64, a1: f64) -> kurbo::BezPath {
+    wedge_corners(c, outer, inner, a0, a1).0
+}
+
+/// [`wedge`], and the anchors where its edges meet at an angle (in
+/// `geometry::anchor_runs`' order, which counts one anchor per element after the
+/// move): the ones a slice's corner radius rounds. A whole ring has none.
+fn wedge_corners(
+    c: Point,
+    outer: f64,
+    inner: f64,
+    a0: f64,
+    a1: f64,
+) -> (kurbo::BezPath, Vec<usize>) {
     let mut p = kurbo::BezPath::new();
     let on = |r: f64, a: f64| c + kurbo::Vec2::new(a.cos(), a.sin()) * r;
     let arc = |p: &mut kurbo::BezPath, r: f64, from: f64, to: f64| {
         let a = kurbo::Arc::new(c, (r, r), from, to - from, 0.0);
         a.to_cubic_beziers(0.01, |p1, p2, p3| p.curve_to(p1, p2, p3));
     };
+    let whole = a1 - a0 >= std::f64::consts::TAU - 1e-9;
+    let last = |p: &kurbo::BezPath| p.elements().len() - 1;
+    let mut corners = vec![0];
     p.move_to(on(outer, a0));
     arc(&mut p, outer, a0, a1);
+    corners.push(last(&p));
     if inner > 0.0 {
         p.line_to(on(inner, a1));
+        corners.push(last(&p));
         arc(&mut p, inner, a1, a0);
-    } else if a1 - a0 < std::f64::consts::TAU - 1e-9 {
+        corners.push(last(&p));
+    } else if !whole {
         p.line_to(c);
+        corners.push(last(&p));
     }
     p.close_path();
-    p
+    if whole {
+        corners.clear();
+    }
+    (p, corners)
 }
 
 /// Line and area charts: per series its area (an area chart), its line and its
@@ -2792,6 +3077,7 @@ fn lines(
         if points_on {
             let size = l.point_size;
             let hollow = l.points == super::PointStyle::Hollow;
+            let shape = style.and_then(|st| st.point).unwrap_or_default();
             for run in &runs {
                 for (c, v) in run {
                     let p = at(*c, *v);
@@ -2814,10 +3100,7 @@ fn lines(
                         key: key(PartRole::Point, s.column.0, *c as u32),
                         parent: Some(series_key),
                         name: format!("{} · {}", s.name, data.categories[*c]),
-                        kind: NodeKind::Ellipse {
-                            size: bx.size(),
-                            arc: Default::default(),
-                        },
+                        kind: point_kind(shape, bx.size()),
                         transform: Affine::translate(bx.origin().to_vec2()),
                         fills,
                         strokes,
@@ -3046,6 +3329,80 @@ fn rule_at(horizontal: bool, share: f64, plot: Size) -> (Rect, Insets) {
         insets.left = px(0.0);
         insets.right = px(0.0);
         (Rect::new(0.0, y - 0.5, plot.width, y + 0.5), insets)
+    }
+}
+
+/// A tick mark in an axis frame `frame` big: a 1 px stub [`TICK_LEN`] long at
+/// `along` (a share of the frame along its axis, from its left or top), across
+/// the axis from the frame's start edge (left or top) or its end. Centred like a
+/// tick label, so it keeps its size while its place follows the plot.
+fn tick_mark(stub_horizontal: bool, along: f64, from_start: bool, frame: Size) -> (Rect, Insets) {
+    if stub_horizontal {
+        let y = along * frame.height;
+        let x = if from_start {
+            0.0
+        } else {
+            frame.width - TICK_LEN
+        };
+        let mut insets = centred_y(along * 100.0);
+        if from_start {
+            insets.left = px(0.0);
+        } else {
+            insets.right = px(0.0);
+        }
+        (Rect::new(x, y - 0.5, x + TICK_LEN, y + 0.5), insets)
+    } else {
+        let x = along * frame.width;
+        let y = if from_start {
+            0.0
+        } else {
+            frame.height - TICK_LEN
+        };
+        let mut insets = centred_x(along * 100.0);
+        if from_start {
+            insets.top = px(0.0);
+        } else {
+            insets.bottom = px(0.0);
+        }
+        (Rect::new(x - 0.5, y, x + 0.5, y + TICK_LEN), insets)
+    }
+}
+
+/// An axis title's corner, insets and turn in its axis frame `frame` big, at the
+/// frame's start edge (left or top) or, `at_end`, its end, centred along it.
+/// A side axis's title reads upwards, turned a quarter; its insets place the
+/// unturned box, which layout turns about its centre.
+fn title_place(b: Rect, frame: Size, turned: bool, at_end: bool) -> (Point, Insets, f64) {
+    if turned {
+        let cx = if at_end {
+            frame.width - b.height() / 2.0
+        } else {
+            b.height() / 2.0
+        };
+        let cy = frame.height / 2.0;
+        let mut insets = centred_y(50.0);
+        let reach = b.height() / 2.0 - b.width() / 2.0;
+        if at_end {
+            insets.right = px(reach);
+        } else {
+            insets.left = px(reach);
+        }
+        let at = Point::new(cx - b.width() / 2.0 - b.x0, cy - b.height() / 2.0 - b.y0);
+        (at, insets, -std::f64::consts::FRAC_PI_2)
+    } else {
+        let top = if at_end {
+            frame.height - b.height()
+        } else {
+            0.0
+        };
+        let mut insets = centred_x(50.0);
+        if at_end {
+            insets.bottom = px(0.0);
+        } else {
+            insets.top = px(0.0);
+        }
+        let at = Point::new(frame.width / 2.0 - b.width() / 2.0 - b.x0, top - b.y0);
+        (at, insets, 0.0)
     }
 }
 

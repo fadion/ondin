@@ -16,10 +16,6 @@ Phases in landing order; each is a session or less and ends green and committed.
 takes the first phase listed, and deletes it here when it lands. A phase left part-done carries
 a *Landed:* line saying what is in and what is next, so the next session resumes there.
 
-- **The generator's remaining options** — every kind is generated; these options are stored and
-  not yet drawn: axis titles, tick marks, the value axis line, dashed gridlines, a slice's corner
-  radius, a series' own point shape, a Sankey's *Gradient* flows. Goldens through `goldens.rs`'
-  `chart_page`.
 - **The Chart card, what is left** — *Landed:* the card's sections, presets, previews, series and
   node swatches, flatten. Next: the *Outline* preset (stroked, unfilled marks: an option the
   generator needs first); *From variables* and bindable swatches, where the variable flows learn

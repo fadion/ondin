@@ -1,0 +1,407 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="1860" viewBox="0 0 560 1860">
+  <defs>
+    <linearGradient id="grad-c4a2_272-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+      <stop offset="0" stop-color="#3b6fe0"/>
+      <stop offset="1" stop-color="#f08c2e"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_273-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+      <stop offset="0" stop-color="#2ea88a"/>
+      <stop offset="1" stop-color="#f08c2e"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_274-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+      <stop offset="0" stop-color="#d94e7a"/>
+      <stop offset="1" stop-color="#f08c2e"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_275-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+      <stop offset="0" stop-color="#3b6fe0"/>
+      <stop offset="1" stop-color="#8a63d2"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_276-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+      <stop offset="0" stop-color="#2ea88a"/>
+      <stop offset="1" stop-color="#8a63d2"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_277-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+      <stop offset="0" stop-color="#d94e7a"/>
+      <stop offset="1" stop-color="#8a63d2"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_278-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
+      <stop offset="0" stop-color="#f08c2e"/>
+      <stop offset="1" stop-color="#c9a227"/>
+    </linearGradient>
+    <linearGradient id="grad-c4a2_279-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
+      <stop offset="0" stop-color="#f08c2e"/>
+      <stop offset="1" stop-color="#4aa8d8"/>
+    </linearGradient>
+  </defs>
+  <clipPath id="clip-c7_2"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 1" clip-path="url(#clip-c7_2)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Revenue">
+        <rect data-name="Swatch · Revenue" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
+      </g>
+      <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
+      </g>
+      <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
+        <rect data-name="Swatch · Profit" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Profit" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Profit</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Value axis">
+        <text data-name="Tick -20" transform="matrix(1 0 0 1 20.519531 170.996582)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">-20</tspan></text>
+        <text data-name="Tick 0" transform="matrix(1 0 0 1 31.916992 135.466309)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0</tspan></text>
+        <text data-name="Tick 20" transform="matrix(1 0 0 1 25.208496 99.936035)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">20</tspan></text>
+        <text data-name="Tick 40" transform="matrix(1 0 0 1 24.811035 64.405762)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">40</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 25.095703 28.875488)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 25.111816 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+        <rect data-name="Tick mark -20" transform="matrix(1 0 0 1 44.856445 177.151367)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 0" transform="matrix(1 0 0 1 44.856445 141.621094)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 20" transform="matrix(1 0 0 1 44.856445 106.09082)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 40" transform="matrix(1 0 0 1 44.856445 70.560547)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 60" transform="matrix(1 0 0 1 44.856445 35.030273)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 80" transform="matrix(1 0 0 1 44.856445 -0.5)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <text data-name="Title Amount" transform="matrix(0 -1 1 0 0 110.874512)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Amount</tspan></text>
+      </g>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 48.859375 177.65625)">
+        <text data-name="Title Month" transform="matrix(1 0 0 1 181.498535 29.30957)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Month</tspan></text>
+        <rect data-name="Tick mark Jan" transform="matrix(1 0 0 1 32.761963 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Feb" transform="matrix(1 0 0 1 99.285889 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Mar" transform="matrix(1 0 0 1 165.809814 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Apr" transform="matrix(1 0 0 1 232.33374 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark May" transform="matrix(1 0 0 1 298.857666 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Jun" transform="matrix(1 0 0 1 365.381592 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <text data-name="Category Jan" transform="matrix(1 0 0 1 23.784668 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jan</tspan></text>
+        <text data-name="Category Feb" transform="matrix(1 0 0 1 90.182373 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Feb</tspan></text>
+        <text data-name="Category Mar" transform="matrix(1 0 0 1 156.182617 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Mar</tspan></text>
+        <text data-name="Category Apr" transform="matrix(1 0 0 1 223.60083 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Apr</tspan></text>
+        <text data-name="Category May" transform="matrix(1 0 0 1 288.290527 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">May</tspan></text>
+        <text data-name="Category Jun" transform="matrix(1 0 0 1 356.240479 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jun</tspan></text>
+      </g>
+      <g data-name="Plot" transform="matrix(1 0 0 1 48.859375 0)">
+        <g data-name="Grid">
+          <path data-name="Gridline -20" d="M0,177.6514 L399.1436,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 0" d="M0,142.1211 L399.1436,142.1211" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 20" d="M0,106.5908 L399.1436,106.5908" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 40" d="M0,71.0605 L399.1436,71.0605" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 60" d="M0,35.5303 L399.1436,35.5303" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 80" d="M0,0 L399.1436,0" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 141.621094)" x="0" y="0" width="399.1436" height="1" fill="#bfbfbf"/>
+          <rect data-name="Value axis line" transform="matrix(1 0 0 1 -0.5 0)" x="0" y="0" width="1" height="177.6514" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series Revenue">
+          <path data-name="Revenue · Jan" transform="matrix(1 0 0 1 9.978589 67.50752)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,74.6136 C14.5521,74.6136 14.5521,74.6136 14.5521,74.6136 L0,74.6136 C0,74.6136 0,74.6136 0,74.6136 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Feb" transform="matrix(1 0 0 1 76.502515 56.848437)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,85.2727 C14.5521,85.2727 14.5521,85.2727 14.5521,85.2727 L0,85.2727 C0,85.2727 0,85.2727 0,85.2727 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Mar" transform="matrix(1 0 0 1 143.02644 62.177979)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,79.9431 C14.5521,79.9431 14.5521,79.9431 14.5521,79.9431 L0,79.9431 C0,79.9431 0,79.9431 0,79.9431 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Apr" transform="matrix(1 0 0 1 209.550366 42.636328)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,99.4848 C14.5521,99.4848 14.5521,99.4848 14.5521,99.4848 L0,99.4848 C0,99.4848 0,99.4848 0,99.4848 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · May" transform="matrix(1 0 0 1 276.074292 33.75376)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,108.3673 C14.5521,108.3673 14.5521,108.3673 14.5521,108.3673 L0,108.3673 C0,108.3673 0,108.3673 0,108.3673 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Jun" transform="matrix(1 0 0 1 342.598218 21.318164)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,120.8029 C14.5521,120.8029 14.5521,120.8029 14.5521,120.8029 L0,120.8029 C0,120.8029 0,120.8029 0,120.8029 Z" fill="#3b6fe0"/>
+        </g>
+        <g data-name="Series Costs">
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 25.985909 88.825684)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,53.2954 C14.5521,53.2954 14.5521,53.2954 14.5521,53.2954 L0,53.2954 C0,53.2954 0,53.2954 0,53.2954 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 92.509834 85.272656)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,56.8484 C14.5521,56.8484 14.5521,56.8484 14.5521,56.8484 L0,56.8484 C0,56.8484 0,56.8484 0,56.8484 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 225.557686 78.166602)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,63.9545 C14.5521,63.9545 14.5521,63.9545 14.5521,63.9545 L0,63.9545 C0,63.9545 0,63.9545 0,63.9545 Z" fill="#f08c2e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 292.081612 74.613574)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,67.5075 C14.5521,67.5075 14.5521,67.5075 14.5521,67.5075 L0,67.5075 C0,67.5075 0,67.5075 0,67.5075 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 358.605537 69.284033)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,72.8371 C14.5521,72.8371 14.5521,72.8371 14.5521,72.8371 L0,72.8371 C0,72.8371 0,72.8371 0,72.8371 Z" fill="#f08c2e"/>
+        </g>
+        <g data-name="Series Profit">
+          <path data-name="Profit · Jan" transform="matrix(1 0 0 1 41.993228 120.80293)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,21.3182 C14.5521,21.3182 14.5521,21.3182 14.5521,21.3182 L0,21.3182 C0,21.3182 0,21.3182 0,21.3182 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Feb" transform="matrix(1 0 0 1 108.517154 113.696875)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,28.4242 C14.5521,28.4242 14.5521,28.4242 14.5521,28.4242 L0,28.4242 C0,28.4242 0,28.4242 0,28.4242 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Mar" transform="matrix(1 0 0 1 175.04108 142.121094)" d="M0,0 C0,0 0,0 0,0 L14.5521,0 C14.5521,0 14.5521,0 14.5521,0 L14.5521,17.5417 C14.5521,18.6462 13.6567,19.5417 12.5521,19.5417 L2,19.5417 C0.8954,19.5417 0,18.6462 0,17.5417 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Apr" transform="matrix(1 0 0 1 241.565005 106.59082)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,35.5303 C14.5521,35.5303 14.5521,35.5303 14.5521,35.5303 L0,35.5303 C0,35.5303 0,35.5303 0,35.5303 Z" fill="#2ea88a"/>
+          <path data-name="Profit · May" transform="matrix(1 0 0 1 308.088931 101.261279)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,40.8598 C14.5521,40.8598 14.5521,40.8598 14.5521,40.8598 L0,40.8598 C0,40.8598 0,40.8598 0,40.8598 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Jun" transform="matrix(1 0 0 1 374.612857 94.155225)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,47.9659 C14.5521,47.9659 14.5521,47.9659 14.5521,47.9659 L0,47.9659 C0,47.9659 0,47.9659 0,47.9659 Z" fill="#2ea88a"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_3"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 2" transform="matrix(1 0 0 1 0 320)" clip-path="url(#clip-c7_3)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Revenue">
+        <rect data-name="Swatch · Revenue" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
+      </g>
+      <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
+      </g>
+      <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
+        <rect data-name="Swatch · Profit" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Profit" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Profit</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Category axis" transform="matrix(1 0 0 1 395.34375 0)">
+        <text data-name="Title Month" transform="matrix(0 -1 1 0 38.134277 106.898926)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Month</tspan></text>
+        <rect data-name="Tick mark Jan" transform="matrix(1 0 0 1 0 14.304281)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Feb" transform="matrix(1 0 0 1 0 43.912842)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Mar" transform="matrix(1 0 0 1 0 73.521403)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Apr" transform="matrix(1 0 0 1 0 103.129964)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark May" transform="matrix(1 0 0 1 0 132.738525)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <rect data-name="Tick mark Jun" transform="matrix(1 0 0 1 0 162.347087)" x="0" y="0" width="4" height="1" fill="#bfbfbf"/>
+        <text data-name="Category Jan" transform="matrix(1 0 0 1 10 8.149495)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jan</tspan></text>
+        <text data-name="Category Feb" transform="matrix(1 0 0 1 10 37.758057)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Feb</tspan></text>
+        <text data-name="Category Mar" transform="matrix(1 0 0 1 10 67.366618)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Mar</tspan></text>
+        <text data-name="Category Apr" transform="matrix(1 0 0 1 10 96.975179)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Apr</tspan></text>
+        <text data-name="Category May" transform="matrix(1 0 0 1 10 126.58374)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">May</tspan></text>
+        <text data-name="Category Jun" transform="matrix(1 0 0 1 10 156.192301)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jun</tspan></text>
+      </g>
+      <g data-name="Value axis" transform="matrix(1 0 0 1 0 177.65625)">
+        <text data-name="Tick -20" transform="matrix(1 0 0 1 -9.168457 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">-20</tspan></text>
+        <text data-name="Tick 0" transform="matrix(1 0 0 1 75.599512 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0</tspan></text>
+        <text data-name="Tick 20" transform="matrix(1 0 0 1 151.314502 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">20</tspan></text>
+        <text data-name="Tick 40" transform="matrix(1 0 0 1 230.18501 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">40</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 309.396582 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 388.473877 10)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+        <rect data-name="Tick mark -20" transform="matrix(1 0 0 1 -0.5 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 0" transform="matrix(1 0 0 1 78.569238 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 20" transform="matrix(1 0 0 1 157.638477 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 40" transform="matrix(1 0 0 1 236.707715 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 60" transform="matrix(1 0 0 1 315.776953 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <rect data-name="Tick mark 80" transform="matrix(1 0 0 1 394.846191 0)" x="0" y="0" width="1" height="4" fill="#bfbfbf"/>
+        <text data-name="Title Amount" transform="matrix(1 0 0 1 175.624268 29.30957)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Amount</tspan></text>
+      </g>
+      <g data-name="Plot">
+        <g data-name="Grid">
+          <path data-name="Gridline -20" d="M0,0 L0,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 0" d="M79.0692,0 L79.0692,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 20" d="M158.1385,0 L158.1385,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 40" d="M237.2077,0 L237.2077,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 60" d="M316.277,0 L316.277,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 80" d="M395.3462,0 L395.3462,177.6514" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 78.569238 0)" x="0" y="0" width="1" height="177.6514" fill="#bfbfbf"/>
+          <rect data-name="Value axis line" transform="matrix(1 0 0 1 0 177.151367)" x="0" y="0" width="395.3462" height="1" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series Revenue">
+          <path data-name="Revenue · Jan" transform="matrix(1 0 0 1 79.069238 4.441284)" d="M0,0 C0,0 0,0 0,0 L164.0454,0 C165.15,0 166.0454,0.8954 166.0454,2 L166.0454,4.4769 C166.0454,5.5814 165.15,6.4769 164.0454,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Feb" transform="matrix(1 0 0 1 79.069238 34.049845)" d="M0,0 C0,0 0,0 0,0 L187.7662,0 C188.8707,0 189.7662,0.8954 189.7662,2 L189.7662,4.4769 C189.7662,5.5814 188.8707,6.4769 187.7662,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Mar" transform="matrix(1 0 0 1 79.069238 63.658407)" d="M0,0 C0,0 0,0 0,0 L175.9058,0 C177.0104,0 177.9058,0.8954 177.9058,2 L177.9058,4.4769 C177.9058,5.5814 177.0104,6.4769 175.9058,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Apr" transform="matrix(1 0 0 1 79.069238 93.266968)" d="M0,0 C0,0 0,0 0,0 L219.3939,0 C220.4984,0 221.3939,0.8954 221.3939,2 L221.3939,4.4769 C221.3939,5.5814 220.4984,6.4769 219.3939,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · May" transform="matrix(1 0 0 1 79.069238 122.875529)" d="M0,0 C0,0 0,0 0,0 L239.1612,0 C240.2657,0 241.1612,0.8954 241.1612,2 L241.1612,4.4769 C241.1612,5.5814 240.2657,6.4769 239.1612,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+          <path data-name="Revenue · Jun" transform="matrix(1 0 0 1 79.069238 152.48409)" d="M0,0 C0,0 0,0 0,0 L266.8354,0 C267.94,0 268.8354,0.8954 268.8354,2 L268.8354,4.4769 C268.8354,5.5814 267.94,6.4769 266.8354,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
+        </g>
+        <g data-name="Series Costs">
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 79.069238 11.565844)" d="M0,0 C0,0 0,0 0,0 L116.6039,0 C117.7084,0 118.6039,0.8954 118.6039,2 L118.6039,4.4769 C118.6039,5.5814 117.7084,6.4769 116.6039,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 79.069238 41.174405)" d="M0,0 C0,0 0,0 0,0 L124.5108,0 C125.6154,0 126.5108,0.8954 126.5108,2 L126.5108,4.4769 C126.5108,5.5814 125.6154,6.4769 124.5108,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 79.069238 100.391528)" d="M0,0 C0,0 0,0 0,0 L140.3246,0 C141.4292,0 142.3246,0.8954 142.3246,2 L142.3246,4.4769 C142.3246,5.5814 141.4292,6.4769 140.3246,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 79.069238 130.000089)" d="M0,0 C0,0 0,0 0,0 L148.2316,0 C149.3361,0 150.2316,0.8954 150.2316,2 L150.2316,4.4769 C150.2316,5.5814 149.3361,6.4769 148.2316,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 79.069238 159.60865)" d="M0,0 C0,0 0,0 0,0 L160.0919,0 C161.1965,0 162.0919,0.8954 162.0919,2 L162.0919,4.4769 C162.0919,5.5814 161.1965,6.4769 160.0919,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+        </g>
+        <g data-name="Series Profit">
+          <path data-name="Profit · Jan" transform="matrix(1 0 0 1 79.069238 18.690404)" d="M0,0 C0,0 0,0 0,0 L45.4415,0 C46.5461,0 47.4415,0.8954 47.4415,2 L47.4415,4.4769 C47.4415,5.5814 46.5461,6.4769 45.4415,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Feb" transform="matrix(1 0 0 1 79.069238 48.298965)" d="M0,0 C0,0 0,0 0,0 L61.2554,0 C62.36,0 63.2554,0.8954 63.2554,2 L63.2554,4.4769 C63.2554,5.5814 62.36,6.4769 61.2554,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Mar" transform="matrix(1 0 0 1 35.581157 77.907527)" d="M0,2 C0,0.8954 0.8954,0 2,0 L43.4881,0 C43.4881,0 43.4881,0 43.4881,0 L43.4881,6.4769 C43.4881,6.4769 43.4881,6.4769 43.4881,6.4769 L2,6.4769 C0.8954,6.4769 0,5.5814 0,4.4769 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Apr" transform="matrix(1 0 0 1 79.069238 107.516088)" d="M0,0 C0,0 0,0 0,0 L77.0692,0 C78.1738,0 79.0692,0.8954 79.0692,2 L79.0692,4.4769 C79.0692,5.5814 78.1738,6.4769 77.0692,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
+          <path data-name="Profit · May" transform="matrix(1 0 0 1 79.069238 137.124649)" d="M0,0 C0,0 0,0 0,0 L88.9296,0 C90.0342,0 90.9296,0.8954 90.9296,2 L90.9296,4.4769 C90.9296,5.5814 90.0342,6.4769 88.9296,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
+          <path data-name="Profit · Jun" transform="matrix(1 0 0 1 79.069238 166.73321)" d="M0,0 C0,0 0,0 0,0 L104.7435,0 C105.848,0 106.7435,0.8954 106.7435,2 L106.7435,4.4769 C106.7435,5.5814 105.848,6.4769 104.7435,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_4"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 3" transform="matrix(1 0 0 1 0 640)" clip-path="url(#clip-c7_4)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Revenue">
+        <rect data-name="Swatch · Revenue" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
+      </g>
+      <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
+      </g>
+      <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
+        <rect data-name="Swatch · Profit" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Profit" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Profit</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Value axis">
+        <text data-name="Tick -20" transform="matrix(1 0 0 1 0 195.516113)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">-20</tspan></text>
+        <text data-name="Tick 0" transform="matrix(1 0 0 1 11.397461 155.081934)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0</tspan></text>
+        <text data-name="Tick 20" transform="matrix(1 0 0 1 4.688965 114.647754)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">20</tspan></text>
+        <text data-name="Tick 40" transform="matrix(1 0 0 1 4.291504 74.213574)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">40</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 4.576172 33.779395)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 4.592285 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+      </g>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 24.34375 202.171875)">
+        <text data-name="Category Jan" transform="matrix(1 0 0 1 25.827962 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jan</tspan></text>
+        <text data-name="Category Feb" transform="matrix(1 0 0 1 96.312256 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Feb</tspan></text>
+        <text data-name="Category Mar" transform="matrix(1 0 0 1 166.399089 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Mar</tspan></text>
+        <text data-name="Category Apr" transform="matrix(1 0 0 1 237.90389 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Apr</tspan></text>
+        <text data-name="Category May" transform="matrix(1 0 0 1 306.680176 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">May</tspan></text>
+        <text data-name="Category Jun" transform="matrix(1 0 0 1 378.716715 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jun</tspan></text>
+      </g>
+      <g data-name="Plot" transform="matrix(1 0 0 1 24.34375 0)">
+        <g data-name="Grid">
+          <path data-name="Gridline -20" d="M0,202.1709 L423.6631,202.1709" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 0" d="M0,161.7367 L423.6631,161.7367" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 20" d="M0,121.3025 L423.6631,121.3025" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 40" d="M0,80.8684 L423.6631,80.8684" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 60" d="M0,40.4342 L423.6631,40.4342" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <path data-name="Gridline 80" d="M0,0 L423.6631,0" fill="none" stroke="#e6e6e6" stroke-width="1" stroke-linejoin="round" stroke-linecap="butt" stroke-dasharray="3,3" stroke-dashoffset="0"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 161.236719)" x="0" y="0" width="423.6631" height="1" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series Revenue">
+          <path data-name="Line · Revenue" d="M35.3053,76.8249 L105.9158,64.6947 L176.5263,70.7598 L247.1368,48.521 L317.7473,38.4125 L388.3578,24.2605" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <rect data-name="Revenue · Jan" transform="matrix(1 0 0 1 31.305257 72.824941)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+          <rect data-name="Revenue · Feb" transform="matrix(1 0 0 1 101.915771 60.694687)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+          <rect data-name="Revenue · Mar" transform="matrix(1 0 0 1 172.526286 66.759814)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+          <rect data-name="Revenue · Apr" transform="matrix(1 0 0 1 243.1368 44.521016)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+          <rect data-name="Revenue · May" transform="matrix(1 0 0 1 313.747314 34.412471)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+          <rect data-name="Revenue · Jun" transform="matrix(1 0 0 1 384.357829 20.260508)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
+        </g>
+        <g data-name="Series Costs">
+          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 31.305257 97.085449)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 101.915771 93.042031)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 243.1368 84.955195)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 313.747314 80.911777)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 384.357829 74.84665)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+        </g>
+        <g data-name="Series Profit">
+          <path data-name="Line · Profit" d="M35.3053,137.4762 L105.9158,129.3894 L176.5263,183.9755 L247.1368,121.3025 L317.7473,115.2374 L388.3578,107.1506" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Profit · Jan" transform="matrix(1 0 0 1 31.305257 133.476211)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+          <ellipse data-name="Profit · Feb" transform="matrix(1 0 0 1 101.915771 125.389375)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+          <ellipse data-name="Profit · Mar" transform="matrix(1 0 0 1 172.526286 179.975518)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+          <ellipse data-name="Profit · Apr" transform="matrix(1 0 0 1 243.1368 117.302539)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+          <ellipse data-name="Profit · May" transform="matrix(1 0 0 1 313.747314 111.237412)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+          <ellipse data-name="Profit · Jun" transform="matrix(1 0 0 1 384.357829 103.150576)" cx="4" cy="4" rx="4" ry="4" fill="#2ea88a"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_5"><rect x="0" y="0" width="480" height="280"/></clipPath>
+  <g data-name="Chart 4" transform="matrix(1 0 0 1 0 960)" clip-path="url(#clip-c7_5)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Team A">
+        <rect data-name="Swatch · Team A" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Team A" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Team A</tspan></text>
+      </g>
+      <g data-name="Legend · Team B" transform="matrix(1 0 0 1 70.828125 0)">
+        <rect data-name="Swatch · Team B" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Team B" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Team B</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Value axis">
+        <text data-name="Tick 30" transform="matrix(1 0 0 1 20.831055 174.996582)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">30</tspan></text>
+        <text data-name="Tick 40" transform="matrix(1 0 0 1 20.519531 138.666309)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">40</tspan></text>
+        <text data-name="Tick 50" transform="matrix(1 0 0 1 21.099609 102.336035)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">50</tspan></text>
+        <text data-name="Tick 60" transform="matrix(1 0 0 1 20.804199 66.005762)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">60</tspan></text>
+        <text data-name="Tick 70" transform="matrix(1 0 0 1 21.572266 29.675488)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">70</tspan></text>
+        <text data-name="Tick 80" transform="matrix(1 0 0 1 20.820312 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">80</tspan></text>
+        <text data-name="Title Score" transform="matrix(0 -1 1 0 0 107.35791)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Score</tspan></text>
+      </g>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 40.5625 181.65625)">
+        <text data-name="Title Hours" transform="matrix(1 0 0 1 186.687256 25.30957)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Hours</tspan></text>
+        <text data-name="Tick 2" transform="matrix(1 0 0 1 -3.354248 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">2</tspan></text>
+        <text data-name="Tick 4" transform="matrix(1 0 0 1 98.305786 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">4</tspan></text>
+        <text data-name="Tick 6" transform="matrix(1 0 0 1 200.306885 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">6</tspan></text>
+        <text data-name="Tick 8" transform="matrix(1 0 0 1 302.173706 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">8</tspan></text>
+        <text data-name="Tick 10" transform="matrix(1 0 0 1 401.728271 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">10</tspan></text>
+      </g>
+      <g data-name="Plot" transform="matrix(1 0 0 1 40.5625 0)">
+        <g data-name="Grid">
+          <rect data-name="Gridline 30" transform="matrix(1 0 0 1 0 181.151367)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 40" transform="matrix(1 0 0 1 0 144.821094)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 50" transform="matrix(1 0 0 1 0 108.49082)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 60" transform="matrix(1 0 0 1 0 72.160547)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 70" transform="matrix(1 0 0 1 0 35.830273)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 80" transform="matrix(1 0 0 1 0 -0.5)" x="0" y="0" width="407.4351" height="1" fill="#e6e6e6"/>
+          <rect data-name="Axis line" transform="matrix(1 0 0 1 0 181.151367)" x="0" y="0" width="407.4351" height="1" fill="#bfbfbf"/>
+        </g>
+        <g data-name="Series Team A">
+          <rect data-name="Team A · row 1" transform="matrix(1 0 0 1 -4 137.688066)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+          <rect data-name="Team A · row 2" transform="matrix(1 0 0 1 97.858765 97.724766)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+          <rect data-name="Team A · row 3" transform="matrix(1 0 0 1 148.788147 75.926602)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+          <rect data-name="Team A · row 4" transform="matrix(1 0 0 1 250.646912 57.761465)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+          <rect data-name="Team A · row 5" transform="matrix(1 0 0 1 301.576294 28.697246)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+          <rect data-name="Team A · row 6" transform="matrix(1 0 0 1 403.435059 3.266055)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
+        </g>
+        <g data-name="Series Team B">
+          <path data-name="Team B · row 1" transform="matrix(1 0 0 1 -4 159.48623)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 2" transform="matrix(1 0 0 1 97.858765 126.788984)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 3" transform="matrix(1 0 0 1 148.788147 115.889902)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 4" transform="matrix(1 0 0 1 250.646912 68.660547)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 5" transform="matrix(1 0 0 1 301.576294 61.394492)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 6" transform="matrix(1 0 0 1 403.435059 32.330273)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_6"><rect x="0" y="0" width="320" height="240"/></clipPath>
+  <g data-name="Chart 5" transform="matrix(1 0 0 1 0 1280)" clip-path="url(#clip-c7_6)">
+    <g data-name="Legend" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Legend · Jan">
+        <rect data-name="Swatch · Jan" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Jan" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jan</tspan></text>
+      </g>
+      <g data-name="Legend · Feb" transform="matrix(1 0 0 1 48.671875 0)">
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
+      </g>
+      <g data-name="Legend · Mar" transform="matrix(1 0 0 1 97.625 0)">
+        <rect data-name="Swatch · Mar" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Mar" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Mar</tspan></text>
+      </g>
+      <g data-name="Legend · Apr" transform="matrix(1 0 0 1 147.734375 0)">
+        <rect data-name="Swatch · Apr" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
+      </g>
+      <g data-name="Legend · May" transform="matrix(1 0 0 1 195.875 0)">
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
+      </g>
+      <g data-name="Legend · Jun" transform="matrix(1 0 0 1 248.015625 0)">
+        <rect data-name="Swatch · Jun" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Jun" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jun</tspan></text>
+      </g>
+    </g>
+    <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
+      <g data-name="Pie" transform="matrix(1 0 0 1 53.259766 0)">
+        <g data-name="Slices">
+          <path data-name="Slice · Jan" d="M96.3204,0.1717 C117.7187,1.4892 137.9662,10.3457 153.4589,25.1646 C155.0354,26.6724 155.0078,29.2175 153.3983,30.7582 L132.9582,50.3253 C131.3891,51.8274 128.8769,51.8189 127.1992,50.306 C118.4615,42.4268 107.4006,37.5887 95.6836,36.5209 C93.4338,36.3158 91.7223,34.4767 91.7602,32.305 L92.2541,4.0132 C92.2929,1.7854 94.1431,0.0376 96.3204,0.1717 Z" fill="#3b6fe0"/>
+          <path data-name="Slice · Feb" d="M161.0347,33.3598 C176.9287,52.8282 184.037,78.0322 180.6573,102.9363 C180.3639,105.098 178.2887,106.5716 176.0962,106.1751 L148.2516,101.14 C146.1142,100.7535 144.6444,98.716 144.8823,96.4695 C146.3535,82.578 142.4231,68.6419 133.9104,57.5661 C132.5337,55.7749 132.7224,53.2697 134.3429,51.8234 L155.4534,32.9815 C157.1157,31.4978 159.6551,31.67 161.0347,33.3598 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Mar" d="M178.48,113.8823 C172.5438,136.3932 158.1737,155.769 138.3553,167.9841 C136.4982,169.1287 134.0426,168.4594 132.9581,166.513 L119.186,141.7947 C118.1288,139.8972 118.7713,137.4685 120.6588,136.2272 C131.4073,129.1584 139.3091,118.5039 142.9534,106.1663 C143.5934,103.9998 145.731,102.6799 147.8537,103.1408 L175.5055,109.1446 C177.6829,109.6173 179.0362,111.7729 178.48,113.8823 Z" fill="#2ea88a"/>
+          <path data-name="Slice · Apr" d="M128.5128,173.2453 C101.1213,185.7905 69.2592,183.9114 43.5321,168.2337 C41.6692,167.0985 41.1508,164.6067 42.3927,162.7568 L58.1645,139.2638 C59.3752,137.4604 61.8309,136.9303 63.7937,138.0488 C78.5169,146.4385 96.3322,147.4891 111.9395,140.8881 C114.0201,140.0081 116.3965,140.8231 117.3869,142.7563 L130.288,167.9403 C131.3039,169.9233 130.4962,172.3369 128.5128,173.2453 Z" fill="#d94e7a"/>
+          <path data-name="Slice · May" d="M34.376,161.8524 C8.2768,141.1749 -4.4032,107.8164 1.371,75.0234 C1.7493,72.8748 3.8808,71.484 6.0561,71.9662 L33.6815,78.0906 C35.8021,78.5607 37.1907,80.6544 36.8644,82.8897 C34.1438,101.5246 41.2704,120.2731 55.6823,132.3957 C57.411,133.8499 57.7638,136.3373 56.4909,138.0974 L39.9088,161.0256 C38.6031,162.831 36.0859,163.2072 34.376,161.8524 Z" fill="#8a63d2"/>
+          <path data-name="Slice · Jun" d="M3.9761,64.1712 C15.0338,28.0171 47.4235,2.4832 85.16,0.171 C87.3376,0.0376 89.1875,1.7855 89.2264,4.0132 L89.7202,32.305 C89.7582,34.4769 88.0464,36.3158 85.7968,36.5199 C64.3712,38.4636 46.0637,52.896 39.172,73.2759 C38.4484,75.4157 36.2607,76.6509 34.1577,76.107 L6.7629,69.0222 C4.6058,68.4644 3.338,66.2575 3.9761,64.1712 Z" fill="#c9a227"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <clipPath id="clip-c7_7"><rect x="0" y="0" width="560" height="300"/></clipPath>
+  <g data-name="Chart 6" transform="matrix(1 0 0 1 0 1560)" clip-path="url(#clip-c7_7)">
+    <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
+      <g data-name="Flows">
+        <path data-name="Flow · Search → Signup" d="M57.8203,58.3529 C157.0942,58.3529 157.0942,100.7112 256.3682,100.7112 L256.3682,188.2406 C157.0942,188.2406 157.0942,145.8824 57.8203,145.8824 Z" fill="url(#grad-c4a2_272-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Social → Signup" d="M57.8203,177.7647 C157.0942,177.7647 157.0942,188.2406 256.3682,188.2406 L256.3682,232.0053 C157.0942,232.0053 157.0942,221.5294 57.8203,221.5294 Z" fill="url(#grad-c4a2_273-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Direct → Signup" d="M57.8203,238.8235 C157.0942,238.8235 157.0942,232.0053 256.3682,232.0053 L256.3682,261.1818 C157.0942,261.1818 157.0942,268 57.8203,268 Z" fill="url(#grad-c4a2_274-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Search → Bounce" d="M57.8203,0 C262.3682,0 262.3682,0 466.916,0 L466.916,58.3529 C262.3682,58.3529 262.3682,58.3529 57.8203,58.3529 Z" fill="url(#grad-c4a2_275-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Social → Bounce" d="M57.8203,155.8824 C262.3682,155.8824 262.3682,58.3529 466.916,58.3529 L466.916,80.2353 C262.3682,80.2353 262.3682,177.7647 57.8203,177.7647 Z" fill="url(#grad-c4a2_276-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Direct → Bounce" d="M57.8203,231.5294 C262.3682,231.5294 262.3682,80.2353 466.916,80.2353 L466.916,87.5294 C262.3682,87.5294 262.3682,238.8235 57.8203,238.8235 Z" fill="url(#grad-c4a2_277-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Signup → Trial" d="M268.3682,100.7112 C367.6421,100.7112 367.6421,97.5294 466.916,97.5294 L466.916,206.9412 C367.6421,206.9412 367.6421,210.123 268.3682,210.123 Z" fill="url(#grad-c4a2_278-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Signup → Leave" d="M268.3682,210.123 C367.6421,210.123 367.6421,216.9412 466.916,216.9412 L466.916,268 C367.6421,268 367.6421,261.1818 268.3682,261.1818 Z" fill="url(#grad-c4a2_279-fill-0)" opacity="0.4"/>
+      </g>
+      <g data-name="Nodes">
+        <rect data-name="Node · Search" transform="matrix(1 0 0 1 45.820312 0)" x="0" y="0" width="12" height="145.8824" rx="2" fill="#3b6fe0"/>
+        <text data-name="Label · Search" transform="matrix(1 0 0 1 0 65.681411)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Search</tspan></text>
+        <rect data-name="Node · Signup" transform="matrix(1 0 0 1 256.368164 100.71123)" x="0" y="0" width="12" height="160.4706" rx="2" fill="#f08c2e"/>
+        <text data-name="Label · Signup" transform="matrix(1 0 0 1 210.870117 173.686758)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Signup</tspan></text>
+        <rect data-name="Node · Social" transform="matrix(1 0 0 1 45.820312 155.882353)" x="0" y="0" width="12" height="65.6471" rx="2" fill="#2ea88a"/>
+        <text data-name="Label · Social" transform="matrix(1 0 0 1 5.519531 181.446117)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Social</tspan></text>
+        <rect data-name="Node · Direct" transform="matrix(1 0 0 1 45.820312 231.529412)" x="0" y="0" width="12" height="36.4706" rx="2" fill="#d94e7a"/>
+        <text data-name="Label · Direct" transform="matrix(1 0 0 1 6.158203 242.50494)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Direct</tspan></text>
+        <rect data-name="Node · Bounce" transform="matrix(1 0 0 1 466.916016 0)" x="0" y="0" width="12" height="87.5294" rx="2" fill="#8a63d2"/>
+        <text data-name="Label · Bounce" transform="matrix(1 0 0 1 484.916016 36.50494)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Bounce</tspan></text>
+        <rect data-name="Node · Trial" transform="matrix(1 0 0 1 466.916016 97.529412)" x="0" y="0" width="12" height="109.4118" rx="2" fill="#c9a227"/>
+        <text data-name="Label · Trial" transform="matrix(1 0 0 1 484.916016 144.975528)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Trial</tspan></text>
+        <rect data-name="Node · Leave" transform="matrix(1 0 0 1 466.916016 216.941176)" x="0" y="0" width="12" height="51.0588" rx="2" fill="#4aa8d8"/>
+        <text data-name="Label · Leave" transform="matrix(1 0 0 1 484.916016 235.210823)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Leave</tspan></text>
+      </g>
+    </g>
+  </g>
+</svg>

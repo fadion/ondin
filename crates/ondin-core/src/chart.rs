@@ -291,8 +291,10 @@ pub struct SeriesStyle {
     pub visible: bool,
     #[serde(default, skip_serializing_if = "is_default")]
     pub dash: Dash,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub point: PointShape,
+    /// The series' own point shape; `None` takes a scatter's `Points::shape`, and
+    /// a line's circle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<PointShape>,
 }
 
 /// A Sankey node's colour, by name.
@@ -411,7 +413,11 @@ impl Default for Options {
             slices: Slices::default(),
             points: Points::default(),
             flows: Flows::default(),
-            value_axis: Axis::default(),
+            // The gridlines carry the value axis, so its own line starts off.
+            value_axis: Axis {
+                line: false,
+                ..Axis::default()
+            },
             category_axis: Axis {
                 grid: Gridlines {
                     show: false,

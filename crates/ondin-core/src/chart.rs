@@ -1061,6 +1061,131 @@ impl Chart {
             generated: None,
         }
     }
+
+    /// The kind's variant as the Chart card names it (*Stacked*, *Smooth*,
+    /// *Donut*, *Bubble*); `None` for a Sankey, which has none.
+    pub fn variant(&self) -> Option<&'static str> {
+        let stack = |s: Stacking, apart| match s {
+            Stacking::Apart => apart,
+            Stacking::Stacked => "Stacked",
+            Stacking::Percent => "100%",
+        };
+        let o = &self.options;
+        Some(match self.kind {
+            ChartKind::Column | ChartKind::Bar => stack(o.bars.stacking, "Grouped"),
+            ChartKind::Line => match o.lines.curve {
+                Curve::Straight => "Straight",
+                Curve::Smooth => "Smooth",
+                Curve::Step => "Step",
+            },
+            ChartKind::Area => stack(o.lines.area_stacking, "Overlapping"),
+            ChartKind::Pie if o.slices.donut => "Donut",
+            ChartKind::Pie => "Pie",
+            ChartKind::Scatter if self.mapping.size.is_some() => "Bubble",
+            ChartKind::Scatter => "Scatter",
+            ChartKind::Sankey => return None,
+        })
+    }
+
+    /// This chart on `table` in place of its own (`charts.md`, *Import*): a
+    /// column whose name the old table also has takes that column's id, so the
+    /// mapping and the series styles naming it are kept; the rest are dropped.
+    /// When nothing of the mapping survives, the mapping is guessed
+    /// ([`Mapping::guess`]). The link, the parts and the stamp are left as they
+    /// were, for the caller to say.
+    pub fn with_table(&self, mut table: Table) -> Chart {
+        let old = &self.table;
+        let mut next = old.next_column_id().0.max(table.next_column_id().0);
+        let mut kept = FxHashSet::default();
+        for c in &mut table.columns {
+            let same = old
+                .columns
+                .iter()
+                .find(|o| o.name == c.name && !kept.contains(&o.id));
+            c.id = match same {
+                Some(o) => o.id,
+                None => {
+                    next += 1;
+                    ColumnId(next - 1)
+                }
+            };
+            kept.insert(c.id);
+        }
+        let keep = |c: &Option<ColumnId>| c.filter(|id| kept.contains(id));
+        let m = &self.mapping;
+        let mut mapping = Mapping {
+            category: keep(&m.category),
+            series: m
+                .series
+                .iter()
+                .copied()
+                .filter(|c| kept.contains(c))
+                .collect(),
+            size: keep(&m.size),
+            group: keep(&m.group),
+            from: keep(&m.from),
+            to: keep(&m.to),
+            value: keep(&m.value),
+        };
+        if mapping.columns().next().is_none() {
+            mapping = Mapping::guess(self.kind, &table);
+        }
+        Chart {
+            mapping,
+            series: self
+                .series
+                .iter()
+                .filter(|s| kept.contains(&s.column))
+                .cloned()
+                .collect(),
+            table,
+            ..self.clone()
+        }
+    }
+}
+
+impl Mapping {
+    /// A mapping for `kind` read off `table`'s column types, for a table that
+    /// arrives without one: a Sankey's first two text columns and first number
+    /// column; a scatter's first number column as X and the other number columns
+    /// as Y; otherwise the first text column (else the first column) as the
+    /// category and every other number column as a series.
+    pub fn guess(kind: ChartKind, table: &Table) -> Mapping {
+        let numeric: Vec<(ColumnId, bool)> = table
+            .columns
+            .iter()
+            .map(|c| (c.id, table.is_numeric(c.id)))
+            .collect();
+        let text = || numeric.iter().filter(|c| !c.1).map(|c| c.0);
+        let numbers = || numeric.iter().filter(|c| c.1).map(|c| c.0);
+        match kind {
+            ChartKind::Sankey => {
+                let mut t = text();
+                Mapping {
+                    from: t.next(),
+                    to: t.next(),
+                    value: numbers().next(),
+                    ..Mapping::default()
+                }
+            }
+            ChartKind::Scatter => {
+                let x = numbers().next();
+                Mapping {
+                    category: x,
+                    series: numbers().filter(|c| Some(*c) != x).collect(),
+                    ..Mapping::default()
+                }
+            }
+            _ => {
+                let category = text().next().or_else(|| numeric.first().map(|c| c.0));
+                Mapping {
+                    category,
+                    series: numbers().filter(|c| Some(*c) != category).collect(),
+                    ..Mapping::default()
+                }
+            }
+        }
+    }
 }
 
 impl Options {

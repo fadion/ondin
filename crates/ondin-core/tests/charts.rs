@@ -690,3 +690,94 @@ fn a_sankey_adds_flows_leaves_out_rows_and_refuses_a_loop() {
         "the loop is refused"
     );
 }
+
+/// A chart's variant is named from the options of its kind's family.
+#[test]
+fn a_variant_is_named_from_its_kinds_options() {
+    let mut c = sample();
+    assert_eq!(c.variant(), Some("Grouped"));
+    c.options.bars.stacking = ondin_core::chart::Stacking::Percent;
+    assert_eq!(c.variant(), Some("100%"));
+    c.kind = ChartKind::Area;
+    assert_eq!(c.variant(), Some("Overlapping"), "an area's own stacking");
+    c.kind = ChartKind::Pie;
+    c.options.slices.donut = true;
+    assert_eq!(c.variant(), Some("Donut"));
+    c.kind = ChartKind::Scatter;
+    c.mapping.size = Some(ColumnId(2));
+    assert_eq!(c.variant(), Some("Bubble"));
+    c.kind = ChartKind::Sankey;
+    assert_eq!(c.variant(), None);
+}
+
+/// A replaced table keeps the mapping and the series style of each column whose
+/// name survives, gives the rest fresh ids, and drops what names a lost column;
+/// a mapping of which nothing survives is guessed.
+///
+/// flip: `Chart::with_table` matching columns by place instead of name → fails
+/// at "Revenue keeps its id".
+#[test]
+fn a_replaced_table_keeps_the_columns_whose_names_survive() {
+    use ondin_core::chart::SeriesStyle;
+    let col = |id, name: &str| Column {
+        id: ColumnId(id),
+        name: name.into(),
+    };
+    let mut c = sample();
+    let style = |column| SeriesStyle {
+        column,
+        fill: ondin_core::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
+        visible: true,
+        dash: Default::default(),
+        point: Default::default(),
+    };
+    c.series = vec![style(ColumnId(1)), style(ColumnId(2))];
+    let table = Table {
+        columns: vec![col(0, "Profit"), col(1, "Month"), col(2, "Revenue")],
+        rows: vec![vec!["3".into(), "Apr".into(), "50".into()]],
+    };
+    let got = c.with_table(table);
+    assert_eq!(got.validate(), Ok(()));
+    let id = |name: &str| got.table.columns.iter().find(|x| x.name == name).unwrap().id;
+    assert_eq!(id("Revenue"), ColumnId(1), "Revenue keeps its id");
+    assert_eq!(id("Month"), ColumnId(0));
+    assert!(id("Profit").0 > 2, "a new column takes a fresh id");
+    assert_eq!(got.mapping.category, Some(ColumnId(0)));
+    assert_eq!(got.mapping.series, [ColumnId(1)], "Costs is gone");
+    assert_eq!(got.series, [style(ColumnId(1))]);
+
+    let fresh = Table {
+        columns: vec![col(0, "City"), col(1, "Sales"), col(2, "Visits")],
+        rows: vec![vec!["Oslo".into(), "4".into(), "9".into()]],
+    };
+    let got = c.with_table(fresh);
+    assert_eq!(got.validate(), Ok(()));
+    let id = |name: &str| got.table.columns.iter().find(|x| x.name == name).unwrap().id;
+    assert_eq!(got.mapping.category, Some(id("City")), "guessed");
+    assert_eq!(got.mapping.series, [id("Sales"), id("Visits")]);
+    assert!(got.series.is_empty());
+}
+
+/// A guessed mapping reads the column types: a text category and number series,
+/// a scatter's numeric X, a Sankey's two text columns and a number.
+#[test]
+fn a_mapping_is_guessed_from_the_column_types() {
+    let col = |id, name: &str| Column {
+        id: ColumnId(id),
+        name: name.into(),
+    };
+    let t = Table {
+        columns: vec![col(0, "Year"), col(1, "From"), col(2, "To"), col(3, "N")],
+        rows: vec![vec!["2020".into(), "A".into(), "B".into(), "5".into()]],
+    };
+    let m = Mapping::guess(ChartKind::Column, &t);
+    assert_eq!(m.category, Some(ColumnId(1)));
+    assert_eq!(m.series, [ColumnId(0), ColumnId(3)]);
+    let m = Mapping::guess(ChartKind::Scatter, &t);
+    assert_eq!((m.category, m.series), (Some(ColumnId(0)), vec![ColumnId(3)]));
+    let m = Mapping::guess(ChartKind::Sankey, &t);
+    assert_eq!(
+        (m.from, m.to, m.value),
+        (Some(ColumnId(1)), Some(ColumnId(2)), Some(ColumnId(0)))
+    );
+}

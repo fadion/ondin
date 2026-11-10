@@ -972,6 +972,91 @@ impl Chart {
             ..self.clone()
         }
     }
+
+    /// A new chart of `kind` on its sample table, so a chart made by the tool, the
+    /// palette or an agent draws something until its data is typed or pasted:
+    /// *Category* and three series over *Jan*–*Jun*; a scatter's numeric X and two
+    /// Y series; a Sankey's eight flows over three columns.
+    pub fn sample(kind: ChartKind) -> Chart {
+        let cols = |names: &[&str]| -> Vec<Column> {
+            (0..)
+                .zip(names)
+                .map(|(id, name)| Column {
+                    id: ColumnId(id),
+                    name: (*name).to_string(),
+                })
+                .collect()
+        };
+        let rows = |rows: &[&[&str]]| -> Vec<Vec<String>> {
+            rows.iter()
+                .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                .collect()
+        };
+        let (columns, rows, mapping) = match kind {
+            ChartKind::Sankey => (
+                cols(&["From", "To", "Value"]),
+                rows(&[
+                    &["Search", "Signup", "1200"],
+                    &["Social", "Signup", "600"],
+                    &["Direct", "Signup", "400"],
+                    &["Search", "Bounce", "800"],
+                    &["Social", "Bounce", "300"],
+                    &["Direct", "Bounce", "100"],
+                    &["Signup", "Trial", "1500"],
+                    &["Signup", "Leave", "700"],
+                ]),
+                Mapping {
+                    from: Some(ColumnId(0)),
+                    to: Some(ColumnId(1)),
+                    value: Some(ColumnId(2)),
+                    ..Mapping::default()
+                },
+            ),
+            ChartKind::Scatter => (
+                cols(&["Hours", "Team A", "Team B"]),
+                rows(&[
+                    &["2", "41", "35"],
+                    &["4", "52", "44"],
+                    &["5", "58", "47"],
+                    &["7", "63", "60"],
+                    &["8", "71", "62"],
+                    &["10", "78", "70"],
+                ]),
+                Mapping {
+                    category: Some(ColumnId(0)),
+                    series: vec![ColumnId(1), ColumnId(2)],
+                    ..Mapping::default()
+                },
+            ),
+            _ => (
+                cols(&["Category", "Revenue", "Costs", "Profit"]),
+                rows(&[
+                    &["Jan", "42", "30", "12"],
+                    &["Feb", "48", "32", "16"],
+                    &["Mar", "45", "34", "11"],
+                    &["Apr", "56", "36", "20"],
+                    &["May", "61", "38", "23"],
+                    &["Jun", "68", "41", "27"],
+                ]),
+                Mapping {
+                    category: Some(ColumnId(0)),
+                    series: vec![ColumnId(1), ColumnId(2), ColumnId(3)],
+                    ..Mapping::default()
+                },
+            ),
+        };
+        Chart {
+            kind,
+            table: Table { columns, rows },
+            mapping,
+            series: Vec::new(),
+            nodes: Vec::new(),
+            options: Options::default(),
+            source: None,
+            parts: Vec::new(),
+            generated: None,
+        }
+    }
 }
 
 impl Options {

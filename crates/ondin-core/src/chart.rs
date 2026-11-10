@@ -7,12 +7,16 @@
 //! regeneration is a transaction carrying [`crate::Operation::SetChartParts`] for
 //! its chart; nothing else writes under a chart frame.
 
+mod colours;
 mod generate;
+mod preset;
 pub mod scale;
 mod settle;
 
+pub use colours::{sankey_nodes, series_fill, with_node_fill, with_palette, with_series_fill};
 pub use generate::{Generated, Part, Refusal, generate, palette};
-pub use settle::{settle, settle_all, settle_round, stale};
+pub use preset::Preset;
+pub use settle::{preview, settle, settle_all, settle_round, stale};
 
 use crate::id::NodeId;
 use crate::node::{Node, NodeKind};

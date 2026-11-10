@@ -383,6 +383,48 @@ impl RenderOverrides {
         out
     }
 
+    /// Draw `generated` in place of chart `chart`'s parts: its committed children
+    /// hidden through the child-order patch, the new parts as ghosts in their
+    /// order. A scrubbed chart option previews this way, since a patch cannot add
+    /// a tick or a bar.
+    pub fn replace_chart(&mut self, chart: NodeId, generated: &ondin_core::chart::Generated) {
+        /// The actor the preview's part ids are minted under: ids no document
+        /// holds, read only by the scene walk.
+        const PREVIEW_ACTOR: u64 = 0xC4A3;
+        let mut ids = ondin_core::IdSource::new(PREVIEW_ACTOR);
+        let parts = &generated.parts;
+        fn under(
+            parts: &[ondin_core::chart::Part],
+            parent: Option<ondin_core::chart::PartKey>,
+            ids: &mut ondin_core::IdSource,
+        ) -> Vec<GhostNode> {
+            parts
+                .iter()
+                .filter(|p| p.parent == parent)
+                .map(|p| {
+                    let mut g =
+                        GhostNode::leaf(ids.mint(), p.transform, p.kind.clone(), shaped(&p.kind));
+                    g.paint = Paint {
+                        fills: ondin_core::keyed_by_position(p.fills.clone()),
+                        strokes: ondin_core::keyed_by_position(p.strokes.clone()),
+                    };
+                    g.opacity = p.opacity;
+                    g.children = under(parts, Some(p.key), ids);
+                    g
+                })
+                .collect()
+        }
+        self.order.insert(chart, Vec::new());
+        self.ghosts.retain(|g| g.parent != chart);
+        for (index, node) in under(parts, None, &mut ids).into_iter().enumerate() {
+            self.ghosts.push(Ghost {
+                parent: chart,
+                index,
+                node,
+            });
+        }
+    }
+
     /// Install (or clear) the mode's explanatory artwork — see [`Self::chrome`].
     /// `glued` is the layer the ghost is a continuation of, and the ghost itself;
     /// `None` clears it.

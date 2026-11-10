@@ -2063,9 +2063,23 @@ impl OndinApp {
             .map(|n| n.href().to_string())
             .unwrap_or_default();
         let draft_id = egui::Id::new(("link-address", id));
-        let (mut text, refused) = ui
-            .data(|d| d.get_temp::<(String, bool)>(draft_id))
-            .unwrap_or((saved.clone(), false));
+        // A draft remembers the pass its field was last drawn in. One that
+        // missed a pass lost its focus unseen (the selection moved on), so it
+        // is dropped rather than shown later as if saved; a refused one stays.
+        let pass = ui.ctx().cumulative_pass_nr();
+        let draft = ui
+            .data(|d| d.get_temp::<(String, bool, u64)>(draft_id))
+            .filter(|(_, refused, seen)| *refused || seen + 1 >= pass);
+        let (mut text, refused) = match draft {
+            Some((text, refused, _)) => {
+                ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), refused, pass)));
+                (text, refused)
+            }
+            None => {
+                ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
+                (saved.clone(), false)
+            }
+        };
         let mut commit = None;
         ui.horizontal(|ui| {
             ui::disable_unless(ui, enabled, |ui| {
@@ -2081,16 +2095,16 @@ impl OndinApp {
                 // Typing only keeps the draft; the commit is the defocus below.
                 // valve-gate-not-a-commit
                 if resp.changed() {
-                    ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), false)));
+                    ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), false, pass)));
                 }
                 if resp.lost_focus() {
                     if !ui::defocus_commits(&resp) {
-                        ui.data_mut(|d| d.remove::<(String, bool)>(draft_id));
+                        ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
                     } else if ondin_core::element::is_href(text.trim()) {
-                        ui.data_mut(|d| d.remove::<(String, bool)>(draft_id));
+                        ui.data_mut(|d| d.remove::<(String, bool, u64)>(draft_id));
                         commit = Some(text.trim().to_string());
                     } else {
-                        ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), true)));
+                        ui.data_mut(|d| d.insert_temp(draft_id, (text.clone(), true, pass)));
                     }
                 }
                 resp.on_hover_text("Link address");
@@ -13880,6 +13894,73 @@ mod mask_card_tests {
         assert!(
             drawn.iter().any(|s| s == "header"),
             "the Layers row wears its tag: {drawn:?}"
+        );
+    }
+
+    /// A link address draft whose field went undrawn for a pass (the selection
+    /// moved on mid-typing) is dropped rather than shown later as if saved; one
+    /// drawn every pass stays.
+    /// flip: `link_address_row` keeping a draft whatever pass it was last seen
+    /// in → fails at "the stale draft".
+    #[test]
+    fn a_link_address_draft_left_unseen_is_dropped() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let frame = t.add(
+            root,
+            NodeKind::Artboard {
+                size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        app.session.adopt_document(t.doc.clone(), None);
+        app.session.selection.set(vec![frame]);
+        app.session.commit(Transaction(vec![Operation::SetElement {
+            id: frame,
+            element: Some(ondin_core::element::HtmlElement::Link),
+        }]));
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut texts = |app: &mut crate::app::OndinApp| {
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                shapes = ctx
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1320.0, 820.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| eframe::App::ui(app, ui, &mut kitten),
+                    )
+                    .shapes;
+            }
+            shapes
+                .into_iter()
+                .filter_map(|c| match c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let draft_id = egui::Id::new(("link-address", frame));
+        texts(&mut app);
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(draft_id, ("/typed".to_string(), false, pass)));
+        let drawn = texts(&mut app);
+        assert!(
+            drawn.iter().any(|s| s == "/typed"),
+            "the control: a draft drawn every pass shows: {drawn:?}"
+        );
+        ctx.data_mut(|d| d.insert_temp(draft_id, ("/stale".to_string(), false, 0u64)));
+        let drawn = texts(&mut app);
+        assert!(
+            !drawn.iter().any(|s| s == "/stale"),
+            "the stale draft: {drawn:?}"
         );
     }
 

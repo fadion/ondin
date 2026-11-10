@@ -467,7 +467,12 @@ selecting anything else closes it.
   description; the table is always the document's own copy, so a chart whose file is gone still
   draws. **The path is the document's, so untrusted**: the tokens link's rules hold
   (`styles-variables.md`, *A linked file*; `tokens_import::read_linked`) — absolute, on a local
-  drive, a regular file of at most 16 MB, read on the UI thread as the tokens import reads.
+  drive, a regular file of at most 16 MB. The file is read and parsed on a worker
+  (`chart_import::ChartRead`, one at a time, a later read replacing the pending one) for every
+  door that reads a path: *Import…*, a file dropped on a chart or on bare canvas, and *Update*.
+  What it was for lands when it answers (`poll_chart_read`): the import box, the replaced tables,
+  or the new chart; a refusal goes to the status line. A browser drop's bytes are parsed in the
+  frame, having no file to wait on. The watch's `stat`s stay on the UI thread.
 - **Watching**, as the tokens link (`watch_chart_links`): every `WATCH_EVERY` (45 s), when the
   window regains focus, and when a new path is linked, each linked path is `stat`ed. A change
   shows the pill *sales.csv changed · Update chart* (*Update 2 charts* when several link it) after

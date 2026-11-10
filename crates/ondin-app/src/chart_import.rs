@@ -38,6 +38,48 @@ pub(crate) struct ChartImport {
     link: bool,
 }
 
+/// A chart data file being read and parsed on a worker, and what its answer
+/// is for. One at a time: a second read replaces the first, whose answer is
+/// dropped.
+pub(crate) struct ChartRead {
+    job: crate::job::Job<Result<Parsed, String>>,
+    then: Then,
+}
+
+/// A file as the worker read it.
+struct Parsed {
+    text: String,
+    read: table_io::Read,
+    /// Its stat as read, for the link.
+    stat: Option<(u64, u64)>,
+}
+
+/// What a read lands as.
+enum Then {
+    /// The import box for this chart.
+    Import { chart: NodeId, path: PathBuf },
+    /// *Update chart data* for every chart linking `path`.
+    Update { path: String },
+    /// A new chart at this point, linked to `path` (a canvas drop).
+    Insert {
+        at: ondin_core::kurbo::Point,
+        path: PathBuf,
+    },
+}
+
+/// Read and parse `path` as `format`, by the tokens link's rules; `Err` says
+/// why not.
+fn read_file(path: &Path, format: table_io::Format) -> Result<Parsed, String> {
+    let text = crate::tokens_import::read_linked(path, crate::tokens_import::MAX_READ)
+        .ok_or_else(|| "not a local file of at most 16 MB".to_string())?;
+    let read = table_io::read(&text, format, None).map_err(|e| e.to_string())?;
+    Ok(Parsed {
+        text,
+        read,
+        stat: stat_of(path),
+    })
+}
+
 /// What the watch last saw of the linked files: by path, the stat on disk.
 #[derive(Default)]
 pub(crate) struct ChartWatch {
@@ -143,34 +185,115 @@ impl OndinApp {
                 .session
                 .fail(format!("Cannot import {name}: not a CSV, TSV or JSON file"));
         };
-        let linkable = bytes.is_none();
-        let text = match bytes {
-            Some(b) => String::from_utf8_lossy(&b).into_owned(),
-            None => {
-                match crate::tokens_import::read_linked(&path, crate::tokens_import::MAX_READ) {
-                    Some(t) => t,
-                    None => {
-                        return self.session.fail(format!(
-                            "Cannot import {name}: not a local file of at most 16 MB"
-                        ));
-                    }
-                }
-            }
+        let Some(b) = bytes else {
+            // Read off the UI thread; the box opens when it lands.
+            let from = path.clone();
+            let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
+                read_file(&from, format)
+            });
+            self.chart_read = Some(ChartRead {
+                job,
+                then: Then::Import { chart: id, path },
+            });
+            return;
         };
-        let read = match table_io::read(&text, format, None) {
-            Ok(r) => r,
-            Err(e) => return self.session.fail(format!("Cannot import {name}: {e}")),
+        let text = String::from_utf8_lossy(&b).into_owned();
+        match table_io::read(&text, format, None) {
+            Ok(read) => self.open_import_box(
+                id,
+                path,
+                false,
+                Parsed {
+                    text,
+                    read,
+                    stat: None,
+                },
+            ),
+            Err(e) => self.session.fail(format!("Cannot import {name}: {e}")),
+        }
+    }
+
+    /// The import box for chart `id` on a file read as `parsed`.
+    fn open_import_box(&mut self, id: NodeId, path: PathBuf, linkable: bool, parsed: Parsed) {
+        let Some(format) = path
+            .file_name()
+            .and_then(|n| table_io::Format::of_name(&n.to_string_lossy()))
+        else {
+            return;
         };
         self.chart_import = Some(ChartImport {
             chart: id,
             path,
             linkable,
-            text,
+            text: parsed.text,
             format,
-            header: read.header,
-            read,
+            header: parsed.read.header,
+            read: parsed.read,
             link: linkable,
         });
+    }
+
+    /// Land the chart data read on a worker, once it has: open the import box,
+    /// update the linked charts, or insert the dropped chart, by what it was for.
+    /// A refusal is said on the status line.
+    pub(crate) fn poll_chart_read(&mut self) {
+        let Some(pending) = &self.chart_read else {
+            return;
+        };
+        let answer = match pending.job.poll() {
+            Ok(None) => return,
+            Ok(Some(a)) => a,
+            Err(()) => Err("the read stopped".to_string()),
+        };
+        let Some(ChartRead { then, .. }) = self.chart_read.take() else {
+            return;
+        };
+        self.land_chart_read(then, answer);
+    }
+
+    /// Block until the pending read lands, then land it (tests only).
+    #[cfg(test)]
+    pub(crate) fn settle_chart_read(&mut self) {
+        if let Some(ChartRead { job, then }) = self.chart_read.take() {
+            let answer = job
+                .wait()
+                .unwrap_or_else(|| Err("the read stopped".to_string()));
+            self.land_chart_read(then, answer);
+        }
+    }
+
+    fn land_chart_read(&mut self, then: Then, answer: Result<Parsed, String>) {
+        match then {
+            Then::Import { chart, path } => {
+                let name = file_name(&path.to_string_lossy());
+                match answer {
+                    Ok(parsed)
+                        if self
+                            .session
+                            .doc
+                            .get(chart)
+                            .is_some_and(|n| n.chart().is_some()) =>
+                    {
+                        self.open_import_box(chart, path, true, parsed);
+                    }
+                    Ok(_) => {}
+                    Err(why) => self.session.fail(format!("Cannot import {name}: {why}")),
+                }
+            }
+            Then::Update { path } => match answer {
+                Ok(parsed) => self.replace_linked_tables(&path, parsed),
+                Err(why) => self
+                    .session
+                    .fail(format!("Cannot update from {}: {why}", file_name(&path))),
+            },
+            Then::Insert { at, path } => {
+                let name = file_name(&path.to_string_lossy());
+                match answer {
+                    Ok(parsed) => self.insert_chart_from(at, Some(&path), parsed),
+                    Err(why) => self.session.fail(format!("Cannot import {name}: {why}")),
+                }
+            }
+        }
     }
 
     /// Replace chart `id`'s table with `read`'s, linked to `link` or unlinked,
@@ -379,6 +502,24 @@ impl OndinApp {
     /// *Update chart data*: read `path` and replace every chart linked to it, one
     /// undo step. The file's contents enter the document only here, on a click.
     pub(crate) fn update_linked_charts(&mut self, path: &str) {
+        let Some(format) = table_io::Format::of_name(&file_name(path)) else {
+            return;
+        };
+        let from = PathBuf::from(path);
+        let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
+            read_file(&from, format)
+        });
+        self.chart_read = Some(ChartRead {
+            job,
+            then: Then::Update {
+                path: path.to_string(),
+            },
+        });
+    }
+
+    /// Replace the table of every chart whose link to `path` changed with
+    /// `parsed`'s, one undo step, *Update chart data*.
+    fn replace_linked_tables(&mut self, path: &str, parsed: Parsed) {
         let name = file_name(path);
         let ids: Vec<NodeId> = self
             .changed_links()
@@ -386,19 +527,8 @@ impl OndinApp {
             .find(|(p, _)| p == path)
             .map(|(_, ids)| ids)
             .unwrap_or_default();
-        let Some(format) = table_io::Format::of_name(&name) else {
-            return;
-        };
-        let Some(text) =
-            crate::tokens_import::read_linked(Path::new(path), crate::tokens_import::MAX_READ)
-        else {
-            return self.session.fail(format!("Cannot read {name}"));
-        };
-        let read = match table_io::read(&text, format, None) {
-            Ok(r) => r,
-            Err(e) => return self.session.fail(format!("Cannot update from {name}: {e}")),
-        };
-        let (modified, size) = stat_of(Path::new(path)).unwrap_or_default();
+        let read = parsed.read;
+        let (modified, size) = parsed.stat.unwrap_or_default();
         let link = DataLink {
             path: path.to_string(),
             size,
@@ -590,39 +720,62 @@ impl OndinApp {
         if format == table_io::Format::Json {
             return false;
         }
-        let text = match (&file.path, &file.bytes) {
-            (Some(p), _) => crate::tokens_import::read_linked(p, crate::tokens_import::MAX_READ),
-            (None, Some(b)) => Some(String::from_utf8_lossy(b).into_owned()),
-            (None, None) => None,
-        };
-        let Some(text) = text else {
-            self.session.fail(format!(
-                "Cannot import {name}: not a local file of at most 16 MB"
-            ));
-            return true;
-        };
-        let read = match table_io::read(&text, format, None) {
-            Ok(r) => r,
-            Err(e) => {
-                self.session.fail(format!("Cannot import {name}: {e}"));
-                return true;
+        let p = at.unwrap_or_else(|| self.viewport_centre());
+        match (&file.path, &file.bytes) {
+            (Some(path), _) => {
+                let (from, path) = (path.clone(), path.clone());
+                let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
+                    read_file(&from, format)
+                });
+                self.chart_read = Some(ChartRead {
+                    job,
+                    then: Then::Insert { at: p, path },
+                });
             }
-        };
+            (None, Some(b)) => {
+                let text = String::from_utf8_lossy(b).into_owned();
+                match table_io::read(&text, format, None) {
+                    Ok(read) => self.insert_chart_from(
+                        p,
+                        None,
+                        Parsed {
+                            text,
+                            read,
+                            stat: None,
+                        },
+                    ),
+                    Err(e) => self.session.fail(format!("Cannot import {name}: {e}")),
+                }
+            }
+            (None, None) => self.session.fail(format!(
+                "Cannot import {name}: not a local file of at most 16 MB"
+            )),
+        }
+        true
+    }
+
+    /// A new chart at `at` from a table file, its kind read off the columns,
+    /// linked to `path` when the file came with one.
+    fn insert_chart_from(
+        &mut self,
+        at: ondin_core::kurbo::Point,
+        path: Option<&Path>,
+        parsed: Parsed,
+    ) {
+        let read = parsed.read;
         let kind = kind_for(&read.table);
         let mut c = Chart::sample(kind);
         c.mapping = chart::Mapping::guess(kind, &read.table);
         c.table = read.table;
-        c.source = file.path.as_ref().map(|p| {
-            let (modified, size) = stat_of(p).unwrap_or_default();
+        c.source = path.map(|p| {
+            let (modified, size) = parsed.stat.unwrap_or_default();
             DataLink {
                 path: p.to_string_lossy().into_owned(),
                 size,
                 modified,
             }
         });
-        let p = at.unwrap_or_else(|| self.viewport_centre());
-        self.insert_chart_at(p, c);
-        true
+        self.insert_chart_at(at, c);
     }
 }
 
@@ -793,6 +946,11 @@ mod tests {
 
         let path = temp_csv("link", "Category,Revenue,Units\nQ1,10,3\nQ2,12,4\n");
         app.open_chart_import(id, path.clone(), None);
+        assert!(
+            app.chart_import.is_none(),
+            "the file is read off the UI thread"
+        );
+        app.settle_chart_read();
         assert!(app.chart_import.is_some(), "the box opened");
         pass(&ctx, &mut app, Vec::new());
         pass(&ctx, &mut app, vec![enter()]);
@@ -813,6 +971,7 @@ mod tests {
         app.watch_chart_links(&ctx);
         assert_eq!(app.chart_link_state(id), Some(LinkState::Changed));
         app.update_linked_charts(&link.path);
+        app.settle_chart_read();
         let chart = app.session.doc.get(id).and_then(|n| n.chart()).unwrap();
         assert_eq!(chart.table.rows.len(), 3, "the new row read in");
         app.chart_watch.next = 0.0;
@@ -846,6 +1005,7 @@ mod tests {
         );
         let id = *app.session.selection.ids().first().unwrap();
         app.open_chart_import(id, PathBuf::from(r"\\host\share\sales.csv"), None);
+        app.settle_chart_read();
         assert!(app.chart_import.is_none(), "a share is never read");
     }
 }

@@ -1126,6 +1126,8 @@ pub struct OndinApp {
     pub(crate) chart_import: Option<crate::chart_import::ChartImport>,
     /// What the watch last saw of the files charts link.
     pub(crate) chart_watch: crate::chart_import::ChartWatch,
+    /// A chart data file being read on a worker, and what lands it.
+    pub(crate) chart_read: Option<crate::chart_import::ChartRead>,
     /// The find and replace box, kept while closed so it reopens as it was left.
     pub(crate) find: crate::find::FindBox,
     /// The Colour review card, at the palette's place (`colour_review.rs`).
@@ -1862,6 +1864,7 @@ impl OndinApp {
             chart_data: None,
             chart_import: None,
             chart_watch: Default::default(),
+            chart_read: None,
             find: Default::default(),
             colour_review: Default::default(),
             repeat: Default::default(),
@@ -2348,6 +2351,7 @@ impl OndinApp {
         self.watch_disk(&ctx);
         self.watch_tokens(&ctx);
         self.watch_chart_links(&ctx);
+        self.poll_chart_read();
         self.poll_imports();
         // Before the bar and the canvas's next frame read the envelope.
         self.tend_warp();

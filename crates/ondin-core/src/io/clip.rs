@@ -129,16 +129,14 @@ pub fn write_carrying(
     from: Option<Rect>,
     heading: &str,
 ) -> Result<String, IoError> {
-    // A chart's linked file stays behind (`Chart::copied`).
-    let dto_of = |t: &Vec<Node>| {
-        t.iter()
-            .map(|n| {
-                let mut d = NodeDto::from_node(n);
-                d.chart = d.chart.map(|c| Box::new(c.copied()));
-                d
-            })
-            .collect()
+    // A chart's linked file stays behind (`Chart::copied`), the variables'
+    // detached twins' too.
+    let copied = |n: &Node| {
+        let mut d = NodeDto::from_node(n);
+        d.chart = d.chart.map(|c| Box::new(c.copied()));
+        d
     };
+    let dto_of = |t: &Vec<Node>| t.iter().map(copied).collect();
     let dto = ClipDto {
         schema_version: CURRENT_SCHEMA_VERSION,
         subtrees: subtrees.iter().map(dto_of).collect(),
@@ -150,7 +148,7 @@ pub fn write_carrying(
         vars: CarriedDto {
             vars: vars.vars.clone(),
             modes: vars.modes.clone(),
-            detached: vars.detached.iter().map(NodeDto::from_node).collect(),
+            detached: vars.detached.iter().map(copied).collect(),
             styles: vars.styles.clone(),
             tokens: vars.tokens.clone(),
         },
@@ -278,7 +276,12 @@ fn parse(json: &str) -> Result<Payload, IoError> {
             .vars
             .detached
             .into_iter()
-            .map(NodeDto::into_node)
+            .map(|d| {
+                NodeDto::into_node(d).map(|mut n| {
+                    n.chart = n.chart.map(|c| Box::new(c.copied()));
+                    n
+                })
+            })
             .collect::<Result<_, _>>()?,
         styles: dto.vars.styles,
         tokens: dto.vars.tokens,

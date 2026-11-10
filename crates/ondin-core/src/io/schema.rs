@@ -367,7 +367,7 @@ pub(crate) struct NodeDto {
     )]
     pub element: Option<crate::element::HtmlElement>,
     /// The frame's chart (`crate::chart`), absent on every other layer. New in
-    /// v15. One `Chart::validate` refuses refuses the file: dropping it would
+    /// v15. One `Chart::validate` refuses fails the whole file: dropping it would
     /// leave its parts as plain shapes that no regeneration owns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart: Option<Box<crate::chart::Chart>>,

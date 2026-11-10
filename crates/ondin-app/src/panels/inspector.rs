@@ -10490,15 +10490,20 @@ impl OndinApp {
         let doc = &self.session.doc;
         match slot {
             // The whole description with the one colour replaced, solid.
-            PaintSlot::Chart(colour) => match (
-                self.session.chart_drawn(id),
-                paint::stops_of(&brush).first(),
-            ) {
-                (Some(chart), Some((_, c))) => Transaction(vec![Operation::SetChart {
-                    id,
-                    chart: Some(Box::new(super::chart::with_colour(chart, colour, *c))),
-                }]),
-                _ => Transaction(Vec::new()),
+            PaintSlot::Chart(colour) => match paint::stops_of(&brush).first() {
+                Some((_, c)) => Transaction(
+                    self.chart_slot_targets(id, colour)
+                        .into_iter()
+                        .filter_map(|at| {
+                            let chart = self.session.chart_drawn(at)?;
+                            Some(Operation::SetChart {
+                                id: at,
+                                chart: Some(Box::new(super::chart::with_colour(chart, colour, *c))),
+                            })
+                        })
+                        .collect(),
+                ),
+                None => Transaction(Vec::new()),
             },
             // The image fill's own write, with one end of its duotone replaced.
             PaintSlot::Duotone(i, end) => {

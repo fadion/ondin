@@ -2912,12 +2912,12 @@ pub static VERBS: &[Verb] = &[
                 .layers(ctx.doc, "nodes")?
                 .into_iter()
                 .map(|id| {
-                    crate::chart::flatten(ctx.doc, id).ok_or_else(|| {
+                    crate::chart::flatten_ops(ctx.doc, id).ok_or_else(|| {
                         a.invalid("nodes", format!("`{}` is not a chart", id.to_wire()))
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Done::ops(ops))
+            Ok(Done::ops(ops.into_iter().flatten().collect()))
         },
     },
 ];
@@ -2964,22 +2964,27 @@ fn chart_valid(a: &Args<'_>, chart: &crate::chart::Chart) -> Result<(), VerbErro
 }
 
 /// `own` with `patch` merged over it as a JSON merge patch (RFC 7396): an object
-/// merges key by key, a null sets the key back to its default, anything else
+/// merges key by key, a null sets the key back to its value in `T::default()`
+/// (not a nested struct's own default, which may differ), anything else
 /// replaces it.
-fn patched<T: serde::Serialize + serde::de::DeserializeOwned>(
+fn patched<T: serde::Serialize + serde::de::DeserializeOwned + Default>(
     a: &Args<'_>,
     param: &'static str,
     own: &T,
     patch: &Value,
 ) -> Result<T, VerbError> {
-    fn merge(into: &mut Value, patch: &Value) {
+    fn merge(into: &mut Value, patch: &Value, default: Option<&Value>) {
         match (into, patch) {
             (Value::Object(into), Value::Object(patch)) => {
                 for (k, v) in patch {
+                    let default = default.and_then(|d| d.get(k));
                     if v.is_null() {
-                        into.remove(k);
+                        match default {
+                            Some(d) => into.insert(k.clone(), d.clone()),
+                            None => into.remove(k),
+                        };
                     } else {
-                        merge(into.entry(k.clone()).or_insert(Value::Null), v);
+                        merge(into.entry(k.clone()).or_insert(Value::Null), v, default);
                     }
                 }
             }
@@ -2987,7 +2992,8 @@ fn patched<T: serde::Serialize + serde::de::DeserializeOwned>(
         }
     }
     let mut v = serde_json::to_value(own).map_err(|e| a.invalid(param, e))?;
-    merge(&mut v, patch);
+    let default = serde_json::to_value(T::default()).map_err(|e| a.invalid(param, e))?;
+    merge(&mut v, patch, Some(&default));
     serde_json::from_value(v).map_err(|e| a.invalid(param, e))
 }
 

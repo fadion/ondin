@@ -1,34 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="560" height="1860" viewBox="0 0 560 1860">
   <defs>
-    <linearGradient id="grad-c4a2_272-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_3-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#3b6fe0"/>
       <stop offset="1" stop-color="#f08c2e"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_273-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_4-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#2ea88a"/>
       <stop offset="1" stop-color="#f08c2e"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_274-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_5-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#d94e7a"/>
       <stop offset="1" stop-color="#f08c2e"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_275-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_6-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#3b6fe0"/>
       <stop offset="1" stop-color="#8a63d2"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_276-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_7-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#2ea88a"/>
       <stop offset="1" stop-color="#8a63d2"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_277-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_8-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#d94e7a"/>
       <stop offset="1" stop-color="#8a63d2"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_278-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_9-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#f08c2e"/>
       <stop offset="1" stop-color="#c9a227"/>
     </linearGradient>
-    <linearGradient id="grad-c4a2_279-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
+    <linearGradient id="grad-721c0a194b88663a_10-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#f08c2e"/>
       <stop offset="1" stop-color="#4aa8d8"/>
     </linearGradient>
@@ -377,14 +377,14 @@
   <g data-name="Chart 6" transform="matrix(1 0 0 1 0 1560)" clip-path="url(#clip-c7_7)">
     <g data-name="Body" transform="matrix(1 0 0 1 16 16)">
       <g data-name="Flows">
-        <path data-name="Flow · Search → Signup" d="M57.8203,58.3529 C157.0942,58.3529 157.0942,100.7112 256.3682,100.7112 L256.3682,188.2406 C157.0942,188.2406 157.0942,145.8824 57.8203,145.8824 Z" fill="url(#grad-c4a2_272-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Social → Signup" d="M57.8203,177.7647 C157.0942,177.7647 157.0942,188.2406 256.3682,188.2406 L256.3682,232.0053 C157.0942,232.0053 157.0942,221.5294 57.8203,221.5294 Z" fill="url(#grad-c4a2_273-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Direct → Signup" d="M57.8203,238.8235 C157.0942,238.8235 157.0942,232.0053 256.3682,232.0053 L256.3682,261.1818 C157.0942,261.1818 157.0942,268 57.8203,268 Z" fill="url(#grad-c4a2_274-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Search → Bounce" d="M57.8203,0 C262.3682,0 262.3682,0 466.916,0 L466.916,58.3529 C262.3682,58.3529 262.3682,58.3529 57.8203,58.3529 Z" fill="url(#grad-c4a2_275-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Social → Bounce" d="M57.8203,155.8824 C262.3682,155.8824 262.3682,58.3529 466.916,58.3529 L466.916,80.2353 C262.3682,80.2353 262.3682,177.7647 57.8203,177.7647 Z" fill="url(#grad-c4a2_276-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Direct → Bounce" d="M57.8203,231.5294 C262.3682,231.5294 262.3682,80.2353 466.916,80.2353 L466.916,87.5294 C262.3682,87.5294 262.3682,238.8235 57.8203,238.8235 Z" fill="url(#grad-c4a2_277-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Signup → Trial" d="M268.3682,100.7112 C367.6421,100.7112 367.6421,97.5294 466.916,97.5294 L466.916,206.9412 C367.6421,206.9412 367.6421,210.123 268.3682,210.123 Z" fill="url(#grad-c4a2_278-fill-0)" opacity="0.4"/>
-        <path data-name="Flow · Signup → Leave" d="M268.3682,210.123 C367.6421,210.123 367.6421,216.9412 466.916,216.9412 L466.916,268 C367.6421,268 367.6421,261.1818 268.3682,261.1818 Z" fill="url(#grad-c4a2_279-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Search → Signup" d="M57.8203,58.3529 C157.0942,58.3529 157.0942,100.7112 256.3682,100.7112 L256.3682,188.2406 C157.0942,188.2406 157.0942,145.8824 57.8203,145.8824 Z" fill="url(#grad-721c0a194b88663a_3-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Social → Signup" d="M57.8203,177.7647 C157.0942,177.7647 157.0942,188.2406 256.3682,188.2406 L256.3682,232.0053 C157.0942,232.0053 157.0942,221.5294 57.8203,221.5294 Z" fill="url(#grad-721c0a194b88663a_4-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Direct → Signup" d="M57.8203,238.8235 C157.0942,238.8235 157.0942,232.0053 256.3682,232.0053 L256.3682,261.1818 C157.0942,261.1818 157.0942,268 57.8203,268 Z" fill="url(#grad-721c0a194b88663a_5-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Search → Bounce" d="M57.8203,0 C262.3682,0 262.3682,0 466.916,0 L466.916,58.3529 C262.3682,58.3529 262.3682,58.3529 57.8203,58.3529 Z" fill="url(#grad-721c0a194b88663a_6-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Social → Bounce" d="M57.8203,155.8824 C262.3682,155.8824 262.3682,58.3529 466.916,58.3529 L466.916,80.2353 C262.3682,80.2353 262.3682,177.7647 57.8203,177.7647 Z" fill="url(#grad-721c0a194b88663a_7-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Direct → Bounce" d="M57.8203,231.5294 C262.3682,231.5294 262.3682,80.2353 466.916,80.2353 L466.916,87.5294 C262.3682,87.5294 262.3682,238.8235 57.8203,238.8235 Z" fill="url(#grad-721c0a194b88663a_8-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Signup → Trial" d="M268.3682,100.7112 C367.6421,100.7112 367.6421,97.5294 466.916,97.5294 L466.916,206.9412 C367.6421,206.9412 367.6421,210.123 268.3682,210.123 Z" fill="url(#grad-721c0a194b88663a_9-fill-0)" opacity="0.4"/>
+        <path data-name="Flow · Signup → Leave" d="M268.3682,210.123 C367.6421,210.123 367.6421,216.9412 466.916,216.9412 L466.916,268 C367.6421,268 367.6421,261.1818 268.3682,261.1818 Z" fill="url(#grad-721c0a194b88663a_10-fill-0)" opacity="0.4"/>
       </g>
       <g data-name="Nodes">
         <rect data-name="Node · Search" transform="matrix(1 0 0 1 45.820312 0)" x="0" y="0" width="12" height="145.8824" rx="2" fill="#3b6fe0"/>

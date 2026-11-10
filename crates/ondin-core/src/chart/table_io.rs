@@ -231,7 +231,12 @@ fn read_json(text: &str) -> Result<Read, Unreadable> {
                 .map(|k| match get(k) {
                     None | Some(serde_json::Value::Null) => String::new(),
                     Some(serde_json::Value::String(s)) => s.clone(),
-                    Some(serde_json::Value::Number(n)) => n.to_string(),
+                    // Written without an exponent, which `parse_number` refuses:
+                    // `serde_json` writes 1e21 as `1e21`, `f64`'s `Display` never.
+                    Some(serde_json::Value::Number(n)) => match n.as_f64() {
+                        Some(f) if n.is_f64() => f.to_string(),
+                        _ => n.to_string(),
+                    },
                     Some(serde_json::Value::Bool(b)) => b.to_string(),
                     Some(serde_json::Value::Array(_) | serde_json::Value::Object(_)) => {
                         if !nested.contains(k) {
@@ -377,6 +382,28 @@ mod tests {
         assert_eq!(read("{}", Format::Json, None), Err(Unreadable::NotObjects));
         assert_eq!(read("[1]", Format::Json, None), Err(Unreadable::NotObjects));
         assert_eq!(read("[", Format::Json, None), Err(Unreadable::BadJson));
+    }
+
+    /// A JSON number written with an exponent lands as a cell `parse_number`
+    /// reads, at its value.
+    /// flip: `read_json` writing a float with `Number::to_string` → fails at "1e21".
+    #[test]
+    fn a_json_exponent_reads_as_a_number() {
+        let text = r#"[{"a":0.00001,"b":1e21,"c":-2.5e-3,"d":1e-7}]"#;
+        let r = read(text, Format::Json, None).unwrap();
+        let row = &r.table.rows[0];
+        for (cell, want, what) in [
+            (&row[0], 0.00001, "1e-5"),
+            (&row[1], 1e21, "1e21"),
+            (&row[2], -2.5e-3, "-2.5e-3"),
+            (&row[3], 1e-7, "1e-7"),
+        ] {
+            assert_eq!(
+                crate::chart::parse_number(cell),
+                Some(want),
+                "{what}: {cell}"
+            );
+        }
     }
 
     /// Past the row limit the rest is left out and said.

@@ -234,7 +234,7 @@ A chart (a frame carrying a chart description, `design/charts.md`) has its own h
 | Import chart data… | one chart; dims on lock |
 | Update chart data | while its linked file changed on disk; dims on lock |
 | Unlink data file | while linked; dims on lock |
-| Flatten chart | promoted from Structure; dims on lock |
+| Flatten chart | promoted from Structure; also over several layers that are all charts, flattening each; dims on lock |
 
 ### 5.2 Group
 

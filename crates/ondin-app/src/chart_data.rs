@@ -398,7 +398,7 @@ impl OndinApp {
                     ui.set_height(H);
                     egui::Frame::NONE.inner_margin(PAD).show(ui, |ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                        head(ui, &name, linked, &mut act);
+                        head(ui, &name, &mut act);
                         if linked {
                             ui.label(
                                 egui::RichText::new(linked_line(&chart))
@@ -454,7 +454,7 @@ fn linked_line(chart: &Chart) -> String {
 
 /// The head: the table glyph, *Chart data*, the chart's name, *Import…*, ✕;
 /// the toolbar under it.
-fn head(ui: &mut egui::Ui, name: &str, linked: bool, act: &mut Vec<Act>) {
+fn head(ui: &mut egui::Ui, name: &str, act: &mut Vec<Act>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(theme::icon_text(
@@ -487,7 +487,6 @@ fn head(ui: &mut egui::Ui, name: &str, linked: bool, act: &mut Vec<Act>) {
             }
         });
     });
-    let _ = linked;
 }
 
 /// The grid: the header row and the row gutter held at the viewport's edges
@@ -502,36 +501,53 @@ fn grid(
 ) {
     let t = &chart.table;
     let (nr, nc) = (t.rows.len(), t.columns.len());
+    // The table's size once this pass's edit lands, so the cursor may stand on
+    // a row or column added just now.
+    let (mut fit_r, mut fit_c) = (nr, nc);
     if !linked {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             if word_button(ui, "Add row").clicked() && nr < chart::MAX_ROWS {
-                let mut next = t.clone();
+                let mut next = with_typed(t, s);
                 next.rows.push(vec![String::new(); nc]);
                 s.at = (nr, s.at.1.min(nc.saturating_sub(1)));
                 s.anchor = s.at;
                 s.reveal = true;
+                fit_r = nr + 1;
                 act.push(Act::Table(next));
             }
             if word_button(ui, "Add column").clicked() && nc < chart::MAX_COLUMNS {
-                let mut next = t.clone();
+                let mut next = with_typed(t, s);
                 add_column(&mut next, nc);
                 s.at = (s.at.0, nc);
                 s.anchor = s.at;
                 s.reveal = true;
+                fit_c = nc + 1;
                 act.push(Act::Table(next));
             }
         });
     }
-    // Keep the cursor inside the table as it shrinks under an undo.
+    // Keep the cursor, and a menu or rename's column or row, inside the table
+    // as it shrinks under an undo.
     s.at = (
-        s.at.0.min(nr.saturating_sub(1)),
-        s.at.1.min(nc.saturating_sub(1)),
+        s.at.0.min(fit_r.saturating_sub(1)),
+        s.at.1.min(fit_c.saturating_sub(1)),
     );
     s.anchor = (
-        s.anchor.0.min(nr.saturating_sub(1)),
-        s.anchor.1.min(nc.saturating_sub(1)),
+        s.anchor.0.min(fit_r.saturating_sub(1)),
+        s.anchor.1.min(fit_c.saturating_sub(1)),
     );
+    if s.rename.as_ref().is_some_and(|(c, _)| *c >= nc) {
+        s.rename = None;
+    }
+    let menu_fits = match s.menu {
+        Some(Menu::Header(c, _)) => c < nc,
+        Some(Menu::Row(r, _)) => r < nr,
+        None => true,
+    };
+    if !menu_fits {
+        s.menu = None;
+    }
 
     let grid_id = egui::Id::new(GRID_ID);
     let content = egui::vec2(GUTTER + COL_W * nc as f32, ROW_H * (nr as f32 + 1.0));
@@ -630,7 +646,7 @@ fn grid(
         {
             match (r, c) {
                 (Some(_), Some(_)) if !linked => s.edit = Some(t.rows[s.at.0][s.at.1].clone()),
-                (None, Some(c)) => s.rename = Some((c, t.columns[c].name.clone())),
+                (None, Some(c)) if !linked => s.rename = Some((c, t.columns[c].name.clone())),
                 _ => {}
             }
         }
@@ -808,7 +824,6 @@ fn grid(
         // The cell being typed into, over its cell.
         if let Some(text) = &mut s.edit {
             let rc = cell_rect(s.at.0, s.at.1);
-            let id = egui::Id::new("chart-data-cell");
             let resp = ui
                 .scope_builder(egui::UiBuilder::new().max_rect(rc), |ui| {
                     ui::text_field(ui, rc.size(), text, "")
@@ -817,7 +832,6 @@ fn grid(
             if !resp.has_focus() && !ui.memory(|m| m.has_focus(resp.id)) {
                 resp.request_focus();
             }
-            let _ = id;
         }
         if let Some((c, text)) = &mut s.rename {
             let hr = egui::Rect::from_min_size(
@@ -993,6 +1007,19 @@ fn moved(at: Cell, dr: isize, dc: isize, nr: usize, nc: usize) -> Cell {
     (r, c)
 }
 
+/// `t` with the cell being typed into written, taking the typing: an edit that
+/// grows the table carries it, rather than a second write from the old table
+/// dropping it.
+fn with_typed(t: &chart::Table, s: &mut ChartData) -> chart::Table {
+    let mut next = t.clone();
+    if let Some(text) = s.edit.take()
+        && let Some(cell) = next.rows.get_mut(s.at.0).and_then(|r| r.get_mut(s.at.1))
+    {
+        *cell = text.chars().take(chart::MAX_CELL_CHARS).collect();
+    }
+    next
+}
+
 /// Write the cell being typed into, if any.
 fn commit_edit_text(chart: &Chart, s: &mut ChartData, linked: bool, act: &mut Vec<Act>) {
     let Some(text) = s.edit.take() else { return };
@@ -1018,9 +1045,15 @@ fn menus(
     let at = match menu {
         Menu::Header(_, p) | Menu::Row(_, p) => p,
     };
-    let area = egui::Area::new(egui::Id::new("chart-data-menu"))
+    // Kept on screen by the size it drew at last frame, its rows varying by menu.
+    let area_id = egui::Id::new("chart-data-menu");
+    let size = ui
+        .ctx()
+        .memory(|m| m.area_rect(area_id))
+        .map_or(egui::vec2(208.0, 0.0), |r| r.size());
+    let area = egui::Area::new(area_id)
         .order(egui::Order::Tooltip)
-        .fixed_pos(at)
+        .fixed_pos(ui::menu_place(ui.ctx(), at, size))
         .show(ui.ctx(), |ui| {
             ui::menu_frame(4.0).show(ui, |ui| {
                 ui.set_width(200.0);
@@ -1042,7 +1075,7 @@ fn menus(
                         };
                         if ui::menu_row(
                             ui,
-                            ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename"),
+                            ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename").enabled(!linked),
                             ui::MENU_ROW_H,
                         )
                         .clicked()
@@ -1389,5 +1422,122 @@ mod tests {
         }
         pass(&ctx, &mut app, vec![key(egui::Key::Escape)]);
         assert!(app.chart_data.is_none(), "Escape with no edit closes it");
+    }
+
+    /// A headless app with a new chart's data window open, a few passes in.
+    fn opened(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        crate::theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        let id = *app.session.selection.ids().first().unwrap();
+        for _ in 0..3 {
+            pass(ctx, &mut app, Vec::new());
+        }
+        (app, id)
+    }
+
+    /// Where the window drew the text `s`, from one pass's shapes.
+    fn text_pos(ctx: &egui::Context, app: &mut OndinApp, s: &str) -> egui::Pos2 {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        out.shapes
+            .iter()
+            .find_map(|c| find(&c.shape, s))
+            .unwrap_or_else(|| panic!("{s} is drawn"))
+    }
+
+    /// A click at `at`, moved onto first.
+    fn click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        pass(ctx, app, vec![button(true)]);
+        pass(ctx, app, vec![button(false)]);
+        pass(ctx, app, Vec::new());
+    }
+
+    fn table_of(app: &OndinApp, id: NodeId) -> chart::Table {
+        app.session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .unwrap()
+            .table
+            .clone()
+    }
+
+    /// *Add row* moves the cursor onto the new row, and a cell being typed
+    /// into lands in its own cell in the same step.
+    /// flip: `grid` clamping the cursor to the table as it was before the add → fails at "on the new row".
+    #[test]
+    fn add_row_moves_onto_it_and_keeps_the_typing() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let rows = table_of(&app, id).rows.len();
+        assert!(rows > 2, "the sample has rows to stand in");
+        let data = app.chart_data.as_mut().unwrap();
+        data.at = (1, 0);
+        data.anchor = (1, 0);
+        data.edit = Some("typed".into());
+        let at = text_pos(&ctx, &mut app, "Add row");
+        click(&ctx, &mut app, at);
+        let t = table_of(&app, id);
+        assert_eq!(t.rows.len(), rows + 1, "a row was added");
+        assert_eq!(t.rows[1][0], "typed", "the typing landed in its cell");
+        assert_eq!(
+            app.chart_data.as_ref().map(|d| d.at),
+            Some((rows, 0)),
+            "on the new row"
+        );
+    }
+
+    /// A header menu open on a column an undo removes closes rather than
+    /// reading past the table.
+    /// flip: `grid` leaving `s.menu` alone as the table shrinks → fails by panicking in `menus`.
+    #[test]
+    fn a_menu_on_a_column_undone_away_closes() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let cols = table_of(&app, id).columns.len();
+        let at = text_pos(&ctx, &mut app, "Add column");
+        click(&ctx, &mut app, at);
+        assert_eq!(
+            table_of(&app, id).columns.len(),
+            cols + 1,
+            "a column was added"
+        );
+        app.chart_data.as_mut().unwrap().menu = Some(Menu::Header(cols, egui::pos2(400.0, 300.0)));
+        app.session.undo();
+        assert_eq!(table_of(&app, id).columns.len(), cols, "the add was undone");
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        assert!(
+            app.chart_data.as_ref().is_some_and(|d| d.menu.is_none()),
+            "the menu closed"
+        );
     }
 }

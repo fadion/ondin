@@ -1770,6 +1770,9 @@ pub struct Context<'a> {
     /// The selection has something to align against (`OndinApp::align_target`):
     /// what keeps *Align ▸* live.
     pub can_align: bool,
+    /// Several layers are selected and every one is a chart: what offers
+    /// *Flatten chart* over them, which flattens each.
+    pub all_charts: bool,
 }
 
 /// A layer's part in a component, for the menu's component rows.
@@ -2501,6 +2504,8 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
             }
             _ => {}
         }
+    } else if cx.all_charts {
+        rows.push(Row::new(Item::FlattenChart).promote().dim_if(locked, why));
     }
 
     // Composed in `double_click_pick`'s order (text, picture, points) so the menu
@@ -3357,6 +3362,13 @@ impl OndinApp {
                 .map(|p| (p, self.shown_page_name(p)))
                 .collect(),
             can_align: self.align_target().is_some(),
+            all_charts: self.session.selection.ids().len() > 1
+                && self.session.selection.ids().iter().all(|id| {
+                    self.session
+                        .doc
+                        .get(*id)
+                        .is_some_and(|n| n.chart().is_some())
+                }),
         }
     }
 
@@ -3645,6 +3657,21 @@ impl OndinApp {
                 if let Some(id) = hit {
                     self.enter_container(id, world);
                 }
+            }
+            // A selection of charts flattens each, as `Ctrl+E` does, when the menu
+            // was opened over one of them or from the palette.
+            Item::FlattenChart
+                if self.session.selection.ids().len() > 1
+                    && hit.is_none_or(|h| self.session.selection.ids().contains(&h))
+                    && self.session.selection.ids().iter().all(|id| {
+                        self.session
+                            .doc
+                            .get(*id)
+                            .is_some_and(|n| n.chart().is_some())
+                    }) =>
+            {
+                let ids = self.session.selection.ids().to_vec();
+                self.flatten_charts(&ids);
             }
             // The chart under the menu, or the one selected chart from the palette.
             Item::EditChartData
@@ -3959,6 +3986,7 @@ mod tests {
             one_page: false,
             other_pages: Vec::new(),
             can_align: true,
+            all_charts: false,
         }
     }
 
@@ -4358,6 +4386,28 @@ mod tests {
         assert_eq!(
             state(&build(&cx)),
             ["Hide", "Lock", "Rename", "Reset origin"]
+        );
+    }
+
+    /// Several charts selected offer *Flatten chart*, which flattens each;
+    /// several frames that are not all charts do not.
+    /// flip: `head_rows` dropping the several-charts arm → fails at "offered over two charts".
+    #[test]
+    fn flatten_chart_is_offered_over_several_charts() {
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let (two, kinds) = ([id(1), id(2)], [Kind::Frame, Kind::Frame]);
+        let mut cx = open(target, &two, &kinds);
+        assert!(
+            !flat(&build(&cx)).contains(&Item::FlattenChart),
+            "not over two plain frames"
+        );
+        cx.all_charts = true;
+        assert!(
+            flat(&build(&cx)).contains(&Item::FlattenChart),
+            "offered over two charts"
         );
     }
 

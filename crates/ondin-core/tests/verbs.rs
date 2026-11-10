@@ -2968,6 +2968,46 @@ fn set_chart_patches_the_kind_mapping_and_options() {
     assert_eq!(refused_param(&doc, &mut ids, "set_chart", plain), "node");
 }
 
+/// A null in `set_chart`'s options resets the key to the chart's default, not
+/// to the default of the struct holding it: the value axis's line and the
+/// category axis's gridlines start off.
+/// flip: `patched` removing a nulled key → fails at "the value axis's line".
+#[test]
+fn set_chart_null_resets_to_the_charts_default() {
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "column" }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "options": {
+            "value_axis": { "line": true }, "category_axis": { "grid": { "show": true } } } }),
+    );
+    let set = chart_of(&doc, c).options;
+    assert!(
+        set.value_axis.line && set.category_axis.grid.show,
+        "the fixture set both"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "options": {
+            "value_axis": { "line": null }, "category_axis": { "grid": { "show": null } } } }),
+    );
+    let got = chart_of(&doc, c).options;
+    assert!(!got.value_axis.line, "the value axis's line");
+    assert!(
+        !got.category_axis.grid.show,
+        "the category axis's gridlines"
+    );
+}
+
 /// `set_chart_data` replaces the table, keeping the mapping and series styles of
 /// each column whose name survives, and drops the linked file.
 #[test]
@@ -2985,6 +3025,7 @@ fn set_chart_data_keeps_the_columns_whose_names_survive() {
         path: "C:/sales.csv".into(),
         size: 1,
         modified: 1,
+        header: None,
     });
     linked.series.push(SeriesStyle {
         column: ColumnId(1),
@@ -3055,6 +3096,81 @@ fn flatten_chart_leaves_the_parts() {
         refused_param(&doc, &mut ids, "flatten_chart", again),
         "nodes"
     );
+}
+
+/// `flatten_chart` detaches a line's stroke drawing a colour scoped to fills to
+/// the colour it drew, whether the scope came before the binding or was
+/// narrowed after it, so the commit takes it.
+/// flip: `flatten_ops` without its `out_of_scope_ops` → fails at "flatten_chart commits".
+#[test]
+fn flatten_chart_detaches_a_line_drawing_a_fill_scoped_colour() {
+    use ondin_core::chart::PartRole;
+    use ondin_core::variable::{Cell, CollectionId, Field, Scope, VarKind, Variable};
+    let red = Color::from_rgb8(255, 0, 0);
+    let fills = Some(Scope::of([Field::Fill]));
+    for narrowed in [false, true] {
+        let (mut doc, mut ids, page) = blank();
+        let c = run(
+            &mut doc,
+            &mut ids,
+            "insert_chart",
+            json!({ "parent": page.to_wire(), "kind": "line" }),
+        )[0];
+        let (light, var) = (ids.mint_mode(), ids.mint_var());
+        let bound = ondin_core::chart::with_variables(&chart_of(&doc, c), &[var]);
+        doc.apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: ondin_core::Mode {
+                    id: light,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(red))].into(),
+                    scope: if narrowed { None } else { fills },
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetChart {
+                id: c,
+                chart: Some(Box::new(bound)),
+            },
+        ]))
+        .expect("a colour binds the chart");
+        Resolved::settled(&mut doc);
+        if narrowed {
+            let ops = ondin_core::variable::scope_ops(&doc, var, fills);
+            doc.apply(&Transaction(ops)).expect("the scope narrows");
+        }
+        let line = chart_of(&doc, c)
+            .parts
+            .iter()
+            .find(|(k, _)| k.role == PartRole::Line)
+            .map(|(_, id)| *id)
+            .expect("a line part");
+        let stroke = |doc: &Document| doc.get(line).unwrap().paint().strokes[0].brush.clone();
+        assert_eq!(stroke(&doc).var(), Some(var), "the line draws the binding");
+        run(
+            &mut doc,
+            &mut ids,
+            "flatten_chart",
+            json!({ "nodes": [c.to_wire()] }),
+        );
+        assert_eq!(
+            stroke(&doc).literal().cloned(),
+            Some(Brush::Solid(red)),
+            "narrowed {narrowed}: the line holds the colour it drew"
+        );
+    }
 }
 
 /// A verb writing a chart's part answers its edit, and the commit refuses it with

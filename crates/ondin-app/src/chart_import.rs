@@ -36,6 +36,9 @@ pub(crate) struct ChartImport {
     header: bool,
     read: table_io::Read,
     link: bool,
+    /// The file's stat when `text` was read, which the link stores, so a change
+    /// while the box is open still reads as changed.
+    stat: Option<(u64, u64)>,
 }
 
 /// A chart data file being read and parsed on a worker, and what its answer
@@ -67,12 +70,16 @@ enum Then {
     },
 }
 
-/// Read and parse `path` as `format`, by the tokens link's rules; `Err` says
-/// why not.
-fn read_file(path: &Path, format: table_io::Format) -> Result<Parsed, String> {
+/// Read and parse `path` as `format`, by the tokens link's rules, its header
+/// row as `header` says or guessed when `None`; `Err` says why not.
+fn read_file(
+    path: &Path,
+    format: table_io::Format,
+    header: Option<bool>,
+) -> Result<Parsed, String> {
     let text = crate::tokens_import::read_linked(path, crate::tokens_import::MAX_READ)
         .ok_or_else(|| "not a local file of at most 16 MB".to_string())?;
-    let read = table_io::read(&text, format, None).map_err(|e| e.to_string())?;
+    let read = table_io::read(&text, format, header).map_err(|e| e.to_string())?;
     Ok(Parsed {
         text,
         read,
@@ -189,7 +196,7 @@ impl OndinApp {
             // Read off the UI thread; the box opens when it lands.
             let from = path.clone();
             let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
-                read_file(&from, format)
+                read_file(&from, format, None)
             });
             self.chart_read = Some(ChartRead {
                 job,
@@ -230,6 +237,7 @@ impl OndinApp {
             header: parsed.read.header,
             read: parsed.read,
             link: linkable,
+            stat: parsed.stat,
         });
     }
 
@@ -395,11 +403,12 @@ impl OndinApp {
         }
         if go == Some(true) || (enter && go.is_none()) {
             let link = (t.link && t.linkable).then(|| {
-                let (modified, size) = stat_of(&t.path).unwrap_or_default();
+                let (modified, size) = t.stat.unwrap_or_default();
                 DataLink {
                     path: t.path.to_string_lossy().into_owned(),
                     size,
                     modified,
+                    header: Some(t.header),
                 }
             });
             let rows = t.read.table.rows.len();
@@ -506,8 +515,17 @@ impl OndinApp {
             return;
         };
         let from = PathBuf::from(path);
+        // Read as the import chose; charts linking one file read it once.
+        let header = self
+            .changed_links()
+            .into_iter()
+            .find(|(p, _)| p == path)
+            .and_then(|(_, ids)| {
+                ids.iter()
+                    .find_map(|id| self.session.doc.get(*id)?.chart()?.source.as_ref()?.header)
+            });
         let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
-            read_file(&from, format)
+            read_file(&from, format, header)
         });
         self.chart_read = Some(ChartRead {
             job,
@@ -533,13 +551,17 @@ impl OndinApp {
             path: path.to_string(),
             size,
             modified,
+            header: None,
         };
         let ops: Vec<Operation> = ids
             .iter()
             .filter_map(|id| {
                 let chart = self.session.doc.get(*id)?.chart()?;
                 let next = Chart {
-                    source: Some(link.clone()),
+                    source: Some(DataLink {
+                        header: chart.source.as_ref().and_then(|s| s.header),
+                        ..link.clone()
+                    }),
                     ..chart.with_table(read.table.clone())
                 };
                 Some(Operation::SetChart {
@@ -725,7 +747,7 @@ impl OndinApp {
             (Some(path), _) => {
                 let (from, path) = (path.clone(), path.clone());
                 let job = crate::job::Job::spawn("ondin-chart-read", &self.egui_ctx, move || {
-                    read_file(&from, format)
+                    read_file(&from, format, None)
                 });
                 self.chart_read = Some(ChartRead {
                     job,
@@ -773,6 +795,7 @@ impl OndinApp {
                 path: p.to_string_lossy().into_owned(),
                 size,
                 modified,
+                header: None,
             }
         });
         self.insert_chart_at(at, c);
@@ -1007,5 +1030,120 @@ mod tests {
         app.open_chart_import(id, PathBuf::from(r"\\host\share\sales.csv"), None);
         app.settle_chart_read();
         assert!(app.chart_import.is_none(), "a share is never read");
+    }
+
+    /// The import box holds the keymap off: `Delete` while it is up leaves the
+    /// selected chart where it is.
+    /// flip: `modal_is_up` leaving out `chart_import` → fails at "the chart stays".
+    #[test]
+    fn delete_under_the_import_box_keeps_the_chart() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        app.chart_data = None;
+        let id = *app.session.selection.ids().first().expect("the chart");
+        let path = temp_csv("modal", "Category,Revenue\nQ1,10\n");
+        app.open_chart_import(id, path.clone(), None);
+        app.settle_chart_read();
+        assert!(app.chart_import.is_some(), "the box opened");
+        pass(&ctx, &mut app, Vec::new());
+        let delete = egui::Event::Key {
+            key: egui::Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(&ctx, &mut app, vec![delete]);
+        pass(&ctx, &mut app, Vec::new());
+        assert!(app.session.doc.get(id).is_some(), "the chart stays");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// *Update* reads the file the way the import did: a header turned off in
+    /// the box stays off, rather than guessed again.
+    /// flip: `update_linked_charts` reading with the header guessed → fails at "the first row is data".
+    #[test]
+    fn update_keeps_the_header_choice_of_the_import() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        let id = *app.session.selection.ids().first().expect("the chart");
+        let path = temp_csv("header", "Category,Revenue\nQ1,10\n");
+        app.open_chart_import(id, path.clone(), None);
+        app.settle_chart_read();
+        let t = app.chart_import.as_mut().expect("the box opened");
+        assert!(t.header, "the guess takes the first row as the header");
+        t.header = false;
+        t.read = table_io::read(&t.text, t.format, Some(false)).unwrap();
+        pass(&ctx, &mut app, Vec::new());
+        pass(&ctx, &mut app, vec![enter()]);
+        let rows = |app: &OndinApp| {
+            app.session
+                .doc
+                .get(id)
+                .and_then(|n| n.chart())
+                .unwrap()
+                .table
+                .rows
+                .len()
+        };
+        assert_eq!(rows(&app), 2, "imported with the first row as data");
+        std::fs::write(&path, "Category,Revenue\nQ1,10\nQ2,12\n").unwrap();
+        app.chart_watch.next = 0.0;
+        app.watch_chart_links(&ctx);
+        assert_eq!(app.chart_link_state(id), Some(LinkState::Changed));
+        let link = app
+            .session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .unwrap()
+            .source
+            .clone()
+            .unwrap();
+        app.update_linked_charts(&link.path);
+        app.settle_chart_read();
+        assert_eq!(rows(&app), 3, "the first row is data");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// A link stores the file's stat as it was read, so a change made while
+    /// the box was open reads as changed once the import lands.
+    /// flip: the box's *Replace* taking the stat from the file at the click → fails at "the change is seen".
+    #[test]
+    fn a_file_changed_under_the_import_box_reads_as_changed() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        let id = *app.session.selection.ids().first().expect("the chart");
+        let path = temp_csv("stat", "Category,Revenue\nQ1,10\n");
+        app.open_chart_import(id, path.clone(), None);
+        app.settle_chart_read();
+        assert!(app.chart_import.is_some(), "the box opened");
+        std::fs::write(&path, "Category,Revenue\nQ1,10\nQ2,12\nQ3,14\n").unwrap();
+        pass(&ctx, &mut app, Vec::new());
+        pass(&ctx, &mut app, vec![enter()]);
+        assert!(app.chart_import.is_none(), "Enter replaced the data");
+        app.chart_watch.next = 0.0;
+        app.watch_chart_links(&ctx);
+        assert_eq!(
+            app.chart_link_state(id),
+            Some(LinkState::Changed),
+            "the change is seen"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

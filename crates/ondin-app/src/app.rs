@@ -8388,6 +8388,7 @@ impl OndinApp {
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()
             || self.tokens_import.is_some()
+            || self.chart_import.is_some()
             || self.trace.is_some()
     }
 

@@ -408,3 +408,209 @@ fn outlined_marks_are_stroked_over_a_tint() {
         );
     }
 }
+
+/// The value axis's tick labels, lowest first.
+fn tick_text(g: &Generated) -> Vec<String> {
+    all(g, PartRole::TickLabel, 0)
+        .iter()
+        .map(|p| match &p.kind {
+            crate::node::NodeKind::Text { content, .. } => content.clone(),
+            other => panic!("a label: {other:?}"),
+        })
+        .collect()
+}
+
+/// A stack whose sum lands a rounding error past a tick tops its axis at that
+/// tick: 100% stacked shares of 9, 18 and 1 add to just over 1, and 0.1 + 0.2
+/// to just over 0.3.
+/// flip: `scale::ticks` without its snap → fails at "0.3"; also `lines`
+/// without its 100% clamp → fails at the area's "100%". The clamp alone is not
+/// pinned: the snap covers these shares.
+#[test]
+fn a_stack_a_rounding_error_past_a_tick_ends_at_the_tick() {
+    let one = |kind, values: [&str; 3]| {
+        let mut c = Chart::sample(kind);
+        let mut row = vec!["Jan".to_string()];
+        row.extend(values.iter().map(|v| (*v).to_string()));
+        c.table.rows = vec![row];
+        c
+    };
+    // The fixture: the shares do add past 1.
+    let (a, b, c) = (9.0f64 / 28.0, 18.0 / 28.0, 1.0 / 28.0);
+    assert!(a + b + c > 1.0);
+    for kind in [ChartKind::Column, ChartKind::Area] {
+        let mut chart = one(kind, ["9", "18", "1"]);
+        chart.options.bars.stacking = Stacking::Percent;
+        chart.options.lines.area_stacking = Stacking::Percent;
+        let ticks = tick_text(&draw(&chart));
+        assert_eq!(
+            ticks.last().map(String::as_str),
+            Some("100%"),
+            "{kind:?}: {ticks:?}"
+        );
+    }
+    for kind in [ChartKind::Column, ChartKind::Area] {
+        let mut chart = one(kind, ["0.1", "0.2", "0"]);
+        chart.options.bars.stacking = Stacking::Stacked;
+        chart.options.lines.area_stacking = Stacking::Stacked;
+        let ticks = tick_text(&draw(&chart));
+        assert_eq!(
+            ticks.last().map(String::as_str),
+            Some("0.3"),
+            "{kind:?}: {ticks:?}"
+        );
+    }
+}
+
+/// A line or area chart with value labels and no points refuses past
+/// `MAX_MARKS` values, as one with points does.
+/// flip: `lines` counting only points → fails at "refused".
+#[test]
+fn line_value_labels_count_toward_the_mark_limit() {
+    for kind in [ChartKind::Line, ChartKind::Area] {
+        let mut c = Chart::sample(kind);
+        c.mapping.series.truncate(1);
+        c.table.rows = (0..=MAX_MARKS)
+            .map(|i| vec![format!("R{i}"), "1".into(), "1".into(), "1".into()])
+            .collect();
+        c.options.lines.points = PointStyle::None;
+        assert!(draw(&c).parts.len() > 1, "the fixture draws without labels");
+        c.options.values.position = ValuePosition::Inside;
+        match generate(&c, kurbo::Size::new(480.0, 280.0), "Inter") {
+            Err(Refusal::TooManyMarks { count, what }) => {
+                assert_eq!((count, what), (MAX_MARKS + 1, "value labels"), "{kind:?}");
+            }
+            Err(other) => panic!("{kind:?}: {other:?}"),
+            Ok(g) => panic!("{kind:?}: not refused, {} parts", g.parts.len()),
+        }
+    }
+}
+
+/// A bubble chart says once which row it leaves out for want of a size,
+/// grouped or not.
+/// flip: `scatter_clouds` skipping a sizeless row silently when ungrouped →
+/// fails at "ungrouped".
+#[test]
+fn a_bubble_with_no_size_is_left_out_and_said() {
+    let mut c = Chart::sample(ChartKind::Scatter);
+    c.table.columns.push(Column {
+        id: ColumnId(3),
+        name: "Size".into(),
+    });
+    for (i, r) in c.table.rows.iter_mut().enumerate() {
+        r.push(if i == 2 { String::new() } else { "5".into() });
+    }
+    c.mapping.size = Some(ColumnId(3));
+    let said = |g: &Generated| g.left_out.iter().filter(|s| *s == "Row 3: no size").count();
+    assert_eq!(said(&draw(&c)), 1, "ungrouped: {:?}", draw(&c).left_out);
+    c.table.columns.push(Column {
+        id: ColumnId(4),
+        name: "Group".into(),
+    });
+    for r in &mut c.table.rows {
+        r.push("a".into());
+    }
+    c.mapping.group = Some(ColumnId(4));
+    assert_eq!(said(&draw(&c)), 1, "grouped: {:?}", draw(&c).left_out);
+}
+
+/// A slice too thin to draw past the pad angle takes no label and no leader
+/// line, inside or out.
+/// flip: `pie` labelling every slice → fails at "no label".
+#[test]
+fn a_slice_too_thin_to_draw_takes_no_label() {
+    let mut c = Chart::sample(ChartKind::Pie);
+    c.table.rows[0][1] = "0.1".into();
+    c.options.slices.pad_angle = 10.0;
+    c.options.values.position = ValuePosition::Inside;
+    for outside in [true, false] {
+        c.options.values.pie_outside = outside;
+        let g = draw(&c);
+        assert!(part(&g, PartRole::Slice, 0, 0).is_none(), "the fixture");
+        assert!(part(&g, PartRole::Slice, 0, 1).is_some(), "the fixture");
+        assert!(part(&g, PartRole::ValueLabel, 0, 1).is_some());
+        assert!(part(&g, PartRole::ValueLabel, 0, 0).is_none(), "no label");
+        assert!(part(&g, PartRole::LeaderLine, 0, 0).is_none(), "no leader");
+    }
+}
+
+/// A zero on top of a stack is not its end: the segment under it keeps the
+/// outside label it has when the cell is empty.
+/// flip: `bar_marks` counting a zero segment as covering → fails at "outside".
+#[test]
+fn a_zero_on_a_stack_does_not_take_its_outside_label() {
+    let with_top = |cell: &str| {
+        let mut c = Chart::sample(ChartKind::Column);
+        c.options.bars.stacking = Stacking::Stacked;
+        c.options.values.position = ValuePosition::Outside;
+        c.table.rows[0][3] = cell.into();
+        draw(&c)
+    };
+    let (zero, empty) = (with_top("0"), with_top(""));
+    let costs = |g: &Generated| part(g, PartRole::ValueLabel, 2, 0).map(|p| p.transform);
+    let bar = drawn_box(part(&empty, PartRole::Bar, 2, 0).unwrap());
+    let label = part(&empty, PartRole::ValueLabel, 2, 0).expect("the fixture: a label");
+    assert!(
+        drawn_box(label).y1 <= bar.y0 + 1e-9,
+        "the fixture: above the bar"
+    );
+    assert_eq!(costs(&zero), costs(&empty), "outside");
+}
+
+/// Every number `p` carries is finite: its transform, its geometry and its insets.
+fn finite(p: &Part) -> bool {
+    use crate::container::LengthPct;
+    let inset = |l: Option<LengthPct>| match l {
+        Some(LengthPct::Px(v) | LengthPct::Percent(v)) => v.is_finite(),
+        None => true,
+    };
+    let geometry = match &p.kind {
+        crate::node::NodeKind::Path {
+            path, corner_radii, ..
+        } => crate::node::path_is_finite(path) && corner_radii.iter().all(|v| v.is_finite()),
+        crate::node::NodeKind::Rect {
+            size, corner_radii, ..
+        } => {
+            let r = corner_radii;
+            [
+                size.width,
+                size.height,
+                r.top_left,
+                r.top_right,
+                r.bottom_right,
+                r.bottom_left,
+            ]
+            .iter()
+            .all(|v| v.is_finite())
+        }
+        k => k
+            .box_size()
+            .is_none_or(|s| s.width.is_finite() && s.height.is_finite()),
+    };
+    let i = &p.insets;
+    geometry
+        && p.transform.as_coeffs().iter().all(|v| v.is_finite())
+        && [i.top, i.right, i.bottom, i.left].into_iter().all(inset)
+}
+
+/// A chart drawn smaller than its axes' labels, so its plot has no width or no
+/// height, still writes only finite numbers, whatever its curve.
+/// flip: `curve` taking a slope between points with no room between them →
+/// fails at "Line Smooth".
+#[test]
+fn a_chart_with_no_room_for_its_plot_draws_finite_parts() {
+    for kind in ChartKind::ALL {
+        for curve in [Curve::Straight, Curve::Smooth, Curve::Step] {
+            let mut c = Chart::sample(kind);
+            c.options.lines.curve = curve;
+            c.options.lines.points = PointStyle::Filled;
+            c.options.values.position = ValuePosition::Inside;
+            for (w, h) in [(1.0, 1.0), (30.0, 30.0), (50.0, 200.0), (200.0, 20.0)] {
+                let g = generate(&c, kurbo::Size::new(w, h), "Inter").expect("draws");
+                for p in &g.parts {
+                    assert!(finite(p), "{kind:?} {curve:?} at {w}×{h}: {p:?}");
+                }
+            }
+        }
+    }
+}

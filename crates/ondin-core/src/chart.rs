@@ -338,6 +338,10 @@ pub struct DataLink {
     /// Modified time in whole seconds since the Unix epoch.
     #[serde(default)]
     pub modified: u64,
+    /// Whether a CSV's or TSV's first row is the header, as the import chose;
+    /// `None` guesses it on each read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<bool>,
 }
 
 /// A generated part's role in its chart, which regeneration keeps its id by.
@@ -1528,11 +1532,31 @@ pub fn guard(
     }
 }
 
-/// *Flatten chart*: the frame keeps everything it is, its parts stay where they
-/// are, and the description goes. `None` for a node that is not a chart.
+/// The description's drop alone, [`flatten_ops`]' first operation: on its own
+/// the commit refuses it when a part draws a binding its variable's scope
+/// leaves out. `None` for a node that is not a chart.
 pub fn flatten(doc: &crate::Document, id: NodeId) -> Option<Operation> {
     doc.get(id)?.chart.as_ref()?;
     Some(Operation::SetChart { id, chart: None })
+}
+
+/// *Flatten chart*: the frame keeps everything it is, its parts stay where they
+/// are, and the description goes; a part's binding its variable's scope refuses
+/// (a line's stroke drawing a colour scoped to fills) detaches to the colour it
+/// drew. The drop comes first, so the detaches no longer write a part. `None`
+/// for a node that is not a chart.
+pub fn flatten_ops(doc: &crate::Document, id: NodeId) -> Option<Vec<Operation>> {
+    let drop = flatten(doc, id)?;
+    let parts: Vec<NodeId> = doc
+        .get(id)?
+        .chart()?
+        .parts
+        .iter()
+        .map(|(_, p)| *p)
+        .collect();
+    let mut ops = vec![drop];
+    ops.extend(crate::variable::out_of_scope_ops(doc, &parts));
+    Some(ops)
 }
 
 #[cfg(test)]

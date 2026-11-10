@@ -1519,8 +1519,10 @@ fn axes(
 /// Column and bar marks: one series frame of bars each, and the value labels.
 fn bar_marks(chart: &Chart, data: &Data, ax: &Axes, totals: &[f64], out: &mut Out) {
     let o = &chart.options;
+    // Kept above zero: a plot the axes' labels leave no room for draws its
+    // bars at its edge rather than at NaN.
     let (horizontal, plot, plot_key, across_len) =
-        (ax.horizontal, ax.plot, ax.plot_key, ax.across_len);
+        (ax.horizontal, ax.plot, ax.plot_key, ax.across_len.max(1e-9));
     let stacking = o.bars.stacking;
     let (n_cat, n_ser) = (data.categories.len(), data.series.len());
     let value_share = |v: f64| ax.t.t(v);
@@ -1646,13 +1648,15 @@ fn bar_marks(chart: &Chart, data: &Data, ax: &Axes, totals: &[f64], out: &mut Ou
         let vf = &o.values.format;
         let size = o.text.value_size;
         // In a stack only the outermost segment each way has an outside to sit
-        // in; the ones it covers take their label inside, where it fits.
+        // in; the ones it covers take their label inside, where it fits. A
+        // zero covers nothing and so is never the end.
         let outermost = |i: usize| {
-            let (_, c, _, _, up) = values_parts[i];
+            let (_, c, raw, _, up) = values_parts[i];
             stacking == Stacking::Apart
-                || !values_parts[i + 1..]
-                    .iter()
-                    .any(|(_, c2, _, _, up2)| *c2 == c && *up2 == up)
+                || (raw != 0.0
+                    && !values_parts[i + 1..]
+                        .iter()
+                        .any(|(_, c2, raw2, _, up2)| *c2 == c && *up2 == up && *raw2 != 0.0))
         };
         let flags: Vec<bool> = (0..values_parts.len()).map(outermost).collect();
         for ((series, c, raw, bx, up), outer) in values_parts.into_iter().zip(flags) {
@@ -1701,7 +1705,7 @@ impl Axes {
             (self.horizontal, self.left_at_end, self.bottom_at_top);
         let (band, across_len, every, turn, tick_size) = (
             self.band,
-            self.across_len,
+            self.across_len.max(1e-9),
             self.every,
             self.turn,
             self.tick_size,
@@ -1722,7 +1726,7 @@ impl Axes {
                     .categories
                     .iter()
                     .enumerate()
-                    .map(|(c, name)| ((c as f64 + 0.5) * band / across_len.max(1e-9), name.clone()))
+                    .map(|(c, name)| ((c as f64 + 0.5) * band / across_len, name.clone()))
                     .collect(),
             };
             let from_start = if horizontal {
@@ -2456,11 +2460,16 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
             }
         }
         _ => {
+            // A row with no size is said once, however many series it holds.
+            let mut sizeless = vec![false; rows.len()];
             for s in &data.series {
                 let mut points = Vec::new();
                 for (i, y) in s.values.iter().enumerate() {
                     if let (Some(x), Some(y)) = (xs[i], y) {
                         if bubble && sizes[i].is_none() {
+                            if !std::mem::replace(&mut sizeless[i], true) {
+                                left.push(format!("Row {}: no size", rows[i] + 1));
+                            }
                             continue;
                         }
                         points.push((x, *y, sizes[i], rows[i]));
@@ -2761,7 +2770,7 @@ fn pie(
         );
     }
     let mut mids = Vec::new();
-    for s in slices {
+    for (s, text) in slices.iter().zip(&labels) {
         let sweep = if total > 0.0 {
             s.value / total * std::f64::consts::TAU
         } else {
@@ -2772,11 +2781,17 @@ fn pie(
         } else {
             (a, a + sweep)
         };
-        mids.push((a + sweep / 2.0, s));
+        let mid = a + sweep / 2.0;
         a += sweep;
+        // A slice too thin to draw past its padding takes no label either; a
+        // lone slice (a ring at nothing) keeps its own.
         if a1 <= a0 {
+            if slices.len() == 1 {
+                mids.push((mid, s, text));
+            }
             continue;
         }
+        mids.push((mid, s, text));
         let (path, corners) = wedge_corners(centre, r, hole, a0, a1);
         let radii = if so.radius > 0.0 {
             let mut radii = vec![0.0; corners.iter().max().map_or(0, |m| m + 1)];
@@ -2811,7 +2826,7 @@ fn pie(
             LayoutItem::default(),
             fill_insets(),
         );
-        for ((mid, s), text) in mids.into_iter().zip(&labels) {
+        for (mid, s, text) in mids {
             let b = out.text.measure(text, size);
             let dir = kurbo::Vec2::new(mid.cos(), mid.sin());
             let at = if outside {
@@ -2952,12 +2967,14 @@ fn lines(
     };
     let n_cat = data.categories.len();
     let points_on = l.points != super::PointStyle::None;
-    if points_on {
+    // Points and value labels are one per value each, so either counts.
+    let values_on = o.values.position != ValuePosition::Off;
+    if points_on || values_on {
         let marks = n_cat * data.series.len();
         if marks > super::MAX_MARKS {
             return Err(Refusal::TooManyMarks {
                 count: marks,
-                what: "points",
+                what: if points_on { "points" } else { "value labels" },
             });
         }
     }
@@ -3025,6 +3042,11 @@ fn lines(
     }
     if !lo.is_finite() {
         (lo, hi) = (0.0, 1.0);
+    }
+    // Shares end at 100% each way, as a 100% stacked bar's do.
+    if stacking == Stacking::Percent {
+        hi = if hi > 0.0 { 1.0 } else { 0.0 };
+        lo = if lo < 0.0 { -1.0 } else { 0.0 };
     }
     let spec = AxisSpec {
         horizontal: false,
@@ -3162,7 +3184,7 @@ fn lines(
     }
 
     // Value labels sit above their point.
-    if o.values.position != ValuePosition::Off {
+    if values_on {
         let values_key = key(PartRole::Values, 0, 0);
         out.frame_pinned(
             values_key,
@@ -3241,7 +3263,9 @@ fn curve(path: &mut kurbo::BezPath, pts: &[Point], curve: super::Curve) {
         }
         super::Curve::Smooth => {
             let n = pts.len();
-            if n < 3 {
+            // Points with no room between them (a plot of no width) have no
+            // slope to take, so they draw straight.
+            if n < 3 || pts.windows(2).any(|w| w[1].x - w[0].x <= 0.0) {
                 for p in &pts[1..] {
                     path.line_to(*p);
                 }

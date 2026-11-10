@@ -81,10 +81,20 @@ pub fn preview(doc: &Document, res: &Resolved, id: NodeId, chart: &Chart) -> Opt
     generate(chart, size, &family).ok()
 }
 
-/// The actor new parts are minted under, past every id the document holds of
-/// it: a settle needs no session's id source, so a CLI export or a load
-/// regenerates as the app does.
-const PART_ACTOR: u64 = 0xC4A2;
+/// The actor chart `chart`'s new parts are minted under, past every id the
+/// document holds of it, so a settle needs no session's id source and a CLI
+/// export or a load regenerates as the app does. One actor per chart: a deleted
+/// chart's parts live on in its undo step, and only that chart, never present
+/// while they are away, mints under their actor.
+fn part_actor(chart: NodeId) -> u64 {
+    // splitmix64's finaliser: fixed, so the same chart always draws the same ids.
+    let mut z = (chart.actor ^ chart.seq.rotate_left(32)) ^ 0xC4A2_0000_0000_0000;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    // Actor 0 is the one a migration writes item ids under.
+    z.max(1)
+}
 
 /// One round: every stale chart settled against `res` and applied to `doc`
 /// directly; the nodes it wrote, for the caller to lay out again.
@@ -94,10 +104,10 @@ pub fn settle_round(doc: &mut Document, res: &Resolved) -> DirtySet {
     if charts.is_empty() {
         return round;
     }
-    let mut ids = IdSource::new(PART_ACTOR);
-    crate::document::reserve_existing_ids(doc, &mut ids);
     let family = crate::typography::TextStyle::default().font_family;
     for c in charts {
+        let mut ids = IdSource::new(part_actor(c));
+        crate::document::reserve_existing_ids(doc, &mut ids);
         let Some(tx) = settle(doc, res, &mut ids, c, &family) else {
             continue;
         };
@@ -145,8 +155,10 @@ fn ops(
         .filter(|(_, n)| under.contains(n))
         .map(|(k, n)| (*k, *n))
         .collect();
-    // A text part whose kind changes is made again under its own id; any other
-    // kind is patched. Decided first, so the deletes below take it out.
+    // A part whose kind no geometry patch reaches (a text whose content
+    // changes, a rect that becomes a path) is deleted and made again under a
+    // new id; any other kind is patched. Decided first, so the deletes below
+    // take it out.
     let mut remade: FxHashSet<NodeId> = FxHashSet::default();
     for p in &generated.parts {
         if let Some(n) = by_key.get(&p.key).and_then(|n| doc.get(*n))
@@ -156,12 +168,32 @@ fn ops(
             remade.insert(n.id);
         }
     }
-    let kept: FxHashSet<NodeId> = generated
+    let mut kept: FxHashSet<NodeId> = generated
         .parts
         .iter()
         .filter_map(|p| by_key.get(&p.key).copied())
         .filter(|n| !remade.contains(n))
         .collect();
+    // A part is kept only while its old parent is the chart or kept too: the
+    // walk below deletes any other parent, taking the part with it, so moving
+    // it out afterwards would name a deleted node.
+    loop {
+        let orphans: Vec<NodeId> = kept
+            .iter()
+            .copied()
+            .filter(|n| {
+                doc.get(*n)
+                    .and_then(|n| n.parent)
+                    .is_none_or(|p| p != chart && !kept.contains(&p))
+            })
+            .collect();
+        if orphans.is_empty() {
+            break;
+        }
+        for n in orphans {
+            kept.remove(&n);
+        }
+    }
 
     // Delete what no part keeps, topmost first: a deleted frame takes its subtree.
     let mut children: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();

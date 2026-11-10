@@ -78,8 +78,16 @@ pub fn ticks(lo: f64, hi: f64, count: u32, typed: Option<(f64, f64)>) -> Ticks {
         }
     }
     let step = nice_step((hi - lo) / count);
-    let min = (lo / step).floor() * step;
-    let max = (hi / step).ceil() * step;
+    // A value a rounding error off a whole step is on it: 0.1 + 0.2 ends at 0.3.
+    let snap = |k: f64| {
+        if (k - k.round()).abs() < 1e-9 {
+            k.round()
+        } else {
+            k
+        }
+    };
+    let min = snap(lo / step).floor() * step;
+    let max = snap(hi / step).ceil() * step;
     let values = walk(min, max, step);
     Ticks {
         min,
@@ -196,6 +204,21 @@ mod tests {
         let t = ticks(0.0, 50.0, 5, Some((0.0, 120.0)));
         assert_eq!((t.min, t.max), (0.0, 120.0), "a typed range is kept");
         assert_eq!(t.values, vec![0.0, 50.0, 100.0]);
+    }
+
+    /// A sum that lands a rounding error past a step does not widen the domain
+    /// by a whole step.
+    #[test]
+    fn a_rounding_error_past_a_step_is_not_a_step() {
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let t = ticks(0.0, 0.1 + 0.2, 5, None);
+        assert_eq!(t.step, 0.1);
+        assert!(near(t.max, 0.3), "{t:?}");
+        assert_eq!(t.values.len(), 4);
+        let t = ticks(0.0, 1.0000000000000002, 5, None);
+        assert!(near(t.max, 1.0), "{t:?}");
+        let t = ticks(-(0.1 + 0.2), 0.0, 5, None);
+        assert!(near(t.min, -0.3), "{t:?}");
     }
 
     /// Numbers written with separators, places, affixes, compact units and

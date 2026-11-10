@@ -189,10 +189,12 @@ pub(crate) fn with_fill(
     }
 }
 
-/// What the cache is keyed by: everything the generator reads but the parts.
-fn description_key(id: NodeId, chart: &Chart, size: kurbo::Size) -> u64 {
+/// What the cache is keyed by: everything the generator reads but the parts,
+/// and the display scale the Style pictures are rasterised at.
+fn description_key(id: NodeId, chart: &Chart, size: kurbo::Size, ppp: f32) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     id.hash(&mut h);
+    ppp.to_bits().hash(&mut h);
     format!("{:?}", chart.kind).hash(&mut h);
     format!("{:?}", chart.mapping).hash(&mut h);
     format!("{:?}", chart.series).hash(&mut h);
@@ -276,8 +278,23 @@ impl OndinApp {
         }
     }
 
-    /// The `SetChart` binding chart `id`'s slot `colour` to `var` at `alpha`
-    /// (its `%` kept when `None`), or for `var` `None` detaching it to the
+    /// The charts a write to chart `id`'s slot `colour` lands on: every selected
+    /// chart when `id` is one of a selection of charts and the colour is the
+    /// chart's own, as the card's other edits write each; only `id` for a
+    /// series or node colour, which belongs to that chart's table.
+    pub(crate) fn chart_slot_targets(&self, id: NodeId, colour: ChartColour) -> Vec<NodeId> {
+        if matches!(colour, ChartColour::Series(_) | ChartColour::Node(_)) {
+            return vec![id];
+        }
+        match self.selected_charts() {
+            Some(ids) if ids.contains(&id) => ids,
+            _ => vec![id],
+        }
+    }
+
+    /// The `SetChart`s binding slot `colour` of chart `id` (and of the charts
+    /// selected with it, [`Self::chart_slot_targets`]) to `var` at `alpha` (each
+    /// one's `%` kept when `None`), or for `var` `None` detaching each to the
     /// colour it draws.
     pub(crate) fn chart_bind_tx(
         &self,
@@ -287,28 +304,32 @@ impl OndinApp {
         alpha: Option<f32>,
     ) -> Transaction {
         let doc = &self.session.doc;
-        let Some(chart) = doc.get(id).and_then(|n| n.chart()) else {
-            return Transaction::default();
-        };
-        let Some(now) = fill_of(chart, colour) else {
-            return Transaction::default();
-        };
-        let fill = match var {
-            Some(var) => ondin_core::BrushSource::Bound {
-                var,
-                alpha: alpha.unwrap_or(match &now {
-                    ondin_core::BrushSource::Bound { alpha, .. } => *alpha,
-                    ondin_core::BrushSource::Literal(Brush::Solid(c)) => c.components[3],
-                    ondin_core::BrushSource::Literal(_) => 1.0,
-                }),
-            },
-            None if now.is_bound() => doc.resolve_brush(id, &now).into_owned().into(),
-            None => return Transaction::default(),
-        };
-        Transaction(vec![Operation::SetChart {
-            id,
-            chart: Some(Box::new(with_fill(chart, colour, fill))),
-        }])
+        let mut ops = Vec::new();
+        for at in self.chart_slot_targets(id, colour) {
+            let Some(chart) = doc.get(at).and_then(|n| n.chart()) else {
+                continue;
+            };
+            let Some(now) = fill_of(chart, colour) else {
+                continue;
+            };
+            let fill = match var {
+                Some(var) => ondin_core::BrushSource::Bound {
+                    var,
+                    alpha: alpha.unwrap_or(match &now {
+                        ondin_core::BrushSource::Bound { alpha, .. } => *alpha,
+                        ondin_core::BrushSource::Literal(Brush::Solid(c)) => c.components[3],
+                        ondin_core::BrushSource::Literal(_) => 1.0,
+                    }),
+                },
+                None if now.is_bound() => doc.resolve_brush(at, &now).into_owned().into(),
+                None => continue,
+            };
+            ops.push(Operation::SetChart {
+                id: at,
+                chart: Some(Box::new(with_fill(chart, colour, fill))),
+            });
+        }
+        Transaction(ops)
     }
 
     /// The Chart card, for one chart frame.
@@ -422,7 +443,7 @@ impl OndinApp {
             *b = self.session.doc.resolve_brush(id, b).into_owned().into();
         }
         let chart = &drawn;
-        let key = description_key(id, chart, size);
+        let key = description_key(id, chart, size, ctx.pixels_per_point());
         if self
             .chart_card
             .as_ref()
@@ -609,10 +630,8 @@ impl OndinApp {
             |_| label,
             |p, i, r, on| ui::segment_label(p, r, names[i], on),
         );
-        if let Some(i) = pick.filter(|i| *i != at) {
-            let mut next = chart.clone();
-            set(&mut next, i);
-            self.chart_commit(id, label, next);
+        if let Some(i) = pick {
+            self.chart_pick(id, chart, label, i, at, set);
         }
     }
 
@@ -661,10 +680,45 @@ impl OndinApp {
                     }
                 });
         });
-        if let Some(i) = pick.filter(|i| *i != at) {
+        if let Some(i) = pick {
+            self.chart_pick(id, chart, label, i, at, set);
+        }
+    }
+
+    /// Commit row `i` of a segmented control or dropdown lit at `at`. The lit
+    /// row changes nothing on the first chart, so over several charts it
+    /// writes the others, which the card does not show and which may differ.
+    fn chart_pick(
+        &mut self,
+        id: NodeId,
+        chart: &Chart,
+        label: &'static str,
+        i: usize,
+        at: usize,
+        set: impl Fn(&mut Chart, usize),
+    ) {
+        if i != at {
             let mut next = chart.clone();
             set(&mut next, i);
-            self.chart_commit(id, label, next);
+            return self.chart_commit(id, label, next);
+        }
+        let doc = &self.session.doc;
+        let ops: Vec<Operation> = self
+            .chart_others
+            .iter()
+            .filter_map(|other| {
+                let own = doc.get(*other).and_then(|n| n.chart())?;
+                let mut next = own.clone();
+                set(&mut next, i);
+                (next != *own).then(|| Operation::SetChart {
+                    id: *other,
+                    chart: Some(Box::new(next)),
+                })
+            })
+            .collect();
+        if !ops.is_empty() {
+            self.session.name_step(label, icon::CHART);
+            self.commit_edit(Transaction(ops));
         }
     }
 
@@ -2208,16 +2262,17 @@ impl OndinApp {
     }
 
     /// *Flatten chart*: each chart keeps its parts and drops its description, one
-    /// undo step.
+    /// undo step (`chart::flatten_ops`).
     pub(crate) fn flatten_charts(&mut self, ids: &[NodeId]) {
-        let ops: Vec<Operation> = ids
+        let each: Vec<Vec<Operation>> = ids
             .iter()
-            .filter_map(|id| chart::flatten(&self.session.doc, *id))
+            .filter_map(|id| chart::flatten_ops(&self.session.doc, *id))
             .collect();
-        if ops.is_empty() {
+        let n = each.len();
+        if n == 0 {
             return;
         }
-        let n = ops.len();
+        let ops: Vec<Operation> = each.into_iter().flatten().collect();
         self.session.name_step("Flatten chart", icon::STACK_SIMPLE);
         if self.commit_edit(Transaction(ops)) {
             self.session.info(match n {
@@ -2884,5 +2939,101 @@ mod tests {
             shapes(&ctx, &mut app);
         }
         assert_ne!(key(&app), was, "redrawn");
+    }
+
+    /// Two column charts, both selected, the first `a`.
+    fn two_charts(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        let (mut app, a) = charted(ctx, ChartKind::Column);
+        let b = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        let index = app.session.doc.get(page).map_or(0, |n| n.children().len());
+        let tx = ondin_core::edit::create_chart(
+            b,
+            page,
+            index,
+            Affine::IDENTITY,
+            kurbo::Point::new(-4000.0, 400.0),
+            kurbo::Point::new(-3520.0, 680.0),
+            ondin_core::peniko::Color::WHITE,
+            Chart::sample(ChartKind::Column),
+        );
+        assert!(app.session.commit(tx));
+        app.session.selection.set_one(a);
+        app.session.selection.add(b);
+        (app, a, b)
+    }
+
+    fn chart_at(app: &OndinApp, id: NodeId) -> Chart {
+        app.session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap()
+    }
+
+    /// A chart-wide colour picked over two selected charts writes both, a
+    /// series colour only the chart the card shows.
+    /// flip: `chart_slot_targets` answering only `id` → fails at "the second chart took the gridlines".
+    #[test]
+    fn a_chart_colour_over_two_charts_writes_both() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_charts(&ctx);
+        let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        let slot = PaintSlot::Chart(ChartColour::Grid(true));
+        let tx = app.slot_transaction(a, slot, Brush::Solid(red));
+        assert!(app.commit_edit(tx));
+        let lit: ondin_core::BrushSource = Brush::Solid(red).into();
+        assert_eq!(chart_at(&app, a).options.value_axis.grid.colour, lit);
+        assert_eq!(
+            chart_at(&app, b).options.value_axis.grid.colour,
+            lit,
+            "the second chart took the gridlines"
+        );
+        let col = chart_at(&app, a).mapping.series[0];
+        let before = chart::series_fill(&chart_at(&app, b), col);
+        let tx = app.slot_transaction(
+            a,
+            PaintSlot::Chart(ChartColour::Series(col)),
+            Brush::Solid(red),
+        );
+        assert!(app.commit_edit(tx));
+        assert_eq!(chart::series_fill(&chart_at(&app, a), col), Some(lit));
+        assert_eq!(
+            chart::series_fill(&chart_at(&app, b), col),
+            before,
+            "a series colour stays the first chart's"
+        );
+    }
+
+    /// Picking the lit segment over two charts that disagree writes the other
+    /// chart, in one step.
+    /// flip: `chart_pick` returning when `i == at` → fails at "the second chart stacks".
+    #[test]
+    fn picking_the_lit_segment_brings_the_others_to_it() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_charts(&ctx);
+        let mut stacked = chart_at(&app, a);
+        stacked.options.bars.stacking = Stacking::Stacked;
+        app.chart_commit(a, "Chart type", stacked.clone());
+        assert_eq!(chart_at(&app, b).options.bars.stacking, Stacking::Apart);
+        app.chart_others = vec![b];
+        app.chart_pick(a, &stacked, "Chart type", 1, 1, |c, i| {
+            *c = with_variant(c, i);
+        });
+        app.chart_others.clear();
+        assert_eq!(
+            chart_at(&app, b).options.bars.stacking,
+            Stacking::Stacked,
+            "the second chart stacks"
+        );
+        assert_eq!(chart_at(&app, a).options.bars.stacking, Stacking::Stacked);
+        app.session.undo();
+        assert_eq!(
+            chart_at(&app, b).options.bars.stacking,
+            Stacking::Apart,
+            "one step"
+        );
+        assert_eq!(chart_at(&app, a).options.bars.stacking, Stacking::Stacked);
     }
 }

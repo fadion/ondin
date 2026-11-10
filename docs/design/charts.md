@@ -77,8 +77,10 @@ everything below.
   never meets a chart, which cannot sit in a main. *Bind other uses* and Colour review leave a
   chart's parts out, as no edit but the regeneration may write them.
 - **`nodes: Vec<NodeStyle>`** — a Sankey's node colours, keyed by node name, so a
-  re-import or a reorder keeps them. A name seen for the first time takes the palette's next
-  colour; a style whose name no row uses any more is dropped by the next regeneration.
+  re-import or a reorder keeps them. A node with no style draws the palette's colour at its
+  place in node order; editing or binding its swatch stores one (`chart::with_node_fill`). A
+  style whose name no row uses stays, drawing nothing, and applies again if the name returns;
+  only picking a palette clears them (`chart::with_palette`).
 - **`options`** — every kind's options at once (*Options*, below), so switching kind and back
   keeps what was set.
 - **`source: Option<chart::DataLink>`** — the linked file, if any (*Import and the linked file*).
@@ -94,7 +96,8 @@ everything below.
   parents first, plus the values it left out with their reasons. Every part carries both its place
   at this size and the layout that keeps it there, so the parts draw right before any layout runs.
   `family` stands in when the chart names none. It lives in core so MCP, the CLI and Command Mode
-  make the same chart. Label widths come from the same parley layout a text node uses. A chart
+  make the same chart. Label widths come from the same parley layout a text node uses. A plot
+  the labels leave no length still draws finite geometry, its lengths floored above zero. A chart
   past its limits is a `Refusal` (*Too many marks*), and settle keeps the parts it has.
 - **`chart::settle`** runs after layout resolves, as `Document::settle_widths` picks modes by
   width: **the parts are derived state, written outside history**. After any commit, undo, redo
@@ -109,13 +112,21 @@ everything below.
   while `Chart::generated`, the size `SetChartParts` stamped, differs from its drawn size; a
   changed description clears the stamp. `Resolved::settle` runs it after the width picks (so a
   load, an export and compare settle as the app does) and the session after every commit, undo
-  and redo; new parts take ids under an actor of their own, past every id the document holds.
+  and redo. New parts take ids under an actor derived from the chart frame's id
+  (`settle::part_actor`), past every id of that actor the document holds, so settle needs no
+  session's id source. A deleted chart's part ids live on in its undo step; only that chart
+  mints under their actor, and it is absent while they are, so no other chart re-mints them.
 - **Ids are kept by role.** Settle diffs the new parts against `parts` by `PartKey` (`role`,
   then the series' column id or 0, then the row, tick or node index): a kept key keeps its
   `NodeId` and gets `SetGeometry`, `SetFills`, `SetTransform`, `SetInsets` and the rest only where
-  it changed, and a move or a reorder where its place did; a text whose kind changes is made
-  again under the same id; a new key is created with a minted id; a missing one is deleted.
+  it changed, and a move or a reorder where its place did. A part whose kind no geometry patch
+  reaches (a text whose content changes, a `Rect` that becomes a `Path`) is deleted and made
+  again under a new id; a new key is created with a minted id; a missing one is deleted.
   Compare and the snapshot see the change that was made, not the whole chart rebuilt.
+- **A part keeps its id only while its old parent is the chart or is itself kept**, repeated
+  until nothing changes: the delete walk takes out every parent no key keeps, and its subtree
+  with it, so a kept part under one would be moved out of a deleted node. Such a part is made
+  again under a new id.
 - **Previews.** A resize drag needs nothing of its own: the layout reflows the parts as the frame
   is dragged (*Laid out, not placed*), and the release regenerates for the new size. Scrubbing an
   option field regenerates on every frame (`chart::preview`) into
@@ -157,8 +168,9 @@ or turned, which value labels fit.
   category's centre (a scatter's at its X ticks). A pie or donut sits in a square frame
   (`aspect-ratio: 1`) centred in the plot.
 - **Value labels** sit outside, inside or at the end of their bar. In a stack only the outermost
-  segment each way takes an outside label; the segments it covers take theirs inside, and a label
-  that does not fit inside is left out. A value label writes as many places as the value has, up
+  segment each way takes an outside or end label, and a zero, covering nothing, is never the
+  outermost; the segments it covers take theirs inside, and a label that does not fit inside is
+  left out. A value label writes as many places as the value has, up
   to three; a 100% chart's labels and ticks are whole percentages of each category's total.
 - **Every container is a frame**, unpainted and unclipped, never a group, because a group takes
   no insets. The tree, bottom to top: *Legend*, then in the Body *Value axis*, *Category axis*
@@ -191,19 +203,22 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 | **Sankey** | — | From + To text columns and a Value column: one row per flow between two named nodes |
 
 - **Smooth** is a monotone cubic (Fritsch–Carlson), so a smoothed line never overshoots a peak
-  the data does not have. **Step** turns halfway between points. A line's points sit at the
+  the data does not have; points with no width between them have no slope to take and draw
+  straight. **Step** turns halfway between points. A line's points sit at the
   centres of the category bands, as columns do.
 - **Lines and areas** are one series frame each: the area (a closed path down to the baseline or
   to the stack beneath it, at the area opacity), the line over it (round joins and caps, the
   series' dash), and the points (centred on their values in the series' own point shape, a
   circle when it has none; *Hollow* is white with the series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
-  while *Start at zero* is on; an area's always holds zero.
+  while *Start at zero* is on; an area's always holds zero, and a 100% area's runs to 100%, from
+  −100% when any value is negative, as a 100% bar's does.
 - **A scatter** reads its category column as X, numbers on a tick axis like the value axis (a row
   whose X is not a number is left out and said), and each series column as a Y series; with a
   group column, the first series split into one series per group value, coloured through the
   palette in first-seen order. With a size column it is a bubble chart: a bubble's side is the
   largest size times the square root of its share of the largest value, so its area follows the
-  value, and a row with no size is left out. Points are circles, squares, or diamond and triangle
+  value, and a row with no size is left out and said (*Row 4: no size*), once however many series
+  it holds. Points are circles, squares, or diamond and triangle
   paths, centred on their place at their own size: a series' own shape, else the chart's (a
   group takes its series'). Vertical gridlines follow the category axis's
   *Gridlines*. *Start at zero* is off by default on every axis; columns, bars and areas hold zero
@@ -214,7 +229,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   centred in the body at its own size, so it stays round as the chart resizes; each slice is a
   wedge path pinned by its own box; its corner radius rounds the wedge's corners as a path's
   per-anchor radii, and the box is the rounded outline's. Labels sit two thirds out on a pie, mid-ring on a donut, or
-  outside on a leader line, the pie shrunk to leave them room. **One slice of at most 100 is a
+  outside on a leader line, the pie shrunk to leave them room; a slice too thin to draw past its
+  pad angle gets no label and no leader line, unless it is the only slice. **One slice of at most 100 is a
   progress ring**: its share of 100 drawn over a *Track* in the value gridline colour.
 - **Values the kind cannot draw are left out, and said.** Negative values in a pie, text in a
   series column, a row with an empty category, a Sankey row whose value is not above zero or whose
@@ -224,7 +240,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 - **Limits.** A table holds at most 10,000 rows and 64 columns, a cell at most 256 characters.
   A chart draws at most 2,000 marks (bars, points, slices); past that it draws nothing new and the
   card says *Too many marks: 3,400 bars, at most 2,000*. A line or area is one path per series and
-  takes all 10,000 rows. A pie draws at most 100 slices, and *Group small slices* folds those under
+  takes all 10,000 rows, but its points and its value labels are one mark per value each, so
+  either shown counts (*points*, else *value labels*). A pie draws at most 100 slices, and *Group small slices* folds those under
   a percentage into *Other*. A Sankey draws at most 200 nodes and 1,000 flows.
 
 ### Sankey
@@ -383,7 +400,7 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
 - **Style** — the preset cells in a row, each the chart generated with the preset at 320 × 200
   and its fills and strokes rasterised small (`style_picture`, through `rasterize_paths`; text
   left out), cached with the generator's left-out values while the description, its bound
-  colours resolved, and the drawn size are unchanged (`ChartCardCache`), so a bound variable's
+  colours resolved, the drawn size and the display scale are unchanged (`ChartCardCache`), so a bound variable's
   new value or a mode switch redraws them (`style_pictures_follow_a_bound_variables_value`). The
   preset the options are exactly at lights. Undo step *Chart style*.
 - **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), the left-out line (*2
@@ -431,7 +448,11 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
 A multi-selection of charts shows the Chart card when every chart is the same kind
 (`selected_charts`), drawn from the first and writing each in one step: the kind, and every
 option the edit changed (`chart::Options::carried`, a diff of the first chart's options carried
-onto each), so each keeps its own data and the options left alone. The Data section says *Edit
+onto each), so each keeps its own data and the options left alone. Picking the segment or
+dropdown row already lit changes nothing on the first chart, so it writes the others to that
+value, one step (`chart_pick`). A chart-wide colour (text, axis, gridline, neutral, track) picked
+or bound in the picker writes every selected chart (`chart_slot_targets`); a series' or node's
+colour belongs to its table and writes only the shown chart. The Data section says *Edit
 data one chart at a time* and the Series section is left out. A selection of charts only drops
 the frame's own cards and group colours as one chart does. A scrub previews every chart, the
 render overrides minting each chart's ghost ids past the others'.
@@ -442,10 +463,12 @@ A floating card over the bottom of the canvas column, non-modal, so the chart re
 canvas as cells are committed. 640 wide (the canvas column's width less 32 when narrower), 320
 tall, fixed: the grid scrolls inside it rather than the card growing (egui popups shrink but never
 grow back). One at a time, for the selected chart; selecting another chart moves it there, and
-selecting anything else closes it.
+selecting anything else closes it. Leaving the document (a tab switch) closes it, the import box
+and a pending chart read, since they name this document's node ids.
 
 - **Head**: the table glyph, *Chart data*, the chart's name, *Import…*, ✕. Under it the toolbar:
-  *Add row*, *Add column*, and the source line when linked.
+  *Add row*, *Add column*, and the source line when linked. Each adds at the end, moves the
+  cursor onto the new row or column, and carries a cell being typed into in the same step.
 - **The grid** is one focusable region that locks the arrows, `Tab` and `Escape` while it has
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
   document). A header row of column names, each with its type tag (`Aa` text, `#` number) and
@@ -472,11 +495,14 @@ selecting anything else closes it.
   *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /
-  *below*, *Delete row*.
+  *below*, *Delete row*. Both are placed by `ui::menu_place`; a menu or a rename whose column or
+  row an undo removes closes.
 - **While the import box is up** the window gives up the keyboard and is not drawn; it takes the
   keyboard back after.
 - **Linked**, the grid is read-only and says so in a line over it (*Edited in sales.csv — unlink
-  to edit here*); the mapping, series and options stay editable.
+  to edit here*): the menus' rows that write the table, *Rename* among them, are disabled and a
+  double-click on a header does nothing. The mapping (the menu's *Use as category* and *Show as
+  series* too), series and options stay editable.
 
 ### Import and the linked file
 
@@ -489,19 +515,23 @@ selecting anything else closes it.
   it cut. **CSV** (RFC 4180): the delimiter is detected among comma, semicolon and tab; the first row is
   the header unless it parses as numbers. **TSV** the same with tab. **JSON** is an array of
   objects; every key seen becomes a column, in first-seen order (each object read in its own key
-  order, which `serde_json`'s sorted map would lose); numbers are numbers, strings are
+  order, which `serde_json`'s sorted map would lose); numbers are numbers, written into the cell
+  without an exponent, which `parse_number` refuses; strings are
   text, `true`/`false` are text, `null` is empty, and a nested object or array leaves its cell
   empty and is named in the note. Anything else is refused: *Not an array of objects*. Numbers
   written with a thousands separator (`1,234.5`) parse; a decimal comma does not.
-- **The import box**, the tokens review's modal canvas card (`settings::canvas_card`): *Import
+- **The import box**, the tokens review's modal canvas card (`settings::canvas_card`; a modal to
+  `modal_is_up`, so the keymap is held off under it): *Import
   chart data*, the file name and its two parent folders; the first 20 rows as they will land,
   each column's type tag; *First row is the header* (a switch, CSV and TSV); an info note for
   anything left out; foot *Keep this file linked* (absent for a browser drop, which has no
   path), *Cancel*, *Replace data*; `Enter` replaces. Replacing keeps the mapping and series
   colours for every column whose name the new table also has (`Chart::with_table`). Undo step
   *Import chart data*; the status line says *Imported sales.csv · 12 rows, 3 series*.
-- **A linked chart** stores `DataLink { path, size, modified }` (as last read) in its own
-  description; the table is always the document's own copy, so a chart whose file is gone still
+- **A linked chart** stores `DataLink { path, size, modified, header }` in its own description:
+  the stat the worker took when it read the file, so a change while the import box is open reads
+  as *Changed*, and the box's *First row is the header* choice, which *Update* reads the file
+  with (`header` absent from the file when `None`: a canvas drop, guessed on each read). The table is always the document's own copy, so a chart whose file is gone still
   draws. **The path is the document's, so untrusted**: the tokens link's rules hold
   (`styles-variables.md`, *A linked file*; `tokens_import::read_linked`) — absolute, on a local
   drive, a regular file of at most 16 MB. The file is read and parsed on a worker
@@ -521,25 +551,35 @@ selecting anything else closes it.
 - **A missing file** shows *File not found* on the source line with *Relink…* and *Unlink*.
   *Unlink* drops the link and makes the grid editable; undo step *Unlink data file*.
 - **Copying a chart drops its link.** The clipboard carries the description and table but not the
-  path, for the reason the clipboard refuses linked images: pasted content must not make the
+  path, written and read through `Chart::copied`, the variables' detached twins included, for the
+  reason the clipboard refuses linked images: pasted content must not make the
   receiving document read a file the copy chose.
 
 ### Flatten
 
-- **`chart::flatten`**: the frame keeps everything it is, its parts stay where they are, and the
-  description goes: one `SetChart { chart: None }`, undo step *Flatten chart*. What was on screen
-  is what remains; the labels are text layers that can be edited, restyled or converted to paths.
+- **`chart::flatten_ops`**: the frame keeps everything it is, its parts stay where they are, and
+  the description goes (`chart::flatten`, one `SetChart { chart: None }`), undo step *Flatten
+  chart*. In the same transaction every part binding its variable's scope refuses — a line's
+  stroke drawing a colour scoped to fills, which `variable::check` excuses only on a chart's parts
+  — detaches to the colour it drew (`variable::out_of_scope_ops`); the drop comes first, so the
+  detaches no longer write a part. `chart::flatten` alone is refused at the commit when such a
+  binding exists, so every door goes through `flatten_ops`
+  (`flatten_chart_detaches_a_line_drawing_a_fill_scoped_colour`). What was on screen is what
+  remains; the labels are text layers that can be edited, restyled or converted to paths.
   The frame then behaves as any frame: its tree opens, the Frame cards return, and *Frame* /
   *Group* converts it.
 - **Doors**: the Chart card's foot; `Ctrl+E`, which flattens a selected chart as it flattens a
-  boolean (`app-booleans.md`); the context menu; the palette's *Flatten chart*. A selection of
-  charts flattens each.
+  boolean (`app-booleans.md`); the context menu; the palette's *Flatten chart*. Over a selection
+  of several layers that are all charts, the context menu and the palette offer it too
+  (`menu::Context::all_charts`); a selection of charts flattens each, one undo step
+  (`flatten_charts`).
 
 ### Context menu
 
 On a chart (`context-menus.md`, `menu::head_rows`): *Edit data…*, *Import chart data…*, *Update
 chart data* (while its file changed), *Unlink data file* (while linked), and *Flatten chart* in
-the structure group, then the frame's usual rows. The palette lists the same rows for a selected
+the structure group, then the frame's usual rows. Over several charts its one chart row is
+*Flatten chart*. The palette lists the same rows for a selected
 chart, and *Edit data…*, *Import chart data…* and *Flatten chart* dim with *Select a chart*
 without one (`menu::KIND_VERBS`).
 
@@ -558,9 +598,10 @@ without one (`menu::KIND_VERBS`).
   column types unless one is given (`Mapping::guess`: a Sankey's first two text columns and first
   number column, a scatter's first number column as X and the rest as Y, else the first text
   column as the category and the number columns as series); `set_chart` changes the kind and
-  merge-patches the mapping and options; `set_chart_data` replaces the table by *Import*'s rule
-  (`Chart::with_table`; a mapping of which nothing survives is guessed) and drops the link;
-  `flatten_chart` is `chart::flatten`. Any other verb writing a part is refused at the commit by
+  merge-patches the mapping and options, a null setting a key back to its value in the whole
+  struct's default (`Options::default()`, not a nested struct's own); `set_chart_data` replaces
+  the table by *Import*'s rule (`Chart::with_table`; a mapping of which nothing survives is
+  guessed) and drops the link; `flatten_chart` is `chart::flatten_ops` for each chart. Any other verb writing a part is refused at the commit by
   `chart::guard`.
 - **Code export** (`export.md`, *Code export*) writes a chart as the frames it is: its flex and
   grid containers as CSS, its marks positioned by their percentage insets, its labels and pie

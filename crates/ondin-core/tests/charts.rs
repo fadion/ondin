@@ -427,6 +427,7 @@ fn a_copy_drops_the_linked_file() {
         path: "C:\\data\\sales.csv".into(),
         size: 10,
         modified: 1,
+        header: None,
     });
     f.history
         .commit(
@@ -979,4 +980,161 @@ fn colour_review_leaves_a_charts_parts_out() {
             .all(|s| s.nodes.iter().all(|n| !parts.contains(n))),
         "no swatch names a part"
     );
+}
+
+/// Chart `id` settled once, its regeneration applied and asserted accepted.
+fn settle_checked(doc: &mut Document, id: NodeId, what: &str) {
+    let res = ondin_core::Resolved::rebuild(doc);
+    let mut ids = IdSource::new(0xC6);
+    ondin_core::reserve_existing_ids(doc, &mut ids);
+    let tx = ondin_core::chart::settle(doc, &res, &mut ids, id, "Inter").expect("a chart");
+    if let Err(e) = doc.apply(&tx) {
+        panic!("{what}: the regeneration was refused: {e}");
+    }
+}
+
+/// Every kind settles at sizes that leave its plot no width or no height, and
+/// the document accepts what it writes.
+/// flip: `bar_marks` dividing by a plot of no width → fails at "refused".
+#[test]
+fn a_chart_too_small_for_its_plot_settles() {
+    for kind in ChartKind::ALL {
+        for (w, h) in [(1.0, 1.0), (30.0, 30.0), (50.0, 200.0), (200.0, 20.0)] {
+            let (mut doc, chart) = unsettled(w, h);
+            let mut c = Chart::sample(kind);
+            c.options.lines.curve = ondin_core::chart::Curve::Smooth;
+            c.options.values.position = ondin_core::chart::ValuePosition::Inside;
+            doc.apply(&Transaction(vec![Operation::SetChart {
+                id: chart,
+                chart: Some(Box::new(c)),
+            }]))
+            .unwrap();
+            settle_checked(&mut doc, chart, &format!("{kind:?} at {w}×{h}"));
+        }
+    }
+}
+
+/// A deleted chart's parts are held by its undo step, so another chart's
+/// regeneration never mints their ids: undoing the delete brings it back.
+/// flip: `settle_round` minting every chart's parts under one actor → fails at
+/// "the delete undoes".
+#[test]
+fn a_regeneration_never_takes_a_deleted_charts_part_ids() {
+    let mut ids = IdSource::new(0xC7);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let page = doc.first_page();
+    let mut history = History::default();
+    let settle = |doc: &mut Document| {
+        let mut res = ondin_core::Resolved::rebuild(doc);
+        ondin_core::chart::settle_all(doc, &mut res);
+    };
+    let [b, a] = [(); 2].map(|_| ids.mint());
+    for id in [b, a] {
+        history
+            .commit(
+                &mut doc,
+                Transaction(vec![
+                    create(id, page, frame(480.0, 280.0)),
+                    Operation::SetChart {
+                        id,
+                        chart: Some(Box::new(sample())),
+                    },
+                ]),
+            )
+            .unwrap();
+        settle(&mut doc);
+    }
+    let a_parts: Vec<NodeId> = doc
+        .get(a)
+        .unwrap()
+        .chart()
+        .unwrap()
+        .parts
+        .iter()
+        .map(|(_, n)| *n)
+        .collect();
+    history
+        .commit(&mut doc, Transaction(vec![Operation::DeleteNode { id: a }]))
+        .unwrap();
+    settle(&mut doc);
+    let mut c = doc.get(b).unwrap().chart().unwrap().clone();
+    c.kind = ChartKind::Line;
+    history
+        .commit(
+            &mut doc,
+            Transaction(vec![Operation::SetChart {
+                id: b,
+                chart: Some(Box::new(c)),
+            }]),
+        )
+        .unwrap();
+    settle(&mut doc);
+    let b_parts: Vec<NodeId> = doc
+        .get(b)
+        .unwrap()
+        .chart()
+        .unwrap()
+        .parts
+        .iter()
+        .map(|(_, n)| *n)
+        .collect();
+    history.undo(&mut doc).unwrap().unwrap();
+    settle(&mut doc);
+    let reused = b_parts.iter().filter(|n| a_parts.contains(n)).count();
+    if let Err(e) = history.undo(&mut doc) {
+        panic!("the delete undoes: {e} ({reused} of the line's part ids were the deleted chart's)");
+    }
+    assert!(doc.get(a).is_some());
+    settle(&mut doc);
+}
+
+/// `id`'s description with its kind set to `kind`, applied.
+fn set_kind(doc: &mut Document, id: NodeId, kind: ChartKind) {
+    let mut c = doc.get(id).unwrap().chart().unwrap().clone();
+    c.kind = kind;
+    doc.apply(&Transaction(vec![Operation::SetChart {
+        id,
+        chart: Some(Box::new(c)),
+    }]))
+    .unwrap();
+}
+
+/// A chart with value labels switches between a pie and every axis kind both
+/// ways: the labels' frame hangs under the plot in one and the pie's frame in
+/// the other, so it is made again rather than moved out of a deleted parent.
+/// flip: `settle::ops` keeping a part by its key alone → fails at "the
+/// regeneration was refused".
+#[test]
+fn value_labels_survive_a_switch_to_and_from_a_pie() {
+    for kind in [
+        ChartKind::Column,
+        ChartKind::Bar,
+        ChartKind::Line,
+        ChartKind::Area,
+    ] {
+        let (mut doc, chart) = unsettled(480.0, 280.0);
+        let mut c = doc.get(chart).unwrap().chart().unwrap().clone();
+        c.options.values.position = ondin_core::chart::ValuePosition::Inside;
+        doc.apply(&Transaction(vec![Operation::SetChart {
+            id: chart,
+            chart: Some(Box::new(c)),
+        }]))
+        .unwrap();
+        set_kind(&mut doc, chart, kind);
+        settle_checked(&mut doc, chart, &format!("{kind:?}"));
+        assert!(
+            part(&doc, chart, PartRole::Values, 0, 0).is_some(),
+            "the fixture: {kind:?} has its value labels"
+        );
+        set_kind(&mut doc, chart, ChartKind::Pie);
+        settle_checked(&mut doc, chart, &format!("{kind:?} to pie"));
+        let values = part(&doc, chart, PartRole::Values, 0, 0).expect("a pie's values");
+        assert!(doc.get(values).is_some());
+        set_kind(&mut doc, chart, kind);
+        settle_checked(&mut doc, chart, &format!("pie to {kind:?}"));
+        let values = part(&doc, chart, PartRole::Values, 0, 0).expect("values again");
+        let plot = part(&doc, chart, PartRole::Plot, 0, 0).unwrap();
+        assert_eq!(doc.get(values).unwrap().parent(), Some(plot), "{kind:?}");
+    }
 }

@@ -2299,7 +2299,6 @@ fn style_fields(value: &crate::style::StyleValue) -> &'static [Field] {
 fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec<crate::Operation> {
     use crate::Operation as O;
     let t = doc.variables();
-    let mut ops = Vec::new();
     let mut ids: Vec<NodeId> = doc
         .node_map()
         .values()
@@ -2312,8 +2311,44 @@ fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec
         .map(|n| n.id)
         .collect();
     ids.sort();
-    for id in ids {
-        let n = doc.get(id).expect("listed from the document");
+    let mut ops = detach_nodes_ops(doc, &ids, gone);
+    // And a style whose paints read one detaches them too, to the colour they
+    // draw in the default mode (§15 D1062) — a style holds one value for layers
+    // in every mode. Its users are rewritten from it by the commit, the style
+    // winning over the per-layer detaches above, so they stay styled.
+    // In a document with no modes of its own too: a kit's variable resolves in
+    // its kit's default there (§15 D1064), and the style must not dangle.
+    for s in doc.styles().iter() {
+        let fields = style_fields(&s.value);
+        let vars: Vec<VarId> = s
+            .value
+            .vars()
+            .into_iter()
+            .filter(|v| fields.iter().any(|f| gone(*v, *f)))
+            .collect();
+        if !vars.is_empty() {
+            ops.push(O::SetStyleValue {
+                id: s.id,
+                value: crate::style::detach_vars(&s.value, t, t.default_mode(), &vars),
+            });
+        }
+    }
+    ops
+}
+
+/// The operations detaching each of `ids`' fields bound to a variable `gone`
+/// answers for in that field's family, to the value it drew — [`detach_ops`]'s
+/// per-node half, styles left alone.
+fn detach_nodes_ops(
+    doc: &crate::Document,
+    ids: &[NodeId],
+    gone: &dyn Fn(VarId, Field) -> bool,
+) -> Vec<crate::Operation> {
+    use crate::Operation as O;
+    let t = doc.variables();
+    let mut ops = Vec::new();
+    for &id in ids {
+        let Some(n) = doc.get(id) else { continue };
         // A chart's colours detach in its description and its parts together.
         if n.chart().is_some() {
             ops.extend(crate::chart::rebind_ops(doc, id, &|at, b| {
@@ -2527,28 +2562,28 @@ fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec
             ops.push(O::SetOpacityVar { id, var: None });
         }
     }
-    // And a style whose paints read one detaches them too, to the colour they
-    // draw in the default mode (§15 D1062) — a style holds one value for layers
-    // in every mode. Its users are rewritten from it by the commit, the style
-    // winning over the per-layer detaches above, so they stay styled.
-    // In a document with no modes of its own too: a kit's variable resolves in
-    // its kit's default there (§15 D1064), and the style must not dangle.
-    for s in doc.styles().iter() {
-        let fields = style_fields(&s.value);
-        let vars: Vec<VarId> = s
-            .value
-            .vars()
-            .into_iter()
-            .filter(|v| fields.iter().any(|f| gone(*v, *f)))
-            .collect();
-        if !vars.is_empty() {
-            ops.push(O::SetStyleValue {
-                id: s.id,
-                value: crate::style::detach_vars(&s.value, t, t.default_mode(), &vars),
-            });
-        }
-    }
     ops
+}
+
+/// The operations detaching every binding of `ids` that its variable's scope
+/// refuses, each to the value it drew: what a chart's parts need when they
+/// become ordinary layers, their strokes drawing colours scoped to fills.
+pub fn out_of_scope_ops(doc: &crate::Document, ids: &[NodeId]) -> Vec<crate::Operation> {
+    let t = doc.variables();
+    let refused = |v: VarId, f: Field| t.get(v).is_some_and(|v| !v.binds(f));
+    let mut ids: Vec<NodeId> = ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            doc.get(*id).is_some_and(|n| {
+                Field::ALL
+                    .into_iter()
+                    .any(|f| bound_in(n, f).any(|v| refused(v, f)))
+            })
+        })
+        .collect();
+    ids.sort();
+    detach_nodes_ops(doc, &ids, &refused)
 }
 
 /// The operations that delete `mode` (D1038): every frame set to it returns to

@@ -345,38 +345,36 @@
     </g>
     <g data-name="Body" transform="matrix(1 0 0 1 16 42.515625)">
       <g data-name="Value axis">
-        <text data-name="Tick -50%" transform="matrix(1 0 0 1 0 115.516113)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">-50%</tspan></text>
-        <text data-name="Tick 0%" transform="matrix(1 0 0 1 11.585449 74.79248)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0%</tspan></text>
-        <text data-name="Tick 50%" transform="matrix(1 0 0 1 5.05957 34.068848)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">50%</tspan></text>
-        <text data-name="Tick 100%" transform="matrix(1 0 0 1 0.171875 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">100%</tspan></text>
+        <text data-name="Tick -100%" transform="matrix(1 0 0 1 0 115.516113)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">-100%</tspan></text>
+        <text data-name="Tick 0%" transform="matrix(1 0 0 1 16.473145 54.430664)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">0%</tspan></text>
+        <text data-name="Tick 100%" transform="matrix(1 0 0 1 5.05957 -6.654785)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">100%</tspan></text>
       </g>
-      <g data-name="Category axis" transform="matrix(1 0 0 1 35.328125 122.171875)">
-        <text data-name="Category Jan" transform="matrix(1 0 0 1 11.578857 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jan</tspan></text>
-        <text data-name="Category Feb" transform="matrix(1 0 0 1 53.564941 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Feb</tspan></text>
-        <text data-name="Category Mar" transform="matrix(1 0 0 1 95.153564 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Mar</tspan></text>
-        <text data-name="Category Apr" transform="matrix(1 0 0 1 138.160156 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Apr</tspan></text>
-        <text data-name="Category May" transform="matrix(1 0 0 1 178.438232 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">May</tspan></text>
-        <text data-name="Category Jun" transform="matrix(1 0 0 1 221.976562 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jun</tspan></text>
+      <g data-name="Category axis" transform="matrix(1 0 0 1 40.21875 122.171875)">
+        <text data-name="Category Jan" transform="matrix(1 0 0 1 11.171549 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jan</tspan></text>
+        <text data-name="Category Feb" transform="matrix(1 0 0 1 52.343018 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Feb</tspan></text>
+        <text data-name="Category Mar" transform="matrix(1 0 0 1 93.117025 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Mar</tspan></text>
+        <text data-name="Category Apr" transform="matrix(1 0 0 1 135.309001 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Apr</tspan></text>
+        <text data-name="Category May" transform="matrix(1 0 0 1 174.772461 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">May</tspan></text>
+        <text data-name="Category Jun" transform="matrix(1 0 0 1 217.496175 6)" x="0" y="10" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="11" font-weight="400">Jun</tspan></text>
       </g>
-      <g data-name="Plot" transform="matrix(1 0 0 1 35.328125 0)">
+      <g data-name="Plot" transform="matrix(1 0 0 1 40.21875 0)">
         <g data-name="Grid">
-          <rect data-name="Gridline -50%" transform="matrix(1 0 0 1 0 121.670898)" x="0" y="0" width="252.6738" height="1" fill="#e6e6e6"/>
-          <rect data-name="Gridline 0%" transform="matrix(1 0 0 1 0 80.947266)" x="0" y="0" width="252.6738" height="1" fill="#e6e6e6"/>
-          <rect data-name="Gridline 50%" transform="matrix(1 0 0 1 0 40.223633)" x="0" y="0" width="252.6738" height="1" fill="#e6e6e6"/>
-          <rect data-name="Gridline 100%" transform="matrix(1 0 0 1 0 -0.5)" x="0" y="0" width="252.6738" height="1" fill="#e6e6e6"/>
-          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 80.947266)" x="0" y="0" width="252.6738" height="1" fill="#bfbfbf"/>
+          <rect data-name="Gridline -100%" transform="matrix(1 0 0 1 0 121.670898)" x="0" y="0" width="247.7861" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 0%" transform="matrix(1 0 0 1 0 60.585449)" x="0" y="0" width="247.7861" height="1" fill="#e6e6e6"/>
+          <rect data-name="Gridline 100%" transform="matrix(1 0 0 1 0 -0.5)" x="0" y="0" width="247.7861" height="1" fill="#e6e6e6"/>
+          <rect data-name="Baseline" transform="matrix(1 0 0 1 0 60.585449)" x="0" y="0" width="247.7861" height="1" fill="#bfbfbf"/>
         </g>
         <g data-name="Series Revenue">
-          <path data-name="Area · Revenue" d="M21.0562,40.7236 C35.0936,40.7236 49.131,40.7236 63.1685,40.7236 C77.2059,40.7236 91.2433,15.9986 105.2808,15.9986 C119.3182,15.9986 133.3556,40.7236 147.3931,40.7236 C161.4305,40.7236 175.4679,40.7236 189.5054,40.7236 C203.5428,40.7236 217.5802,40.7236 231.6177,40.7236 L231.6177,81.4473 C217.5802,81.4473 203.5428,81.4473 189.5054,81.4473 C175.4679,81.4473 161.4305,81.4473 147.3931,81.4473 C133.3556,81.4473 119.3182,81.4473 105.2808,81.4473 C91.2433,81.4473 77.2059,81.4473 63.1685,81.4473 C49.131,81.4473 35.0936,81.4473 21.0562,81.4473 Z" fill="#3b6fe0" opacity="0.3"/>
-          <path data-name="Line · Revenue" d="M21.0562,40.7236 C35.0936,40.7236 49.131,40.7236 63.1685,40.7236 C77.2059,40.7236 91.2433,15.9986 105.2808,15.9986 C119.3182,15.9986 133.3556,40.7236 147.3931,40.7236 C161.4305,40.7236 175.4679,40.7236 189.5054,40.7236 C203.5428,40.7236 217.5802,40.7236 231.6177,40.7236" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Revenue" d="M20.6488,30.5427 C34.4147,30.5427 48.1806,30.5427 61.9465,30.5427 C75.7124,30.5427 89.4783,11.9989 103.2442,11.9989 C117.0101,11.9989 130.776,30.5427 144.5419,30.5427 C158.3078,30.5427 172.0737,30.5427 185.8396,30.5427 C199.6055,30.5427 213.3714,30.5427 227.1373,30.5427 L227.1373,61.0854 L185.8396,61.0854 L144.5419,61.0854 L103.2442,61.0854 L61.9465,61.0854 L20.6488,61.0854 Z" fill="#3b6fe0" opacity="0.3"/>
+          <path data-name="Line · Revenue" d="M20.6488,30.5427 C34.4147,30.5427 48.1806,30.5427 61.9465,30.5427 C75.7124,30.5427 89.4783,11.9989 103.2442,11.9989 C117.0101,11.9989 130.776,30.5427 144.5419,30.5427 C158.3078,30.5427 172.0737,30.5427 185.8396,30.5427 C199.6055,30.5427 213.3714,30.5427 227.1373,30.5427" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Area · Costs" d="M21.0562,11.6353 L63.1685,13.5745 L63.1685,40.7236 L21.0562,40.7236 Z M147.3931,14.5442 C161.4305,14.8144 175.4679,15.0839 189.5054,15.3548 C203.5428,15.6257 217.5802,15.8981 231.6177,16.1697 L231.6177,40.7236 C217.5802,40.7236 203.5428,40.7236 189.5054,40.7236 C175.4679,40.7236 161.4305,40.7236 147.3931,40.7236 Z" fill="#f08c2e" opacity="0.3"/>
-          <path data-name="Line · Costs" d="M21.0562,11.6353 L63.1685,13.5745 M147.3931,14.5442 C161.4305,14.8144 175.4679,15.0839 189.5054,15.3548 C203.5428,15.6257 217.5802,15.8981 231.6177,16.1697" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Costs" d="M20.6488,8.7265 L61.9465,10.1809 L61.9465,30.5427 L20.6488,30.5427 Z M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273 L227.1373,30.5427 L185.8396,30.5427 L144.5419,30.5427 Z" fill="#f08c2e" opacity="0.3"/>
+          <path data-name="Line · Costs" d="M20.6488,8.7265 L61.9465,10.1809 M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
-          <path data-name="Area · Profit" d="M21.0562,0 C35.0936,0 49.131,0 63.1685,0 C77.2059,0 91.2433,97.4458 105.2808,97.4458 C119.3182,97.4458 133.3556,0 147.3931,0 C161.4305,0 175.4679,0 189.5054,0 C203.5428,0 217.5802,0 231.6177,0 L231.6177,16.1697 C217.5802,15.8981 203.5428,15.6257 189.5054,15.3548 C175.4679,15.0839 161.4305,14.5442 147.3931,14.5442 C133.3556,14.5442 119.3182,81.4473 105.2808,81.4473 C91.2433,81.4473 77.2059,15.5108 63.1685,13.5745 C49.131,11.6383 35.0936,11.7429 21.0562,11.6353 Z" fill="#2ea88a" opacity="0.3"/>
-          <path data-name="Line · Profit" d="M21.0562,0 C35.0936,0 49.131,0 63.1685,0 C77.2059,0 91.2433,97.4458 105.2808,97.4458 C119.3182,97.4458 133.3556,0 147.3931,0 C161.4305,0 175.4679,0 189.5054,0 C203.5428,0 217.5802,0 231.6177,0" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Profit" d="M20.6488,0 C34.4147,0 48.1806,0 61.9465,0 C75.7124,0 89.4783,73.0844 103.2442,73.0844 C117.0101,73.0844 130.776,0 144.5419,0 C158.3078,0 172.0737,0 185.8396,0 C199.6055,0 213.3714,0 227.1373,0 L227.1373,12.1273 L185.8396,11.5161 L144.5419,10.9081 L103.2442,61.0854 L61.9465,10.1809 L20.6488,8.7265 Z" fill="#2ea88a" opacity="0.3"/>
+          <path data-name="Line · Profit" d="M20.6488,0 C34.4147,0 48.1806,0 61.9465,0 C75.7124,0 89.4783,73.0844 103.2442,73.0844 C117.0101,73.0844 130.776,0 144.5419,0 C158.3078,0 172.0737,0 185.8396,0 C199.6055,0 213.3714,0 227.1373,0" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
       </g>
     </g>

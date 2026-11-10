@@ -21,6 +21,7 @@
 pub mod cache;
 pub mod clock;
 pub mod cover;
+pub mod disk;
 pub mod history;
 pub mod ids;
 pub mod naming;

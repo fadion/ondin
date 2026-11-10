@@ -155,7 +155,7 @@ ondin-app/src/
 ├─ job.rs           Job: one computation on a worker thread, picked up by the frame loop when it lands
 ├─ import.rs        files given by a drop or Place image: read on a worker, landed in their tab (app-image-editing.md)
 ├─ reader.rs        another tool's file and a placed PDF parsed in a child process, `ondin reader` (library.md)
-├─ library/         the library folder: store, project, scan, recovery, cover, cache; history.rs undo kept between sessions (library.md)
+├─ library/         the library folder: store, project, scan, recovery, cover, cache; disk.rs outside changes to an open file; history.rs undo kept between sessions (library.md)
 ├─ kits/            kit chrome: the kit menu and tag, the library's kit index, the insert picker, publish and updates (kits.md)
 ├─ assets/          the assets browser: icon sets (sets.rs), photo services (photos.rs), the workers and cache (mod.rs), the panel and inserts (panel.rs) (app-canvas-chrome.md)
 ├─ keychain.rs      the system secret store: the Figma token, the photo services' keys

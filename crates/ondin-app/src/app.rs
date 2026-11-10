@@ -481,8 +481,13 @@ pub(crate) struct Opening {
     pub at: std::time::Instant,
 }
 
-/// A document read for opening, with the undo history kept for exactly its bytes.
-pub(crate) type Opened = (ondin_core::Document, Option<ondin_core::SavedHistory>);
+/// A document read for opening, with the undo history kept for exactly its bytes
+/// and the stamp of the file it was read from (`library::disk`).
+pub(crate) type Opened = (
+    ondin_core::Document,
+    Option<ondin_core::SavedHistory>,
+    Option<crate::library::disk::Stamp>,
+);
 
 /// Read `path` as a document, and the history kept for it under `root` when `keep`
 /// says histories are kept.
@@ -491,12 +496,17 @@ pub(crate) fn read_opened(
     root: &std::path::Path,
     keep: bool,
 ) -> Result<Opened, String> {
+    // Before the read (`Stamp::from_meta`).
+    let meta = std::fs::metadata(path).ok();
     let bytes = std::fs::read(path).map_err(|e| format!("Read failed: {e}"))?;
     let doc = ondin_core::io::load(&bytes).map_err(|e| format!("Load error: {e}"))?;
     let history = keep
         .then(|| crate::library::history::for_opened(root, &doc, &bytes))
         .flatten();
-    Ok((doc, history))
+    let stamp = meta.map(|m| {
+        crate::library::disk::Stamp::from_meta(&m, crate::library::history::digest(&bytes))
+    });
+    Ok((doc, history, stamp))
 }
 
 pub struct OndinApp {
@@ -2019,6 +2029,8 @@ impl OndinApp {
         // Above the view branch too: the library screen can hold a dirty session.
         self.handle_close_request(&ctx);
         self.close_confirmation(&ctx);
+        // After the close card: a save it asked for can be the one held.
+        self.disk_clash_card(&ctx);
         self.value_delete_confirmation(&ctx);
         self.page_delete_confirmation(&ctx);
 
@@ -5836,11 +5848,18 @@ impl OndinApp {
                 None => return false,
             },
         };
+        if self.disk_changed() {
+            return false;
+        }
         match crate::library::store::write_document_digest(&path, &self.session.doc) {
             Ok(file) => {
                 if let Some(history) = self.kept_history() {
                     history.write(&file);
                 }
+                self.session.disk = crate::library::disk::Stamp::of(&path, file);
+                // A save that passed the check ends a put-off question: the file
+                // went back, or went away.
+                self.session.clash = crate::session::Clash::Clear;
             }
             Err(e) => {
                 let e = crate::private::io_error(&e);
@@ -5866,6 +5885,22 @@ impl OndinApp {
         if self.prefs.export_on_save {
             self.export_all(crate::panels::ExportAll::Quietly);
         }
+        true
+    }
+
+    /// Whether the open document's file changed under it since this session last
+    /// read or wrote it (`library::disk`). A change holds the save and puts the
+    /// question ([`Self::disk_clash_card`]); every caller of a refused save already
+    /// treats it as failed (the tab stays dirty, the close stays open).
+    fn disk_changed(&mut self) -> bool {
+        let session = &mut self.session;
+        let (Some(path), Some(stamp)) = (session.path.as_deref(), session.disk.as_mut()) else {
+            return false;
+        };
+        if !stamp.check(path) {
+            return false;
+        }
+        session.clash = crate::session::Clash::Ask;
         true
     }
 
@@ -5948,6 +5983,10 @@ impl OndinApp {
         if interval == 0 || !self.session.is_dirty() || self.session.is_saving() {
             return;
         }
+        // Held until the user answers whether to reload or overwrite.
+        if self.session.clash != crate::session::Clash::Clear {
+            return;
+        }
         if self.last_autosave.elapsed().as_secs() < interval {
             return;
         }
@@ -5957,6 +5996,10 @@ impl OndinApp {
         };
         // Stamped at queue time: a back-off on failure.
         self.last_autosave = std::time::Instant::now();
+        // Checked here rather than on the writer: the answer is a question on screen.
+        if self.disk_changed() {
+            return;
+        }
         let at = self.session.revision();
         let doc = self.session.doc.clone();
         let history = self.kept_history();
@@ -6085,7 +6128,12 @@ impl OndinApp {
                 }
                 Done::Forgot => {}
                 // The export follows a landed save; a superseded write is not one.
-                Done::Saved { path, at } => {
+                Done::Saved { path, at, stamp } => {
+                    // Whether or not the session goes clean: the file is this
+                    // write now, superseded or not.
+                    if self.session.path.as_deref() == Some(path.as_path()) {
+                        self.session.disk = stamp;
+                    }
                     if self.session.finish_save(&path, at) && self.prefs.export_on_save {
                         self.export_all(crate::panels::ExportAll::Quietly);
                     }
@@ -6425,9 +6473,15 @@ impl OndinApp {
         self.land_open(o, loaded);
     }
 
-    /// [`Self::adopt_opened`], then take up the undo history kept for the file read.
-    pub(crate) fn adopt_opened_with(&mut self, path: &std::path::Path, (doc, history): Opened) {
+    /// [`Self::adopt_opened`], then take up the undo history kept for the file read
+    /// and the file's stamp.
+    pub(crate) fn adopt_opened_with(
+        &mut self,
+        path: &std::path::Path,
+        (doc, history, stamp): Opened,
+    ) {
         self.adopt_opened(path, doc);
+        self.session.disk = stamp;
         if let Some(history) = history {
             self.session.resume_history(history);
         }
@@ -6568,6 +6622,98 @@ impl OndinApp {
     pub(crate) fn commit_text_before_closing(&mut self) {
         if self.text.as_ref().is_some_and(TextSession::changed) {
             self.finish_text_edit();
+        }
+    }
+
+    /// *Changed on disk*: a save of the open document found its file written by
+    /// someone else since this session read or wrote it ([`Self::disk_changed`]).
+    /// *Reload* takes the file's version, *Overwrite* saves this one over it, and
+    /// *Later* (also ✕, Escape and the backdrop) holds autosave until the next save
+    /// asks again.
+    fn disk_clash_card(&mut self, ctx: &egui::Context) {
+        use crate::session::Clash;
+        if self.session.clash != Clash::Ask {
+            return;
+        }
+        let name = self.shown_title();
+        let dirty = self.session.is_dirty();
+        let mut decision: Option<usize> = None;
+        let modal = crate::settings::card("disk-clash", ctx, |ui| {
+            ui.set_width(crate::ui::menu_inner_w(340.0, crate::settings::PAD));
+            if crate::settings::modal_title(ui, "Changed on disk") {
+                decision = Some(0);
+            }
+            ui.add_space(8.0);
+            let what = if dirty {
+                "Reload it to take that version and lose the changes made here, or overwrite it with this one."
+            } else {
+                "Reload it to take that version, or overwrite it with this one."
+            };
+            ui.label(
+                egui::RichText::new(format!(
+                    "“{name}” was changed outside Ondin since it was last saved here. {what}"
+                ))
+                .size(crate::ui::CONTROL_PT)
+                .color(theme::text::muted()),
+            );
+            let reload = if dirty {
+                crate::ui::FieldButton::Danger
+            } else {
+                crate::ui::FieldButton::Off
+            };
+            let buttons = [
+                ("Later", crate::ui::FieldButton::Off),
+                ("Reload", reload),
+                ("Overwrite", crate::ui::FieldButton::Primary),
+            ];
+            if let Some(i) = crate::settings::footer_buttons(ui, &buttons) {
+                decision = Some(i);
+            }
+        });
+        if modal.should_close() {
+            decision.get_or_insert(0);
+        }
+        match decision {
+            Some(0) => {
+                self.session.clash = Clash::Held;
+                self.session.info(format!(
+                    "“{name}” is not autosaved until it is reloaded or overwritten"
+                ));
+            }
+            Some(1) => self.reload_from_disk(),
+            Some(_) => self.overwrite_disk(),
+            None => {}
+        }
+    }
+
+    /// Save the open document over a file someone else changed: *Changed on
+    /// disk*'s *Overwrite*.
+    fn overwrite_disk(&mut self) {
+        // Unchecked once: the save stamps the file it writes.
+        self.session.disk = None;
+        self.session.clash = crate::session::Clash::Clear;
+        if self.save_file(false) {
+            let name = self.shown_title();
+            self.session.info(format!("Saved over “{name}”"));
+        }
+    }
+
+    /// Read the open document's file again in place of the session, its unsaved
+    /// changes and undo steps dropped: *Changed on disk*'s *Reload*.
+    fn reload_from_disk(&mut self) {
+        let Some(path) = self.session.path.clone() else {
+            return;
+        };
+        match read_opened(&path, &self.library.root, self.prefs.history_size > 0) {
+            // The same file's tab is in front, so the adopt replaces it in place.
+            Ok(opened) => {
+                self.adopt_opened_with(&path, opened);
+                self.session.info("Reloaded from disk");
+            }
+            Err(why) => {
+                self.session.clash = crate::session::Clash::Held;
+                self.session.fail(why);
+            }
         }
     }
 
@@ -8130,6 +8276,7 @@ impl OndinApp {
         self.settings.is_some()
             || self.confirming_close
             || !self.closing_tabs.is_empty()
+            || self.session.clash == crate::session::Clash::Ask
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
             || self.pages.deleting.is_some()
@@ -12809,6 +12956,152 @@ mod library_wiring_tests {
             !app.session.is_dirty(),
             "the same armed state must write when the document *is* dirty"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A filed, dirty app and its path, the file then rewritten by someone else
+    /// as a document named "Theirs".
+    fn app_with_a_changed_file(
+        ctx: &egui::Context,
+        tag: &str,
+    ) -> (OndinApp, std::path::PathBuf, std::path::PathBuf) {
+        let root = temp_root(tag);
+        let mut app = app_at(ctx, root.clone());
+        assert!(app.save_file(false), "fixture: filed");
+        let path = app.session.path.clone().unwrap();
+        assert!(
+            app.session.disk.is_some(),
+            "fixture: the save stamped the file"
+        );
+        app.session.mark_unsaved();
+        let mut theirs = ondin_core::Document::new(ondin_core::IdSource::new(0x7e1).mint());
+        let mut meta = theirs.meta().clone();
+        meta.name = Some("Theirs".into());
+        theirs.set_meta(meta);
+        crate::library::store::write_document(&path, &theirs).unwrap();
+        (app, path, root)
+    }
+
+    fn name_on_disk(path: &std::path::Path) -> Option<String> {
+        let doc = ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap();
+        doc.meta().name.clone()
+    }
+
+    /// A save over a file someone else changed is held and asks, by hand and by
+    /// autosave alike, and the file keeps their version; put off, autosave stays
+    /// held until a save lands.
+    ///
+    /// flip: `save_file` without its `disk_changed` check → fails at "the save is
+    /// refused". flip: `autosave_tick` without its `Clash` gate → fails at
+    /// "held autosave writes nothing". flip: `save_file` not clearing `clash` →
+    /// fails at "a save that lands clears it".
+    #[test]
+    fn a_save_over_an_outside_change_is_held_and_asks() {
+        use crate::session::Clash;
+        let ctx = egui::Context::default();
+        let (mut app, path, root) = app_with_a_changed_file(&ctx, "clash-save");
+        assert!(!app.save_file(false), "the save is refused");
+        assert_eq!(app.session.clash, Clash::Ask);
+        assert!(app.modal_is_up(), "the card is up");
+        assert_eq!(
+            name_on_disk(&path).as_deref(),
+            Some("Theirs"),
+            "their version stays"
+        );
+
+        app.session.clash = Clash::Clear;
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        app.disk_settle();
+        assert_eq!(app.session.clash, Clash::Ask, "autosave asks too");
+        assert_eq!(name_on_disk(&path).as_deref(), Some("Theirs"));
+
+        app.session.clash = Clash::Held;
+        // Unstamped, so only the gate can hold it.
+        app.session.disk = None;
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        app.disk_settle();
+        assert_eq!(
+            name_on_disk(&path).as_deref(),
+            Some("Theirs"),
+            "held autosave writes nothing"
+        );
+        // Unstamped still, so this save passes the check and ends the hold.
+        assert!(app.save_file(false));
+        assert_eq!(
+            app.session.clash,
+            Clash::Clear,
+            "a save that lands clears it"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// *Reload* takes the file's version, clean; *Overwrite* writes this one over
+    /// it and later saves go ahead.
+    ///
+    /// flip: `overwrite_disk` keeping the old stamp → fails at "the overwrite
+    /// lands".
+    #[test]
+    fn a_clash_reloads_or_overwrites() {
+        use crate::session::Clash;
+        let ctx = egui::Context::default();
+        let (mut app, _, root) = app_with_a_changed_file(&ctx, "clash-reload");
+        assert!(!app.save_file(false));
+        app.reload_from_disk();
+        assert_eq!(app.session.doc.meta().name.as_deref(), Some("Theirs"));
+        assert!(!app.session.is_dirty(), "reloaded clean");
+        assert_eq!(app.session.clash, Clash::Clear);
+        let _ = std::fs::remove_dir_all(&root);
+
+        let (mut app, path, root) = app_with_a_changed_file(&ctx, "clash-overwrite");
+        assert!(!app.save_file(false));
+        app.overwrite_disk();
+        assert_ne!(
+            name_on_disk(&path).as_deref(),
+            Some("Theirs"),
+            "the overwrite lands"
+        );
+        assert_eq!(app.session.clash, Clash::Clear);
+        app.session.mark_unsaved();
+        assert!(app.save_file(false), "and the next save goes ahead");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The app's own writes move the stamp: an autosave, then a save by hand,
+    /// never asks.
+    ///
+    /// flip: `apply_disk` not taking up `Done::Saved`'s stamp → fails at "no
+    /// clash after its own autosave".
+    #[test]
+    fn the_apps_own_autosave_is_not_an_outside_change() {
+        let ctx = egui::Context::default();
+        let root = temp_root("clash-own");
+        let mut app = app_at(&ctx, root.clone());
+        assert!(app.save_file(false));
+        // Other bytes, or the autosave rewrites what the stamp already holds.
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Edited".into());
+        app.session.doc.set_meta(meta);
+        app.session.mark_unsaved();
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        app.disk_settle();
+        assert!(!app.session.is_dirty(), "fixture: the autosave landed");
+        assert!(
+            std::fs::read(app.session.path.as_ref().unwrap()).is_ok_and(|b| ondin_core::io::load(
+                &b
+            )
+            .unwrap()
+            .meta()
+            .name
+            .as_deref()
+                == Some("Edited")),
+            "fixture: with other bytes"
+        );
+        app.session.mark_unsaved();
+        assert!(app.save_file(false), "no clash after its own autosave");
+        assert_eq!(app.session.clash, crate::session::Clash::Clear);
         let _ = std::fs::remove_dir_all(&root);
     }
 

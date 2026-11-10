@@ -423,6 +423,7 @@ fn load_digest(path: &Path) -> io::Result<(Document, String)> {
 /// edits it records are as true of the renamed, moved or marked file.
 fn rewrite(root: &Path, path: &Path, doc: &Document, was: &str) -> io::Result<()> {
     let now = write_document_digest(path, doc)?;
+    super::disk::rewrote(was, &now);
     if let Some(id) = doc.meta().id.as_deref() {
         super::history::restamp(root, id, was, &now);
     }

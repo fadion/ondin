@@ -125,8 +125,13 @@ pub enum Done {
     SnapshotFailed(String),
     /// A removal finished. Nothing reads it; [`Writer::settle`] counts it.
     Forgot,
-    /// The document at `path` now holds revision `at`.
-    Saved { path: PathBuf, at: u64 },
+    /// The document at `path` now holds revision `at`, and `stamp` is the file as
+    /// written (`super::disk`).
+    Saved {
+        path: PathBuf,
+        at: u64,
+        stamp: Option<super::disk::Stamp>,
+    },
     /// It does not, and this is why. The error itself, not its message: the
     /// status line words it, without the path in private mode.
     SaveFailed(std::io::Error),
@@ -172,7 +177,8 @@ impl Writer {
                                 if let Some(history) = history {
                                     history.write(&file);
                                 }
-                                Done::Saved { path, at }
+                                let stamp = super::disk::Stamp::of(&path, file);
+                                Done::Saved { path, at, stamp }
                             }
                             Err(e) => Done::SaveFailed(e),
                         }

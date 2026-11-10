@@ -78,6 +78,18 @@ impl std::fmt::Display for CommitError {
     }
 }
 
+/// Whether a save of the document found its file changed by someone else since
+/// the session last read or wrote it (`library::disk`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Clash {
+    /// Nothing found; saves go ahead.
+    Clear,
+    /// A save was held: the card asks whether to reload or overwrite.
+    Ask,
+    /// Asked and put off: autosave holds off, and the next save asks again.
+    Held,
+}
+
 /// What the status line is reporting. Errors are kept distinct so the chrome
 /// can colour them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -443,6 +455,12 @@ pub struct EditorSession {
     pub home_pending: bool,
     /// The file backing this document, if it has been saved or opened.
     pub path: Option<PathBuf>,
+    /// [`Self::path`] as this session last read or wrote it (`library::disk`).
+    /// `None` for a document not read from its path (never filed, or recovered
+    /// from a snapshot), whose saves are unchecked.
+    pub disk: Option<crate::library::disk::Stamp>,
+    /// Whether a save found the file changed by someone else.
+    pub clash: Clash,
 
     /// Uncommitted gesture preview, as per-node patches over the committed
     /// state (§6.2, invariant 5). Empty when no gesture is live.
@@ -735,6 +753,8 @@ impl EditorSession {
             first_visit: false,
             home_pending: false,
             path,
+            disk: None,
+            clash: Clash::Clear,
             overrides: RenderOverrides::default(),
             session_preview: None,
             preview_holds_gesture: false,
@@ -1903,6 +1923,9 @@ impl EditorSession {
         self.resumed = false;
         self.naming = None;
         self.path = path;
+        // The caller stamps a document it read from its path.
+        self.disk = None;
+        self.clash = Clash::Clear;
         self.dirty = false;
         // A different document, so anything derived from the old one is stale.
         self.revision = next_revision();

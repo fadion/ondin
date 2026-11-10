@@ -1752,6 +1752,16 @@ fn paint_node_pass<P: ScenePainter>(
     {
         return;
     }
+    // A layer whose ink overflowed has no box to cull on, and drawing it would
+    // hand the GPU coordinates past what it can hold. The preview's exemptions
+    // above apply: its cached answer describes the committed layer.
+    if !ov.moved(id)
+        && ov.ghosts_of(id).next().is_none()
+        && !walk.grown(doc, ov, id)
+        && res.ink_overflows(doc, id)
+    {
+        return;
+    }
 
     // A gesture's override first, then the used geometry (where container layout
     // placed the node).

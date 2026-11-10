@@ -198,6 +198,96 @@ fn full_view_draws_all_shapes() {
     assert_eq!(painter.fills.len(), 2, "both rects drawn when both in view");
 }
 
+/// A filled ellipse under 51 groups of `scale(1e6)` has a world box past
+/// `f64::MAX` and so no ink to cull on; the walk skips it rather than draw it,
+/// and still draws the ordinary rect beside the groups.
+/// flip: `paint_node` without its `ink_overflows` skip → fails at "only the
+/// ordinary rect is drawn".
+#[test]
+fn a_layer_whose_ink_overflows_is_not_drawn() {
+    let mut ids = IdSource::new(0x0F1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (plain, huge) = (ids.mint(), ids.mint());
+    let fill = || {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
+            visible: true,
+        }])
+    };
+    let mut ops = vec![Operation::CreateNode {
+        id: plain,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: None,
+        name: None,
+    }];
+    let mut holder = root;
+    let mut groups = Vec::new();
+    for _ in 0..51 {
+        let g = ids.mint();
+        ops.push(Operation::CreateNode {
+            id: g,
+            parent: holder,
+            index: if holder == root { 1 } else { 0 },
+            kind: NodeKind::Group,
+            transform: Some(Affine::scale(1e6)),
+            name: None,
+        });
+        groups.push(g);
+        holder = g;
+    }
+    ops.push(Operation::CreateNode {
+        id: huge,
+        parent: holder,
+        index: 0,
+        kind: NodeKind::Ellipse {
+            size: Size::new(1e6, 1e6),
+            arc: Default::default(),
+        },
+        transform: None,
+        name: None,
+    });
+    ops.push(Operation::SetFills {
+        id: plain,
+        fills: fill(),
+    });
+    ops.push(Operation::SetFills {
+        id: huge,
+        fills: fill(),
+    });
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    assert!(
+        res.ink_overflows(&doc, huge),
+        "the fixture's own claim: the ellipse's ink is past measuring"
+    );
+    assert!(
+        !res.ink_overflows(&doc, plain) && !res.ink_overflows(&doc, groups[0]),
+        "control: an ordinary layer and a container are not flagged"
+    );
+
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    let mut painter = RecordingPainter::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
+    assert_eq!(painter.fills.len(), 1, "only the ordinary rect is drawn");
+}
+
 #[test]
 fn gpu_scene_builds_without_device() {
     // Building a vello::Scene needs no GPU; this exercises the GPU painter path.

@@ -46,6 +46,28 @@ pub fn hit_test(res: &Resolved, doc: &Document, page: NodeId, p: Point, slop: f6
     hits
 }
 
+/// The key of chart `chart`'s topmost part under world point `p`: what a
+/// double-click on a chart meant, which [`hit_test`] answers only as the chart.
+pub fn chart_part_at(
+    res: &Resolved,
+    doc: &Document,
+    page: NodeId,
+    chart: NodeId,
+    p: Point,
+) -> Option<crate::chart::PartKey> {
+    let area = Rect::new(p.x, p.y, p.x, p.y);
+    let mut hits: Vec<NodeId> = res
+        .candidates_intersecting(page, area)
+        .into_iter()
+        .filter(|id| crate::chart::owner(doc, *id) == Some(chart))
+        .filter(|id| hits_own_shape(res, doc, *id, p, 0.0))
+        .collect();
+    hits.sort_by_key(|id| std::cmp::Reverse(paint_path(doc, *id)));
+    let parts = &doc.get(chart)?.chart()?.parts;
+    hits.into_iter()
+        .find_map(|id| parts.iter().find(|(_, n)| *n == id).map(|(k, _)| *k))
+}
+
 /// Whether world point `p` lands on `id`'s own painted area, children aside: the
 /// exact half of [`hit_test`], which [`touches_loop`] shares.
 fn hits_own_shape(res: &Resolved, doc: &Document, id: NodeId, p: Point, slop: f64) -> bool {

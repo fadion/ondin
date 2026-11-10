@@ -12,11 +12,13 @@ mod generate;
 mod preset;
 pub mod scale;
 mod settle;
+pub mod table_io;
 
 pub use colours::{sankey_nodes, series_fill, with_node_fill, with_palette, with_series_fill};
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::Preset;
 pub use settle::{preview, settle, settle_all, settle_round, stale};
+pub use table_io::grouped;
 
 use crate::id::NodeId;
 use crate::node::{Node, NodeKind};

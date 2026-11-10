@@ -32,8 +32,7 @@ a *Landed:* line saying what is in and what is next, so the next session resumes
   a chart opening it at the clicked mark's cell.
 - **Import and the linked file** — CSV, TSV and JSON readers, the import box, the drop doors, the
   link with the tokens link's path rules, watching, the pill and *Update*, relink and unlink.
-- **Elsewhere** — the snapshot's `chart`, the four verbs, code export writing the chart's layout,
-  compare's rows, the context menu, the palette rows, `control_audit` for the card and the
+- **Elsewhere** — the context menu, the palette rows, `control_audit` for the card and the
   window.
 
 ## Now · Icon packs

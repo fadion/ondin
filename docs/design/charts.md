@@ -408,7 +408,7 @@ selecting anything else closes it.
   and its two parent folders; the first 20 rows as they will land, each column's type tag; *First
   row is the header* (a switch, CSV only); an info note for anything left out; foot *Keep this file
   linked*, *Cancel*, *Replace data*. Replacing keeps the mapping and series colours for every
-  column whose name the new table also has. Undo step *Import chart data*.
+  column whose name the new table also has (`Chart::with_table`). Undo step *Import chart data*.
 - **A linked chart** stores `DataLink { path, stamp }` (path, size and modified time as last read)
   in its own description; the table is always the document's own copy, so a chart whose file is
   gone still draws. **The path is the document's, so untrusted**: the tokens link's rules hold
@@ -450,17 +450,26 @@ frame's usual rows.
   in v15 (`io.md`, the ladder). v15 had not shipped, so no bump of its own: a v14 reader already
   refuses the file by its version rather than loading the parts as plain shapes and dropping the
   description on its next save.
-- **MCP snapshot**: a chart frame carries `chart` (kind, variant, mapping, series, the table's
-  header and row count) beside its parts, each part with its `role`; `snapshot_version` bumps.
-  The verbs `insert_chart`, `set_chart`, `set_chart_data` and `flatten_chart` join the registry
-  (`ondin_core::verbs`).
-- **Code export** writes a chart as the frames it is: its flex and grid containers as CSS, its
-  marks positioned by their percentage insets, its paths as stretching inline `<svg>`s (*Laid
-  out, not placed*), so the exported chart resizes in a browser as it does on the canvas. The
-  chart frame gets `role="img"` and an `aria-label` of its name, and its parts are
-  `aria-hidden`.
-- **Compare** marks the chart frame, not its parts, as changed, with *Chart data changed* or
-  *Chart options changed* in the changes card.
+- **MCP snapshot** (`export.md`, *Snapshot*): a chart frame carries `chart` (kind, variant
+  (`Chart::variant`), the table's header with each column's id and type and its row count, the
+  mapping by column id, each series' name, visibility and own colour, and whether it is linked)
+  beside its parts, each part with its `role`. Version 17.
+- **Verbs** (`ondin_core::verbs`, MCP's Phase 2, `mcp.md`): `insert_chart` makes a 480 × 280
+  frame named *Chart* on the kind's sample table, or on a table given, its mapping read off the
+  column types unless one is given (`Mapping::guess`: a Sankey's first two text columns and first
+  number column, a scatter's first number column as X and the rest as Y, else the first text
+  column as the category and the number columns as series); `set_chart` changes the kind and
+  merge-patches the mapping and options; `set_chart_data` replaces the table by *Import*'s rule
+  (`Chart::with_table`; a mapping of which nothing survives is guessed) and drops the link;
+  `flatten_chart` is `chart::flatten`. Any other verb writing a part is refused at the commit by
+  `chart::guard`.
+- **Code export** (`export.md`, *Code export*) writes a chart as the frames it is: its flex and
+  grid containers as CSS, its marks positioned by their percentage insets, its labels and pie
+  centred on their points, its paths as stretching inline `<svg>`s (*Laid out, not placed*), so
+  the exported chart resizes in a browser as it does on the canvas. The chart frame gets
+  `role="img"` and an `aria-label` of its name, and its parts are `aria-hidden`.
+- **Compare** (`app-compare.md`) marks the chart frame, not its parts, as changed, with *Chart
+  data changed* or *Chart options changed* in the changes card.
 - **SVG, PDF, PNG, Penpot and Sketch** need nothing: the parts are ordinary layers.
 
 ## Icons

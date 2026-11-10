@@ -1355,8 +1355,8 @@ pub fn text_slot_number(
 
 /// Write `x` — a number as [`text_slot_number`] reads it — into number slot `k`
 /// of a text's style or paragraph, in the unit the slot holds (px for an Auto
-/// line height). A size is floored at `MIN_FONT_SIZE` and a weight kept to
-/// 1–1000, the ranges the fields allow.
+/// line height). A size is kept to `MIN_FONT_SIZE..=MAX_FONT_SIZE` and a weight
+/// to 1–1000, the ranges the fields allow.
 pub fn set_text_slot_number(
     k: usize,
     style: &mut crate::typography::TextStyle,
@@ -1369,7 +1369,14 @@ pub fn set_text_slot_number(
         _ => Length::Px(x).canonical(),
     };
     match k {
-        TEXT_SIZE => style.font_size = x.max(crate::typography::MIN_FONT_SIZE),
+        // `NaN` draws at the floor, where `clamp` would keep it.
+        TEXT_SIZE => {
+            use crate::typography::{MAX_FONT_SIZE, MIN_FONT_SIZE};
+            style.font_size = match x.is_nan() {
+                true => MIN_FONT_SIZE,
+                false => x.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE),
+            }
+        }
         TEXT_WEIGHT => style.weight = x.round().clamp(1.0, 1000.0) as u16,
         // A line is never less than no height.
         TEXT_LINE_HEIGHT => style.line_height = Some(like(style.line_height, x.max(0.0))),
@@ -4232,5 +4239,22 @@ mod tests {
             assert_eq!(s, want);
             assert_eq!(serde_json::from_str::<BrushSource>(&s).unwrap(), bound);
         }
+    }
+
+    /// A bound font size draws within the fields' range, and `NaN` at its floor.
+    /// flip: `set_text_slot_number`'s size arm without the ceiling → fails at
+    /// "the ceiling".
+    #[test]
+    fn a_bound_font_size_draws_within_the_fields_range() {
+        use crate::typography::{MAX_FONT_SIZE, MIN_FONT_SIZE, ParagraphStyle, TextStyle};
+        let drawn = |x: f64| {
+            let (mut s, mut p) = (TextStyle::default(), ParagraphStyle::default());
+            set_text_slot_number(TEXT_SIZE, &mut s, &mut p, x);
+            s.font_size
+        };
+        assert_eq!(drawn(24.0), 24.0, "control: a size in range");
+        assert_eq!(drawn(1e9), MAX_FONT_SIZE, "the ceiling");
+        assert_eq!(drawn(0.5), MIN_FONT_SIZE, "the floor");
+        assert_eq!(drawn(f64::NAN), MIN_FONT_SIZE, "NaN");
     }
 }

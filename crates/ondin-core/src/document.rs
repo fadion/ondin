@@ -2899,7 +2899,9 @@ impl Document {
         else {
             return Err(OpError::WrongKindForOp);
         };
-        let old = std::mem::replace(s, Box::new(style.clone()));
+        let mut style = style.clone();
+        style.clamp_size();
+        let old = std::mem::replace(s, Box::new(style));
         let old_spans = match spans {
             // Re-stated against the new default — `Spans::restated` has why, and the
             // render preview of this op goes through the same function.
@@ -4959,6 +4961,74 @@ mod tests {
             !back.changes_nothing(&doc),
             "control: a nudge back is a change"
         );
+    }
+
+    /// A whole text style past `typography::MAX_FONT_SIZE` lands at it through a
+    /// create and through `SetTextStyle`, a span the clamp makes default goes,
+    /// and a write past the limit onto a style at it changes nothing.
+    /// flip: `op_set_text_style` storing the style unclamped → fails at "the set
+    /// size".
+    #[test]
+    fn a_whole_text_style_is_held_to_the_font_size_limit() {
+        use crate::typography::{CharAttr, CharSpans, MAX_FONT_SIZE, Span};
+        let (mut doc, _root, ab) = base();
+        let t = IdSource::new(0xC21).mint();
+        let huge = crate::TextStyle {
+            font_size: 1e9,
+            ..Default::default()
+        };
+        let spans = CharSpans::from_parts(
+            vec![Span {
+                start: 0,
+                end: 3,
+                attr: CharAttr::Size(5e9),
+            }],
+            &huge,
+        );
+        assert!(
+            !spans.is_empty(),
+            "the fixture's span differs from its style"
+        );
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: t,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "some words".into(),
+                style: Box::new(huge.clone()),
+                spans,
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: crate::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("an oversized style is clamped, not refused");
+        let stored = |doc: &Document| match &doc.get(t).unwrap().kind {
+            NodeKind::Text { style, spans, .. } => (style.font_size, spans.is_empty()),
+            _ => unreachable!(),
+        };
+        assert_eq!(stored(&doc), (MAX_FONT_SIZE, true), "the created size");
+
+        let small = crate::TextStyle {
+            font_size: 24.0,
+            ..Default::default()
+        };
+        let set = |style: &crate::TextStyle| Operation::SetTextStyle {
+            id: t,
+            style: style.clone(),
+            spans: None,
+        };
+        assert!(set(&huge).changes_nothing(&doc), "a size past the limit");
+        doc.apply(&Transaction(vec![set(&small)])).unwrap();
+        assert!(!set(&huge).changes_nothing(&doc), "control: a change");
+        doc.apply(&Transaction(vec![set(&huge)])).unwrap();
+        assert_eq!(stored(&doc).0, MAX_FONT_SIZE, "the set size");
     }
 
     /// A transform past the limit keeps its shape: the linear part is scaled as a

@@ -1425,8 +1425,10 @@ impl NodeKind {
 
     /// Hold every length and coordinate in this kind to
     /// ±[`crate::build::GEOMETRY_LIMIT`]: sizes, corner radii, a line's or arc's
-    /// end, a text box's width, and every point of a path or a text rail. Ratios,
-    /// turns, angles and smoothing keep their own ranges, enforced elsewhere.
+    /// end, a text box's width, and every point of a path or a text rail. A text's
+    /// font sizes, its style's and its spans', are held to
+    /// [`crate::typography::MAX_FONT_SIZE`] instead. Ratios, turns, angles and
+    /// smoothing keep their own ranges, enforced elsewhere.
     ///
     /// Asked after [`Self::geometry_is_finite`]: a clamp passes `NaN` through.
     pub fn clamp_geometry(&mut self) {
@@ -1494,7 +1496,12 @@ impl NodeKind {
                 }
             }
             NodeKind::Text {
-                sizing, on_path, ..
+                content,
+                style,
+                spans,
+                sizing,
+                on_path,
+                ..
             } => {
                 match sizing {
                     TextSizing::Auto => {}
@@ -1504,6 +1511,9 @@ impl NodeKind {
                 if let Some(rail) = on_path.as_deref_mut() {
                     clamp_path(rail);
                 }
+                // The spans after the style, so one the clamp made default goes.
+                style.clamp_size();
+                *spans = spans.clamped(content, style);
             }
         }
     }

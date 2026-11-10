@@ -1167,22 +1167,26 @@ impl Operation {
                     && *sp == spans.clamped(content, style)
                     && *psp == para_spans.clamped(content, paragraph)
             ),
-            Operation::SetTextStyle { id, style, spans } => matches!(
-                kind(id),
-                Some(NodeKind::Text {
-                    content,
-                    style: s,
-                    spans: sp,
-                    ..
-                }) if **s == *style
-                    && match spans {
-                        // `None` re-states against unchanged defaults, so the
-                        // question is whether the stored list is already a fixed
-                        // point of the re-statement.
-                        None => *sp == sp.restated(style),
-                        Some(given) => *sp == given.clamped(content, style),
-                    }
-            ),
+            Operation::SetTextStyle { id, style, spans } => {
+                let mut style = style.clone();
+                style.clamp_size();
+                matches!(
+                    kind(id),
+                    Some(NodeKind::Text {
+                        content,
+                        style: s,
+                        spans: sp,
+                        ..
+                    }) if **s == style
+                        && match spans {
+                            // `None` re-states against unchanged defaults, so the
+                            // question is whether the stored list is already a
+                            // fixed point of the re-statement.
+                            None => *sp == sp.restated(&style),
+                            Some(given) => *sp == given.clamped(content, &style),
+                        }
+                )
+            }
             Operation::SetTextSpans { id, spans } => matches!(
                 kind(id),
                 Some(NodeKind::Text {

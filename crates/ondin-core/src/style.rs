@@ -176,16 +176,18 @@ pub enum StyleValue {
 }
 
 impl StyleValue {
-    /// A strokes style's lengths held to `node::MAX_STROKE_WIDTH` and a layout
-    /// style's to `build::GEOMETRY_LIMIT`, as the layers that use them are, so
-    /// the commit's `settle` never finds a styled layer apart from its style.
+    /// A strokes style's lengths held to `node::MAX_STROKE_WIDTH`, a layout
+    /// style's to `build::GEOMETRY_LIMIT` and a text style's font size to
+    /// `typography::MAX_FONT_SIZE`, as the layers that use them are, so the
+    /// commit's `settle` never finds a styled layer apart from its style.
     pub fn clamp_lengths(&mut self) {
         match self {
             StyleValue::Strokes(strokes) => {
                 strokes.iter_mut().for_each(|s| s.value.clamp_lengths());
             }
             StyleValue::Layout(l) => l.display.clamp_lengths(),
-            StyleValue::Fills(_) | StyleValue::Effects(_) | StyleValue::Text(_) => {}
+            StyleValue::Text(t) => t.clamp_size(),
+            StyleValue::Fills(_) | StyleValue::Effects(_) => {}
         }
     }
 

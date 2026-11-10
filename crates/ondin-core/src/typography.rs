@@ -662,9 +662,10 @@ pub struct TextStyle {
 /// Smallest font size the fields accept. Zero is not a size, and a negative one
 /// is not a drawing.
 pub const MIN_FONT_SIZE: f64 = 1.0;
-/// Largest font size: the fields stop at it, and a character attribute set or
-/// scaled through [`TextStyle`] is clamped to it. A whole style written by an
-/// operation or read from a file is not.
+/// Largest font size: the fields stop at it, and every door that stores a size
+/// clamps to it — a character attribute set or scaled through [`TextStyle`], a
+/// span through [`Spans::clamped`], a whole style through
+/// [`TextStyle::clamp_size`].
 pub const MAX_FONT_SIZE: f64 = 1000.0;
 
 impl Default for TextStyle {
@@ -710,6 +711,15 @@ impl TextStyle {
             CharAttrKind::Case => CharAttr::Case(self.case),
             CharAttrKind::BaselineShift => CharAttr::BaselineShift(self.baseline_shift),
             CharAttrKind::Color => CharAttr::Color(self.color),
+        }
+    }
+
+    /// Hold the font size at or under [`MAX_FONT_SIZE`]: what a door that stores
+    /// a whole style owes it. The ceiling only: a bound size stores the literal 0
+    /// (`variable::clear_text_slot_number`), and a `NaN` passes through.
+    pub fn clamp_size(&mut self) {
+        if self.font_size > MAX_FONT_SIZE {
+            self.font_size = MAX_FONT_SIZE;
         }
     }
 

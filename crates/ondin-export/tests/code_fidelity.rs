@@ -434,6 +434,49 @@ fn the_check_names_what_a_page_draws_differently() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Charts drawn at 480 × 280, flattened, then resized, so nothing regenerates
+/// them: the canvas places the parts by its layout, the page by the CSS the
+/// export wrote for it — the plot's grid cell, the marks' percentage insets, the
+/// labels and the pie's square centred on a point, the stretching paths.
+///
+/// flip: `margined_axis` leaving a centring pair to CSS's auto margins → fails
+/// at "differs" (an overflowing box sits at its start inset).
+#[test]
+fn charts_reflow_as_the_canvas_does() {
+    use ondin_core::GeometryPatch;
+    use ondin_core::chart::{Chart, ChartKind};
+    let mut d = Doc::new();
+    let made: Vec<(NodeId, Size)> = [
+        (ChartKind::Column, 0.0, 0.0, Size::new(640.0, 320.0)),
+        (ChartKind::Line, 0.0, 340.0, Size::new(360.0, 220.0)),
+        (ChartKind::Pie, 380.0, 340.0, Size::new(260.0, 300.0)),
+    ]
+    .into_iter()
+    .map(|(kind, x, y, to)| {
+        let f = d.frame(None, x, y, 480.0, 280.0, kind.label());
+        d.apply(vec![Operation::SetChart {
+            id: f,
+            chart: Some(Box::new(Chart::sample(kind))),
+        }]);
+        (f, to)
+    })
+    .collect();
+    Resolved::settled(&mut d.doc);
+    for (f, to) in made {
+        let parts = d.doc.get(f).unwrap().chart().unwrap().parts.len();
+        assert!(parts > 10, "the fixture settled: {parts}");
+        d.apply(vec![
+            Operation::SetChart { id: f, chart: None },
+            Operation::SetGeometry {
+                id: f,
+                geometry: GeometryPatch::Size(to),
+            },
+        ]);
+    }
+    let (doc, res) = d.done();
+    holds_within("charts", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
 /// `fidelity::check` holds a page of body text that matches, whose antialiasing
 /// alone puts the whole page's mean past `MAX_MEAN_ERROR`.
 ///

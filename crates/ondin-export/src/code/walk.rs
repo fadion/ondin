@@ -1759,6 +1759,17 @@ impl Walk<'_> {
         if let Some(e) = over_children {
             el.children.push(Child::Element(Box::new(e)));
         }
+        // A chart reads as one picture named by its layer; its parts, hidden
+        // with the subtrees under them, would read as a heap of numbers.
+        if node.chart().is_some() {
+            el.attrs.push(("role", "img".into()));
+            el.attrs.push(("aria-label", node.name().to_string()));
+            for c in &mut el.children {
+                if let Child::Element(e) = c {
+                    e.attrs.push(("aria-hidden", "true".into()));
+                }
+            }
+        }
         el
     }
 
@@ -1843,17 +1854,24 @@ impl Walk<'_> {
                     && let Some(b) = bx
                 {
                     // Not on a ratio's derived side, which the ratio sizes, down
-                    // as well as up, from whatever the layout gives the other.
+                    // as well as up, from whatever the layout gives the other, nor
+                    // on a percentage, which follows its parent down.
                     let derived = |side| {
                         item.aspect_ratio.is_some_and(|r| {
                             r.side == side && r.is_valid() && container::holds_ratio(kind)
                         })
                     };
-                    if item.min_width == Dimension::Auto && !derived(container::RatioSide::Width) {
+                    let pct = |d: Dimension| matches!(d, Dimension::Percent(_));
+                    if item.min_width == Dimension::Auto
+                        && !derived(container::RatioSide::Width)
+                        && !pct(item.width)
+                    {
                         let w = self.axis_size(node, 0, b.width());
                         el.set("min-width", w);
                     }
-                    if item.min_height == Dimension::Auto && !derived(container::RatioSide::Height)
+                    if item.min_height == Dimension::Auto
+                        && !derived(container::RatioSide::Height)
+                        && !pct(item.height)
                     {
                         let h = self.axis_size(node, 1, b.height());
                         el.set("min-height", h);
@@ -1870,20 +1888,26 @@ impl Walk<'_> {
                 let insets_apply = boxed && insets.is_authored() && container::takes_insets(kind);
                 let mut stretched = (false, false);
                 if insets_apply {
-                    stretched.0 = axis(el, "left", "right", insets.left, insets.right, slot.x);
-                    stretched.1 = axis(el, "top", "bottom", insets.top, insets.bottom, slot.y);
                     let m = insets.margin_auto;
-                    for (on, prop) in [
-                        (m.top, "margin-top"),
-                        (m.right, "margin-right"),
-                        (m.bottom, "margin-bottom"),
-                        (m.left, "margin-left"),
-                    ] {
-                        if on {
-                            el.set(prop, "auto");
-                        }
+                    let (x, x_mid) = margined_axis(
+                        el,
+                        ("left", "right"),
+                        (insets.left, insets.right),
+                        (m.left, m.right),
+                        slot.x,
+                    );
+                    let (y, y_mid) = margined_axis(
+                        el,
+                        ("top", "bottom"),
+                        (insets.top, insets.bottom),
+                        (m.top, m.bottom),
+                        slot.y,
+                    );
+                    if x_mid || y_mid {
+                        let half = |mid: bool| if mid { "-50%" } else { "0" };
+                        el.set("translate", format!("{} {}", half(x_mid), half(y_mid)));
                     }
-                    stretched = stretched_axes(stretched, insets, kind);
+                    stretched = stretched_axes((x, y), insets, kind);
                 } else {
                     el.set("left", px(slot.x));
                     el.set("top", px(slot.y));
@@ -1947,6 +1971,18 @@ impl Walk<'_> {
                     (d, _) => own_or(d, size.height),
                 }),
             ),
+            // A frame without a layout: a typed size as the layout reads it (a
+            // chart's plot is 100% of its grid cell), else its own box.
+            NodeKind::Artboard { .. } => {
+                let s = bx.map(|b| b.size()).unwrap_or_default();
+                let typed = |d: Dimension| {
+                    matches!(d, Dimension::Px(_) | Dimension::Percent(_)).then(|| dimension(d))
+                };
+                (
+                    Some(typed(item.width).unwrap_or_else(|| self.axis_size(node, 0, s.width))),
+                    Some(typed(item.height).unwrap_or_else(|| self.axis_size(node, 1, s.height))),
+                )
+            }
             NodeKind::Text { sizing, .. } => match sizing {
                 TextSizing::Auto => (None, None),
                 TextSizing::AutoHeight(w) => (Some(px(*w)), None),
@@ -3299,6 +3335,42 @@ fn axis(
             el.set(start, px(slot));
             false
         }
+    }
+}
+
+/// [`axis`], with auto margins between its two insets placed as core places
+/// them (`container::Insets`): pushing the box against one inset, or centring it
+/// between the two even when it overflows them, where CSS's own auto margins
+/// would leave an overflowing box at its start. A push is the far inset alone; a
+/// centre is the midpoint, the box drawn back by half its size through
+/// `translate`. Answers whether both insets are set, and whether it centres.
+fn margined_axis(
+    el: &mut Element,
+    (start, end): (&'static str, &'static str),
+    (a, b): (Option<LengthPct>, Option<LengthPct>),
+    auto: (bool, bool),
+    slot: f64,
+) -> (bool, bool) {
+    match (a, b, auto) {
+        (Some(a), Some(b), (true, true)) => {
+            let mid = match (a, b) {
+                (LengthPct::Percent(a), LengthPct::Percent(b)) => {
+                    format!("{}%", fmt((a + 100.0 - b) / 2.0))
+                }
+                _ => format!("calc(({} + 100% - {}) / 2)", length_pct(a), length_pct(b)),
+            };
+            el.set(start, mid);
+            (true, true)
+        }
+        (Some(_), Some(b), (true, false)) => {
+            el.set(end, length_pct(b));
+            (true, false)
+        }
+        (Some(a), Some(_), (false, true)) => {
+            el.set(start, length_pct(a));
+            (true, false)
+        }
+        _ => (axis(el, start, end, a, b, slot), false),
     }
 }
 

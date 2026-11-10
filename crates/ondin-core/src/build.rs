@@ -55,6 +55,27 @@ pub fn affine_is_finite(t: Affine) -> bool {
     t.as_coeffs().iter().all(|c| c.is_finite())
 }
 
+/// The largest magnitude a stored length or coordinate may have: a node's size,
+/// a path's points, a transform's coefficients, a pivot.
+///
+/// A million document units is far past any design, while a shape with no ceiling
+/// (a 1e50-wide ellipse) overflows the GPU renderer's buffers and the canvas draws
+/// nothing. The operations and the loader clamp to it rather than refuse, so a
+/// gesture past it stops at it; the app's numeric fields stop at it too.
+pub const GEOMETRY_LIMIT: f64 = 1_000_000.0;
+
+/// `v` held to ±[`GEOMETRY_LIMIT`]. A `NaN` passes through, so callers test
+/// finiteness first.
+pub fn clamp_coord(v: f64) -> f64 {
+    v.clamp(-GEOMETRY_LIMIT, GEOMETRY_LIMIT)
+}
+
+/// `t` with every coefficient held to ±[`GEOMETRY_LIMIT`]: the translation, and
+/// the linear part, since a huge scale on a small shape is the same huge shape.
+pub fn clamp_affine(t: Affine) -> Affine {
+    Affine::new(t.as_coeffs().map(clamp_coord))
+}
+
 /// Whether `t` can be inverted without manufacturing a value the file cannot
 /// hold.
 ///

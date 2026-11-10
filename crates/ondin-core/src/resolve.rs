@@ -1894,9 +1894,10 @@ mod measurable_bounds_tests {
     ///
     /// The failure is forced through `boolean::poison_next`; `boolean_failed` is
     /// asserted first so a poisoned call that landed elsewhere cannot leave the
-    /// test green. The overflow is a `scale(1e308)` operand, which
-    /// `op_set_transform` accepts and `query::local_box` composes into an infinite
-    /// box. The stderr line about a synthetic failure is expected.
+    /// test green. The overflow is a million-wide operand under nested scales,
+    /// which compose into an infinite world box though each stored number is
+    /// within the geometry limit. The stderr line about a synthetic failure is
+    /// expected.
     ///
     /// flip: remove `.and_then(geometry::measurable)` from the placeholder arm →
     /// fails at the bounds assertion, and independently at the container
@@ -1912,10 +1913,18 @@ mod measurable_bounds_tests {
         let small = ids.mint();
         let sibling = ids.mint();
         create(&mut doc, group, root, 0, NodeKind::Group, Affine::IDENTITY);
+        // 51 groups of `scale(1e6)` put the boolean at a world scale of ~1e306,
+        // each stored number within the geometry limit.
+        let mut holder = group;
+        for _ in 0..51 {
+            let g = ids.mint();
+            create(&mut doc, g, holder, 0, NodeKind::Group, Affine::scale(1e6));
+            holder = g;
+        }
         create(
             &mut doc,
             boolean,
-            group,
+            holder,
             0,
             NodeKind::Boolean {
                 op: crate::node::BoolOp::Union,
@@ -1927,8 +1936,8 @@ mod measurable_bounds_tests {
             huge,
             boolean,
             0,
-            rect_kind(100.0, 100.0),
-            Affine::scale(1e308),
+            rect_kind(1e6, 1e6),
+            Affine::IDENTITY,
         );
         create(
             &mut doc,

@@ -6,15 +6,6 @@ decided. Decided non-goals are in `non-goals.md`; built work is described in `ar
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
 
-## Now · Performance
-
-- **Clamp oversized geometry in core.** The app's fields stop at `ui::FIELD_LIMIT` (±1,000,000),
-  but canvas gestures, MCP and a loaded file can still give a shape any finite size. Far past
-  the limit a curve's extent overflows vello's GPU buffers and the canvas draws an empty frame
-  (a 1e50-wide ellipse; rects survive, having no curves to flatten). Hold sizes, coordinates and
-  path points to one limit where operations and loads are already checked
-  (`build::affine_is_finite` and its neighbours), so every door shares the field limit's number.
-
 ## Now · Code export (HTML/CSS, React, Vue)
 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built

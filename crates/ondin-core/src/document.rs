@@ -3,7 +3,7 @@
 //! The only way to mutate is `apply(Transaction)`. There is no public `&mut`
 //! access to nodes or the tree.
 
-use crate::build::{affine_is_finite, effect_is_finite};
+use crate::build::{affine_is_finite, clamp_affine, effect_is_finite};
 use crate::effect::Effect;
 use crate::export::ExportSpec;
 use crate::guide::{Guide, GuideId};
@@ -1167,7 +1167,8 @@ impl Document {
     }
 
     /// `kind` with the axes `vars` binds read from table `t`, in the mode in
-    /// force at `id` — each its variable's number, never below 0, the other axis
+    /// force at `id` — each its variable's number, never below 0 nor past
+    /// [`crate::build::GEOMETRY_LIMIT`], the other axis
     /// as it is; `kind` unchanged when nothing is bound or it has no stored size.
     /// `vars` is named so a preview can resolve a binding it has not committed.
     pub fn size_drawn_in(
@@ -1187,7 +1188,9 @@ impl Document {
         for (k, var) in vars.iter().enumerate() {
             if let Some(v) = var {
                 let x = match self.resolve_var_in(t, id, *v) {
-                    Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                    Some(crate::variable::Value::Number(x)) => {
+                        x.clamp(0.0, crate::build::GEOMETRY_LIMIT)
+                    }
                     _ => 0.0,
                 };
                 if k == 0 {
@@ -2353,8 +2356,9 @@ impl Document {
             None => numbering.name(self, parent, kind),
         };
 
-        // A mirror axis lands only where it holds, as `GeometryPatch::Path` keeps it.
         let mut stored = kind.clone();
+        stored.clamp_geometry();
+        // A mirror axis lands only where it holds, as `GeometryPatch::Path` keeps it.
         if let NodeKind::Path {
             path,
             corner_radii,
@@ -2383,7 +2387,7 @@ impl Document {
             parent: Some(parent),
             children: Vec::new(),
             kind: stored,
-            transform: transform.unwrap_or(Affine::IDENTITY),
+            transform: transform.map_or(Affine::IDENTITY, clamp_affine),
             name,
             visible: true,
             locked: false,
@@ -2645,9 +2649,15 @@ impl Document {
             stack.extend(n.children.iter().map(|c| (*c, barred)));
         }
 
+        // Held to the geometry limit as `op_create` holds a new node; a history
+        // step's nodes are already within it.
         for n in nodes {
-            self.nodes.insert(n.id, n.clone());
+            let mut n = n.clone();
+            n.kind.clamp_geometry();
+            n.transform = clamp_affine(n.transform);
+            n.pivot = n.pivot.map(Pivot::clamped);
             dirty.0.insert(n.id);
+            self.nodes.insert(n.id, n);
         }
         // The root attaches to `parent` (a no-op for delete-undo, meaningful for
         // paste/duplicate where the caller retargets it).
@@ -2676,7 +2686,7 @@ impl Document {
         let old = {
             let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
             let old = node.transform;
-            node.transform = transform;
+            node.transform = clamp_affine(transform);
             old
         };
         // **This node alone**: `Resolved::update` expands the subtree itself
@@ -3494,7 +3504,7 @@ impl Document {
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let old = node.pivot;
-        node.pivot = pivot;
+        node.pivot = pivot.map(Pivot::clamped);
         dirty.0.insert(id);
         Ok(Operation::SetPivot { id, pivot: old })
     }
@@ -4036,17 +4046,28 @@ pub(crate) fn export_spec_is_usable(spec: &ExportSpec) -> bool {
 
 /// Apply a geometry patch to a node kind in place, returning the patch that
 /// reverses it. Errors if the patch does not match the node kind (§5.6).
+///
+/// The result is held to the geometry limit (`NodeKind::clamp_geometry`), so a
+/// preview through `GeometryPatch::applied_to` stops where the commit will.
 pub(crate) fn apply_geometry_patch(
     kind: &mut NodeKind,
     patch: &GeometryPatch,
 ) -> Result<GeometryPatch, OpError> {
-    use GeometryPatch as G;
     // Before the `mem::replace` arms, none of which looks at its value:
     // `svg_in`'s `numbers()` and `BezPath::from_svg` do not filter for finite.
     // See [`OpError::NonFinite`].
     if !patch.is_finite() {
         return Err(OpError::NonFinite);
     }
+    let inverse = replace_geometry(kind, patch)?;
+    kind.clamp_geometry();
+    Ok(inverse)
+}
+
+/// The arms of [`apply_geometry_patch`]: write the patch's value, return the one
+/// it replaced.
+fn replace_geometry(kind: &mut NodeKind, patch: &GeometryPatch) -> Result<GeometryPatch, OpError> {
+    use GeometryPatch as G;
     match (kind, patch) {
         (NodeKind::Rect { size, .. }, G::Size(new))
         | (NodeKind::Ellipse { size, .. }, G::Size(new))
@@ -4581,6 +4602,160 @@ mod tests {
         )
         .expect("InsertSubtree in a history step");
         assert!(doc.contains(h));
+    }
+
+    /// A create, a geometry patch, a transform and a pivot past
+    /// `build::GEOMETRY_LIMIT` land at it rather than being refused, and undo puts
+    /// back what was there.
+    /// flip: `op_create` without `clamp_geometry` → fails at "the created size".
+    #[test]
+    fn oversized_geometry_lands_at_the_limit_through_the_operations() {
+        let lim = crate::build::GEOMETRY_LIMIT;
+        let (mut doc, _root, ab) = base();
+        let e = IdSource::new(0xC1A).mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: e,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: Size::new(1e50, 10.0),
+                arc: Default::default(),
+            },
+            transform: Some(Affine::translate((-1e50, 5.0))),
+            name: None,
+        }]))
+        .expect("an oversized ellipse is clamped, not refused");
+        let n = doc.get(e).unwrap();
+        assert_eq!(
+            n.kind.box_size(),
+            Some(Size::new(lim, 10.0)),
+            "the created size"
+        );
+        assert_eq!(
+            n.transform().translation(),
+            Vec2::new(-lim, 5.0),
+            "the created position"
+        );
+
+        let before = doc.get(e).unwrap().clone();
+        let out = doc
+            .apply(&Transaction(vec![
+                Operation::SetGeometry {
+                    id: e,
+                    geometry: GeometryPatch::Size(Size::new(3.0, 1e300)),
+                },
+                Operation::SetTransform {
+                    id: e,
+                    transform: Affine::scale(1e9),
+                },
+                Operation::SetPivot {
+                    id: e,
+                    pivot: Some(Pivot::Local(Point::new(1e40, -2.0))),
+                },
+            ]))
+            .expect("clamped, not refused");
+        let n = doc.get(e).unwrap();
+        assert_eq!(n.kind.box_size(), Some(Size::new(3.0, lim)), "the patch");
+        assert_eq!(n.transform(), Affine::scale(lim), "the transform");
+        assert_eq!(
+            n.pivot(),
+            Some(Pivot::Local(Point::new(lim, -2.0))),
+            "the pivot"
+        );
+
+        doc.apply(&out.inverse).expect("undo");
+        assert_eq!(
+            doc.get(e).unwrap(),
+            &before,
+            "undo puts back the old values"
+        );
+    }
+
+    /// A subtree inserted with a path point and a transform past the limit, a
+    /// paste's or an MCP write's door, lands at it.
+    /// flip: `op_insert_subtree` without `clamp_geometry` → fails at "the path".
+    #[test]
+    fn an_inserted_subtree_lands_at_the_limit() {
+        let lim = crate::build::GEOMETRY_LIMIT;
+        let (mut doc, _root, ab) = base();
+        let p = IdSource::new(0xC1B).mint();
+        let mut path = kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((2e6, 10.0));
+        path.line_to((2e6, -10.0));
+        path.close_path();
+        let mut n = node(
+            p,
+            None,
+            vec![],
+            NodeKind::Path {
+                path,
+                corner_radii: vec![],
+                corner_smoothing: 0.0,
+                mirror: crate::symmetry::PathMirror::default(),
+            },
+        );
+        n.transform = Affine::translate((0.0, 7e9));
+        insert(&mut doc, vec![n], ab).expect("clamped, not refused");
+        let n = doc.get(p).unwrap();
+        let NodeKind::Path { path, .. } = &n.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            path.elements()[1],
+            kurbo::PathEl::LineTo(Point::new(lim, 10.0)),
+            "the path"
+        );
+        assert_eq!(
+            n.transform().translation(),
+            Vec2::new(0.0, lim),
+            "the transform"
+        );
+    }
+
+    /// A file written with a size and a position past the limit opens at it.
+    /// flip: `normalize_kind` without `clamp_geometry` → fails at "the loaded size".
+    #[test]
+    fn a_file_past_the_limit_loads_at_the_limit() {
+        let lim = crate::build::GEOMETRY_LIMIT;
+        let (mut doc, _root, ab) = base();
+        let e = IdSource::new(0xC1C).mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: e,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: Size::new(4321.0, 10.0),
+                arc: Default::default(),
+            },
+            transform: Some(Affine::translate((8765.0, 0.0))),
+            name: None,
+        }]))
+        .expect("an ellipse");
+        let json = String::from_utf8(crate::io::save(&doc).unwrap()).unwrap();
+        assert_eq!(
+            json.matches("4321.0").count(),
+            1,
+            "the width is in the file"
+        );
+        assert_eq!(json.matches("8765.0").count(), 1, "the x is in the file");
+        let loaded = crate::io::load(
+            json.replace("4321.0", "1e50")
+                .replace("8765.0", "-1e300")
+                .as_bytes(),
+        )
+        .expect("it loads");
+        let n = loaded.get(e).unwrap();
+        assert_eq!(
+            n.kind.box_size(),
+            Some(Size::new(lim, 10.0)),
+            "the loaded size"
+        );
+        assert_eq!(
+            n.transform().translation(),
+            Vec2::new(-lim, 0.0),
+            "the loaded position"
+        );
     }
 
     /// The pivot arm's twin for **paint** (§15 D831): `op_set_fills` and

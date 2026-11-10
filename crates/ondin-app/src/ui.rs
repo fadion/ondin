@@ -2692,10 +2692,10 @@ pub fn scrub(base: f64) -> f64 {
     base * SCRUB_SCALE
 }
 
-/// The largest magnitude any [`Scrub`] field reaches, typed or dragged: a million
-/// document units is far past any design, while a number with no ceiling (`1e50`)
-/// can stall every pass that walks the shape's extent.
-pub const FIELD_LIMIT: f64 = 1_000_000.0;
+/// The largest magnitude any [`Scrub`] field reaches, typed or dragged: the
+/// document's own geometry limit, so a field never offers a number the model
+/// would clamp.
+pub const FIELD_LIMIT: f64 = ondin_core::build::GEOMETRY_LIMIT;
 
 /// How a [`value_field`] behaves under the hand.
 ///

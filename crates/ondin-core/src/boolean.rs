@@ -109,8 +109,8 @@ pub fn evaluate(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
     // A magnitude bound, because the guard below cannot see a hang: over operands of
     // ~10³⁰⁴ world units flo_curves spins without panicking, and `evaluate` runs on
     // the UI thread (document open, per-pointer-move re-evaluation while dragging).
-    // Nothing on the way in bounds magnitude — `geometry_is_finite` only tests
-    // `is_finite()` — so a hand-written or pasted `.ondin` can carry such a value.
+    // `build::GEOMETRY_LIMIT` bounds each stored number, but operands are in world
+    // space, where nested transforms multiply.
     if operands.iter().any(|p| !within_bool_range(p)) {
         return None;
     }

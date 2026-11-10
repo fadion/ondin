@@ -4,36 +4,55 @@ use super::*;
 use crate::kurbo::{RoundedRectRadii, Size};
 use crate::{Document, IdSource, NodeKind, Operation, Resolved, Transaction};
 
-/// Two rects in a frame: one storing `Affine::scale(1e308)` over a size of `1e-306`
-/// (all coefficients finite, world bounds `(0,0)–(100,100)`), and a plain 20×20 at x=80.
+/// Two rects in a frame: one whose world basis is `2¹⁰²³`, the largest finite power
+/// of two, over a size of `25·2⁻¹⁰²¹` (world bounds `(0,0)–(100,100)`), and a plain
+/// 20×20 at x=80.
+///
+/// The world scale is built from 53 nested groups of `2¹⁹` and the rect's own `2¹⁶`,
+/// each within `build::GEOMETRY_LIMIT`: one stored coefficient cannot reach it, a
+/// composition can. Powers of two keep every product exact.
 fn a_pathological_member_and_an_ordinary_one() -> (Document, Resolved, NodeId, NodeId) {
     let mut ids = IdSource::new(0x5E1);
     let root = ids.mint();
     let mut doc = Document::new(root);
     let (ab, a, b) = (ids.mint(), ids.mint(), ids.mint());
-    doc.apply(&Transaction(vec![
-        Operation::CreateNode {
-            id: ab,
-            parent: root,
-            index: 0,
-            kind: NodeKind::Artboard {
-                size: Size::new(400.0, 400.0),
-                corner_radii: RoundedRectRadii::default(),
-                corner_smoothing: 0.0,
-            },
-            transform: None,
-            name: None,
+    let mut ops = vec![Operation::CreateNode {
+        id: ab,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Artboard {
+            size: Size::new(400.0, 400.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
+        transform: None,
+        name: None,
+    }];
+    let mut parent = ab;
+    for _ in 0..53 {
+        let g = ids.mint();
+        ops.push(Operation::CreateNode {
+            id: g,
+            parent,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: Some(Affine::scale(f64::from(1u32 << 19))),
+            name: None,
+        });
+        parent = g;
+    }
+    let side = 25.0 * 2f64.powi(-1021);
+    ops.extend([
         Operation::CreateNode {
             id: a,
-            parent: ab,
+            parent,
             index: 0,
             kind: NodeKind::Rect {
-                size: Size::new(1e-306, 1e-306),
+                size: Size::new(side, side),
                 corner_radii: RoundedRectRadii::default(),
                 corner_smoothing: 0.0,
             },
-            transform: Some(Affine::scale(1e308)),
+            transform: Some(Affine::scale(f64::from(1u32 << 16))),
             name: None,
         },
         Operation::CreateNode {
@@ -48,8 +67,9 @@ fn a_pathological_member_and_an_ordinary_one() -> (Document, Resolved, NodeId, N
             transform: Some(Affine::translate((80.0, 0.0))),
             name: None,
         },
-    ]))
-    .expect("the fixture is an ordinary, all-finite document");
+    ]);
+    doc.apply(&Transaction(ops))
+        .expect("the fixture is an ordinary, all-finite document");
     let res = Resolved::rebuild(&doc);
     (doc, res, a, b)
 }
@@ -57,7 +77,9 @@ fn a_pathological_member_and_an_ordinary_one() -> (Document, Resolved, NodeId, N
 /// A member whose scaled basis overflows to `inf` sits the resize out alone: the ordinary
 /// rect still scales, the pathological one is unchanged, and the transaction applies.
 ///
-/// flip: `scaled_about`'s `then_some` replaced by `Some(out)` → fails at the `applied.is_ok()` assertion
+/// Coverage note: `scaled_about` returning `Some(out)` unchecked does not fail this,
+/// because `split_geometry_scale` refuses the infinite basis next; the test pins the
+/// pair, not either guard.
 #[test]
 fn one_overflowing_member_does_not_refuse_the_whole_resize() {
     let (mut doc, res, a, b) = a_pathological_member_and_an_ordinary_one();

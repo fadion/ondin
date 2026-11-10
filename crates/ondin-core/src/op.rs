@@ -1690,7 +1690,8 @@ pub enum OpError {
     /// check at the operation, the last place the value can be rejected while the
     /// user still has their work.
     ///
-    /// **Not clamped**: no defensible number exists to clamp a coordinate to.
+    /// **Not clamped**: no defensible number exists to clamp a `NaN` to. A finite
+    /// length or coordinate past `build::GEOMETRY_LIMIT` is clamped, not refused.
     #[error("a number is not finite")]
     NonFinite,
     /// A layout value CSS itself refuses — a negative track size, `minmax()`

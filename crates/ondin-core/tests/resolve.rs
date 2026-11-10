@@ -2867,27 +2867,17 @@ fn a_mask_larger_than_what_it_passes_lends_its_container_nothing() {
     );
 }
 
-/// **One layer whose extent is not a number no longer poisons the document's**
-/// (§15 D495).
+/// One layer whose extent is not a number is left out of the bounds and the index
+/// rather than spreading infinity up to the root.
 ///
-/// ⚠️ **`SetTransform` accepts this transform and is right to.** D421 guards the
-/// operation with `build::affine_is_finite`, and every coefficient of
-/// `scale(1e308)` **is** finite — the overflow happens later, in `transform_rect`'s
-/// corner multiply. So this is not a hole in D421's guard; it is the third shape
-/// of the same class, where a check on the *operands* cannot see what the
-/// *derived* value does. That is why the guard is at the bounds rather than at
-/// the op.
+/// Each stored number is within `build::GEOMETRY_LIMIT`, but transforms compose:
+/// under 51 groups of `scale(1e6)` a million-wide rect's box passes `f64::MAX` in
+/// `transform_rect`'s corner multiply, which no check on the operands can see. An
+/// infinite root box would make the export plan's raster size infinite and the
+/// spatial index answer a query far from anything drawn.
 ///
-/// The failure it prevents is the whole session's, not one layer's: an infinite
-/// box unions all the way to the root, so `world_bounds(root)` — which
-/// `plan::raster_size` and `plan::raster_opts` read (§15 D334) — was infinite, and
-/// the spatial index answered a query 5,000 units away from anything drawn.
-///
-/// **Reachable without hand-editing a file**: `transform="scale(1e308)"` in an
-/// imported SVG arrives as exactly this affine.
-///
-/// The untouched sibling is the in-fixture control: if the guard were backwards it
-/// would take that one out of the index too, and the assertion would say so.
+/// The untouched sibling is the in-fixture control: a backwards guard would take it
+/// out of the index too.
 #[test]
 fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
     let mut ids = IdSource::new(0x1E30);
@@ -2896,14 +2886,13 @@ fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
     let (ab, group, big, small) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
     create(&mut doc, ab, root, 0, artboard(), Affine::IDENTITY);
     create(&mut doc, group, ab, 0, NodeKind::Group, Affine::IDENTITY);
-    create(
-        &mut doc,
-        big,
-        group,
-        0,
-        rect(100.0, 100.0),
-        Affine::IDENTITY,
-    );
+    let mut holder = group;
+    for _ in 0..51 {
+        let g = ids.mint();
+        create(&mut doc, g, holder, 0, NodeKind::Group, Affine::scale(1e6));
+        holder = g;
+    }
+    create(&mut doc, big, holder, 0, rect(1e6, 1e6), Affine::IDENTITY);
     create(
         &mut doc,
         small,
@@ -2913,18 +2902,12 @@ fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
         Affine::IDENTITY,
     );
 
-    let overflowing = Affine::new([1e308, 0.0, 0.0, 1e308, 0.0, 0.0]);
-    assert!(
-        ondin_core::build::affine_is_finite(overflowing),
-        "the fixture's own claim: D421's guard accepts this"
-    );
-    doc.apply(&Transaction(vec![Operation::SetTransform {
-        id: big,
-        transform: overflowing,
-    }]))
-    .unwrap();
-
     let res = Resolved::rebuild(&doc);
+    assert!(
+        res.world_transform(big)
+            .is_some_and(ondin_core::build::affine_is_finite),
+        "the fixture's own claim: the transform is finite, only the box overflows"
+    );
     assert_eq!(
         res.world_bounds(big),
         None,

@@ -41,7 +41,7 @@ Reachability and the duplicate check are what make cycles and orphan components 
 
 **Guides** are verified without a tree: malformed id, duplicate id and non-finite position are refused. A guide far off the artwork is legal. Ids come from the same reservation as nodes (§5.2). An `owner` is required; one that is dangling or neither a frame nor a page is refused rather than promoted to page-wide, since a scoped guide's position is in its owner's space. This also keeps drawing and snapping free of a fallback `check_guide_owner` will not let `apply` produce.
 
-**There is deliberately no finiteness check in the loader**: `serde_json` writes non-finite `f64` as `null` and refuses `null`/overflowing literals when deserializing the DTO, above the integrity walk. Protection is at the operation (`OpError::NonFinite`, invariant 8), which covers every number the model carries including paint.
+**There is deliberately no finiteness check in the loader**: `serde_json` writes non-finite `f64` as `null` and refuses `null`/overflowing literals when deserializing the DTO, above the integrity walk. Protection is at the operation (`OpError::NonFinite`, invariant 8), which covers every number the model carries including paint. **Magnitude is clamped on load**, as the operations clamp it: `normalize_kind` holds the kind's geometry (`NodeKind::clamp_geometry`), and the transform and pivot go through `build::clamp_affine` and `Pivot::clamped`, so a file past `build::GEOMETRY_LIMIT` opens with its values at the limit.
 
 The save format and the MCP snapshot (§7 snapshot) are distinct schemas; never conflate them.
 

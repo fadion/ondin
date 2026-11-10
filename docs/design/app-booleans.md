@@ -28,7 +28,8 @@ Mask card, and how a failed boolean draws. Part of §9.4.
   `CLOSE_DISTANCE` of 0.01) that would otherwise erase thin results. Scale and accuracy are
   **constants**, never zoom- or size-dependent, or the same shapes would combine differently by camera.
 - `boolean::MAX_BOOL_COORD` (10¹⁵⁰) is refused at `evaluate`: past ~10³⁰⁴ (scaled) flo_curves hangs.
-  Nothing upstream bounds magnitude (`geometry_is_finite` only tests finiteness).
+  `build::GEOMETRY_LIMIT` bounds each stored number, but operands are in world space, where
+  nested transforms multiply.
 - **Winding**: flo_curves is even-odd, Ondin fills non-zero. `from_flo` alternates each subpath's
   direction with its nesting depth, so the result means the same under either rule (and is safe for
   SVG). Nesting is counted from `representative_point`: the bbox centre if inside, else a horizontal

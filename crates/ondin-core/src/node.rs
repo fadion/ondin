@@ -854,6 +854,16 @@ impl Pivot {
             Self::Local(p) => p.is_finite(),
         }
     }
+
+    /// This pivot with both coordinates held to ±[`crate::build::GEOMETRY_LIMIT`].
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        use crate::build::clamp_coord as c;
+        match self {
+            Self::Normalized(v) => Self::Normalized(Vec2::new(c(v.x), c(v.y))),
+            Self::Local(p) => Self::Local(Point::new(c(p.x), c(p.y))),
+        }
+    }
 }
 
 /// Which boolean a [`NodeKind::Boolean`] container performs on its children.
@@ -1138,6 +1148,36 @@ pub(crate) fn path_is_finite(path: &BezPath) -> bool {
     })
 }
 
+/// Hold every point of `path`, control points included, to
+/// ±[`crate::build::GEOMETRY_LIMIT`]. Whether any point moved.
+fn clamp_path(path: &mut BezPath) -> bool {
+    let mut moved = false;
+    let mut c = |p: &mut Point| {
+        let q = Point::new(
+            crate::build::clamp_coord(p.x),
+            crate::build::clamp_coord(p.y),
+        );
+        moved |= q != *p;
+        *p = q;
+    };
+    for el in path.elements_mut() {
+        match el {
+            kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => c(p),
+            kurbo::PathEl::QuadTo(a, b) => {
+                c(a);
+                c(b);
+            }
+            kurbo::PathEl::CurveTo(a, b, d) => {
+                c(a);
+                c(b);
+                c(d);
+            }
+            kurbo::PathEl::ClosePath => {}
+        }
+    }
+    moved
+}
+
 fn is_default_paragraph(p: &ParagraphStyle) -> bool {
     *p == ParagraphStyle::default()
 }
@@ -1379,6 +1419,91 @@ impl NodeKind {
                         TextSizing::Fixed(s) => size(s),
                     }
                     && on_path.as_deref().is_none_or(path_is_finite)
+            }
+        }
+    }
+
+    /// Hold every length and coordinate in this kind to
+    /// ±[`crate::build::GEOMETRY_LIMIT`]: sizes, corner radii, a line's or arc's
+    /// end, a text box's width, and every point of a path or a text rail. Ratios,
+    /// turns, angles and smoothing keep their own ranges, enforced elsewhere.
+    ///
+    /// Asked after [`Self::geometry_is_finite`]: a clamp passes `NaN` through.
+    pub fn clamp_geometry(&mut self) {
+        use crate::build::clamp_coord;
+        fn c(v: &mut f64) {
+            *v = clamp_coord(*v);
+        }
+        fn size(s: &mut Size) {
+            c(&mut s.width);
+            c(&mut s.height);
+        }
+        fn radii(r: &mut RoundedRectRadii) {
+            c(&mut r.top_left);
+            c(&mut r.top_right);
+            c(&mut r.bottom_right);
+            c(&mut r.bottom_left);
+        }
+        fn point(p: &mut Point) {
+            c(&mut p.x);
+            c(&mut p.y);
+        }
+        match self {
+            NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => {}
+            NodeKind::Slice { size: s }
+            | NodeKind::Ellipse { size: s, .. }
+            | NodeKind::Spiral { size: s, .. } => size(s),
+            NodeKind::Polygon {
+                size: s,
+                corner_radius,
+                ..
+            }
+            | NodeKind::Star {
+                size: s,
+                corner_radius,
+                ..
+            } => {
+                size(s);
+                c(corner_radius);
+            }
+            NodeKind::Artboard {
+                size: s,
+                corner_radii,
+                ..
+            }
+            | NodeKind::Rect {
+                size: s,
+                corner_radii,
+                ..
+            } => {
+                size(s);
+                radii(corner_radii);
+            }
+            NodeKind::Line { end } | NodeKind::Arc { end, .. } => point(end),
+            NodeKind::Path {
+                path,
+                corner_radii,
+                mirror,
+                ..
+            } => {
+                corner_radii.iter_mut().for_each(c);
+                // A mirror is kept only where it holds, and a clamp off the axis
+                // can break it.
+                if clamp_path(path) {
+                    *mirror = crate::symmetry::kept(path, corner_radii, *mirror);
+                }
+            }
+            NodeKind::Text {
+                sizing, on_path, ..
+            } => {
+                match sizing {
+                    TextSizing::Auto => {}
+                    TextSizing::AutoHeight(w) => c(w),
+                    TextSizing::Fixed(s) => size(s),
+                }
+                if let Some(rail) = on_path.as_deref_mut() {
+                    clamp_path(rail);
+                }
             }
         }
     }

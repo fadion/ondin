@@ -586,7 +586,8 @@ impl NodeDto {
             parent,
             children,
             kind: normalize_kind(self.kind),
-            transform: Affine::new(self.transform),
+            // Held to the geometry limit, not refused, as the operations hold it.
+            transform: crate::build::clamp_affine(Affine::new(self.transform)),
             name: self.name,
             visible: self.visible,
             locked: self.locked,
@@ -607,7 +608,7 @@ impl NodeDto {
             mask_mode: self.mask_mode,
             fill_rule: self.fill_rule,
             paint: self.paint,
-            pivot: self.pivot,
+            pivot: self.pivot.map(crate::node::Pivot::clamped),
             // Dropped rather than refused (§15 D492): refusing the document over
             // an export preset would lose the artwork to save the recipe, and an
             // unusable spec such as `Width(0)` has no defensible repair.
@@ -1001,8 +1002,10 @@ impl DocumentDto {
 /// `Spans` guarantees sorted, non-overlapping, non-default, in-range spans (see
 /// `typography.rs`) through its own `set`/`normalize`, not its shape, so a file is
 /// where a list can arrive unnormalized. Clamping rather than rejecting is
-/// deliberate: an overlong span is a hand-edit, not a corrupt tree.
-fn normalize_kind(kind: NodeKind) -> NodeKind {
+/// deliberate: an overlong span is a hand-edit, not a corrupt tree. Lengths and
+/// coordinates are held to `build::GEOMETRY_LIMIT` the same way.
+fn normalize_kind(mut kind: NodeKind) -> NodeKind {
+    kind.clamp_geometry();
     match kind {
         NodeKind::Text {
             content,

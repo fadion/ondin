@@ -41,8 +41,8 @@
 //! `Polygon`, `Star`, `Artboard`, and `Text` through its [`TextSizing`]. **Between
 //! two insets, a path and a line stretch too** ([`inset_stretch`]): their points
 //! are scaled into the used box, so the stroke keeps its width. That is insets
-//! only — a flex or grid container still keeps a path's size, since stretching
-//! every path in a laid column would redraw documents nobody changed. An arc is
+//! only — a flex or grid container still keeps a path's size: its `stretch` is a
+//! default no one chose, and a path scaled unevenly is a distorted drawing. An arc is
 //! positioned and keeps its size: scaled unevenly it is no longer an arc.
 //! **A group or a boolean takes no insets at all**
 //! yet: its box is its children's, which [`crate::Resolved`] measures *after* it

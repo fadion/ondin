@@ -68,14 +68,34 @@ subject. The four filled shape tools keep a slot each while the rail has room fo
 ### The wheel
 
 `canvas::wheel_input` runs while the canvas is hovered (or the pointer is over the origin fields or
-the image-edit *Done* pill, whose `Area`s it takes the wheel back from). It reads raw `MouseWheel`
-events, not egui's smoothed deltas (§15 D26).
+the image-edit *Done* pill, whose `Area`s it takes the wheel back from), or while a touch pinch's
+centre is over the canvas. It reads raw `MouseWheel` events, not egui's smoothed deltas (§15 D26).
 
 | Input | Effect |
 | --- | --- |
 | scroll | pan vertically |
 | `Shift`+scroll | pan horizontally |
 | `Ctrl`/`Cmd`+scroll, `Alt`+scroll | zoom at the cursor (`Alt` is Adobe's spelling) |
+| trackpad pinch | zoom at the cursor |
+| touchscreen pinch | zoom about the fingers' centre and pan with them |
+
+- **A pinch is read three ways** (`canvas::pinch_zoom`): a macOS trackpad's as `Event::Zoom`, a
+  Windows trackpad's as `Ctrl`+wheel (read by `wheel_travel`), a touchscreen's from
+  `InputState::multi_touch` (`zoom_delta`, and `translation_delta` for the pan). Never
+  `InputState::zoom_delta`, which folds in the `Ctrl`+wheel and would count it twice. Present mode
+  takes the zoom only; only the canvas pans with two fingers.
+- **A touch pinch's anchor is where the fingers are**, inside the canvas rect and on the canvas's own
+  layer, not hover: egui withholds hover while the first finger's cancelled press is held.
+- **The first finger is a mouse.** egui-winit emulates it as a left press and drag, and reports two
+  or more fingers only through `multi_touch`. When a second finger lands, `canvas_ui` calls
+  `cancel_gesture` (the move or marquee the first finger started is abandoned, nothing committed)
+  and sets `gesture_cancelled`. While a pinch is held, and through the frame the fingers lift
+  (`OndinApp::track_pinch`), the mode input (normal and text) does not run, so the first finger's
+  release neither commits, clicks nor ends a text session; present mode asks the same helper, so
+  that release is not a tap that steps a frame. The minimap is not covered: its first finger
+  starts a map drag, which holds off its zoom. `a_two_finger_touch_pinches_instead_of_dragging`,
+  `a_pinch_in_a_text_session_leaves_it_open` and
+  `present::tests::a_pinch_zooms_the_presentation_without_stepping` pin it.
 
 Settings' *Zoom with the scroll wheel* (`CanvasPrefs::wheel_zooms`, off by default) swaps the plain
 and `Ctrl`/`Alt` meanings for a mouse wheel only (`canvas::wheel_travel`): a notch zooms at the

@@ -1995,6 +1995,14 @@ impl OndinApp {
             self.home_camera();
         }
 
+        // A second finger turns the first finger's press into a pinch: what that
+        // press started is abandoned, and the tools sit the touch out.
+        let (began, pinching) = self.track_pinch(ui.ctx());
+        if began {
+            self.cancel_gesture(ui.ctx());
+            self.gesture_cancelled = true;
+        }
+
         self.wheel_input(ui, &resp, rect, ppp);
 
         // Only from rest, so a gesture never loses its release to a peek; a compare
@@ -2026,7 +2034,7 @@ impl OndinApp {
             self.draw_canvas(ui, &painter, rect, ppp, &resp);
             return;
         }
-        if self.context_menu.is_none() && !self.tabs.menu_was_up && !self.peeking {
+        if self.context_menu.is_none() && !self.tabs.menu_was_up && !self.peeking && !pinching {
             match self.mode {
                 // A picker opened over a text session can pick too.
                 Mode::TextInsert if self.dropper_armed().is_some() => {
@@ -2044,6 +2052,17 @@ impl OndinApp {
         self.canvas_context_menu(ui, &resp, rect, ppp);
 
         self.draw_canvas(ui, &painter, rect, ppp, &resp);
+    }
+
+    /// Follow a two-finger touch, whose first finger egui-winit emulates as a
+    /// mouse press: `(began, pinching)`, `began` on the frame a second finger
+    /// lands, `pinching` while one is held and through the frame the fingers lift,
+    /// whose emulated release belongs to the pinch rather than to a click.
+    pub(crate) fn track_pinch(&mut self, ctx: &egui::Context) -> (bool, bool) {
+        let (pinch, touching) = ctx.input(|i| (i.multi_touch().is_some(), i.any_touches()));
+        let was = self.pinch_held;
+        self.pinch_held = pinch || (was && touching);
+        (pinch && !was, self.pinch_held || was)
     }
 
     /// The canvas's door onto the context menu (`docs/context-menus.md` §2).
@@ -8698,27 +8717,42 @@ impl OndinApp {
     }
 
     /// The wheel: scroll pans, `Shift`+scroll pans sideways, `Ctrl`+scroll zooms
-    /// at the cursor, and so does a trackpad pinch ([`pinch_zoom`]); *Zoom with the
+    /// at the cursor, and so does a trackpad or touch pinch ([`pinch_zoom`]), which
+    /// on a touchscreen also pans with the fingers; *Zoom with the
     /// scroll wheel* swaps a mouse's plain and `Ctrl` meanings ([`wheel_travel`]). Read from raw
     /// `MouseWheel` events, so a zoom notch is a step, and gated on hover since
     /// `Context::input` is global.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
+        // A touch pinch pans with its fingers and zooms around their centre, asked
+        // of where the fingers are rather than of hover, which egui withholds
+        // while the first finger's cancelled press is held.
+        let touch = ui.input(|i| i.multi_touch()).filter(|t| {
+            rect.contains(t.center_pos) && ui.ctx().layer_id_at(t.center_pos) == Some(resp.layer_id)
+        });
         // The canvas's own overlay areas (origin fields, *Done* pill) must not
         // swallow the wheel; every other overlay keeps it.
-        let Some(hover) = resp.hover_pos().or_else(|| {
-            let p = ui.ctx().pointer_hover_pos()?;
-            let [id] = *self.session.selection.ids() else {
-                return None;
-            };
-            let under = ui.ctx().layer_id_at(p);
-            (rect.contains(p)
-                && (under == Some(origin_fields_layer(id)) || under == Some(crop_exit_layer(id))))
-            .then_some(p)
-        }) else {
+        let Some(hover) = touch
+            .map(|t| t.center_pos)
+            .or_else(|| resp.hover_pos())
+            .or_else(|| {
+                let p = ui.ctx().pointer_hover_pos()?;
+                let [id] = *self.session.selection.ids() else {
+                    return None;
+                };
+                let under = ui.ctx().layer_id_at(p);
+                (rect.contains(p)
+                    && (under == Some(origin_fields_layer(id))
+                        || under == Some(crop_exit_layer(id))))
+                .then_some(p)
+            })
+        else {
             return;
         };
-        let (pan, zoom) = wheel_travel(ui.ctx(), rect.height(), self.prefs.canvas.wheel_zooms);
+        let (mut pan, zoom) = wheel_travel(ui.ctx(), rect.height(), self.prefs.canvas.wheel_zooms);
         let factor = wheel_zoom_factor(zoom) * pinch_zoom(ui.ctx());
+        if let Some(t) = touch {
+            pan += t.translation_delta;
+        }
 
         if pan != egui::Vec2::ZERO {
             self.session
@@ -11532,20 +11566,24 @@ pub(crate) fn wheel_zoom_factor(zoom: f32) -> f64 {
     (f64::from(zoom) / 600.0).exp().clamp(0.2, 5.0)
 }
 
-/// This frame's trackpad pinch as a zoom factor, `1.0` with none. macOS sends a
-/// pinch as a gesture, which egui hands on as `Event::Zoom`; Windows sends it as
-/// `Ctrl`+wheel, which [`wheel_travel`] reads, so neither is counted twice.
-/// Clamped as [`wheel_zoom_factor`] is.
+/// This frame's pinch as a zoom factor, `1.0` with none. macOS sends a trackpad
+/// pinch as a gesture, which egui hands on as `Event::Zoom`; a Windows trackpad
+/// sends `Ctrl`+wheel, which [`wheel_travel`] reads; a touchscreen sends touches,
+/// which egui measures in `multi_touch`. Not `InputState::zoom_delta`, which
+/// folds in the `Ctrl`+wheel and would count it twice. Clamped as
+/// [`wheel_zoom_factor`] is.
 pub(crate) fn pinch_zoom(ctx: &egui::Context) -> f64 {
     ctx.input(|i| {
-        i.events
+        let touch = i.multi_touch().map_or(1.0, |t| f64::from(t.zoom_delta));
+        let gesture = i
+            .events
             .iter()
             .filter_map(|ev| match ev {
                 egui::Event::Zoom(f) => Some(f64::from(*f)),
                 _ => None,
             })
-            .product::<f64>()
-            .clamp(0.2, 5.0)
+            .product::<f64>();
+        (gesture * touch).clamp(0.2, 5.0)
     })
 }
 
@@ -26101,6 +26139,200 @@ mod pinch_tests {
         let zoomed = app.session.camera.zoom;
         frame(&ctx, &mut app, Vec::new());
         assert_eq!(app.session.camera.zoom, zoomed, "and no pinch, no zoom");
+    }
+
+    /// One whole canvas frame, closed as the app closes one.
+    fn canvas_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                events,
+                ..Default::default()
+            },
+            |ui| app.canvas_ui(ui),
+        );
+        if !ctx.input(|i| i.pointer.any_down()) {
+            app.end_released_gestures();
+        }
+    }
+
+    /// One finger's touch event, and for finger 0 the mouse events egui-winit
+    /// emulates from it.
+    fn finger(id: u64, phase: egui::TouchPhase, pos: egui::Pos2) -> Vec<egui::Event> {
+        let mut out = vec![egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        }];
+        if id == 0 {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            match phase {
+                egui::TouchPhase::Start => {
+                    out.extend([egui::Event::PointerMoved(pos), button(true)])
+                }
+                egui::TouchPhase::Move => out.push(egui::Event::PointerMoved(pos)),
+                egui::TouchPhase::End => out.extend([button(false), egui::Event::PointerGone]),
+                egui::TouchPhase::Cancel => out.push(egui::Event::PointerGone),
+            }
+        }
+        out
+    }
+
+    /// A selected 100 × 60 rect at the origin, and where its centre is on screen.
+    fn app_with_rect(ctx: &egui::Context) -> (OndinApp, NodeId, egui::Pos2) {
+        use ondin_core::{Document, Operation, Transaction};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0x7C4);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(100.0, 60.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a rect");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        app.canvas_px = (SIZE.x as u32, SIZE.y as u32);
+        app.session.camera.zoom = 1.0;
+        app.session.camera.center = Point::new(50.0, 30.0);
+        let c = app
+            .session
+            .camera
+            .world_to_screen(Point::new(50.0, 30.0), app.canvas_px);
+        (app, id, egui::pos2(c.x as f32, c.y as f32))
+    }
+
+    /// A two-finger touch whose first finger has started a gesture — a move on the
+    /// layer, a marquee off it — zooms instead: the gesture is abandoned, the
+    /// fingers zoom, and lifting them commits, clicks and selects nothing.
+    ///
+    /// flip: `pinch_zoom` without the touch factor → fails at "the pinch zooms";
+    /// `canvas_ui` not abandoning the press when the pinch begins → fails at "the
+    /// first finger's gesture is abandoned".
+    #[test]
+    fn a_two_finger_touch_pinches_instead_of_dragging() {
+        use egui::TouchPhase::{End, Move, Start};
+        for on_layer in [true, false] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let (mut app, id, centre) = app_with_rect(&ctx);
+            let before = app.session.doc.get(id).unwrap().clone();
+            let zoom = app.session.camera.zoom;
+            let p0 = match on_layer {
+                true => centre,
+                false => centre + egui::vec2(120.0, 80.0),
+            };
+            for _ in 0..3 {
+                canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p0)]);
+            }
+            canvas_frame(&ctx, &mut app, finger(0, Start, p0));
+            for k in 1..=6 {
+                let p = p0 + egui::vec2(4.0 * k as f32, 0.0);
+                canvas_frame(&ctx, &mut app, finger(0, Move, p));
+            }
+            assert!(
+                !app.drag.is_none() || app.session.has_gesture_preview(),
+                "the fixture: one finger started a gesture (on the layer: {on_layer})"
+            );
+
+            let mut a = p0 + egui::vec2(24.0, 0.0);
+            let mut b = a + egui::vec2(0.0, 40.0);
+            canvas_frame(&ctx, &mut app, finger(1, Start, b));
+            assert!(
+                app.drag.is_none() && !app.session.has_gesture_preview(),
+                "the first finger's gesture is abandoned (on the layer: {on_layer})"
+            );
+            for _ in 0..4 {
+                a.y -= 10.0;
+                b.y += 10.0;
+                let mut ev = finger(0, Move, a);
+                ev.extend(finger(1, Move, b));
+                canvas_frame(&ctx, &mut app, ev);
+            }
+            assert!(
+                app.session.camera.zoom > zoom * 1.5,
+                "the pinch zooms: {} from {zoom}",
+                app.session.camera.zoom
+            );
+
+            let mut ev = finger(0, End, a);
+            ev.extend(finger(1, End, b));
+            canvas_frame(&ctx, &mut app, ev);
+            for _ in 0..3 {
+                canvas_frame(&ctx, &mut app, Vec::new());
+            }
+            assert_eq!(
+                app.session.doc.get(id).unwrap(),
+                &before,
+                "nothing committed"
+            );
+            assert_eq!(
+                app.session.selection.ids(),
+                &[id],
+                "and the selection stands"
+            );
+            assert!(
+                app.drag.is_none() && !app.pinch_held,
+                "and the pinch is over"
+            );
+        }
+    }
+
+    /// In a text session, a pinch whose first finger stays still outside the text
+    /// zooms and leaves the session open: that finger's release is the pinch's,
+    /// not a click outside, which would end the session.
+    ///
+    /// flip: `canvas_ui` running the mode input while a pinch is held → fails at
+    /// "the session stays open".
+    #[test]
+    fn a_pinch_in_a_text_session_leaves_it_open() {
+        use egui::TouchPhase::{End, Move, Start};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _id, centre) = app_with_rect(&ctx);
+        app.begin_text(Point::new(0.0, 0.0));
+        assert!(
+            app.text.is_some() && app.mode == crate::input::Mode::TextInsert,
+            "the fixture: a text session"
+        );
+        let zoom = app.session.camera.zoom;
+        let a = centre + egui::vec2(120.0, 80.0);
+        for _ in 0..3 {
+            canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(a)]);
+        }
+        let mut ev = finger(0, Start, a);
+        let mut b = a + egui::vec2(0.0, 30.0);
+        ev.extend(finger(1, Start, b));
+        canvas_frame(&ctx, &mut app, ev);
+        for _ in 0..4 {
+            b.y += 15.0;
+            canvas_frame(&ctx, &mut app, finger(1, Move, b));
+        }
+        assert!(app.session.camera.zoom > zoom, "the pinch zooms");
+        let mut ev = finger(1, End, b);
+        ev.extend(finger(0, End, a));
+        canvas_frame(&ctx, &mut app, ev);
+        for _ in 0..3 {
+            canvas_frame(&ctx, &mut app, Vec::new());
+        }
+        assert!(app.text.is_some(), "the session stays open");
     }
 }
 

@@ -288,10 +288,12 @@ impl crate::app::OndinApp {
             self.stop_presenting(&ctx);
             return;
         }
+        // A pinch's first finger arrives as a mouse press; its release is no tap.
+        let (_, pinching) = self.track_pinch(&ctx);
         let Some(p) = self.presenting.as_mut() else {
             return;
         };
-        if next || resp.clicked() {
+        if next || (resp.clicked() && !pinching) {
             p.step(1, now);
         }
         if back || resp.secondary_clicked() {
@@ -357,7 +359,11 @@ impl crate::app::OndinApp {
         }
         view.pan_pixels(Vec2::new(f64::from(pan.x * ppp), f64::from(pan.y * ppp)));
         if factor != 1.0 {
-            let at = ctx.pointer_hover_pos().unwrap_or(rect.center()) - rect.min;
+            let touch = ctx.input(|i| i.multi_touch()).map(|t| t.center_pos);
+            let at = touch
+                .or_else(|| ctx.pointer_hover_pos())
+                .unwrap_or(rect.center())
+                - rect.min;
             let at = Vec2::new(f64::from(at.x * ppp), f64::from(at.y * ppp));
             view.zoom_by(factor, at, px);
         }
@@ -776,5 +782,93 @@ mod tests {
         assert!(counter_alpha(COUNTER_HOLD + COUNTER_FADE / 2.0) < 1.0);
         assert!(counter_alpha(COUNTER_HOLD + COUNTER_FADE) < 1e-6);
         assert_eq!(counter_alpha(COUNTER_HOLD + COUNTER_FADE + 1.0), 0.0);
+    }
+
+    /// One present-mode frame of `events`.
+    fn present_frame(
+        ctx: &egui::Context,
+        app: &mut crate::app::OndinApp,
+        events: Vec<egui::Event>,
+    ) {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.present_ui(ui),
+        );
+    }
+
+    /// One finger's touch, and for finger 0 the mouse events egui-winit emulates.
+    fn finger(id: u64, phase: egui::TouchPhase, pos: egui::Pos2) -> Vec<egui::Event> {
+        let mut out = vec![egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        }];
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        match (id, phase) {
+            (0, egui::TouchPhase::Start) => {
+                out.extend([egui::Event::PointerMoved(pos), button(true)])
+            }
+            (0, egui::TouchPhase::Move) => out.push(egui::Event::PointerMoved(pos)),
+            (0, egui::TouchPhase::End) => out.extend([button(false), egui::Event::PointerGone]),
+            _ => {}
+        }
+        out
+    }
+
+    /// A tap steps to the next frame; a pinch whose first finger stays still
+    /// zooms and does not, since that finger's release is the pinch's.
+    ///
+    /// flip: `present_ui` stepping on `clicked()` during a pinch → fails at "a
+    /// pinch does not step".
+    #[test]
+    fn a_pinch_zooms_the_presentation_without_stepping() {
+        use egui::TouchPhase::{End, Move, Start};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _) = three_pages(&ctx);
+        app.start_presenting(&ctx);
+        let a = egui::pos2(400.0, 300.0);
+        for _ in 0..3 {
+            present_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(a)]);
+        }
+        present_frame(&ctx, &mut app, finger(0, Start, a));
+        present_frame(&ctx, &mut app, finger(0, End, a));
+        for _ in 0..3 {
+            present_frame(&ctx, &mut app, Vec::new());
+        }
+        let at = app.presenting.as_ref().unwrap().at;
+        assert_eq!(at, 1, "control: a tap steps");
+
+        let mut ev = finger(0, Start, a);
+        let mut b = a + egui::vec2(0.0, 30.0);
+        ev.extend(finger(1, Start, b));
+        present_frame(&ctx, &mut app, ev);
+        for _ in 0..4 {
+            b.y += 15.0;
+            present_frame(&ctx, &mut app, finger(1, Move, b));
+        }
+        let mut ev = finger(1, End, b);
+        ev.extend(finger(0, End, a));
+        present_frame(&ctx, &mut app, ev);
+        for _ in 0..3 {
+            present_frame(&ctx, &mut app, Vec::new());
+        }
+        let p = app.presenting.as_ref().unwrap();
+        assert!(p.view.is_some(), "the pinch zooms");
+        assert_eq!(p.at, at, "a pinch does not step");
     }
 }

@@ -363,7 +363,7 @@ non-goal**; `DashboardState::selected` is one path and every verb takes one docu
 | `←` `↑` `Page Up` `Backspace` · right-click | previous frame |
 | `Home` / `End` | first / last frame |
 | `Ctrl+PageDown` / `Ctrl+PageUp` | first frame of the next / previous page presented |
-| `Ctrl`/`Alt`+wheel · pinch | zoom in on the frame at the cursor; back to the fit at or below it |
+| `Ctrl`/`Alt`+wheel · trackpad or touchscreen pinch | zoom in on the frame at the cursor; back to the fit at or below it |
 | wheel · `Shift`+wheel | scroll the zoomed frame vertically / horizontally |
 | `Escape` | leave |
 
@@ -412,7 +412,7 @@ A layers row adds `→`/`←` (open, fold), `↑`/`↓` (the next row, past the 
 Built: space+drag pan · `Shift` constrain / keep ratio · `Alt` duplicate-drag · `Alt` resize about
 the centre · `Alt` **draw** about the press point · `Ctrl`+side-drag skew · `Shift` 15° rotate and
 skew snap · `Ctrl`+click deep select · `Alt`+`Shift`+click key layer · `Ctrl`/`Alt`+wheel zoom (a mouse's
-plain and `Ctrl`/`Alt` wheel swap under Settings' *Zoom with the scroll wheel*) · trackpad pinch zoom · `Shift`+wheel horizontal scroll · `Shift` pen constrain · `Ctrl` pen/node curvature · `Alt` hover
+plain and `Ctrl`/`Alt` wheel swap under Settings' *Zoom with the scroll wheel*) · trackpad or touchscreen pinch zoom (a touchscreen pinch also pans the canvas) · `Shift`+wheel horizontal scroll · `Shift` pen constrain · `Ctrl` pen/node curvature · `Alt` hover
 measure (`measure.rs`; the overlay is in `canvas.rs`) · middle-mouse pan in **both** modes (Space
 is not the alias in a text session, where it is a character) · `Alt`+click eyedropper onto the
 top stroke · `Shift`+click eyedropper stays armed · `Ctrl`+click eyedropper takes the raw pixel,

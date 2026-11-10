@@ -777,6 +777,10 @@ pub struct OndinApp {
     /// A gesture cancelled while the button is still held, so no release path turns it
     /// into an edit. Cleared at the end of the frame once nothing is held.
     pub(crate) gesture_cancelled: bool,
+    /// A two-finger touch is pinching the canvas, held until every finger lifts
+    /// and through the frame they do, so the first finger's emulated press, which
+    /// egui-winit sends as a mouse button, never reaches a tool.
+    pub(crate) pinch_held: bool,
     /// Every value a gesture is holding while it runs ([`InFlight`]).
     pub(crate) in_flight: InFlight,
     /// The detached colour picker, when one is open.
@@ -1878,6 +1882,7 @@ impl OndinApp {
             clones: None,
             entered_group: None,
             gesture_cancelled: false,
+            pinch_held: false,
             in_flight: InFlight::default(),
             picker: None,
             key_colour: None,

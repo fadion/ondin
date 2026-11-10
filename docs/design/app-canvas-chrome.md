@@ -1305,7 +1305,9 @@ runs (`pages` names each frame's page, index for index).
   `stop_presenting` leaves fullscreen unless the window was fullscreen before. A shown frame that no
   longer resolves ends it.
 - **Zoom**, because a tall frame fitted to the screen's height is too small to read. `Ctrl`+wheel
-  (or `Alt`+wheel) or a pinch zooms in at the cursor; the plain wheel and `Shift`+wheel then scroll.
+  (or `Alt`+wheel) or a trackpad or touchscreen pinch zooms in at the cursor (a touch pinch at its
+  fingers' centre, and its first finger's release is no tap); the plain wheel and `Shift`+wheel
+  then scroll.
   The wheel and the pinch are read as the canvas reads them (`canvas::wheel_travel`,
   `canvas::wheel_zoom_factor`, `canvas::pinch_zoom`).
   `hold_on_frame` holds the view on the frame, every frame so a resize refits: on each axis the

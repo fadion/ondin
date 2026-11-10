@@ -108,7 +108,9 @@ pub enum NodeKind {
     Arc     { end: kurbo::Point, sweep: f64 },   // open; from the origin to `end`, as a line
     Path    { path: kurbo::BezPath, corner_radii: Vec<f64>, corner_smoothing: f64,
               mirror: symmetry::PathMirror }, // a radius per anchor; PathMirror { vertical, horizontal }
-    Text    { content: String, style: TextStyle, sizing: TextSizing },
+    Boolean { op: BoolOp },                 // a container; its outline is derived, in Resolved — app-booleans.md
+    Text    { content: String, style: Box<TextStyle>, spans: CharSpans, para_spans: ParaSpans,
+              paragraph: ParagraphStyle, block: BlockStyle, sizing: TextSizing, on_path: Option<Box<BezPath>> }, // §5.4
     Slice   { size: kurbo::Size },          // a region to export; draws nothing
 }
 

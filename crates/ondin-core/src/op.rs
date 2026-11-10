@@ -1714,8 +1714,8 @@ pub enum OpError {
     /// geometry, a transform, a **pivot** (§15 D639), an **effect** (§15 D641), a
     /// guide's position (§15 D421), or **a paint**: gradient stops, ramp and
     /// transform, colour channels, an image brush's alpha and the
-    /// [`crate::ImageRef`] behind it (§15 D452), and a stroke's width and dashes
-    /// (§15 D451).
+    /// [`crate::ImageRef`] behind it (§15 D452), a stroke's width and dashes
+    /// (§15 D451), and a text's character and paragraph styles and spans.
     ///
     /// ⚠️ **Refused rather than repaired**: `serde_json` writes a non-finite `f64`
     /// as `null` and the reader has no arm for it, so such a value would survive

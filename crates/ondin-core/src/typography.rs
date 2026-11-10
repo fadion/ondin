@@ -61,6 +61,14 @@ impl Default for Length {
 impl Length {
     pub const ZERO: Length = Length::Px(0.0);
 
+    /// Whether this length is a number: `serde_json` writes a `NaN` or an
+    /// infinity as `null`, which no file can be read back from.
+    pub fn is_finite(self) -> bool {
+        match self {
+            Length::Px(v) | Length::Em(v) => v.is_finite(),
+        }
+    }
+
     /// This length rounded to [`LENGTH_PLACES`] — the only form that is stored.
     ///
     /// Every constructor path goes through here: the setters below, the scale
@@ -482,6 +490,19 @@ impl Default for Decoration {
     }
 }
 
+impl Decoration {
+    /// Whether every number this decoration carries is finite.
+    pub fn is_finite(&self) -> bool {
+        self.thickness.is_none_or(Length::is_finite)
+            && self.offset.is_none_or(Length::is_finite)
+            && color_is_finite(self.color)
+    }
+}
+
+fn color_is_finite(c: Option<Color>) -> bool {
+    c.is_none_or(|c| c.components.iter().all(|f| f.is_finite()))
+}
+
 /// Skip-ink's default: on, as CSS's initial value is. See [`Decoration::skip_ink`].
 fn skips_ink() -> bool {
     true
@@ -580,6 +601,28 @@ impl CharAttrKind {
 }
 
 impl CharAttr {
+    /// Whether every number this attribute carries is finite.
+    pub fn is_finite(&self) -> bool {
+        match self {
+            CharAttr::Size(v) => v.is_finite(),
+            CharAttr::Variations(v) => v.iter().all(|a| a.value.is_finite()),
+            CharAttr::LineHeight(l) => l.is_none_or(Length::is_finite),
+            CharAttr::LetterSpacing(l) | CharAttr::WordSpacing(l) | CharAttr::BaselineShift(l) => {
+                l.is_finite()
+            }
+            CharAttr::Underline(d) | CharAttr::Strikethrough(d) => {
+                d.as_ref().is_none_or(Decoration::is_finite)
+            }
+            CharAttr::Color(c) => color_is_finite(*c),
+            CharAttr::Family(_)
+            | CharAttr::Weight(_)
+            | CharAttr::Italic(_)
+            | CharAttr::Features(_)
+            | CharAttr::Locale(_)
+            | CharAttr::Case(_) => true,
+        }
+    }
+
     pub fn kind(&self) -> CharAttrKind {
         match self {
             CharAttr::Family(_) => CharAttrKind::Family,
@@ -714,13 +757,29 @@ impl TextStyle {
         }
     }
 
-    /// Hold the font size at or under [`MAX_FONT_SIZE`]: what a door that stores
-    /// a whole style owes it. The ceiling only: a bound size stores the literal 0
-    /// (`variable::clear_text_slot_number`), and a `NaN` passes through.
+    /// Hold the font size to `0..=`[`MAX_FONT_SIZE`]: what a door that stores a
+    /// whole style owes it. Not to [`MIN_FONT_SIZE`], because a bound size stores
+    /// the literal 0 (`variable::clear_text_slot_number`); a negative size draws
+    /// mirrored ink. A `NaN` passes through, so ask [`Self::is_finite`] first.
     pub fn clamp_size(&mut self) {
-        if self.font_size > MAX_FONT_SIZE {
-            self.font_size = MAX_FONT_SIZE;
-        }
+        self.font_size = self.font_size.clamp(0.0, MAX_FONT_SIZE);
+    }
+
+    /// Whether every number this style carries is finite, the font size, axis
+    /// values, lengths, decorations and colour.
+    pub fn is_finite(&self) -> bool {
+        self.font_size.is_finite()
+            && self.variations.iter().all(|a| a.value.is_finite())
+            && self.line_height.is_none_or(Length::is_finite)
+            && self.letter_spacing.is_finite()
+            && self.word_spacing.is_finite()
+            && self.baseline_shift.is_finite()
+            && self.underline.as_ref().is_none_or(Decoration::is_finite)
+            && self
+                .strikethrough
+                .as_ref()
+                .is_none_or(Decoration::is_finite)
+            && color_is_finite(self.color)
     }
 
     /// Overwrite one attribute, canonicalizing whatever needs it.
@@ -1375,6 +1434,20 @@ impl<A: SpanAttr> Spans<A> {
     }
 }
 
+impl CharSpans {
+    /// Whether every number the spans carry is finite.
+    pub fn is_finite(&self) -> bool {
+        self.0.iter().all(|s| s.attr.is_finite())
+    }
+}
+
+impl ParaSpans {
+    /// Whether every length the spans carry is finite.
+    pub fn is_finite(&self) -> bool {
+        self.0.iter().all(|s| s.attr.is_finite())
+    }
+}
+
 impl SpanAttr for CharAttr {
     type Defaults = TextStyle;
     type Kind = CharAttrKind;
@@ -1834,6 +1907,18 @@ pub struct ParagraphStyle {
 pub const MAX_LIST_LEVEL: u8 = 8;
 
 impl ParagraphStyle {
+    /// Whether every length this style carries is finite.
+    pub fn is_finite(&self) -> bool {
+        [
+            self.spacing,
+            self.indent,
+            self.indent_start,
+            self.indent_end,
+        ]
+        .into_iter()
+        .all(Length::is_finite)
+    }
+
     /// This style's value for one spannable attribute, as a span would carry it.
     pub fn get(&self, kind: ParaAttrKind) -> ParaAttr {
         match kind {
@@ -1948,6 +2033,17 @@ impl ParaAttrKind {
 }
 
 impl ParaAttr {
+    /// Whether the length this attribute carries, if any, is finite.
+    pub fn is_finite(&self) -> bool {
+        match self {
+            ParaAttr::Spacing(l)
+            | ParaAttr::Indent(l)
+            | ParaAttr::IndentStart(l)
+            | ParaAttr::IndentEnd(l) => l.is_finite(),
+            ParaAttr::Hanging(_) | ParaAttr::Marker(_) | ParaAttr::Level(_) => true,
+        }
+    }
+
     pub fn kind(&self) -> ParaAttrKind {
         match self {
             ParaAttr::Spacing(_) => ParaAttrKind::Spacing,

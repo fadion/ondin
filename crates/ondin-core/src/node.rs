@@ -1341,7 +1341,9 @@ impl NodeKind {
     /// An SVG import reaches it (`L 1e999 10` parses to infinity through
     /// `BezPath::from_svg`).
     ///
-    /// Geometry only; other `f64`s a node carries are guarded by their own ops.
+    /// Geometry, and a text's character and paragraph styles and spans, which
+    /// travel in the kind; other `f64`s a node carries are guarded by their own
+    /// ops.
     /// [`crate::Node::transform`] is checked by `op_set_transform`, being a field
     /// of the node rather than of the kind.
     pub fn geometry_is_finite(&self) -> bool {
@@ -1407,12 +1409,20 @@ impl NodeKind {
                     && corner_smoothing.is_finite()
             }
             NodeKind::Text {
+                style,
+                spans,
+                paragraph,
+                para_spans,
                 sizing,
                 on_path,
                 on_path_offset,
                 ..
             } => {
-                on_path_offset.is_finite()
+                style.is_finite()
+                    && spans.is_finite()
+                    && paragraph.is_finite()
+                    && para_spans.is_finite()
+                    && on_path_offset.is_finite()
                     && match sizing {
                         TextSizing::Auto => true,
                         TextSizing::AutoHeight(w) => w.is_finite(),

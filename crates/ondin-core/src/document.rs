@@ -2855,6 +2855,10 @@ impl Document {
         para_spans: &ParaSpans,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        // See [`OpError::NonFinite`]: a `NaN` in a span saves as an unopenable file.
+        if !spans.is_finite() || !para_spans.is_finite() {
+            return Err(OpError::NonFinite);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let NodeKind::Text {
             content: c,
@@ -2889,6 +2893,10 @@ impl Document {
         spans: Option<&CharSpans>,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        // See [`OpError::NonFinite`]; asked before the clamp, which keeps a `NaN`.
+        if !style.is_finite() || spans.is_some_and(|s| !s.is_finite()) {
+            return Err(OpError::NonFinite);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let NodeKind::Text {
             content,
@@ -2929,6 +2937,10 @@ impl Document {
         spans: &CharSpans,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        // See [`OpError::NonFinite`].
+        if !spans.is_finite() {
+            return Err(OpError::NonFinite);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let NodeKind::Text {
             content,
@@ -2951,6 +2963,10 @@ impl Document {
         spans: Option<&ParaSpans>,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        // See [`OpError::NonFinite`].
+        if !paragraph.is_finite() || spans.is_some_and(|s| !s.is_finite()) {
+            return Err(OpError::NonFinite);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let NodeKind::Text {
             content,
@@ -2985,6 +3001,10 @@ impl Document {
         spans: &ParaSpans,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        // See [`OpError::NonFinite`].
+        if !spans.is_finite() {
+            return Err(OpError::NonFinite);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let NodeKind::Text {
             content,
@@ -5029,6 +5049,132 @@ mod tests {
         assert!(!set(&huge).changes_nothing(&doc), "control: a change");
         doc.apply(&Transaction(vec![set(&huge)])).unwrap();
         assert_eq!(stored(&doc).0, MAX_FONT_SIZE, "the set size");
+        let negative = crate::TextStyle {
+            font_size: -5.0,
+            ..Default::default()
+        };
+        doc.apply(&Transaction(vec![set(&negative)])).unwrap();
+        assert_eq!(stored(&doc).0, 0.0, "a negative size lands at 0");
+    }
+
+    /// A text number that is not finite is refused at every text door, and the
+    /// document still saves and loads: `serde_json` writes it as `null`.
+    /// flip: `op_set_text_style` without its `is_finite` check → fails at
+    /// "SetTextStyle".
+    #[test]
+    fn a_non_finite_text_number_is_refused() {
+        use crate::typography::{
+            CharAttr, CharSpans, Length, ParaAttr, ParaSpans, ParagraphStyle, Span,
+        };
+        let (mut doc, _root, ab) = base();
+        let t = IdSource::new(0xC22).mint();
+        let text = |style: crate::TextStyle| NodeKind::Text {
+            content: "some words".into(),
+            style: Box::new(style),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: crate::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let nan = crate::TextStyle {
+            font_size: f64::NAN,
+            ..Default::default()
+        };
+        let create = |kind| Operation::CreateNode {
+            id: t,
+            parent: ab,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        assert!(
+            matches!(
+                doc.apply(&Transaction(vec![create(text(nan.clone()))])),
+                Err(OpError::NonFinite)
+            ),
+            "CreateNode"
+        );
+        doc.apply(&Transaction(vec![create(text(Default::default()))]))
+            .expect("control: a finite text");
+
+        let default = crate::TextStyle::default();
+        let char_spans = |attr| {
+            CharSpans::from_parts(
+                vec![Span {
+                    start: 0,
+                    end: 3,
+                    attr,
+                }],
+                &default,
+            )
+        };
+        let para_spans = |attr| {
+            ParaSpans::from_parts(
+                vec![Span {
+                    start: 0,
+                    end: 3,
+                    attr,
+                }],
+                &ParagraphStyle::default(),
+            )
+        };
+        let refused = [
+            (
+                "SetTextStyle",
+                Operation::SetTextStyle {
+                    id: t,
+                    style: nan,
+                    spans: None,
+                },
+            ),
+            (
+                "SetTextSpans",
+                Operation::SetTextSpans {
+                    id: t,
+                    spans: char_spans(CharAttr::LetterSpacing(Length::Px(f64::INFINITY))),
+                },
+            ),
+            (
+                "SetText",
+                Operation::SetText {
+                    id: t,
+                    content: "some words".into(),
+                    spans: char_spans(CharAttr::Size(f64::NAN)),
+                    para_spans: Default::default(),
+                },
+            ),
+            (
+                "SetParagraphStyle",
+                Operation::SetParagraphStyle {
+                    id: t,
+                    paragraph: ParagraphStyle {
+                        indent: Length::Em(f64::NAN),
+                        ..Default::default()
+                    },
+                    spans: None,
+                },
+            ),
+            (
+                "SetParagraphSpans",
+                Operation::SetParagraphSpans {
+                    id: t,
+                    spans: para_spans(ParaAttr::Spacing(Length::Px(f64::NAN))),
+                },
+            ),
+        ];
+        for (door, op) in refused {
+            assert!(
+                matches!(doc.apply(&Transaction(vec![op])), Err(OpError::NonFinite)),
+                "{door}"
+            );
+        }
+        let bytes = crate::io::save(&doc).expect("saves");
+        crate::io::load(&bytes).expect("the document still loads");
     }
 
     /// A transform past the limit keeps its shape: the linear part is scaled as a

@@ -414,7 +414,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, "Delete page?") {
                 cancel = true;
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(crate::input::keys(&body))

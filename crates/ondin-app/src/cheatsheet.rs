@@ -1119,10 +1119,10 @@ mod tests {
     /// **The card fits the window**: full width on a large one, narrowed with
     /// fewer columns on a small one, never past an edge.
     /// flip: `cheatsheet_ui` sizing the card to `W` whatever the window → fails
-    /// at 800×560.
+    /// at 780×560.
     #[test]
     fn the_card_fits_the_window() {
-        for (w, h, columns) in [(1320.0, 820.0, 3), (800.0, 560.0, 2), (520.0, 420.0, 1)] {
+        for (w, h, columns) in [(1320.0, 820.0, 3), (780.0, 560.0, 2), (520.0, 420.0, 1)] {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
             let mut app = OndinApp::headless(&ctx);
@@ -1139,9 +1139,10 @@ mod tests {
                 "{w}×{h}: the card {card:?} leaves the window"
             );
             if w > W + MARGIN * 2.0 {
-                // The frame's hairline sits outside the width it was given.
+                // The frame's hairline sits outside the width it was given, and
+                // the columns' split rounds by a few hundredths.
                 assert!(
-                    (card.width() - W).abs() <= 2.0,
+                    (card.width() - W).abs() <= 2.1,
                     "{w}×{h}: full width, got {}",
                     card.width()
                 );

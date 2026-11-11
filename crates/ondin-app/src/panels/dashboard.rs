@@ -3536,7 +3536,7 @@ impl OndinApp {
             if settings::modal_title(ui, "Delete project") {
                 cancel = true;
             }
-            ui.add_space(8.0);
+            settings::title_gap(ui);
             ui.label(
                 egui::RichText::new(format!("“{shown}” can't be brought back."))
                     .size(ui::CONTROL_PT)
@@ -3650,15 +3650,10 @@ impl OndinApp {
         let mut cancel = false;
         let modal = settings::card("move-to-project", ctx, |ui| {
             ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
-            if settings::modal_title(ui, "Move to project") {
+            if settings::modal_title_noted(ui, "Move to project", Some(&format!("“{name}”"))) {
                 cancel = true;
             }
-            ui.label(
-                egui::RichText::new(format!("“{name}”"))
-                    .size(ui::SMALL_PT)
-                    .color(theme::text::dim()),
-            );
-            ui.add_space(10.0);
+            settings::title_gap(ui);
             egui::ScrollArea::vertical()
                 .max_height(240.0)
                 .show(ui, |ui| {
@@ -3754,7 +3749,6 @@ impl OndinApp {
                 decision = Some(settings::Decision::Cancel);
             }
 
-            ui.add_space(settings::TITLE_GAP - settings::SECTION_AIR);
             settings::theme_section(ui, &mut d.theme);
             settings::section(ui, "Storage");
             field_label(ui, "Base folder");
@@ -4149,7 +4143,7 @@ impl OndinApp {
             ) {
                 decision = Some(false);
             }
-            ui.add_space(8.0);
+            settings::title_gap(ui);
             ui.label(
                 egui::RichText::new(if purge {
                     format!("“{name}” is deleted for good. This cannot be undone.")
@@ -4191,7 +4185,7 @@ impl OndinApp {
         let modal = settings::card("missing-file", ctx, |ui| {
             ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
             done |= settings::modal_title(ui, "File not found");
-            ui.add_space(8.0);
+            settings::title_gap(ui);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(format!(
@@ -4202,10 +4196,7 @@ impl OndinApp {
                 )
                 .wrap(),
             );
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done |= settings::text_button(ui, "Close", FieldButton::Primary).clicked();
-            });
+            done |= settings::footer_buttons(ui, &[("Close", FieldButton::Primary)]).is_some();
         });
         if done || modal.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             self.dash.missing = None;
@@ -5046,8 +5037,8 @@ mod tests {
         // The eyebrow starts at the content's left edge; the column is `set_width`'s.
         let column = ui::menu_inner_w(settings::CARD_W, settings::PAD);
         assert_eq!(
-            column, 338.0,
-            "376 across, less 18 of padding and a hairline"
+            column, 346.0,
+            "376 across, less 14 of padding and a hairline"
         );
         // Paint order separates the modal's own text from the empty state behind it.
         for cs in full.shapes.iter().skip(card_at + 1) {

@@ -201,7 +201,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, &format!("Make {name} local?")) {
                 decision = Some(false);
             }
-            ui.add_space(6.0);
+            crate::settings::title_gap(ui);
             ui.label(
                 egui::RichText::new(format!(
                     "{name} becomes a main in this document that you can edit. It stops \

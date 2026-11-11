@@ -1374,7 +1374,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, "Delete value") {
                 cancel = true;
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(body)

@@ -1517,7 +1517,7 @@ impl OndinApp {
             if settings::modal_title(ui, title) {
                 act = Some(CardAct::Close);
             }
-            ui.add_space(settings::TITLE_GAP - 8.0);
+            settings::title_gap(ui);
             match &mut card.step {
                 Step::Form => form(ui, card, &projects, &foot, &mut act),
                 Step::Loading { what, .. } => {
@@ -1724,32 +1724,33 @@ fn form(
         }
         _ => {}
     }
-    ui.add_space(settings::FOOTER_GAP - 6.0);
     let busy = matches!(card.field, Field::Reading { .. } | Field::Fetching { .. });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        if busy {
-            ui.add(
-                egui::Spinner::new()
-                    .size(ui::SMALL_PT)
+    settings::modal_foot(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if busy {
+                ui.add(
+                    egui::Spinner::new()
+                        .size(ui::SMALL_PT)
+                        .color(theme::text::faint()),
+                );
+            }
+            ui.label(
+                egui::RichText::new(foot)
+                    .size(settings::CAPTION_PT)
                     .color(theme::text::faint()),
             );
-        }
-        ui.label(
-            egui::RichText::new(foot)
-                .size(settings::CAPTION_PT)
-                .color(theme::text::faint()),
-        );
-        let state = if ready {
-            FieldButton::Primary
-        } else {
-            FieldButton::Disabled
-        };
-        match settings::footer_row(ui, &[("Cancel", FieldButton::Off), ("Import", state)]) {
-            Some(0) => *act = Some(CardAct::Close),
-            Some(_) => *act = Some(CardAct::Import),
-            None => {}
-        }
+            let state = if ready {
+                FieldButton::Primary
+            } else {
+                FieldButton::Disabled
+            };
+            match settings::footer_row(ui, &[("Cancel", FieldButton::Off), ("Import", state)]) {
+                Some(0) => *act = Some(CardAct::Close),
+                Some(_) => *act = Some(CardAct::Import),
+                None => {}
+            }
+        })
     });
 }
 
@@ -2362,23 +2363,24 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
     }
     ui.add_space(8.0);
     report(ui, &o.report);
-    ui.add_space(settings::FOOTER_GAP - 6.0);
-    ui.horizontal(|ui| {
-        if ui::icon_button(ui, icon::COPY, 26.0, 13.0, false, true)
-            .on_hover_text("Copy report")
-            .clicked()
-        {
-            *act = Some(CardAct::Copy);
-        }
-        let mut buttons = vec![("Done", FieldButton::Off)];
-        if o.open.is_some() {
-            buttons.push(("Open document", FieldButton::Primary));
-        }
-        match settings::footer_row(ui, &buttons) {
-            Some(0) => *act = Some(CardAct::Done),
-            Some(_) => *act = Some(CardAct::Open),
-            None => {}
-        }
+    settings::modal_foot(ui, |ui| {
+        ui.horizontal(|ui| {
+            if ui::icon_button(ui, icon::COPY, 26.0, 13.0, false, true)
+                .on_hover_text("Copy report")
+                .clicked()
+            {
+                *act = Some(CardAct::Copy);
+            }
+            let mut buttons = vec![("Done", FieldButton::Off)];
+            if o.open.is_some() {
+                buttons.push(("Open document", FieldButton::Primary));
+            }
+            match settings::footer_row(ui, &buttons) {
+                Some(0) => *act = Some(CardAct::Done),
+                Some(_) => *act = Some(CardAct::Open),
+                None => {}
+            }
+        })
     });
 }
 

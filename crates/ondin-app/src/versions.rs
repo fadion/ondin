@@ -925,9 +925,19 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
 
 /// The card's head: the glyph, the title, the document and its count dim beside it,
 /// how far the summaries have got while they are worked out, and the close button.
-/// Answers whether the close button was pressed.
+/// Answers whether the close button was pressed. A modal's title row, as tall
+/// as `settings::modal_title`'s.
 fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -> bool {
+    let (row, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), crate::settings::CANVAS_CARD_HEAD_H),
+        egui::Sense::hover(),
+    );
     let close = ui
+        .new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        )
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             ui.label(theme::icon_text(
@@ -1012,16 +1022,11 @@ fn key_chip(ui: &mut egui::Ui, key: &str) {
 /// (`pins`) — *Close* and *Save named version…*. Answers which was pressed:
 /// `Some(true)` to save a named version, `Some(false)` to close.
 fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
-    let rule = ui.cursor().min.y;
-    let full = ui.max_rect().x_range();
-    ui.painter().line_segment(
-        [
-            egui::pos2(full.min - crate::settings::PAD, rule),
-            egui::pos2(full.max + crate::settings::PAD, rule),
-        ],
-        egui::Stroke::new(1.0, color::text_a(20)),
-    );
-    ui.add_space(12.0);
+    crate::settings::modal_foot(ui, |ui| foot_row(ui, pins))
+}
+
+/// [`card_foot`]'s row: the hint, then the two buttons.
+fn foot_row(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         if pins {
@@ -1257,7 +1262,7 @@ impl OndinApp {
             if card_head(ui, &title, progress) {
                 close = true;
             }
-            ui.add_space(10.0);
+            crate::settings::title_gap(ui);
             egui::ScrollArea::vertical()
                 .max_height(LIST_MAX_H)
                 .auto_shrink([false, true])
@@ -1344,7 +1349,6 @@ impl OndinApp {
                     }
                     crate::ui::keep_focus_in_view(ui);
                 });
-            ui.add_space(12.0);
             match card_foot(ui, pins) {
                 Some(true) => save_named = true,
                 Some(false) => close = true,

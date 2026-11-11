@@ -6206,7 +6206,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, "Recover unsaved work") {
                 decision = Some(RecoverChoice::Later);
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             let name = crate::private::document(&pending.name, 0);
             // No time clause for an unreadable stamp: `0` or `now` would both mislead.
             ui.label(
@@ -6679,7 +6679,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, "Changed on disk") {
                 decision = Some(0);
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             let what = if dirty {
                 "Reload it to take that version and lose the changes made here, or overwrite it with this one."
             } else {
@@ -6833,7 +6833,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, "Unsaved changes") {
                 decision = Some(CloseChoice::Cancel);
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             let count = asked.len() + usize::from(scratch.is_some());
             let sentence = match (asked.first(), &scratch) {
                 (Some(one), None) if count == 1 => {

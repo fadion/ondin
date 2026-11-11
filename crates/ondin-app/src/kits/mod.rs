@@ -401,7 +401,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, &format!("Stop sharing {name} as a kit?")) {
                 decision = Some(false);
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             let again = if version == 0 {
                 "You can make it a kit again later.".to_string()
             } else {

@@ -34,8 +34,10 @@ use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 
 /// Width of the card, border and padding included.
 pub(crate) const CARD_W: f32 = 376.0;
-/// The card's inner margin.
-pub(crate) const PAD: f32 = 18.0;
+/// The card's side inset: a canvas card's, so a modal and Batch rename are one
+/// object. Its title and footer rows are full height, so the frame has no
+/// margin above or below.
+pub(crate) const PAD: f32 = CANVAS_CARD_PAD;
 /// Clear air above and below a section header — the same number both sides.
 ///
 /// Equal air is safe because the header carries a hairline, which reads as
@@ -45,12 +47,13 @@ pub(crate) const SECTION_AIR: f32 = 18.0;
 /// Height the section header's row is allocated: exactly its galley, since a
 /// `ui.horizontal` would add points above and below the label.
 const EYEBROW_H: f32 = 12.0;
-/// Under the modal's title, **in total**. [`section`] adds [`SECTION_AIR`] above its
-/// own header, so the caller subtracts that rather than adding 26 on top.
-pub(crate) const TITLE_GAP: f32 = 26.0;
-/// Above the footer's two buttons — the same standoff the title gets, and the whole
-/// of it, since nothing below adds air of its own.
-pub(crate) const FOOTER_GAP: f32 = TITLE_GAP;
+/// Under the modal's title row, **in total** ([`title_gap`]): where a canvas
+/// card's body starts. A card opening on a [`section`] adds nothing, the
+/// section's own [`SECTION_AIR`] standing in for it.
+pub(crate) const TITLE_GAP: f32 = PAD;
+/// Above the rule over the footer row, in total ([`modal_foot`]): where a canvas
+/// card's body ends.
+pub(crate) const FOOTER_GAP: f32 = 12.0;
 /// Between two rows inside one section: the inspector's row pitch.
 pub(crate) const ROW_GAP: f32 = ui::CARD_ROW_GAP;
 /// A switch row. [`crate::panels`]' feature lists use the same height, and these
@@ -65,9 +68,9 @@ const BUTTON_H: f32 = FIELD_H;
 const BUTTON_PAD_X: f32 = ui::LABEL_BUTTON_PAD_X;
 /// Between two controls on one row: the inspector's.
 pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
-/// The card's title and footer together, with their gaps: what the scrolling
-/// sections leave room for.
-const CHROME_H: f32 = 120.0;
+/// The card's title and footer rows together, with the footer's gap and rule:
+/// what the scrolling sections leave room for.
+const CHROME_H: f32 = CANVAS_CARD_HEAD_H + FOOTER_GAP + 1.0 + CANVAS_CARD_FOOT_H;
 /// The least the sections are given however short the window, so a few rows
 /// always show.
 const MIN_BODY_H: f32 = 200.0;
@@ -266,8 +269,7 @@ impl OndinApp {
             // ⚠️ The height is asked as a minimum: an `Area` hands a scroll area
             // last frame's size, so a maximum alone never grows back. The minimum
             // is the sections' own height as last measured, capped by the window.
-            let room =
-                (ctx.content_rect().height() - 2.0 * (CARD_EDGE + PAD) - CHROME_H).max(MIN_BODY_H);
+            let room = (ctx.content_rect().height() - 2.0 * CARD_EDGE - CHROME_H).max(MIN_BODY_H);
             let body_id = egui::Id::new("settings-body-h");
             let content = ui.data(|d| d.get_temp::<f32>(body_id)).unwrap_or(room);
             let body = egui::ScrollArea::vertical()
@@ -278,7 +280,6 @@ impl OndinApp {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     // --- appearance --------------------------------------------
-                    ui.add_space(TITLE_GAP - SECTION_AIR);
                     theme_section(ui, &mut draft.theme);
                     ui.add_space(ROW_GAP);
                     if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
@@ -887,14 +888,16 @@ pub(crate) fn card<R>(
         let out = body(ui);
         // The card's rect, frame included, so the window's own controls laid over
         // the backdrop keep clear of it (`chrome::above_modal`).
-        let rect = ui.min_rect().expand(PAD);
+        let rect = ui.min_rect().expand2(egui::vec2(PAD, 0.0));
         crate::chrome::note_card(ui.ctx(), rect);
         out
     })
 }
 
 /// The card every settings-shaped modal is drawn on: the ground, the hairline,
-/// the corner, the shadow, [`PAD`] of inner margin, and a half-black backdrop.
+/// the corner, the shadow, [`PAD`] of side inset, and a half-black backdrop.
+/// [`modal_title`] and the footer ([`footer_buttons`]) are full-height rows, as
+/// on a [`canvas_card`].
 ///
 /// Shared so every settings-shaped modal is the same object. The caller sets its
 /// own width: [`CARD_W`] is this file's, and a modal with a wider row may be wider.
@@ -920,7 +923,7 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         // Half black: a modal over a canvas must dim more than
         // egui's default 100/255, or a light document still reads as in focus.
         .backdrop_color(egui::Color32::from_black_alpha(128))
-        .frame(card_frame().inner_margin(egui::Margin::same(PAD as i8)))
+        .frame(card_frame().inner_margin(egui::Margin::symmetric(PAD as i8, 0)))
 }
 
 /// [`card_modal`]'s ground, hairline, corner and shadow, without its margin: also
@@ -948,21 +951,45 @@ fn card_centre_id() -> egui::Id {
     egui::Id::new("card-centre")
 }
 
-/// The title row every settings-shaped modal opens with: the name on the left, the
-/// ✕ against the right margin. Returns whether the ✕ was pressed.
+/// The title row every settings-shaped modal opens with, [`CANVAS_CARD_HEAD_H`]
+/// tall as a canvas card's: the name on the left, the ✕ against the right
+/// margin. Returns whether the ✕ was pressed. The caller follows it with
+/// [`title_gap`], or with a [`section`].
 ///
 /// The ✕ is [`ui::close_button`], as on every popover.
 pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     modal_title_noted(ui, title, None)
 }
 
+/// [`modal_title`] with a dim `note` after the name ([`title_row`]): the file
+/// a card acts on.
+pub(crate) fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CANVAS_CARD_HEAD_H),
+        egui::Sense::hover(),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    title_row(&mut child, title, note)
+}
+
+/// The air under [`modal_title`]'s row, [`TITLE_GAP`] in total whatever the
+/// card's `item_spacing`.
+pub(crate) fn title_gap(ui: &mut egui::Ui) {
+    ui.add_space((TITLE_GAP - ui.spacing().item_spacing.y).max(0.0));
+}
+
 /// The air between a title and its note: the theme's item spacing, fixed
 /// because a canvas card zeroes its own.
 const TITLE_NOTE_GAP: f32 = 7.0;
 
-/// [`modal_title`] with `note` after the name, dim and cut to the room the ✕
-/// leaves: what the card is about, such as the file an import reads.
-fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
+/// A title row's content: the name, then `note` dim and cut to the room the ✕
+/// leaves (what the card is about, such as the file an import reads), then
+/// the ✕.
+fn title_row(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
     ui.horizontal(|ui| {
         let title_font = egui::FontId::proportional(ui::TITLE_PT);
         let shown = ui.label(
@@ -1080,7 +1107,7 @@ pub(crate) fn card_head_noted(ui: &mut egui::Ui, w: f32, title: &str, note: Opti
             .max_rect(rect.shrink2(egui::vec2(CANVAS_CARD_PAD, 0.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    modal_title_noted(&mut child, title, note)
+    title_row(&mut child, title, note)
 }
 
 /// A canvas card's footer row, `w` wide: `note` faint on the left, `buttons` on
@@ -1162,13 +1189,44 @@ fn footer(ui: &mut egui::Ui, commit: Option<(&str, FieldButton)>) -> Option<Deci
     })
 }
 
-/// Every dialog's footer: `buttons` left to right, right-aligned after
-/// [`FOOTER_GAP`], the way out first and the commit last, so the commit is
-/// always rightmost. Answers the index pressed; a `Disabled` button answers
-/// nothing.
+/// Every dialog's footer: `buttons` left to right in a [`modal_foot`],
+/// right-aligned, the way out first and the commit last, so the commit is
+/// always rightmost. Answers the index pressed; a `Disabled` button
+/// answers nothing.
 pub(crate) fn footer_buttons(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)]) -> Option<usize> {
-    ui.add_space(FOOTER_GAP);
-    footer_row(ui, buttons)
+    modal_foot(ui, |ui| footer_row(ui, buttons))
+}
+
+/// A modal's footer, the card's last row as on a canvas card: [`FOOTER_GAP`]
+/// under the body whatever the card's `item_spacing`, a rule run out across
+/// [`PAD`] to the card's edges, then a [`CANVAS_CARD_FOOT_H`] row whose content
+/// `add` lays one [`BUTTON_H`] high, centred on it.
+pub(crate) fn modal_foot<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.add_space((FOOTER_GAP - ui.spacing().item_spacing.y).max(0.0));
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let (rule, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        let y = ui::hairline_in_column(rule.center().y, ui.ctx().pixels_per_point(), 1.0);
+        ui.painter().line_segment(
+            [
+                egui::pos2(rule.left() - PAD, y),
+                egui::pos2(rule.right() + PAD, y),
+            ],
+            egui::Stroke::new(1.0, color::divider()),
+        );
+        let (row, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), CANVAS_CARD_FOOT_H),
+            egui::Sense::hover(),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row.shrink2(egui::vec2(0.0, (CANVAS_CARD_FOOT_H - BUTTON_H) / 2.0)))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        add(&mut child)
+    })
+    .inner
 }
 
 /// [`footer_buttons`]' row without the gap above, for a popover, whose fields sit
@@ -1527,6 +1585,53 @@ mod tests {
             .collect()
     }
 
+    /// A modal's title and footer are a canvas card's rows: the title centred in
+    /// the 40pt row at the card's top, the buttons in the 48pt row at its bottom.
+    /// flip: `card_modal` with `Margin::same(PAD)` → fails the title at 35.
+    #[test]
+    fn the_title_and_footer_rows_are_a_canvas_cards() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_settings(&ctx);
+        let runs = galleys(&mut app, &ctx);
+        // The frame as painted: `Shape::Vec([shadow, rect])` for a shadowed one.
+        fn rects(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(r) => out.push(r.rect),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| rects(s, out)),
+                _ => {}
+            }
+        }
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            ..Default::default()
+        };
+        let full = ctx.run_ui(input, |ui| app.settings_ui(ui.ctx()));
+        let mut all = Vec::new();
+        full.shapes.iter().for_each(|cs| rects(&cs.shape, &mut all));
+        let card = all
+            .into_iter()
+            .filter(|r| (r.width() - CARD_W).abs() <= 3.0)
+            .max_by(|a, b| a.height().total_cmp(&b.height()))
+            .expect("the card's frame");
+        let mid = |t: &str| {
+            runs.iter()
+                .find(|(_, _, s)| s == t)
+                .map(|(p, s, _)| p.y + s.y / 2.0)
+                .unwrap_or_else(|| panic!("no {t:?}"))
+        };
+        let title = mid("Settings") - card.top();
+        let foot = card.bottom() - mid("Save changes");
+        assert!(
+            (title - CANVAS_CARD_HEAD_H / 2.0).abs() <= 1.5,
+            "the title's middle is {title:.1}pt under the card's top"
+        );
+        assert!(
+            (foot - CANVAS_CARD_FOOT_H / 2.0).abs() <= 1.5,
+            "the buttons' middle is {foot:.1}pt over the card's bottom"
+        );
+    }
+
     /// On a window shorter than the card, the sections scroll and the title and
     /// the footer stay on screen; on a tall one the whole card shows, its last
     /// row included.
@@ -1590,8 +1695,8 @@ mod tests {
             .fold(f32::INFINITY, f32::min);
         let column = ui::menu_inner_w(CARD_W, PAD);
         assert_eq!(
-            column, 338.0,
-            "376 across, less 18 of padding and a hairline"
+            column, 346.0,
+            "376 across, less 14 of padding and a hairline"
         );
 
         for (pos, size, text) in &runs {
@@ -1719,13 +1824,12 @@ mod tests {
     ///
     /// Measured on ink, not layout boxes: a 22pt `ui::switch_row` centres a 16pt
     /// track, so 3pt of row padding sits between header and ink; 4pt of slack
-    /// covers that. The first header is exempt because the card's title above it
-    /// stands off by `TITLE_GAP` on purpose, and gets its own assertion.
+    /// covers that. The first header is exempt because the card's title row
+    /// stands above it, and gets its own assertion.
     ///
     /// flip: a 15pt `add_space` over an 11pt `item_spacing`, with the eyebrow row
     /// left to take `interact_size.y` → the headers fail (*Layers* 32 above
-    /// against 20 below). Dropping the `TITLE_GAP - SECTION_AIR` line fails the
-    /// title assertion.
+    /// against 20 below).
     #[test]
     fn a_section_header_has_equal_air_above_and_below_it() {
         let ctx = egui::Context::default();

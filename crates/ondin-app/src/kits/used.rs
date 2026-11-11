@@ -126,7 +126,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, &title) {
                 act = Some(Act::Close);
             }
-            ui.add_space(8.0);
+            crate::settings::title_gap(ui);
             if used.is_empty() {
                 ui.label(
                     egui::RichText::new("This document uses no kit.")
@@ -255,7 +255,7 @@ impl OndinApp {
             if crate::settings::modal_title(ui, &format!("Make all {} components local?", u.name)) {
                 decision = Some(false);
             }
-            ui.add_space(6.0);
+            crate::settings::title_gap(ui);
             ui.label(
                 egui::RichText::new(format!(
                     "{} become{} mains in this document that you can edit. They \

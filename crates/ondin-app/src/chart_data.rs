@@ -1537,7 +1537,7 @@ mod tests {
     }
 
     /// The chart's name after *Chart data* sits on the title's baseline.
-    /// flip: `modal_title_noted` laying the note out as a centred label → fails
+    /// flip: `settings::title_row` laying the note out as a centred label → fails
     /// at "one baseline".
     #[test]
     fn the_title_note_sits_on_the_titles_baseline() {

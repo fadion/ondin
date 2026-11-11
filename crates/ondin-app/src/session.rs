@@ -693,6 +693,24 @@ impl InkLog {
             }
             Some(kept)
         });
+        // Derived state settled after an edit (a chart's regeneration) records
+        // under the edit's revisions, and joins its record: `between` reads one
+        // record per step.
+        if let Some(last) = self.0.back_mut().filter(|l| (l.from, l.to) == (from, to)) {
+            for top in tops {
+                if !last.tops.contains(&top) {
+                    last.tops.push(top);
+                }
+            }
+            last.was = match (last.was.take(), was) {
+                (Some(mut a), Some(b)) if a.len() + b.len() <= Self::BOXES => {
+                    a.extend(b);
+                    Some(a)
+                }
+                _ => None,
+            };
+            return;
+        }
         if self.0.len() == Self::KEPT {
             self.0.pop_front();
         }

@@ -26110,6 +26110,68 @@ mod redraw_tests {
         draw(&mut canvas, &session, &camera, px);
         assert!(canvas.patched().is_none(), "steps past what the log keeps");
     }
+
+    /// A chart edit redraws the parts its regeneration writes: every pixel that
+    /// changed lies in the patch.
+    /// flip: `InkLog::record` pushing the regeneration's record apart → fails at
+    /// "changed outside the patch".
+    #[test]
+    fn a_chart_edit_patches_its_regenerated_parts() {
+        use ondin_core::chart::{Chart, ChartKind};
+        let camera = Camera::default();
+        let px = (400, 300);
+        let (mut session, _) = edit_fixture();
+        let id = session.ids.mint();
+        let page = session.page;
+        let index = session.doc.get(page).map_or(0, |n| n.children().len());
+        let vp = camera.viewport(px);
+        let tx = ondin_core::edit::create_chart(
+            id,
+            page,
+            index,
+            Affine::IDENTITY,
+            ondin_core::kurbo::Point::new(vp.view.x0 + 20.0, vp.view.y0 + 20.0),
+            ondin_core::kurbo::Point::new(vp.view.x0 + 300.0, vp.view.y0 + 220.0),
+            Color::WHITE,
+            Chart::sample(ChartKind::Column),
+        );
+        session.try_commit(tx).expect("a chart");
+        let mut canvas = CanvasRenderer::headless();
+        draw(&mut canvas, &session, &camera, px);
+        let mut bar = session
+            .doc
+            .get(id)
+            .and_then(|n| n.chart())
+            .cloned()
+            .unwrap();
+        bar.kind = ChartKind::Bar;
+        let before = page_pixels(&session, &vp);
+        session
+            .try_commit(Transaction(vec![Operation::SetChart {
+                id,
+                chart: Some(Box::new(bar)),
+            }]))
+            .expect("a bar chart");
+        draw(&mut canvas, &session, &camera, px);
+        let after = page_pixels(&session, &vp);
+        assert!(before != after, "fixture: the edit changed the page");
+        // Drawn whole is right too: a remade part with no ink box leaves the
+        // edit's old ink unbounded.
+        let regions = canvas.patched().unwrap_or_default();
+        let whole = canvas.patched().is_none();
+        let inside = |x: u32, y: u32| {
+            regions.iter().any(|r| {
+                (r.at.0..r.at.0 + r.size.0).contains(&x) && (r.at.1..r.at.1 + r.size.1).contains(&y)
+            })
+        };
+        for (i, (p, q)) in before.chunks(4).zip(after.chunks(4)).enumerate() {
+            let (x, y) = (i as u32 % px.0, i as u32 / px.0);
+            assert!(
+                whole || p == q || inside(x, y),
+                "({x}, {y}) changed outside the patch"
+            );
+        }
+    }
 }
 
 /// The hover outline under a floating area.

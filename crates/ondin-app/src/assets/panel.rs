@@ -5,8 +5,13 @@
 //! this — and opening one closes the others. Two tabs on a segmented control,
 //! then a search box. A click places at the view's centre and selects; a drag
 //! drops at the pointer. With shapes or frames selected, a photo's click fills
-//! them instead, and Alt-click places. Every insert is one undo step and carries
-//! its credit (`ondin_core::credit`).
+//! them instead, and Alt-click places. Every insert is one undo step, and a
+//! remote icon's or photo's carries its credit (`ondin_core::credit`).
+//!
+//! The Icons tab also offers the library's icon packs, kits marked *Show in
+//! Icons tab* and switched on in Settings: their published mains, read through
+//! the insert picker's kit shelf and placed as instances of them
+//! (`OndinApp::ask_icon_place`).
 
 use super::photos::{Orientation, Page, Photo, PhotoError, PhotoSize, SERVICES, ServiceSpec};
 use super::sets::{self, IconSet, SETS, SetSpec};
@@ -56,30 +61,139 @@ const EMPTY_AIR: f32 = 40.0;
 /// which has no fill of its own and reads as black.
 const ICON_INK: &str = "#000000";
 
-/// One icon of the results: its set and where it sits there.
+/// One icon of the results: a remote set's, by where it sits there, or a kit's
+/// published main (a set's by its default variant, as `kit::insert` places it).
 #[derive(Clone)]
-struct Hit {
-    spec: &'static SetSpec,
-    set: Arc<IconSet>,
-    index: usize,
+enum Hit {
+    Set {
+        spec: &'static SetSpec,
+        set: Arc<IconSet>,
+        index: usize,
+    },
+    Kit {
+        pack: Arc<KitPack>,
+        top: NodeId,
+    },
 }
 
 impl Hit {
-    fn icon(&self) -> &sets::Icon {
-        &self.set.icons[self.index]
+    fn key(&self) -> String {
+        match self {
+            Hit::Set { spec, set, index } => {
+                let i = &set.icons[*index];
+                format!("{}/{}/{}", spec.key, i.name, i.variant)
+            }
+            Hit::Kit { pack, top } => {
+                format!("{}/{}", sets::pack_key(&pack.entry.id), top.to_wire())
+            }
+        }
     }
 
-    fn key(&self) -> String {
-        let i = self.icon();
-        format!("{}/{}/{}", self.spec.key, i.name, i.variant)
+    /// The name the tile's card and the status line show.
+    fn name(&self) -> String {
+        match self {
+            Hit::Set { set, index, .. } => set.icons[*index].name.clone(),
+            Hit::Kit { pack, top } => {
+                crate::private::layer(pack.published.document(), *top).into_owned()
+            }
+        }
     }
+}
+
+/// A source the Icons tab offers: a remote set or a library kit marked *Show in
+/// Icons tab*, switched on in Settings.
+#[derive(Clone)]
+enum Choice {
+    Set(&'static SetSpec),
+    Kit(crate::kits::index::KitEntry),
+}
+
+impl Choice {
+    /// The key Settings and the set dropdown remember it by.
+    fn key(&self) -> String {
+        match self {
+            Choice::Set(s) => s.key.to_string(),
+            Choice::Kit(k) => sets::pack_key(&k.id),
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Choice::Set(s) => s.name,
+            Choice::Kit(k) => &k.name,
+        }
+    }
+}
+
+/// A kit's published state, read for the Icons tab.
+struct KitPack {
+    entry: crate::kits::index::KitEntry,
+    /// The version the state was read at, which a placement records.
+    version: u32,
+    published: Arc<ondin_core::kit::Published>,
+    /// The size field's default: the width most of its icons share.
+    grid: f64,
+}
+
+impl KitPack {
+    fn new(
+        entry: crate::kits::index::KitEntry,
+        version: u32,
+        published: Arc<ondin_core::kit::Published>,
+    ) -> Self {
+        let grid = kit_grid(&published).unwrap_or(24.0);
+        KitPack {
+            entry,
+            version,
+            published,
+            grid,
+        }
+    }
+}
+
+/// The width most of `published`'s icons share, each set's by its default
+/// variant: the size an icon of the kit is placed at until the field is set.
+fn kit_grid(published: &ondin_core::kit::Published) -> Option<f64> {
+    let doc = published.document();
+    let mut widths: Vec<i64> = published
+        .tops()
+        .iter()
+        .filter_map(|&top| {
+            let shown = crate::kits::index::tile_subject(doc, top);
+            match doc.get(shown)?.kind() {
+                NodeKind::Artboard { size, .. } => Some(size.width.round() as i64),
+                _ => None,
+            }
+        })
+        .filter(|w| *w > 0)
+        .collect();
+    widths.sort_unstable();
+    // The longest run of one width; the smaller width wins a tie.
+    let mut best: Option<(usize, i64)> = None;
+    for run in widths.chunk_by(|a, b| a == b) {
+        if best.is_none_or(|(n, _)| run.len() > n) {
+            best = Some((run.len(), run[0]));
+        }
+    }
+    best.map(|(_, w)| w as f64)
+}
+
+/// A kit icon's name as it is searched: lower case, its words joined by hyphens
+/// as Iconify's names are, so `sets::rank_name` ranks it as any icon.
+fn search_name(name: &str) -> String {
+    name.to_lowercase()
+        .split(|c: char| c.is_whitespace() || matches!(c, '/' | '_' | '-'))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// What the results were worked out for.
 #[derive(Clone, PartialEq)]
 struct HitsKey {
     query: String,
-    sets: Vec<&'static str>,
+    /// Each source shown, a kit's with the version its state was read at.
+    sets: Vec<String>,
     variant: Option<usize>,
 }
 
@@ -122,6 +236,8 @@ struct Out<'a> {
     /// A photo is being fetched for an insert.
     fetching: bool,
     assets: &'a mut super::Assets,
+    /// The kits' published states and tile pictures, the insert picker's.
+    shelf: &'a mut crate::kits::index::KitShelf,
     /// The panel's choices as this frame left them, saved when they changed.
     prefs: crate::prefs::AssetPrefs,
     /// A photo search to send after the frame.
@@ -177,15 +293,17 @@ fn services_on(on: &[String]) -> Vec<&'static ServiceSpec> {
 }
 
 /// The icons of `sets` answering `query` in `variant` (each set's default under
-/// *All sets*), best first: by rank, then name, then set order.
+/// *All sets*), then those of `kits`, each main once by its default variant,
+/// best first: by rank, then name, then source order.
 fn find_icons(
     query: &str,
     sets: &[(&'static SetSpec, Arc<IconSet>)],
+    kits: &[Arc<KitPack>],
     variant: Option<usize>,
 ) -> Vec<Hit> {
     let query = query.trim().to_lowercase();
     let words: Vec<&str> = query.split([' ', '-']).filter(|w| !w.is_empty()).collect();
-    let mut ranked: Vec<(u8, usize, Hit)> = Vec::new();
+    let mut ranked: Vec<(u8, String, usize, Hit)> = Vec::new();
     for (order, (spec, set)) in sets.iter().enumerate() {
         let v = variant.unwrap_or(0);
         for (index, icon) in set.icons.iter().enumerate() {
@@ -197,24 +315,39 @@ fn find_icons(
                 false => sets::rank(icon, &query, &words),
             };
             if let Some(r) = rank {
-                ranked.push((
-                    r,
-                    order,
-                    Hit {
-                        spec,
-                        set: Arc::clone(set),
-                        index,
-                    },
-                ));
+                let hit = Hit::Set {
+                    spec,
+                    set: Arc::clone(set),
+                    index,
+                };
+                ranked.push((r, icon.name.clone(), order, hit));
+            }
+        }
+    }
+    for (order, pack) in kits.iter().enumerate() {
+        let doc = pack.published.document();
+        for &top in pack.published.tops() {
+            let Some(node) = doc.get(top) else { continue };
+            let name = search_name(node.name());
+            let rank = match words.is_empty() {
+                true => Some(0),
+                false => sets::rank_name(&name, &[], &query, &words),
+            };
+            if let Some(r) = rank {
+                let hit = Hit::Kit {
+                    pack: Arc::clone(pack),
+                    top,
+                };
+                ranked.push((r, name, sets.len() + order, hit));
             }
         }
     }
     ranked.sort_by(|a, b| {
         a.0.cmp(&b.0)
-            .then_with(|| a.2.icon().name.cmp(&b.2.icon().name))
-            .then(a.1.cmp(&b.1))
+            .then_with(|| a.1.cmp(&b.1))
+            .then(a.2.cmp(&b.2))
     });
-    ranked.into_iter().map(|(_, _, h)| h).collect()
+    ranked.into_iter().map(|(_, _, _, h)| h).collect()
 }
 
 /// *Phosphor, Lucide or Font Awesome Free*.
@@ -382,6 +515,17 @@ impl OndinApp {
         }
         let prefs = self.prefs.assets.clone();
         let on_sets = sets_on(&prefs.icon_sets);
+        let own = self.session.doc.meta().id.clone();
+        let on_packs: Vec<crate::kits::index::KitEntry> =
+            sets::icon_packs(&self.library, own.as_deref())
+                .into_iter()
+                .filter(|k| prefs.icon_sets.contains(&sets::pack_key(&k.id)))
+                .collect();
+        let on: Vec<Choice> = on_sets
+            .iter()
+            .map(|s| Choice::Set(s))
+            .chain(on_packs.iter().cloned().map(Choice::Kit))
+            .collect();
         let on_services = services_on(&prefs.photo_services);
         let photos_tab = prefs.photos_tab;
         let targets = self.photo_targets();
@@ -399,33 +543,60 @@ impl OndinApp {
         let anchor = self.rail_popup_anchor(self.asset_button);
         let height = crate::kits::picker::panel_height(anchor.y, self.canvas_rect.top());
 
-        // The chosen set, its variant and the size.
-        let set = on_sets.iter().copied().find(|s| s.key == prefs.set);
-        let shown_sets: Vec<&'static SetSpec> = match set {
-            Some(s) => vec![s],
-            None => on_sets.clone(),
+        // The chosen source, its variant and the size.
+        let chosen = on.iter().find(|c| c.key() == prefs.set).cloned();
+        let shown: Vec<Choice> = match &chosen {
+            Some(c) => vec![c.clone()],
+            None => on.clone(),
         };
-        let variant = set.map(|s| {
-            prefs
-                .variants
-                .get(s.key)
-                .and_then(|label| s.variants.iter().position(|v| v.label == label))
-                .unwrap_or(0)
-        });
+        // A kit shows each icon by its default variant.
+        let variant = match &chosen {
+            Some(Choice::Set(s)) => Some(
+                prefs
+                    .variants
+                    .get(s.key)
+                    .and_then(|label| s.variants.iter().position(|v| v.label == label))
+                    .unwrap_or(0),
+            ),
+            _ => None,
+        };
         let mut ready: Vec<(&'static SetSpec, Arc<IconSet>)> = Vec::new();
+        let mut kits: Vec<Arc<KitPack>> = Vec::new();
         let mut loading: Vec<(&'static SetSpec, u64, Option<u64>)> = Vec::new();
-        let mut failed: Vec<&'static SetSpec> = Vec::new();
+        let mut reading: Vec<String> = Vec::new();
+        let mut failed: Vec<String> = Vec::new();
         if !photos_tab {
-            for spec in &shown_sets {
-                match self.assets.set(spec) {
-                    SetState::Ready(s) => ready.push((spec, Arc::clone(s))),
-                    SetState::Loading { done, total } => loading.push((spec, *done, *total)),
-                    SetState::Failed => failed.push(spec),
+            for c in &shown {
+                match c {
+                    Choice::Set(spec) => match self.assets.set(spec) {
+                        SetState::Ready(s) => ready.push((spec, Arc::clone(s))),
+                        SetState::Loading { done, total } => loading.push((spec, *done, *total)),
+                        SetState::Failed => failed.push(spec.name.to_string()),
+                    },
+                    Choice::Kit(k) => {
+                        self.kit_shelf.ask(k);
+                        match self.kit_shelf.load(&k.id) {
+                            Some(crate::kits::index::Load::Ready(Some(p))) => {
+                                let version =
+                                    self.kit_shelf.read_version(&k.id).unwrap_or(k.version);
+                                kits.push(Arc::new(KitPack::new(k.clone(), version, p.clone())));
+                            }
+                            Some(crate::kits::index::Load::Ready(None)) => {}
+                            Some(crate::kits::index::Load::Failed) => failed.push(k.name.clone()),
+                            Some(crate::kits::index::Load::Pending) | None => {
+                                reading.push(k.name.clone())
+                            }
+                        }
+                    }
                 }
             }
         }
-        let grid = match set.and_then(|s| ready.iter().find(|(r, _)| r.key == s.key)) {
-            Some((_, s)) => s.grid_of(variant.unwrap_or(0)),
+        let grid = match &chosen {
+            Some(Choice::Set(s)) => ready
+                .iter()
+                .find(|(r, _)| r.key == s.key)
+                .map_or(24.0, |(_, set)| set.grid_of(variant.unwrap_or(0))),
+            Some(Choice::Kit(_)) => kits.first().map_or(24.0, |p| p.grid),
             None => 24.0,
         };
         let size = prefs.icon_size.unwrap_or(grid);
@@ -446,6 +617,7 @@ impl OndinApp {
             cancelled: self.gesture_cancelled,
             fetching: self.assets.fetch.is_some(),
             assets: &mut self.assets,
+            shelf: &mut self.kit_shelf,
             prefs: prefs.clone(),
             search: None,
         };
@@ -454,11 +626,18 @@ impl OndinApp {
         // The icon results, worked out again only when what they answer changed.
         let hits_key = HitsKey {
             query: panel.query.trim().to_lowercase(),
-            sets: ready.iter().map(|(s, _)| s.key).collect(),
+            sets: ready
+                .iter()
+                .map(|(s, _)| s.key.to_string())
+                .chain(
+                    kits.iter()
+                        .map(|p| format!("{}@{}", sets::pack_key(&p.entry.id), p.version)),
+                )
+                .collect(),
             variant,
         };
         if panel.hits.as_ref().is_none_or(|(k, _)| *k != hits_key) && !photos_tab {
-            let hits = find_icons(&hits_key.query, &ready, variant);
+            let hits = find_icons(&hits_key.query, &ready, &kits, variant);
             if panel
                 .hits
                 .as_ref()
@@ -502,12 +681,13 @@ impl OndinApp {
             match photos_tab {
                 false => {
                     let view = IconsView {
-                        on: &on_sets,
-                        set,
+                        on: &on,
+                        set: chosen.as_ref(),
                         variant,
                         size,
-                        ready: &ready,
+                        ready: ready.len() + kits.len(),
                         loading: &loading,
+                        reading: &reading,
                         failed: &failed,
                     };
                     icons_body(ui, panel, &view, bottom, now, &mut out);
@@ -587,6 +767,8 @@ impl OndinApp {
                 for s in &on_sets {
                     self.assets.retry_set(s.key);
                 }
+                // A kit whose read failed is forgotten, so the next frame asks again.
+                self.kit_shelf.refresh(&on_packs);
             }
             Some(Act::RetryPhotos) => {
                 if let Some(p) = self.asset_panel.as_mut() {
@@ -610,7 +792,19 @@ impl OndinApp {
                     None => None,
                 };
                 match item {
-                    Item::Icon(hit) => self.insert_icon(&hit, size, world),
+                    Item::Icon(Hit::Set { spec, set, index }) => {
+                        self.insert_icon(spec, &set.icons[index], size, world)
+                    }
+                    Item::Icon(Hit::Kit { pack, top }) => {
+                        let source = crate::kits::picker::Source::Kit {
+                            id: pack.entry.id.clone(),
+                            version: pack.version,
+                            published: Arc::clone(&pack.published),
+                            top,
+                        };
+                        let centre = world.unwrap_or_else(|| self.viewport_centre());
+                        self.ask_icon_place(source, centre, world.is_some(), size);
+                    }
                     Item::Photo(photo) => {
                         self.fetch_asset_photos(vec![*photo], PhotoIntent::Place { at: world })
                     }
@@ -658,10 +852,10 @@ impl OndinApp {
             egui::Id::new("assets-ghost"),
         ));
         let (tex, tint) = match item {
-            Item::Icon(h) => {
+            Item::Icon(Hit::Set { set, index, .. }) => {
                 let px = (ICON_PT * ctx.pixels_per_point()).round();
-                let key = format!("{}@{px}", h.key());
-                let icon = h.icon().clone();
+                let key = format!("{}@{px}", item.key());
+                let icon = set.icons[*index].clone();
                 (
                     self.assets
                         .icon_tile(key, || icon.svg(f64::from(px), "#ffffff"))
@@ -669,23 +863,29 @@ impl OndinApp {
                     theme::text::strong(),
                 )
             }
+            // A kit's picture in its own colours, as the insert picker shows it.
+            Item::Icon(Hit::Kit { pack, top }) => (
+                self.kit_shelf.tile(ctx, &pack.entry.id, *top),
+                egui::Color32::WHITE,
+            ),
             Item::Photo(p) => (self.assets.thumb(&p.thumb).cloned(), egui::Color32::WHITE),
         };
         if let Some(t) = tex {
             let size = t.size_vec2() / ctx.pixels_per_point();
             let size = match item {
                 Item::Photo(_) => size * (120.0 / size.x.max(1.0)),
-                Item::Icon(_) => size,
+                Item::Icon(Hit::Kit { .. }) => fit(size, ICON_PT),
+                Item::Icon(Hit::Set { .. }) => size,
             };
             let r = egui::Rect::from_center_size(at, size);
             painter.image(t.id(), r, crate::thumbs::FULL_UV, tint.gamma_multiply(0.7));
         }
     }
 
-    /// Place `hit` as a group of vectors named after it, `size` points across,
-    /// centred on `at` (world) or mid-view, and select it: *Insert icon*.
-    fn insert_icon(&mut self, hit: &Hit, size: f64, at: Option<Point>) {
-        let icon = hit.icon();
+    /// Place `icon` of the set `spec` as a group of vectors named after it,
+    /// `size` points across, centred on `at` (world) or mid-view, and select it:
+    /// *Insert icon*.
+    fn insert_icon(&mut self, spec: &SetSpec, icon: &sets::Icon, size: f64, at: Option<Point>) {
         let svg = icon.svg(size, ICON_INK);
         let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
         let parent = ids.mint();
@@ -699,7 +899,7 @@ impl OndinApp {
         };
         out.tx.0.push(Operation::SetCredit {
             id: out.root,
-            credit: Some(Box::new(icon_credit(hit.spec, &today()))),
+            credit: Some(Box::new(icon_credit(spec, &today()))),
         });
         self.session.name_step("Insert icon", icon::ASSETS);
         let at = at.unwrap_or_else(|| self.viewport_centre());
@@ -889,8 +1089,8 @@ fn search_field(ui: &mut egui::Ui, panel: &mut Panel, hint: &str, now: f64) {
 /// The set and variant dropdowns and the size field.
 fn icon_controls(
     ui: &mut egui::Ui,
-    on: &[&'static SetSpec],
-    set: Option<&'static SetSpec>,
+    on: &[Choice],
+    set: Option<&Choice>,
     variant: Option<usize>,
     size: f64,
     prefs: &mut crate::prefs::AssetPrefs,
@@ -900,22 +1100,27 @@ fn icon_controls(
         ui.spacing_mut().interact_size.y = ui::CONTROL_H;
         ui.spacing_mut().button_padding.y = 0.0;
         let set_w = ui.available_width() - VARIANT_W - SIZE_W - 2.0 * ui::CARD_COL_GAP;
-        let mut picked = set.map(|s| s.key);
+        let was = set.map(Choice::key);
+        let mut picked = was.clone();
         egui::ComboBox::from_id_salt("assets-set")
             .icon(ui::combo_chevron)
             .width(set_w)
-            .selected_text(ui::combo_text(set.map_or("All sets", |s| s.name)))
+            .selected_text(ui::combo_text(set.map_or("All sets", Choice::name)))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
                 ui.selectable_value(&mut picked, None, "All sets");
-                for s in on {
-                    ui.selectable_value(&mut picked, Some(s.key), s.name);
+                for c in on {
+                    ui.selectable_value(&mut picked, Some(c.key()), c.name());
                 }
             });
-        if picked != set.map(|s| s.key) {
-            prefs.set = picked.unwrap_or_default().to_string();
+        if picked != was {
+            prefs.set = picked.unwrap_or_default();
         }
-        match (set, variant) {
+        let remote = match set {
+            Some(Choice::Set(s)) => Some(*s),
+            _ => None,
+        };
+        match (remote, variant) {
             (Some(s), Some(v)) if s.variants.len() > 1 => {
                 let mut chosen = v;
                 // In a child no wider than the dropdown, which its truncation reads.
@@ -938,11 +1143,18 @@ fn icon_controls(
                         .insert(s.key.to_string(), s.variants[chosen].label.to_string());
                 }
             }
-            (set, _) => {
-                let label = set.map_or("Variant", |s| s.variants[0].label);
-                let tip = match set {
-                    Some(s) => format!("{} has one style", s.name),
-                    None => "Pick one set to choose its variant".to_string(),
+            (remote, _) => {
+                let label = match set {
+                    Some(Choice::Set(s)) => s.variants[0].label,
+                    Some(Choice::Kit(_)) => "Default",
+                    None => "Variant",
+                };
+                let tip = match (set, remote) {
+                    (_, Some(s)) => format!("{} has one style", s.name),
+                    (Some(Choice::Kit(k)), _) => {
+                        format!("{} shows each icon by its default variant", k.name)
+                    }
+                    _ => "Pick one set to choose its variant".to_string(),
                 };
                 ui.add_enabled_ui(false, |ui| {
                     egui::ComboBox::from_id_salt("assets-variant-off")
@@ -1060,6 +1272,12 @@ fn progress_row(ui: &mut egui::Ui, name: &str, done: u64, total: Option<u64>) {
         _ if done > 0 => format!("Downloading {name} · {} MB", mb(done)),
         _ => format!("Downloading {name}…"),
     };
+    caption_row(ui, &text);
+}
+
+/// A line over the grid saying what is still on its way: a set downloading, a
+/// kit being read.
+fn caption_row(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .size(ui::CAPTION_PT)
@@ -1095,13 +1313,17 @@ fn note(ui: &mut egui::Ui, text: &str) {
 
 /// What the Icons tab shows this frame.
 struct IconsView<'a> {
-    on: &'a [&'static SetSpec],
-    set: Option<&'static SetSpec>,
+    on: &'a [Choice],
+    set: Option<&'a Choice>,
     variant: Option<usize>,
     size: f64,
-    ready: &'a [(&'static SetSpec, Arc<IconSet>)],
+    /// How many of the shown sources are ready.
+    ready: usize,
     loading: &'a [(&'static SetSpec, u64, Option<u64>)],
-    failed: &'a [&'static SetSpec],
+    /// The kits whose published state is still being read.
+    reading: &'a [String],
+    /// The names of the sources that could not be had.
+    failed: &'a [String],
 }
 
 /// The Icons tab under the tabs: the search, the set, variant and size, any set
@@ -1141,11 +1363,15 @@ fn icons_body(
     for (spec, done, total) in view.loading {
         progress_row(ui, spec.name, *done, *total);
     }
+    for name in view.reading {
+        caption_row(ui, &format!("Reading {name}…"));
+    }
+    let waiting = !view.loading.is_empty() || !view.reading.is_empty();
     if !hits.is_empty() {
         let list_h = bottom - ui.cursor().top() - FOOT_H - ROW_GAP;
         icon_grid(ui, panel, &hits, list_h, out);
-    } else if !view.failed.is_empty() && view.loading.is_empty() && view.ready.is_empty() {
-        let names: Vec<&str> = view.failed.iter().map(|s| s.name).collect();
+    } else if !view.failed.is_empty() && !waiting && view.ready == 0 {
+        let names: Vec<&str> = view.failed.iter().map(String::as_str).collect();
         let head = format!("Can't reach {}", or_list(&names));
         let words = (
             head.as_str(),
@@ -1159,11 +1385,15 @@ fn icons_body(
             out,
             Act::RetrySets,
         );
-    } else if view.loading.is_empty() {
-        note(ui, &format!("No icons match “{}”", panel.query.trim()));
+    } else if !waiting {
+        match panel.query.trim() {
+            "" => note(ui, "No icons published yet"),
+            q => note(ui, &format!("No icons match “{q}”")),
+        }
     }
     let left = match view.set {
-        Some(s) => format!("{} · {}", s.name, s.licence),
+        Some(Choice::Set(s)) => format!("{} · {}", s.name, s.licence),
+        Some(Choice::Kit(k)) => format!("{} · v{}", k.name, k.version),
         None => format!("All sets · {}", ui::count(view.on.len(), "set")),
     };
     foot(ui, bottom, &left, &counted(hits.len() as u64, "icon"));
@@ -1364,18 +1594,26 @@ fn icon_grid(ui: &mut egui::Ui, panel: &mut Panel, hits: &[Hit], height: f32, ou
                         false,
                         resp.hovered() || resp.dragged(),
                     );
-                    let key = format!("{}@{px}", hit.key());
-                    let icon = hit.icon().clone();
-                    let svg = || icon.svg(f64::from(px), "#ffffff");
-                    if let Some(t) = out.assets.icon_tile(key, svg) {
-                        let size = t.size_vec2() / ppp;
+                    let (tex, size, tint) = match hit {
+                        Hit::Set { set, index, .. } => {
+                            let key = format!("{}@{px}", hit.key());
+                            let icon = &set.icons[*index];
+                            let svg = || icon.svg(f64::from(px), "#ffffff");
+                            let t = out.assets.icon_tile(key, svg).cloned();
+                            let size = t.as_ref().map(|t| t.size_vec2() / ppp);
+                            (t, size, theme::text::strong())
+                        }
+                        // A kit's picture in its own colours, as the insert
+                        // picker shows it, fitted to the icon's size.
+                        Hit::Kit { pack, top } => {
+                            let t = out.shelf.tile(ui.ctx(), &pack.entry.id, *top);
+                            let size = t.as_ref().map(|t| fit(t.size_vec2(), ICON_PT));
+                            (t, size, egui::Color32::WHITE)
+                        }
+                    };
+                    if let (Some(t), Some(size)) = (tex, size) {
                         let r = egui::Rect::from_center_size(cell.center(), size);
-                        ui.painter().image(
-                            t.id(),
-                            r,
-                            crate::thumbs::FULL_UV,
-                            theme::text::strong(),
-                        );
+                        ui.painter().image(t.id(), r, crate::thumbs::FULL_UV, tint);
                     }
                 }
                 ui.add_space(TILE_GAP);
@@ -1388,6 +1626,11 @@ fn icon_grid(ui: &mut egui::Ui, panel: &mut Panel, hits: &[Hit], height: f32, ou
         panel.shown += PAGE;
         ui.ctx().request_repaint();
     }
+}
+
+/// `size` scaled to fit a square `side` points across, its aspect kept.
+fn fit(size: egui::Vec2, side: f32) -> egui::Vec2 {
+    size * (side / size.x.max(size.y).max(1.0))
 }
 
 /// The photos in two columns, each tile at its photo's own aspect; answers
@@ -1529,23 +1772,37 @@ fn hover_card(
         };
         match item {
             Item::Icon(h) => {
-                let icon = h.icon();
                 ui.label(
-                    egui::RichText::new(&icon.name)
+                    egui::RichText::new(h.name())
                         .size(ui::CONTROL_PT)
                         .color(theme::text::strong()),
                 );
-                line(
-                    ui,
-                    &format!(
-                        "{} · {} · {icon_size:.0} px",
-                        h.spec.name, h.spec.variants[icon.variant].label
-                    ),
-                );
-                if !icon.aliases.is_empty() {
-                    line(ui, &format!("Also: {}", icon.aliases.join(", ")));
+                match h {
+                    Hit::Set { spec, set, index } => {
+                        let icon = &set.icons[*index];
+                        line(
+                            ui,
+                            &format!(
+                                "{} · {} · {icon_size:.0} px",
+                                spec.name, spec.variants[icon.variant].label
+                            ),
+                        );
+                        if !icon.aliases.is_empty() {
+                            line(ui, &format!("Also: {}", icon.aliases.join(", ")));
+                        }
+                        line(ui, &format!("Licence: {}", spec.licence));
+                    }
+                    Hit::Kit { pack, .. } => {
+                        line(
+                            ui,
+                            &format!(
+                                "{} · v{} · {icon_size:.0} px",
+                                pack.entry.name, pack.version
+                            ),
+                        );
+                        line(ui, "An instance of the kit's component");
+                    }
                 }
-                line(ui, &format!("Licence: {}", h.spec.licence));
                 line(ui, "Click to place · drag to drop");
             }
             Item::Photo(p) => {
@@ -1607,9 +1864,12 @@ mod tests {
             (b, set_with(&["arrow", "car"])),
         ];
         let names = |q: &str| -> Vec<String> {
-            find_icons(q, &sets, None)
+            find_icons(q, &sets, &[], None)
                 .iter()
-                .map(|h| format!("{}:{}", h.spec.key, h.icon().name))
+                .map(|h| match h {
+                    Hit::Set { spec, .. } => format!("{}:{}", spec.key, h.name()),
+                    Hit::Kit { .. } => unreachable!("no kits here"),
+                })
                 .collect()
         };
         assert_eq!(
@@ -1723,12 +1983,7 @@ mod tests {
             grid: 32.0,
             variant_grids: Vec::new(),
         });
-        let hit = Hit {
-            spec,
-            set,
-            index: 0,
-        };
-        app.insert_icon(&hit, 24.0, None);
+        app.insert_icon(spec, &set.icons[0], 24.0, None);
         let [id] = *app.session.selection.ids() else {
             panic!("one layer selected, got {:?}", app.session.selection.ids());
         };
@@ -1873,12 +2128,12 @@ mod tests {
             grid: 32.0,
             variant_grids: Vec::new(),
         });
-        let hit = Hit {
-            spec: SetSpec::by_key("font-awesome").unwrap(),
-            set,
-            index: 0,
-        };
-        app.insert_icon(&hit, 24.0, None);
+        app.insert_icon(
+            SetSpec::by_key("font-awesome").unwrap(),
+            &set.icons[0],
+            24.0,
+            None,
+        );
         let group = app.session.selection.ids()[0];
         let part = app.session.doc.get(group).unwrap().children()[0];
         app.session.selection.set_one(part);
@@ -2039,6 +2294,137 @@ mod tests {
         );
         assert!(texts.iter().any(|t| t == "Open settings"), "{texts:?}");
         assert!(app.assets.sets.is_empty(), "no set was asked for");
+    }
+
+    /// A library with the picker's kit *Atlas* marked *Show in Icons tab*, and
+    /// an app editing another document there; the kit's id, its set *Button*
+    /// and its main *Badge*.
+    fn icon_pack_library(
+        ctx: &egui::Context,
+        tag: &str,
+    ) -> (OndinApp, std::path::PathBuf, String, NodeId, NodeId) {
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        let root = temp_root(tag);
+        let (kit, set, badge) = file_kit(&root);
+        let mut app = app_on(ctx, root.clone());
+        let entry = app
+            .library
+            .entries
+            .iter()
+            .find(|e| e.meta.id.as_deref() == Some(kit.as_str()))
+            .expect("the fixture: the kit is filed")
+            .clone();
+        crate::library::store::set_kit_icons(&root, &entry, true).unwrap();
+        app.library.refresh();
+        (app, root, kit, set, badge)
+    }
+
+    /// Only a kit marked *Show in Icons tab* is an icon pack, and only once it
+    /// has published; its icons are its published mains, a set once, ranked by
+    /// name as any icon, and the size field starts at the width most share.
+    /// flip: `icon_packs` without its `icons` test → fails at "an unmarked kit".
+    #[test]
+    fn a_marked_kits_mains_are_its_icons() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root, kit, set, badge) = icon_pack_library(&ctx, "pack-icons");
+        let own = app.session.doc.meta().id.clone();
+        let packs = sets::icon_packs(&app.library, own.as_deref());
+        assert_eq!(packs.len(), 1, "listed for Settings");
+
+        app.kit_shelf.ask(&packs[0]);
+        app.kit_shelf.settle();
+        let Some(crate::kits::index::Load::Ready(Some(p))) = app.kit_shelf.load(&kit) else {
+            panic!("the kit's published state loads");
+        };
+        let pack = Arc::new(KitPack::new(packs[0].clone(), 4, p.clone()));
+        let tops = |q: &str| -> Vec<NodeId> {
+            find_icons(q, &[], std::slice::from_ref(&pack), None)
+                .iter()
+                .map(|h| match h {
+                    Hit::Kit { top, .. } => *top,
+                    Hit::Set { .. } => unreachable!("no remote set here"),
+                })
+                .collect()
+        };
+        assert_eq!(tops(""), vec![badge, set], "each main once, by name");
+        assert_eq!(tops("butt"), vec![set]);
+        // *Small*, the set's default variant, is 80 wide and *Badge* 24: a tie,
+        // which the smaller width takes.
+        assert_eq!(pack.grid, 24.0);
+
+        let entry = app.library.entry_at(&packs[0].path).unwrap().clone();
+        crate::library::store::set_kit_icons(&root, &entry, false).unwrap();
+        app.library.refresh();
+        assert!(
+            sets::icon_packs(&app.library, own.as_deref()).is_empty(),
+            "an unmarked kit is no icon pack"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A kit icon placed from the Icons tab is an instance of its main, its
+    /// longer side the size field's, as one *Insert icon* step.
+    /// flip: `build_placement` skipping `scaled_to` → fails at "the size
+    /// field's".
+    #[test]
+    fn a_kit_icon_places_an_instance_at_the_fields_size() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root, kit, _, badge) = icon_pack_library(&ctx, "pack-place");
+        let own = app.session.doc.meta().id.clone();
+        let pack = sets::icon_packs(&app.library, own.as_deref()).remove(0);
+        app.kit_shelf.ask(&pack);
+        app.kit_shelf.settle();
+        let Some(crate::kits::index::Load::Ready(Some(p))) = app.kit_shelf.load(&kit) else {
+            panic!("the kit's published state loads");
+        };
+        let source = crate::kits::picker::Source::Kit {
+            id: kit.clone(),
+            version: pack.version,
+            published: p.clone(),
+            top: badge,
+        };
+        app.ask_icon_place(source, Point::new(200.0, 200.0), false, 48.0);
+        app.settle_kit_place();
+
+        let [inst] = *app.session.selection.ids() else {
+            panic!("one layer selected, got {:?}", app.session.selection.ids());
+        };
+        let node = app.session.doc.get(inst).unwrap();
+        assert!(node.link().is_some(), "an instance of the kit's main");
+        let b = ondin_core::local_box(&app.session.doc, &app.session.resolved, inst).unwrap();
+        // *Badge* is 24 × 30: its height is the longer side.
+        assert!(
+            (b.height() - 48.0).abs() < 1e-6 && (b.width() - 38.4).abs() < 1e-6,
+            "the size field's, aspect kept: {b:?}"
+        );
+        assert_eq!(last_step(&app), "Insert icon");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With only a kit switched on, the Icons tab shows its icons, not the
+    /// empty state.
+    /// flip: `assets_ui` leaving kits out of `on` → fails at "Reading Atlas…".
+    #[test]
+    fn a_kit_switched_on_fills_the_icons_tab() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root, kit, _, _) = icon_pack_library(&ctx, "pack-tab");
+        app.prefs.assets.icon_sets = vec![sets::pack_key(&kit)];
+        app.canvas_rect =
+            egui::Rect::from_min_size(egui::pos2(46.0, 40.0), egui::vec2(1000.0, 700.0));
+        app.toggle_assets();
+        let (_, texts) = panel_rect(&mut app, &ctx);
+        assert!(texts.iter().any(|t| t == "Reading Atlas…"), "{texts:?}");
+        app.kit_shelf.settle();
+        let (_, texts) = panel_rect(&mut app, &ctx);
+        assert!(
+            !texts.iter().any(|t| t == "No icon sets are on"),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "2 icons"), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The panel's rect over `frames` frames.

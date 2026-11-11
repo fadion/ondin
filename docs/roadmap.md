@@ -8,25 +8,18 @@ item's premise can go stale while its ask still reads true.
 
 ## Now · Icon packs
 
-A kit of icon components that the assets browser's Icons tab shows beside the remote sets. It is
-a kit, not a second publishing path: *Make this a kit*, publishing, the vault and the update pill
-stay as `kits.md` has them. Not designed yet; the pieces:
+The flag, Settings' listing, browsing and inserting are built (`kits.md`, *The kit mark*;
+`app-canvas-chrome.md`, *Icon packs*). Open:
 
-- **The flag** — a kit carries an explicit "show in the Icons tab" mark, never inferred from its
-  content. Settings ▸ Assets lists flagged library kits beside `sets::SETS`, off by default like
-  them. The kit stays in the insert picker too.
-- **Browsing** — the Icons tab's grid, search, set dropdown and size field take the flagged kits'
-  mains as icons. A set shows once, by its default variant.
-- **Inserting** — a click or drag goes through `kit::insert`, placing an instance sized to the
-  size field, one undo step. Resizing follows the author's constraints; nothing is assumed.
 - **To decide: recolouring.** A remote icon is one group with its `currentColor` written black;
   an instance has no icon colour, only per-layer fill overrides or a bound variable. Leading
-  option: an icon kit binds its ink to one colour variable that the instance overrides.
+  option: an icon kit binds its ink to one colour variable that the instance overrides. Until
+  then a kit's tile shows the kit's own colours, which a black icon set reads poorly against the
+  dark theme's ground.
 - **To decide: variants.** The tab has one variant dropdown and a set can have several
   properties (weight × filled). Either the kit names the property the dropdown drives, or
-  icon kits allow one property.
-- **Strokes at size** — an outline icon set to scale thickens its strokes as it grows, one set
-  fixed does not. That is the author's constraints working, and `kits.md` should say so.
+  icon kits allow one property. Until then a kit shows each set by its default variant and the
+  dropdown is off.
 
 ## Now · Code export (HTML/CSS, React, Vue)
 

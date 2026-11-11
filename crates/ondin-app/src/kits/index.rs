@@ -42,6 +42,8 @@ pub(crate) struct KitEntry {
     pub version: u32,
     /// The last publish's note, when it had one — the update notice shows it.
     pub note: Option<String>,
+    /// The author's *Show in Icons tab*.
+    pub icons: bool,
 }
 
 /// Every kit in `lib` but `own` — the document being edited, whose mains are its
@@ -80,6 +82,7 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
             modified: e.modified,
             version: e.meta.kit.as_ref().map_or(0, |k| k.version),
             note: e.meta.kit.as_ref().and_then(|k| k.note.clone()),
+            icons: e.meta.kit.as_ref().is_some_and(|k| k.icons),
         })
         .collect();
     out.sort_by_key(|k| k.name.to_lowercase());
@@ -658,6 +661,7 @@ mod tests {
             modified: 7,
             version: 1,
             note: None,
+            icons: false,
         }
     }
 

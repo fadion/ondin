@@ -941,7 +941,22 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   closed or in focus mode (`assets_pass` runs outside the panels' guard); one asked for in a
   document left behind is dropped. The panel's choices are written to the preferences once no
   button is down, not on each frame of a scrubbed size.
-- **Settings ▸ Assets**, after the web fonts: a caption, then *Icon sets* and *Photos*, a
+- **Icon packs.** A library kit marked *Show in Icons tab* (`kits.md`, *The kit mark*) that has
+  published is listed by `sets::icon_packs` (the document being edited left out) and switched on
+  under the key `kit:<id>` among the preferences' icon sets. The set dropdown lists such kits after
+  the remote sets; their published mains are the icons, a set once by its default variant, read
+  through the insert picker's kit shelf (*Reading Atlas…* while it loads) and ranked by name with
+  the remote icons' rule (`sets::rank_name`). A kit's tile is the shelf's picture in the kit's own
+  colours, fitted to the icon size, as the insert picker shows it. With a kit chosen the variant
+  dropdown is off (*Atlas shows each icon by its default variant*) and the size field starts at the
+  width most of its icons share (`kit_grid`). The foot names the kit and its version; the hover
+  card its kit, version and size. A click or drag places an instance through the insert picker's
+  placement (`ask_icon_place`, one at a time with the picker's): `kit::insert`, then the instance's
+  box resized so its longer side is the size field's (`edit::resize_to`, as the inspector's W and H
+  would, so its layers follow the author's constraints), then centred, as one *Insert icon* step
+  with no credit.
+- **Settings ▸ Assets**, after the web fonts: a caption, then *Icon sets* (the library's icon
+  packs after the remote sets, noted *Kit in your library · v4*) and *Photos*, a
   `ui::switch_row_noted` per set or service noted with its licence or what it needs; under a keyed
   service that is on, its key in `ui::secret_field` and a caption saying where a key is made and
   that it goes to that service only; *Photo size* (*Small · 400 px*, *Regular · 1080 px*, *Full

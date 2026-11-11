@@ -637,6 +637,17 @@ impl OndinApp {
                 toggle_key(&mut draft.icon_sets, spec.key);
             }
         }
+        // The library's icon packs after the remote sets, off until switched on.
+        let own = self.session.doc.meta().id.clone();
+        for kit in crate::assets::sets::icon_packs(&self.library, own.as_deref()) {
+            ui.add_space(ROW_GAP);
+            let key = crate::assets::sets::pack_key(&kit.id);
+            let on = draft.icon_sets.contains(&key);
+            let note = format!("Kit in your library · v{}", kit.version);
+            if ui::switch_row_noted(ui, &kit.name, &note, on, SWITCH_H).clicked() {
+                toggle_key(&mut draft.icon_sets, &key);
+            }
+        }
         ui.add_space(ROW_GAP * 2.0);
         sub_heading(ui, "Photos");
         // A keyed service just switched on shows its field: the keys are read now.

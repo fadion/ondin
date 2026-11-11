@@ -170,6 +170,25 @@ pub(crate) const SETS: &[SetSpec] = &[
     },
 ];
 
+/// The library's icon packs, as Settings lists them after [`SETS`]: sharing
+/// kits marked *Show in Icons tab* that have published, by name, the document
+/// being edited (`own`) left out, as the insert picker leaves it out.
+pub(crate) fn icon_packs(
+    lib: &crate::library::state::Library,
+    own: Option<&str>,
+) -> Vec<crate::kits::index::KitEntry> {
+    crate::kits::index::kits_in(lib, own)
+        .into_iter()
+        .filter(|k| k.icons && k.version > 0)
+        .collect()
+}
+
+/// The key a kit's switch is remembered by among the preferences' icon sets,
+/// beside the remote sets' own keys, which never hold a colon.
+pub(crate) fn pack_key(kit: &str) -> String {
+    format!("kit:{kit}")
+}
+
 /// One icon of a loaded set.
 #[derive(Clone, Debug)]
 pub(crate) struct Icon {
@@ -335,18 +354,24 @@ impl Icon {
 /// starting with the query beats one with a word starting with it, which beats
 /// one merely containing it; an alias match ranks after the name's.
 pub(crate) fn rank(icon: &Icon, query: &str, words: &[&str]) -> Option<u8> {
-    let in_name = |w: &str| icon.name.contains(w);
-    let in_alias = |w: &str| icon.aliases.iter().any(|a| a.contains(w));
+    rank_name(&icon.name, &icon.aliases, query, words)
+}
+
+/// [`rank`] for any icon by its `name` and `aliases`, both lower case with
+/// words joined by hyphens, as Iconify spells them: a kit's icons are ranked
+/// by the same rule.
+pub(crate) fn rank_name(name: &str, aliases: &[String], query: &str, words: &[&str]) -> Option<u8> {
+    let in_name = |w: &str| name.contains(w);
+    let in_alias = |w: &str| aliases.iter().any(|a| a.contains(w));
     if !words.iter().all(|w| in_name(w) || in_alias(w)) {
         return None;
     }
     let joined = query.replace(' ', "-");
-    Some(if icon.name == joined {
+    Some(if name == joined {
         0
-    } else if icon.name.starts_with(&joined) {
+    } else if name.starts_with(&joined) {
         1
-    } else if icon
-        .name
+    } else if name
         .split('-')
         .any(|part| words.first().is_some_and(|w| part.starts_with(w)))
     {

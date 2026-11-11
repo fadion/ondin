@@ -112,6 +112,9 @@ pub(crate) struct Placing {
     /// Where it lands, in world units, and whether a drag let it go there.
     centre: ondin_core::kurbo::Point,
     dropped: bool,
+    /// The Icons tab's size field: the instance is scaled so its longer side is
+    /// this, and the step is *Insert icon*. `None` from the insert picker.
+    size: Option<f64>,
     /// The revision the worker's copy of the document was taken at.
     rev: u64,
     job: crate::job::Job<Result<(Transaction, NodeId), String>>,
@@ -295,7 +298,7 @@ impl LocalTiles {
 
 /// Where a placeable component comes from.
 #[derive(Clone)]
-enum Source {
+pub(crate) enum Source {
     /// This document's own main — in its tree, or a copy in its vault of a kit
     /// that cannot be found.
     Local(NodeId),
@@ -809,7 +812,7 @@ impl OndinApp {
     #[cfg(test)]
     fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2, dropped: bool) {
         let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
-        self.start_kit_place(source, centre, dropped);
+        self.start_kit_place(source, centre, dropped, None);
         self.settle_kit_place();
     }
 
@@ -819,7 +822,7 @@ impl OndinApp {
     pub(crate) fn settle_kit_place(&mut self) {
         while let Some(pl) = self.kit_placing.take() {
             let built = pl.job.wait().unwrap_or_else(|| Err(STOPPED.to_string()));
-            self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.rev, built);
+            self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.size, pl.rev, built);
         }
     }
 
@@ -880,14 +883,36 @@ impl OndinApp {
             let ppp = self.egui_ctx.pixels_per_point();
             let point = at.unwrap_or(self.canvas_rect.center());
             let centre = self.to_world(point, self.canvas_rect, ppp);
-            self.start_kit_place(source, centre, at.is_some());
+            self.start_kit_place(source, centre, at.is_some(), None);
+        }
+    }
+
+    /// The Icons tab's placement of a kit's icon, `size` across, centred on
+    /// `centre` (world) and inside the container there when `dropped`. One at a
+    /// time with the picker's: an ask while one builds is dropped.
+    pub(crate) fn ask_icon_place(
+        &mut self,
+        source: Source,
+        centre: ondin_core::kurbo::Point,
+        dropped: bool,
+        size: f64,
+    ) {
+        if self.kit_placing.is_none() {
+            self.start_kit_place(source, centre, dropped, Some(size));
         }
     }
 
     /// Build an instance of `source` centred on `centre` on a worker, over a copy
     /// of the document: at the document's top level, or for a drag let go there
-    /// (`dropped`), inside the container under it ([`Self::drop_container_at`]).
-    fn start_kit_place(&mut self, source: Source, centre: ondin_core::kurbo::Point, dropped: bool) {
+    /// (`dropped`), inside the container under it ([`Self::drop_container_at`]),
+    /// scaled to `size` when the Icons tab asked.
+    fn start_kit_place(
+        &mut self,
+        source: Source,
+        centre: ondin_core::kurbo::Point,
+        dropped: bool,
+        size: Option<f64>,
+    ) {
         let parent = dropped
             .then(|| self.drop_container_at(centre))
             .flatten()
@@ -899,13 +924,14 @@ impl OndinApp {
         let job = crate::job::Job::spawn("ondin-kit-place", &self.egui_ctx, move || {
             ondin_core::text::register_font_data(&fonts);
             let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
-            build_placement(&doc, &mut ids, &built, parent, centre)
+            build_placement(&doc, &mut ids, &built, parent, centre, size)
         });
         self.kit_placing = Some(Placing {
             key: key_of(&source),
             source,
             centre,
             dropped,
+            size,
             rev: self.session.revision(),
             job,
         });
@@ -927,7 +953,7 @@ impl OndinApp {
         let Some(pl) = self.kit_placing.take() else {
             return;
         };
-        self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.rev, built);
+        self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.size, pl.rev, built);
     }
 
     /// Commit a built placement as one undoable step and select it, or say why it
@@ -938,11 +964,12 @@ impl OndinApp {
         source: Source,
         centre: ondin_core::kurbo::Point,
         dropped: bool,
+        size: Option<f64>,
         rev: u64,
         built: Result<(Transaction, NodeId), String>,
     ) {
         if rev != self.session.revision() {
-            self.start_kit_place(source, centre, dropped);
+            self.start_kit_place(source, centre, dropped, size);
             return;
         }
         let (tx, instance) = match built {
@@ -952,7 +979,11 @@ impl OndinApp {
                 return;
             }
         };
-        self.session.name_step("Insert component", icon::HEXAGON);
+        // The Icons tab's, named as its remote icons' inserts are.
+        match size {
+            Some(_) => self.session.name_step("Insert icon", icon::ASSETS),
+            None => self.session.name_step("Insert component", icon::HEXAGON),
+        }
         if !self.session.commit(tx) {
             return;
         }
@@ -979,6 +1010,7 @@ fn build_placement(
     source: &Source,
     parent: NodeId,
     centre: ondin_core::kurbo::Point,
+    size: Option<f64>,
 ) -> Result<(Transaction, NodeId), String> {
     let (mut tx, instance) = match source {
         Source::Kit {
@@ -1021,10 +1053,35 @@ fn build_placement(
                 .ok_or_else(|| "That component is no longer here".to_string());
         }
     };
+    if let Some(size) = size {
+        tx.0.extend(scaled_to(doc, &tx, instance, size).0);
+    }
     if let Some(op) = ondin_core::build::centred_on(doc, &tx, instance, centre) {
         tx.0.push(op);
     }
     Ok((tx, instance))
+}
+
+/// The edit that makes `instance`, as `tx` places it over `doc`, `size` across
+/// its longer side with its aspect kept — the Icons tab's size field. Its box
+/// is resized as the inspector's W and H would, so the layers inside follow
+/// the author's constraints and nothing else is assumed.
+fn scaled_to(doc: &Document, tx: &Transaction, instance: NodeId, size: f64) -> Transaction {
+    let mut scratch = doc.clone();
+    if scratch.apply(tx).is_err() {
+        return Transaction::default();
+    }
+    let res = ondin_core::Resolved::rebuild(&scratch);
+    let Some(now) = ondin_core::local_box(&scratch, &res, instance) else {
+        return Transaction::default();
+    };
+    let long = now.width().max(now.height());
+    if long <= 0.0 || size <= 0.0 {
+        return Transaction::default();
+    }
+    let k = size / long;
+    let want = ondin_core::kurbo::Size::new(now.width() * k, now.height() * k);
+    ondin_core::edit::resize_to(&scratch, &res, instance, want)
 }
 
 /// The panel's whole height with its foot at `bottom`: [`H`], or less when the

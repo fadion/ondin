@@ -1,21 +1,10 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: code export. The
-**Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
-decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
-Refs are file + function name, never line numbers. Read the code before picking an item up — an
-item's premise can go stale while its ask still reads true.
-
-## Now · Code export (HTML/CSS, React, Vue)
-
-Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
-(`export.md`, *Code export*).
-
-- **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
-  has not run on CI's Linux and macOS legs; unverified until it does. It draws the HTML output
-  and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,
-  TypeScript or Vue compiler runs in the tests. A CI leg parsing the emitted `.tsx` with `tsc`
-  and the `.vue` files with `@vue/compiler-sfc` would catch output that does not compile.
+Open work only. The **Later** sections wait on each other or on a stated trigger;
+**Considerations** are ideas not yet decided. Decided non-goals are in `non-goals.md`; built
+work is described in `architecture.md`. Refs are file + function name, never line numbers. Read
+the code before picking an item up — an item's premise can go stale while its ask still reads
+true.
 
 ## Later
 

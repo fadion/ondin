@@ -119,6 +119,7 @@ multiplayer is one of its considerations.
 - **Code layers, and importing HTML/CSS or framework code as layers** — too complex fully, messy partly; SVG import is untouched (§15 D1099).
 - **The code fidelity check in the app** — it needs an external browser and cannot check React or Vue; `ondin check code` stays the way to run it.
 - **Live interaction states in present mode** — hover and press on the canvas are prototyping; the states exist for code export.
+- **Compiling the React and Vue output in CI** (`tsc`, `@vue/compiler-sfc`) — a Node toolchain in CI for a syntax check; the fidelity tests draw the HTML and the component walk.
 
 ## Charts
 

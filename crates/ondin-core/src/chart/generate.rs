@@ -1094,14 +1094,20 @@ fn axes(
     let va_tick = if va.show && va.ticks { TICK_LEN } else { 0.0 };
     let ca_tick = if ca.show && ca.ticks { TICK_LEN } else { 0.0 };
     let (va_gap, ca_gap) = (AXIS_GAP + va_tick, AXIS_GAP + ca_tick);
-    let va_thick = if va_show {
-        if horizontal {
-            label_h + va_gap
-        } else {
-            tick_boxes.iter().map(Rect::width).fold(0.0, f64::max) + va_gap
-        }
-    } else {
+    let va_turn = set_turn(va.angle);
+    let va_thick = if !va_show {
         va_tick
+    } else if horizontal && va_turn == 0.0 {
+        label_h + va_gap
+    } else {
+        tick_boxes
+            .iter()
+            .map(|b| {
+                let (across, down) = turned_reach(*b, va_turn);
+                if horizontal { down } else { across }
+            })
+            .fold(0.0, f64::max)
+            + va_gap
     };
     // A title's text and box, in its own track past its axis's labels.
     let title_of = |a: &Axis| {
@@ -1147,21 +1153,33 @@ fn axes(
         body.width - va_thick
     } / n_cat.max(1) as f64;
     let (turn, every) = if x_ticks.is_some() {
-        (0.0, 1)
+        (set_turn(ca.angle), 1)
     } else if horizontal {
-        (0.0, thin_every(label_h * 1.2, band_len_guess))
+        // Beside the plot a turned label takes more of its band, so it thins
+        // by how far it reaches down.
+        let turn = set_turn(ca.angle);
+        let need = if turn == 0.0 {
+            label_h * 1.2
+        } else {
+            cat_boxes
+                .iter()
+                .map(|b| turned_reach(*b, turn).1)
+                .fold(0.0, f64::max)
+                + 4.0
+        };
+        (turn, thin_every(need, band_len_guess))
     } else {
         category_turn(ca.angle, &cat_boxes, band_len_guess, label_h)
     };
     let ca_thick = if !ca_show {
         ca_tick
-    } else if horizontal {
-        cat_boxes.iter().map(Rect::width).fold(0.0, f64::max) + ca_gap
     } else {
-        let (s, c) = turn.sin_cos();
         cat_boxes
             .iter()
-            .map(|b| b.width() * s.abs() + b.height() * c.abs())
+            .map(|b| {
+                let (across, down) = turned_reach(*b, turn);
+                if horizontal { across } else { down }
+            })
             .fold(0.0, f64::max)
             + ca_gap
     };
@@ -1330,36 +1348,41 @@ fn axes(
             let share = value_share(t.values[i]);
             let name = format!("Tick {s}");
             let k = key(PartRole::TickLabel, 0, i as u32);
+            // The insets place the unturned box, which layout turns about its
+            // centre; a turned label's centre sits as far out as it reaches.
+            let (across, down) = turned_reach(*b, va_turn);
             if horizontal {
                 let cx = share * frame_w;
-                let at = Point::new(cx - b.width() / 2.0 - b.x0, va_gap - b.y0);
-                let at = if bottom_at_top {
-                    Point::new(at.x, frame_h - va_gap - b.height() - b.y0)
+                let edge = va_gap + (down - b.height()) / 2.0;
+                let y = if bottom_at_top {
+                    frame_h - va_gap - (down + b.height()) / 2.0
                 } else {
-                    at
+                    edge
                 };
+                let at = Point::new(cx - b.width() / 2.0 - b.x0, y - b.y0);
                 let mut insets = centred_x(share * 100.0);
                 if bottom_at_top {
-                    insets.bottom = px(va_gap);
+                    insets.bottom = px(edge);
                 } else {
-                    insets.top = px(va_gap);
+                    insets.top = px(edge);
                 }
-                out.label(k, value_axis_key, name, s, tick_size, at, insets, 0.0);
+                out.label(k, value_axis_key, name, s, tick_size, at, insets, va_turn);
             } else {
                 let cy = (1.0 - share) * frame_h;
+                let edge = va_gap + (across - b.width()) / 2.0;
                 let x = if left_at_end {
-                    va_gap - b.x0
+                    edge
                 } else {
-                    frame_w - va_gap - b.width() - b.x0
+                    frame_w - va_gap - (across + b.width()) / 2.0
                 };
-                let at = Point::new(x, cy - b.height() / 2.0 - b.y0);
+                let at = Point::new(x - b.x0, cy - b.height() / 2.0 - b.y0);
                 let mut insets = centred_y((1.0 - share) * 100.0);
                 if left_at_end {
-                    insets.left = px(va_gap);
+                    insets.left = px(edge);
                 } else {
-                    insets.right = px(va_gap);
+                    insets.right = px(edge);
                 }
-                out.label(k, value_axis_key, name, s, tick_size, at, insets, 0.0);
+                out.label(k, value_axis_key, name, s, tick_size, at, insets, va_turn);
             }
         }
     }
@@ -1788,17 +1811,20 @@ impl Axes {
         };
         for (centre, name, b, k, label_name) in items {
             if horizontal {
+                // As below, turned about its centre, as far out as it reaches.
+                let across = turned_reach(b, turn).0;
+                let edge = gap + (across - b.width()) / 2.0;
                 let x = if left_at_end {
-                    gap - b.x0
+                    edge
                 } else {
-                    frame.width() - gap - b.width() - b.x0
+                    frame.width() - gap - (across + b.width()) / 2.0
                 };
-                let at = Point::new(x, centre - b.height() / 2.0 - b.y0);
+                let at = Point::new(x - b.x0, centre - b.height() / 2.0 - b.y0);
                 let mut insets = centred_y(centre / across_len * 100.0);
                 if left_at_end {
-                    insets.left = px(gap);
+                    insets.left = px(edge);
                 } else {
-                    insets.right = px(gap);
+                    insets.right = px(edge);
                 }
                 out.label(
                     k,
@@ -1808,7 +1834,7 @@ impl Axes {
                     tick_size,
                     at,
                     insets,
-                    0.0,
+                    turn,
                 );
             } else {
                 // A turned label's box is its unturned one, turned about its
@@ -3496,6 +3522,26 @@ fn category_turn(angle: LabelAngle, boxes: &[Rect], band: f64, label_h: f64) -> 
         LabelAngle::Auto if widest <= room => (0.0, 1),
         LabelAngle::Auto => (slant, thin_every(label_h * 1.5, band)),
     }
+}
+
+/// A tick label's turn at its set angle, for the axes [`category_turn`] does
+/// not decide: *Auto* keeps them flat.
+fn set_turn(angle: LabelAngle) -> f64 {
+    match angle {
+        LabelAngle::Auto | LabelAngle::Flat => 0.0,
+        LabelAngle::Slanted => -std::f64::consts::FRAC_PI_4,
+        LabelAngle::Upright => -std::f64::consts::FRAC_PI_2,
+    }
+}
+
+/// How far a label's box `b`, turned `turn` about its centre, reaches across
+/// and down. Flat, it is exactly the box's width and height.
+fn turned_reach(b: Rect, turn: f64) -> (f64, f64) {
+    let (s, c) = turn.sin_cos();
+    (
+        b.width() * c.abs() + b.height() * s.abs(),
+        b.width() * s.abs() + b.height() * c.abs(),
+    )
 }
 
 /// Where a value label sits on its bar `bar` (in the plot `plot`), its box `b`:

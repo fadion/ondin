@@ -661,10 +661,11 @@ impl Default for Flows {
     }
 }
 
-/// A tick label's angle.
+/// A tick label's angle, on either axis and either side of the plot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LabelAngle {
-    /// Turned 45° and then thinned to every *n*th when they would touch.
+    /// Category labels under columns turn 45° and then thin to every *n*th
+    /// when they would touch; every other axis keeps its labels flat.
     #[default]
     Auto,
     Flat,

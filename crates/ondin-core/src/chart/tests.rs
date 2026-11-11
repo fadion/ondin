@@ -181,6 +181,59 @@ fn tick_marks_stand_between_the_plot_and_the_labels() {
     assert_eq!(width(&b) - width(&a), 4.0);
 }
 
+/// A label angle turns the labels of an axis beside the plot too: a column
+/// chart's value labels and a bar chart's category labels stand upright inside
+/// their axis's frame, a gap off the plot, and the frame narrows to fit them.
+/// flip: `set_turn` answering 0 for `Upright` → fails at "turned".
+#[test]
+fn labels_beside_the_plot_turn_to_their_angle() {
+    let quarter = |p: &Part| {
+        let c = p.transform.as_coeffs();
+        c[0].abs() < 1e-9 && (c[1] + 1.0).abs() < 1e-9
+    };
+    for (kind, axis, role) in [
+        (ChartKind::Column, PartRole::ValueAxis, PartRole::TickLabel),
+        (
+            ChartKind::Bar,
+            PartRole::CategoryAxis,
+            PartRole::CategoryLabel,
+        ),
+    ] {
+        let flat = Chart::sample(kind);
+        let mut upright = flat.clone();
+        upright.options.value_axis.angle = LabelAngle::Upright;
+        upright.options.category_axis.angle = LabelAngle::Upright;
+        let (a, b) = (draw(&flat), draw(&upright));
+        let labels = all(&b, role, 0);
+        assert!(!labels.is_empty(), "{kind:?}: the fixture has labels");
+        assert!(labels.iter().all(|p| quarter(p)), "{kind:?}: turned");
+        assert!(
+            !all(&a, role, 0).iter().any(|p| quarter(p)),
+            "{kind:?}: flat by default"
+        );
+        let width = |g: &Generated| box_size(part(g, axis, 0, 0).unwrap()).width;
+        let w = width(&b);
+        assert!(
+            w < width(&a),
+            "{kind:?}: the frame narrows, {w} vs {}",
+            width(&a)
+        );
+        // Against the plot by the same gap, each one as far out as it reaches.
+        let right = drawn_box(labels[0]).x1;
+        assert!(
+            right < w - 1.0,
+            "{kind:?}: a gap off the plot, {right} in {w}"
+        );
+        for p in labels {
+            let bx = drawn_box(p);
+            assert!(
+                bx.x0 >= -1e-6 && (bx.x1 - right).abs() < 1e-6,
+                "{kind:?}: {bx:?} inside a {w} frame, its right edge at {right}"
+            );
+        }
+    }
+}
+
 /// The value axis line runs along the plot's edge on the axis's side, off by
 /// default; the category axis line is the baseline at zero, or the plot's edge
 /// when zero is out of range, never outside the plot.

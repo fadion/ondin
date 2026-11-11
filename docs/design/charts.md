@@ -323,7 +323,10 @@ it applies to; switching kind keeps the others' values.
     flow opacity, labels (Name, Name and value, Off).
 - **Axes** (not Pie or Sankey): per axis, *Show*, its line (off by default on the value axis, whose
   gridlines carry it), its tick marks, the colour both draw in, its labels and their angle (Auto,
-  0°, 45°, 90°; Auto turns them 45° and then thins them to every *n*th when they would touch),
+  0°, 45°, 90°, on either axis and either side of the plot; Auto turns category labels under
+  columns 45° and then thins them to every *n*th when they would touch, and keeps every other
+  axis's flat; a set angle beside the plot thins a bar chart's category labels by their turned
+  height),
   a title, and for a value axis its range (Auto or a typed min and max), *Start at zero* (always
   on for columns and bars, whose length is the value), the tick count (Auto aims for five on
   1-2-5 steps), side (left or right, top or bottom) and number format. Gridlines per axis: on or

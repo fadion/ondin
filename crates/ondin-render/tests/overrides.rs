@@ -3152,6 +3152,98 @@ fn a_frame_resize_previews_its_pinned_children_where_the_commit_puts_them() {
     }
 }
 
+/// Resizing a frame whose plain group is pinned at 0% on every side previews
+/// the group's contents, a nested group's path included, where the commit
+/// stretches them.
+///
+/// **Flip:** `relayout` without its plain-group branch fails "an icon
+/// resized": the preview leaves the art at its committed size.
+#[test]
+fn a_frame_resize_previews_a_pinned_groups_contents_as_its_commit() {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let mut add = |doc: &mut Document, parent: NodeId, kind: NodeKind, at: (f64, f64)| {
+        let id = ids.mint();
+        let index = doc.get(parent).unwrap().children().len();
+        let painted = matches!(kind, NodeKind::Rect { .. } | NodeKind::Path { .. });
+        let mut ops = vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        }];
+        if painted {
+            ops.push(Operation::SetFills {
+                id,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        id
+    };
+    let frame = add(
+        &mut doc,
+        root,
+        NodeKind::Artboard {
+            size: Size::new(24.0, 24.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        (0.0, 0.0),
+    );
+    let group = add(&mut doc, frame, NodeKind::Group, (0.0, 0.0));
+    add(
+        &mut doc,
+        group,
+        NodeKind::Rect {
+            size: Size::new(24.0, 6.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        (0.0, 0.0),
+    );
+    let inner = add(&mut doc, group, NodeKind::Group, (0.0, 0.0));
+    let mut p = ondin_core::kurbo::BezPath::new();
+    p.move_to((4.0, 8.0));
+    p.line_to((20.0, 8.0));
+    p.line_to((12.0, 24.0));
+    p.close_path();
+    add(
+        &mut doc,
+        inner,
+        NodeKind::Path {
+            path: p,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        },
+        (0.0, 0.0),
+    );
+    let all = Some(ondin_core::LengthPct::Percent(0.0));
+    doc.apply(&Transaction(vec![Operation::SetInsets {
+        id: group,
+        insets: ondin_core::Insets {
+            top: all,
+            right: all,
+            bottom: all,
+            left: all,
+            ..Default::default()
+        },
+    }]))
+    .unwrap();
+    let tx = Transaction(vec![Operation::SetGeometry {
+        id: frame,
+        geometry: GeometryPatch::Size(Size::new(48.0, 36.0)),
+    }]);
+    assert_preview_matches_commit(&doc, &tx, "an icon resized");
+}
+
 /// Setting, changing and clearing a layer's insets previews as its commit —
 /// the inspector's scrub over an inset field is this.
 ///

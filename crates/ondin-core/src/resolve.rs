@@ -119,7 +119,7 @@ fn entry(id: NodeId, r: Rect) -> BoundsEntry {
 /// that moves keeps its size, and one that grows keeps nothing but its kind.
 /// Read through [`local_in`] and [`kind_in`] here and [`Resolved::used_local`] and
 /// [`Resolved::used_kind`] outside, so "no entry" always means "as specified".
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Used {
     /// The local transform layout places the node with.
     local: Option<Affine>,
@@ -130,6 +130,9 @@ struct Used {
     /// `display`), with its origin at the group's local origin. `None` otherwise,
     /// a frame included: a frame's size is its kind's.
     frame: Option<kurbo::Size>,
+    /// A plain group stretched by insets, its own or an ancestor group's: the
+    /// box its children keep their shares of (`container::place_in_stretch`).
+    stretch: Option<crate::container::Stretch>,
 }
 
 /// The committed document as the flex engine sees it (`container::LayoutView`):
@@ -402,19 +405,66 @@ fn used_geometry(
                 local: p.local,
                 kind: p.kind,
                 frame: p.frame,
+                ..Used::default()
             });
         }
         return root_used(doc, used, node, l.size);
     }
     let parent = doc.get(node.parent()?)?;
-    let frame = frame_box(used, parent)?;
     let own = doc.resolved_kind(id)?;
+    // A plain group's box is its children's union as specified.
+    let contents = crate::container::is_plain_group(&own, node.display())
+        .then(|| crate::container::atomic_box(view, id, &own))
+        .flatten();
+    // Inside a stretched group, a layer keeps its share of the group's box, its
+    // own insets inert there as in any plain group.
+    if let Some(stretch) = used.get(&parent.id()).and_then(|u| u.stretch) {
+        if stretch.is_identity() && stretch.from.origin() == stretch.to.origin() {
+            return None;
+        }
+        let (local, kind, inner) =
+            crate::container::place_in_stretch(&stretch, node.transform(), &own, contents)?;
+        return Some(Used {
+            local: Some(local),
+            kind,
+            stretch: inner,
+            ..Used::default()
+        });
+    }
+    let frame = frame_box(used, parent)?;
+    if let Some(c) = contents {
+        let (local, stretch) =
+            crate::container::place_group(node.insets(), frame, node.transform(), c)?;
+        return Some(Used {
+            local: Some(local),
+            stretch: Some(stretch),
+            ..Used::default()
+        });
+    }
     let (local, kind) = crate::container::place(node.insets(), frame, node.transform(), &own)?;
     Some(Used {
         local: Some(local),
         kind,
-        frame: None,
+        ..Used::default()
     })
+}
+
+/// The outermost pinned plain group `id` sits in, through plain groups only, or
+/// `id`: a change inside one moves its box, so every layer it stretches is
+/// placed again from there.
+fn stretch_root(doc: &Document, id: NodeId) -> NodeId {
+    let mut root = id;
+    let mut at = doc.get(id).and_then(Node::parent);
+    while let Some(p) = at.and_then(|p| doc.get(p)) {
+        if !crate::container::is_plain_group(p.kind(), p.display()) {
+            break;
+        }
+        if p.insets().is_authored() {
+            root = p.id();
+        }
+        at = p.parent();
+    }
+    root
 }
 
 /// A layout root's used geometry: the size its own pass gave it (a hugging frame
@@ -443,11 +493,13 @@ fn root_used(
             local: Some(local),
             kind: k.or(kind),
             frame,
+            ..Used::default()
         }),
         None => (kind.is_some() || frame.is_some()).then_some(Used {
             local: None,
             kind,
             frame,
+            ..Used::default()
         }),
     }
 }
@@ -482,11 +534,7 @@ fn with_bound_size(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Use
         return used;
     }
     let kind = doc.resolved_kind(id)?.into_owned();
-    let mut u = used.unwrap_or(Used {
-        local: None,
-        kind: None,
-        frame: None,
-    });
+    let mut u = used.unwrap_or_default();
     u.kind = Some(kind);
     Some(u)
 }
@@ -512,11 +560,7 @@ fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<
         return used;
     };
     kind.set_corner_radii(drawn);
-    let mut u = used.unwrap_or(Used {
-        local: None,
-        kind: None,
-        frame: None,
-    });
+    let mut u = used.unwrap_or_default();
     u.kind = Some(kind);
     Some(u)
 }
@@ -801,7 +845,7 @@ impl Resolved {
             // From the root of the node's flex chain: an item's change moves its
             // siblings and can resize every hugging container above it, and the
             // pass that places them runs at the chain's root.
-            let from = crate::container::chain_root(&DocView(doc), *id);
+            let from = crate::container::chain_root(&DocView(doc), stretch_root(doc, *id));
             collect_subtree(doc, from, depth(doc, from), &mut affected);
         }
         let mut ordered: Vec<NodeId> = affected.keys().copied().collect();
@@ -994,6 +1038,13 @@ impl Resolved {
     /// a resize read for such a group.
     pub fn used_frame(&self, id: NodeId) -> Option<kurbo::Size> {
         self.used.get(&id).and_then(|u| u.frame)
+    }
+
+    /// How a plain group stretched by insets maps its children, its own or an
+    /// ancestor group's stretch handed on (`container::Stretch`); `None` for a
+    /// group drawn as specified.
+    pub fn used_stretch(&self, id: NodeId) -> Option<crate::container::Stretch> {
+        self.used.get(&id).and_then(|u| u.stretch)
     }
 
     /// The stroke-expanded world AABB of `id`.
@@ -2258,13 +2309,12 @@ mod used_geometry_tests {
                 Some(Used {
                     local: Some(Affine::translate((5.0, 5.0))),
                     kind: Some(rect_kind(width - 10.0, 50.0)),
-                    frame: None,
+                    ..Used::default()
                 })
             } else if id == inner {
                 Some(Used {
                     local: Some(Affine::translate((30.0, 0.0))),
-                    kind: None,
-                    frame: None,
+                    ..Used::default()
                 })
             } else if id == text {
                 // A faded frame halves the wrap: an input that dirties the frame
@@ -2277,7 +2327,7 @@ mod used_geometry_tests {
                 Some(Used {
                     local: None,
                     kind: Some(text_kind(TextSizing::AutoHeight(width / share))),
-                    frame: None,
+                    ..Used::default()
                 })
             } else {
                 None

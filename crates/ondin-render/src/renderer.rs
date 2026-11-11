@@ -56,6 +56,9 @@ pub struct NodeOverride {
     /// The box a group with a layout is given under this preview —
     /// `Resolved::used_frame`'s twin, written by the flex relayout.
     pub frame: Option<ondin_core::kurbo::Size>,
+    /// How a plain group stretched by insets maps its children under this
+    /// preview — `Resolved::used_stretch`'s twin, written by the relayout.
+    pub stretch: Option<ondin_core::container::Stretch>,
 }
 
 /// Artwork that does not exist in the document yet, drawn among `parent`'s children at
@@ -883,6 +886,12 @@ impl RenderOverrides {
             let Some(parent) = node.parent() else {
                 continue;
             };
+            // Inside a group this preview stretched, a layer keeps its share of
+            // the group's box, as `Resolved` places it.
+            if let Some(s) = self.get(parent).and_then(|o| o.stretch) {
+                self.place_stretched(doc, res, id, &s, &mut queue);
+                continue;
+            }
             let frame = match self.get(parent).and_then(|o| o.kind.as_ref()) {
                 Some(k) => k.clone(),
                 None => match res.used_kind(doc, parent) {
@@ -908,6 +917,22 @@ impl RenderOverrides {
                 .get(id)
                 .and_then(|o| o.insets)
                 .unwrap_or(*node.insets());
+            // A pinned plain group is placed by its contents' box and stretches
+            // them (`container::place_group`).
+            if ondin_core::container::is_plain_group(node.kind(), node.display()) {
+                let view = PreviewView { doc, ov: self, res };
+                if let Some(c) = ondin_core::container::atomic_box(&view, id, node.kind())
+                    && let Some((local, s)) =
+                        ondin_core::container::place_group(&insets, size, node.transform(), c)
+                {
+                    let e = self.entry(id);
+                    e.transform = Some(local);
+                    e.stretch = Some(s);
+                    self.mark_moved(doc, id);
+                    queue.extend(node.children().iter().copied());
+                }
+                continue;
+            }
             // The kind this preview has given it, else the document's; either way at
             // its specified size, which `place` stretches from.
             let Some(mut base) = self.current_kind(doc, id) else {
@@ -983,6 +1008,48 @@ impl RenderOverrides {
             if resized && matches!(kind, NodeKind::Artboard { .. }) {
                 queue.extend(node.children().iter().copied());
             }
+        }
+    }
+
+    /// Place `id` inside a group this preview stretched by `s`, at its share of
+    /// the group's box (`container::place_in_stretch`); a plain group inside
+    /// hands its own stretch on to its children, queued.
+    fn place_stretched(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        id: NodeId,
+        s: &ondin_core::container::Stretch,
+        queue: &mut std::collections::VecDeque<NodeId>,
+    ) {
+        let Some(node) = doc.get(id) else { return };
+        let Some(base) = self.current_kind(doc, id) else {
+            return;
+        };
+        let contents = ondin_core::container::is_plain_group(node.kind(), node.display())
+            .then(|| {
+                let view = PreviewView { doc, ov: self, res };
+                ondin_core::container::atomic_box(&view, id, node.kind())
+            })
+            .flatten();
+        let Some((local, kind, inner)) =
+            ondin_core::container::place_in_stretch(s, node.transform(), &base, contents)
+        else {
+            return;
+        };
+        self.entry(id).transform = Some(local);
+        let kind = kind.unwrap_or(base);
+        let now = self
+            .get(id)
+            .and_then(|o| o.kind.clone())
+            .or_else(|| res.used_kind(doc, id).cloned());
+        if now.as_ref() != Some(&kind) {
+            self.set_kind(doc, res, id, kind);
+        }
+        self.mark_moved(doc, id);
+        if let Some(inner) = inner {
+            self.entry(id).stretch = Some(inner);
+            queue.extend(node.children().iter().copied());
         }
     }
 

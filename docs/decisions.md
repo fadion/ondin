@@ -54,6 +54,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D873** Used values are quantized to 1/64 px (`container::quantize`).
 - **D869** A group with `display` has a box; without it, it is a plain group. **D870** A frame may sit in any group, but never under a boolean or a mask.
 - **D871** Constraints are `position: absolute` with insets. **D874** Tools edit from drawn geometry, and `build::keep_insets` turns the result into insets at the commit door.
+- A plain group pinned in a box is placed by its contents' union and scales them by re-placing each child at its share, never through its transform, so a stroke keeps its width in a grouped icon as in a lone pinned path; an edit inside is read back through the group's map at the commit door.
 - **D872** Every leaf is measured; shapes are replaced elements and take their stored geometry as intrinsic size.
 - **D875** In flex, auto-width text never wraps, auto-height text wraps at the given width. Resizing an item writes grow/shrink 0 (`build::keep_flex_sizes`). Hidden layers, masks and pinned children leave the flow.
 - **D877** Dragging an in-flow item reorders it. Several items of one container drag as a block. **D894** Pinning never moves an item. **D896** An in-flow item turns about its box centre.

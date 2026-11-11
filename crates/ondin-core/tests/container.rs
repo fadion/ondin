@@ -509,3 +509,134 @@ fn insets_round_trip_through_the_save_format_and_are_absent_when_unset() {
     assert_eq!(*back.get(pinned).unwrap().insets(), insets);
     assert!(back.get(plain).unwrap().insets().is_unset());
 }
+
+/// A closed path tracing the box `x0, y0` to `x1, y1`.
+fn square(x0: f64, y0: f64, x1: f64, y1: f64) -> NodeKind {
+    let mut p = ondin_core::kurbo::BezPath::new();
+    p.move_to((x0, y0));
+    p.line_to((x1, y0));
+    p.line_to((x1, y1));
+    p.line_to((x0, y1));
+    p.close_path();
+    NodeKind::Path {
+        path: p,
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
+    }
+}
+
+/// Every side at `p` percent.
+fn all_pct(p: f64) -> Insets {
+    let v = Some(LengthPct::Percent(p));
+    Insets {
+        top: v,
+        right: v,
+        bottom: v,
+        left: v,
+        ..Default::default()
+    }
+}
+
+/// A 24 frame holding a plain group pinned at 0% on every side, which holds a
+/// rect over the whole box and a group holding a path from 4 to 20: an icon.
+/// The frame, the group, the inner group and the path.
+fn icon(s: &mut Scene) -> (NodeId, NodeId, NodeId, NodeId) {
+    let f = s.add(s.root, frame(24.0, 24.0), (100.0, 100.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(24.0, 24.0), (0.0, 0.0));
+    let inner = s.add(g, NodeKind::Group, (0.0, 0.0));
+    let path = s.add(inner, square(4.0, 4.0, 20.0, 20.0), (0.0, 0.0));
+    s.pin(g, all_pct(0.0));
+    (f, g, inner, path)
+}
+
+/// A plain group pinned on both edges scales its contents with the frame, a
+/// group inside it included, each layer keeping its share of the box and a
+/// path's points scaled rather than its stroke.
+/// flip: `used_geometry` without the stretched-parent branch → fails at "the
+/// group fills the frame", a group's box being its children's.
+#[test]
+fn a_pinned_group_scales_its_contents_with_the_frame() {
+    let mut s = Scene::new();
+    let (f, g, _, path) = icon(&mut s);
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(104.0, 104.0, 120.0, 120.0),
+        "at its own size it is drawn as specified"
+    );
+    s.resize(f, 48.0, 48.0);
+    assert_eq!(
+        s.bounds(g),
+        Rect::new(100.0, 100.0, 148.0, 148.0),
+        "the group fills the frame"
+    );
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(108.0, 108.0, 140.0, 140.0),
+        "the path scales with the icon"
+    );
+    assert!(
+        matches!(s.res.used_kind(&s.doc, path), Some(NodeKind::Path { .. })),
+        "its points are scaled, not its transform"
+    );
+    s.undo();
+    assert_eq!(s.bounds(path), Rect::new(104.0, 104.0, 120.0, 120.0));
+}
+
+/// A layer moved inside a stretched group stays where it was put: it is
+/// written back at half the distance in the group's own space, and the
+/// group's box holds.
+/// flip: `keep_insets` without `keep_stretched` → fails at "drawn where it
+/// was moved".
+#[test]
+fn a_layer_moved_inside_a_stretched_group_stays_where_it_was_put() {
+    let mut s = Scene::new();
+    let (f, _, inner, path) = icon(&mut s);
+    s.resize(f, 48.0, 48.0);
+    let drawn = s.res.used_local(&s.doc, path).unwrap();
+    s.commit(vec![Operation::SetTransform {
+        id: path,
+        transform: Affine::translate((4.0, 0.0)) * drawn,
+    }]);
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(112.0, 108.0, 144.0, 140.0),
+        "drawn where it was moved"
+    );
+    let stored = s.doc.get(path).unwrap().transform();
+    let inner_at = s.doc.get(inner).unwrap().transform();
+    assert!(
+        ((inner_at * stored).translation().x - 2.0).abs() < 1e-9,
+        "half the distance in the group's own space: {stored:?} under {inner_at:?}"
+    );
+}
+
+/// A layer moved out past a stretched group's box grows the box without moving
+/// anything already drawn: the pinned group takes new insets.
+/// flip: `keep_stretched` skipping the groups above → fails at "the rect has
+/// not moved".
+#[test]
+fn growing_a_stretched_groups_box_moves_nothing_else() {
+    let mut s = Scene::new();
+    let (f, g, _, path) = icon(&mut s);
+    s.resize(f, 48.0, 48.0);
+    let rect_id = s.doc.get(g).unwrap().children()[0];
+    let before = s.bounds(rect_id);
+    let drawn = s.res.used_local(&s.doc, path).unwrap();
+    s.commit(vec![Operation::SetTransform {
+        id: path,
+        transform: Affine::translate((24.0, 0.0)) * drawn,
+    }]);
+    assert_eq!(s.bounds(rect_id), before, "the rect has not moved");
+    assert_eq!(
+        s.bounds(path),
+        Rect::new(132.0, 108.0, 164.0, 140.0),
+        "the path is where it was put"
+    );
+    assert_ne!(
+        *s.doc.get(g).unwrap().insets(),
+        all_pct(0.0),
+        "the group took new insets"
+    );
+}

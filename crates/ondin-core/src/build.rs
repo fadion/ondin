@@ -8925,6 +8925,212 @@ fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
         .or_else(|| is_layout_root(&view, group).then(|| find(group)).flatten())
 }
 
+/// `tx` with every edit inside a pinned plain group read as "draw it here"
+/// (`container::Stretch`): a layer the edit moves or resizes is written back
+/// in the group's specified space ([`crate::container::unstretched`]), and
+/// each plain group above it up to the pinned one is placed again so that its
+/// new union is drawn where the old map put it — the pinned group by new
+/// insets, a group inside it by a new transform. A pinned group moved whole
+/// takes new insets. Every other layer passes through.
+///
+/// An axis-aligned map is fixed by any two boxes it takes onto each other, so
+/// placing the new union where the old map puts it draws every layer inside
+/// exactly where it was.
+fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
+    use crate::container::{Stretch, is_plain_group};
+    use kurbo::Rect;
+    let pinned_group = |id: NodeId| {
+        doc.get(id)
+            .is_some_and(|n| is_plain_group(n.kind(), n.display()) && n.insets().is_authored())
+    };
+    // The plain groups `id` sits in, innermost first, up to the outermost pinned one.
+    let chain = |id: NodeId| -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut at = doc.get(id).and_then(|n| n.parent());
+        while let Some(p) = at.and_then(|p| doc.get(p)) {
+            if !is_plain_group(p.kind(), p.display()) {
+                break;
+            }
+            out.push(p.id());
+            at = p.parent();
+        }
+        match out.iter().rposition(|g| pinned_group(*g)) {
+            Some(i) => {
+                out.truncate(i + 1);
+                out
+            }
+            None => Vec::new(),
+        }
+    };
+    let mut moved: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
+    for op in &tx.0 {
+        match op {
+            Operation::SetTransform { id, transform } => {
+                moved.entry(*id).or_insert((None, false)).0 = Some(*transform);
+            }
+            Operation::SetGeometry { id, geometry } if geometry.resizes() => {
+                moved.entry(*id).or_insert((None, false)).1 = true;
+            }
+            _ => {}
+        }
+    }
+    let inside: Vec<NodeId> = {
+        let mut v: Vec<NodeId> = moved
+            .keys()
+            .copied()
+            .filter(|id| !chain(*id).is_empty() && !doc.in_vault(*id))
+            .collect();
+        v.sort();
+        v
+    };
+    let whole: Vec<NodeId> = {
+        let mut v: Vec<NodeId> = moved
+            .iter()
+            .filter(|(id, (to, _))| to.is_some() && pinned_group(**id) && chain(**id).is_empty())
+            .map(|(id, _)| *id)
+            .collect();
+        v.sort();
+        v
+    };
+    if inside.is_empty() && whole.is_empty() {
+        return tx;
+    }
+    let mut after = doc.clone();
+    if after.apply_unchecked(&tx).is_err() {
+        return tx;
+    }
+    let identity = |c: Rect| Stretch { from: c, to: c };
+    let map = |s: &Stretch, r: Rect| {
+        let (sx, sy) = (
+            if s.from.width() > 0.0 {
+                s.to.width() / s.from.width()
+            } else {
+                1.0
+            },
+            if s.from.height() > 0.0 {
+                s.to.height() / s.from.height()
+            } else {
+                1.0
+            },
+        );
+        let at = |x: f64, y: f64| {
+            kurbo::Point::new(
+                s.to.x0 + (x - s.from.x0) * sx,
+                s.to.y0 + (y - s.from.y0) * sy,
+            )
+        };
+        Rect::from_points(at(r.x0, r.y0), at(r.x1, r.y1))
+    };
+    let mut out = tx;
+    // Each edited layer, written back in its group's specified space.
+    let mut groups: Vec<NodeId> = Vec::new();
+    for id in inside {
+        let Some(node) = after.get(id) else { continue };
+        let Some(parent) = node.parent() else {
+            continue;
+        };
+        let (to, geometry_changed) = moved[&id];
+        groups.extend(chain(id));
+        let Some(s) = res.used_stretch(parent) else {
+            continue;
+        };
+        let local = to
+            .or_else(|| res.used_local(doc, id))
+            .unwrap_or(node.transform());
+        let kind = if geometry_changed {
+            after
+                .resolved_kind(id)
+                .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned)
+        } else {
+            res.used_kind(doc, id)
+                .cloned()
+                .unwrap_or_else(|| node.kind().clone())
+        };
+        let contents = is_plain_group(node.kind(), node.display())
+            .then(|| res.used_stretch(id).map(|st| st.to))
+            .flatten();
+        let Some((stored, back)) = crate::container::unstretched(&s, local, &kind, contents) else {
+            continue;
+        };
+        // A move alone keeps the stored kind: the stretched one read back is it,
+        // up to float noise.
+        let back = if geometry_changed {
+            back.unwrap_or(kind)
+        } else {
+            node.kind().clone()
+        };
+        out.0.extend(baked_ops(id, node, stored, &back));
+    }
+    // Each group above, innermost first, placed again by its new union.
+    groups.sort_by_key(|g| std::cmp::Reverse(depth_of(doc, *g)));
+    groups.dedup();
+    let mut settled = after.clone();
+    if settled.apply_unchecked(&out).is_err() {
+        return out;
+    }
+    for g in groups.into_iter().chain(whole) {
+        let Some(node) = settled.get(g) else { continue };
+        let view = crate::resolve::DocView(&settled);
+        let Some(union) = crate::container::atomic_box(&view, g, node.kind()) else {
+            continue;
+        };
+        let was = res.used_stretch(g).unwrap_or_else(|| identity(union));
+        let drawn = map(&was, union);
+        // The group's local as drawn, shifted so its new union's origin lands on
+        // the old map's image of it.
+        let used = moved
+            .get(&g)
+            .and_then(|m| m.0)
+            .or_else(|| res.used_local(doc, g))
+            .unwrap_or(node.transform());
+        let local = used * Affine::translate(drawn.origin() - union.origin());
+        let boxed = Rect::from_origin_size(union.origin(), drawn.size());
+        if node.insets().is_authored() {
+            let Some(parent) = node.parent().and_then(|p| settled.get(p)) else {
+                continue;
+            };
+            let frame = match res.used_kind(doc, parent.id()).unwrap_or(parent.kind()) {
+                NodeKind::Artboard { size, .. } => *size,
+                NodeKind::Group => match res.used_frame(parent.id()) {
+                    Some(size) => size,
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let insets = crate::container::inverse_group(node.insets(), frame, local, boxed);
+            if insets != *node.insets() {
+                out.0.push(Operation::SetInsets { id: g, insets });
+            }
+        } else if let Some(s) = node.parent().and_then(|p| res.used_stretch(p))
+            && let Some((stored, _)) =
+                crate::container::unstretched(&s, local, node.kind(), Some(boxed))
+            && stored != node.transform()
+        {
+            // The group above measures this one where it now stands.
+            let op = Operation::SetTransform {
+                id: g,
+                transform: stored,
+            };
+            if settled
+                .apply_unchecked(&Transaction(vec![op.clone()]))
+                .is_err()
+            {
+                return out;
+            }
+            out.0.push(op);
+        }
+    }
+    out
+}
+
+/// How many ancestors `id` has.
+fn depth_of(doc: &Document, id: NodeId) -> usize {
+    std::iter::successors(doc.get(id).and_then(|n| n.parent()), |p| {
+        doc.get(*p).and_then(|n| n.parent())
+    })
+    .count()
+}
+
 /// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,
 /// so the layer stays where the edit put it.
 ///
@@ -8941,6 +9147,7 @@ fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
 /// edit leaves it alone, else its size after the edit (the Scale tool's case). A
 /// layer whose insets the transaction sets itself is left alone.
 pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
+    let tx = keep_stretched(doc, res, tx);
     // The placement each node is given, whether it was resized, and the nodes
     // whose insets are set outright.
     let mut placed: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();

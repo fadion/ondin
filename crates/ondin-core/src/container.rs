@@ -44,10 +44,13 @@
 //! only — a flex or grid container still keeps a path's size: its `stretch` is a
 //! default no one chose, and a path scaled unevenly is a distorted drawing. An arc is
 //! positioned and keeps its size: scaled unevenly it is no longer an arc.
-//! **A group or a boolean takes no insets at all**
-//! yet: its box is its children's, which [`crate::Resolved`] measures *after* it
-//! places them, so there is nothing to place it by. The field is stored on either
-//! and inert, as `Node::grids` is on a layer nobody offers grids for.
+//! **A plain group is placed by its contents** ([`place_group`]): its box is its
+//! children's union as specified ([`atomic_box`]), and pinned on both edges it
+//! stretches them, each child keeping its share of the box at any depth
+//! ([`Stretch`], [`place_in_stretch`]) and stretching as a pinned layer of its
+//! kind does — so a pinned icon's art follows its frame with its strokes kept.
+//! A boolean takes no insets yet, its insets stored and inert; inside a
+//! stretched group it is positioned at its share.
 
 use crate::build::clamp_coord;
 use crate::geometry;
@@ -549,6 +552,190 @@ pub fn inverse(insets: &Insets, frame: Size, local: Affine, bx: Rect, kind: &Nod
         bottom: v.end,
         margin_auto: insets.margin_auto,
     }
+}
+
+/// A plain group stretched by its insets: the box its contents span as
+/// specified (`from`) and the box its insets give it (`to`), both in the
+/// group's own space and sharing an origin. Every child keeps its share of
+/// `from` inside `to` ([`place_in_stretch`]), so a pinned icon's paths, rects
+/// and nested groups follow the frame, each stretching as a pinned layer of its
+/// kind does: a stroke keeps its width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stretch {
+    pub from: Rect,
+    pub to: Rect,
+}
+
+impl Stretch {
+    /// Whether the group's box is the size its contents are.
+    pub fn is_identity(&self) -> bool {
+        near(self.from.width(), self.to.width()) && near(self.from.height(), self.to.height())
+    }
+}
+
+/// Whether a node of `kind` with `display` is a plain group: a group without a
+/// layout, whose box is its children's. Insets stretch one by its contents
+/// ([`place_group`]).
+pub fn is_plain_group(kind: &NodeKind, display: Option<&Display>) -> bool {
+    matches!(kind, NodeKind::Group) && display.is_none()
+}
+
+/// A plain group's used placement under `insets` in a box `frame` big: where
+/// its contents' box `contents` (its children's specified union, in its own
+/// space) lands and the [`Stretch`] its children follow. `None` when the insets
+/// set nothing. An axis the contents have no extent on is positioned, as a flat
+/// path's is.
+pub fn place_group(
+    insets: &Insets,
+    frame: Size,
+    stored: Affine,
+    contents: Rect,
+) -> Option<(Affine, Stretch)> {
+    if !insets.is_authored() {
+        return None;
+    }
+    let implicit = slot_of(stored, contents);
+    let stretchy = (
+        contents.width() > FLAT_EXTENT,
+        contents.height() > FLAT_EXTENT,
+    );
+    let (x, w) = insets
+        .horizontal()
+        .resolve(frame.width, contents.width(), implicit.x, stretchy.0);
+    let (y, h) = insets
+        .vertical()
+        .resolve(frame.height, contents.height(), implicit.y, stretchy.1);
+    let to = Rect::from_origin_size(contents.origin(), Size::new(w, h));
+    Some((
+        placed_at(Point::new(x, y), to, stored),
+        Stretch { from: contents, to },
+    ))
+}
+
+/// The insets a plain group pinned in `frame` needs to draw where `local`
+/// puts its box `bx` — [`place_group`] read backwards, each inset in its unit.
+pub fn inverse_group(insets: &Insets, frame: Size, local: Affine, bx: Rect) -> Insets {
+    let slot = slot_of(local, bx);
+    let stretchy = (bx.width() > FLAT_EXTENT, bx.height() > FLAT_EXTENT);
+    let h = insets
+        .horizontal()
+        .inverse(frame.width, slot.x, bx.width(), stretchy.0);
+    let v = insets
+        .vertical()
+        .inverse(frame.height, slot.y, bx.height(), stretchy.1);
+    Insets {
+        left: h.start,
+        right: h.end,
+        top: v.start,
+        bottom: v.end,
+        margin_auto: insets.margin_auto,
+    }
+}
+
+/// The insets that hold a box `size` big at `slot` at its share of `within`:
+/// percentages of it on every side, or a start inset in units on an axis
+/// `within` has no extent on.
+fn share_of(within: Rect, slot: Point, size: Size) -> Insets {
+    let axis = |lo: f64, extent: f64, at: f64, len: f64| {
+        if extent > FLAT_EXTENT {
+            (
+                Some(LengthPct::Percent((at - lo) / extent * 100.0)),
+                Some(LengthPct::Percent(
+                    (lo + extent - at - len) / extent * 100.0,
+                )),
+            )
+        } else {
+            (Some(LengthPct::Px(at - lo)), None)
+        }
+    };
+    let (left, right) = axis(within.x0, within.width(), slot.x, size.width);
+    let (top, bottom) = axis(within.y0, within.height(), slot.y, size.height);
+    Insets {
+        top,
+        right,
+        bottom,
+        left,
+        margin_auto: AutoMargins::default(),
+    }
+}
+
+/// Where a box in `from` goes when it is mapped into `to`: an unrotated box
+/// `bx` placed by `stored`, at its share of `from`, laid in `to` — the box's
+/// slot and size in `to`'s space. The arithmetic every stretched child, and an
+/// edit read back out of one, goes through.
+fn shared_box(
+    from: Rect,
+    to: Rect,
+    stored: Affine,
+    bx: Rect,
+    stretchy: (bool, bool),
+) -> (Point, Size) {
+    let share = share_of(from, slot_of(stored, bx), bx.size());
+    let local = Affine::translate(-from.origin().to_vec2()) * stored;
+    let implicit = slot_of(local, bx);
+    let (x, w) = share
+        .horizontal()
+        .resolve(to.width(), bx.width(), implicit.x, stretchy.0);
+    let (y, h) = share
+        .vertical()
+        .resolve(to.height(), bx.height(), implicit.y, stretchy.1);
+    (Point::new(to.x0 + x, to.y0 + y), Size::new(w, h))
+}
+
+/// A child's used geometry inside a stretched group: the child at `stored` with
+/// `kind` keeps its share of `stretch.from` inside `stretch.to`, stretching as a
+/// pinned layer of its kind does ([`inset_stretch`]). A plain group's contents
+/// are its box (`contents`, [`atomic_box`]), and it hands its own [`Stretch`]
+/// on. `None` for a child with no box.
+pub fn place_in_stretch(
+    stretch: &Stretch,
+    stored: Affine,
+    kind: &NodeKind,
+    contents: Option<Rect>,
+) -> Option<(Affine, Option<NodeKind>, Option<Stretch>)> {
+    if let Some(c) = contents {
+        let stretchy = (c.width() > FLAT_EXTENT, c.height() > FLAT_EXTENT);
+        let (slot, size) = shared_box(stretch.from, stretch.to, stored, c, stretchy);
+        let to = Rect::from_origin_size(c.origin(), size);
+        return Some((
+            placed_at(slot, to, stored),
+            None,
+            Some(Stretch { from: c, to }),
+        ));
+    }
+    let bx = geometry::local_bounds(kind, None)?;
+    let stretchy = inset_stretch(kind);
+    let (slot, size) = shared_box(stretch.from, stretch.to, stored, bx, stretchy);
+    let stretched = (
+        !near(size.width, bx.width()),
+        !near(size.height, bx.height()),
+    );
+    let (used_kind, used_box) = if stretched.0 || stretched.1 {
+        let k = resized(kind, size, stretched);
+        let b = geometry::local_bounds(&k, None)?;
+        (Some(k), b)
+    } else {
+        (None, bx)
+    };
+    Some((placed_at(slot, used_box, stored), used_kind, None))
+}
+
+/// [`place_in_stretch`] read backwards: the specified placement and kind that
+/// draw a child where an edit left it, `drawn` with `kind` inside the stretched
+/// group's `to` — its share of `to` laid back in `from`. What an edit to a
+/// layer inside a stretched group commits (`build::keep_insets`).
+pub fn unstretched(
+    stretch: &Stretch,
+    drawn: Affine,
+    kind: &NodeKind,
+    contents: Option<Rect>,
+) -> Option<(Affine, Option<NodeKind>)> {
+    let back = Stretch {
+        from: stretch.to,
+        to: stretch.from,
+    };
+    let (local, kind, _) = place_in_stretch(&back, drawn, kind, contents)?;
+    Some((local, kind))
 }
 
 // ---------------------------------------------------------------------------

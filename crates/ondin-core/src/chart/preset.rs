@@ -2,7 +2,7 @@
 //! description in one step, not a link. The Chart card's Style cells and an
 //! agent's `set_chart` write the same values.
 
-use super::{LegendPosition, Options, PointStyle, ValuePosition};
+use super::{LegendPosition, NodeLabels, Options, PointStyle, ValuePosition};
 
 /// The presets, in the card's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -11,9 +11,11 @@ pub enum Preset {
     Clean,
     /// Rounded marks and a light dashed grid.
     Soft,
-    /// Heavy marks, no grid, large values.
+    /// Heavy marks, no grid, large values; a Sankey's nodes wider and its
+    /// flows stronger.
     Bold,
-    /// No axes, no grid, no legend: a sparkline when the chart is small.
+    /// No axes, no grid, no legend, no Sankey labels: a sparkline when the
+    /// chart is small.
     Minimal,
     /// Marks stroked in their colour over a light tint of it, and thin lines.
     Outline,
@@ -56,6 +58,9 @@ impl Preset {
         o.slices.pad_angle = clean.slices.pad_angle;
         o.slices.radius = clean.slices.radius;
         o.flows.node_radius = clean.flows.node_radius;
+        o.flows.node_width = clean.flows.node_width;
+        o.flows.opacity = clean.flows.opacity;
+        o.flows.labels = clean.flows.labels;
         for (axis, default) in [
             (&mut o.value_axis, &clean.value_axis),
             (&mut o.category_axis, &clean.category_axis),
@@ -86,6 +91,8 @@ impl Preset {
                 o.category_axis.grid.show = false;
                 o.values.position = ValuePosition::Outside;
                 o.text.value_size = 14.0;
+                o.flows.node_width = 18.0;
+                o.flows.opacity = 0.6;
             }
             Preset::Minimal => {
                 o.value_axis.show = false;
@@ -93,6 +100,7 @@ impl Preset {
                 o.value_axis.grid.show = false;
                 o.category_axis.grid.show = false;
                 o.legend.position = LegendPosition::Off;
+                o.flows.labels = NodeLabels::Off;
             }
             Preset::Outline => {
                 o.outline = Some(OUTLINE_WIDTH);
@@ -128,5 +136,20 @@ mod tests {
         let mut custom = Options::default();
         custom.bars.radius = 9.0;
         assert_eq!(Preset::of(&custom), None, "an edited option lights none");
+    }
+
+    /// Every preset changes something a Sankey draws, so no two of its cells
+    /// pick the same look.
+    #[test]
+    fn every_preset_changes_what_a_sankey_draws() {
+        let flows = |p: Preset| {
+            let o = p.apply(&Options::default());
+            format!("{:?}{:?}", o.flows, o.outline)
+        };
+        for (i, a) in Preset::ALL.iter().enumerate() {
+            for b in &Preset::ALL[i + 1..] {
+                assert_ne!(flows(*a), flows(*b), "{a:?} and {b:?}");
+            }
+        }
     }
 }

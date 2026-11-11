@@ -9672,9 +9672,10 @@ mod tests {
     /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 20] = [
+        let panels: [(&str, &str); 21] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("chart.rs", include_str!("panels/chart.rs")),
+            ("chart_picture.rs", include_str!("panels/chart_picture.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("credit.rs", include_str!("panels/credit.rs")),
             ("bind_others.rs", include_str!("panels/bind_others.rs")),

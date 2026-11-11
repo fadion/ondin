@@ -13,7 +13,7 @@ use ondin_core::chart::{
     LegendPosition, NodeLabels, Palette, PieLabel, PointShape, PointStyle, Preset, Stacking,
     ValuePosition,
 };
-use ondin_core::kurbo::{self, Affine, BezPath, Shape};
+use ondin_core::kurbo;
 use ondin_core::{Brush, NodeId, Operation, Transaction};
 use std::hash::{Hash, Hasher};
 
@@ -28,24 +28,34 @@ pub(crate) const FOLDED: [&str; 5] = [
 
 /// A Style cell's height: the picture and its name under it.
 /// Past two control heights, so it reads (and audits) as a tile, not a control.
-const STYLE_CELL_H: f32 = 58.0;
-/// The picture inside a Style cell, narrow enough for five cells to a row.
-const STYLE_PICTURE: egui::Vec2 = egui::vec2(44.0, 28.0);
+const STYLE_CELL_H: f32 = 61.0;
+/// The picture inside a Style cell at its largest; a narrower cell draws it smaller.
+const STYLE_PICTURE: egui::Vec2 = super::chart_picture::SIZE;
+/// The least room between a Style cell's edge and its picture, so the lit
+/// cell's ring never touches the picture's frame.
+const STYLE_INSET: f32 = 5.0;
+/// The room above a Style cell's picture: the same as each side's.
+const STYLE_TOP: f32 = STYLE_INSET;
+/// The gap between Style cells, under `ui::CARD_COL_GAP`: the cells' own
+/// insets already space the pictures apart, and the width goes to the pictures.
+const STYLE_GAP: f32 = 2.0;
 /// The number the *Format* dropdown writes as its sample.
 const FORMAT_SAMPLE: f64 = 12_345.6;
 /// The *Format* dropdown's popup width: two text fields to a row.
 const FORMAT_POPUP_W: f32 = 220.0;
 /// The series style menu's width, past its longest row.
 const SERIES_MENU_W: f32 = 140.0;
-/// The size a Style cell's chart is generated at before it is drawn small, so
-/// its marks keep a chart's proportions rather than a thumbnail's.
-const STYLE_CHART: kurbo::Size = kurbo::Size::new(320.0, 200.0);
 /// What the card measured of its chart, kept while the description stays the same:
 /// the Style cells' pictures and the generator's left-out values.
 pub(crate) struct ChartCardCache {
     id: NodeId,
     key: u64,
+    /// The Style pictures, drawn on first show at [`Self::thumb_px`].
     thumbs: Vec<(Preset, egui::TextureHandle)>,
+    thumb_px: [usize; 2],
+    picture: super::chart_picture::Picture,
+    /// The chart's first colours, its bindings resolved.
+    colours: [ondin_core::peniko::Color; super::chart_picture::COLOURS],
     left_out: Vec<String>,
     refusal: Option<String>,
     /// Whether the chart draws a progress ring's track, which the Marks section
@@ -190,11 +200,12 @@ pub(crate) fn with_fill(
 }
 
 /// What the cache is keyed by: everything the generator reads but the parts,
-/// and the display scale the Style pictures are rasterised at.
+/// and the display scale and theme the Style pictures are rasterised in.
 fn description_key(id: NodeId, chart: &Chart, size: kurbo::Size, ppp: f32) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     id.hash(&mut h);
     ppp.to_bits().hash(&mut h);
+    format!("{:?}", theme::color::theme()).hash(&mut h);
     format!("{:?}", chart.kind).hash(&mut h);
     format!("{:?}", chart.mapping).hash(&mut h);
     format!("{:?}", chart.series).hash(&mut h);
@@ -209,56 +220,30 @@ fn description_key(id: NodeId, chart: &Chart, size: kurbo::Size, ppp: f32) -> u6
     h.finish()
 }
 
-/// A Style cell's picture: `chart` generated at [`STYLE_CHART`] and its fills and
-/// strokes rasterised at `px`, text left out, since no label reads at this size.
+/// The device pixels a Style cell `cell_w` wide draws its picture in at `ppp`:
+/// [`STYLE_PICTURE`], or smaller in its proportions to keep [`STYLE_INSET`]
+/// each side. Whole pixels both ways, so the texture is never stretched.
+fn style_picture_px(cell_w: f32, ppp: f32) -> [usize; 2] {
+    let w = (STYLE_PICTURE.x * ppp)
+        .min((cell_w - 2.0 * STYLE_INSET) * ppp)
+        .floor()
+        .max(1.0);
+    let h = (w * STYLE_PICTURE.y / STYLE_PICTURE.x).round().max(1.0);
+    [w as usize, h as usize]
+}
+
+/// A Style cell's picture: `preset`'s drawing of `picture` in `colours` and the
+/// theme's ink, rasterised at `px` with its edges on the pixel grid.
 fn style_picture(
     ctx: &egui::Context,
-    chart: &Chart,
+    picture: super::chart_picture::Picture,
+    colours: &[ondin_core::peniko::Color; super::chart_picture::COLOURS],
+    preset: Preset,
     px: [usize; 2],
 ) -> Option<egui::TextureHandle> {
-    let family = ondin_core::typography::TextStyle::default().font_family;
-    let generated = chart::generate(chart, STYLE_CHART, &family).ok()?;
-    let k = (px[0] as f64 / STYLE_CHART.width).min(px[1] as f64 / STYLE_CHART.height);
-    let mut world: std::collections::HashMap<chart::PartKey, Affine> = Default::default();
-    let mut art: Vec<(BezPath, ondin_core::peniko::Color)> = Vec::new();
-    // A gradient flow draws in its source's colour here: one colour reads at this size.
-    let solid = |b: &ondin_core::BrushSource, alpha: f32| match b.literal() {
-        Some(brush @ (Brush::Solid(_) | Brush::Gradient(_))) => super::paint::stops_of(brush)
-            .first()
-            .map(|(_, c)| c.multiply_alpha(alpha)),
-        _ => None,
-    };
-    for p in &generated.parts {
-        let parent: Affine = p
-            .parent
-            .and_then(|k| world.get(&k).copied())
-            .unwrap_or_default();
-        let at = parent * p.transform;
-        world.insert(p.key, at);
-        let Some(outline) = ondin_core::geometry::local_path(&p.kind) else {
-            continue;
-        };
-        let to_px = Affine::scale(k) * at;
-        for f in p.fills.iter().filter(|f| f.visible) {
-            if let Some(c) = solid(&f.brush, p.opacity) {
-                art.push((to_px * outline.clone(), c));
-            }
-        }
-        for s in p.strokes.iter().filter(|s| s.visible) {
-            if let Some(c) = solid(&s.brush, p.opacity) {
-                let pen = kurbo::Stroke::new(s.width)
-                    .with_join(s.join)
-                    .with_caps(s.cap);
-                let ink = kurbo::stroke(
-                    outline.path_elements(0.1),
-                    &pen,
-                    &kurbo::StrokeOpts::default(),
-                    0.1,
-                );
-                art.push((to_px * ink, c));
-            }
-        }
-    }
+    use super::chart_picture as pictures;
+    let k = px[0] as f64 / STYLE_PICTURE.x as f64;
+    let art = pictures::art(picture, preset, colours, &pictures::Ink::of_theme(), k);
     let rgba = ondin_render::rasterize_paths(px[0] as u32, px[1] as u32, &art)?;
     let image = egui::ColorImage::from_rgba_unmultiplied(px, &rgba);
     Some(ctx.load_texture("chart-style", image, egui::TextureOptions::LINEAR))
@@ -471,25 +456,13 @@ impl OndinApp {
                 (Vec::new(), Some(format!("Flows loop back: {path}")), false)
             }
         };
-        let ppp = ctx.pixels_per_point();
-        let px = [
-            (STYLE_PICTURE.x * ppp).round() as usize,
-            (STYLE_PICTURE.y * ppp).round() as usize,
-        ];
-        let thumbs = Preset::ALL
-            .into_iter()
-            .filter_map(|p| {
-                let styled = Chart {
-                    options: p.apply(&chart.options),
-                    ..chart.clone()
-                };
-                style_picture(ctx, &styled, px).map(|t| (p, t))
-            })
-            .collect();
         self.chart_card = Some(ChartCardCache {
             id,
             key,
-            thumbs,
+            thumbs: Vec::new(),
+            thumb_px: [0, 0],
+            picture: super::chart_picture::Picture::of(chart),
+            colours: super::chart_picture::colours(chart),
             left_out,
             refusal,
             track,
@@ -757,17 +730,28 @@ impl OndinApp {
 
     fn chart_style_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
         let lit = Preset::of(&chart.options);
+        let n = Preset::ALL.len() as f32;
+        let cell = (ui.available_width() - STYLE_GAP * (n - 1.0)) / n;
+        let ctx = ui.ctx().clone();
+        let px = style_picture_px(cell, ctx.pixels_per_point());
+        if let Some(c) = self.chart_card.as_mut().filter(|c| c.id == id)
+            && c.thumb_px != px
+        {
+            c.thumbs = Preset::ALL
+                .into_iter()
+                .filter_map(|p| style_picture(&ctx, c.picture, &c.colours, p, px).map(|t| (p, t)))
+                .collect();
+            c.thumb_px = px;
+        }
         let thumbs: Vec<(Preset, egui::TextureId)> = self
             .chart_card
             .as_ref()
             .filter(|c| c.id == id)
             .map(|c| c.thumbs.iter().map(|(p, t)| (*p, t.id())).collect())
             .unwrap_or_default();
-        let n = Preset::ALL.len() as f32;
-        let cell = (ui.available_width() - ui::CARD_COL_GAP * (n - 1.0)) / n;
         let mut pick = None;
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+            ui.spacing_mut().item_spacing.x = STYLE_GAP;
             for preset in Preset::ALL {
                 let picture = thumbs.iter().find(|(p, _)| *p == preset).map(|(_, t)| *t);
                 if style_cell(ui, cell, preset.label(), picture, lit == Some(preset)).clicked() {
@@ -2431,11 +2415,17 @@ fn style_cell(
             egui::StrokeKind::Inside,
         );
     }
-    let frame = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + 6.0 + STYLE_PICTURE.y / 2.0),
-        STYLE_PICTURE,
+    // On whole device pixels, at exactly the texture's size, so no texel is
+    // sampled between two pixels.
+    let ppp = ui.ctx().pixels_per_point();
+    let px = style_picture_px(width, ppp);
+    let size = egui::vec2(px[0] as f32, px[1] as f32) / ppp;
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let min = egui::pos2(
+        snap(rect.center().x - size.x / 2.0),
+        snap(rect.top() + STYLE_TOP),
     );
-    p.rect_filled(frame, egui::CornerRadius::same(2), egui::Color32::WHITE);
+    let frame = egui::Rect::from_min_size(min, size);
     if let Some(t) = picture {
         p.image(t, frame, crate::thumbs::FULL_UV, egui::Color32::WHITE);
     }
@@ -2457,6 +2447,7 @@ fn style_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ondin_core::kurbo::Affine;
 
     /// A chart on bare canvas, selected, in a headless app.
     fn charted(ctx: &egui::Context, kind: ChartKind) -> (OndinApp, NodeId) {
@@ -2524,6 +2515,20 @@ mod tests {
         assert!(cache.left_out.is_empty() && cache.refusal.is_none());
         let chart = app.session.doc.get(id).and_then(|n| n.chart()).unwrap();
         assert_eq!(Preset::of(&chart.options), Some(Preset::Clean));
+    }
+
+    /// A Style picture keeps its inset each side in a narrow cell, in whole
+    /// pixels and its proportions at any scale, and never grows past its own
+    /// size in a wide one.
+    #[test]
+    fn a_style_picture_keeps_its_inset() {
+        for ppp in [1.0, 1.5, 2.0] {
+            let [w, h] = style_picture_px(46.5, ppp);
+            assert!(w as f32 / ppp + 2.0 * STYLE_INSET <= 46.5, "{w} at {ppp}");
+            let want = (w as f32 * STYLE_PICTURE.y / STYLE_PICTURE.x).round();
+            assert_eq!(h as f32, want, "whole pixels in proportion at {ppp}");
+        }
+        assert_eq!(style_picture_px(80.0, 1.0), [44, 32]);
     }
 
     /// A series colour written through the picker's slot reads back from the

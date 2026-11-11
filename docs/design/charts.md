@@ -287,10 +287,11 @@ it applies to; switching kind keeps the others' values.
 - **Style presets** (`chart::Preset`). A preset is a set of option values written over the
   description's style fields in one step, not a link: *Clean* (the defaults), *Soft* (rounded
   marks and slices, filled points, a dashed value grid), *Bold* (heavy marks, no grid, large
-  values outside), *Minimal* (no axes, no grid, no legend: a sparkline when the chart is small),
-  *Outline* (outlined marks at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`).
-  Data, palette, text family and number formats are left alone. The preset cells are drawn by
-  `chart::generate` itself on the chart's own data, so what a cell shows is what it does.
+  values outside; a Sankey's nodes 18 wide and its flows at 60%), *Minimal* (no axes, no grid,
+  no legend, no Sankey labels: a sparkline when the chart is small), *Outline* (outlined marks
+  at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`). Every preset changes something each
+  kind draws, so no two cells of a kind look alike. Data, palette, text family and number
+  formats are left alone.
 - **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
   *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a group of colour variables
   that may bind a fill (the name before the last `/`, else the collection's name; its variables
@@ -397,12 +398,22 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   `ui::menu_rows`, each row its glyph, `rail::chart_glyph`), then the variants on
   `ui::segmented`. A switch to or from a Sankey re-reads the mapping off the table's columns.
   Undo step *Chart type*.
-- **Style** — the preset cells in a row, each the chart generated with the preset at 320 × 200
-  and its fills and strokes rasterised small (`style_picture`, through `rasterize_paths`; text
-  left out), cached with the generator's left-out values while the description, its bound
-  colours resolved, the drawn size and the display scale are unchanged (`ChartCardCache`), so a bound variable's
-  new value or a mode switch redraws them (`style_pictures_follow_a_bound_variables_value`). The
-  preset the options are exactly at lights. Undo step *Chart style*.
+- **Style** — the preset cells in a row, each a drawing of its preset for the chart's kind
+  (`panels/chart_picture.rs`) on a 44 × 32 grid, not the chart shrunk: few, thick marks that
+  change only what the preset changes. A narrow cell draws it smaller, keeping 5 px each side
+  as above it so it clears the lit ring; the cells sit 2 px apart so the width goes to the
+  pictures. It is rasterised at a whole-pixel size with every straight edge and hairline
+  snapped to the pixel grid, and drawn at a pixel-aligned spot, so a smaller picture stays
+  crisp. Donut and Bubble have drawings of their own; stacking variants
+  keep their kind's. The marks wear the chart's first colours (series, a pie's first slices, a
+  Sankey's first nodes; the palette fills the rest), the chrome is the theme's text ink, and
+  there is no ground: a 1 px frame sits over the cell's hover and lit fills. Outline's tint is
+  22% there, against the chart's 14%, which vanishes at this size. The pictures are rasterised
+  through `rasterize_paths` and cached with the generator's left-out values while the
+  description, its bound colours resolved, the drawn size, the display scale and the theme are
+  unchanged (`ChartCardCache`), so a bound variable's new value, a mode switch or a theme
+  switch redraws them (`style_pictures_follow_a_bound_variables_value`). The preset the
+  options are exactly at lights. Undo step *Chart style*.
 - **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), the left-out line (*2
   values left out*, the reasons in its tooltip) or the refusal (*Too many marks: …*, *Flows loop
   back: …*) in the warning ink, and the mapping: *Category* (*X* for a scatter) or a Sankey's

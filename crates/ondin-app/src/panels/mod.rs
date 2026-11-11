@@ -7,6 +7,7 @@
 pub(crate) mod bind_others;
 pub(crate) mod binding;
 mod chart;
+mod chart_picture;
 mod component;
 pub(crate) mod credit;
 pub(crate) mod dashboard;

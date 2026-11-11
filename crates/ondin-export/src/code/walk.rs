@@ -1950,16 +1950,19 @@ impl Walk<'_> {
             }
             Place::Share { local, of } => {
                 el.set("position", "absolute");
-                let share = bx.filter(|_| css::is_translation(local)).and_then(|b| {
-                    let at = b + local.translation();
+                // The unturned box's share, turned about its centre as CSS turns
+                // by default: the canvas stretches a turned layer's own box and
+                // turns that. Text keeps its type size there too.
+                let share = bx.and_then(|b| {
+                    let at = container::slot_of(local, b);
                     let pct = |v: f64, len: f64| {
                         (len > 1e-9).then(|| format!("{}%", fmt(v / len * 100.0)))
                     };
                     Some((
-                        pct(at.x0 - of.x0, of.width())?,
-                        pct(at.y0 - of.y0, of.height())?,
-                        pct(at.width(), of.width())?,
-                        pct(at.height(), of.height())?,
+                        pct(at.x - of.x0, of.width())?,
+                        pct(at.y - of.y0, of.height())?,
+                        pct(b.width(), of.width())?,
+                        pct(b.height(), of.height())?,
                     ))
                 });
                 match share {
@@ -1969,16 +1972,12 @@ impl Walk<'_> {
                         el.set("top", top);
                         el.set("width", width);
                         el.set("height", height);
-                        if matches!(kind, NodeKind::Text { .. }) {
-                            self.report.approximate(format!(
-                                "text {}: in a group its insets scale, its box scales and \
-                                 its type keeps its size",
-                                label(node)
-                            ));
+                        if let Some(m) = css::matrix(css::linear(local)) {
+                            el.set("transform", m);
                         }
                     }
-                    // Turned, skewed, or with no extent to share: at its drawn place
-                    // from the group's box, which a resize leaves where it is.
+                    // With no extent to share: at its drawn place from the group's
+                    // box, which a resize leaves where it is.
                     None => {
                         self.report.approximate(format!(
                             "{} {}: in a group its insets scale, written at its drawn size",

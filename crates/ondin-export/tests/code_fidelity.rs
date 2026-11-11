@@ -1333,6 +1333,112 @@ fn a_pinned_group_scales_in_a_resized_use() {
     holds_components("pinned-group-use", &doc, &res);
 }
 
+/// A pinned group's turned bar, turned group and text, used at twice the
+/// icon's size: each takes its unturned box's share and turns about its
+/// centre, the text's type at its own size, as the canvas draws them, with
+/// nothing reported.
+/// flip: `Walk::place` writing a turned layer's share at its drawn size →
+/// fails at "meant to be exact" with the bar reported.
+#[test]
+fn a_pinned_groups_turned_layers_and_text_scale_in_a_resized_use() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 160.0, 120.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 40.0, 40.0, "Icon");
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let bar = |size: Size| NodeKind::Rect {
+        size,
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
+    };
+    // A 24 × 4 bar turned 45° about (20, 16), its slot's centre.
+    let turned = d.add(
+        Some(art),
+        bar(Size::new(24.0, 4.0)),
+        Affine::translate((20.0, 16.0))
+            * Affine::rotate(std::f64::consts::FRAC_PI_4)
+            * Affine::translate((-12.0, -2.0)),
+        "Bar",
+    );
+    d.fill(turned, solid(60, 120, 220, 255));
+    let tilt = d.add(
+        Some(art),
+        NodeKind::Group,
+        Affine::translate((30.0, 8.0)) * Affine::rotate(0.5),
+        "Tilt",
+    );
+    let dot = d.add(
+        Some(tilt),
+        bar(Size::new(6.0, 3.0)),
+        Affine::IDENTITY,
+        "Dot",
+    );
+    d.fill(dot, solid(220, 60, 60, 255));
+    let label = d.add(
+        Some(art),
+        text_node(
+            "Hi",
+            TextSizing::Auto,
+            TextStyle {
+                font_size: 8.0,
+                line_height: Some(ondin_core::Length::Px(10.0)),
+                ..Default::default()
+            },
+            |_| {},
+        ),
+        Affine::translate((6.0, 26.0)),
+        "Label",
+    );
+    d.fill(label, solid(30, 30, 30, 255));
+    d.apply(vec![
+        Operation::SetInsets {
+            id: art,
+            insets: Insets {
+                left: Some(LengthPct::Percent(10.0)),
+                right: Some(LengthPct::Percent(10.0)),
+                top: Some(LengthPct::Percent(10.0)),
+                bottom: Some(LengthPct::Percent(10.0)),
+                ..Default::default()
+            },
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+    ]);
+    let (tx, used) = ondin_core::build::place_instance(
+        &d.doc,
+        &mut d.ids,
+        icon,
+        board,
+        Some(Point::new(60.0, 20.0)),
+    )
+    .expect("an instance");
+    d.apply(tx.0);
+    let res = Resolved::rebuild(&d.doc);
+    let tx = ondin_core::edit::resize_to(&d.doc, &res, used, Size::new(80.0, 80.0));
+    let tx = ondin_core::build::keep_insets(&d.doc, &res, tx);
+    d.apply(tx.0);
+    let (doc, res) = d.done();
+    let drawn_bar = ondin_core::build::subtree_nodes(&doc, &[used])
+        .into_iter()
+        .find(|n| doc.get(*n).unwrap().name() == "Bar")
+        .and_then(|n| res.ink_bounds(n))
+        .unwrap();
+    assert!(
+        drawn_bar.width() > 30.0,
+        "the fixture: the bar is drawn stretched in the use, {drawn_bar:?}"
+    );
+    // Held as `rotation` is, unblurred: a turned edge's antialiasing differs.
+    holds_as(
+        "pinned-group-turned",
+        &doc,
+        &res,
+        0,
+        MAX_CELL_ERROR,
+        html_of_components,
+    );
+}
+
 /// What CSS cannot draw goes to inline SVG and still matches: a star, a path and
 /// an inner shadow, beside a group with no layout.
 #[test]

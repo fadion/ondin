@@ -7280,29 +7280,35 @@ impl OndinApp {
     ///
     /// A pin diagram and four fields. Clicking a strut pins that edge at its current
     /// distance (`container::with_edge`), so a pin never moves anything. Applies to
-    /// every [`Self::inset_subjects`] layer, each at its own distances.
+    /// every [`Self::inset_subjects`] layer, each at its own distances. With none,
+    /// a layer that could be pinned elsewhere gets the card disabled under the
+    /// reason it cannot be pinned here ([`Self::inset_inert_reason`]).
     fn inspector_insets(&mut self, ui: &mut egui::Ui) {
-        use ondin_core::container::Edge as Pin;
         let subjects = self.inset_subjects();
-        let Some(&anchor) = subjects.first() else {
-            return;
+        let (anchor, place, inert) = match subjects.first() {
+            Some(&anchor) => {
+                let Some(place) = self.inset_placement(anchor) else {
+                    return;
+                };
+                (Some(anchor), Some(place), None)
+            }
+            None => {
+                let Some(why) = self.inset_inert_reason() else {
+                    return;
+                };
+                (None, None, Some(why))
+            }
         };
-        let Some(place) = self.inset_placement(anchor) else {
-            return;
-        };
-        let insets = self
-            .session
-            .display_node(anchor)
+        let insets = anchor
+            .and_then(|a| self.session.display_node(a))
             .map(|n| n.insets())
             .unwrap_or_default();
         let mixed = subjects
             .iter()
             .any(|id| self.session.display_node(*id).map(|n| n.insets()) != Some(insets));
         // Outside a layout every child is absolute, held at top and left when it has no insets.
-        let laid = self
-            .session
-            .doc
-            .get(anchor)
+        let laid = anchor
+            .and_then(|a| self.session.doc.get(a))
             .and_then(|n| n.parent())
             .and_then(|p| self.session.doc.get(p))
             .is_some_and(|p| p.display().is_some());
@@ -7310,105 +7316,125 @@ impl OndinApp {
         let badge = (laid && !mixed && insets.is_authored()).then_some("Absolute");
         // Outside a layout an axis with no inset is shown held, without writing one:
         // an authored inset would take the layer out of a future layout.
+        let live = place.is_some();
         let held = (
-            !laid && insets.left.is_none() && insets.right.is_none(),
-            !laid && insets.top.is_none() && insets.bottom.is_none(),
+            live && !laid && insets.left.is_none() && insets.right.is_none(),
+            live && !laid && insets.top.is_none() && insets.bottom.is_none(),
         );
         self.panel_badged(ui, "Position", None, badge, |app, ui| {
-            if mixed {
+            let note = match &inert {
+                Some(why) => Some(why.as_str()),
+                None => mixed.then_some("Pinned differently. A pin applies to every layer."),
+            };
+            if let Some(note) = note {
                 ui.label(
-                    egui::RichText::new("Pinned differently. A pin applies to every layer.")
+                    egui::RichText::new(note)
                         .size(ui::SMALL_PT)
                         .color(theme::text::faint()),
                 );
             }
-            let full = ui.available_width();
-            let gap = ui::CARD_COL_GAP;
-            let side = ui::CONTROL_H;
-            let field = egui::vec2((full - INSET_DIAGRAM_W - gap * 2.0) / 2.0, side);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                let diagram = egui::vec2(INSET_DIAGRAM_W, 2.0 * side + ui::CARD_ROW_GAP);
-                if let Some(edge) = inset_diagram(ui, diagram, &insets, held) {
-                    app.toggle_pin(&subjects, edge, inset_of(&insets, edge).is_none());
-                }
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-                    for pair in [[Pin::Left, Pin::Right], [Pin::Top, Pin::Bottom]] {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = gap;
-                            for edge in pair {
-                                let is_held = match edge {
-                                    Pin::Left => held.0,
-                                    Pin::Top => held.1,
-                                    Pin::Right | Pin::Bottom => false,
-                                };
-                                app.inset_field(
-                                    ui, &subjects, edge, field, &insets, &place, is_held,
-                                );
-                            }
-                        });
-                    }
-                });
+            ui::disable_unless(ui, live, |ui| {
+                app.inset_controls(ui, &subjects, &insets, place.as_ref(), held, mixed)
             });
-            let button = egui::vec2((full - gap * 2.0) / 3.0, side);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                for horizontal in [true, false] {
-                    let on = if horizontal {
-                        insets.margin_auto.left && insets.margin_auto.right
-                    } else {
-                        insets.margin_auto.top && insets.margin_auto.bottom
-                    };
-                    let (glyph, tip) = match (horizontal, on) {
-                        (true, false) => (
-                            icon::ALIGN_CENTER_HORIZONTAL,
-                            "Centre in the container horizontally",
-                        ),
-                        (true, true) => {
-                            (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring horizontally")
+        });
+    }
+
+    /// The Position card's diagram, four fields and three buttons. With no
+    /// `place` the card is inert: every field reads `auto` and nothing commits.
+    fn inset_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        insets: &ondin_core::Insets,
+        place: Option<&InsetPlacement>,
+        held: (bool, bool),
+        mixed: bool,
+    ) {
+        use ondin_core::container::Edge as Pin;
+        let full = ui.available_width();
+        let gap = ui::CARD_COL_GAP;
+        let side = ui::CONTROL_H;
+        let field = egui::vec2((full - INSET_DIAGRAM_W - gap * 2.0) / 2.0, side);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            let diagram = egui::vec2(INSET_DIAGRAM_W, 2.0 * side + ui::CARD_ROW_GAP);
+            if let Some(edge) = inset_diagram(ui, diagram, insets, held)
+                && place.is_some()
+            {
+                self.toggle_pin(subjects, edge, inset_of(insets, edge).is_none());
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
+                for pair in [[Pin::Left, Pin::Right], [Pin::Top, Pin::Bottom]] {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for edge in pair {
+                            let is_held = match edge {
+                                Pin::Left => held.0,
+                                Pin::Top => held.1,
+                                Pin::Right | Pin::Bottom => false,
+                            };
+                            self.inset_field(ui, subjects, edge, field, insets, place, is_held);
                         }
-                        (false, false) => (
-                            icon::ALIGN_CENTER_VERTICAL,
-                            "Centre in the container vertically",
-                        ),
-                        (false, true) => (icon::ALIGN_CENTER_VERTICAL, "Stop centring vertically"),
-                    };
-                    let state = if on {
-                        ui::FieldButton::On
-                    } else {
-                        ui::FieldButton::Off
-                    };
-                    let mark = app.centre_mark(&subjects, horizontal);
-                    let (resp, reset) = ui::field_button_marked(
-                        ui,
-                        glyph,
-                        button,
-                        state,
-                        mark.as_ref().map(Mark::field),
-                    );
-                    let resp = tip_unless_marked(resp, &mark, tip);
-                    if reset {
-                        app.reset_marked(true, &mark);
-                    } else if resp.clicked() {
-                        app.toggle_centre(&subjects, horizontal, !on);
-                    }
-                }
-                // *Scale*: every side pinned by percentage, so the layer keeps its
-                // share of the container as it resizes.
-                let scaled = !mixed && scales_with_container(&insets);
-                let (state, tip) = match scaled {
-                    true => (ui::FieldButton::On, "Stop scaling with the container"),
-                    false => (
-                        ui::FieldButton::Off,
-                        "Scale with the container: pin every side by percentage",
-                    ),
-                };
-                let (resp, _) = ui::field_button_marked(ui, icon::RESIZE, button, state, None);
-                if resp.on_hover_text(tip).clicked() {
-                    app.toggle_scale(&subjects, !scaled);
+                    });
                 }
             });
+        });
+        let button = egui::vec2((full - gap * 2.0) / 3.0, side);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for horizontal in [true, false] {
+                let on = if horizontal {
+                    insets.margin_auto.left && insets.margin_auto.right
+                } else {
+                    insets.margin_auto.top && insets.margin_auto.bottom
+                };
+                let (glyph, tip) = match (horizontal, on) {
+                    (true, false) => (
+                        icon::ALIGN_CENTER_HORIZONTAL,
+                        "Centre in the container horizontally",
+                    ),
+                    (true, true) => (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring horizontally"),
+                    (false, false) => (
+                        icon::ALIGN_CENTER_VERTICAL,
+                        "Centre in the container vertically",
+                    ),
+                    (false, true) => (icon::ALIGN_CENTER_VERTICAL, "Stop centring vertically"),
+                };
+                let state = if on {
+                    ui::FieldButton::On
+                } else {
+                    ui::FieldButton::Off
+                };
+                let mark = self.centre_mark(subjects, horizontal);
+                let (resp, reset) = ui::field_button_marked(
+                    ui,
+                    glyph,
+                    button,
+                    state,
+                    mark.as_ref().map(Mark::field),
+                );
+                let resp = tip_unless_marked(resp, &mark, tip);
+                if reset {
+                    self.reset_marked(true, &mark);
+                } else if resp.clicked() && place.is_some() {
+                    self.toggle_centre(subjects, horizontal, !on);
+                }
+            }
+            // *Scale*: every side pinned by percentage, so the layer keeps its
+            // share of the container as it resizes.
+            let scaled = !mixed && scales_with_container(insets);
+            let (state, tip) = match scaled {
+                true => (ui::FieldButton::On, "Stop scaling with the container"),
+                false => (
+                    ui::FieldButton::Off,
+                    "Scale with the container: pin every side by percentage",
+                ),
+            };
+            let (resp, _) = ui::field_button_marked(ui, icon::RESIZE, button, state, None);
+            if resp.on_hover_text(tip).clicked() && place.is_some() {
+                self.toggle_scale(subjects, !scaled);
+            }
         });
     }
 
@@ -7463,6 +7489,46 @@ impl OndinApp {
                 })
             })
             .collect()
+    }
+
+    /// Why a selected layer the card could pin elsewhere cannot be pinned where
+    /// it is, for the card to show disabled: inside a plain group or boolean it
+    /// takes its share of the group, whose pins are on the outermost such group;
+    /// with no frame or laid group above that, there is nothing to pin to. `None`
+    /// for a top-level frame, which is the container rather than a layer in one.
+    fn inset_inert_reason(&self) -> Option<String> {
+        use ondin_core::container::{placed_by_contents, takes_insets};
+        let doc = &self.session.doc;
+        let id = self.session.selection.ids().iter().copied().find(|id| {
+            doc.get(*id).is_some_and(|n| {
+                (takes_insets(n.kind()) || placed_by_contents(n.kind(), n.display()))
+                    && !(matches!(n.kind(), NodeKind::Artboard { .. })
+                        && n.parent().is_none_or(|p| doc.is_page(p)))
+            })
+        })?;
+        let mut top = id;
+        while let Some(p) = doc.get(top)?.parent()
+            && doc
+                .get(p)
+                .is_some_and(|g| placed_by_contents(g.kind(), g.display()))
+        {
+            top = p;
+        }
+        let in_frame = doc
+            .get(top)?
+            .parent()
+            .and_then(|p| doc.get(p))
+            .is_some_and(|p| {
+                matches!(p.kind(), NodeKind::Artboard { .. })
+                    || (matches!(p.kind(), NodeKind::Group) && p.display().is_some())
+            });
+        Some(match top != id && in_frame {
+            true => format!(
+                "Scales with its group “{}”. Pin the group to change how it resizes.",
+                crate::private::layer(doc, top)
+            ),
+            false => "Not inside a frame, so there is nothing to pin it to.".to_owned(),
+        })
     }
 
     /// Where `id` is drawn inside its container, all through the preview so the
@@ -7716,7 +7782,8 @@ impl OndinApp {
     /// distance it is kept at.
     ///
     /// A click through an unpinned field pins nothing until the number differs. The
-    /// unit suffix commits directly, not through the valve.
+    /// unit suffix commits directly, not through the valve. With no `place` (an
+    /// inert card) it reads `auto` and commits nothing.
     #[allow(clippy::too_many_arguments)]
     fn inset_field(
         &mut self,
@@ -7725,12 +7792,12 @@ impl OndinApp {
         edge: ondin_core::container::Edge,
         size: egui::Vec2,
         insets: &ondin_core::Insets,
-        place: &InsetPlacement,
+        place: Option<&InsetPlacement>,
         held: bool,
     ) {
         use ondin_core::LengthPct;
         let set = inset_of(insets, edge);
-        let distance = place.distance(edge);
+        let distance = place.map_or(0.0, |p| p.distance(edge));
         let shown = match set {
             Some(LengthPct::Px(v)) | Some(LengthPct::Percent(v)) => v,
             None => distance,
@@ -7817,6 +7884,9 @@ impl OndinApp {
             );
             resp
         };
+        if place.is_none() {
+            return;
+        }
         // The valve is still told nothing moved, since it owns the engagement latch.
         if hit && let Some(m) = &mark {
             self.commit_reset(m.tx.clone());
@@ -14921,6 +14991,8 @@ mod line_length_tests {
                         egui::Shape::Text(t) => Some(t.galley.text().to_string()),
                         _ => None,
                     })
+                    // The Position card below has an `L` of its own, its left inset.
+                    .take_while(|t| !t.eq_ignore_ascii_case("Position"))
                     .filter(|t| matches!(t.as_str(), "W" | "H" | "L"))
                     .collect();
             }
@@ -18922,8 +18994,21 @@ mod rhythm_tests {
 
     /// Every control-shaped box a pass painted, as rows top to bottom and each row left to right.
     /// Picked by its hairline (stroked, 18 to 34 points tall), so a new control is measured
-    /// without being added.
+    /// without being added. A box drawn inside a stroked well under 80 points tall is a mark
+    /// in a picture (the Position card's pin diagram), not a control.
     fn control_rows(out: &egui::FullOutput) -> Vec<Vec<egui::Rect>> {
+        let wells: Vec<egui::Rect> = out
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r)
+                    if r.stroke.width > 0.0 && r.rect.height() > 34.0 && r.rect.height() < 80.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
         let mut v: Vec<egui::Rect> = Vec::new();
         for cs in &out.shapes {
             if let egui::Shape::Rect(r) = &cs.shape
@@ -18931,6 +19016,7 @@ mod rhythm_tests {
                 && r.rect.height() >= 18.0
                 && r.rect.height() <= 34.0
                 && r.rect.width() >= 14.0
+                && !wells.iter().any(|w| w.contains_rect(r.rect))
                 && !v.contains(&r.rect)
             {
                 v.push(r.rect);
@@ -23727,6 +23813,61 @@ mod inset_card_tests {
             ui.set_max_width(240.0);
             app.inspector_insets(ui);
         });
+    }
+
+    /// How tall the Position card draws for the current selection; 0 when it is not drawn.
+    fn card_height(app: &mut OndinApp) -> f32 {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut h = 0.0;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(240.0);
+            let top = ui.cursor().top();
+            app.inspector_insets(ui);
+            h = ui.cursor().top() - top;
+        });
+        h
+    }
+
+    /// A layer inside a plain group, and one outside any frame, get the card
+    /// disabled under the reason; a top-level frame gets none.
+    /// flip: `inspector_insets` returning when there are no subjects → fails at
+    /// "the card is drawn for a layer in a group".
+    #[test]
+    fn a_layer_the_card_cannot_pin_gets_it_disabled_with_the_reason() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        let g = group_in_pinnable(&mut app, frame, rect);
+        app.session.selection.set(vec![rect]);
+        assert!(app.inset_subjects().is_empty(), "the rect is the group's");
+        let why = app.inset_inert_reason().unwrap_or_default();
+        assert!(why.starts_with("Scales with its group"), "{why}");
+        assert!(
+            card_height(&mut app) > 0.0,
+            "the card is drawn for a layer in a group"
+        );
+
+        app.session.selection.set(vec![g]);
+        assert_eq!(app.inset_subjects(), vec![g], "the group itself is pinned");
+
+        app.session.selection.set(vec![frame]);
+        assert_eq!(app.inset_inert_reason(), None, "a top-level frame");
+        assert_eq!(card_height(&mut app), 0.0, "and no card for it");
+
+        let page = app.session.doc.get(frame).unwrap().parent().unwrap();
+        assert!(app.session.commit(Transaction(vec![Operation::Reparent {
+            id: g,
+            new_parent: page,
+            index: 0,
+        }])));
+        for id in [g, rect] {
+            app.session.selection.set(vec![id]);
+            assert_eq!(
+                app.inset_inert_reason().as_deref(),
+                Some("Not inside a frame, so there is nothing to pin it to."),
+                "outside a frame"
+            );
+        }
     }
 
     /// The card is offered to a child of a group with a layout and pins it against the group's box.

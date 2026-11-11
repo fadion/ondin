@@ -994,6 +994,7 @@ impl OndinApp {
         self.colour_review.open = false;
         self.clean_up = None;
         self.fill_content = None;
+        self.chart_data = None;
         self.batch_rename = Some(BatchRename {
             s,
             selected: selection.len(),

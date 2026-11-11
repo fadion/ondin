@@ -155,6 +155,7 @@ impl OndinApp {
         self.batch_rename = None;
         self.clean_up = None;
         self.fill_content = None;
+        self.chart_data = None;
         if !f.open {
             f.scope = match self.session.selection.ids().is_empty() {
                 true => In::Page,

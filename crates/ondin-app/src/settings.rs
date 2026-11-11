@@ -960,24 +960,41 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
 /// leaves: what the card is about, such as the file an import reads.
 fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
     ui.horizontal(|ui| {
-        ui.label(
+        let title_font = egui::FontId::proportional(ui::TITLE_PT);
+        let shown = ui.label(
             egui::RichText::new(title)
-                .size(ui::TITLE_PT)
+                .font(title_font.clone())
                 .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let closed = ui::close_button(ui).clicked();
             if let Some(note) = note {
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(note)
-                                .size(ui::SMALL_PT)
-                                .color(theme::text::dim()),
-                        )
-                        .truncate(),
-                    );
-                });
+                // On the title's baseline: the smaller type centred by its box
+                // sits high beside it. Cut short of the ✕, the whole note its tooltip.
+                let ink = theme::text::dim();
+                let left = shown.rect.right() + ui.spacing().item_spacing.x;
+                let room = ui.available_rect_before_wrap().right() - left;
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    note.to_owned(),
+                    egui::FontId::proportional(ui::SMALL_PT),
+                    ink,
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+                let galley = ui.painter().layout_job(job);
+                let title = ui.painter().layout_no_wrap(
+                    title.to_owned(),
+                    title_font,
+                    egui::Color32::PLACEHOLDER,
+                );
+                let baseline = shown.rect.top() + ui::baseline_in(&title);
+                let at = egui::pos2(left, baseline - ui::baseline_in(&galley));
+                let rect = egui::Rect::from_min_size(at, galley.size());
+                let cut = galley.elided;
+                ui.painter().galley(at, galley, ink);
+                if cut {
+                    ui.interact(rect, ui.id().with("title-note"), egui::Sense::hover())
+                        .on_hover_text(note);
+                }
             }
             closed
         })

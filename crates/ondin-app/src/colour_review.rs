@@ -239,6 +239,7 @@ impl OndinApp {
         self.batch_rename = None;
         self.clean_up = None;
         self.fill_content = None;
+        self.chart_data = None;
         let r = &mut self.colour_review;
         if !r.open {
             r.selection = !self.session.selection.ids().is_empty();

@@ -2390,7 +2390,7 @@ impl OndinApp {
         self.fill_content_ui(&ctx, canvas);
         self.tokens_import_ui(&ctx, canvas);
         self.chart_import_ui(&ctx, canvas);
-        self.chart_data_ui(&ctx);
+        self.chart_data_ui(&ctx, canvas);
         self.trace_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
@@ -3155,7 +3155,7 @@ impl OndinApp {
             if !egui::Popup::is_any_open(ctx) {
                 self.batch_rename = None;
             }
-        } else if self.clean_up.take().is_some() {
+        } else if self.clean_up.take().is_some() || self.escape_chart_data(ctx) {
         } else if self.fill_content.is_some() {
             // A row's open kind list takes this press and closes itself.
             if !egui::Popup::is_any_open(ctx) {

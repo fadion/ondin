@@ -1,7 +1,8 @@
-//! The chart data window (`charts.md`, *The data window*): a floating card over
-//! the bottom of the canvas column holding the selected chart's table as a
-//! grid. Non-modal: each committed cell, paste, clear, insert or delete is one
-//! `SetChart` (*Edit chart data*), so the chart redraws as the table changes.
+//! The chart data window (`charts.md`, *The data window*): a card over the
+//! canvas, where Clean up's hangs, holding a chart's table as a grid. Open, as
+//! Clean up is: the canvas stays live under it, and each committed cell, paste,
+//! clear, insert or delete is one `SetChart` (*Edit chart data*), so the chart
+//! redraws as the table changes.
 //!
 //! The grid is one focusable region that locks the arrows, `Tab` and `Escape`
 //! while it has the keyboard, so the canvas keymap stays quiet; a cell being
@@ -14,20 +15,22 @@ use eframe::egui;
 use ondin_core::chart::{self, Chart, ChartKind, ColumnId};
 use ondin_core::{NodeId, Operation, Transaction};
 
-/// The card's size; narrower when the canvas column is ([`OndinApp::chart_data_ui`]).
+/// The card's width; narrower when the canvas is ([`OndinApp::chart_data_ui`]).
 pub(crate) const W: f32 = 640.0;
-const H: f32 = 320.0;
-const PAD: f32 = 12.0;
-/// The card's gap from the canvas column's bottom.
-const MARGIN: f32 = 16.0;
+/// The grid's height, whatever the table holds, so the card keeps its size.
+const GRID_H: f32 = 240.0;
+const PAD: f32 = crate::settings::CANVAS_CARD_PAD;
+/// Between the toolbar, the linked line and the grid: Clean up's.
+const GAP: f32 = 10.0;
 /// A cell's width and height, the row-number gutter's width.
 const COL_W: f32 = 112.0;
 const ROW_H: f32 = ui::MENU_ROW_H;
 const GUTTER: f32 = 40.0;
-/// The space a cell's text keeps from its edges.
-const CELL_PAD: f32 = 6.0;
-/// The header's chevron: the width at its right edge a click opens the menu in.
-const CHEVRON_W: f32 = 18.0;
+/// The space a cell's text keeps from its edges: a [`ui::label_edit_set`]'s,
+/// so a cell typed into keeps its text where it was.
+const CELL_PAD: f32 = ui::INLINE_EDIT_PAD_X;
+/// The category's key mark in a header.
+const KEY_PT: f32 = 11.0;
 /// The grid's focus id.
 const GRID_ID: &str = "chart-data-grid";
 /// The undo step every edit makes.
@@ -298,12 +301,28 @@ impl OndinApp {
         if self.session.doc.get(id).and_then(|n| n.chart()).is_none() {
             return;
         }
+        // One card over the canvas's top at a time.
+        self.close_find();
+        self.colour_review.open = false;
+        self.batch_rename = None;
+        self.clean_up = None;
+        self.fill_content = None;
         self.chart_data = Some(ChartData::new(id, at));
     }
 
     /// Close the window, dropping a cell being typed into.
     pub(crate) fn close_chart_data(&mut self) {
         self.chart_data = None;
+    }
+
+    /// `Escape` with the window open and nothing in it holding the keyboard:
+    /// close it. The grid and a cell being typed into answer their own.
+    pub(crate) fn escape_chart_data(&mut self, ctx: &egui::Context) -> bool {
+        if self.chart_data.is_none() || ctx.memory(|m| m.focused().is_some()) {
+            return false;
+        }
+        self.chart_data = None;
+        true
     }
 
     /// Write `table` as chart `id`'s, one undo step.
@@ -328,9 +347,10 @@ impl OndinApp {
         }]));
     }
 
-    /// The window, each frame: closed when its chart is no longer the one
-    /// selected chart.
-    pub(crate) fn chart_data_ui(&mut self, ctx: &egui::Context) {
+    /// The window, each frame: moved to another chart when that one alone is
+    /// selected, and closed when its chart is gone. Selecting anything else, or
+    /// nothing, leaves it on its chart.
+    pub(crate) fn chart_data_ui(&mut self, ctx: &egui::Context, canvas: egui::Rect) {
         let Some(open) = &mut self.chart_data else {
             return;
         };
@@ -343,36 +363,29 @@ impl OndinApp {
             return;
         }
         let id = open.chart;
-        let still = matches!(self.session.selection.ids(), [one] if *one == id);
+        // Selecting another chart moves the window there.
+        if let [other] = self.session.selection.ids()
+            && *other != id
+            && self
+                .session
+                .doc
+                .get(*other)
+                .is_some_and(|n| n.chart().is_some())
+        {
+            self.chart_data = Some(ChartData::new(*other, (0, 0)));
+            return;
+        }
         let Some(chart) = self.session.doc.get(id).and_then(|n| n.chart()).cloned() else {
             self.chart_data = None;
             return;
         };
-        if !still {
-            // Selecting another chart moves the window there.
-            match self.session.selection.ids() {
-                [other]
-                    if self
-                        .session
-                        .doc
-                        .get(*other)
-                        .is_some_and(|n| n.chart().is_some()) =>
-                {
-                    self.chart_data = Some(ChartData::new(*other, (0, 0)));
-                }
-                _ => self.chart_data = None,
-            }
-            return;
-        }
         let name = self
             .session
             .doc
             .get(id)
             .map(|n| n.name().to_string())
             .unwrap_or_default();
-        let column = self.canvas_rect;
-        let w = W.min(column.width() - 32.0).max(320.0);
-        let anchor = egui::pos2(column.center().x, column.bottom() - MARGIN);
+        let w = W.min(canvas.width() - 32.0).max(320.0);
         let linked = chart.source.is_some();
         // Each column's series swatch, a binding read where the chart is.
         let swatches: Vec<Option<egui::Color32>> = chart
@@ -388,28 +401,23 @@ impl OndinApp {
         let Some(mut state) = self.chart_data.take() else {
             return;
         };
-        egui::Area::new(egui::Id::new("chart-data"))
-            .order(egui::Order::Foreground)
-            .pivot(egui::Align2::CENTER_BOTTOM)
-            .fixed_pos(anchor)
-            .show(ctx, |ui| {
-                ui::card_frame().show(ui, |ui| {
-                    ui.set_width(w);
-                    ui.set_height(H);
-                    egui::Frame::NONE.inner_margin(PAD).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                        head(ui, &name, &mut act);
-                        if linked {
-                            ui.label(
-                                egui::RichText::new(linked_line(&chart))
-                                    .size(ui::SMALL_PT)
-                                    .color(theme::text::dim()),
-                            );
-                        }
-                        grid(ui, &chart, &swatches, &mut state, linked, &mut act);
-                    });
+        let hold = crate::settings::CardHold::Open;
+        crate::settings::canvas_card(ctx, "chart-data", canvas, w, hold, |ui| {
+            if crate::settings::card_head_noted(ui, w, "Chart data", Some(&name)) {
+                act.push(Act::Close);
+            }
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: PAD as i8,
+                    right: PAD as i8,
+                    top: 0,
+                    bottom: PAD as i8,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(ui::CARD_COL_GAP, GAP);
+                    grid(ui, &chart, &swatches, &mut state, linked, &mut act);
                 });
-            });
+        });
         self.chart_data = Some(state);
         for a in act {
             match a {
@@ -432,10 +440,11 @@ enum Act {
     Copy(String),
 }
 
-/// A word button at the head's height, as wide as Find's (`find::button_w`).
-fn word_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let w = crate::find::button_w(ui, label);
-    ui::label_button(ui, label, egui::vec2(w, ROW_H), ui::FieldButton::Off)
+/// A toolbar button: its glyph and word, as wide as they need.
+fn tool_button(ui: &mut egui::Ui, glyph: &str, label: &str) -> egui::Response {
+    let w = ui::action_button_w(ui.ctx(), label);
+    let size = egui::vec2(w, ui::CONTROL_H);
+    ui::action_button(ui, glyph, label, ui::FieldButton::Off, size)
 }
 
 /// *Edited in sales.csv — unlink to edit here*.
@@ -452,45 +461,10 @@ fn linked_line(chart: &Chart) -> String {
     format!("Edited in {file} — unlink to edit here")
 }
 
-/// The head: the table glyph, *Chart data*, the chart's name, *Import…*, ✕;
-/// the toolbar under it.
-fn head(ui: &mut egui::Ui, name: &str, act: &mut Vec<Act>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        ui.label(theme::icon_text(
-            icon::TABLE,
-            ui::CONTROL_GLYPH_PT,
-            theme::text::muted(),
-        ));
-        ui.label(
-            egui::RichText::new("Chart data")
-                .size(ui::HEAD_PT)
-                .color(theme::text::strong()),
-        );
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(name)
-                    .size(ui::SMALL_PT)
-                    .color(theme::text::dim()),
-            )
-            .truncate(),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui::close_button(ui).on_hover_text("Close (Esc)").clicked() {
-                act.push(Act::Close);
-            }
-            if word_button(ui, "Import…")
-                .on_hover_text("Replace the table with a CSV, TSV or JSON file")
-                .clicked()
-            {
-                act.push(Act::Import);
-            }
-        });
-    });
-}
-
-/// The grid: the header row and the row gutter held at the viewport's edges
-/// over the scrolled cells.
+/// The grid under its toolbar (*Add row*, *Add column*, and *Import…* at the
+/// right): the header row and the row gutter held at the viewport's edges over
+/// the scrolled cells, and past the table's last row and column a dim grid
+/// filling the view, which neither scrolls nor takes a click.
 fn grid(
     ui: &mut egui::Ui,
     chart: &Chart,
@@ -504,28 +478,57 @@ fn grid(
     // The table's size once this pass's edit lands, so the cursor may stand on
     // a row or column added just now.
     let (mut fit_r, mut fit_c) = (nr, nc);
-    if !linked {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            if word_button(ui, "Add row").clicked() && nr < chart::MAX_ROWS {
-                let mut next = with_typed(t, s);
-                next.rows.push(vec![String::new(); nc]);
-                s.at = (nr, s.at.1.min(nc.saturating_sub(1)));
-                s.anchor = s.at;
-                s.reveal = true;
-                fit_r = nr + 1;
-                act.push(Act::Table(next));
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if tool_button(ui, icon::IMPORT, "Import…")
+                .on_hover_text("Replace the table with a CSV, TSV or JSON file")
+                .clicked()
+            {
+                act.push(Act::Import);
             }
-            if word_button(ui, "Add column").clicked() && nc < chart::MAX_COLUMNS {
-                let mut next = with_typed(t, s);
-                add_column(&mut next, nc);
-                s.at = (s.at.0, nc);
-                s.anchor = s.at;
-                s.reveal = true;
-                fit_c = nc + 1;
-                act.push(Act::Table(next));
-            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if linked {
+                    return;
+                }
+                let more_rows = nr < chart::MAX_ROWS;
+                let resp = ui::disable_unless(ui, more_rows, |ui| {
+                    tool_button(ui, icon::ROWS_PLUS_BOTTOM, "Add row")
+                })
+                .inner
+                .on_disabled_hover_text(format!("At most {} rows", chart::MAX_ROWS));
+                if resp.clicked() {
+                    let mut next = with_typed(t, s);
+                    next.rows.push(vec![String::new(); nc]);
+                    s.at = (nr, s.at.1.min(nc.saturating_sub(1)));
+                    s.anchor = s.at;
+                    s.reveal = true;
+                    fit_r = nr + 1;
+                    act.push(Act::Table(next));
+                }
+                let more_cols = nc < chart::MAX_COLUMNS;
+                let resp = ui::disable_unless(ui, more_cols, |ui| {
+                    tool_button(ui, icon::COLUMNS_PLUS_RIGHT, "Add column")
+                })
+                .inner
+                .on_disabled_hover_text(format!("At most {} columns", chart::MAX_COLUMNS));
+                if resp.clicked() {
+                    let mut next = with_typed(t, s);
+                    add_column(&mut next, nc);
+                    s.at = (s.at.0, nc);
+                    s.anchor = s.at;
+                    s.reveal = true;
+                    fit_c = nc + 1;
+                    act.push(Act::Table(next));
+                }
+            });
         });
+    });
+    if linked {
+        ui.label(
+            egui::RichText::new(linked_line(chart))
+                .size(ui::SMALL_PT)
+                .color(theme::text::dim()),
+        );
     }
     // Keep the cursor, and a menu or rename's column or row, inside the table
     // as it shrinks under an undo.
@@ -554,8 +557,12 @@ fn grid(
     let editing = s.edit.is_some() || s.rename.is_some();
     keys(ui, chart, s, linked, act, grid_id, editing);
 
+    // Scrolled by the wheel and the cursor, its bars hidden as Settings' are.
     let scroll = egui::ScrollArea::both()
         .auto_shrink([false, false])
+        .max_height(GRID_H)
+        .min_scrolled_height(GRID_H)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .id_salt("chart-data-scroll");
     scroll.show_viewport(ui, |ui, view| {
         let (rect, _) = ui.allocate_exact_size(content, egui::Sense::hover());
@@ -618,14 +625,6 @@ fn grid(
                 }
                 (None, Some(c)) if resp.secondary_clicked() => s.menu = Some(Menu::Header(c, p)),
                 (Some(r), None) if resp.secondary_clicked() => s.menu = Some(Menu::Row(r, p)),
-                // The chevron opens the same menu, under itself.
-                (None, Some(c)) if resp.clicked() && p.x >= cell_rect(0, c).right() - CHEVRON_W => {
-                    let at = egui::pos2(
-                        cell_rect(0, c).right() - CHEVRON_W,
-                        origin.y + view.min.y + ROW_H + ui::MENU_GAP,
-                    );
-                    s.menu = Some(Menu::Header(c, at));
-                }
                 (None, Some(c)) => {
                     // A header click selects its column.
                     s.anchor = (0, c);
@@ -660,6 +659,17 @@ fn grid(
         let hairline = egui::Stroke::new(1.0, theme::color::field_border());
         let font = egui::FontId::proportional(ui::CONTROL_PT);
         let numeric: Vec<bool> = t.columns.iter().map(|c| t.is_numeric(c.id)).collect();
+        // The dim grid past the table: the cells' own lines on the card's ground.
+        let v_last = ((view.max.y / ROW_H).ceil() as usize).max(nr);
+        let vc_last = (((view.max.x - GUTTER).max(0.0) / COL_W).ceil() as usize).max(nc);
+        let faint = egui::Stroke::new(1.0, theme::color::card_border());
+        for r in first..v_last {
+            for c in c_first..vc_last {
+                if r >= nr || c >= nc {
+                    p.rect_stroke(cell_rect(r, c), 0.0, faint, egui::StrokeKind::Inside);
+                }
+            }
+        }
         for r in first..last {
             for c in c_first..c_last {
                 let rc = cell_rect(r, c);
@@ -733,6 +743,9 @@ fn grid(
             0.0,
             theme::color::card(),
         );
+        // A header's tooltips by where they answer: a role mark's, then a cut
+        // name's, the first that holds the pointer.
+        let mut tips: Vec<(egui::Rect, String)> = Vec::new();
         for (c, column) in t.columns.iter().enumerate().take(c_last).skip(c_first) {
             let hr = egui::Rect::from_min_size(
                 egui::pos2(cell_rect(0, c).left(), hy),
@@ -745,6 +758,10 @@ fn grid(
                 hr.intersect(egui::Rect::everything_right_of(gx + GUTTER))
                     .intersect(p.clip_rect()),
             );
+            // A header being renamed is its field, drawn below.
+            if s.rename.as_ref().is_some_and(|(r, _)| *r == c) {
+                continue;
+            }
             let tag = if numeric[c] { "#" } else { "Aa" };
             let mut x = hr.left() + CELL_PAD;
             let tag_g = clip.layout_no_wrap(
@@ -758,33 +775,56 @@ fn grid(
                 theme::text::faint(),
             );
             x += tag_g.size().x + 5.0;
-            let (ink, mark) = match role_of(chart, column.id, swatches.get(c).copied().flatten()) {
-                Role::Category => (color::text(), Some("Category")),
-                Role::Named(n) => (color::text(), Some(n)),
-                Role::Series(colour) => {
-                    if let Some(c) = colour {
-                        let sw = egui::Rect::from_center_size(
-                            egui::pos2(x + 4.0, hr.center().y),
-                            egui::vec2(8.0, 8.0),
-                        );
-                        clip.rect_filled(sw, 2.0, c);
-                        x += 13.0;
-                    }
-                    (color::text(), None)
-                }
-                Role::Unmapped => (theme::text::dim(), None),
+            let role = role_of(chart, column.id, swatches.get(c).copied().flatten());
+            if let Role::Series(Some(colour)) = role {
+                let sw = egui::Rect::from_center_size(
+                    egui::pos2(x + 4.0, hr.center().y),
+                    egui::vec2(8.0, 8.0),
+                );
+                clip.rect_filled(sw, 2.0, colour);
+                x += 13.0;
+            }
+            let ink = match role {
+                Role::Unmapped => theme::text::dim(),
+                _ => color::text(),
             };
-            let mark_g = mark.map(|m| {
-                clip.layout_no_wrap(
-                    m.to_string(),
-                    egui::FontId::proportional(ui::SMALL_PT - 1.5),
-                    theme::text::faint(),
-                )
-            });
-            // The name stops short of the role mark and the chevron, an ellipsis
-            // where it is cut.
-            let name_right =
-                hr.right() - CHEVRON_W - mark_g.as_ref().map_or(0.0, |g| g.size().x + 4.0);
+            // The role mark against the right edge: the category's key, or a
+            // Sankey column's word.
+            let mark = match role {
+                Role::Category => Some((
+                    clip.layout_no_wrap(
+                        icon::KEY.into(),
+                        theme::icon_font(KEY_PT),
+                        theme::text::faint(),
+                    ),
+                    Some(if chart.kind == ChartKind::Scatter {
+                        "The chart's X values"
+                    } else {
+                        "The chart's categories"
+                    }),
+                )),
+                Role::Named(n) => Some((
+                    clip.layout_no_wrap(
+                        n.to_string(),
+                        egui::FontId::proportional(ui::SMALL_PT - 1.5),
+                        theme::text::faint(),
+                    ),
+                    None,
+                )),
+                _ => None,
+            };
+            let mut name_right = hr.right() - CELL_PAD;
+            if let Some((g, tip)) = mark {
+                let at = egui::pos2(name_right - g.size().x, hr.center().y - g.size().y / 2.0);
+                let mark_rect = egui::Rect::from_min_size(at, g.size());
+                clip.galley(at, g, theme::text::faint());
+                if let Some(tip) = tip {
+                    tips.push((mark_rect.expand(2.0), tip.to_string()));
+                }
+                name_right = mark_rect.left() - 4.0;
+            }
+            // The name stops short of the mark, an ellipsis where it is cut and
+            // the whole name its tooltip.
             let mut job = egui::text::LayoutJob::simple_singleline(
                 column.name.clone(),
                 egui::FontId::proportional(ui::SMALL_PT),
@@ -792,28 +832,19 @@ fn grid(
             );
             job.wrap = egui::text::TextWrapping::truncate_at_width((name_right - x).max(0.0));
             let name_g = clip.layout_job(job);
+            if name_g.elided {
+                tips.push((hr, column.name.clone()));
+            }
             clip.galley(
                 egui::pos2(x, hr.center().y - name_g.size().y / 2.0),
                 name_g,
                 ink,
             );
-            clip.text(
-                egui::pos2(hr.right() - CHEVRON_W / 2.0, hr.center().y),
-                egui::Align2::CENTER_CENTER,
-                icon::CARET_DOWN,
-                theme::icon_font(ui::COMBO_CHEVRON_PT),
-                ui::combo_chevron_ink(),
-            );
-            if let Some(g) = mark_g {
-                clip.galley(
-                    egui::pos2(
-                        hr.right() - CHEVRON_W - g.size().x,
-                        hr.center().y - g.size().y / 2.0,
-                    ),
-                    g,
-                    theme::text::faint(),
-                );
-            }
+        }
+        if let Some(at) = resp.hover_pos()
+            && let Some((_, tip)) = tips.iter().find(|(r, _)| r.contains(at))
+        {
+            resp.clone().on_hover_text_at_pointer(tip);
         }
         p.rect_filled(
             egui::Rect::from_min_size(egui::pos2(gx, hy), egui::vec2(GUTTER, ROW_H)),
@@ -821,28 +852,31 @@ fn grid(
             theme::color::card(),
         );
 
-        // The cell being typed into, over its cell.
+        // The cell being typed into turns editable in place: its ground and the
+        // cursor's square edge stay the grid's, and its text where it was drawn.
         if let Some(text) = &mut s.edit {
             let rc = cell_rect(s.at.0, s.at.1);
-            let resp = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(rc), |ui| {
-                    ui::text_field(ui, rc.size(), text, "")
-                })
-                .inner;
+            let align = match numeric.get(s.at.1) {
+                Some(true) => egui::Align::Max,
+                _ => egui::Align::Min,
+            };
+            let id = egui::Id::new((GRID_ID, "cell"));
+            let resp = ui::label_edit_set(ui, rc, text, id, ui::CONTROL_PT, align);
             if !resp.has_focus() && !ui.memory(|m| m.has_focus(resp.id)) {
                 resp.request_focus();
             }
         }
+        // A header being renamed: a cell's ground under the cursor's edge.
         if let Some((c, text)) = &mut s.rename {
             let hr = egui::Rect::from_min_size(
                 egui::pos2(cell_rect(0, *c).left(), hy),
                 egui::vec2(COL_W, ROW_H),
             );
-            let resp = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(hr), |ui| {
-                    ui::text_field(ui, hr.size(), text, "Column name")
-                })
-                .inner;
+            let edge = egui::Stroke::new(1.5, color::accent());
+            p.rect_filled(hr, 0.0, theme::color::field());
+            p.rect_stroke(hr, 0.0, edge, egui::StrokeKind::Inside);
+            let id = egui::Id::new((GRID_ID, "rename"));
+            let resp = ui::label_edit_set(ui, hr, text, id, ui::SMALL_PT, egui::Align::Min);
             if !resp.has_focus() {
                 resp.request_focus();
             }
@@ -1086,7 +1120,7 @@ fn menus(
                         if chart.kind != ChartKind::Sankey {
                             if ui::menu_row(
                                 ui,
-                                ui::MenuRow::new(icon::TEXT_AA, category),
+                                ui::MenuRow::new(icon::KEY, category),
                                 ui::MENU_ROW_H,
                             )
                             .clicked()
@@ -1276,7 +1310,7 @@ mod tests {
         }
     }
 
-    /// A header name too long for its cell stops short of the role mark.
+    /// A header name too long for its cell stops short of the category's key.
     /// flip: the header's name galley laid out with `layout_no_wrap` → fails at "clear of the mark".
     #[test]
     fn a_long_header_name_stops_short_of_its_role_mark() {
@@ -1312,7 +1346,7 @@ mod tests {
         }
         let at = |s: &str| out.iter().find_map(|c| find(&c.shape, s));
         let name = at("A category name").expect("the header's name is drawn");
-        let mark = at("Category").expect("the role mark is drawn");
+        let mark = at(icon::KEY).expect("the key is drawn");
         assert!(
             (name.center().y - mark.center().y).abs() < ROW_H / 2.0,
             "the same header: {name:?} {mark:?}"
@@ -1323,11 +1357,11 @@ mod tests {
         );
     }
 
-    /// A click on a header's chevron opens the header menu; a click on its name
-    /// selects the column instead.
-    /// flip: dropping the chevron arm in the grid's click match → fails at "the chevron opens it".
+    /// A right-click on a header opens its menu; a click selects the column.
+    /// flip: dropping the header's secondary-click arm in the grid's click
+    /// match → fails at "a right-click opens it".
     #[test]
-    fn the_header_chevron_opens_its_menu() {
+    fn a_right_click_opens_the_header_menu() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
@@ -1343,29 +1377,57 @@ mod tests {
             .expect("the grid is drawn")
             .rect;
         let y = grid.top() + ROW_H / 2.0;
-        let click = |app: &mut OndinApp, at: egui::Pos2| {
-            let button = |pressed| egui::Event::PointerButton {
+        let click = |app: &mut OndinApp, at: egui::Pos2, button: egui::PointerButton| {
+            let press = |pressed| egui::Event::PointerButton {
                 pos: at,
-                button: egui::PointerButton::Primary,
+                button,
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             };
             pass(&ctx, app, vec![egui::Event::PointerMoved(at)]);
-            pass(&ctx, app, vec![button(true)]);
-            pass(&ctx, app, vec![button(false)]);
+            pass(&ctx, app, vec![press(true)]);
+            pass(&ctx, app, vec![press(false)]);
             pass(&ctx, app, Vec::new());
         };
         let menu = |app: &OndinApp| app.chart_data.as_ref().and_then(|d| d.menu);
-        click(&mut app, egui::pos2(grid.left() + GUTTER + 30.0, y));
-        assert!(menu(&app).is_none(), "a click on the name selects");
+        let header = egui::pos2(grid.left() + GUTTER + COL_W - 10.0, y);
+        click(&mut app, header, egui::PointerButton::Primary);
+        assert!(menu(&app).is_none(), "a click selects");
         assert_eq!(app.chart_data.as_ref().map(|d| d.anchor), Some((0, 0)));
-        click(
-            &mut app,
-            egui::pos2(grid.left() + GUTTER + COL_W - CHEVRON_W / 2.0, y),
-        );
+        click(&mut app, header, egui::PointerButton::Secondary);
         assert!(
             matches!(menu(&app), Some(Menu::Header(0, _))),
-            "the chevron opens it"
+            "a right-click opens it"
+        );
+    }
+
+    /// The window stays on its chart when the selection is cleared, and moves to
+    /// another chart selected alone.
+    /// flip: `chart_data_ui` closing on any other selection → fails at "stays open".
+    #[test]
+    fn the_window_stays_open_when_the_selection_moves_off() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        app.session.selection.clear();
+        for _ in 0..2 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(
+            app.chart_data.as_ref().map(|d| d.chart),
+            Some(id),
+            "stays open"
+        );
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(-3000.0, 0.0),
+            Chart::sample(ChartKind::Line),
+        );
+        let other = *app.session.selection.ids().first().unwrap();
+        assert_ne!(other, id, "fixture: a second chart");
+        pass(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.chart_data.as_ref().map(|d| d.chart),
+            Some(other),
+            "moved"
         );
     }
 
@@ -1463,6 +1525,74 @@ mod tests {
             .iter()
             .find_map(|c| find(&c.shape, s))
             .unwrap_or_else(|| panic!("{s} is drawn"))
+    }
+
+    /// The chart's name after *Chart data* sits on the title's baseline.
+    /// flip: `modal_title_noted` laying the note out as a centred label → fails
+    /// at "one baseline".
+    #[test]
+    fn the_title_note_sits_on_the_titles_baseline() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let name = app.session.doc.get(id).unwrap().name().to_string();
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+        // Every place `s` is drawn: the name shows on the inspector card too.
+        fn baselines(shape: &egui::Shape, s: &str, out: &mut Vec<f32>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    out.push(t.pos.y + ui::baseline_in(&t.galley));
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|x| baselines(x, s, out)),
+                _ => {}
+            }
+        }
+        let at = |s: &str| {
+            let mut all = Vec::new();
+            out.shapes
+                .iter()
+                .for_each(|c| baselines(&c.shape, s, &mut all));
+            assert!(!all.is_empty(), "{s} is drawn");
+            all
+        };
+        let title = at("Chart data")[0];
+        let note = at(&name)
+            .into_iter()
+            .min_by(|a, b| (a - title).abs().total_cmp(&(b - title).abs()))
+            .unwrap();
+        assert!((title - note).abs() < 0.5, "one baseline: {title} {note}");
+    }
+
+    /// A cell typed into keeps its text where the grid drew it, a text cell and
+    /// a number cell alike.
+    /// flip: `grid` laying the edit as a `ui::text_field` → fails at "in place".
+    #[test]
+    fn a_cell_typed_into_keeps_its_text_in_place() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let t = table_of(&app, id);
+        for at in [(0, 0), (0, 1)] {
+            let text = t.rows[at.0][at.1].clone();
+            let data = app.chart_data.as_mut().unwrap();
+            (data.at, data.anchor, data.edit) = (at, at, None);
+            let drawn = text_pos(&ctx, &mut app, &text);
+            app.chart_data.as_mut().unwrap().edit = Some(text.clone());
+            for _ in 0..3 {
+                pass(&ctx, &mut app, Vec::new());
+            }
+            let typed = text_pos(&ctx, &mut app, &text);
+            assert!(
+                (drawn - typed).length() < 0.6,
+                "{text} in place: {drawn:?} {typed:?}"
+            );
+        }
     }
 
     /// A click at `at`, moved onto first.

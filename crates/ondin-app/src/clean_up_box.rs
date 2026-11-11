@@ -176,6 +176,7 @@ impl OndinApp {
         self.colour_review.open = false;
         self.batch_rename = None;
         self.fill_content = None;
+        self.chart_data = None;
         let selection = self.selected_layers();
         let remembered = &self.prefs.clean_up;
         let mut rules = Rules {

@@ -2382,7 +2382,20 @@ pub fn label_edit(
     text: &mut String,
     id: egui::Id,
 ) -> egui::Response {
-    let font = egui::FontId::proportional(CONTROL_PT);
+    label_edit_set(ui, rect, text, id, CONTROL_PT, egui::Align::Min)
+}
+
+/// [`label_edit`] over a label drawn at `pt` and set to `align` inside the
+/// inset: a chart data cell, whose numbers stand against its right edge.
+pub fn label_edit_set(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    text: &mut String,
+    id: egui::Id,
+    pt: f32,
+    align: egui::Align,
+) -> egui::Response {
+    let font = egui::FontId::proportional(pt);
     let frame = edit_frame(ui, &font, rect.height(), INLINE_EDIT_PAD_X);
     ui.put(
         rect,
@@ -2390,6 +2403,7 @@ pub fn label_edit(
             .on(egui::TextEdit::singleline(text))
             .id(id)
             .desired_width(rect.width() - INLINE_EDIT_PAD_X * 2.0)
+            .horizontal_align(align)
             .font(font),
     )
 }

@@ -222,6 +222,7 @@ impl OndinApp {
         self.colour_review.open = false;
         self.batch_rename = None;
         self.clean_up = None;
+        self.chart_data = None;
         let selection = self.selected_layers();
         let p = &self.prefs.fill_content;
         let last =

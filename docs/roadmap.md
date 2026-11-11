@@ -1,25 +1,10 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is the work that lands before Command Mode and MCP: icon packs and code
-export. The **Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
+Open work only. **Now** is the work that lands before Command Mode and MCP: code export. The
+**Later** sections wait on that work or on a stated trigger; **Considerations** are ideas not yet
 decided. Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`.
 Refs are file + function name, never line numbers. Read the code before picking an item up — an
 item's premise can go stale while its ask still reads true.
-
-## Now · Icon packs
-
-The flag, Settings' listing, browsing and inserting are built (`kits.md`, *The kit mark*;
-`app-canvas-chrome.md`, *Icon packs*). Open:
-
-- **To decide: recolouring.** A remote icon is one group with its `currentColor` written black;
-  an instance has no icon colour, only per-layer fill overrides or a bound variable. Leading
-  option: an icon kit binds its ink to one colour variable that the instance overrides. Until
-  then a kit's tile shows the kit's own colours, which a black icon set reads poorly against the
-  dark theme's ground.
-- **To decide: variants.** The tab has one variant dropdown and a set can have several
-  properties (weight × filled). Either the kit names the property the dropdown drives, or
-  icon kits allow one property. Until then a kit shows each set by its default variant and the
-  dropdown is off.
 
 ## Now · Code export (HTML/CSS, React, Vue)
 

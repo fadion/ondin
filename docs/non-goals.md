@@ -91,6 +91,8 @@ multiplayer is one of its considerations.
 - **A "remember last page" dashboard option** — the default page is a Settings preference (§15 D749).
 - **Reading Figma's `.fig` binary** — the format is unpublished, reading it reverse-engineers another company's product, and it breaks when Figma changes it; Figma files come in by link through the documented REST API.
 - **EPS import** — PostScript is a program, and reading it needs an interpreter (Ghostscript, AGPL); PDF and AI import cover the vector files that matter.
+- **Choosing an icon kit's variant in the Icons tab** — a set can have several properties, and the tab would have to enforce one or grow a picker per property; the tab places the default variant as an instance and its Instance card switches variants.
+- **Recolouring an icon kit's icons on placement** — an icon lands in the kit's own colours; fill overrides on the instance recolour it.
 
 ## Components and layout
 

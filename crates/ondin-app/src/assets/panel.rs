@@ -863,11 +863,9 @@ impl OndinApp {
                     theme::text::strong(),
                 )
             }
-            // A kit's picture in its own colours, as the insert picker shows it.
-            Item::Icon(Hit::Kit { pack, top }) => (
-                self.kit_shelf.tile(ctx, &pack.entry.id, *top),
-                egui::Color32::WHITE,
-            ),
+            Item::Icon(Hit::Kit { pack, top }) => {
+                kit_ink(self.kit_shelf.icon_tile(ctx, &pack.entry.id, *top))
+            }
             Item::Photo(p) => (self.assets.thumb(&p.thumb).cloned(), egui::Color32::WHITE),
         };
         if let Some(t) = tex {
@@ -1603,12 +1601,14 @@ fn icon_grid(ui: &mut egui::Ui, panel: &mut Panel, hits: &[Hit], height: f32, ou
                             let size = t.as_ref().map(|t| t.size_vec2() / ppp);
                             (t, size, theme::text::strong())
                         }
-                        // A kit's picture in its own colours, as the insert
-                        // picker shows it, fitted to the icon's size.
+                        // A kit's icon in the theme's ink as the remote ones
+                        // are, or in its own colours when it has several,
+                        // fitted to the icon's size.
                         Hit::Kit { pack, top } => {
-                            let t = out.shelf.tile(ui.ctx(), &pack.entry.id, *top);
-                            let size = t.as_ref().map(|t| fit(t.size_vec2(), ICON_PT));
-                            (t, size, egui::Color32::WHITE)
+                            let t = out.shelf.icon_tile(ui.ctx(), &pack.entry.id, *top);
+                            let size = t.as_ref().map(|(t, _)| fit(t.size_vec2(), ICON_PT));
+                            let (t, tint) = kit_ink(t);
+                            (t, size, tint)
                         }
                     };
                     if let (Some(t), Some(size)) = (tex, size) {
@@ -1625,6 +1625,18 @@ fn icon_grid(ui: &mut egui::Ui, panel: &mut Panel, hits: &[Hit], height: f32, ou
     if near_end && shown < hits.len() {
         panel.shown += PAGE;
         ui.ctx().request_repaint();
+    }
+}
+
+/// A kit icon's texture and its tint from `KitShelf::icon_tile`: a silhouette
+/// in the ink the remote icons wear, a picture in its own colours untinted.
+fn kit_ink(
+    tile: Option<(egui::TextureHandle, bool)>,
+) -> (Option<egui::TextureHandle>, egui::Color32) {
+    match tile {
+        Some((t, true)) => (Some(t), theme::text::strong()),
+        Some((t, false)) => (Some(t), egui::Color32::WHITE),
+        None => (None, egui::Color32::WHITE),
     }
 }
 

@@ -946,8 +946,11 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   under the key `kit:<id>` among the preferences' icon sets. The set dropdown lists such kits after
   the remote sets; their published mains are the icons, a set once by its default variant, read
   through the insert picker's kit shelf (*Reading Atlas…* while it loads) and ranked by name with
-  the remote icons' rule (`sets::rank_name`). A kit's tile is the shelf's picture in the kit's own
-  colours, fitted to the icon size, as the insert picker shows it. With a kit chosen the variant
+  the remote icons' rule (`sets::rank_name`). A kit's tile is the shelf's picture fitted to the icon
+  size: when every pixel it draws is one colour, as white coverage (`Pixels::silhouette`) tinted with
+  the remote icons' ink, so a black set reads on the dark theme; else in the kit's own colours, as
+  the insert picker shows it, since one ink would fill a duotone icon or a white cut-out to a blob.
+  Either way the icon lands in the kit's colours. With a kit chosen the variant
   dropdown is off (*Atlas shows each icon by its default variant*) and the size field starts at the
   width most of its icons share (`kit_grid`). The foot names the kit and its version; the hover
   card its kit, version and size. A click or drag places an instance through the insert picker's

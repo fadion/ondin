@@ -194,6 +194,47 @@ impl Pixels {
         };
         ctx.load_texture(name, image, egui::TextureOptions::LINEAR)
     }
+
+    /// The picture as white coverage, for the Icons tab to tint with the theme's
+    /// ink — `None` unless every pixel it draws is one colour. A picture of two
+    /// colours (a duotone icon, a white cut-out drawn as a shape) keeps them, since
+    /// one ink would fill it to a blob. Faint edge pixels are left out of the test:
+    /// unmultiplied, their colour is too coarse to compare.
+    pub(crate) fn silhouette(&self) -> Option<Pixels> {
+        const FAINT: u8 = 32;
+        const NEAR: u8 = 24;
+        let mut ink: Option<[u8; 3]> = None;
+        let pixels = self.rgba.as_chunks::<4>().0;
+        for &[r, g, b, a] in pixels {
+            if a < FAINT {
+                continue;
+            }
+            let rgb = [r, g, b];
+            match ink {
+                None => ink = Some(rgb),
+                Some(c) if c.iter().zip(rgb).any(|(a, b)| a.abs_diff(b) > NEAR) => return None,
+                Some(_) => {}
+            }
+        }
+        ink?;
+        let rgba = pixels
+            .iter()
+            .flat_map(|px| [255, 255, 255, px[3]])
+            .collect();
+        Some(Pixels {
+            rgba,
+            width: self.width,
+            height: self.height,
+        })
+    }
+}
+
+/// A tile's uploaded textures: its picture in the kit's own colours, and its
+/// [`Pixels::silhouette`] when it has one.
+#[derive(Clone)]
+struct Uploaded {
+    picture: egui::TextureHandle,
+    silhouette: Option<egui::TextureHandle>,
 }
 
 struct Shelf {
@@ -211,7 +252,7 @@ struct Shelf {
     /// The rendered pictures not yet uploaded: each is taken out as its
     /// texture is made.
     pixels: HashMap<NodeId, Pixels>,
-    tiles: HashMap<NodeId, egui::TextureHandle>,
+    tiles: HashMap<NodeId, Uploaded>,
 }
 
 struct Job {
@@ -426,18 +467,44 @@ impl KitShelf {
         id: &str,
         top: NodeId,
     ) -> Option<egui::TextureHandle> {
+        self.uploaded(ctx, id, top).map(|u| u.picture.clone())
+    }
+
+    /// `top`'s tile as the Icons tab draws it: its silhouette, answered with
+    /// `true` for the caller to tint, else its picture in the kit's own colours.
+    pub(crate) fn icon_tile(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        top: NodeId,
+    ) -> Option<(egui::TextureHandle, bool)> {
+        let u = self.uploaded(ctx, id, top)?;
+        Some(match &u.silhouette {
+            Some(s) => (s.clone(), true),
+            None => (u.picture.clone(), false),
+        })
+    }
+
+    fn uploaded(&mut self, ctx: &egui::Context, id: &str, top: NodeId) -> Option<&Uploaded> {
         let s = self.shelves.get_mut(id)?;
-        if let Some(t) = s.tiles.get(&top) {
-            return Some(t.clone());
+        if !s.tiles.contains_key(&top) {
+            // Taken out as it is uploaded: the textures are the picture from
+            // here, and a re-read brings both again.
+            let p = s.pixels.remove(&top)?;
+            let name = format!("kit-tile-{id}-{}", top.to_wire());
+            let silhouette = p
+                .silhouette()
+                .map(|s| s.texture(ctx, format!("{name}-ink")));
+            let picture = p.texture(ctx, name);
+            s.tiles.insert(
+                top,
+                Uploaded {
+                    picture,
+                    silhouette,
+                },
+            );
         }
-        // Taken out as it is uploaded: the texture is the picture from here,
-        // and a re-read brings both again.
-        let t = s
-            .pixels
-            .remove(&top)?
-            .texture(ctx, format!("kit-tile-{id}-{}", top.to_wire()));
-        s.tiles.insert(top, t.clone());
-        Some(t)
+        s.tiles.get(&top)
     }
 
     /// Wait for every outstanding ask — the tests', `Covers::settle`'s shape (§15
@@ -816,6 +883,42 @@ mod tests {
             Some(first.id())
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A picture of one colour becomes white coverage with its alpha kept; one of
+    /// two colours, or of nothing, has no silhouette; a faint edge pixel of
+    /// another colour does not count.
+    ///
+    /// flip: `silhouette` testing faint pixels too → fails at *"a faint edge"*.
+    #[test]
+    fn a_tile_of_one_colour_has_a_silhouette() {
+        let of = |px: &[[u8; 4]]| Pixels {
+            rgba: px.concat(),
+            width: px.len() as u32,
+            height: 1,
+        };
+        let ink = [20, 20, 20, 255];
+        let edge = [20, 20, 20, 128];
+        let clear = [0, 0, 0, 0];
+        let s = of(&[ink, edge, clear]).silhouette().expect("one colour");
+        assert_eq!(
+            s.rgba,
+            [
+                [255, 255, 255, 255],
+                [255, 255, 255, 128],
+                [255, 255, 255, 0]
+            ]
+            .concat()
+        );
+        assert!(
+            of(&[ink, [255, 255, 255, 255]]).silhouette().is_none(),
+            "black on a white shape keeps its colours"
+        );
+        assert!(
+            of(&[ink, [200, 0, 0, 20]]).silhouette().is_some(),
+            "a faint edge"
+        );
+        assert!(of(&[clear]).silhouette().is_none(), "nothing drawn");
     }
 
     /// **A read that failed is tried again when the picker opens, and a kit the

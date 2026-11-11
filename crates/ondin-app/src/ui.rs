@@ -1184,6 +1184,49 @@ pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response,
     (resp, baseline)
 }
 
+/// A section's fold head inside a card, which also divides it from the section
+/// above: [`section_head`]'s caret and eyebrow, each centred on the row by its
+/// box as that header's are, then a hairline out to the card's edge as Settings'
+/// section rule. The whole row is one press target, and the caret and eyebrow
+/// brighten while it is hovered.
+pub fn fold_rule(ui: &mut egui::Ui, label: &str, open: bool) -> egui::Response {
+    let caret = if open {
+        icon::CARET_DOWN
+    } else {
+        icon::CARET_RIGHT
+    };
+    let lay = |text: String, font| {
+        ui.painter()
+            .layout_no_wrap(text, font, egui::Color32::PLACEHOLDER)
+    };
+    let glyph = lay(caret.into(), theme::icon_font(12.0));
+    let word = lay(label.to_uppercase(), egui::FontId::proportional(EYEBROW_PT));
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), FOLD_HEAD_H),
+        egui::Sense::click(),
+    );
+    let ink = if resp.hovered() {
+        theme::text::muted()
+    } else {
+        theme::text::faint()
+    };
+    let ppp = ui.ctx().pixels_per_point();
+    let top = |h: f32| ((rect.center().y - h / 2.0) * ppp).round() / ppp;
+    let word_x = rect.left() + glyph.size().x + 6.0;
+    let rule_x = word_x + word.size().x + CARD_COL_GAP;
+    let p = ui.painter();
+    p.galley(egui::pos2(rect.left(), top(glyph.size().y)), glyph, ink);
+    p.galley(egui::pos2(word_x, top(word.size().y)), word, ink);
+    if rule_x < rect.right() {
+        let y = hairline_in_column(rect.center().y, ppp, 1.0);
+        p.line_segment(
+            [egui::pos2(rule_x, y), egui::pos2(rect.right(), y)],
+            egui::Stroke::new(1.0, theme::color::divider()),
+        );
+    }
+    resp
+}
+
 /// A fold's caret beside a name rather than an eyebrow — a group, a kit — its
 /// left edge at `at`'s x and centred on its y. Answers the glyph's rect.
 pub fn fold_caret(p: &egui::Painter, at: egui::Pos2, open: bool, ink: egui::Color32) -> egui::Rect {
@@ -1990,6 +2033,45 @@ pub fn field_row_active<R>(
     }
     let frame = field_frame().stroke(egui::Stroke::new(1.0, color::accent_700()));
     framed_row(ui, size, frame, add)
+}
+
+/// A [`field_row`] the whole of which is one press target, for a row that opens
+/// something rather than holding a value to type (a chart's colour row opens
+/// its picker). It hovers as a dropdown's face does — the ground lifts to
+/// [`color::hover`], the hairline unchanged — and wears [`field_row_active`]'s
+/// accent hairline while `active`. `add` gets the ground it lays out on, for a
+/// [`paint_swatch`]'s corners; hover-only widgets inside keep their tooltips.
+pub fn field_row_pressable<R>(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    active: bool,
+    add: impl FnOnce(&mut egui::Ui, egui::Color32) -> R,
+) -> (R, egui::Response) {
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let ground = if resp.hovered() || resp.is_pointer_button_down_on() {
+        color::hover()
+    } else {
+        color::field()
+    };
+    let edge = if active {
+        color::accent_700()
+    } else {
+        color::field_border()
+    };
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(5),
+        ground,
+        egui::Stroke::new(1.0, edge),
+        egui::StrokeKind::Inside,
+    );
+    let inner = rect.shrink2(egui::vec2(FIELD_PAD_X, FIELD_BORDER_H / 2.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(inner)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    (add(&mut child, ground), resp)
 }
 
 /// A single-line **text** field on the same ground as [`value_field`]. A bare
@@ -3200,6 +3282,15 @@ pub fn disable_unless<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     ui.add_enabled_ui(enabled || !ui.is_enabled(), add)
+}
+
+/// A card dropdown's closed face at [`CONTROL_H`], set in the `Ui` it is about to
+/// be laid out in: a combo paints exactly `interact_size.y`, and the theme's is 24.
+/// Call it in a scope of the combo's own, since it reaches every control after it.
+/// The popup sets its own row heights ([`menu_rows`]).
+pub fn combo_height(ui: &mut egui::Ui) {
+    ui.spacing_mut().interact_size.y = CONTROL_H;
+    ui.spacing_mut().button_padding.y = 0.0;
 }
 
 /// The arrow at the closed end of a `ComboBox` — a caret glyph at one fixed
@@ -5877,7 +5968,14 @@ pub fn swatch(
     paint: Swatch<'_>,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(box_size, box_size), egui::Sense::click());
-    let p = ui.painter();
+    paint_swatch(ui.painter(), rect, bg, paint);
+    resp
+}
+
+/// A [`swatch`]'s ink in `rect`, unsensed: for a chip inside a larger target
+/// ([`field_row_pressable`]) that must not take the row's hover.
+pub fn paint_swatch(p: &egui::Painter, rect: egui::Rect, bg: egui::Color32, paint: Swatch<'_>) {
+    let box_size = rect.width();
     paint_checkerboard(p, rect, box_size * 0.5);
     match paint {
         Swatch::Solid(c) => {
@@ -5907,7 +6005,6 @@ pub fn swatch(
         egui::Stroke::new(1.0, swatch_hairline()),
         egui::StrokeKind::Inside,
     );
-    resp
 }
 
 /// Strip a `DragValue`'s own grounds and borders, so it floats on whatever the

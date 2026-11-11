@@ -294,14 +294,6 @@ fn pending(ui: &egui::Ui, id: egui::Id, current: &str, rules: Rules) -> Option<S
     rules.commits(&buf, current)
 }
 
-/// A closed dropdown's face at [`ui::CONTROL_H`], in the `Ui` it is about to be
-/// laid out in — the font family's two lines (`typography.rs`). The popup sets its
-/// own row heights (`ui::menu_rows`), so this reaches the face alone.
-fn control_height(ui: &mut egui::Ui) {
-    ui.spacing_mut().interact_size.y = ui::CONTROL_H;
-    ui.spacing_mut().button_padding.y = 0.0;
-}
-
 /// One option of a [`dropdown`]: its label, and why it is greyed when it is.
 struct Choice {
     label: String,
@@ -325,7 +317,7 @@ fn dropdown(
 ) -> Option<usize> {
     let mut pick = None;
     ui::disable_unless(ui, enabled.is_none(), |ui| {
-        control_height(ui);
+        ui::combo_height(ui);
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)
@@ -377,7 +369,7 @@ fn swap_picker(
     let mut open = false;
     let search_id = egui::Id::new(("swap-search", salt));
     ui::disable_unless(ui, enabled.is_none(), |ui| {
-        control_height(ui);
+        ui::combo_height(ui);
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)

@@ -352,9 +352,7 @@ impl OndinApp {
         let several = ids.len() > 1;
         self.panel(ui, "Chart", None, |app, ui| {
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-            app.chart_section(ui, "Chart type", "Type", |app, ui| {
-                app.chart_type_rows(ui, id, &chart);
-            });
+            app.chart_type_rows(ui, id, &chart);
             app.chart_section(ui, "Chart style", "Style", |app, ui| {
                 app.chart_style_rows(ui, id, &chart);
             });
@@ -469,8 +467,8 @@ impl OndinApp {
         });
     }
 
-    /// One of the card's sections: a fold head and, open, its rows. `key` is the
-    /// fold's memory in `collapsed_panels`.
+    /// One of the card's sections: a fold head ruled off from the rows above and,
+    /// open, its rows. `key` is the fold's memory in `collapsed_panels`.
     fn chart_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -479,7 +477,7 @@ impl OndinApp {
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
         let open = !self.collapsed_panels.contains(key);
-        if ui::fold_head(ui, label, open).0.clicked() {
+        if ui::fold_rule(ui, label, open).clicked() {
             if open {
                 self.collapsed_panels.insert(key);
             } else {
@@ -618,7 +616,7 @@ impl OndinApp {
         on: bool,
         set: impl Fn(&mut Chart, bool),
     ) {
-        if ui::switch_row(ui, label, on, ui::CONTROL_H).clicked() {
+        if ui::switch_row(ui, label, on, crate::settings::SWITCH_H).clicked() {
             let mut next = chart.clone();
             set(&mut next, !on);
             self.chart_commit(id, label, next);
@@ -640,6 +638,7 @@ impl OndinApp {
     ) {
         let mut pick = None;
         ui::labelled(ui, label, |ui| {
+            ui::combo_height(ui);
             egui::ComboBox::from_id_salt(salt)
                 .icon(ui::combo_chevron)
                 .width(ui.available_width())
@@ -697,22 +696,25 @@ impl OndinApp {
 
     fn chart_type_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
         let mut pick = None;
-        egui::ComboBox::from_id_salt("chart-kind")
-            .icon(ui::combo_chevron)
-            .width(ui.available_width())
-            .selected_text(ui::glyph_and_text(
-                crate::rail::chart_glyph(chart.kind),
-                chart.kind.label(),
-            ))
-            .show_ui(ui, |ui| {
-                ui::menu_rows(ui);
-                for kind in ChartKind::ALL {
-                    let row = ui::glyph_and_text(crate::rail::chart_glyph(kind), kind.label());
-                    if ui.selectable_label(kind == chart.kind, row).clicked() {
-                        pick = Some(kind);
+        ui.scope(|ui| {
+            ui::combo_height(ui);
+            egui::ComboBox::from_id_salt("chart-kind")
+                .icon(ui::combo_chevron)
+                .width(ui.available_width())
+                .selected_text(ui::glyph_and_text(
+                    crate::rail::chart_glyph(chart.kind),
+                    chart.kind.label(),
+                ))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    for kind in ChartKind::ALL {
+                        let row = ui::glyph_and_text(crate::rail::chart_glyph(kind), kind.label());
+                        if ui.selectable_label(kind == chart.kind, row).clicked() {
+                            pick = Some(kind);
+                        }
                     }
-                }
-            });
+                });
+        });
         if let Some(kind) = pick.filter(|k| *k != chart.kind) {
             let mut next = chart.clone();
             next.kind = kind;
@@ -901,6 +903,7 @@ impl OndinApp {
         }
         let mut pick = None;
         ui::labelled(ui, "Palette", |ui| {
+            ui::combo_height(ui);
             egui::ComboBox::from_id_salt(("chart-palette", id))
                 .icon(ui::combo_chevron)
                 .width(ui.available_width())
@@ -1041,8 +1044,8 @@ impl OndinApp {
         self.chart_colour_row(ui, id, slot, width, swatch, name, true, None);
     }
 
-    /// One colour of the chart as a field `width` wide: its swatch, which opens
-    /// the picker on the slot while `live`, its name (dim when not), a
+    /// One colour of the chart as a field `width` wide, the whole of which opens
+    /// the picker on the slot while `live`: its swatch, its name (dim when not), a
     /// right-aligned `total`, and, bound, its variable's name in a capsule.
     #[allow(clippy::too_many_arguments)]
     fn chart_colour_row(
@@ -1056,12 +1059,15 @@ impl OndinApp {
         live: bool,
         total: Option<&str>,
     ) {
-        ui::field_row(ui, egui::vec2(width, ui::CONTROL_H), |ui| {
+        let open = self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.slot == PaintSlot::Chart(slot));
+        let size = egui::vec2(width, ui::CONTROL_H);
+        let (_, resp) = ui::field_row_pressable(ui, size, open, |ui, ground| {
             ui.spacing_mut().item_spacing.x = 7.0;
-            let resp = ui::swatch(ui, 14.0, theme::color::field(), swatch);
-            if resp.clicked() && live {
-                self.open_picker(ui, id, PaintSlot::Chart(slot), resp.rect.left_top());
-            }
+            let (chip, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
+            ui::paint_swatch(ui.painter(), chip, ground, swatch);
             let ink = if live {
                 color::text()
             } else {
@@ -1096,6 +1102,9 @@ impl OndinApp {
                 });
             });
         });
+        if resp.clicked() && live {
+            self.open_picker(ui, id, PaintSlot::Chart(slot), resp.rect.left_top());
+        }
     }
 
     /// A series row's style button: a menu of its line's dash (a line or area)
@@ -1981,6 +1990,7 @@ impl OndinApp {
         let f = slot(&mut probe).clone();
         let sample = chart::scale::format(FORMAT_SAMPLE, &f, 1);
         ui::labelled(ui, "Format", |ui| {
+            ui::combo_height(ui);
             egui::ComboBox::from_id_salt((salt, id))
                 .icon(ui::combo_chevron)
                 .width(ui.available_width())

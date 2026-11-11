@@ -267,6 +267,18 @@ fn the_chart_frame_moves_and_deletes_whole() {
     assert!(f.doc.get(f.bar).is_some(), "and back, parts and all");
 }
 
+/// A chart frame never converts to a group, which could not hold its
+/// description; its Frame / Group dropdown is disabled with the reason.
+#[test]
+fn a_chart_stays_a_frame() {
+    let f = fixture();
+    assert_eq!(
+        ondin_core::build::convert_container_refusal(&f.doc, f.chart),
+        Some("A chart stays a frame: flatten it first")
+    );
+    assert!(!ondin_core::build::can_convert_container(&f.doc, f.chart));
+}
+
 /// A chart can't be part of a component, an instance, a boolean or a mask, and
 /// sits only on a frame.
 /// flip: `chart::check` answering `Ok` → fails at "made a main".

@@ -1182,6 +1182,10 @@ pub fn convert_container_refusal(doc: &Document, id: NodeId) -> Option<&'static 
         {
             return Some("Nothing inside to group");
         }
+        // A chart is a frame its description regenerates; a group could not hold it.
+        NodeKind::Artboard { .. } if n.chart().is_some() => {
+            return Some("A chart stays a frame: flatten it first");
+        }
         // Only a frame sets a mode, and dropping it would recolour what it holds.
         NodeKind::Artboard { .. } if !n.modes().is_empty() => {
             return Some("A group cannot set a variable mode");

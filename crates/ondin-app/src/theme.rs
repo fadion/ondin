@@ -955,8 +955,14 @@ pub mod icon {
     pub const HASH: &str = "\u{e2a2}";
     /// A boolean variable: a switch, its knob on.
     pub const TOGGLE: &str = "\u{f01f}";
-    /// The browser's *New mode*.
+    /// A column added to a table: the browser's *New mode*, the chart data
+    /// window's *Add column*.
     pub const COLUMNS_PLUS_RIGHT: &str = "\u{e542}";
+    /// A row added to a table: the chart data window's *Add row*.
+    pub const ROWS_PLUS_BOTTOM: &str = "\u{e59e}";
+    /// A chart's key column, its categories (a scatter's X): the data window's
+    /// header mark and *Use as category*.
+    pub const KEY: &str = "\u{e2d6}";
     /// A variable mode, wherever a frame picks one: two sheets, one behind the
     /// other.
     pub const MODE: &str = "\u{f02d}";
@@ -1389,6 +1395,8 @@ pub mod icon {
         ("hash", HASH),
         ("toggle", TOGGLE),
         ("columns-plus-right", COLUMNS_PLUS_RIGHT),
+        ("rows-plus-bottom", ROWS_PLUS_BOTTOM),
+        ("key", KEY),
         ("mode", MODE),
         ("mode-default", MODE_DEFAULT),
         ("upload-simple", UPLOAD_SIMPLE),

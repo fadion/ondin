@@ -7334,7 +7334,7 @@ impl OndinApp {
                 );
             }
             ui::disable_unless(ui, live, |ui| {
-                app.inset_controls(ui, &subjects, &insets, place.as_ref(), held, mixed)
+                app.inset_controls(ui, &subjects, &insets, place.as_ref(), held)
             });
         });
     }
@@ -7348,7 +7348,6 @@ impl OndinApp {
         insets: &ondin_core::Insets,
         place: Option<&InsetPlacement>,
         held: (bool, bool),
-        mixed: bool,
     ) {
         use ondin_core::container::Edge as Pin;
         let full = ui.available_width();
@@ -7381,14 +7380,10 @@ impl OndinApp {
             });
         });
         let button = egui::vec2((full - gap * 2.0) / 3.0, side);
+        let [across, down, scaled] = self.inset_buttons_lit(subjects);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            for horizontal in [true, false] {
-                let on = if horizontal {
-                    insets.margin_auto.left && insets.margin_auto.right
-                } else {
-                    insets.margin_auto.top && insets.margin_auto.bottom
-                };
+            for (horizontal, on) in [(true, across), (false, down)] {
                 let (glyph, tip) = match (horizontal, on) {
                     (true, false) => (
                         icon::ALIGN_CENTER_HORIZONTAL,
@@ -7423,7 +7418,6 @@ impl OndinApp {
             }
             // *Scale*: every side pinned by percentage, so the layer keeps its
             // share of the container as it resizes.
-            let scaled = !mixed && scales_with_container(insets);
             let (state, tip) = match scaled {
                 true => (ui::FieldButton::On, "Stop scaling with the container"),
                 false => (
@@ -7436,6 +7430,26 @@ impl OndinApp {
                 self.toggle_scale(subjects, !scaled);
             }
         });
+    }
+
+    /// Whether the Position card's *Centre horizontally*, *Centre vertically* and
+    /// *Scale* buttons are lit: each when every subject is in its state, never
+    /// from one subject's insets, since two layers scaled at different places
+    /// hold different percentages.
+    fn inset_buttons_lit(&self, subjects: &[NodeId]) -> [bool; 3] {
+        let every = |f: &dyn Fn(&ondin_core::Insets) -> bool| {
+            !subjects.is_empty()
+                && subjects.iter().all(|id| {
+                    self.session
+                        .display_node(*id)
+                        .is_some_and(|n| f(&n.insets()))
+                })
+        };
+        [
+            every(&|i| i.margin_auto.left && i.margin_auto.right),
+            every(&|i| i.margin_auto.top && i.margin_auto.bottom),
+            every(&scales_with_container),
+        ]
     }
 
     /// Pin every side of every subject by percentage at its current place, or
@@ -23868,6 +23882,52 @@ mod inset_card_tests {
                 "outside a frame"
             );
         }
+    }
+
+    /// Two layers scaled or centred together light the button, though their
+    /// percentages differ; one of the two centred lights nothing.
+    /// flip: `inset_buttons_lit` reading the first subject's insets for the
+    /// centre buttons → fails at "one centred of two"; *Scale* lit only when
+    /// the insets are equal → fails at "both scaled".
+    #[test]
+    fn several_layers_light_a_button_only_when_every_one_is_in_its_state() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        let other = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: other,
+            parent: frame,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(30.0, 20.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((150.0, 120.0))),
+            name: None,
+        }])));
+        let both = [rect, other];
+        app.session.selection.set(both.to_vec());
+        assert_eq!(app.inset_subjects(), both.to_vec(), "the fixture");
+        assert_eq!(app.inset_buttons_lit(&both), [false; 3], "nothing pinned");
+
+        app.toggle_centre(&both[..1], true, true);
+        assert_eq!(
+            app.inset_buttons_lit(&both),
+            [false; 3],
+            "one centred of two"
+        );
+
+        app.toggle_scale(&both, true);
+        let pins = |id| *app.session.doc.get(id).unwrap().insets();
+        assert_ne!(pins(rect), pins(other), "their percentages differ");
+        assert_eq!(
+            app.inset_buttons_lit(&both),
+            [false, false, true],
+            "both scaled"
+        );
+
+        app.toggle_centre(&both, false, true);
+        assert!(app.inset_buttons_lit(&both)[1], "both centred vertically");
     }
 
     /// The card is offered to a child of a group with a layout and pins it against the group's box.

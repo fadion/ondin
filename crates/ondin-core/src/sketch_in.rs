@@ -439,16 +439,24 @@ impl Builder<'_> {
     }
 
     /// Pin the node made for the master child `layer` (Sketch id `sid`) inside
-    /// its master of `size`, as its resizing constraint says. A group takes no
-    /// insets; an instance's wait for its copy.
+    /// its master of `size`, as its resizing constraint says; an instance's wait
+    /// for its copy. A pinned group or shape group scales every layer inside it
+    /// by its share, which is Sketch's resize only when none of them pins an edge
+    /// or a size ([`scales_with_its_box`]); one that does is left unpinned.
     fn pin(&mut self, sid: &str, layer: &Value, size: Size) {
         let class = str_of(layer, "_class");
-        if class == "group" {
-            return;
-        }
         let Some(insets) = insets_of(layer, size) else {
             return;
         };
+        if !scales_with_its_box(layer) {
+            self.count(
+                "Resizing inside groups",
+                1,
+                "groups",
+                "Kept at their drawn size",
+            );
+            return;
+        }
         if class == "symbolInstance" {
             self.pins.insert(sid.to_owned(), insets);
         } else if let Some(&id) = self.layers.get(sid) {
@@ -1360,7 +1368,7 @@ impl Builder<'_> {
                 "Resized symbols",
                 1,
                 "instances",
-                "Their layers follow their pins, except inside groups",
+                "Their layers follow their pins",
             );
         }
         // The placeholder's own flags, written again on the copy.
@@ -1758,6 +1766,18 @@ fn num_in(v: &Value, path: &[&str]) -> f64 {
 
 fn b(v: &Value, k: &str) -> bool {
     b_of(v, k)
+}
+
+/// Whether every layer below `layer`, through nested groups, resizes by its
+/// share of the box — no constraint, or 63 with nothing pinned — as an Ondin
+/// pinned group lays its contents. True for a layer with none.
+fn scales_with_its_box(layer: &Value) -> bool {
+    arr(layer, "layers").iter().all(|l| {
+        matches!(
+            l.get("resizingConstraint").and_then(Value::as_i64),
+            None | Some(63)
+        ) && scales_with_its_box(l)
+    })
 }
 
 /// A layer's Sketch resizing constraint as insets inside a box of `outer`.

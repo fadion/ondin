@@ -511,6 +511,57 @@ fn a_masters_layers_take_their_pins_as_insets() {
     );
 }
 
+/// A master's group is pinned when every layer in it resizes by its share, as
+/// an Ondin pinned group scales its contents, so a resized instance stretches
+/// it; a group holding a layer of fixed width is left unpinned and reported.
+/// flip: `scales_with_its_box` answering true → fails at *"left unpinned"*.
+#[test]
+fn a_masters_group_is_pinned_only_when_its_layers_scale_with_it() {
+    let group = |id: &str, name: &str, x: f64, inner: i64| {
+        let mut r = rectangle(&format!("{id}r"), 0.0, 0.0, json!({}));
+        r["resizingConstraint"] = json!(inner);
+        json!({
+            "_class": "group", "do_objectID": id, "name": name,
+            "frame": frame(x, 0.0, 40.0, 20.0), "resizingConstraint": 63, "layers": [r],
+        })
+    };
+    let master = json!({
+        "_class": "symbolMaster", "do_objectID": "M", "name": "Bar", "symbolID": "S",
+        "frame": frame(0.0, 0.0, 100.0, 20.0),
+        "layers": [group("F", "Free", 10.0, 63), group("X", "Fixed", 50.0, 63 & !2)],
+    });
+    let instance = json!({ "_class": "symbolInstance", "do_objectID": "I", "name": "Wide",
+        "symbolID": "S", "frame": frame(200.0, 0.0, 300.0, 20.0) });
+    let r = import(sketch(
+        &[("P", "Page", json!([master, instance]))],
+        json!({}),
+        &[],
+    ));
+    let res = ondin_core::Resolved::rebuild(&r.doc);
+    let copy = |name: &str| {
+        let wide = one(&r.doc, "Wide");
+        ondin_core::build::subtree_nodes(&r.doc, &[wide])
+            .into_iter()
+            .find(|&n| r.doc.get(n).is_some_and(|n| n.name() == name))
+            .unwrap()
+    };
+    let free = res.world_bounds(copy("Free")).unwrap();
+    assert_eq!((free.x0, free.x1), (230.0, 350.0), "stretched by its share");
+    assert!(
+        !r.doc.get(copy("Fixed")).unwrap().insets().is_authored(),
+        "left unpinned"
+    );
+    let rows: Vec<(&str, &str)> = r
+        .report
+        .iter()
+        .map(|u| (u.what, u.count.as_str()))
+        .collect();
+    assert!(
+        rows.contains(&("Resizing inside groups", "1 group")),
+        "{rows:?}"
+    );
+}
+
 /// A mask's own fill is drawn under what it clips, as Sketch draws it: the mask
 /// paints nothing in Ondin, so an unmasking copy just above it carries the fill.
 /// flip: skip the copy in `children` → fails at the layer count.

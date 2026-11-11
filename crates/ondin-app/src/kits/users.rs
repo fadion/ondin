@@ -109,14 +109,15 @@ fn uses(path: &std::path::Path, kit: &str) -> bool {
     })
 }
 
+/// What the dialog says while the count is on its way: a sentence that reads
+/// as an answer would be replaced by the true one a moment later.
+pub(crate) const CHECKING: &str = "Checking kit usages…";
+
 /// The dialog's first sentence: how many documents use the kit and what
-/// happens to them — the count's own sentence while it is still arriving.
+/// happens to them, or [`CHECKING`] while the count is still arriving.
 pub(crate) fn sentence(name: &str, count: Option<usize>) -> String {
     match count {
-        None => format!(
-            "Documents that use components from {name} keep their copies, which keep \
-             working, and stop receiving updates."
-        ),
+        None => CHECKING.to_string(),
         Some(0) => format!("No document in your library uses components from {name}."),
         Some(1) => format!(
             "1 document in your library uses components from {name}. It keeps its copies, \
@@ -216,10 +217,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The sentence reads the count, and stands without one.
+    /// The sentence reads the count, and says it is checking until it has one.
     #[test]
     fn the_sentence_says_the_count() {
-        assert!(sentence("Atlas", None).starts_with("Documents that use components"));
+        assert_eq!(sentence("Atlas", None), CHECKING);
         assert_eq!(
             sentence("Atlas", Some(0)),
             "No document in your library uses components from Atlas."

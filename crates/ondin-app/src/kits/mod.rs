@@ -329,8 +329,8 @@ impl OndinApp {
     ///
     /// **The count is read by loading every library file on a worker** (§15
     /// D1021, [`users`]), started when the dialog opens and dropped when it
-    /// closes, so each opening counts afresh; until it arrives the first sentence
-    /// stands without a number, as it did before there was one (§15 D1017).
+    /// closes, so each opening counts afresh; until it arrives the first line
+    /// says it is checking ([`users::CHECKING`]).
     pub(crate) fn stop_sharing_dialog(&mut self, ctx: &egui::Context) {
         let Some(target) = self.unsharing_kit.clone() else {
             self.kit_users = None;

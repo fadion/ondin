@@ -1220,19 +1220,54 @@ impl EditorSession {
         // A chart's description changes what its parts are, which no patch can
         // say: the parts it would generate are drawn in their place.
         self.chart_preview = None;
+        let mut described: Vec<(NodeId, &ondin_core::chart::Chart)> = Vec::new();
         for op in &tx.0 {
             if let Operation::SetChart {
                 id,
                 chart: Some(chart),
             } = op
-                && let Some(parts) =
-                    ondin_core::chart::preview(&self.doc, &self.resolved, *id, chart)
             {
-                self.overrides.replace_chart(*id, &parts);
-                // The first is the card's own chart; the rest follow it.
-                if self.chart_preview.is_none() {
-                    self.chart_preview = Some((*id, chart.clone()));
+                described.push((*id, chart));
+                if let Some(parts) =
+                    ondin_core::chart::preview(&self.doc, &self.resolved, *id, chart)
+                {
+                    self.overrides.replace_chart(*id, &parts);
+                    // The first is the card's own chart; the rest follow it.
+                    if self.chart_preview.is_none() {
+                        self.chart_preview = Some((*id, chart.clone()));
+                    }
                 }
+            }
+        }
+        // A pie keeps round by sitting centred at its own size, so no inset
+        // reflows it as its chart resizes: a pie the preview resizes is
+        // generated again at the size drawn, as the commit's settle will.
+        let mut pies: Vec<(NodeId, Size)> = self
+            .overrides
+            .patched()
+            .filter_map(|id| {
+                let c = self.doc.get(id)?.chart()?;
+                let Some(NodeKind::Artboard { size, .. }) = &self.overrides.get(id)?.kind else {
+                    return None;
+                };
+                let fresh = c.generated == Some([size.width, size.height]);
+                (c.kind == ondin_core::chart::ChartKind::Pie && !fresh).then_some((id, *size))
+            })
+            .collect();
+        pies.sort_by_key(|(id, _)| *id);
+        pies.dedup_by_key(|(id, _)| *id);
+        let family = ondin_core::typography::TextStyle::default().font_family;
+        for (id, size) in pies {
+            let Some(chart) = described
+                .iter()
+                .find(|(d, _)| *d == id)
+                .map(|(_, c)| *c)
+                .or_else(|| self.doc.get(id)?.chart())
+            else {
+                continue;
+            };
+            if let Ok(parts) = ondin_core::chart::generate(chart, size, &family) {
+                self.overrides.replace_chart(id, &parts);
             }
         }
         self.drawn = next_revision();
@@ -4102,5 +4137,49 @@ mod tests {
         assert_eq!(s.chart_drawn(id).map(|c| c.kind), Some(ChartKind::Bar));
         s.clear_preview();
         assert_eq!(s.chart_drawn(id).map(|c| c.kind), Some(ChartKind::Column));
+    }
+
+    /// A resize preview draws a pie generated at the new size, while a column
+    /// chart, which reflows by its insets, keeps its own parts.
+    /// flip: `set_preview`'s pie pass removed → fails at "the pie's committed parts hidden".
+    #[test]
+    fn a_resized_pie_is_drawn_at_its_new_size_during_the_drag() {
+        use ondin_core::chart::{Chart, ChartKind};
+        let mut s = EditorSession::new();
+        let page = s.doc.first_page();
+        let make = |s: &mut EditorSession, kind: ChartKind, x: f64| {
+            let id = s.ids.mint();
+            let index = s.doc.get(page).map_or(0, |n| n.children().len());
+            let tx = ondin_core::edit::create_chart(
+                id,
+                page,
+                index,
+                Affine::IDENTITY,
+                Point::new(x, 0.0),
+                Point::new(x + 480.0, 280.0),
+                ondin_core::peniko::Color::WHITE,
+                Chart::sample(kind),
+            );
+            assert!(s.commit(tx));
+            id
+        };
+        let pie = make(&mut s, ChartKind::Pie, -4000.0);
+        let column = make(&mut s, ChartKind::Column, -3000.0);
+        let grow = |id| Operation::SetGeometry {
+            id,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(720.0, 420.0)),
+        };
+        s.set_preview(&Transaction(vec![grow(pie), grow(column)]));
+        assert_eq!(
+            s.overrides.children_of(pie),
+            Some(&[][..]),
+            "the pie's committed parts hidden"
+        );
+        assert!(s.overrides.ghosts_of(pie).count() > 0, "the pie drawn anew");
+        assert_eq!(
+            s.overrides.ghosts_of(column).count(),
+            0,
+            "the column chart reflows its own parts"
+        );
     }
 }

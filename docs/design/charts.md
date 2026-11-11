@@ -127,12 +127,14 @@ everything below.
   until nothing changes: the delete walk takes out every parent no key keeps, and its subtree
   with it, so a kept part under one would be moved out of a deleted node. Such a part is made
   again under a new id.
-- **Previews.** A resize drag needs nothing of its own: the layout reflows the parts as the frame
-  is dragged (*Laid out, not placed*), and the release regenerates for the new size. Scrubbing an
-  option field regenerates on every frame (`chart::preview`) into
-  `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the frame's own,
-  since a patch cannot add a tick or a bar. Nothing enters the document until release
-  (invariant 5).
+- **Previews.** A resize drag mostly needs nothing of its own: the layout reflows the parts as the
+  frame is dragged (*Laid out, not placed*), and the release regenerates for the new size. A pie
+  is the exception, since its square frame sits centred at its own size and no inset can make it
+  follow the smaller side: `set_preview` generates a pie the preview resizes at the size drawn,
+  every frame. Scrubbing an option field regenerates on every frame (`chart::preview`) the same
+  way, into `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the
+  frame's own, since a patch cannot add a tick or a bar. Nothing enters the document until
+  release (invariant 5).
 
 ### Laid out, not placed
 

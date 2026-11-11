@@ -455,7 +455,8 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   cross. The number format is one control, *Format*: a dropdown whose closed face is 12,345.6
   written through the format, opening on *Prefix* and *Suffix*, *Decimals* (Auto, 0–3), and
   *Thousands separator*, *Compact* and *Percent*, the same rows whatever is set so the popup
-  keeps its size. The value axis, a scatter's X axis and the value labels each have one.
+  keeps its size; the popup is as wide as the dropdown, and the face is the only sample. The
+  value axis, a scatter's X axis and the value labels each have one.
   The chart's own colours are colour rows (`chart_slot_row`, *Text colour*'s row): in Axes, per
   axis, *Value* / *Category axis colour* after its tick-marks switch while it draws a line or
   ticks, and *Value* / *Category gridline colour* after the dashed-gridlines switch while
@@ -533,7 +534,8 @@ read, since they name this document's node ids.
   step *Edit chart data*. A cell being typed into is the window's own, dropped when the window
   closes or moves to another chart.
 - **Header menu** (on `ui::menu_frame`, opened by a right-click on the header at the pointer;
-  a click selects the column): *Rename*, *Use as category* / *Use as X* (`icon::KEY`),
+  a click selects the column): *Rename*, *Use as category* / *Use as X* (`icon::KEY`, dimmed on
+  the column that already is, its tooltip saying so),
   *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /

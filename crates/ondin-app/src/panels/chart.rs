@@ -41,7 +41,7 @@ const STYLE_TOP: f32 = STYLE_INSET;
 const STYLE_GAP: f32 = 2.0;
 /// The number the *Format* dropdown writes as its sample.
 const FORMAT_SAMPLE: f64 = 12_345.6;
-/// The *Format* dropdown's popup width: two text fields to a row.
+/// The *Format* dropdown's least popup width: two text fields to a row.
 const FORMAT_POPUP_W: f32 = 220.0;
 /// The series style menu's width, past its longest row.
 const SERIES_MENU_W: f32 = 140.0;
@@ -917,13 +917,9 @@ impl OndinApp {
                         }
                     }
                     ui::menu_sep(ui);
-                    ui.label(ui::eyebrow("From variables"));
+                    ui::menu_eyebrow(ui, "From variables");
                     if groups.is_empty() {
-                        ui.label(
-                            egui::RichText::new("No colour variables yet")
-                                .size(ui::SMALL_PT)
-                                .color(theme::text::muted()),
-                        );
+                        ui::menu_note(ui, "No colour variables yet");
                     }
                     for (g, (name, _)) in groups.iter().enumerate() {
                         if ui.selectable_label(lit_group == Some(g), name).clicked() {
@@ -1998,7 +1994,8 @@ impl OndinApp {
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .selected_text(ui::combo_text(&sample))
                 .show_ui(ui, |ui| {
-                    ui.set_width(FORMAT_POPUP_W);
+                    // As wide as the dropdown, so the rows reach its right edge.
+                    ui.set_width(ui.available_width().max(FORMAT_POPUP_W));
                     ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
                     let half = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
                     ui.horizontal(|ui| {
@@ -2050,14 +2047,6 @@ impl OndinApp {
                             set(slot(c), on);
                         });
                     }
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} → {sample}",
-                            chart::scale::format(FORMAT_SAMPLE, &chart::NumberFormat::default(), 1)
-                        ))
-                        .size(ui::SMALL_PT)
-                        .color(theme::text::muted()),
-                    );
                 });
         });
     }

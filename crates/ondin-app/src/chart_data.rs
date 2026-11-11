@@ -1118,13 +1118,22 @@ fn menus(
                             s.menu = None;
                         }
                         if chart.kind != ChartKind::Sankey {
-                            if ui::menu_row(
+                            let is_category = chart.mapping.category == Some(id);
+                            let resp = ui::menu_row(
                                 ui,
-                                ui::MenuRow::new(icon::KEY, category),
+                                ui::MenuRow::new(icon::KEY, category).enabled(!is_category),
                                 ui::MENU_ROW_H,
-                            )
-                            .clicked()
-                            {
+                            );
+                            let resp = if is_category {
+                                resp.on_hover_text(if chart.kind == ChartKind::Scatter {
+                                    "Already the X column"
+                                } else {
+                                    "Already the category column"
+                                })
+                            } else {
+                                resp
+                            };
+                            if resp.clicked() {
                                 let mut next = chart.clone();
                                 next.mapping.category = Some(id);
                                 next.mapping.series.retain(|x| *x != id);

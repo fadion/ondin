@@ -956,6 +956,10 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     modal_title_noted(ui, title, None)
 }
 
+/// The air between a title and its note: the theme's item spacing, fixed
+/// because a canvas card zeroes its own.
+const TITLE_NOTE_GAP: f32 = 7.0;
+
 /// [`modal_title`] with `note` after the name, dim and cut to the room the ✕
 /// leaves: what the card is about, such as the file an import reads.
 fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool {
@@ -972,7 +976,7 @@ fn modal_title_noted(ui: &mut egui::Ui, title: &str, note: Option<&str>) -> bool
                 // On the title's baseline: the smaller type centred by its box
                 // sits high beside it. Cut short of the ✕, the whole note its tooltip.
                 let ink = theme::text::dim();
-                let left = shown.rect.right() + ui.spacing().item_spacing.x;
+                let left = shown.rect.right() + TITLE_NOTE_GAP;
                 let room = ui.available_rect_before_wrap().right() - left;
                 let mut job = egui::text::LayoutJob::simple_singleline(
                     note.to_owned(),

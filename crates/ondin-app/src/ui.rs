@@ -742,6 +742,16 @@ pub fn menu_note(ui: &mut egui::Ui, text: &str) {
         });
 }
 
+/// A section's [`eyebrow`] inside a menu card, inset as [`menu_note`] is so it
+/// lines up with the rows' text rather than touching the card's edge.
+pub fn menu_eyebrow(ui: &mut egui::Ui, label: &str) {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .show(ui, |ui| {
+            ui.label(eyebrow(label));
+        });
+}
+
 /// The height a menu card of `rows` rows and `seps` separators paints at, rows
 /// `gap` apart and padded `pad`, its border included. Exact, since rows and
 /// separators are fixed heights; [`menu_place`] needs it before the card is shown.

@@ -741,6 +741,148 @@ fn switching_a_variant_carries_overrides_and_keeps_ids() {
     );
 }
 
+/// A switch on a resized instance pins the new variant's path by that
+/// variant's insets: the switch writes the variant's own outline, which the
+/// commit door must not read as "draw it here".
+///
+/// flip: `keep_insets` without its `relinked` exclusion → fails at the drawn box.
+#[test]
+fn a_switch_on_a_resized_instance_keeps_the_new_variants_pins() {
+    switch_resized_icon(false);
+}
+
+/// The same with each variant's path inside a pinned plain group, which scales it.
+///
+/// flip: `keep_stretched` without its `relinked` exclusion → fails at the drawn box.
+#[test]
+fn a_switch_on_a_resized_instance_keeps_a_pinned_groups_contents() {
+    switch_resized_icon(true);
+}
+
+/// An *Arrow* set of Right and Left, each a 20 × 20 frame with its art pinned
+/// 20% in from every side (`grouped`: a plain group around the path), placed,
+/// resized to 40 × 40 and switched from Right to Left through the commit door.
+fn switch_resized_icon(grouped: bool) {
+    use ondin_core::kurbo::Rect;
+    use ondin_core::{Insets, LengthPct::Percent};
+    let mut ids = IdSource::new(0xBB);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [s, right, rart, rpath, left, lart, lpath] = [(); 7].map(|_| ids.mint());
+    let pins = Insets {
+        top: Some(Percent(20.0)),
+        right: Some(Percent(20.0)),
+        bottom: Some(Percent(20.0)),
+        left: Some(Percent(20.0)),
+        ..Default::default()
+    };
+    let at = |id, x, y| Operation::SetTransform {
+        id,
+        transform: Affine::translate((x, y)),
+    };
+    // Two arrows in one box at the identity, as an icon's variants are: the
+    // variants' insets agree, so a switch writes only the outline.
+    let arrow = |tip: f64, back: f64| {
+        let mut path = ondin_core::kurbo::BezPath::new();
+        path.move_to((back, 4.0));
+        path.line_to((tip, 10.0));
+        path.line_to((back, 16.0));
+        path.close_path();
+        NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+            mirror: Default::default(),
+        }
+    };
+    let art = |id, path, variant, kind: NodeKind| {
+        if grouped {
+            vec![
+                create(id, variant, 0, NodeKind::Group, "Icon"),
+                create(path, id, 0, kind, "Path"),
+            ]
+        } else {
+            vec![create(id, variant, 0, kind, "Path")]
+        }
+    };
+    let mut ops = vec![
+        create(s, root, 0, frame(100.0, 40.0), "Arrow"),
+        create(right, s, 0, frame(20.0, 20.0), "Right"),
+        create(left, s, 1, frame(20.0, 20.0), "Left"),
+    ];
+    ops.extend(art(rart, rpath, right, arrow(16.0, 4.0)));
+    ops.extend(art(lart, lpath, left, arrow(4.0, 16.0)));
+    ops.extend([
+        at(left, 40.0, 0.0),
+        Operation::SetInsets {
+            id: rart,
+            insets: pins,
+        },
+        Operation::SetInsets {
+            id: lart,
+            insets: pins,
+        },
+        Operation::SetComponent {
+            id: right,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: left,
+            component: true,
+        },
+        Operation::SetVariantSet {
+            id: s,
+            set: Some(VariantSet {
+                props: vec![VariantProp::new("Direction", strs(&["Right", "Left"]))],
+            }),
+        },
+        Operation::SetVariant {
+            id: right,
+            values: strs(&["Right"]),
+        },
+        Operation::SetVariant {
+            id: left,
+            values: strs(&["Left"]),
+        },
+    ]);
+    doc.apply(&Transaction(ops)).expect("a set of two variants");
+    // The app's commit door: the layout rewrites, then the component passes.
+    let door = |doc: &mut Document, ids: &mut IdSource, tx: Transaction| {
+        let res = Resolved::rebuild(doc);
+        let tx = ondin_core::build::keep_insets(doc, &res, tx);
+        let mut tx = ondin_core::build::keep_flex_sizes(doc, &res, tx);
+        ondin_core::propagate::owed(doc, &mut tx, ids);
+        doc.apply(&tx).expect("the door commits");
+    };
+    let (tx, inst) = ondin_core::build::place_instance(&doc, &mut ids, right, root, None).unwrap();
+    door(&mut doc, &mut ids, tx);
+    door(&mut doc, &mut ids, Transaction(vec![at(inst, 0.0, 100.0)]));
+    let res = Resolved::rebuild(&doc);
+    let tx = ondin_core::edit::resize_to(&doc, &res, inst, Size::new(40.0, 40.0));
+    door(&mut doc, &mut ids, tx);
+    let art = doc.get(inst).unwrap().children()[0];
+    let pinned = Some(Rect::new(8.0, 108.0, 32.0, 132.0));
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(art),
+        pinned,
+        "the fixture: Right's art pinned in the 40 × 40 instance"
+    );
+    let tx = variant::switch(&doc, inst, left, &mut ids).unwrap();
+    assert!(
+        !tx.0
+            .iter()
+            .any(|op| matches!(op, Operation::SetInsets { .. })),
+        "the fixture: the variants' insets agree, so the switch writes none"
+    );
+    door(&mut doc, &mut ids, tx);
+    assert_eq!(doc.get(art).unwrap().link(), Some(lart), "switched");
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(art),
+        pinned,
+        "Left's art, pinned as Right's was"
+    );
+}
+
 /// **Variants made apart share no item ids**, and a switch matches their fills by
 /// position (`rekey_lists`). A fixture keyed `keyed_by_position` gives Small's
 /// and Large's `Bg` fill one id already, so the rekeying is a no-op there. Here

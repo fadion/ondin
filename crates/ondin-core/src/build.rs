@@ -8967,12 +8967,15 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
     // Groups whose insets the edit sets itself: it writes what it means inside
     // them (the Position card, baking a stretched group's contents as it re-pins).
     let mut explicit: FxHashSet<NodeId> = FxHashSet::default();
+    let relinked = relinked(&tx);
     for op in &tx.0 {
         match op {
-            Operation::SetTransform { id, transform } => {
+            Operation::SetTransform { id, transform } if !relinked.contains(id) => {
                 moved.entry(*id).or_insert((None, false)).0 = Some(*transform);
             }
-            Operation::SetGeometry { id, geometry } if geometry.resizes() => {
+            Operation::SetGeometry { id, geometry }
+                if geometry.resizes() && !relinked.contains(id) =>
+            {
                 moved.entry(*id).or_insert((None, false)).1 = true;
             }
             Operation::SetInsets { id, .. } => {
@@ -9138,6 +9141,18 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
     out
 }
 
+/// The layers `tx` links to a new source: a variant switch's or a kit update's
+/// copies. The transforms and sizes written for them are the new source's own,
+/// in its specified space, so the layout passes never read them as "draw it here".
+fn relinked(tx: &Transaction) -> FxHashSet<NodeId> {
+    tx.0.iter()
+        .filter_map(|op| match op {
+            Operation::SetLink { id, link: Some(_) } => Some(*id),
+            _ => None,
+        })
+        .collect()
+}
+
 /// How many ancestors `id` has.
 fn depth_of(doc: &Document, id: NodeId) -> usize {
     std::iter::successors(doc.get(id).and_then(|n| n.parent()), |p| {
@@ -9160,13 +9175,14 @@ fn depth_of(doc: &Document, id: NodeId) -> usize {
 /// into a frame pins it against the new frame, and an `InsertSubtree` copy is
 /// re-pinned where the edit placed it. The frame's size is its used size when the
 /// edit leaves it alone, else its size after the edit (the Scale tool's case). A
-/// layer whose insets the transaction sets itself is left alone.
+/// layer whose insets the transaction sets itself is left alone, and so is one it
+/// relinks (`relinked`).
 pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
     let tx = keep_stretched(doc, res, tx);
     // The placement each node is given, whether it was resized, and the nodes
     // whose insets are set outright.
     let mut placed: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
-    let mut explicit: FxHashSet<NodeId> = FxHashSet::default();
+    let mut explicit: FxHashSet<NodeId> = relinked(&tx);
     for op in &tx.0 {
         match op {
             Operation::SetTransform { id, transform } => {

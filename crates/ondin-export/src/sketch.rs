@@ -558,7 +558,12 @@ impl Writer<'_> {
                 }
             }
         }
-        l["resizingConstraint"] = json!(constraint(node.insets()));
+        // Nothing pinned: Sketch scales it with the group, as Ondin does.
+        l["resizingConstraint"] = json!(if crate::scales_with_group(doc, id) {
+            63
+        } else {
+            constraint(node.insets())
+        });
         l["exportOptions"] = self.exports(node);
         if !node.grids().is_empty() {
             self.approximate("Layout grids, left out");

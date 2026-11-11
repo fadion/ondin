@@ -1138,7 +1138,14 @@ impl Writer<'_> {
             s["layoutItemVSizing"] = json!(if hug_h { "auto" } else { "fix" });
         }
         let Some(f) = flex else {
-            self.constraints(s, insets);
+            // Penpot reads a group child's own constraints, so one Ondin scales
+            // with its group says so on both axes.
+            if crate::scales_with_group(doc, id) {
+                s["constraintsH"] = json!("scale");
+                s["constraintsV"] = json!("scale");
+            } else {
+                self.constraints(s, insets);
+            }
             return;
         };
         if insets.is_authored() {

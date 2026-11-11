@@ -78,6 +78,65 @@ fn png() -> Vec<u8> {
     out.into_inner()
 }
 
+/// A 20 × 20 *Icon* component whose *Art*, a plain group pinned 20% in from
+/// every side, holds two rects, *Bar* and *Dot*: art its group scales.
+pub fn pinned_icon() -> Fixture {
+    let mut ids = IdSource::new(0x1C0);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [icon, art, bar, dot] = [(); 4].map(|_| ids.mint());
+    let pct = Some(ondin_core::LengthPct::Percent(20.0));
+    let named = |id, name: &str| Operation::SetName {
+        id,
+        name: name.into(),
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: icon,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(20.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Icon".into()),
+        },
+        Operation::CreateNode {
+            id: art,
+            parent: icon,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: Some("Art".into()),
+        },
+        rect(bar, art, 0, (12.0, 4.0), Affine::translate((4.0, 4.0))),
+        rect(dot, art, 1, (4.0, 4.0), Affine::translate((12.0, 12.0))),
+        named(bar, "Bar"),
+        named(dot, "Dot"),
+        solid(bar, [40, 40, 40]),
+        solid(dot, [40, 40, 40]),
+        Operation::SetInsets {
+            id: art,
+            insets: ondin_core::Insets {
+                top: pct,
+                right: pct,
+                bottom: pct,
+                left: pct,
+                ..Default::default()
+            },
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+    ]))
+    .expect("the icon");
+    let res = Resolved::rebuild(&doc);
+    Fixture { doc, res }
+}
+
 /// A page with a flex row, a component and an instance whose label is
 /// overridden, a fill bound to a colour variable, a text style, a mask over a
 /// picture, a turned rect, a radial gradient and a hidden, locked layer.

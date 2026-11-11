@@ -102,3 +102,21 @@ pub fn drawn_origins(doc: &ondin_core::Document, origins: &[NodeId]) -> Vec<Node
         })
         .collect()
 }
+
+/// Whether `id` sits in a pinned plain group or boolean, through nested plain
+/// groups — one whose insets scale its contents with its box. A design file's
+/// constraints are each layer's own, so such a layer is written as scaling on
+/// both axes; its own insets are inert there.
+pub(crate) fn scales_with_group(doc: &ondin_core::Document, id: NodeId) -> bool {
+    let mut at = doc.get(id).and_then(|n| n.parent());
+    while let Some(p) = at.and_then(|p| doc.get(p)) {
+        if !ondin_core::container::placed_by_contents(p.kind(), p.display()) {
+            return false;
+        }
+        if p.insets().is_authored() {
+            return true;
+        }
+        at = p.parent();
+    }
+    false
+}

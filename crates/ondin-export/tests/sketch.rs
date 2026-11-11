@@ -572,3 +572,31 @@ fn sketch_import_reads_the_export_back() {
             .any(|&id| doc.get(id).unwrap().link().is_some())
     );
 }
+
+/// A pinned group's layers are written as scaling with it (nothing pinned, 63),
+/// so Sketch resizes them as Ondin does, and the reader pins the group again.
+/// flip: `flags` writing each layer's own insets inside the group → fails at
+/// the layers' constraints.
+#[test]
+fn a_pinned_groups_layers_scale_with_it() {
+    let f = rich::pinned_icon();
+    let out = ondin_export::sketch::export(&f.doc, &f.res, "Icon").unwrap();
+    let all = layers(&unzip(&out.bytes));
+    let constraint = |name: &str| {
+        let (_, l) = all.iter().find(|(_, l)| s(l, "name") == name).unwrap();
+        l["resizingConstraint"].as_i64()
+    };
+    assert_eq!(
+        (constraint("Bar"), constraint("Dot")),
+        (Some(63), Some(63)),
+        "the layers' constraints"
+    );
+    let mut ids = IdSource::new(0x9D);
+    let back = ondin_core::sketch_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)
+        .expect("read back");
+    assert_eq!(
+        back.doc.get(named(&back.doc, "Art")).unwrap().insets(),
+        f.doc.get(named(&f.doc, "Art")).unwrap().insets(),
+        "the group pinned again"
+    );
+}

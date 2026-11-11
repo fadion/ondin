@@ -130,6 +130,35 @@ fn a_mask_and_its_run_become_a_masked_group() {
     assert_eq!(kids.len(), 2);
 }
 
+/// A pinned group's layers are written as scaling with it on both axes, since
+/// Penpot reads a group child's own constraints, and the group by its insets.
+/// flip: `item` writing each layer's own insets inside the group → fails at
+/// the layers' constraints.
+#[test]
+fn a_pinned_groups_layers_scale_with_it() {
+    let f = rich::pinned_icon();
+    let out = ondin_export::penpot::export(&f.doc, &f.res, "Icon").unwrap();
+    let z = unzip(&out.bytes);
+    let constraints = |name: &str| {
+        let v = z
+            .json
+            .values()
+            .find(|v| s(v, "name") == name)
+            .unwrap_or_else(|| panic!("{name}"));
+        (
+            s(v, "constraintsH").to_owned(),
+            s(v, "constraintsV").to_owned(),
+        )
+    };
+    let scale = ("scale".to_owned(), "scale".to_owned());
+    assert_eq!(
+        (constraints("Bar"), constraints("Dot")),
+        (scale.clone(), scale.clone()),
+        "the layers' constraints"
+    );
+    assert_eq!(constraints("Art"), scale, "the group, by its percentages");
+}
+
 /// The copy names the layers it copies and lists its overridden text as touched.
 #[test]
 fn a_copy_names_its_main_and_what_it_overrides() {

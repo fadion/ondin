@@ -44,13 +44,13 @@
 //! only — a flex or grid container still keeps a path's size: its `stretch` is a
 //! default no one chose, and a path scaled unevenly is a distorted drawing. An arc is
 //! positioned and keeps its size: scaled unevenly it is no longer an arc.
-//! **A plain group is placed by its contents** ([`place_group`]): its box is its
-//! children's union as specified ([`atomic_box`]), and pinned on both edges it
-//! stretches them, each child keeping its share of the box at any depth
-//! ([`Stretch`], [`place_in_stretch`]) and stretching as a pinned layer of its
-//! kind does — so a pinned icon's art follows its frame with its strokes kept.
-//! A boolean takes no insets yet, its insets stored and inert; inside a
-//! stretched group it is positioned at its share.
+//! **A plain group or a boolean is placed by its contents** ([`place_group`],
+//! [`placed_by_contents`]): its box is its children's union as specified
+//! ([`atomic_box`]), and pinned on both edges it stretches them, each child
+//! keeping its share of the box at any depth ([`Stretch`],
+//! [`place_in_stretch`]) and stretching as a pinned layer of its kind does — so
+//! a pinned icon's art follows its frame with its strokes kept, a boolean's
+//! outline drawn from its stretched operands.
 
 use crate::build::clamp_coord;
 use crate::geometry;
@@ -573,11 +573,16 @@ impl Stretch {
     }
 }
 
-/// Whether a node of `kind` with `display` is a plain group: a group without a
-/// layout, whose box is its children's. Insets stretch one by its contents
-/// ([`place_group`]).
-pub fn is_plain_group(kind: &NodeKind, display: Option<&Display>) -> bool {
-    matches!(kind, NodeKind::Group) && display.is_none()
+/// Whether a node of `kind` with `display` has no box of its own but its
+/// children's: a plain group (one without a layout) or a boolean, whose result
+/// is drawn from its operands. Insets place and stretch one by its contents
+/// ([`place_group`]), and a stretched one hands the stretch on to them.
+pub fn placed_by_contents(kind: &NodeKind, display: Option<&Display>) -> bool {
+    match kind {
+        NodeKind::Group => display.is_none(),
+        NodeKind::Boolean { .. } => true,
+        _ => false,
+    }
 }
 
 /// A plain group's used placement under `insets` in a box `frame` big: where

@@ -8937,18 +8937,19 @@ fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
 /// placing the new union where the old map puts it draws every layer inside
 /// exactly where it was.
 fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
-    use crate::container::{Stretch, is_plain_group};
+    use crate::container::{Stretch, placed_by_contents};
     use kurbo::Rect;
     let pinned_group = |id: NodeId| {
         doc.get(id)
-            .is_some_and(|n| is_plain_group(n.kind(), n.display()) && n.insets().is_authored())
+            .is_some_and(|n| placed_by_contents(n.kind(), n.display()) && n.insets().is_authored())
     };
-    // The plain groups `id` sits in, innermost first, up to the outermost pinned one.
+    // The plain groups and booleans `id` sits in, innermost first, up to the
+    // outermost pinned one.
     let chain = |id: NodeId| -> Vec<NodeId> {
         let mut out = Vec::new();
         let mut at = doc.get(id).and_then(|n| n.parent());
         while let Some(p) = at.and_then(|p| doc.get(p)) {
-            if !is_plain_group(p.kind(), p.display()) {
+            if !placed_by_contents(p.kind(), p.display()) {
                 break;
             }
             out.push(p.id());
@@ -9046,7 +9047,7 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
                 .cloned()
                 .unwrap_or_else(|| node.kind().clone())
         };
-        let contents = is_plain_group(node.kind(), node.display())
+        let contents = placed_by_contents(node.kind(), node.display())
             .then(|| res.used_stretch(id).map(|st| st.to))
             .flatten();
         let Some((stored, back)) = crate::container::unstretched(&s, local, &kind, contents) else {

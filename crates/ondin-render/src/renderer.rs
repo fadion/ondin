@@ -917,9 +917,9 @@ impl RenderOverrides {
                 .get(id)
                 .and_then(|o| o.insets)
                 .unwrap_or(*node.insets());
-            // A pinned plain group is placed by its contents' box and stretches
-            // them (`container::place_group`).
-            if ondin_core::container::is_plain_group(node.kind(), node.display()) {
+            // A pinned plain group or boolean is placed by its contents' box and
+            // stretches them (`container::place_group`).
+            if ondin_core::container::placed_by_contents(node.kind(), node.display()) {
                 let view = PreviewView { doc, ov: self, res };
                 if let Some(c) = ondin_core::container::atomic_box(&view, id, node.kind())
                     && let Some((local, s)) =
@@ -1026,7 +1026,7 @@ impl RenderOverrides {
         let Some(base) = self.current_kind(doc, id) else {
             return;
         };
-        let contents = ondin_core::container::is_plain_group(node.kind(), node.display())
+        let contents = ondin_core::container::placed_by_contents(node.kind(), node.display())
             .then(|| {
                 let view = PreviewView { doc, ov: self, res };
                 ondin_core::container::atomic_box(&view, id, node.kind())

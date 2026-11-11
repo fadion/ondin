@@ -3153,11 +3153,12 @@ fn a_frame_resize_previews_its_pinned_children_where_the_commit_puts_them() {
 }
 
 /// Resizing a frame whose plain group is pinned at 0% on every side previews
-/// the group's contents, a nested group's path included, where the commit
-/// stretches them.
+/// the group's contents, a nested group's path and a ring's operands
+/// included, where the commit stretches them.
 ///
 /// **Flip:** `relayout` without its plain-group branch fails "an icon
-/// resized": the preview leaves the art at its committed size.
+/// resized": the preview leaves the art at its committed size. So does
+/// `place_stretched` passing over a boolean.
 #[test]
 fn a_frame_resize_previews_a_pinned_groups_contents_as_its_commit() {
     let mut ids = IdSource::new(1);
@@ -3166,7 +3167,10 @@ fn a_frame_resize_previews_a_pinned_groups_contents_as_its_commit() {
     let mut add = |doc: &mut Document, parent: NodeId, kind: NodeKind, at: (f64, f64)| {
         let id = ids.mint();
         let index = doc.get(parent).unwrap().children().len();
-        let painted = matches!(kind, NodeKind::Rect { .. } | NodeKind::Path { .. });
+        let painted = matches!(
+            kind,
+            NodeKind::Rect { .. } | NodeKind::Path { .. } | NodeKind::Boolean { .. }
+        );
         let mut ops = vec![Operation::CreateNode {
             id,
             parent,
@@ -3225,6 +3229,26 @@ fn a_frame_resize_previews_a_pinned_groups_contents_as_its_commit() {
         },
         (0.0, 0.0),
     );
+    // A ring, drawn from its stretched operands.
+    let ring = add(
+        &mut doc,
+        group,
+        NodeKind::Boolean {
+            op: ondin_core::BoolOp::Subtract,
+        },
+        (0.0, 0.0),
+    );
+    for (d, at) in [(10.0, 7.0), (4.0, 10.0)] {
+        add(
+            &mut doc,
+            ring,
+            NodeKind::Ellipse {
+                size: Size::new(d, d),
+                arc: Default::default(),
+            },
+            (at, at),
+        );
+    }
     let all = Some(ondin_core::LengthPct::Percent(0.0));
     doc.apply(&Transaction(vec![Operation::SetInsets {
         id: group,

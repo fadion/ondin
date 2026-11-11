@@ -412,8 +412,8 @@ fn used_geometry(
     }
     let parent = doc.get(node.parent()?)?;
     let own = doc.resolved_kind(id)?;
-    // A plain group's box is its children's union as specified.
-    let contents = crate::container::is_plain_group(&own, node.display())
+    // A plain group's or a boolean's box is its children's union as specified.
+    let contents = crate::container::placed_by_contents(&own, node.display())
         .then(|| crate::container::atomic_box(view, id, &own))
         .flatten();
     // Inside a stretched group, a layer keeps its share of the group's box, its
@@ -449,17 +449,15 @@ fn used_geometry(
     })
 }
 
-/// The outermost pinned plain group `id` sits in, through plain groups only, or
-/// `id`: a change inside one moves its box, so every layer it stretches is
-/// placed again from there.
+/// The outermost pinned plain group or boolean above `id`, or `id`: a change
+/// anywhere inside one can move its box — a laid group or a hugging frame in
+/// it measures to its contents too — so every layer it stretches is placed
+/// again from there.
 fn stretch_root(doc: &Document, id: NodeId) -> NodeId {
     let mut root = id;
     let mut at = doc.get(id).and_then(Node::parent);
     while let Some(p) = at.and_then(|p| doc.get(p)) {
-        if !crate::container::is_plain_group(p.kind(), p.display()) {
-            break;
-        }
-        if p.insets().is_authored() {
+        if crate::container::placed_by_contents(p.kind(), p.display()) && p.insets().is_authored() {
             root = p.id();
         }
         at = p.parent();

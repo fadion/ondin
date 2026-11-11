@@ -584,6 +584,67 @@ fn a_pinned_group_scales_its_contents_with_the_frame() {
     assert_eq!(s.bounds(path), Rect::new(104.0, 104.0, 120.0, 120.0));
 }
 
+/// A 24 frame holding a ring, a boolean subtracting a circle from 6 to 18 from
+/// one from 2 to 22, `grouped` in a plain group. The frame and the ring.
+fn ring(s: &mut Scene, grouped: bool) -> (NodeId, NodeId) {
+    let f = s.add(s.root, frame(24.0, 24.0), (100.0, 100.0));
+    let parent = match grouped {
+        true => s.add(f, NodeKind::Group, (0.0, 0.0)),
+        false => f,
+    };
+    let ring = s.add(
+        parent,
+        NodeKind::Boolean {
+            op: ondin_core::BoolOp::Subtract,
+        },
+        (0.0, 0.0),
+    );
+    let circle = |d: f64| NodeKind::Ellipse {
+        size: Size::new(d, d),
+        arc: Default::default(),
+    };
+    s.add(ring, circle(20.0), (2.0, 2.0));
+    s.add(ring, circle(12.0), (6.0, 6.0));
+    (f, ring)
+}
+
+/// A boolean scales with its frame by its operands, pinned itself or inside a
+/// pinned group: its outline is drawn from the stretched operands.
+/// flip: `placed_by_contents` answering no for a boolean → fails at "a pinned
+/// ring".
+#[test]
+fn a_boolean_scales_by_its_operands() {
+    for grouped in [false, true] {
+        let mut s = Scene::new();
+        let (f, ring) = ring(&mut s, grouped);
+        let pinned = match grouped {
+            false => ring,
+            true => s.doc.get(ring).unwrap().parent().unwrap(),
+        };
+        // Where it is drawn: 2 in from each side of the 24.
+        s.pin(pinned, all_pct(2.0 / 24.0 * 100.0));
+        s.resize(f, 48.0, 48.0);
+        let outline = ondin_core::kurbo::Shape::bounding_box(
+            s.res.boolean_path(ring).expect("the ring has an outline"),
+        );
+        let world = s
+            .res
+            .world_transform(ring)
+            .unwrap()
+            .transform_rect_bbox(outline);
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            near(world.x0, 104.0) && near(world.x1, 144.0) && near(world.y1, 144.0),
+            "{}: {world:?}",
+            if grouped {
+                "a ring in a pinned group"
+            } else {
+                "a pinned ring"
+            }
+        );
+    }
+}
+
 /// A layer moved inside a stretched group stays where it was put: it is
 /// written back at half the distance in the group's own space, and the
 /// group's box holds.

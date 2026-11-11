@@ -6,7 +6,7 @@
 //!
 //! The grid is one focusable region that locks the arrows, `Tab` and `Escape`
 //! while it has the keyboard, so the canvas keymap stays quiet; a cell being
-//! typed into is a `ui::text_field` laid over the cell.
+//! typed into turns editable in place (`ui::label_edit_set`).
 
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
@@ -42,7 +42,7 @@ pub(crate) type Cell = (usize, usize);
 /// The window while it is open.
 #[derive(Clone, Debug)]
 pub(crate) struct ChartData {
-    /// The chart it shows; selecting anything else closes it.
+    /// The chart it shows, until another chart is selected alone or it is gone.
     pub(crate) chart: NodeId,
     /// The cursor, and the other corner of the selected range.
     pub(crate) at: Cell,

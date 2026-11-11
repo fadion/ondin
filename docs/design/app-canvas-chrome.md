@@ -1063,7 +1063,7 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   no modal: nothing blocks the canvas and a click there leaves it open. It is at most
   `ui::canvas_popup_room` tall, its list scrolling past `ui::CANVAS_POPUP_LIST_H`; title, controls
   and foot stay put. One card over the canvas's top shows at a time: opening it, Find, batch
-  rename, Clean up or Fill with content closes the others, since centred one would run under Find's corner. The census is taken again when the revision, the scope or the threshold changes.
+  rename, Clean up, Fill with content or the chart data window closes the others, since centred one would run under Find's corner. The census is taken again when the revision, the scope or the threshold changes.
 - **Head.** Batch rename's title row (*Colour review*, ✕). Scope *Selection · Document*, opening on *Selection* when something is selected;
   *Selection* is disabled with *Nothing is selected* when nothing is, and a card left on it says
   *Nothing selected · reviewing the document*. Threshold *Tight · Close · Loose*, *Close* by default,

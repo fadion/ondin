@@ -787,7 +787,7 @@ impl OndinApp {
         );
         let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
         if ui::action_button(ui, icon::TABLE, "Edit data…", ui::FieldButton::Off, size)
-            .on_hover_text("Open the chart's table under the canvas")
+            .on_hover_text("Open the chart's table over the canvas")
             .clicked()
         {
             self.open_chart_data(id, (0, 0));

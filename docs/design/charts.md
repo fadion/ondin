@@ -290,8 +290,11 @@ it applies to; switching kind keeps the others' values.
   values outside; a Sankey's nodes 18 wide and its flows at 60%), *Minimal* (no axes, no grid,
   no legend, no Sankey labels: a sparkline when the chart is small), *Outline* (outlined marks
   at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`). Every preset changes something each
-  kind draws, so no two cells of a kind look alike. Data, palette, text family and number
-  formats are left alone.
+  kind draws, so no two cells of a kind look alike. A preset owns exactly the options some
+  preset sets, writing *Clean*'s value into each it does not set itself (`Preset::apply`).
+  Everything else is left alone: data, palette, text family, number formats, and an option no
+  preset sets, so a user's bar gap survives a Style while the group gap (*Bold*) and the radius
+  (*Soft*) follow it.
 - **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
   *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a group of colour variables
   that may bind a fill (the name before the last `/`, else the collection's name; its variables
@@ -391,13 +394,16 @@ one `SetChart` of the whole description; a scrubbed number previews through
 `EditorSession::set_preview`, which draws the parts the new description generates in place of the
 chart's own (`RenderOverrides::replace_chart`: the children hidden by the child-order patch, the
 new parts as ghosts) and remembers the description (`EditorSession::chart_drawn`) for the card
-and the picker. Its sections are `ui::fold_head`s in the order below, their folds kept in
-`collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart::FOLDED`):
+and the picker. Its rows follow the card rules: dropdowns `CONTROL_H` tall (`ui::combo_height`),
+switch rows `settings::SWITCH_H` as Settings', and each colour row one `ui::field_row_pressable`
+whose whole width opens the picker, lit while the picker serves it. The Type rows come first with
+no head; every other section is headed by a `ui::fold_rule`, in the order below, their folds kept
+in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart::FOLDED`):
 
-- **Type** — a full-width `ComboBox` with the kind's glyph and name (`ui::combo_chevron`,
-  `ui::menu_rows`, each row its glyph, `rail::chart_glyph`), then the variants on
-  `ui::segmented`. A switch to or from a Sankey re-reads the mapping off the table's columns.
-  Undo step *Chart type*.
+- **Type** — always shown: a full-width `ComboBox` with the kind's glyph and name
+  (`ui::combo_chevron`, `ui::menu_rows`, each row its glyph, `rail::chart_glyph`), then the
+  variants on `ui::segmented`. A switch to or from a Sankey re-reads the mapping off the
+  table's columns. Undo step *Chart type*.
 - **Style** — the preset cells in a row, each a drawing of its preset for the chart's kind
   (`panels/chart_picture.rs`) on a 44 × 32 grid, not the chart shrunk: few, thick marks that
   change only what the preset changes. A narrow cell draws it smaller, keeping 5 px each side
@@ -414,14 +420,16 @@ and the picker. Its sections are `ui::fold_head`s in the order below, their fold
   unchanged (`ChartCardCache`), so a bound variable's new value, a mode switch or a theme
   switch redraws them (`style_pictures_follow_a_bound_variables_value`). The preset the
   options are exactly at lights. Undo step *Chart style*.
-- **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), the left-out line (*2
+- **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), *Edit data…* (an
+  `ui::action_button`, tooltip *Open the chart's table over the canvas*), the source line while
+  linked, the left-out line (*2
   values left out*, the reasons in its tooltip) or the refusal (*Too many marks: …*, *Flows loop
   back: …*) in the warning ink, and the mapping: *Category* (*X* for a scatter) or a Sankey's
   *From*, *To* and *Value* as dropdowns of columns.
-- **Series** — the palette dropdown, then one row per column but the category: its swatch,
-  which opens the picker on `PaintSlot::Chart` (solid colours, and the *Variables* tab: a
+- **Series** — the palette dropdown, then one row per column but the category: its colour row
+  (swatch and name), which opens the picker on `PaintSlot::Chart` (solid colours, and the *Variables* tab: a
   binding written into the description, `chart_bind_tx`, *Solid* detaching it to the colour
-  drawn), its name, and the eye, which
+  drawn), and the eye, which
   shows the column as a series or hides it (a hidden series keeps its place and colour). A bound
   colour row (a series', a node's, and the card's other colour rows) shows its variable's name
   right-aligned in a capsule (`binding::capsule`, at most half the row, `binding::chip_tip` its
@@ -470,29 +478,48 @@ render overrides minting each chart's ghost ids past the others'.
 
 ### The data window (`chart_data.rs`)
 
-A floating card over the bottom of the canvas column, non-modal, so the chart redraws on the
-canvas as cells are committed. 640 wide (the canvas column's width less 32 when narrower), 320
-tall, fixed: the grid scrolls inside it rather than the card growing (egui popups shrink but never
-grow back). One at a time, for the selected chart; selecting another chart moves it there, and
-selecting anything else closes it. Leaving the document (a tab switch) closes it, the import box
-and a pending chart read, since they name this document's node ids.
+A canvas card as Clean up's (`settings::canvas_card` with `CardHold::Open`, hung from
+`ui::canvas_popup_area`), so the canvas stays live under it and the chart redraws as cells are
+committed. 640 wide (the canvas's width less 32 when narrower, never under 320); the grid is a
+fixed 240 tall and scrolls inside, so the card keeps one size (egui popups shrink but never grow
+back). Rows inset `CANVAS_CARD_PAD`, 10 apart. One at a time, on one chart: it stays on its chart
+when the selection is cleared or moves to anything but a chart, so a click on the board leaves it
+open, and selecting another chart alone moves it there, at its first cell
+(`the_window_stays_open_when_the_selection_moves_off`). It closes on its ✕, on
+`Escape` and when its chart is deleted. It is one card over the canvas's top among Find, Colour
+review, batch rename, Clean up and Fill with content: opening it closes them, and opening any of
+them closes it. Leaving the document (a tab switch) closes it, the import box and a pending chart
+read, since they name this document's node ids.
 
-- **Head**: the table glyph, *Chart data*, the chart's name, *Import…*, ✕. Under it the toolbar:
-  *Add row*, *Add column*, and the source line when linked. Each adds at the end, moves the
-  cursor onto the new row or column, and carries a cell being typed into in the same step.
+- **Head**: `settings::card_head_noted` — *Chart data*, the chart's layer name as the note, the
+  shared ✕. Under it the toolbar of `ui::action_button`s at `CONTROL_H`, each as wide as
+  `ui::action_button_w` makes it: *Add row* (`icon::ROWS_PLUS_BOTTOM`) and *Add column*
+  (`icon::COLUMNS_PLUS_RIGHT`) on the left, disabled at the table's limits with *At most N rows*
+  / *columns*, and *Import…* (`icon::IMPORT`) on the right. Each add adds at the end, moves the
+  cursor onto the new row or column, and carries a cell being typed into in the same step. A
+  linked chart hides the adds and shows its source line under the toolbar.
 - **The grid** is one focusable region that locks the arrows, `Tab` and `Escape` while it has
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
-  document). A header row of column names, each with its type tag (`Aa` text, `#` number) and
-  its role (*Category*, a Sankey's *From*, *To* or *Value*, a series' swatch, or dim when
-  unmapped) and a dropdown chevron, the name cut with an ellipsis short of the role and the
-  chevron, and a row-number gutter, both held at the scrolled view's edges over the cells;
-  cells on the field ground with its hairline at `ui::MENU_ROW_H`, numbers right-aligned, the
-  selected range in the accent's tint and the cursor ringed in the accent. A column is a number
-  column while every non-empty cell in it parses as one; the type is read, never set.
+  document). A header row of column names, each with its type tag (`Aa` text, `#` number), a
+  series' swatch, the name (dim when unmapped) and, against the right edge, its role's mark: the
+  category's `icon::KEY` (11 pt, faint; tooltip *The chart's categories*, a scatter's *The chart's
+  X values*) or a Sankey's *From*, *To* or *Value* in words. The name is cut with an ellipsis
+  short of the mark, its whole name the tooltip when cut. The header and a row-number gutter are
+  held at the scrolled view's edges over the cells; cells on the field ground with its hairline
+  at `ui::MENU_ROW_H`, numbers right-aligned, the selected range in the accent's tint and the
+  cursor a square 1.5 px accent edge. Past the table's last row and column a dim grid fills the
+  view (the cells' lines in `color::card_border()` on the card's ground, no gutter numbers); it
+  neither scrolls nor takes a click, so only real rows and columns make the grid scroll. The
+  scroll bars are hidden, as Settings' are; the wheel and the cursor still scroll it. A column
+  is a number column while every non-empty cell in it parses as one; the type is read, never set.
 - **Keyboard**, the spreadsheet's: arrows move; typing starts an edit replacing the cell, `F2` or
-  `Enter` edits it in place (a `ui::text_field` over the cell); `Enter` commits and moves down,
-  `Tab` commits and moves right, `Shift` the other way; `Escape` abandons an edit, and with none
-  closes the window; `Delete` and `Backspace` clear the selected cells; `Shift`+arrows, a
+  `Enter` edits it in place (`ui::label_edit_set`, with no ground or edge of its own, so the
+  cell's ground and the cursor's edge stay and the text stays where it was drawn, right-aligned
+  in a number column; a header renames the same way at `SMALL_PT`, over a field-ground cell
+  with the cursor's edge); `Enter` commits and moves down, `Tab` commits and moves right,
+  `Shift` the other way; `Escape` abandons an edit, and with none closes the window (the focused
+  grid answers it; with nothing holding the keyboard it reaches the window through
+  `OndinApp::escape`); `Delete` and `Backspace` clear the selected cells; `Shift`+arrows, a
   `Shift`-click and a drag select a range, a header click its column. `Ctrl+C` / `Ctrl+X` /
   `Ctrl+V` read and write tab-separated text, so a range pasted from a spreadsheet lands as cells
   from the range's corner, growing the table to fit (`chart_data::pasted`). A double-click edits
@@ -500,9 +527,8 @@ and a pending chart read, since they name this document's node ids.
 - **Commits**: each committed cell, paste, clear, insert, sort or delete is one `SetChart`, undo
   step *Edit chart data*. A cell being typed into is the window's own, dropped when the window
   closes or moves to another chart.
-- **Header menu** (on `ui::menu_frame`; a click on the chevron at the header's right edge opens
-  it under the header, a right-click anywhere on the header at the pointer; a click elsewhere on
-  the header selects the column): *Rename*, *Use as category* / *Use as X*,
+- **Header menu** (on `ui::menu_frame`, opened by a right-click on the header at the pointer;
+  a click selects the column): *Rename*, *Use as category* / *Use as X* (`icon::KEY`),
   *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /
@@ -510,14 +536,14 @@ and a pending chart read, since they name this document's node ids.
   row an undo removes closes.
 - **While the import box is up** the window gives up the keyboard and is not drawn; it takes the
   keyboard back after.
-- **Linked**, the grid is read-only and says so in a line over it (*Edited in sales.csv — unlink
-  to edit here*): the menus' rows that write the table, *Rename* among them, are disabled and a
+- **Linked**, the grid is read-only and says so in the line under the toolbar (*Edited in
+  sales.csv — unlink to edit here*): the menus' rows that write the table, *Rename* among them, are disabled and a
   double-click on a header does nothing. The mapping (the menu's *Use as category* and *Show as
   series* too), series and options stay editable.
 
 ### Import and the linked file
 
-- **Doors**: *Import…* in the data window's head; the context menu's and the palette's *Import
+- **Doors**: *Import…* on the data window's toolbar; the context menu's and the palette's *Import
   chart data…* (the palette's dim with *Select a chart* without one); a `.csv`, `.tsv` or `.json`
   dropped onto a chart (`chart_import::drop_chart_data`). A `.csv` or `.tsv` dropped on bare
   canvas makes a chart there from it, linked (*Making one*); a `.json` dropped anywhere but on a
@@ -578,7 +604,10 @@ and a pending chart read, since they name this document's node ids.
   (`flatten_chart_detaches_a_line_drawing_a_fill_scoped_colour`). What was on screen is what
   remains; the labels are text layers that can be edited, restyled or converted to paths.
   The frame then behaves as any frame: its tree opens, the Frame cards return, and *Frame* /
-  *Group* converts it.
+  *Group* converts it. Until then a chart stays a frame, since a group could not hold what its
+  description regenerates: `build::convert_container_refusal` refuses the conversion with *A
+  chart stays a frame: flatten it first*, so the identity card's dropdown is disabled with that
+  reason and every other door refuses it (`tests/charts.rs · a_chart_stays_a_frame`).
 - **Doors**: the Chart card's foot; `Ctrl+E`, which flattens a selected chart as it flattens a
   boolean (`app-booleans.md`); the context menu; the palette's *Flatten chart*. Over a selection
   of several layers that are all charts, the context menu and the palette offer it too
@@ -628,7 +657,11 @@ without one (`menu::KIND_VERBS`).
 New glyphs, on the *Drawing rules* (`app-chrome.md`): `CHART` (three ascending columns on a
 baseline; the slot, the layers row, the palette), and one per kind — `CHART_COLUMN`, `CHART_BAR`,
 `CHART_LINE`, `CHART_AREA`, `CHART_DONUT`, `CHART_SCATTER`, `CHART_SANKEY` (one node bar whose
-two flows part to two bars) — plus `TABLE` for the data window and *Edit data…*. `CHART_PIE_SLICE` already means an arc's sweep and is not reused for the Pie kind;
+two flows part to two bars) — plus `TABLE` for *Edit data…* and the window's undo step. In
+the data window, `ROWS_PLUS_BOTTOM` (U+E59E, `COLUMNS_PLUS_RIGHT` transposed) is *Add row*,
+`COLUMNS_PLUS_RIGHT` (the browser's *New mode*: a column added to a table) *Add column*, and
+`KEY` (U+E2D6, a ring with a shaft and two teeth) the category column, its header mark and *Use
+as category*. `CHART_PIE_SLICE` already means an arc's sweep and is not reused for the Pie kind;
 `CHART_DONUT` is a ring with a gap, drawn to read apart from it. Column and `CHART` differ: the kind
 is three columns of mixed height, the tool three ascending.
 

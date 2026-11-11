@@ -3119,7 +3119,12 @@ impl Walk<'_> {
         // replaced element's box to the pixel, and a fractional `top` moved the
         // stroke by up to half a pixel.
         if pic.markup.is_some()
-            && let Some((mut holder, g, on)) = self.stretching_holder(node, ink, world, place)
+            && let Some(Stretching {
+                mut holder,
+                view: g,
+                stretched: on,
+                into_own,
+            }) = self.stretching_holder(node, ink, world, place)
         {
             let span = |on: bool, g0: f64, g1: f64, len: f64| match on {
                 true => (g0, g1, "0".to_string(), "100%".to_string()),
@@ -3131,6 +3136,10 @@ impl Walk<'_> {
             let (x0, x1, left, width) = span(on.0, g.x0, g.x1, ink.width());
             let (y0, y1, top, height) = span(on.1, g.y0, g.y1, ink.height());
             if let Some(m) = pic.markup.take() {
+                let m = match into_own {
+                    Some(t) => wrapped_markup(&m, t),
+                    None => m,
+                };
                 pic.markup = Some(stretched_markup(&m, Rect::new(x0, y0, x1, y1)));
             }
             pic.set("left", left);
@@ -3173,18 +3182,17 @@ impl Walk<'_> {
         }
     }
 
-    /// For a picture of a path or a line that its insets stretch, the box they
-    /// place it in, its geometry box in the picture's own space (`ink`'s corner
-    /// at `0 0`) and the axes stretched. `None` for anything else, and for a layer drawn turned,
-    /// skewed or scaled: its picture is in world axes, which stretching the box
-    /// would not follow, so it keeps its size as it did, and the report says so.
+    /// For a picture of a path or a line that its insets stretch, or of any
+    /// layer in a pinned group, the box that holds it ([`Stretching`]). `None`
+    /// for anything else, and for one drawn turned, skewed or scaled that
+    /// stretches one way only, which keeps its size, reported.
     fn stretching_holder(
         &mut self,
         node: &Node,
         ink: Rect,
         world: Affine,
         place: Place,
-    ) -> Option<(Element, Rect, (bool, bool))> {
+    ) -> Option<Stretching> {
         let kind = self.res.used_kind_of(node).clone();
         let insets = node.insets();
         let shared = self.shared_box(node, place);
@@ -3207,8 +3215,24 @@ impl Walk<'_> {
         if !(stretched.0 || stretched.1) {
             return None;
         }
-        let [a, b, c, d, ..] = world.as_coeffs();
-        if (a - 1.0).abs() > 1e-9 || b.abs() > 1e-9 || c.abs() > 1e-9 || (d - 1.0).abs() > 1e-9 {
+        let bx = self.box_rect(node).or(shared)?;
+        if css::is_translation(world) {
+            let view = bx + (world.translation() - ink.origin().to_vec2());
+            let class = self.classes.mint(&format!("{} box", node.name()), "box");
+            let mut holder = Element::new("div", class);
+            self.place(&mut holder, node, &kind, Some(bx), place);
+            return Some(Stretching {
+                holder,
+                view,
+                stretched,
+                into_own: None,
+            });
+        }
+        // Drawn turned, skewed or scaled: the picture is taken back into the
+        // layer's own axes, where its box is `bx`, and the holder's CSS and its
+        // ancestors' turn it again. Only when it stretches both ways, since an
+        // axis kept at its size keeps the world ink as its view.
+        if stretched != (true, true) || world.determinant().abs() < 1e-12 {
             self.report.approximate(format!(
                 "{} {}: stretched between its insets while turned or scaled, \
                  written at its drawn size",
@@ -3217,12 +3241,16 @@ impl Walk<'_> {
             ));
             return None;
         }
-        let bx = self.box_rect(node).or(shared)?;
-        let view = bx + (world.translation() - ink.origin().to_vec2());
+        let into_own = world.inverse() * Affine::translate(ink.origin().to_vec2());
         let class = self.classes.mint(&format!("{} box", node.name()), "box");
         let mut holder = Element::new("div", class);
         self.place(&mut holder, node, &kind, Some(bx), place);
-        Some((holder, view, stretched))
+        Some(Stretching {
+            holder,
+            view: bx,
+            stretched,
+            into_own: Some(into_own),
+        })
     }
 }
 
@@ -3365,6 +3393,38 @@ fn stretched_axes(both: (bool, bool), insets: &container::Insets, kind: &NodeKin
     (
         both.0 && can.0 && !(m.left || m.right),
         both.1 && can.1 && !(m.top || m.bottom),
+    )
+}
+
+/// The box a stretched picture is drawn in ([`Walk::stretching_holder`]).
+struct Stretching {
+    /// The element the layer's insets or share place.
+    holder: Element,
+    /// The picture's `viewBox`: its geometry box in its markup's space, or in
+    /// the layer's own space when `into_own` is set.
+    view: Rect,
+    /// The axes the picture stretches on.
+    stretched: (bool, bool),
+    /// For a picture drawn turned, skewed or scaled, the transform that takes
+    /// its world-axes markup into the layer's own axes.
+    into_own: Option<Affine>,
+}
+
+/// An inline `<svg>` from the SVG writer with its contents, definitions too,
+/// drawn through `t`: a `<g>` just inside the root.
+fn wrapped_markup(svg: &str, t: Affine) -> String {
+    let open = svg
+        .find("<svg")
+        .and_then(|s| svg[s..].find('>').map(|e| s + e));
+    let (Some(open), Some(close)) = (open, svg.rfind("</svg>")) else {
+        return svg.to_string();
+    };
+    let m = css::matrix(t).unwrap_or_default();
+    format!(
+        "{}<g transform=\"{m}\">{}</g>{}",
+        &svg[..=open],
+        &svg[open + 1..close],
+        &svg[close..]
     )
 }
 

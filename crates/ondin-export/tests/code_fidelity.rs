@@ -1428,15 +1428,128 @@ fn a_pinned_groups_turned_layers_and_text_scale_in_a_resized_use() {
         drawn_bar.width() > 30.0,
         "the fixture: the bar is drawn stretched in the use, {drawn_bar:?}"
     );
-    // Held as `rotation` is, unblurred: a turned edge's antialiasing differs.
-    holds_as(
-        "pinned-group-turned",
-        &doc,
-        &res,
-        0,
-        MAX_CELL_ERROR,
-        html_of_components,
+    holds_turned("pinned-group-turned-css", &doc, &res);
+}
+
+/// Pictures drawn turned or scaled in the world stretch with their group, used
+/// at twice the icon's size: a stroked path in a turned group, a filled and a
+/// stroked path in a group scaled to a quarter (an import's `viewBox`), and a
+/// turned path pinned on all four sides in the icon itself. Strokes keep their
+/// drawn width; nothing is reported.
+/// flip: `Walk::stretching_holder` refusing a picture whose world is not a
+/// translation → fails at "meant to be exact"; `wrapped_markup` leaving the
+/// markup in world axes → the pixels differ.
+#[test]
+fn turned_and_scaled_pictures_stretch_with_their_group() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 160.0, 120.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 40.0, 40.0, "Icon");
+    let path = |pts: &[(f64, f64)], close: bool| {
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to(pts[0]);
+        for q in &pts[1..] {
+            p.line_to(*q);
+        }
+        if close {
+            p.close_path();
+        }
+        NodeKind::Path {
+            path: p,
+            corner_radii: vec![],
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        }
+    };
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let spin = d.add(
+        Some(art),
+        NodeKind::Group,
+        Affine::translate((8.0, 6.0)) * Affine::rotate(0.6),
+        "Spin",
     );
+    let hook = d.add(
+        Some(spin),
+        path(&[(0.0, 0.0), (12.0, 0.0), (12.0, 7.0)], false),
+        Affine::IDENTITY,
+        "Hook",
+    );
+    d.stroke(hook, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let shrunk = d.add(
+        Some(art),
+        NodeKind::Group,
+        Affine::translate((18.0, 18.0)) * Affine::scale(0.25),
+        "Shrunk",
+    );
+    let wedge = d.add(
+        Some(shrunk),
+        path(&[(0.0, 0.0), (40.0, 0.0), (0.0, 40.0)], true),
+        Affine::IDENTITY,
+        "Wedge",
+    );
+    d.fill(wedge, solid(60, 120, 220, 255));
+    let rule = d.add(
+        Some(shrunk),
+        path(&[(0.0, 60.0), (60.0, 60.0), (60.0, 20.0)], false),
+        Affine::IDENTITY,
+        "Rule",
+    );
+    // 2px as drawn: the canvas snaps a 1px stroke on a whole pixel to the next
+    // half, and Chrome does not.
+    d.stroke(rule, 8.0, StrokeAlign::Center, StrokeSides::All);
+    let tilt_kind = path(&[(0.0, 0.0), (10.0, 4.0), (2.0, 8.0)], true);
+    let tilt_at = Affine::translate((26.0, 4.0)) * Affine::rotate(0.3);
+    let tilt_box = ondin_core::geometry::local_bounds(&tilt_kind, None).unwrap();
+    let tilt = d.add(Some(icon), tilt_kind, tilt_at, "Tilt");
+    d.fill(tilt, solid(220, 60, 60, 255));
+    let tenth = Some(LengthPct::Percent(10.0));
+    d.apply(vec![
+        Operation::SetInsets {
+            id: art,
+            insets: Insets {
+                left: tenth,
+                right: tenth,
+                top: tenth,
+                bottom: tenth,
+                ..Default::default()
+            },
+        },
+        Operation::SetInsets {
+            id: tilt,
+            insets: ondin_core::container::scale_pins(Size::new(40.0, 40.0), tilt_at, tilt_box),
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+    ]);
+    let (tx, used) = ondin_core::build::place_instance(
+        &d.doc,
+        &mut d.ids,
+        icon,
+        board,
+        Some(Point::new(60.0, 20.0)),
+    )
+    .expect("an instance");
+    d.apply(tx.0);
+    let res = Resolved::rebuild(&d.doc);
+    let tx = ondin_core::edit::resize_to(&d.doc, &res, used, Size::new(80.0, 80.0));
+    let tx = ondin_core::build::keep_insets(&d.doc, &res, tx);
+    d.apply(tx.0);
+    let (doc, res) = d.done();
+    let ink = |name: &str| {
+        ondin_core::build::subtree_nodes(&doc, &[used])
+            .into_iter()
+            .find(|n| doc.get(*n).unwrap().name() == name)
+            .and_then(|n| res.ink_bounds(n))
+            .unwrap()
+    };
+    assert!(
+        ink("Wedge").width() > 15.0 && ink("Tilt").width() > 15.0,
+        "the fixture: drawn stretched in the use, {:?} {:?}",
+        ink("Wedge"),
+        ink("Tilt")
+    );
+    holds_turned("pinned-group-turned-pictures", &doc, &res);
 }
 
 /// What CSS cannot draw goes to inline SVG and still matches: a star, a path and
@@ -4177,6 +4290,15 @@ fn a_forced_state_matches_the_canvas() {
 /// in `component_uses_match_the_canvas`).
 fn holds_components(test: &str, doc: &Document, res: &Resolved) {
     holds_as(test, doc, res, 3, MAX_TEXT_CELL_ERROR, html_of_components);
+}
+
+/// `holds_components` for a fixture of turned or scaled layers at fractional
+/// places: Chrome rounds the layout offset of an element whose transform is not
+/// a translation to a whole pixel, so each sits up to half a pixel from the
+/// canvas's, and the blur that absorbs that leaves a turned edge's
+/// antialiasing past text's limit.
+fn holds_turned(test: &str, doc: &Document, res: &Resolved) {
+    holds_as(test, doc, res, 3, MAX_CELL_ERROR, html_of_components);
 }
 
 /// A use whose visibility varies by mode is shown by an element around it, so

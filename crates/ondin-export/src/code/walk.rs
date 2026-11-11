@@ -157,6 +157,10 @@ enum Place {
     /// transform to it (with `outer` folded in for an export's origins). `boxed`
     /// when the parent has edges for insets to measure from.
     Free { local: Affine, boxed: bool },
+    /// Inside a pinned plain group or boolean, whose box `of` (in the group's
+    /// space) its contents scale with: placed and sized by its share of `of` in
+    /// percentages, as `container::place_in_stretch` lays it.
+    Share { local: Affine, of: Rect },
     /// A component's root: sized as its main is, placed by whoever uses it.
     Root,
 }
@@ -1613,13 +1617,29 @@ impl Walk<'_> {
         }
     }
 
+    /// The box a plain group or a boolean placed at `place` scales its contents
+    /// with: its drawn contents' box when its insets place it in a box, or when it
+    /// sits in such a group itself. `None` for any other layer, and for one whose
+    /// insets are inert.
+    fn shared_box(&self, node: &Node, place: Place) -> Option<Rect> {
+        let pinned = match place {
+            Place::Free { boxed, .. } => boxed && node.insets().is_authored(),
+            Place::Share { .. } => true,
+            _ => false,
+        };
+        (pinned && container::placed_by_contents(self.res.used_kind_of(node), node.display()))
+            .then(|| self.res.contents_box(self.doc, node.id()))
+            .flatten()
+    }
+
     /// Tier 1: `node` as an element with declarations, children recursed.
     fn css_element(&mut self, node: &Node, place: Place) -> Element {
         let doc = self.doc;
         let id = node.id();
         let kind = self.res.used_kind_of(node).clone();
         let mut el = Element::new("div", self.classes.mint(node.name(), kind.default_name()));
-        let bx = self.box_rect(node);
+        let shared = self.shared_box(node, place);
+        let bx = self.box_rect(node).or(shared);
         self.place(&mut el, node, &kind, bx, place);
         if let Some(mode) = self.tokens.modes_attr(node.modes().iter().copied()) {
             el.attrs.push(("data-mode", mode));
@@ -1744,6 +1764,11 @@ impl Walk<'_> {
             let in_flow = lays_out && !c.insets().is_authored();
             let place = if in_flow {
                 Place::Flow { grid }
+            } else if let Some(of) = shared {
+                Place::Share {
+                    local: self.res.used_local_of(c),
+                    of,
+                }
             } else {
                 // Where layout put it: a picture is placed by this alone, and an
                 // inset-pinned layer's stored transform is stale.
@@ -1885,7 +1910,10 @@ impl Walk<'_> {
                 el.set("position", "absolute");
                 let slot = container::slot_of(local, bx_or_point);
                 let insets = node.insets();
-                let insets_apply = boxed && insets.is_authored() && container::takes_insets(kind);
+                let insets_apply = boxed
+                    && insets.is_authored()
+                    && (container::takes_insets(kind)
+                        || container::placed_by_contents(kind, node.display()));
                 let mut stretched = (false, false);
                 if insets_apply {
                     let m = insets.margin_auto;
@@ -1918,6 +1946,56 @@ impl Walk<'_> {
                 }
                 if let Some(m) = css::matrix(css::linear(local)) {
                     el.set("transform", m);
+                }
+            }
+            Place::Share { local, of } => {
+                el.set("position", "absolute");
+                let share = bx.filter(|_| css::is_translation(local)).and_then(|b| {
+                    let at = b + local.translation();
+                    let pct = |v: f64, len: f64| {
+                        (len > 1e-9).then(|| format!("{}%", fmt(v / len * 100.0)))
+                    };
+                    Some((
+                        pct(at.x0 - of.x0, of.width())?,
+                        pct(at.y0 - of.y0, of.height())?,
+                        pct(at.width(), of.width())?,
+                        pct(at.height(), of.height())?,
+                    ))
+                });
+                match share {
+                    Some((left, top, width, height)) => {
+                        self.sizes(el, node, kind, bx, (true, true));
+                        el.set("left", left);
+                        el.set("top", top);
+                        el.set("width", width);
+                        el.set("height", height);
+                        if matches!(kind, NodeKind::Text { .. }) {
+                            self.report.approximate(format!(
+                                "text {}: in a group its insets scale, its box scales and \
+                                 its type keeps its size",
+                                label(node)
+                            ));
+                        }
+                    }
+                    // Turned, skewed, or with no extent to share: at its drawn place
+                    // from the group's box, which a resize leaves where it is.
+                    None => {
+                        self.report.approximate(format!(
+                            "{} {}: in a group its insets scale, written at its drawn size",
+                            kind_word(node),
+                            label(node)
+                        ));
+                        let slot = container::slot_of(local, bx_or_point);
+                        el.set("left", px(slot.x - of.x0));
+                        el.set("top", px(slot.y - of.y0));
+                        self.sizes(el, node, kind, bx, (false, false));
+                        if bx.is_none() {
+                            el.set("transform-origin", "0 0");
+                        }
+                        if let Some(m) = css::matrix(css::linear(local)) {
+                            el.set("transform", m);
+                        }
+                    }
                 }
             }
             Place::Root => {
@@ -1956,7 +2034,11 @@ impl Walk<'_> {
         let (w, h): (Option<String>, Option<String>) = match kind {
             NodeKind::Group => {
                 if node.display().is_none() {
-                    (Some("0".into()), Some("0".into()))
+                    // A pinned one has its contents' box (`Walk::shared_box`).
+                    match bx {
+                        Some(b) => (Some(px(b.width())), Some(px(b.height()))),
+                        None => (Some("0".into()), Some("0".into())),
+                    }
                 } else {
                     (Some(hug(item.width)), Some(hug(item.height)))
                 }
@@ -3062,9 +3144,11 @@ impl Walk<'_> {
         }
         match place {
             // A component's root is only ever a CSS element (`Walk::why_inline`).
-            Place::Free { .. } | Place::Root => {
+            Place::Free { .. } | Place::Share { .. } | Place::Root => {
                 let local = match place {
                     Place::Free { local, .. } => local,
+                    // From the share's box, where the group's element starts.
+                    Place::Share { local, of } => Affine::translate(-of.origin().to_vec2()) * local,
                     _ => Affine::IDENTITY,
                 };
                 // The picture is in world space; `local` maps this layer into the
@@ -3102,19 +3186,25 @@ impl Walk<'_> {
         world: Affine,
         place: Place,
     ) -> Option<(Element, Rect, (bool, bool))> {
-        let Place::Free { boxed: true, .. } = place else {
-            return None;
-        };
         let kind = self.res.used_kind_of(node).clone();
         let insets = node.insets();
-        if !matches!(kind, NodeKind::Path { .. } | NodeKind::Line { .. }) || !insets.is_authored() {
-            return None;
-        }
-        let both = (
-            insets.left.is_some() && insets.right.is_some(),
-            insets.top.is_some() && insets.bottom.is_some(),
-        );
-        let stretched = stretched_axes(both, insets, &kind);
+        let shared = self.shared_box(node, place);
+        let stretched = match place {
+            // Every picture in a group its insets scale takes its share, both ways.
+            Place::Share { .. } => (true, true),
+            Place::Free { boxed: true, .. }
+                if insets.is_authored()
+                    && (matches!(kind, NodeKind::Path { .. } | NodeKind::Line { .. })
+                        || shared.is_some()) =>
+            {
+                let both = (
+                    insets.left.is_some() && insets.right.is_some(),
+                    insets.top.is_some() && insets.bottom.is_some(),
+                );
+                stretched_axes(both, insets, &kind)
+            }
+            _ => return None,
+        };
         if !(stretched.0 || stretched.1) {
             return None;
         }
@@ -3128,7 +3218,7 @@ impl Walk<'_> {
             ));
             return None;
         }
-        let bx = self.box_rect(node)?;
+        let bx = self.box_rect(node).or(shared)?;
         let view = bx + (world.translation() - ink.origin().to_vec2());
         let class = self.classes.mint(&format!("{} box", node.name()), "box");
         let mut holder = Element::new("div", class);

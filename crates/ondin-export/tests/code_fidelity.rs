@@ -1221,6 +1221,118 @@ fn stretched_paths_match_the_canvas() {
     holds("stretched-paths", &doc, &res);
 }
 
+/// A 20 × 20 icon whose art is a pinned plain group of two paths (one in a
+/// group of its own) and a pinned boolean, used at 60 × 60: the use's CSS scales
+/// both as the canvas does, each layer at its share of its group's box, strokes
+/// unscaled.
+/// flip: `Walk::place` leaving a plain group's or a boolean's insets out → 109.1
+/// at the badge; `Walk::shared_box` not handing a share on → the inner group
+/// reported as drawn at its size.
+#[test]
+fn a_pinned_group_scales_in_a_resized_use() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 140.0, 80.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 20.0, 20.0, "Icon");
+    let pins = Insets {
+        left: Some(LengthPct::Percent(20.0)),
+        right: Some(LengthPct::Percent(20.0)),
+        top: Some(LengthPct::Percent(20.0)),
+        bottom: Some(LengthPct::Percent(20.0)),
+        ..Default::default()
+    };
+    let path = |pts: &[(f64, f64)], close: bool| {
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to(pts[0]);
+        for q in &pts[1..] {
+            p.line_to(*q);
+        }
+        if close {
+            p.close_path();
+        }
+        NodeKind::Path {
+            path: p,
+            corner_radii: vec![],
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        }
+    };
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let head = d.add(
+        Some(art),
+        path(&[(4.0, 4.0), (10.0, 4.0), (4.0, 10.0)], true),
+        Affine::IDENTITY,
+        "Head",
+    );
+    d.fill(head, solid(60, 120, 220, 255));
+    // A plain group inside the pinned one takes its share and hands it on.
+    let inner = d.add(Some(art), NodeKind::Group, Affine::IDENTITY, "Inner");
+    let shaft = d.add(
+        Some(inner),
+        path(&[(4.0, 4.0), (16.0, 16.0)], false),
+        Affine::IDENTITY,
+        "Shaft",
+    );
+    d.stroke(shaft, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let badge = d.add(
+        Some(icon),
+        NodeKind::Boolean {
+            op: ondin_core::node::BoolOp::Union,
+        },
+        Affine::IDENTITY,
+        "Badge",
+    );
+    d.fill(badge, solid(220, 60, 60, 255));
+    d.rect(badge, 12.0, 12.0, 4.0, 4.0, 0.0);
+    d.rect(badge, 14.0, 10.0, 2.0, 2.0, 0.0);
+    d.apply(vec![
+        Operation::SetInsets {
+            id: art,
+            insets: pins,
+        },
+        Operation::SetInsets {
+            id: badge,
+            insets: Insets {
+                top: Some(LengthPct::Percent(50.0)),
+                left: Some(LengthPct::Percent(60.0)),
+                ..pins
+            },
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+    ]);
+    let (tx, used) = ondin_core::build::place_instance(
+        &d.doc,
+        &mut d.ids,
+        icon,
+        board,
+        Some(Point::new(100.0, 40.0)),
+    )
+    .expect("an instance");
+    d.apply(tx.0);
+    let res = Resolved::rebuild(&d.doc);
+    let tx = ondin_core::edit::resize_to(&d.doc, &res, used, Size::new(60.0, 60.0));
+    let tx = ondin_core::build::keep_insets(&d.doc, &res, tx);
+    d.apply(tx.0);
+    let (doc, res) = d.done();
+    let wide = |name: &str| {
+        let id = ondin_core::build::subtree_nodes(&doc, &[used])
+            .into_iter()
+            .find(|n| doc.get(*n).unwrap().name() == name)
+            .unwrap();
+        res.contents_box(&doc, id).unwrap().width().round()
+    };
+    assert_eq!(
+        (wide("Art"), wide("Badge")),
+        (36.0, 12.0),
+        "the fixture: both drawn stretched in the use"
+    );
+    let export = html_of_components(&doc, &res, &[board]);
+    assert!(export.inlined.is_empty(), "{:?}", export.inlined);
+    holds_components("pinned-group-use", &doc, &res);
+}
+
 /// What CSS cannot draw goes to inline SVG and still matches: a star, a path and
 /// an inner shadow, beside a group with no layout.
 #[test]

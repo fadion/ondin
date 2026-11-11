@@ -11,10 +11,6 @@ item's premise can go stale while its ask still reads true.
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
 (`export.md`, *Code export*).
 
-- **A pinned plain group or boolean** (`layout.md`, *A plain group pinned in a box*) is written
-  without its insets: `walk.rs` applies insets only where `container::takes_insets` holds, so an
-  exported icon whose art is pinned by its group keeps the art at its own size in a resized frame.
-  Its children would need positions as percentages of the group's box.
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
   has not run on CI's Linux and macOS legs; unverified until it does. It draws the HTML output
   and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,

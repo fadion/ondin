@@ -4932,10 +4932,11 @@ impl OndinApp {
         if let Some(q) = query {
             // Measured empty, as CSS measures a container: a width from its
             // content is only its padding, rarely what was meant.
-            let hugs =
-                self.session.doc.get(id).is_some_and(|n| {
-                    n.item().width == ondin_core::container::Dimension::FitContent
-                });
+            let hugs = self
+                .session
+                .doc
+                .get(id)
+                .is_some_and(|n| n.item().width_from_content());
             if hugs {
                 ui.label(
                     egui::RichText::new("Measured empty, so its width is only its padding")
@@ -7266,7 +7267,9 @@ mod tests {
     /// offers *Inherit* and *By width* both, sized for both; picking by width,
     /// the main's row and its instance's read the mode the width picks *· by
     /// width*; the instance's menu has *By width* in *Inherit*'s place with the
-    /// main's own widths; and a main hugging its content offers no *By width*.
+    /// main's own widths; and a main hugging its content offers no *By width* and
+    /// shows *Measured empty*, as does one whose ratio derives its width from a
+    /// fit-content height.
     ///
     /// flip: `collection_mode_row` without its query arm → fails at the main's
     /// row, which reads *· default*.
@@ -7381,6 +7384,32 @@ mod tests {
             item
         }])));
         assert!(var::why_no_query(&app.session.doc, card).is_some());
+        let empty = "Measured empty, so its width is only its padding";
+        let hugging = row(&mut app, card);
+        assert!(hugging.iter().any(|t| t == empty), "{hugging:?}");
+
+        // A ratio deriving the width from a fit-content height measures empty
+        // too; from a set height it does not.
+        use ondin_core::container::{AspectRatio, Dimension, RatioSide};
+        let set_item = |app: &mut OndinApp, height| {
+            let mut item = *app.session.doc.get(card).unwrap().item();
+            item.width = Dimension::Auto;
+            item.height = height;
+            item.aspect_ratio = Some(AspectRatio {
+                ratio: 2.0,
+                side: RatioSide::Width,
+            });
+            assert!(app.commit_edit(Transaction(vec![Operation::SetLayoutItem {
+                id: card,
+                item
+            }])));
+        };
+        set_item(&mut app, Dimension::FitContent);
+        let derived = row(&mut app, card);
+        assert!(derived.iter().any(|t| t == empty), "{derived:?}");
+        set_item(&mut app, Dimension::Auto);
+        let set = row(&mut app, card);
+        assert!(!set.iter().any(|t| t == empty), "{set:?}");
     }
 
     /// A right-click cancelling the mode menu's breakpoint scrub drops the draft,

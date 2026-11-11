@@ -614,8 +614,9 @@ impl Document {
     /// padding, which `@container (min-width)` compares in the export: of a
     /// resize preview's width ([`crate::variable::Variables::with_width`]), else
     /// its laid-out width ([`Self::settle_widths`]), else its own — its padding
-    /// alone where its width comes from its content (fit-content, which layout
-    /// holds there, `limits_drawn_in`), else its width, a bound one read in the
+    /// alone where its width comes from its content
+    /// ([`crate::container::LayoutItem::width_from_content`], which layout holds
+    /// there, `limits_drawn_in`), else its width, a bound one read in the
     /// modes it and its surroundings set.
     pub fn query_width_in(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
         let outer = match t.previewed_width {
@@ -645,7 +646,7 @@ impl Document {
         let NodeKind::Artboard { size, .. } = &n.kind else {
             return None;
         };
-        if n.item.width == crate::container::Dimension::FitContent {
+        if n.item.width_from_content() {
             return Some(self.side_padding(id));
         }
         match n.size_vars[0] {
@@ -664,7 +665,7 @@ impl Document {
     /// Take the laid-out widths of every frame with a width query from `res`,
     /// and answer the layers to lay out again: every variable-reading layer
     /// under a frame whose pick moved. A frame's width never depends on its own
-    /// pick (its own fields read the mode around it, a fit-content width is held
+    /// pick (its own fields read the mode around it, a width from its content is held
     /// at its padding), but a nested querying frame's can follow an outer one's
     /// pick, so a caller lays out again and settles until nothing moves
     /// ([`crate::resolve::Resolved::settle`]).
@@ -1061,15 +1062,13 @@ impl Document {
         // **Inline-size containment** for a frame with width queries, as CSS lays
         // a query container: a width that would come from its content is its
         // padding alone, so what the queries pick can never move the width they
-        // pick by.
-        if item.width == crate::container::Dimension::FitContent
-            && self.nodes.get(&id).is_some_and(|n| !n.queries.is_empty())
-        {
-            let [_, right, _, left] = self
-                .resolved_display(id)
-                .map(|d| d.padding())
-                .unwrap_or_default();
-            item.width = crate::container::Dimension::Px(right.max(0.0) + left.max(0.0));
+        // pick by. A ratio that derived that width derives the height from it
+        // instead, as Chrome lays `aspect-ratio` under `container-type`.
+        if item.width_from_content() && self.nodes.get(&id).is_some_and(|n| !n.queries.is_empty()) {
+            item.width = crate::container::Dimension::Px(self.side_padding(id));
+            if let Some(r) = item.aspect_ratio.as_mut() {
+                r.side = crate::container::RatioSide::Height;
+            }
         }
         item
     }

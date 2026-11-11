@@ -394,14 +394,15 @@ impl Tokens {
         self.names.get(&id).map_or("missing", String::as_str)
     }
 
-    /// `tokens.css`, or `None` when the export read no variable.
+    /// `tokens.css`, or `None` when the export read no variable and holds no
+    /// width query, whose container must be written even with nothing to pick.
     ///
     /// Every variable read and every alias target they reach in any mode,
     /// declared in each of the document's modes; a kit's variable in the column
     /// that mode maps to. A kit's own modes, which only a kit main's frame sets,
     /// get a block of that kit's variables.
     pub fn css(&self, doc: &Document) -> Option<String> {
-        if self.used.is_empty() && self.hidden.is_empty() {
+        if self.used.is_empty() && self.hidden.is_empty() && self.queries.is_empty() {
             return None;
         }
         let t = doc.variables();

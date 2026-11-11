@@ -2741,6 +2741,94 @@ fn a_width_query_is_written_as_a_container_query() {
     assert!(marked, "no file marks the frame with its query");
 }
 
+/// **A query container whose width would come from its content is measured
+/// empty**, on the canvas as `container-type: inline-size` lays it in Chrome:
+/// a frame hugging its contents is its padding wide, and one whose ratio
+/// derives its width from a fit-content height is its padding wide and that
+/// over the ratio high. flip: `Tokens::css` returning `None` with no variable
+/// read → "the containers must still be written"; `Document::limits_drawn_in`
+/// keeping the ratio's side → the canvas lays it at its contents' width.
+#[test]
+fn a_query_container_is_measured_empty_as_chrome_measures_it() {
+    use ondin_core::container::{AspectRatio, Dimension, RatioSide};
+    use ondin_core::variable::{CollectionId, Mode};
+    let mut d = Doc::new();
+    let (compact, wide) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (index, (id, name)) in [(compact, "Compact"), (wide, "Wide")]
+        .into_iter()
+        .enumerate()
+    {
+        d.apply(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let col = d.frame(None, 0.0, 0.0, 200.0, 120.0, "Column");
+    d.apply(vec![Operation::SetDisplay {
+        id: col,
+        display: Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Start,
+            row_gap: 8.0,
+            padding: [8.0; 4],
+            ..Default::default()
+        })),
+    }]);
+    for (k, (height, ratio)) in [
+        (Dimension::Auto, None),
+        (
+            Dimension::FitContent,
+            Some(AspectRatio {
+                ratio: 2.0,
+                side: RatioSide::Width,
+            }),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let card = d.frame(Some(col), 0.0, 0.0, 160.0, 40.0, "Card");
+        d.fill(card, solid(60, 120, 220, 255));
+        let inside = d.rect(card, 0.0, 0.0, 120.0, 20.0, 0.0);
+        d.fill(inside, solid(220, 120, 60, 255));
+        d.apply(vec![
+            Operation::SetDisplay {
+                id: card,
+                display: Some(Display::Flex(Flex {
+                    padding: [0.0, 10.0 + 4.0 * k as f64, 0.0, 10.0],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetQueries {
+                id: card,
+                queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+            },
+            Operation::SetLayoutItem {
+                id: card,
+                item: LayoutItem {
+                    width: Dimension::FitContent,
+                    height,
+                    aspect_ratio: ratio,
+                    ..Default::default()
+                },
+            },
+        ]);
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[col]);
+    let tokens = export.file("tokens.css").map(String::from_utf8_lossy);
+    assert!(
+        tokens.is_some_and(|t| t.contains("container-type: inline-size;")),
+        "no variable is read, but the containers must still be written"
+    );
+    holds("query-measured-empty", &doc, &res);
+}
+
 /// A kit collection's width query is written as the document's are: named after
 /// the kit collection, its children given the kit's narrowest mode and each
 /// other one under `@container`, with the kit's variables in that mode's column

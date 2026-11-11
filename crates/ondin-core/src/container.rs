@@ -2292,6 +2292,21 @@ impl LayoutItem {
         }
     }
 
+    /// Whether a frame laid by this item takes its width from its content: a
+    /// fit-content width, or, where a ratio derives the width (its own `width`
+    /// is then never read), a fit-content height, which CSS and taffy both lay
+    /// shrink-to-fit across. A frame's `Auto` width is its stored size, whatever
+    /// its parent's layout.
+    pub fn width_from_content(&self) -> bool {
+        let derived = self
+            .aspect_ratio
+            .is_some_and(|r| r.is_valid() && r.side == RatioSide::Width);
+        match derived {
+            true => self.height == Dimension::FitContent,
+            false => self.width == Dimension::FitContent,
+        }
+    }
+
     /// All at CSS's defaults — what the save format skips.
     pub fn is_default(&self) -> bool {
         *self == LayoutItem::default()

@@ -2988,8 +2988,9 @@ pub fn why_no_query(doc: &crate::Document, frame: NodeId) -> Option<&'static str
     if !matches!(n.kind, crate::NodeKind::Artboard { .. }) {
         return Some("Only a frame picks by its width");
     }
-    (n.item.width == crate::container::Dimension::FitContent)
-        .then_some("Picks by width only when its width is set from outside — not Fit content")
+    n.item
+        .width_from_content()
+        .then_some("Picks by width only when its width is set from outside — not by its content")
 }
 
 /// The modes of `owner` with their names, in order.

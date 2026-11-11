@@ -277,6 +277,60 @@ fn the_laid_out_width_picks_and_fit_content_is_held_at_the_padding() {
     );
 }
 
+/// A ratio deriving a querying frame's width from a fit-content height is
+/// contained as a fit-content width is: laid at its padding, the ratio deriving
+/// the height from that, as Chrome lays it. From a set height it is not.
+/// flip: `width_from_content` reading only a fit-content width → the laid width
+/// is the 540 of its contents, and fails at "contained".
+#[test]
+fn a_width_derived_from_a_fit_content_height_is_contained() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    let mut f = fixture();
+    f.by_width();
+    let (card, wide) = (f.card, f.ids.mint());
+    f.commit(vec![
+        Operation::SetDisplay {
+            id: card,
+            display: Some(Display::Flex(Flex {
+                padding: [0.0, 10.0, 0.0, 10.0],
+                ..Default::default()
+            })),
+        },
+        Operation::CreateNode {
+            id: wide,
+            parent: card,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(500.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+    ]);
+    let set = |f: &mut F, height| {
+        let mut item = *f.doc.get(card).unwrap().item();
+        item.height = height;
+        item.aspect_ratio = Some(AspectRatio {
+            ratio: 2.0,
+            side: RatioSide::Width,
+        });
+        f.commit(vec![Operation::SetLayoutItem { id: card, item }]);
+        let res = Resolved::rebuild(&f.doc);
+        f.doc.settle_widths(&res);
+        f.doc.query_width_in(f.doc.variables(), card)
+    };
+    assert_eq!(set(&mut f, Dimension::FitContent), Some(0.0), "contained");
+    assert!(variable::why_no_query(&f.doc, card).is_some());
+    let item = f.doc.resolved_item(card);
+    assert_eq!(item.width, Dimension::Px(20.0), "its padding");
+    assert_eq!(item.aspect_ratio.map(|r| r.side), Some(RatioSide::Height));
+    // 200 high, so 400 wide, less the padding.
+    assert_eq!(set(&mut f, Dimension::Auto), Some(380.0), "from its height");
+    assert!(variable::why_no_query(&f.doc, card).is_none());
+}
+
 /// A main's widths: the first mode's 0 is fixed, a width at or past a
 /// neighbour's is refused naming it, and unticking takes the query away.
 #[test]

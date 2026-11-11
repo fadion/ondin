@@ -30,6 +30,10 @@ const MENU_W: f32 = 232.0;
 /// *Make this a kit*'s tooltip, in the menu and the palette alike.
 pub(crate) const MAKE_KIT_TIP: &str = "Other documents can use its components once you publish it";
 
+/// *Show in Icons tab*'s tooltip, in the menus and the palette alike.
+pub(crate) const ICON_PACK_TIP: &str =
+    "Offer its published components as icons in the assets browser, once switched on in Settings";
+
 impl OndinApp {
     /// Whether the document vendors anything from a kit — when *Kits used…* is offered.
     pub(crate) fn uses_kits(&self) -> bool {
@@ -143,6 +147,16 @@ impl OndinApp {
                 app.kits_used_open = true;
             }
             if shared {
+                let on = app.shared_kit().is_some_and(|k| k.icons);
+                let spec = Item::IconPack.spec();
+                let row = crate::ui::MenuRow::new(spec.glyph, spec.label).checked(on);
+                if crate::ui::menu_row(ui, row, H)
+                    .on_hover_text(ICON_PACK_TIP)
+                    .clicked()
+                {
+                    app.open_menu = TopMenu::None;
+                    app.set_icon_pack(!on);
+                }
                 // Asks first, as the card's row does — so an ellipsis, as on
                 // this menu's other dialog rows.
                 if item(ui, Item::StopSharingKit).clicked() {
@@ -270,6 +284,71 @@ impl OndinApp {
         ));
     }
 
+    /// *Show in Icons tab* on the open kit: write the flag and save, as
+    /// *Make this a kit* does. Nothing reaches a consumer's Icons tab until they
+    /// switch the kit on in Settings, so it acts at once.
+    pub(crate) fn set_icon_pack(&mut self, on: bool) {
+        if self.refused_by_compare() {
+            return;
+        }
+        // As `make_kit`: the save holds no typed text until the session ends.
+        self.finish_text_first();
+        let mut meta = self.session.doc.meta().clone();
+        match meta.kit.as_mut() {
+            Some(kit) if kit.is_shared() && kit.icons != on => kit.icons = on,
+            _ => return,
+        }
+        self.session.doc.set_meta(meta);
+        self.session.mark_unsaved();
+        if !self.save_file(false) {
+            return;
+        }
+        let name = self.shown_title();
+        self.session.info(icon_pack_said(&name, on));
+    }
+
+    /// The card menu's *Show in Icons tab* on a library file: the open
+    /// document's through [`Self::set_icon_pack`], a closed one written into
+    /// its file and every open tab's copy patched, as [`Self::set_kit_at`] does.
+    pub(crate) fn set_icon_pack_at(&mut self, path: &std::path::Path, on: bool) {
+        if self.view != crate::app::View::Dashboard && self.session.path.as_deref() == Some(path) {
+            self.set_icon_pack(on);
+            self.library.refresh();
+            return;
+        }
+        let Some(entry) = self.library.entry_at(path).cloned() else {
+            return;
+        };
+        if let Err(e) = crate::library::store::set_kit_icons(&self.library.root, &entry, on) {
+            self.session.fail(format!(
+                "Could not change “{}”: {e}",
+                self.library.shown_entry(&entry)
+            ));
+            return;
+        }
+        self.kit_mark_written(path);
+        let name = self.library.shown_entry(&entry);
+        self.session.info(icon_pack_said(&name, on));
+    }
+
+    /// After a kit mark was written into the file at `path`: the library read
+    /// again, and every tab holding the file, parked ones included, given the
+    /// mark from disk — a stale one would go back with that tab's next save.
+    fn kit_mark_written(&mut self, path: &std::path::Path) {
+        self.library.refresh();
+        if let Some(on_disk) = self.library.entry_at(path).map(|e| e.meta.clone()) {
+            for session in self.open_sessions() {
+                if session.path.as_deref() != Some(path) {
+                    continue;
+                }
+                let mut meta = session.doc.meta().clone();
+                meta.id = on_disk.id.clone();
+                meta.kit = on_disk.kit.clone();
+                session.doc.set_meta(meta);
+            }
+        }
+    }
+
     /// The card menu's *Make a kit* / *Stop sharing as kit* on a library file.
     /// The open document goes through the editor's own verbs, which save it; a
     /// closed one has its mark written into the file
@@ -301,20 +380,7 @@ impl OndinApp {
             ));
             return;
         }
-        self.library.refresh();
-        // Every tab holding the file, parked ones included: a stale mark would go
-        // back to disk with that tab's next save.
-        if let Some(on_disk) = self.library.entry_at(path).map(|e| e.meta.clone()) {
-            for session in self.open_sessions() {
-                if session.path.as_deref() != Some(path) {
-                    continue;
-                }
-                let mut meta = session.doc.meta().clone();
-                meta.id = on_disk.id.clone();
-                meta.kit = on_disk.kit.clone();
-                session.doc.set_meta(meta);
-            }
-        }
+        self.kit_mark_written(path);
         let name = self.library.shown_entry(&entry);
         self.session.info(if sharing {
             format!("{name} is a kit — nothing is shared until you publish it")
@@ -439,6 +505,14 @@ impl OndinApp {
         if self.unsharing_kit.is_none() {
             self.kit_users = None;
         }
+    }
+}
+
+/// The status line after *Show in Icons tab* on the kit `name`.
+fn icon_pack_said(name: &str, on: bool) -> String {
+    match on {
+        true => format!("{name} shows in the Icons tab of documents that switch it on"),
+        false => format!("{name} no longer shows in the Icons tab"),
     }
 }
 

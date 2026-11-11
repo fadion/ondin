@@ -539,6 +539,8 @@ enum Act {
     /// *Make a kit* (`true`) or *Stop sharing as kit* (`false`) on a file; the
     /// second asks first, so the menu sets `OndinApp::unsharing_kit` instead.
     SetKit(PathBuf, bool),
+    /// *Show in Icons tab* (`true`) or *Hide from Icons tab* on a kit's file.
+    SetIconPack(PathBuf, bool),
     Import,
     /// Delete a project. `Some(id)` transfers its files to another project;
     /// `None` leaves them unfiled; `keep_files: false` trashes them.
@@ -2665,21 +2667,27 @@ impl OndinApp {
         }
     }
 
-    /// The file menu's kit row: *Make a kit* or *Stop sharing as kit*, the same
-    /// toggle as the document menu's. None on a conflict copy, which carries the
-    /// original's id; one left as its kit's only file is the kit and gets the row.
-    fn kit_row(&self, entry: &Entry) -> Option<(&'static str, Act)> {
+    /// The file menu's kit rows: *Make a kit*, or on a kit *Show in Icons tab*
+    /// / *Hide from Icons tab* and *Stop sharing as kit*, the document menu's
+    /// toggles worded as this menu's *Star* / *Unstar* are. None on a conflict
+    /// copy, which carries the original's id; one left as its kit's only file is
+    /// the kit and gets the rows.
+    fn kit_rows(&self, entry: &Entry) -> Vec<(&'static str, Act)> {
         if !stands_for_its_kit(&self.library, entry) {
-            return None;
+            return Vec::new();
         }
-        Some(if is_kit(&self.library, entry) {
-            (
-                "Stop sharing as kit",
-                Act::SetKit(entry.path.clone(), false),
-            )
-        } else {
-            ("Make a kit", Act::SetKit(entry.path.clone(), true))
-        })
+        let path = || entry.path.clone();
+        if !is_kit(&self.library, entry) {
+            return vec![("Make a kit", Act::SetKit(path(), true))];
+        }
+        let icons = entry.meta.kit.as_ref().is_some_and(|k| k.icons);
+        vec![
+            match icons {
+                true => ("Hide from Icons tab", Act::SetIconPack(path(), false)),
+                false => ("Show in Icons tab", Act::SetIconPack(path(), true)),
+            },
+            ("Stop sharing as kit", Act::SetKit(path(), false)),
+        ]
     }
 
     fn file_menu_popup(
@@ -2714,8 +2722,9 @@ impl OndinApp {
             ]
         };
         let mut rows = rows;
-        if !trashed && let Some(row) = self.kit_row(entry) {
-            rows.insert(rows.len() - 1, row);
+        if !trashed {
+            let at = rows.len() - 1;
+            rows.splice(at..at, self.kit_rows(entry));
         }
 
         // Narrower than the filter's `FILTER_MENU_W`: these are verbs, those project names.
@@ -2872,6 +2881,7 @@ impl OndinApp {
                 }
             }
             Act::SetKit(path, sharing) => self.set_kit_at(&path, sharing),
+            Act::SetIconPack(path, on) => self.set_icon_pack_at(&path, on),
             Act::Import => self.open_import_card(),
             Act::DeleteProject {
                 id,
@@ -8869,11 +8879,11 @@ mod tests {
         assert_eq!(app.nav_count(&Nav::Kits), 1, "one kit");
         let entry = |p: &Path| app.library.entry_at(p).unwrap().clone();
         assert!(
-            app.kit_row(&entry(&copy)).is_none(),
+            app.kit_rows(&entry(&copy)).is_empty(),
             "no kit row on the copy"
         );
         assert_eq!(
-            app.kit_row(&entry(&atlas)).map(|r| r.0),
+            app.kit_rows(&entry(&atlas)).last().map(|r| r.0),
             Some("Stop sharing as kit"),
             "the original's"
         );
@@ -8898,6 +8908,37 @@ mod tests {
         atlas
     }
 
+    /// A kit card's *Show in Icons tab* writes the flag into the file and the row
+    /// then offers *Hide from Icons tab*, which takes it off and leaves the kit
+    /// sharing.
+    /// flip: `store::set_kit_icons` leaving the flag as it was → fails at
+    /// "written to the file".
+    #[test]
+    fn the_icons_tab_row_writes_the_flag() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kit-icons");
+        let atlas = shared_atlas(&mut app, &root);
+        let first = |app: &OndinApp| app.kit_rows(app.library.entry_at(&atlas).unwrap())[0].0;
+        assert_eq!(
+            first(&app),
+            "Show in Icons tab",
+            "the fixture: a kit, flag off"
+        );
+        app.dashboard_act(Act::SetIconPack(atlas.clone(), true));
+        assert!(
+            mark_on_disk(&atlas).is_some_and(|k| k.icons),
+            "written to the file"
+        );
+        assert_eq!(first(&app), "Hide from Icons tab");
+        app.dashboard_act(Act::SetIconPack(atlas.clone(), false));
+        assert!(
+            mark_on_disk(&atlas).is_some_and(|k| !k.icons && k.sharing),
+            "taken off, still sharing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A kit's conflict copy left as its only file is the kit on the dashboard too,
     /// as in the picker. flip: `stands_for_its_kit` false for every conflict copy →
     /// fails at "listed under Kits".
@@ -8918,7 +8959,7 @@ mod tests {
         assert_eq!(app.nav_count(&Nav::Kits), 1, "listed under Kits");
         let entry = app.library.entry_at(&copy).unwrap().clone();
         assert_eq!(
-            app.kit_row(&entry).map(|r| r.0),
+            app.kit_rows(&entry).last().map(|r| r.0),
             Some("Stop sharing as kit")
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -8939,7 +8980,7 @@ mod tests {
         assert_eq!(app.library.entries.len(), 2, "fixture: both files");
         assert_eq!(app.nav_count(&Nav::Kits), 1, "one kit");
         let picked = crate::kits::index::kits_in(&app.library, None);
-        let stands = |p: &Path| app.kit_row(app.library.entry_at(p).unwrap()).is_some();
+        let stands = |p: &Path| !app.kit_rows(app.library.entry_at(p).unwrap()).is_empty();
         assert_eq!(picked.len(), 1);
         assert!(
             stands(&picked[0].path),

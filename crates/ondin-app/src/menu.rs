@@ -479,6 +479,8 @@ pub enum Item {
     /// The Document menu's kit rows and its way back to the library.
     MakeKit,
     KitsUsed,
+    /// *Show in Icons tab*, a checked row on a sharing kit.
+    IconPack,
     StopSharingKit,
     ShowInLibrary,
     VersionHistory,
@@ -1205,6 +1207,7 @@ impl Item {
             Item::PublishKit => s("Publish kit…", icon::UPLOAD_SIMPLE, None, Group::Kits),
             Item::MakeKit => s("Make this a kit", icon::PACKAGE, None, Group::Kits),
             Item::KitsUsed => s("Kits used…", icon::PACKAGE, None, Group::Kits),
+            Item::IconPack => s("Show in Icons tab", icon::ASSETS, None, Group::Kits),
             Item::StopSharingKit => s("Stop sharing as kit…", icon::PACKAGE, None, Group::Kits),
             Item::ShowInLibrary => s("Show in library", icon::FOLDER_OPEN, None, Group::File),
             Item::VersionHistory => s(
@@ -1497,6 +1500,7 @@ impl Item {
             Item::PublishKit => Action::PublishKit,
             Item::MakeKit => Action::MakeKit,
             Item::KitsUsed => Action::KitsUsed,
+            Item::IconPack => Action::IconPack,
             Item::StopSharingKit => Action::StopSharingKit,
             Item::ShowInLibrary => Action::ShowInLibrary,
             Item::VersionHistory => Action::VersionHistory,
@@ -3821,6 +3825,7 @@ impl OndinApp {
             | Item::PublishKit
             | Item::MakeKit
             | Item::KitsUsed
+            | Item::IconPack
             | Item::StopSharingKit
             | Item::ShowInLibrary
             | Item::VersionHistory

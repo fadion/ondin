@@ -2604,6 +2604,11 @@ impl OndinApp {
             Action::StopSharingKit if self.shared_kit().is_some() => {
                 self.unsharing_kit = Some(None);
             }
+            Action::IconPack => {
+                if let Some(on) = self.shared_kit().map(|k| k.icons) {
+                    self.set_icon_pack(!on);
+                }
+            }
             Action::MakeKit | Action::KitsUsed | Action::StopSharingKit => {}
             Action::ShowInLibrary => self.go_to_dashboard(),
             Action::VersionHistory => self.versions_open = true,

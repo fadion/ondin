@@ -669,6 +669,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// *Show in Icons tab* turns the open kit's flag on and off and saves it;
+    /// on a document that is no kit it does nothing.
+    /// flip: `set_icon_pack` without its `save_file` → fails at "in the file".
+    #[test]
+    fn the_icons_tab_toggle_saves_the_flag() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = std::env::temp_dir().join(format!("ondin-icon-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = OndinApp::headless(&ctx);
+        app.prefs.base_folder = Some(root.clone());
+        app.library = Library::open(root.clone());
+        let icons = |app: &OndinApp| app.session.doc.meta().kit.as_ref().map(|k| k.icons);
+
+        app.dispatch(&ctx, crate::input::Action::IconPack);
+        assert_eq!(icons(&app), None, "no kit, no flag");
+        app.make_kit();
+        assert_eq!(icons(&app), Some(false), "the fixture: a kit, flag off");
+        app.dispatch(&ctx, crate::input::Action::IconPack);
+        assert_eq!(icons(&app), Some(true));
+        let scanned = crate::library::scan::scan(&root);
+        assert_eq!(
+            scanned[0].meta.kit.as_ref().map(|k| k.icons),
+            Some(true),
+            "in the file"
+        );
+        app.dispatch(&ctx, crate::input::Action::IconPack);
+        assert_eq!(icons(&app), Some(false), "and off again");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// While a compare is open, the kit's mark and its publish, written outside
     /// `apply`, are refused with the compare's sentence.
     /// flip: `make_kit` without its compare guard → fails at "Make a kit is refused".

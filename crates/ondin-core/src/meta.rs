@@ -77,6 +77,11 @@ pub struct KitMark {
     /// the document as no longer a kit.
     #[serde(default = "sharing_by_default", skip_serializing_if = "is_sharing")]
     pub sharing: bool,
+    /// The author's *Show in Icons tab*: the assets browser may offer the kit's
+    /// mains as icons, once a consumer switches it on in Settings. Set by hand,
+    /// never inferred from what the kit holds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub icons: bool,
 }
 
 /// A design-tokens file the document is linked to (`ondin_export::dtcg_in`):
@@ -112,6 +117,7 @@ impl Default for KitMark {
             date: None,
             note: None,
             sharing: true,
+            icons: false,
         }
     }
 }

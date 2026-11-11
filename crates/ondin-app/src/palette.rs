@@ -654,6 +654,12 @@ impl OndinApp {
                 shared.then_some("This document is already a kit"),
             ),
         );
+        let mut icons = Cmd::verb(
+            Item::IconPack,
+            (!shared).then_some("This document is not a kit"),
+        );
+        icons.checked = Some(self.shared_kit().is_some_and(|k| k.icons));
+        push(&mut out, icons);
         push(
             &mut out,
             Cmd::verb(

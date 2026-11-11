@@ -2529,6 +2529,7 @@ fn a_filed_document_round_trips_its_library_identity() {
             date: Some(1_774_500_000),
             note: Some("New buttons".into()),
             sharing: true,
+            icons: true,
         }),
     });
     let bytes = io::save(&doc).unwrap();
@@ -2632,6 +2633,7 @@ fn the_first_four_kilobytes_of_a_real_save_carry_the_library_block() {
             date: Some(1_774_500_000),
             note: Some("New buttons".into()),
             sharing: true,
+            icons: true,
         }),
     });
     let bytes = io::save(&doc).unwrap();

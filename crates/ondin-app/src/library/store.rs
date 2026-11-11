@@ -179,6 +179,20 @@ pub fn set_kit(root: &Path, entry: &Entry, sharing: bool) -> io::Result<()> {
     rewrite(root, &entry.path, &doc, &was)
 }
 
+/// Turn a closed kit's *Show in Icons tab* on or off — the card menu's row;
+/// `OndinApp::set_icon_pack` does the same to the open document. A file with
+/// no kit mark is left alone.
+pub fn set_kit_icons(root: &Path, entry: &Entry, on: bool) -> io::Result<()> {
+    let (mut doc, was) = load_digest(&entry.path)?;
+    let mut meta = doc.meta().clone();
+    match meta.kit.as_mut() {
+        Some(kit) if kit.icons != on => kit.icons = on,
+        _ => return Ok(()),
+    }
+    doc.set_meta(meta);
+    rewrite(root, &entry.path, &doc, &was)
+}
+
 /// Copy a document into a new one, with a fresh identity.
 ///
 /// A new id and creation stamp, deliberately: a copy that kept the original's id

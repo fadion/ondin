@@ -199,10 +199,11 @@ pub enum Action {
     UnlinkTokens,
     /// *Publish kit…* (`Ctrl+Alt+P` — §5.3e).
     PublishKit,
-    /// The Document menu's rows, unbound: *Make this a kit*, *Kits used…*, *Stop
-    /// sharing as kit…* and *Show in library*.
+    /// The Document menu's rows, unbound: *Make this a kit*, *Kits used…*, *Show
+    /// in Icons tab* (a toggle), *Stop sharing as kit…* and *Show in library*.
     MakeKit,
     KitsUsed,
+    IconPack,
     StopSharingKit,
     ShowInLibrary,
     /// *Version history…*, the Document menu's first row.

@@ -1045,6 +1045,17 @@ impl Resolved {
         self.used.get(&id).and_then(|u| u.stretch)
     }
 
+    /// A plain group's or a boolean's box as drawn, in its own space: its
+    /// children's union as specified, stretched where insets stretch it. What
+    /// the Position card pins such a layer by.
+    pub fn contents_box(&self, doc: &Document, id: NodeId) -> Option<Rect> {
+        if let Some(s) = self.used_stretch(id) {
+            return Some(s.to);
+        }
+        let node = doc.get(id)?;
+        crate::container::atomic_box(&DocView(doc), id, node.kind())
+    }
+
     /// The stroke-expanded world AABB of `id`.
     ///
     /// **Not reduced by any clip, a mask included.** It is conservative (a clip only

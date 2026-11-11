@@ -322,8 +322,21 @@ pub fn inset_stretch(kind: &NodeKind) -> (bool, bool) {
             .map_or((false, false), |b| {
                 (b.width() > FLAT_EXTENT, b.height() > FLAT_EXTENT)
             }),
+        // Stretched by their contents ([`place_group`]).
+        NodeKind::Group | NodeKind::Boolean { .. } => (true, true),
         _ => (false, false),
     }
+}
+
+/// The insets that scale a layer with its container: every side pinned at
+/// its current distance as a percentage of `frame`, for the box `bx` that
+/// `local` draws — the Position card's *Scale*.
+pub fn scale_pins(frame: Size, local: Affine, bx: Rect) -> Insets {
+    share_of(
+        Rect::from_origin_size(Point::ZERO, frame),
+        slot_of(local, bx),
+        bx.size(),
+    )
 }
 
 /// The extent below which a path's axis is flat and does not stretch: scaling

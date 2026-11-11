@@ -8964,6 +8964,9 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         }
     };
     let mut moved: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
+    // Groups whose insets the edit sets itself: it writes what it means inside
+    // them (the Position card, baking a stretched group's contents as it re-pins).
+    let mut explicit: FxHashSet<NodeId> = FxHashSet::default();
     for op in &tx.0 {
         match op {
             Operation::SetTransform { id, transform } => {
@@ -8972,6 +8975,9 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
             Operation::SetGeometry { id, geometry } if geometry.resizes() => {
                 moved.entry(*id).or_insert((None, false)).1 = true;
             }
+            Operation::SetInsets { id, .. } => {
+                explicit.insert(*id);
+            }
             _ => {}
         }
     }
@@ -8979,7 +8985,10 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         let mut v: Vec<NodeId> = moved
             .keys()
             .copied()
-            .filter(|id| !chain(*id).is_empty() && !doc.in_vault(*id))
+            .filter(|id| {
+                let c = chain(*id);
+                !c.is_empty() && !c.iter().any(|g| explicit.contains(g)) && !doc.in_vault(*id)
+            })
             .collect();
         v.sort();
         v
@@ -8987,7 +8996,12 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
     let whole: Vec<NodeId> = {
         let mut v: Vec<NodeId> = moved
             .iter()
-            .filter(|(id, (to, _))| to.is_some() && pinned_group(**id) && chain(**id).is_empty())
+            .filter(|(id, (to, _))| {
+                to.is_some()
+                    && pinned_group(**id)
+                    && !explicit.contains(*id)
+                    && chain(**id).is_empty()
+            })
             .map(|(id, _)| *id)
             .collect();
         v.sort();

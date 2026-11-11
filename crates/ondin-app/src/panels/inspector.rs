@@ -7351,7 +7351,7 @@ impl OndinApp {
                     }
                 });
             });
-            let button = egui::vec2((full - gap) / 2.0, side);
+            let button = egui::vec2((full - gap * 2.0) / 3.0, side);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for horizontal in [true, false] {
@@ -7394,12 +7394,57 @@ impl OndinApp {
                         app.toggle_centre(&subjects, horizontal, !on);
                     }
                 }
+                // *Scale*: every side pinned by percentage, so the layer keeps its
+                // share of the container as it resizes.
+                let scaled = !mixed && scales_with_container(&insets);
+                let (state, tip) = match scaled {
+                    true => (ui::FieldButton::On, "Stop scaling with the container"),
+                    false => (
+                        ui::FieldButton::Off,
+                        "Scale with the container: pin every side by percentage",
+                    ),
+                };
+                let (resp, _) = ui::field_button_marked(ui, icon::RESIZE, button, state, None);
+                if resp.on_hover_text(tip).clicked() {
+                    app.toggle_scale(&subjects, !scaled);
+                }
             });
         });
     }
 
+    /// Pin every side of every subject by percentage at its current place, or
+    /// unpin them all, as one commit. Neither moves anything.
+    fn toggle_scale(&mut self, subjects: &[NodeId], on: bool) {
+        let ops = subjects
+            .iter()
+            .filter_map(|id| {
+                let p = self.inset_placement(*id)?;
+                let insets = match on {
+                    true => ondin_core::container::scale_pins(p.frame, p.local, p.bx),
+                    false => ondin_core::Insets::default(),
+                };
+                let mut ops = self.baked_placement(*id, &p);
+                ops.push(Operation::SetInsets { id: *id, insets });
+                Some(ops)
+            })
+            .flatten()
+            .collect();
+        let ops = self.kept_in_place(ops, subjects);
+        self.session.name_step(
+            if on {
+                "Scale with container"
+            } else {
+                "Stop scaling"
+            },
+            icon::RESIZE,
+        );
+        self.commit_edit(Transaction(ops));
+    }
+
     /// The selected layers a container can pin: those whose parent is a frame or a
-    /// group with a layout and whose kind takes insets (`container::takes_insets`).
+    /// group with a layout and whose kind takes insets (`container::takes_insets`),
+    /// a plain group and a boolean among them, placed by their contents
+    /// (`container::placed_by_contents`).
     fn inset_subjects(&self) -> Vec<NodeId> {
         let doc = &self.session.doc;
         self.session
@@ -7409,7 +7454,8 @@ impl OndinApp {
             .copied()
             .filter(|id| {
                 doc.get(*id).is_some_and(|n| {
-                    ondin_core::container::takes_insets(n.kind())
+                    (ondin_core::container::takes_insets(n.kind())
+                        || ondin_core::container::placed_by_contents(n.kind(), n.display()))
                         && n.parent().and_then(|p| doc.get(p)).is_some_and(|p| {
                             matches!(p.kind(), NodeKind::Artboard { .. })
                                 || (matches!(p.kind(), NodeKind::Group) && p.display().is_some())
@@ -7429,8 +7475,15 @@ impl OndinApp {
             _ => return None,
         };
         let local = self.session.preview_local_transform(id)?;
-        let kind = self.session.display_node(id)?.kind().clone();
-        let bx = ondin_core::geometry::local_bounds(&kind, self.session.preview_text_layout(id))?;
+        let node = self.session.display_node(id)?;
+        let kind = node.kind().clone();
+        // A group or a boolean is pinned by its contents' box as drawn.
+        let bx = match ondin_core::container::placed_by_contents(&kind, node.display().as_ref()) {
+            true => self.session.resolved.contents_box(&self.session.doc, id)?,
+            false => {
+                ondin_core::geometry::local_bounds(&kind, self.session.preview_text_layout(id))?
+            }
+        };
         Some(InsetPlacement {
             frame,
             local,
@@ -7538,11 +7591,26 @@ impl OndinApp {
     /// size — so a pin change never moves it. This makes unpinning safe: an axis
     /// that loses its insets falls back to the stored transform, which a frame
     /// resize since the pin may have left stale.
+    ///
+    /// A group or a boolean its insets stretch has its contents written where
+    /// they are drawn too, at any depth: without the stretch they would go back
+    /// to their specified size.
     fn baked_placement(&self, id: NodeId, p: &InsetPlacement) -> Vec<Operation> {
-        match self.session.doc.get(id) {
-            Some(node) => build::baked_ops(id, node, p.local, &p.kind),
-            None => Vec::new(),
+        let doc = &self.session.doc;
+        let res = &self.session.resolved;
+        let Some(node) = doc.get(id) else {
+            return Vec::new();
+        };
+        let mut ops = build::baked_ops(id, node, p.local, &p.kind);
+        if res.used_stretch(id).is_some_and(|s| !s.is_identity()) {
+            for d in ondin_core::subtree_nodes(doc, &[id]).into_iter().skip(1) {
+                let Some(n) = doc.get(d) else { continue };
+                let local = res.used_local(doc, d).unwrap_or(n.transform());
+                let kind = res.used_kind(doc, d).unwrap_or(n.kind());
+                ops.extend(build::baked_ops(d, n, local, kind));
+            }
         }
+        ops
     }
 
     /// The override mark on a centre button: an instance's layer centred where its
@@ -11708,6 +11776,14 @@ fn inset_of(
         Pin::Bottom => insets.bottom,
         Pin::Left => insets.left,
     }
+}
+
+/// Whether `insets` scale a layer with its container: every side pinned by
+/// percentage, as the Position card's *Scale* writes them.
+fn scales_with_container(insets: &ondin_core::Insets) -> bool {
+    [insets.top, insets.right, insets.bottom, insets.left]
+        .iter()
+        .all(|i| matches!(i, Some(ondin_core::LengthPct::Percent(_))))
 }
 
 /// The slot in `insets` that holds `edge`.
@@ -23555,6 +23631,57 @@ mod inset_card_tests {
             300.0,
             "and still 300 wide with one side let go"
         );
+    }
+
+    /// The fixture's rect moved into a plain group in the frame, the group
+    /// selected; the group.
+    fn group_in_pinnable(app: &mut OndinApp, frame: NodeId, rect: NodeId) -> NodeId {
+        let g = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: g,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: rect,
+                new_parent: g,
+                index: 0,
+            },
+        ])));
+        app.session.selection.set(vec![g]);
+        g
+    }
+
+    /// *Scale* pins a plain group by percentages on every side without moving
+    /// it, and its contents then scale with the frame; *Stop scaling* on the
+    /// stretched group leaves them as drawn.
+    /// flip: `inset_subjects` refusing a plain group → fails at "the card
+    /// offers the group"; `baked_placement` without its contents → fails at
+    /// "stopping moved it".
+    #[test]
+    fn scale_pins_a_group_by_percentages_and_stopping_moves_nothing() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        let g = group_in_pinnable(&mut app, frame, rect);
+        assert_eq!(app.inset_subjects(), vec![g], "the card offers the group");
+        let before = drawn(&app, rect);
+        app.toggle_scale(&[g], true);
+        assert_eq!(drawn(&app, rect), before, "scaling moved it");
+        let pins = *app.session.doc.get(g).unwrap().insets();
+        assert!(scales_with_container(&pins), "{pins:?}");
+        resize_frame(&mut app, frame, 600.0);
+        assert_eq!(
+            drawn(&app, rect),
+            KRect::new(80.0, 30.0, 280.0, 80.0),
+            "the rect scales across with the frame"
+        );
+        let stretched = drawn(&app, rect);
+        app.toggle_scale(&[g], false);
+        assert_eq!(drawn(&app, rect), stretched, "stopping moved it");
+        assert!(app.session.doc.get(g).unwrap().insets().is_unset());
     }
 
     /// Centring keeps the layer where it is, then follows the frame by half of every change (`margin: auto`).

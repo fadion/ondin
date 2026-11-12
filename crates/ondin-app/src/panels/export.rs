@@ -169,6 +169,10 @@ pub(crate) struct IconTile {
 
 /// Between two icon sizes side by side in the preview, and between their lines.
 const ICON_TILE_GAP: f32 = 10.0;
+/// Why a slice's icon switches are disabled: its tooltip and the frames caption.
+const SLICE_ICON: &str = "A slice is drawn through its box, as the page shows it";
+/// Why a slice's trim is disabled: its box is the point of it.
+const SLICE_BOX: &str = "A slice exports its whole box";
 
 /// What a vector export could not say exactly, as a clause to hang off a message —
 /// `None` when the file is the document (§15 D780).
@@ -875,7 +879,7 @@ impl OndinApp {
                     ui,
                     icon::SLIDERS_HORIZONTAL,
                     CELL,
-                    settings_button_state(spec, open),
+                    settings_button_state(&read_on_slices(spec, self.all_slices()), open),
                 )
                 .on_hover_text(match open {
                     true => "Hide these settings",
@@ -991,7 +995,8 @@ impl OndinApp {
 
     /// What an icon row's file will hold — `16, 32, 48 px` — and what changes it:
     /// a layer that is not square is padded, sizes drawn from their own frames are
-    /// counted, and a fit is named. Empty for a layer with no box.
+    /// counted, and a fit is named (never on a slice, which reads neither). Empty
+    /// for a layer with no box.
     fn icon_size_line(&self, spec: &ExportSpec, id: NodeId) -> String {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let Some(b) = res.ink_bounds(id) else {
@@ -1004,6 +1009,10 @@ impl OndinApp {
         // A hundredth of a unit is no padding anyone would see.
         if (b.width() - b.height()).abs() > 0.01 {
             line.push_str(" · padded to square");
+        }
+        // A slice reads neither switch.
+        if slice.is_some() {
+            return line;
         }
         if spec.size_frames {
             let n = ondin_export::icon::size_frames(doc, id, &sizes).len();
@@ -1207,33 +1216,27 @@ impl OndinApp {
                     });
 
                     // --- the two switches, at the card's own section gap -------
-                    // A slice's box is the point of it, so it offers no trim
-                    // (`plan::raster_opts` ignores one).
-                    let slices = self.session.selection.ids().iter().all(|id| {
-                        self.session
-                            .doc
-                            .get(*id)
-                            .is_some_and(|n| matches!(n.kind(), ondin_core::NodeKind::Slice { .. }))
-                    });
+                    let slices = self.all_slices();
                     {
                         let size = egui::vec2(POP_INNER, POP_CELL);
-                        if !slices {
-                            let trim = ui::toggle_row(
-                                ui,
-                                icon::CROP,
-                                "Trim transparent edges",
-                                trim_button_state(spec),
-                                size,
-                            )
-                            .on_hover_text(
-                                match has_pixels(spec.format) {
-                                    true => "Drop the fully transparent rows and columns",
-                                    false => "Trimming reads pixels, and a vector file has none",
-                                },
-                            );
-                            if trim.clicked() && has_pixels(spec.format) {
-                                edit(&mut out, spec).trim = !spec.trim;
-                            }
+                        let can_trim = has_pixels(spec.format) && !slices;
+                        let trim = ui::toggle_row(
+                            ui,
+                            icon::CROP,
+                            "Trim transparent edges",
+                            match slices {
+                                true => ui::FieldButton::Disabled,
+                                false => trim_button_state(spec),
+                            },
+                            size,
+                        )
+                        .on_hover_text(match (slices, has_pixels(spec.format)) {
+                            (true, _) => SLICE_BOX,
+                            (false, true) => "Drop the fully transparent rows and columns",
+                            (false, false) => "Trimming reads pixels, and a vector file has none",
+                        });
+                        if trim.clicked() && can_trim {
+                            edit(&mut out, spec).trim = !spec.trim;
                         }
                         if spec.format.is_icon() {
                             // Held on, the stored value kept for the other formats.
@@ -1253,7 +1256,7 @@ impl OndinApp {
                             }
                         }
                         if spec.format.is_icon() {
-                            self.icon_switches(ui, spec, sizing, &mut out);
+                            self.icon_switches(ui, spec, sizing, slices, &mut out);
                         }
                         // Only where it means something: every selected layer is a
                         // component set.
@@ -1313,17 +1316,34 @@ impl OndinApp {
         out
     }
 
+    /// Whether every selected layer is a slice, whose box is the point of it: no
+    /// trim, and no icon switch, applies to one.
+    fn all_slices(&self) -> bool {
+        self.session.selection.ids().iter().all(|id| {
+            self.session
+                .doc
+                .get(*id)
+                .is_some_and(|n| matches!(n.kind(), ondin_core::NodeKind::Slice { .. }))
+        })
+    }
+
     /// An icon row's two switches, each with its caption under it: sizes drawn
     /// from frames named for them, saying what it finds on the page, and a fit
-    /// per size.
+    /// per size. On `slices` both are disabled: a slice is drawn through its box,
+    /// as the page shows it, and `icon::entries` reads neither.
     fn icon_switches(
         &mut self,
         ui: &mut egui::Ui,
         spec: &ExportSpec,
         sizing: Option<NodeId>,
+        slices: bool,
         out: &mut Option<ExportSpec>,
     ) {
         let size = egui::vec2(POP_INNER, POP_CELL);
+        let state = |on: bool| match slices {
+            true => ui::FieldButton::Disabled,
+            false => ui::FieldButton::on_if(on),
+        };
         let caption = |ui: &mut egui::Ui, text: &str| {
             ui.label(
                 egui::RichText::new(text)
@@ -1338,15 +1358,19 @@ impl OndinApp {
                 ui,
                 icon::FRAME,
                 "Use frames named for their size",
-                ui::FieldButton::on_if(spec.size_frames),
+                state(spec.size_frames),
                 size,
             )
-            .on_hover_text("Draw a size from its own frame on this page instead of scaling");
-            if frames.clicked() {
+            .on_hover_text(match slices {
+                true => SLICE_ICON,
+                false => "Draw a size from its own frame on this page instead of scaling",
+            });
+            if frames.clicked() && !slices {
                 edit(out, spec).size_frames = !spec.size_frames;
             }
             let doc = &self.session.doc;
             let text = match sizing.and_then(|id| Some((id, doc.get(id)?.name()))) {
+                _ if slices => SLICE_ICON.to_string(),
                 Some((id, name)) => {
                     let sizes = spec.icon_sizes();
                     let found = ondin_export::icon::size_frames(doc, id, &sizes);
@@ -1362,11 +1386,14 @@ impl OndinApp {
                 ui,
                 icon::PIXEL_FIT,
                 "Pixel-fit each size",
-                ui::FieldButton::on_if(spec.pixel_fit),
+                state(spec.pixel_fit),
                 size,
             )
-            .on_hover_text("Text and turned layers are drawn as they are");
-            if fit.clicked() {
+            .on_hover_text(match slices {
+                true => SLICE_ICON,
+                false => "Text and turned layers are drawn as they are",
+            });
+            if fit.clicked() && !slices {
                 edit(out, spec).pixel_fit = !spec.pixel_fit;
             }
             caption(
@@ -3514,6 +3541,20 @@ fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
     }
 }
 
+/// `spec` as a slice's export reads it: trim and the icon switches dropped, since
+/// none applies to a slice. Their stored values stay in the document.
+fn read_on_slices(spec: &ExportSpec, slices: bool) -> ExportSpec {
+    match slices {
+        true => ExportSpec {
+            trim: false,
+            size_frames: false,
+            pixel_fit: false,
+            ..spec.clone()
+        },
+        false => spec.clone(),
+    }
+}
+
 /// Trim is measured on pixels, so it is unavailable rather than merely off for a
 /// format that has none — and it keeps its stored value while it is, so switching
 /// a trimmed PNG to SVG and back does not silently clear it.
@@ -5105,6 +5146,20 @@ mod code_export_tests {
             ..ico
         };
         assert_eq!(settings_button_state(&fitted, false), ui::FieldButton::Set);
+        // On a slice, a stored trim, fit or frames switch is no setting either.
+        let inert = ExportSpec {
+            trim: true,
+            size_frames: true,
+            ..fitted.clone()
+        };
+        assert_eq!(
+            settings_button_state(&read_on_slices(&inert, true), false),
+            ui::FieldButton::Off
+        );
+        assert_eq!(
+            settings_button_state(&read_on_slices(&inert, false), false),
+            ui::FieldButton::Set
+        );
     }
 
     /// An ICO row's settings card offers its sizes as chips and holds the pad on;

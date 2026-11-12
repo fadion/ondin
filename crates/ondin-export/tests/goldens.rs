@@ -923,6 +923,7 @@ fn sample_chart(kind: ondin_core::chart::ChartKind) -> ondin_core::chart::Chart 
         source: None,
         parts: vec![],
         generated: None,
+        minted: 0,
     }
 }
 
@@ -1191,6 +1192,7 @@ fn charts_match_their_golden() {
             source: None,
             parts: vec![],
             generated: None,
+            minted: 0,
         };
         c.options.bars.stacking = stacking;
         c.options.values.position = values;

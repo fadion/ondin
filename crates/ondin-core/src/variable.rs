@@ -3661,6 +3661,14 @@ pub(crate) fn check<'a>(
         .filter_map(|n| n.chart())
         .flat_map(|c| c.parts.iter().map(|(_, id)| *id))
         .collect();
+    // A stale chart's parts may still draw a variable the commit deleted: its
+    // description was detached (`chart::rebind_ops`) and settle remakes them.
+    let awaiting: rustc_hash::FxHashSet<NodeId> = nodes
+        .iter()
+        .filter_map(|n| n.chart())
+        .filter(|c| c.generated.is_none())
+        .flat_map(|c| c.parts.iter().map(|(_, id)| *id))
+        .collect();
     for n in nodes {
         if in_vault(n.id) {
             let own = |v: VarId| t.get(v).is_some_and(|v| v.origin.is_none());
@@ -3690,7 +3698,10 @@ pub(crate) fn check<'a>(
             }
         }
         let colour_ok = |b: &BrushSource| match b.var() {
-            Some(v) => t.kind_of(v) == Some(VarKind::Color),
+            Some(v) => match t.kind_of(v) {
+                Some(k) => k == VarKind::Color,
+                None => awaiting.contains(&n.id),
+            },
             None => true,
         };
         let fills = n.paint.fills.iter().all(|f| colour_ok(&f.brush));

@@ -49,7 +49,8 @@ pub fn stale(doc: &Document, res: &Resolved) -> Vec<NodeId> {
 /// chart. `family` is the document's default text family.
 ///
 /// A chart past its limits ([`super::Refusal`]) keeps the parts it has and is
-/// only stamped, so it is not asked again until it changes.
+/// only stamped, so it is not asked again until it changes; a part drawing a
+/// variable since deleted draws nothing until then, as it already does.
 pub fn settle(
     doc: &Document,
     res: &Resolved,
@@ -62,13 +63,43 @@ pub fn settle(
     let size = drawn_size(doc, res, id)?;
     let at = Some([size.width, size.height]);
     let Ok(generated) = generate(chart, size, family) else {
-        return Some(Transaction(vec![Operation::SetChartParts {
+        let mut out = gone_bindings(doc, &chart.parts);
+        out.push(Operation::SetChartParts {
             id,
             parts: chart.parts.clone(),
             at,
-        }]));
+        });
+        return Some(Transaction(out));
     };
     Some(Transaction(ops(doc, id, &chart.parts, generated, ids, at)))
+}
+
+/// Each of `parts`' fills and strokes bound to a variable the document no
+/// longer has, written transparent: the stamp makes the chart fresh, and a
+/// fresh chart's parts name only variables that exist (`variable::check`).
+fn gone_bindings(doc: &Document, parts: &[(PartKey, NodeId)]) -> Vec<Operation> {
+    let t = doc.variables();
+    let gone = |b: &crate::variable::BrushSource| b.var().is_some_and(|v| t.get(v).is_none());
+    let clear = || crate::Brush::Solid(peniko::Color::TRANSPARENT).into();
+    let mut out = Vec::new();
+    for (_, id) in parts {
+        let Some(n) = doc.get(*id) else { continue };
+        if n.paint.fills.iter().any(|f| gone(&f.brush)) {
+            let mut fills = n.paint.fills.clone();
+            for f in fills.iter_mut().filter(|f| gone(&f.value.brush)) {
+                f.value.brush = clear();
+            }
+            out.push(Operation::SetFills { id: *id, fills });
+        }
+        if n.paint.strokes.iter().any(|s| gone(&s.brush)) {
+            let mut strokes = n.paint.strokes.clone();
+            for s in strokes.iter_mut().filter(|s| gone(&s.value.brush)) {
+                s.value.brush = clear();
+            }
+            out.push(Operation::SetStrokes { id: *id, strokes });
+        }
+    }
+    out
 }
 
 /// What chart `id` would generate at its drawn size if its description were
@@ -82,11 +113,12 @@ pub fn preview(doc: &Document, res: &Resolved, id: NodeId, chart: &Chart) -> Opt
 }
 
 /// The actor chart `chart`'s new parts are minted under, past every id the
-/// document holds of it, so a settle needs no session's id source and a CLI
-/// export or a load regenerates as the app does. One actor per chart: a deleted
-/// chart's parts live on in its undo step, and only that chart, never present
-/// while they are away, mints under their actor.
-fn part_actor(chart: NodeId) -> u64 {
+/// document holds of it and past the chart's [`Chart::minted`], so a settle
+/// needs no session's id source and a CLI export or a load regenerates as the
+/// app does. One actor per chart: a deleted chart's parts live on in its undo
+/// step, and only that chart, never present while they are away, mints under
+/// their actor.
+pub(crate) fn part_actor(chart: NodeId) -> u64 {
     // splitmix64's finaliser: fixed, so the same chart always draws the same ids.
     let mut z = (chart.actor ^ chart.seq.rotate_left(32)) ^ 0xC4A2_0000_0000_0000;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -108,6 +140,9 @@ pub fn settle_round(doc: &mut Document, res: &Resolved) -> DirtySet {
     for c in charts {
         let mut ids = IdSource::new(part_actor(c));
         crate::document::reserve_existing_ids(doc, &mut ids);
+        if let Some(chart) = doc.get(c).and_then(|n| n.chart()) {
+            ids.skip_to(chart.minted.saturating_add(1));
+        }
         let Some(tx) = settle(doc, res, &mut ids, c, &family) else {
             continue;
         };

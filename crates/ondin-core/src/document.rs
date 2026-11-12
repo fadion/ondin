@@ -2114,6 +2114,7 @@ impl Document {
                     }
                     if let Some(now) = &node.chart {
                         c.parts = now.parts.clone();
+                        c.minted = now.minted;
                         // Stale once the description differs, so settle regenerates.
                         c.generated = now.generated.filter(|_| now.same_description(c));
                     }
@@ -2130,6 +2131,13 @@ impl Document {
                 let chart = node.chart.as_mut().ok_or(OpError::WrongKindForOp)?;
                 let old = std::mem::replace(&mut chart.parts, parts.clone());
                 let old_at = std::mem::replace(&mut chart.generated, *at);
+                // The inverse leaves the mark: an undone part's id stays spent.
+                let actor = crate::chart::part_actor(*id);
+                chart.minted = parts
+                    .iter()
+                    .filter(|(_, p)| p.actor == actor)
+                    .map(|(_, p)| p.seq)
+                    .fold(chart.minted, u64::max);
                 chart.validate().map_err(OpError::BadChart)?;
                 Ok(Operation::SetChartParts {
                     id: *id,

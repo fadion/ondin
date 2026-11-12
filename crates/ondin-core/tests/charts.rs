@@ -64,6 +64,7 @@ fn sample() -> Chart {
         source: None,
         parts: Vec::new(),
         generated: None,
+        minted: 0,
     }
 }
 
@@ -883,17 +884,19 @@ fn a_charts_colours_bind_to_variables() {
     assert_eq!(ondin_core::variable::users(&doc, vars[0]), vec![chart]);
 }
 
-/// Deleting a variable a chart's colour reads detaches the description and
-/// its parts to the colour they drew, in one step the commit takes; undo
-/// brings the variable and the binding back.
+/// Deleting a variable a chart's colour reads detaches the description to the
+/// colour it drew, in one step the commit takes, and settle remakes the parts
+/// in it; undo brings the variable and the binding back.
 /// flip: `detach_ops` leaving chart frames alone → fails at the commit.
 #[test]
 fn deleting_a_charts_variable_detaches_it_whole() {
     let (mut doc, _, chart, vars) = bound_chart();
-    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
     let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
     let tx = Transaction(ondin_core::variable::remove_ops(&doc, &[vars[0]]));
     let undo = doc.apply(&tx).expect("the delete commits");
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
     let c = doc.get(chart).unwrap().chart().unwrap();
     assert_eq!(
         ondin_core::chart::series_fill(c, ColumnId(1)).and_then(|b| b.literal().cloned()),
@@ -918,6 +921,71 @@ fn deleting_a_charts_variable_detaches_it_whole() {
     assert_eq!(
         ondin_core::chart::series_fill(c, ColumnId(1)).and_then(|b| b.var()),
         Some(vars[0])
+    );
+}
+
+/// Every `(key, id)` chart `id` holds now.
+fn parts_of(doc: &Document, chart: NodeId) -> Vec<(PartKey, NodeId)> {
+    doc.get(chart).unwrap().chart().unwrap().parts.clone()
+}
+
+/// A variable's delete writes only the chart's description, so a later
+/// regeneration that remakes the parts under new ids leaves its undo standing;
+/// and a part id a regeneration deleted is never minted again for another part.
+/// flip: `rebind_ops` writing the parts' fills again → fails at "the delete
+/// undoes"; `settle_round` reserving past only the ids the document holds →
+/// fails at "never re-minted".
+#[test]
+fn a_variables_delete_undoes_after_its_chart_is_remade() {
+    let (mut doc, _, chart, vars) = bound_chart();
+    let mut history = History::default();
+    let mut seen: Vec<(PartKey, NodeId)> = parts_of(&doc, chart);
+    let settle = |doc: &mut Document, seen: &mut Vec<(PartKey, NodeId)>| {
+        let mut res = ondin_core::Resolved::rebuild(doc);
+        ondin_core::chart::settle_all(doc, &mut res);
+        for (k, id) in parts_of(doc, chart) {
+            let other = seen.iter().find(|(k2, id2)| *id2 == id && *k2 != k);
+            assert!(
+                other.is_none(),
+                "{id:?} never re-minted: was {other:?}, now {k:?}"
+            );
+            seen.push((k, id));
+        }
+    };
+    let delete = Transaction(ondin_core::variable::remove_ops(&doc, &[vars[0]]));
+    history
+        .commit(&mut doc, delete)
+        .expect("the delete commits");
+    settle(&mut doc, &mut seen);
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
+    assert_eq!(
+        doc.get(bar).unwrap().paint().fills[0].brush.var(),
+        None,
+        "settled, the bar draws the detached colour"
+    );
+    let mut fewer = doc.get(chart).unwrap().chart().unwrap().clone();
+    fewer.table.rows.pop();
+    history
+        .commit(
+            &mut doc,
+            Transaction(vec![Operation::SetChart {
+                id: chart,
+                chart: Some(Box::new(fewer)),
+            }]),
+        )
+        .unwrap();
+    settle(&mut doc, &mut seen);
+    history.undo(&mut doc).unwrap().unwrap();
+    settle(&mut doc, &mut seen);
+    if let Err(e) = history.undo(&mut doc) {
+        panic!("the delete undoes: {e}");
+    }
+    settle(&mut doc, &mut seen);
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
+    assert_eq!(
+        doc.get(bar).unwrap().paint().fills[0].brush.var(),
+        Some(vars[0]),
+        "the binding is back on the bar"
     );
 }
 
@@ -1099,6 +1167,119 @@ fn a_regeneration_never_takes_a_deleted_charts_part_ids() {
     }
     assert!(doc.get(a).is_some());
     settle(&mut doc);
+}
+
+/// A part id a regeneration deleted is never minted again, for this chart or
+/// after a save and load: each id names one part for good.
+/// flip: `settle_round` reserving past only the ids the document holds → fails
+/// at "names one part".
+#[test]
+fn a_regeneration_never_mints_a_deleted_parts_id_again() {
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let whole = sample();
+    let mut short = sample();
+    short.table.rows.pop();
+    let mut seen: Vec<(PartKey, NodeId)> = Vec::new();
+    // The short table remakes the value labels, which hiding the axis then
+    // deletes: the newest ids leave with nothing newer kept.
+    for (i, (table, kind, axis)) in [
+        (&whole, ChartKind::Column, true),
+        (&short, ChartKind::Column, true),
+        (&short, ChartKind::Column, false),
+        (&whole, ChartKind::Column, false),
+        (&short, ChartKind::Column, true),
+        (&short, ChartKind::Column, false),
+        (&whole, ChartKind::Line, true),
+        (&whole, ChartKind::Pie, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if i == 5 {
+            doc = io::load(&io::save(&doc).unwrap()).unwrap();
+        }
+        let mut c = doc.get(chart).unwrap().chart().unwrap().clone();
+        c.table = table.table.clone();
+        c.kind = kind;
+        c.options.value_axis.show = axis;
+        doc.apply(&Transaction(vec![Operation::SetChart {
+            id: chart,
+            chart: Some(Box::new(c)),
+        }]))
+        .unwrap();
+        let mut res = ondin_core::Resolved::rebuild(&doc);
+        ondin_core::chart::settle_all(&mut doc, &mut res);
+        for (k, id) in parts_of(&doc, chart) {
+            let other = seen.iter().find(|(k2, id2)| *id2 == id && *k2 != k);
+            assert!(
+                other.is_none(),
+                "{id:?} names one part: {other:?}, now {k:?}"
+            );
+            seen.push((k, id));
+        }
+    }
+}
+
+/// No guide is scoped to a chart's part frame, which its regeneration deletes:
+/// the commit refuses one, and a file holding one loads with the guide moved
+/// onto the page at the place it drew.
+/// flip: `chart::check` skipping its guide-owner walk → fails at "refused";
+/// the loader keeping a part's guide → fails at "moves off the chart".
+#[test]
+fn a_guide_is_never_scoped_to_a_charts_part() {
+    use ondin_core::guide::{Guide, GuideAxis, GuideId};
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let plot = part(&doc, chart, PartRole::Plot, 0, 0).expect("a plot frame");
+    assert!(matches!(
+        doc.get(plot).unwrap().kind(),
+        NodeKind::Artboard { .. }
+    ));
+    let page = doc.first_page();
+    let mut ids = IdSource::new(0xC8);
+    let on_part = Guide {
+        id: GuideId(ids.mint()),
+        axis: GuideAxis::Vertical,
+        position: 10.0,
+        color: None,
+        owner: plot,
+    };
+    let err = refused(&mut doc, vec![Operation::AddGuide { guide: on_part }]);
+    assert!(
+        matches!(err, OpError::ChartPlacement(id, _) if id == plot),
+        "refused: {err}"
+    );
+    doc.apply(&Transaction(vec![Operation::AddGuide {
+        guide: Guide {
+            owner: page,
+            ..on_part
+        },
+    }]))
+    .unwrap();
+    let saved = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    let mut file = saved.clone();
+    for gap in ["", " "] {
+        file = file.replace(
+            &format!("\"owner\":{gap}\"{}\"", page.to_wire()),
+            &format!("\"owner\":{gap}\"{}\"", plot.to_wire()),
+        );
+    }
+    assert_ne!(file, saved, "the fixture: the guide names the part");
+    let loaded = io::load(file.as_bytes()).expect("a guide on a part loads");
+    let g = loaded.guides()[0];
+    assert_eq!(g.owner, page, "moves off the chart");
+    let mut x = 10.0;
+    let mut at = Some(plot);
+    while let Some(id) = at.filter(|id| *id != page) {
+        x += loaded.get(id).unwrap().transform().translation().x;
+        at = loaded.get(id).unwrap().parent();
+    }
+    assert!(
+        (g.position - x).abs() < 1e-9 && x > 10.0,
+        "where it drew: {} vs {x}",
+        g.position
+    );
 }
 
 /// `id`'s description with its kind set to `kind`, applied.

@@ -20,6 +20,7 @@ pub use colours::{
 };
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::{OUTLINE_WIDTH, Preset};
+pub(crate) use settle::part_actor;
 pub use settle::{preview, settle, settle_all, settle_round, stale};
 pub use table_io::grouped;
 
@@ -75,6 +76,11 @@ pub struct Chart {
     /// description changes, so the next settle regenerates ([`stale`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated: Option<[f64; 2]>,
+    /// The highest sequence number a regeneration has given a part, raised by
+    /// every `SetChartParts` and never lowered, so a part id a regeneration
+    /// deleted is never minted again for another part.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub minted: u64,
 }
 
 /// `serde(with)` for [`Chart::parts`]: each id as the save format spells a node
@@ -860,6 +866,10 @@ fn is_zero(v: &u32) -> bool {
     *v == 0
 }
 
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
     *v == T::default()
 }
@@ -990,6 +1000,7 @@ impl Chart {
             source,
             parts: _,
             generated: _,
+            minted: _,
         } = self;
         *kind == other.kind
             && *table == other.table
@@ -1092,6 +1103,7 @@ impl Chart {
             source: None,
             parts: Vec::new(),
             generated: None,
+            minted: 0,
         }
     }
 
@@ -1347,12 +1359,16 @@ pub enum PlacementRule {
     InComponent,
     #[error("is a chart that sets modes, width queries, guides or layout grids")]
     FrameSettings,
+    /// A guide scoped to a frame the chart's regeneration writes and deletes.
+    #[error("is part of a chart, which holds no guides")]
+    GuideOnPart,
 }
 
 /// The chart rules over the whole document, after every transaction and on load:
 /// a chart is a frame, outside any main, instance, kit main, boolean or mask, and
 /// it sets no modes or width queries, holds no guides or layout grids and is not
-/// a component set. Whole-document for `component::check`'s reason: moving a
+/// a component set; and no guide is scoped to one of its parts, which its
+/// regeneration deletes. Whole-document for `component::check`'s reason: moving a
 /// chart's ancestor into a main dirties the ancestor, not the chart.
 pub fn check(
     nodes: &FxHashMap<NodeId, Node>,
@@ -1364,6 +1380,15 @@ pub fn check(
         return Ok(());
     }
     let owners: FxHashSet<NodeId> = guide_owners.into_iter().collect();
+    for &o in &owners {
+        let mut at = nodes.get(&o).and_then(|n| n.parent);
+        while let Some(p) = at.and_then(|p| nodes.get(&p)) {
+            if p.chart.is_some() {
+                return Err((o, PlacementRule::GuideOnPart));
+            }
+            at = p.parent;
+        }
+    }
     for n in charts {
         if !matches!(n.kind, NodeKind::Artboard { .. }) {
             return Err((n.id, PlacementRule::NotAFrame));
@@ -1408,13 +1433,13 @@ pub fn owner(doc: &crate::Document, id: NodeId) -> Option<NodeId> {
     None
 }
 
-/// The operations that rewrite chart `id`'s colour bindings by `map` (a
-/// binding's new paint at a node, `None` to keep it): its description, and the
-/// same rewrite on its parts' fills and strokes, which drew those bindings,
-/// under a `SetChartParts` of the parts they are at the size they were made
-/// for, so `guard` reads it as the chart's regeneration. A variable's delete
-/// and detach go through here, never through the parts alone. Empty when
-/// nothing changes.
+/// The operation that rewrites chart `id`'s colour bindings by `map` (a
+/// binding's new paint at the chart frame, `None` to keep it): its description
+/// alone, which leaves the chart stale so settle remakes the parts. A part id in
+/// an undo step would outlive the regeneration that deletes it, so the parts
+/// are never written here; until settle they may draw a variable the same step
+/// deleted, which `variable::check` allows while the chart is stale. A
+/// variable's delete and detach go through here. Empty when nothing changes.
 pub fn rebind_ops(
     doc: &crate::Document,
     id: NodeId,
@@ -1431,52 +1456,13 @@ pub fn rebind_ops(
             wrote = true;
         }
     }
-    let mut ops = vec![];
-    for (_, part) in &chart.parts {
-        let Some(n) = doc.get(*part) else { continue };
-        let mut fills = n.paint.fills.clone();
-        let mut fills_wrote = false;
-        for f in fills.iter_mut() {
-            if f.value.brush.is_bound()
-                && let Some(to) = map(*part, &f.value.brush)
-            {
-                f.value.brush = to;
-                fills_wrote = true;
-            }
-        }
-        if fills_wrote {
-            ops.push(Operation::SetFills { id: *part, fills });
-        }
-        let mut strokes = n.paint.strokes.clone();
-        let mut strokes_wrote = false;
-        for s in strokes.iter_mut() {
-            if s.value.brush.is_bound()
-                && let Some(to) = map(*part, &s.value.brush)
-            {
-                s.value.brush = to;
-                strokes_wrote = true;
-            }
-        }
-        if strokes_wrote {
-            ops.push(Operation::SetStrokes { id: *part, strokes });
-        }
-    }
-    if !wrote && ops.is_empty() {
+    if !wrote {
         return Vec::new();
     }
-    ops.insert(
-        0,
-        Operation::SetChart {
-            id,
-            chart: Some(Box::new(next)),
-        },
-    );
-    ops.push(Operation::SetChartParts {
+    vec![Operation::SetChart {
         id,
-        parts: chart.parts.clone(),
-        at: chart.generated,
-    });
-    ops
+        chart: Some(Box::new(next)),
+    }]
 }
 
 /// The charts `ops` regenerate: those it writes parts for.

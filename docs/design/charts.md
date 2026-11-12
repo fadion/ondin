@@ -40,7 +40,9 @@ everything below.
   instance resized away from its main would regenerate parts its main does not have, and a linked
   copy has no meaning for a part that is rebuilt. A chart frame's own `display`, and the layout
   of everything inside it, are written only by its regeneration. It sets no variable modes or
-  width queries, is not a component set, and holds no guides or layout grids. As an item in its
+  width queries, is not a component set, and holds no guides or layout grids; nor is a guide
+  scoped to one of its part frames, which a regeneration deletes (`chart::check`; the loader
+  moves such a guide onto the nearest frame or page above the chart). As an item in its
   parent's layout it is a frame like any other: it can fill, grow, stretch or hold a ratio.
 
 ### The description (`chart::Chart`)
@@ -68,10 +70,12 @@ everything below.
   once; `bound_in` lists the description's colours as fills, so the scope is judged on the
   description, and `variable::check` skips the scope (not the kind) of a chart's listed parts,
   which may draw a fill colour as a line's stroke. A delete or a scope that drops the binding
-  (`detach_ops`) detaches the description and its parts to the colour they drew through
-  `chart::rebind_ops`: one `SetChart`, the same rewrite on the parts' fills and strokes, and a
-  `SetChartParts` of the parts as they are, so `chart::guard` reads it as the chart's
-  regeneration. A copy carries the description's variables (`variable::carried`); a paste
+  (`detach_ops`) detaches the description to the colour it drew through `chart::rebind_ops`: one
+  `SetChart`, which leaves the chart stale, and settle remakes the parts from it. The step never
+  writes a part: a part id in an undo step would outlive the regeneration that deletes it, and
+  the undo would fail. Until settle, a stale chart's parts may still draw a variable the commit
+  deleted (`variable::check` allows it, drawn transparent); a settle that refuses the chart
+  writes such a binding transparent before it stamps the chart fresh. A copy carries the description's variables (`variable::carried`); a paste
   rebinds them by the fill's rule and clears the stamp so settle remakes the parts
   (`variable::land`), and a copy leaving its document detaches them (`detached`). A kit's rebind
   never meets a chart, which cannot sit in a main. *Bind other uses* and Colour review leave a
@@ -87,6 +91,9 @@ everything below.
 - **`parts: Vec<(PartKey, NodeId)>`** — the generated nodes by role (`PartKey { role, series,
   index }`), ids saved in the file's wire spelling. Never shown. A copy's keys follow its new ids
   (`document::remap_subtree`).
+- **`minted: u64`** — the highest sequence number a regeneration has given a part under the
+  chart's actor, raised by every `SetChartParts` and never lowered (its inverse included), and
+  saved, skipped at 0. Never shown.
 
 ### Regeneration (`chart::generate`, `chart::settle`)
 
@@ -113,9 +120,11 @@ everything below.
   changed description clears the stamp. `Resolved::settle` runs it after the width picks (so a
   load, an export and compare settle as the app does) and the session after every commit, undo
   and redo. New parts take ids under an actor derived from the chart frame's id
-  (`settle::part_actor`), past every id of that actor the document holds, so settle needs no
-  session's id source. A deleted chart's part ids live on in its undo step; only that chart
-  mints under their actor, and it is absent while they are, so no other chart re-mints them.
+  (`settle::part_actor`), past every id of that actor the document holds and past the chart's
+  `minted`, so settle needs no session's id source and a part a regeneration deleted, which no
+  history step remembers, never lends its id to another part (invariant 3). A deleted chart's
+  part ids live on in its undo step; only that chart mints under their actor, and it is absent
+  while they are, so no other chart re-mints them.
 - **Ids are kept by role.** Settle diffs the new parts against `parts` by `PartKey` (`role`,
   then the series' column id or 0, then the row, tick or node index): a kept key keeps its
   `NodeId` and gets `SetGeometry`, `SetFills`, `SetTransform`, `SetInsets` and the rest only where
@@ -634,7 +643,7 @@ without one (`menu::KIND_VERBS`).
 ## Elsewhere
 
 - **Save format**: `chart` on the frame's DTO, the table as a column list and an array of rows,
-  in v15 (`io.md`, the ladder). v15 had not shipped, so no bump of its own: a v14 reader already
+  with `parts`, the `generated` stamp and the `minted` mark beside the description, in v15 (`io.md`, the ladder). v15 had not shipped, so no bump of its own: a v14 reader already
   refuses the file by its version rather than loading the parts as plain shapes and dropping the
   description on its next save.
 - **MCP snapshot** (`export.md`, *Snapshot*): a chart frame carries `chart` (kind, variant

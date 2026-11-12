@@ -902,7 +902,8 @@ impl DocumentDto {
         // Guides are checked for a parseable id, a finite position and a live
         // owner. A dangling owner is rejected rather than promoted to a global
         // guide, which would move the line to a coordinate the user never chose
-        // (`Document::check_guide_owner`).
+        // (`Document::check_guide_owner`). A guide on a chart's part moves off the
+        // chart (`off_chart`); one on the chart frame itself is refused.
         let mut seen_guides: FxHashSet<GuideId> = FxHashSet::default();
         let mut guides = Vec::with_capacity(self.guides.len());
         for dto in self.guides {
@@ -916,7 +917,8 @@ impl DocumentDto {
                     "guide {id:?} has a non-finite position"
                 )));
             }
-            let owner = parse_id(&dto.owner)?;
+            let (owner, position) =
+                off_chart(&nodes, parse_id(&dto.owner)?, dto.position, dto.axis);
             let kind = nodes.get(&owner).map(Node::kind);
             if !page_ids.contains(&owner) && !matches!(kind, Some(NodeKind::Artboard { .. })) {
                 return Err(IoError::Integrity(format!(
@@ -931,7 +933,7 @@ impl DocumentDto {
             guides.push(Guide {
                 id,
                 axis: dto.axis,
-                position: dto.position,
+                position,
                 color: dto.color,
                 owner,
             });
@@ -1095,6 +1097,57 @@ fn normalize_kind(mut kind: NodeKind) -> NodeKind {
 
 fn parse_id(s: &str) -> Result<NodeId, IoError> {
     NodeId::from_wire(s).ok_or_else(|| IoError::Integrity(format!("malformed node id {s:?}")))
+}
+
+/// A guide scoped to `owner` with its `position`, moved off a chart when
+/// `owner` is one of its parts: onto the nearest frame or page above the chart,
+/// the position carried through the stored transforms between. A part is
+/// deleted by the regeneration that drops it, which a guide on it would refuse
+/// (`chart::check`). Any other owner is returned as it is. The walk is bounded,
+/// since the tree is not yet checked.
+fn off_chart(
+    nodes: &FxHashMap<NodeId, Node>,
+    owner: NodeId,
+    position: f64,
+    axis: GuideAxis,
+) -> (NodeId, f64) {
+    let up = |id: NodeId| nodes.get(&id).and_then(Node::parent);
+    let mut chart = None;
+    let mut at = up(owner);
+    for _ in 0..nodes.len() {
+        let Some(p) = at else { break };
+        if nodes.get(&p).is_some_and(|n| n.chart.is_some()) {
+            chart = Some(p);
+        }
+        at = up(p);
+    }
+    let Some(chart) = chart else {
+        return (owner, position);
+    };
+    let mut to = Affine::IDENTITY;
+    let mut at = Some(owner);
+    let mut above = false;
+    for _ in 0..nodes.len() {
+        let Some(n) = at.and_then(|id| nodes.get(&id)) else {
+            break;
+        };
+        let scope = matches!(n.kind(), NodeKind::Artboard { .. }) || n.parent().is_none();
+        if above && scope && n.chart.is_none() {
+            return (n.id(), axis_of(to, position, axis));
+        }
+        above |= n.id() == chart;
+        to = n.transform() * to;
+        at = n.parent();
+    }
+    (owner, position)
+}
+
+/// `position` along `axis` in a space, read in the space `to` maps it into.
+fn axis_of(to: Affine, position: f64, axis: GuideAxis) -> f64 {
+    match axis {
+        GuideAxis::Vertical => (to * kurbo::Point::new(position, 0.0)).x,
+        GuideAxis::Horizontal => (to * kurbo::Point::new(0.0, position)).y,
+    }
 }
 
 /// Full tree integrity (§5.11, invariant 8). Rejects anything that would make

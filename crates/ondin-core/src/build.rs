@@ -5032,7 +5032,11 @@ pub fn kept_spacing_vars(
 ///
 /// Patches the transaction's own `SetGeometry` in place, so the gesture preview
 /// can run it on the resize it draws.
-pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
+///
+/// Which side an edit changed is judged against the stored size and, given
+/// `res`, the drawn one: tools write the size a layer is drawn at, which a
+/// stretch or an inset makes differ from the stored one.
+pub fn keep_ratios(doc: &Document, res: Option<&Resolved>, mut tx: Transaction) -> Transaction {
     use crate::container::{AspectRatio, RatioSide, holds_ratio};
     // **A ratio and a size binding do not mix**: a bound axis's stored literal is
     // 0, which a ratio would read as a size. Binding either axis takes the ratio
@@ -5126,13 +5130,21 @@ pub fn keep_ratios(doc: &Document, mut tx: Transaction) -> Transaction {
         else {
             continue;
         };
+        let drawn = res
+            .and_then(|r| r.used_kind(doc, *id))
+            .and_then(crate::edit::resizable_size)
+            .unwrap_or(old);
+        // Only the derived side changed, against the stored size or the drawn:
+        // `height` says the derived side is the height.
+        let only = |height: bool| {
+            [old, drawn].iter().any(|was| match height {
+                true => new.width == was.width && new.height != was.height,
+                false => new.height == was.height && new.width != was.width,
+            })
+        };
         *new = match r.side {
-            RatioSide::Height if new.width == old.width && new.height != old.height => {
-                kurbo::Size::new(new.height * r.ratio, new.height)
-            }
-            RatioSide::Width if new.height == old.height && new.width != old.width => {
-                kurbo::Size::new(new.width, new.width / r.ratio)
-            }
+            RatioSide::Height if only(true) => kurbo::Size::new(new.height * r.ratio, new.height),
+            RatioSide::Width if only(false) => kurbo::Size::new(new.width, new.width / r.ratio),
             _ => r.applied(*new),
         };
     }

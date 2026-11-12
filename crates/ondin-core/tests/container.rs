@@ -812,6 +812,41 @@ fn a_nudge_in_a_squeezed_group_keeps_the_layers_share() {
     );
 }
 
+/// A ratio layer its insets stretch on one axis derives the other from it, as
+/// a browser lays `aspect-ratio`: pinned left, right and top, 16 : 9 on H, a
+/// frame grown from 400 to 800 draws it 800 × 450.
+/// flip: `container::place` ignoring its ratio → 800 × 225, failing at
+/// "derived".
+#[test]
+fn a_ratio_layer_stretched_on_one_axis_derives_the_other() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 600.0), (0.0, 0.0));
+    let r = s.add(f, rect(400.0, 225.0), (0.0, 0.0));
+    let mut item = *s.doc.get(r).unwrap().item();
+    item.aspect_ratio = Some(AspectRatio {
+        ratio: 16.0 / 9.0,
+        side: RatioSide::Height,
+    });
+    s.commit(vec![Operation::SetLayoutItem { id: r, item }]);
+    let px = |v: f64| Some(LengthPct::Px(v));
+    s.pin(
+        r,
+        Insets {
+            left: px(0.0),
+            right: px(0.0),
+            top: px(0.0),
+            ..Default::default()
+        },
+    );
+    s.resize(f, 800.0, 600.0);
+    let b = s.bounds(r);
+    assert!(
+        (b.width() - 800.0).abs() < 1e-6 && (b.height() - 450.0).abs() < 1e-6,
+        "derived: {b:?}"
+    );
+}
+
 /// A layer moved out past a stretched group's box grows the box without moving
 /// anything already drawn: the pinned group takes new insets.
 /// flip: `keep_stretched` skipping the groups above → fails at "the rect has

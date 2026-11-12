@@ -510,11 +510,12 @@ fn binding_a_size_takes_a_ratio_off() {
     });
     let tx = build::keep_ratios(
         &f.doc,
+        None,
         Transaction(vec![Operation::SetLayoutItem { id: f.tile, item }]),
     );
     f.doc.apply(&tx).expect("a ratio");
     let ops = build::bind_size_ops(&f.doc, f.tile, [Some(f.width), None]);
-    let tx = build::keep_ratios(&f.doc, Transaction(ops));
+    let tx = build::keep_ratios(&f.doc, None, Transaction(ops));
     f.doc.apply(&tx).expect("bound");
     let tile = f.doc.get(f.tile).unwrap();
     assert_eq!(tile.size_vars()[0], Some(f.width));

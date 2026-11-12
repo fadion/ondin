@@ -511,11 +511,16 @@ pub(crate) fn placed_at(slot: Point, bx: Rect, linear_of: Affine) -> Affine {
 /// the used local transform and, when a stretch changed its size, the used kind.
 /// `None` for a kind that takes no insets, for insets that set nothing, and for a
 /// kind with no box to place (an empty text node measures to nothing).
+///
+/// A valid `ratio` derives its side from the other when the insets stretch
+/// only that other one, as a browser derives an `auto` side under
+/// `aspect-ratio`; stretched on both axes, the insets win.
 pub fn place(
     insets: &Insets,
     frame: Size,
     stored: Affine,
     kind: &NodeKind,
+    ratio: Option<AspectRatio>,
 ) -> Option<(Affine, Option<NodeKind>)> {
     if !insets.is_authored() || !takes_insets(kind) {
         return None;
@@ -523,12 +528,33 @@ pub fn place(
     let bx = geometry::local_bounds(kind, None)?;
     let implicit = slot_of(stored, bx);
     let stretchy = inset_stretch(kind);
-    let (x, w) = insets
-        .horizontal()
-        .resolve(frame.width, bx.width(), implicit.x, stretchy.0);
-    let (y, h) = insets
-        .vertical()
-        .resolve(frame.height, bx.height(), implicit.y, stretchy.1);
+    let (mut x, mut w) =
+        insets
+            .horizontal()
+            .resolve(frame.width, bx.width(), implicit.x, stretchy.0);
+    let (mut y, mut h) =
+        insets
+            .vertical()
+            .resolve(frame.height, bx.height(), implicit.y, stretchy.1);
+    let stretched = (w != bx.width(), h != bx.height());
+    // The derived side placed again at its new size: an end inset reads it.
+    match ratio.filter(|r| r.is_valid()).map(|r| (r, r.side)) {
+        Some((r, RatioSide::Height)) if stretched.0 && !stretched.1 => {
+            h = r.applied(Size::new(w, h)).height;
+            y = insets
+                .vertical()
+                .resolve(frame.height, h, implicit.y, false)
+                .0;
+        }
+        Some((r, RatioSide::Width)) if stretched.1 && !stretched.0 => {
+            w = r.applied(Size::new(w, h)).width;
+            x = insets
+                .horizontal()
+                .resolve(frame.width, w, implicit.x, false)
+                .0;
+        }
+        _ => {}
+    }
     let stretched = (w != bx.width(), h != bx.height());
     let (used_kind, used_box) = if stretched.0 || stretched.1 {
         let k = resized(kind, Size::new(w, h), stretched);
@@ -2125,6 +2151,13 @@ impl AspectRatio {
         self.ratio.is_finite() && self.ratio > 0.0
     }
 
+    /// The ratio as layout reads it, in `f32`: held to 1e-6..1e6, as a ratio
+    /// past that turns an ordinary side into an infinite or a zero one, and a
+    /// layer laid infinite has no bounds to hit or frame.
+    pub fn laid(self) -> f32 {
+        self.ratio.clamp(1e-6, 1e6) as f32
+    }
+
     /// `size` with its derived side following the other.
     pub fn applied(self, size: Size) -> Size {
         match self.side {
@@ -2755,7 +2788,8 @@ fn pinned_size(view: &dyn LayoutView, root: crate::NodeId, out: &[Laid]) -> Opti
         Some(k) => k,
         None => view.kind(root)?,
     };
-    let (_, placed) = place(&insets, frame, view.local(root), &kind)?;
+    let ratio = view.item(root).aspect_ratio;
+    let (_, placed) = place(&insets, frame, view.local(root), &kind, ratio)?;
     match placed? {
         NodeKind::Artboard { size, .. }
             if !near(size.width, own.width) || !near(size.height, own.height) =>
@@ -3079,12 +3113,8 @@ impl<'v> FlexTree<'v> {
                     .aspect_ratio
                     .filter(|_| self.styles[index].aspect_ratio.is_some());
                 let (w, h) = match (ratio, known.width, known.height) {
-                    (Some(r), Some(w), None) if r.side == RatioSide::Height => {
-                        (w, w / r.ratio as f32)
-                    }
-                    (Some(r), None, Some(h)) if r.side == RatioSide::Width => {
-                        (h * r.ratio as f32, h)
-                    }
+                    (Some(r), Some(w), None) if r.side == RatioSide::Height => (w, w / r.laid()),
+                    (Some(r), None, Some(h)) if r.side == RatioSide::Width => (h * r.laid(), h),
                     _ => (
                         known.width.unwrap_or(s.width as f32),
                         known.height.unwrap_or(s.height as f32),
@@ -3271,7 +3301,7 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
         .aspect_ratio
         .filter(|r| r.is_valid() && holds_ratio(kind))
     {
-        style.aspect_ratio = Some(r.ratio as f32);
+        style.aspect_ratio = Some(r.laid());
         match r.side {
             RatioSide::Width => style.size.width = auto(),
             RatioSide::Height => style.size.height = auto(),
@@ -3454,7 +3484,7 @@ fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
                             AutoRepeat::Fill => taffy::RepetitionCount::AutoFill,
                             AutoRepeat::Fit => taffy::RepetitionCount::AutoFit,
                         },
-                        tracks: tracks.iter().map(|s| track_size(*s)).collect(),
+                        tracks: tracks.iter().map(|s| track_size(counted(*s))).collect(),
                         line_names: Vec::new(),
                     },
                 ));
@@ -3480,6 +3510,24 @@ fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
         }
     }
     out
+}
+
+/// A track of an automatic repeat as its repetitions are counted: CSS floors a
+/// definite minimum under a flexible maximum at 1px for the count (Grid
+/// §7.2.3.2), where taffy would divide by zero and lay its cap of tracks. Such
+/// a track's laid size is the flexible share anyway, never under 1px once
+/// counted this way. A fixed track under 1px keeps its size.
+fn counted(s: TrackSize) -> TrackSize {
+    match s {
+        TrackSize::MinMax {
+            min: TrackBreadth::Px(v),
+            max: max @ TrackBreadth::Fr(_),
+        } if v < 1.0 => TrackSize::MinMax {
+            min: TrackBreadth::Px(1.0),
+            max,
+        },
+        other => other,
+    }
 }
 
 /// One track size for taffy — a single breadth `b` is CSS's `minmax(b, b)`, save
@@ -3790,7 +3838,7 @@ mod tests {
 
     /// The slot the used transform puts the box's top-left in, and the used size.
     fn placed(insets: Insets, stored: Affine, kind: &NodeKind) -> (Point, Size) {
-        let (local, used) = place(&insets, FRAME, stored, kind).expect("placed");
+        let (local, used) = place(&insets, FRAME, stored, kind, None).expect("placed");
         let k = used.unwrap_or_else(|| kind.clone());
         let bx = geometry::local_bounds(&k, None).unwrap();
         (slot_of(local, bx), bx.size())
@@ -3877,7 +3925,7 @@ mod tests {
             bottom: px(0.0),
             ..Default::default()
         };
-        let (local, used) = place(&insets, FRAME, Affine::IDENTITY, &kind).expect("placed");
+        let (local, used) = place(&insets, FRAME, Affine::IDENTITY, &kind, None).expect("placed");
         let Some(NodeKind::Path { path, .. }) = used else {
             panic!("a stretched path has a used kind");
         };
@@ -3984,7 +4032,7 @@ mod tests {
         };
         let turned = Affine::translate((5.0, 5.0)) * Affine::rotate(0.6);
         let kind = rect(100.0, 50.0);
-        let (local, _) = place(&insets, FRAME, turned, &kind).unwrap();
+        let (local, _) = place(&insets, FRAME, turned, &kind, None).unwrap();
         let centre = local * Point::new(50.0, 25.0);
         assert!(
             (centre.x - 240.0).abs() < 1e-9 && (centre.y - 45.0).abs() < 1e-9,
@@ -4058,7 +4106,7 @@ mod tests {
         };
         let kind = rect(100.0, 50.0);
         let bx = geometry::local_bounds(&kind, None).unwrap();
-        let (local, _) = place(&insets, FRAME, Affine::IDENTITY, &kind).unwrap();
+        let (local, _) = place(&insets, FRAME, Affine::IDENTITY, &kind, None).unwrap();
         assert_eq!(
             inverse(&insets, FRAME, local, bx, &kind),
             insets,
@@ -4180,7 +4228,7 @@ mod tests {
         ] {
             assert!(!takes_insets(&kind), "{kind:?} takes insets");
             assert!(
-                place(&pinned, FRAME, Affine::IDENTITY, &kind).is_none(),
+                place(&pinned, FRAME, Affine::IDENTITY, &kind, None).is_none(),
                 "{kind:?} was placed"
             );
         }

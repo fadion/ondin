@@ -727,6 +727,7 @@ fn a_copy_with_its_own_size_follows_the_mains_ratio() {
     // The commit door's own pass, then what `owed` appends.
     let tx = ondin_core::build::keep_ratios(
         &f.doc,
+        None,
         Transaction(vec![Operation::SetLayoutItem { id: f.a, item }]),
     );
     f.commit_all(tx.0);

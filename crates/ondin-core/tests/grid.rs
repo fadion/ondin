@@ -1757,6 +1757,32 @@ fn auto_fill_lays_as_many_tracks_as_fit() {
     assert_eq!(g.columns.explicit, 4, "four fit in 700");
 }
 
+/// **A repeat of `minmax(0px, 1fr)` with no gap is counted at 1px a track**, as
+/// CSS floors it: a 400-wide frame lays 400 columns, not taffy's cap of 10,000.
+/// flip: `template` without `counted` → 10,000, failing at "floored".
+#[test]
+fn a_zero_minimum_repeat_is_counted_at_one_pixel() {
+    use ondin_core::container::AutoRepeat;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 100.0), (0.0, 0.0));
+    s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(grid(
+            vec![auto_repeat(
+                AutoRepeat::Fill,
+                TrackSize::MinMax {
+                    min: TrackBreadth::Px(0.0),
+                    max: TrackBreadth::Fr(1.0),
+                },
+            )],
+            vec![],
+        ))),
+    );
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(g.columns.explicit, 400, "floored");
+}
+
 /// **`auto-fit` closes the repeated tracks no item sits in; `auto-fill` keeps
 /// them**: `minmax(160px, 1fr)` repeats three times in 520 either way, and with
 /// two items `auto-fit` shares the width between two tracks (b at 265) where

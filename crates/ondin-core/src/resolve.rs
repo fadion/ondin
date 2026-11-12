@@ -466,7 +466,9 @@ fn used_geometry(
             ..Used::default()
         });
     }
-    let (local, kind) = crate::container::place(node.insets(), frame, node.transform(), &own)?;
+    let ratio = node.item().aspect_ratio;
+    let (local, kind) =
+        crate::container::place(node.insets(), frame, node.transform(), &own, ratio)?;
     Some(Used {
         local: Some(local),
         kind,
@@ -509,7 +511,13 @@ fn root_used(
                 doc.resolved_kind(node.id())
                     .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned)
             });
-            crate::container::place(node.insets(), f, node.transform(), &k)
+            crate::container::place(
+                node.insets(),
+                f,
+                node.transform(),
+                &k,
+                node.item().aspect_ratio,
+            )
         });
     match pinned {
         Some((local, k)) => Some(Used {

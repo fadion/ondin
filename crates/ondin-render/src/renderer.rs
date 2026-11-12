@@ -986,8 +986,13 @@ impl RenderOverrides {
                     self.apply_laid(doc, res, l, false, placed);
                 }
             }
+            let ratio = self
+                .get(id)
+                .and_then(|o| o.item)
+                .unwrap_or(*node.item())
+                .aspect_ratio;
             let (local, kind) =
-                match ondin_core::container::place(&insets, size, node.transform(), &base) {
+                match ondin_core::container::place(&insets, size, node.transform(), &base, ratio) {
                     Some((local, kind)) => (local, kind.unwrap_or_else(|| base.clone())),
                     // Unpinned by this preview: back to where the document puts it.
                     None => (node.transform(), base.clone()),

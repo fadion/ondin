@@ -1197,7 +1197,7 @@ impl EditorSession {
         // adds, or the preview's re-layout stretches the item back every frame.
         // A resize of a layer holding a ratio draws it held, as the commit will —
         // first, as there, so the holds judge the sides it really changes.
-        let tx = &ondin_core::build::keep_ratios(&self.doc, tx.clone());
+        let tx = &ondin_core::build::keep_ratios(&self.doc, Some(&self.resolved), tx.clone());
         let holds = ondin_core::build::flex_holds(&self.doc, &self.resolved, tx);
         let mut ops = match &self.session_preview {
             Some(session) => session.0.clone(),
@@ -1302,7 +1302,14 @@ impl EditorSession {
             res,
             ondin_core::build::keep_insets(doc, res, tx.clone()),
         );
-        let mut follows = ondin_core::propagate::propagate(doc, &door);
+        // A copy holding a ratio of its own takes a followed size held to it,
+        // as `propagate::owed`'s own ratio pass does at the commit.
+        let mut follows = ondin_core::build::keep_ratios(
+            doc,
+            None,
+            Transaction(ondin_core::propagate::propagate(doc, &door)),
+        )
+        .0;
         let restated: Vec<Operation> = follows
             .iter()
             .filter_map(|op| match op {
@@ -1603,7 +1610,7 @@ impl EditorSession {
         // A layer holding an aspect ratio keeps its stored size to it — before
         // `keep_flex_sizes`, which must judge the sides the resize really changes:
         // a drag on the derived side's handle is a change of the other side.
-        let tx = ondin_core::build::keep_ratios(&self.doc, tx);
+        let tx = ondin_core::build::keep_ratios(&self.doc, Some(&self.resolved), tx);
         // The items this edit sets itself, so the receipt names only what
         // `keep_flex_sizes` added.
         let asked: Vec<NodeId> =
@@ -3358,6 +3365,103 @@ mod tests {
             shown,
             s.resolved.world_bounds(copy).unwrap(),
         );
+    }
+
+    /// A copy holding a ratio of its own previews a main's resize held to it,
+    /// as the commit lands it: the main's 40 × 30 rect widened to 80 draws its
+    /// 4 : 3 copy 80 × 60 in the preview too.
+    /// flip: `preview_follows` without its `keep_ratios` → previewed 80 × 30.
+    #[test]
+    fn a_copy_with_its_own_ratio_previews_a_mains_resize_held_to_it() {
+        use ondin_core::container::{AspectRatio, RatioSide};
+        let (mut s, a, copy) = main_and_instance(None, ondin_core::Insets::default());
+        let mut item = *s.doc.get(copy).unwrap().item();
+        item.aspect_ratio = Some(AspectRatio {
+            ratio: 4.0 / 3.0,
+            side: RatioSide::Height,
+        });
+        assert!(s.commit(Transaction(vec![Operation::SetLayoutItem {
+            id: copy,
+            item
+        }])));
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id: a,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(80.0, 30.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(copy).expect("preview bounds");
+        assert!(s.commit(tx));
+        let landed = s.resolved.world_bounds(copy).unwrap();
+        assert!(
+            (landed.height() - 60.0).abs() < 1e-9,
+            "the fixture: {landed:?}"
+        );
+        same_box("a copy with its own ratio", shown, landed);
+    }
+
+    /// Through the session's own doors, a drag on a stretched ratio item's
+    /// derived side previews and lands the same, the stretch let go: in a
+    /// 300-wide stretching column a 2 : 1 rect dragged to 100 high is 200 × 100.
+    /// flip: `keep_ratios` after `keep_flex_sizes` in `EditorSession::commit_inner`
+    /// → fails at "landed", the stretch held.
+    #[test]
+    fn a_derived_side_drag_previews_and_lands_through_the_session() {
+        use ondin_core::container::{
+            AlignItems, AspectRatio, Display, Flex, FlexDirection, RatioSide,
+        };
+        let mut s = EditorSession::new();
+        let root = s.doc.first_page();
+        let [col, r] = [(); 2].map(|_| s.ids.mint());
+        assert!(s.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: col,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 600.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((2000.0, 0.0))),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: col,
+                display: Some(Display::Flex(Flex {
+                    direction: FlexDirection::Column,
+                    align_items: AlignItems::Stretch,
+                    ..Default::default()
+                })),
+            },
+            Operation::CreateNode {
+                id: r,
+                parent: col,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(300.0, 150.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+        ])));
+        let mut item = *s.doc.get(r).unwrap().item();
+        item.aspect_ratio = Some(AspectRatio {
+            ratio: 2.0,
+            side: RatioSide::Height,
+        });
+        assert!(s.commit(Transaction(vec![Operation::SetLayoutItem { id: r, item }])));
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id: r,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(300.0, 100.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(r).expect("preview bounds");
+        assert!(s.commit(tx));
+        let landed = s.resolved.world_bounds(r).unwrap();
+        assert_eq!(landed.size(), Size::new(200.0, 100.0), "landed");
+        same_box("a derived-side drag", shown, landed);
     }
 
     /// `a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it`'s

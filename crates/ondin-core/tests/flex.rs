@@ -81,7 +81,7 @@ impl Scene {
 
     fn commit(&mut self, ops: Vec<Operation>) {
         let tx = ondin_core::build::keep_insets(&self.doc, &self.res, Transaction(ops));
-        let tx = ondin_core::build::keep_ratios(&self.doc, tx);
+        let tx = ondin_core::build::keep_ratios(&self.doc, Some(&self.res), tx);
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.res, tx);
         let dirty = self
             .history
@@ -2173,5 +2173,55 @@ fn dragging_the_derived_side_releases_a_stretch() {
     s.item(r, |i| i.aspect_ratio = Some(ratio(2.0, RatioSide::Height)));
     assert_eq!(s.bounds(r).size(), Size::new(300.0, 150.0), "the fixture");
     s.resize(r, 300.0, 100.0);
+    assert_eq!(s.bounds(r).size(), Size::new(200.0, 100.0), "landed");
+}
+
+/// A ratio far past `f32`'s range still lays a stretched rect at finite
+/// bounds: 1 : 1e40 would make its laid height infinite.
+/// flip: `style_of` casting the ratio unclamped → no world bounds.
+#[test]
+fn an_extreme_ratio_keeps_finite_bounds() {
+    use ondin_core::container::RatioSide;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 600.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            ..Default::default()
+        })),
+    );
+    let r = s.add(f, rect(300.0, 150.0), (0.0, 0.0));
+    s.item(r, |i| {
+        i.aspect_ratio = Some(ratio(1e-40, RatioSide::Height))
+    });
+    let b = s.res.world_bounds(r).expect("finite bounds");
+    assert!(b.height().is_finite() && b.width().is_finite(), "{b:?}");
+}
+
+/// The same drag once the column has grown, so the rect is drawn 400 × 200
+/// while it is stored 300 × 150: the tool writes the drawn width beside the
+/// dragged height, and that is still a change of the derived side alone.
+/// flip: `keep_ratios` judging against the stored size alone → 400 × 200,
+/// failing at "landed".
+#[test]
+fn dragging_the_derived_side_reads_the_drawn_size() {
+    use ondin_core::container::RatioSide;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 600.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            ..Default::default()
+        })),
+    );
+    let r = s.add(f, rect(300.0, 150.0), (0.0, 0.0));
+    s.item(r, |i| i.aspect_ratio = Some(ratio(2.0, RatioSide::Height)));
+    s.resize(f, 400.0, 600.0);
+    assert_eq!(s.bounds(r).size(), Size::new(400.0, 200.0), "the fixture");
+    s.resize(r, 400.0, 100.0);
     assert_eq!(s.bounds(r).size(), Size::new(200.0, 100.0), "landed");
 }

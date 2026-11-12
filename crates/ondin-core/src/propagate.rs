@@ -469,7 +469,7 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // grid written onto its users, a copy given the main's ratio over a size of
     // its own. Both leave what they already wrote as it is.
     *tx = crate::build::keep_area_names(doc, std::mem::take(tx));
-    *tx = crate::build::keep_ratios(doc, std::mem::take(tx));
+    *tx = crate::build::keep_ratios(doc, None, std::mem::take(tx));
     // And the gradients of a copy a follow resized: the commit door carried only
     // the edit's own size writes, and a copy keeps a gradient of its own.
     *tx = crate::paint_box::keep_gradients(doc, std::mem::take(tx));

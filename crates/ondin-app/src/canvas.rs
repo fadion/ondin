@@ -1103,6 +1103,20 @@ pub(crate) fn draw_snap_target(painter: &egui::Painter, at: egui::Pos2, name: &s
     );
 }
 
+/// Side of the square marking a point target a dragged point is near but not on,
+/// in screen pt: smaller than the snap's ring, so the hint never reads as a snap.
+const SNAP_HINT_PX: f32 = 5.0;
+
+/// A point target within reach of the pointer but not yet caught: a small square in
+/// the snaps' red, with no name, which the ring and pill replace once it snaps.
+fn draw_snap_hint(painter: &egui::Painter, at: egui::Pos2) {
+    painter.rect_filled(
+        egui::Rect::from_center_size(at, egui::Vec2::splat(SNAP_HINT_PX)),
+        egui::CornerRadius::ZERO,
+        color::MEASURE,
+    );
+}
+
 /// The anchors joined to `at` by a segment — the one before it and the one after,
 /// across the join of a closed subpath — that are not in `moving`: what a dragged
 /// anchor's tangent and perpendicular snaps are drawn from.
@@ -4296,7 +4310,8 @@ impl OndinApp {
         if !self.snap_shapes {
             return s;
         }
-        let reach = snap::TOLERANCE_PX / self.points_per_world();
+        // As far as a hint reaches, which is further than a snap.
+        let reach = snap::HINT_PX / self.points_per_world();
         let reach = KRect::from_center_size(near, (2.0 * reach, 2.0 * reach));
         let out = &mut s.outlines;
         let keep = |seg: PathSeg, out: &mut snap::Outlines| {
@@ -10522,6 +10537,9 @@ impl OndinApp {
                 let at = self.to_screen(p.at, rect, ppp);
                 let cross = p.kind == snap::PointKind::Intersection;
                 draw_snap_target(painter, at, p.kind.label(), cross);
+            }
+            if let Some(h) = marks.hint {
+                draw_snap_hint(painter, self.to_screen(h.at, rect, ppp));
             }
             if shift && let Drag::Handle { id, at, .. } = self.drag {
                 self.draw_handle_step(painter, rect, ppp, id, at, world);

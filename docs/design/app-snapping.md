@@ -96,7 +96,14 @@ anchor that landed on geometry is not then pulled onto a mirror axis.
 What landed is drawn by `canvas::draw_snap_target`, the mirror's *On axis* mark too: a ring of
 `SNAP_RING_PX` in the measure red and a pill naming it — *Anchor*, *Intersection* (with a × in
 the ring, since there is no anchor there), *Tangent*, *Perpendicular*, *Midpoint*, *Centre*,
-*On path*. A point is too small for a line to say what it matched. The pen shows its mark on hover
+*On path*. A point is too small for a line to say what it matched.
+
+A target near but not yet caught is **hinted**: `snap::point_hint` finds the nearest of any kind but
+*On path* within `HINT_PX` (four times the snap's reach), and `canvas::draw_snap_hint` marks it with a
+small unnamed square in the same red, so a midpoint or a foot can be found by eye from further off.
+It shows while nothing snapped, and while the point only lies *On path*, since sliding along a path
+is how a midpoint is found; a named snap's ring replaces it. A locked axis gets none.
+`OndinApp::point_snapping` gathers segments as far as the hint reaches. The pen shows its mark on hover
 from before its first anchor; a dragged line end shows its mark too.
 
 ### Dragged guide (`snap_guide`)

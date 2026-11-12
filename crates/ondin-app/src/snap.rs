@@ -123,6 +123,17 @@ pub enum PointKind {
 }
 
 impl PointKind {
+    /// Every kind, in [`point_target`]'s order of priority.
+    pub const ORDER: [Self; 7] = [
+        Self::Anchor,
+        Self::Intersection,
+        Self::Tangent,
+        Self::Perpendicular,
+        Self::Midpoint,
+        Self::Centre,
+        Self::OnPath,
+    ];
+
     /// The word on the pill beside the ring: a point is too small for a line to say
     /// what it matched.
     pub fn label(self) -> &'static str {
@@ -181,6 +192,9 @@ pub struct Marks {
     pub gaps: Vec<Measure>,
     /// The geometry a dragged point landed on, drawn as a ring and its name.
     pub point: Option<PointMark>,
+    /// The point target a dragged point is near but not on, drawn as a small
+    /// square ([`PointSnap::hint`]).
+    pub hint: Option<PointMark>,
 }
 
 impl From<Vec<Guide>> for Marks {
@@ -198,6 +212,7 @@ impl From<PointSnap> for Marks {
             guides: s.guides,
             gaps: Vec::new(),
             point: s.mark,
+            hint: s.hint,
         }
     }
 }
@@ -534,7 +549,15 @@ pub struct PointSnap {
     pub guides: Vec<Guide>,
     /// The geometry the point landed on, when it landed on [`Snapping::outlines`].
     pub mark: Option<PointMark>,
+    /// The point target it is near but did not land on ([`point_hint`]); `None`
+    /// once [`Self::mark`] names one, and kept while it only lies *On path*.
+    pub hint: Option<PointMark>,
 }
+
+/// How far, in screen pixels, a point target is marked as near before the point
+/// snaps to it: four times the snap's reach, so a midpoint can be found by eye
+/// and then caught.
+pub(crate) const HINT_PX: f64 = 4.0 * TOLERANCE_PX;
 
 /// Snap a dragged **point** — a resize handle, a pen anchor, a node-tool point —
 /// onto nearby features, on the axes it is free to move.
@@ -548,19 +571,27 @@ pub struct PointSnap {
 /// both axes at once; failing that, an anchor's x or y lines it up as a box's edge does.
 pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
+    let hint = || point_hint(at, s, HINT_PX / s.zoom.max(f64::EPSILON));
     if axes == (true, true)
         && let Some(mark) = point_target(at, s, tolerance)
     {
+        // Sliding along a path is how a midpoint is found, so *On path* keeps the hint.
         return PointSnap {
             at: mark.at,
             guides: Vec::new(),
             mark: Some(mark),
+            hint: (mark.kind == PointKind::OnPath).then(hint).flatten(),
         };
     }
+    let hint = match axes {
+        (true, true) => hint(),
+        _ => None,
+    };
     let mut out = PointSnap {
         at,
         guides: Vec::new(),
         mark: None,
+        hint,
     };
 
     let mut best_x: Option<(f64, f64, Matched)> = None;
@@ -672,24 +703,55 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
 /// tangent or perpendicular from [`Outlines::from`], a segment's midpoint, a
 /// shape's centre, and last the nearest point on a segment.
 pub fn point_target(at: Point, s: &Snapping, tolerance: f64) -> Option<PointMark> {
-    let nearest = |points: &mut dyn Iterator<Item = Point>| {
-        points
-            .map(|p| (p.distance(at), p))
-            .filter(|(d, _)| *d <= tolerance)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, p)| p)
+    let all = candidates(at, s, tolerance);
+    PointKind::ORDER
+        .into_iter()
+        .find_map(|kind| nearest_within(at, tolerance, all.iter().filter(|m| m.kind == kind)))
+}
+
+/// The point target a dragged point is near but not yet on: the nearest within
+/// `reach` of any kind but *On path*, which is drawn wherever the path is. The
+/// canvas marks it so a midpoint or a foot can be found from further off than the
+/// snap catches; [`snap_point`] offers it only when nothing snapped.
+pub fn point_hint(at: Point, s: &Snapping, reach: f64) -> Option<PointMark> {
+    let all = candidates(at, s, reach);
+    nearest_within(
+        at,
+        reach,
+        all.iter().filter(|m| m.kind != PointKind::OnPath),
+    )
+}
+
+/// The nearest of `marks` within `reach` of `at`.
+fn nearest_within<'a>(
+    at: Point,
+    reach: f64,
+    marks: impl Iterator<Item = &'a PointMark>,
+) -> Option<PointMark> {
+    marks
+        .map(|m| (m.at.distance(at), *m))
+        .filter(|(d, _)| *d <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, m)| m)
+}
+
+/// Every point target of every kind a dragged point at `at` could reach within
+/// `reach`: the anchors and centres in view, and what the segments whose boxes
+/// come that near make — their crossings, midpoints, nearest points, and the
+/// tangents and feet from [`Outlines::from`]. Not yet filtered by distance.
+fn candidates(at: Point, s: &Snapping, reach: f64) -> Vec<PointMark> {
+    let mut out = Vec::new();
+    let mut put = |kind, points: &mut dyn Iterator<Item = Point>| {
+        out.extend(points.map(|at| PointMark { at, kind }));
     };
-    let mark = |at, kind| PointMark { at, kind };
-    if let Some(p) = nearest(&mut s.outlines.anchors.iter().copied()) {
-        return Some(mark(p, PointKind::Anchor));
-    }
-    let reach = Rect::from_center_size(at, (2.0 * tolerance, 2.0 * tolerance));
+    put(PointKind::Anchor, &mut s.outlines.anchors.iter().copied());
+    let area = Rect::from_center_size(at, (2.0 * reach, 2.0 * reach));
     let near: Vec<PathSeg> = s
         .outlines
         .segments
         .iter()
         .copied()
-        .filter(|seg| reaches(*seg, reach))
+        .filter(|seg| reaches(*seg, area))
         .collect();
     let mut crossed = Vec::new();
     for (i, a) in near.iter().enumerate() {
@@ -697,32 +759,24 @@ pub fn point_target(at: Point, s: &Snapping, tolerance: f64) -> Option<PointMark
             crossings(*a, *b, &mut crossed);
         }
     }
-    if let Some(p) = nearest(&mut crossed.into_iter()) {
-        return Some(mark(p, PointKind::Intersection));
-    }
-    let from = &s.outlines.from;
-    let mut touching = Vec::new();
-    let mut feet = Vec::new();
+    put(PointKind::Intersection, &mut crossed.into_iter());
+    let (mut touching, mut feet) = (Vec::new(), Vec::new());
     for seg in &near {
-        for f in from {
+        for f in &s.outlines.from {
             tangents(*seg, *f, &mut touching);
             perpendiculars(*seg, *f, &mut feet);
         }
     }
-    if let Some(p) = nearest(&mut touching.into_iter()) {
-        return Some(mark(p, PointKind::Tangent));
-    }
-    if let Some(p) = nearest(&mut feet.into_iter()) {
-        return Some(mark(p, PointKind::Perpendicular));
-    }
-    if let Some(p) = nearest(&mut near.iter().map(|seg| seg.eval(0.5))) {
-        return Some(mark(p, PointKind::Midpoint));
-    }
-    if let Some(p) = nearest(&mut s.outlines.centres.iter().copied()) {
-        return Some(mark(p, PointKind::Centre));
-    }
+    put(PointKind::Tangent, &mut touching.into_iter());
+    put(PointKind::Perpendicular, &mut feet.into_iter());
+    put(
+        PointKind::Midpoint,
+        &mut near.iter().map(|seg| seg.eval(0.5)),
+    );
+    put(PointKind::Centre, &mut s.outlines.centres.iter().copied());
     let on = near.iter().map(|seg| seg.eval(seg.nearest(at, 1e-9).t));
-    nearest(&mut on.into_iter()).map(|p| mark(p, PointKind::OnPath))
+    put(PointKind::OnPath, &mut on.into_iter());
+    out
 }
 
 /// Whether `seg` could pass through `area`: its control box meets it.
@@ -2026,6 +2080,49 @@ mod tests {
         assert_eq!(foot.kind, PointKind::Perpendicular);
         let want = Point::new(50.0 * cos, 50.0 * sin);
         assert!(foot.at.distance(want) < 0.05, "{:?}", foot.at);
+    }
+
+    /// Sliding along a line towards its midpoint, the point snaps *On path* and the
+    /// midpoint is hinted from four times the snap's reach; once it snaps to the
+    /// midpoint, the hint goes. Off the path with nothing in reach, no hint.
+    ///
+    /// flip: `snap_point` dropping the hint under an *On path* snap → fails at
+    /// "hinted while on the path".
+    #[test]
+    fn a_target_near_but_not_caught_is_hinted() {
+        let s = Snapping {
+            outlines: Outlines {
+                segments: vec![line((0.0, 0.0), (100.0, 0.0))],
+                ..Outlines::default()
+            },
+            ..Snapping::none(1.0)
+        };
+        let sliding = snap_point(Point::new(65.0, 2.0), FREE, &s);
+        assert_eq!(sliding.mark.map(|m| m.kind), Some(PointKind::OnPath));
+        let hint = sliding.hint.expect("hinted while on the path");
+        assert_eq!(
+            (hint.kind, hint.at),
+            (PointKind::Midpoint, Point::new(50.0, 0.0))
+        );
+
+        let caught = snap_point(Point::new(53.0, 2.0), FREE, &s);
+        assert_eq!(caught.mark.map(|m| m.kind), Some(PointKind::Midpoint));
+        assert!(caught.hint.is_none(), "the ring replaces it");
+
+        // Off the path, 20 from the midpoint: hinted, not snapped.
+        let off = snap_point(Point::new(50.0, 20.0), FREE, &s);
+        assert!(off.mark.is_none());
+        assert_eq!(off.hint.map(|m| m.kind), Some(PointKind::Midpoint));
+        assert!(
+            snap_point(Point::new(50.0, 30.0), FREE, &s).hint.is_none(),
+            "out of reach"
+        );
+        assert!(
+            snap_point(Point::new(50.0, 20.0), (true, false), &s)
+                .hint
+                .is_none(),
+            "a locked axis gets none"
+        );
     }
 
     /// A curve and a line cross where both are: every crossing found lies on both,

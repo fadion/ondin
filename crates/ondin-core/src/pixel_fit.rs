@@ -1,7 +1,7 @@
 //! *Pixel-fit*: put a layer's edges on the pixel grid, so a 16–24px icon renders
 //! crisp at 1×. A command, not a mode: it moves points once and leaves them.
 //!
-//! The grid is world units. A corner, and an anchor where the curve turns level or
+//! The grid is world units, or the pixels of one icon size under [`fit_on`]. A corner, and an anchor where the curve turns level or
 //! upright, moves to the nearest grid line on each axis that matters; its handles
 //! move with it, so a curve keeps its shape. A box shape (a rectangle, an ellipse,
 //! a polygon, a star, a spiral) keeps its kind and has its box rounded instead; a
@@ -141,12 +141,44 @@ fn fit_rect(r: Rect) -> Rect {
 /// *Pixel-fit* on the outermost layers of `ids`: every visible path, shape and line
 /// in them, through groups, frames and booleans, as one transaction.
 pub fn fit(doc: &Document, res: &Resolved, ids: &[NodeId]) -> (Transaction, Fitted) {
+    fit_on(doc, res, ids, Affine::IDENTITY)
+}
+
+/// [`fit`] onto the grid `grid` maps whole units of: world space to the grid's
+/// space, where each whole unit is a pixel. An icon export fits a copy of its
+/// layer to each size's pixels this way; `grid` must be a scale and a translation.
+pub fn fit_on(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    grid: Affine,
+) -> (Transaction, Fitted) {
     let mut ops = Vec::new();
     let mut fitted = Fitted::default();
+    let place = Place { doc, res, grid };
     for id in build::outermost(doc, ids) {
-        fit_layer(doc, res, id, &mut ops, &mut fitted);
+        fit_layer(&place, id, &mut ops, &mut fitted);
     }
     (Transaction(ops), fitted)
+}
+
+/// What every step of a fit reads: the tree, and the grid it fits onto.
+struct Place<'a> {
+    doc: &'a Document,
+    res: &'a Resolved,
+    grid: Affine,
+}
+
+impl Place<'_> {
+    /// `id`'s transform from its local space into the grid's.
+    fn world(&self, id: NodeId) -> Option<Affine> {
+        Some(self.grid * self.res.world_transform(id)?)
+    }
+
+    /// The local transform that puts `id` at `placed`, a transform into the grid.
+    fn local(&self, id: NodeId, placed: Affine) -> Affine {
+        build::local_for_world(self.doc, self.res, id, self.grid.inverse() * placed)
+    }
 }
 
 /// *Pixel-fit* on the path `id`'s points: those in `only`, or every one.
@@ -157,18 +189,18 @@ pub fn fit_points(
     only: Option<&[PointRef]>,
 ) -> (Transaction, Fitted) {
     let mut fitted = Fitted::default();
-    let tx = fit_path(doc, res, id, only, &mut fitted).unwrap_or_default();
+    let place = Place {
+        doc,
+        res,
+        grid: Affine::IDENTITY,
+    };
+    let tx = fit_path(&place, id, only, &mut fitted).unwrap_or_default();
     (tx, fitted)
 }
 
 /// The ops that fit `id`, or each layer inside it, gathered into `ops`.
-fn fit_layer(
-    doc: &Document,
-    res: &Resolved,
-    id: NodeId,
-    ops: &mut Vec<Operation>,
-    fitted: &mut Fitted,
-) {
+fn fit_layer(place: &Place, id: NodeId, ops: &mut Vec<Operation>, fitted: &mut Fitted) {
+    let (doc, res) = (place.doc, place.res);
     let Some(node) = doc.get(id) else { return };
     if !node.visible() {
         return;
@@ -186,7 +218,7 @@ fn fit_layer(
     match kind {
         NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. } => {
             for child in node.children().to_vec() {
-                fit_layer(doc, res, child, ops, fitted);
+                fit_layer(place, child, ops, fitted);
             }
             return;
         }
@@ -196,7 +228,7 @@ fn fit_layer(
         }
         _ => {}
     }
-    let Some(world) = res.world_transform(id) else {
+    let Some(world) = place.world(id) else {
         return;
     };
     if !square_to_the_page(world) {
@@ -205,7 +237,7 @@ fn fit_layer(
     }
     match kind {
         NodeKind::Path { .. } => {
-            if let Some(tx) = fit_path(doc, res, id, None, fitted) {
+            if let Some(tx) = fit_path(place, id, None, fitted) {
                 ops.extend(tx.0);
             }
         }
@@ -236,7 +268,7 @@ fn fit_layer(
             let placed = Affine::translate(a - from) * world;
             ops.push(Operation::SetTransform {
                 id,
-                transform: build::local_for_world(doc, res, id, placed),
+                transform: place.local(id, placed),
             });
             ops.push(Operation::SetGeometry {
                 id,
@@ -265,7 +297,7 @@ fn fit_layer(
                 return;
             }
             fitted.moved += moved;
-            ops.extend(box_ops(doc, res, id, world, local, now));
+            ops.extend(box_ops(place, id, world, local, now));
         }
         _ => {}
     }
@@ -279,13 +311,16 @@ fn fit_layer(
 /// images land on whole units too and a second fit moves nothing. Points are counted
 /// from what is written, the mirroring included.
 fn fit_path(
-    doc: &Document,
-    res: &Resolved,
+    place: &Place,
     id: NodeId,
     only: Option<&[PointRef]>,
     fitted: &mut Fitted,
 ) -> Option<Transaction> {
-    let (world, base) = path_subpaths(doc, res, id)?;
+    let (doc, res) = (place.doc, place.res);
+    let (world, mut base) = path_subpaths(doc, res, id)?;
+    // Into the grid: the anchors, and the transform `rewrite_path` maps them back by.
+    map_subpaths(&mut base, place.grid);
+    let world = place.grid * world;
     if !square_to_the_page(world) {
         fitted.turned += 1;
         return None;
@@ -354,14 +389,8 @@ fn fit_path(
 
 /// The ops that put a box shape's world box at `now`, its axes kept: a new size
 /// along each local axis and the translation that lands the box's corner.
-fn box_ops(
-    doc: &Document,
-    res: &Resolved,
-    id: NodeId,
-    world: Affine,
-    local: Rect,
-    now: Rect,
-) -> Vec<Operation> {
+fn box_ops(place: &Place, id: NodeId, world: Affine, local: Rect, now: Rect) -> Vec<Operation> {
+    let doc = place.doc;
     let [a, b, c, d, _, _] = world.as_coeffs();
     // A quarter turn sends local width to world height: read each local side off
     // the world axis it lies along.
@@ -379,7 +408,7 @@ fn box_ops(
     vec![
         Operation::SetTransform {
             id: node.id(),
-            transform: build::local_for_world(doc, res, id, placed),
+            transform: place.local(id, placed),
         },
         Operation::SetGeometry {
             id,
@@ -585,6 +614,60 @@ mod tests {
         let (tx, fitted) = fit(&doc, &res, &[g, slice]);
         assert!(tx.0.is_empty());
         assert_eq!(fitted, Fitted::default(), "a slice is not counted");
+    }
+
+    /// On a grid of 24 world units to 16 pixels, a rect and a path inside a group
+    /// land on whole pixels of that grid, not on whole world units.
+    /// flip: `Place::local` without the grid's inverse → fails at "the rect's box
+    /// lands on the grid".
+    #[test]
+    fn a_fit_onto_a_finer_grid_lands_on_its_pixels() {
+        let (doc, [g, rect, path]) = doc_of(|root, [g, rect, path]| {
+            let mut line = kurbo::BezPath::new();
+            line.move_to((2.2, 2.2));
+            line.line_to((20.1, 2.2));
+            line.line_to((20.1, 13.0));
+            vec![
+                group(g, root, Affine::translate((0.6, 0.0))),
+                rect_at(
+                    rect,
+                    g,
+                    0,
+                    Affine::translate((1.2, 0.3)),
+                    Size::new(10.0, 7.3),
+                ),
+                Operation::CreateNode {
+                    id: path,
+                    parent: g,
+                    index: 1,
+                    kind: NodeKind::Path {
+                        path: line,
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                        mirror: PathMirror::NONE,
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]
+        });
+        let res = Resolved::rebuild(&doc);
+        let grid = Affine::scale(16.0 / 24.0);
+        let (tx, fitted) = fit_on(&doc, &res, &[g], grid);
+        assert!(fitted.moved > 0);
+        let mut after = doc.clone();
+        after.apply(&tx).expect("the fit applies");
+        let ra = Resolved::rebuild(&after);
+        let on_grid = |v: f64| ((v * 16.0 / 24.0) - (v * 16.0 / 24.0).round()).abs() < 1e-6;
+        let b = ra.world_bounds(rect).unwrap();
+        assert!(
+            [b.x0, b.y0, b.x1, b.y1].into_iter().all(on_grid),
+            "the rect's box lands on the grid: {b:?}"
+        );
+        let (_, subs) = path_subpaths(&after, &ra, path).unwrap();
+        for a in subs.iter().flat_map(|s| &s.anchors) {
+            assert!(on_grid(a.at.x) && on_grid(a.at.y), "{:?}", a.at);
+        }
     }
 
     /// A line in a scaled group lands both world ends on whole units; a rect under

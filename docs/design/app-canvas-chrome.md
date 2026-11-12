@@ -116,9 +116,10 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
   `size_preview_ui` runs right after `minimap_ui`, so focus mode keeps it and present mode hides it.
 - **Subject:** the selection, outermost only (`build::in_document_order`, reversed so the top
   layer comes first), one row per layer with a box, five rows at most, past which a footer counts the rest (*Showing 5 of 8 layers*). A layer with no box gets no row and is not counted.
-  The head's pin (`PUSH_PIN`) holds the current layers instead of following the selection; a
-  deleted layer drops out of the pin, and the pin lets go when none is left. The pin is view state
-  and never saved.
+  The head's pin (`PUSH_PIN`) holds the current layers instead of following the selection. A
+  pinned layer that is gone passes the pin to a selected layer now in its place (same parent, same
+  index), which is what *Outline shape*, *Flatten* and *Convert to path* leave behind; else it
+  drops out, and the pin lets go when none is left. The pin is view state and never saved.
 - **Tiles.** For each size N, the layer's box (`preview_world_bounds`, so a drag is followed) is
   squared on its longer side (`ondin_export::icon::square_of`, the icon export's framing) and drawn
   at N, centred in its column. A column is N + 28 wide, a ground strip the tallest size + 20. Several

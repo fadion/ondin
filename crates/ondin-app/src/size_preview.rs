@@ -81,6 +81,10 @@ struct Shown {
 pub(crate) struct SizePreview {
     /// The layers the pin holds; `None` follows the selection.
     pinned: Option<Vec<NodeId>>,
+    /// Where each pinned layer sat when last seen, its parent and index: a verb
+    /// that swaps a layer for a new one (*Outline shape*, *Flatten*, *Convert to
+    /// path*) selects what it made in that place, and the pin moves to it.
+    slots: Vec<(NodeId, (NodeId, usize))>,
     /// Whether the ⋯ menu is open.
     menu: bool,
     job: Option<Job<Landed>>,
@@ -123,6 +127,13 @@ fn box_words(b: Rect) -> String {
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     };
     format!("{} × {}", n(b.width()), n(b.height()))
+}
+
+/// Where `id` sits: its parent and its index among the parent's children.
+fn slot_of(doc: &Document, id: NodeId) -> Option<(NodeId, usize)> {
+    let parent = doc.get(id)?.parent()?;
+    let index = doc.get(parent)?.children().iter().position(|c| *c == id)?;
+    Some((parent, index))
 }
 
 /// The sizes `n` is the layer's own: its box's longer side is `n` units.
@@ -216,16 +227,45 @@ impl OndinApp {
     }
 
     /// The layers the card shows: the pinned ones still in the document, or the
-    /// selection, in the layers panel's order, top first. A pin whose layers are
-    /// all gone lets go.
+    /// selection, in the layers panel's order, top first. A pinned layer that is
+    /// gone passes the pin to a selected layer in its place, else drops out; a
+    /// pin whose layers are all gone lets go.
     fn size_preview_subjects(&mut self) -> Vec<NodeId> {
         let doc = &self.session.doc;
-        if let Some(pinned) = &mut self.size_preview.pinned {
-            pinned.retain(|id| doc.get(*id).is_some());
+        let selected = self.session.selection.ids();
+        let sp = &mut self.size_preview;
+        if let Some(pinned) = &mut sp.pinned {
+            for id in pinned.iter_mut() {
+                if doc.get(*id).is_some() {
+                    continue;
+                }
+                let heir = sp
+                    .slots
+                    .iter()
+                    .find(|(was, _)| was == id)
+                    .and_then(|(_, slot)| {
+                        selected.iter().find(|s| slot_of(doc, **s) == Some(*slot))
+                    });
+                if let Some(heir) = heir {
+                    *id = *heir;
+                }
+            }
+            let mut kept: Vec<NodeId> = Vec::with_capacity(pinned.len());
+            pinned.retain(|id| {
+                let keep = doc.get(*id).is_some() && !kept.contains(id);
+                kept.push(*id);
+                keep
+            });
             if pinned.is_empty() {
-                self.size_preview.pinned = None;
+                sp.pinned = None;
             }
         }
+        sp.slots = sp
+            .pinned
+            .iter()
+            .flatten()
+            .filter_map(|id| Some((*id, slot_of(doc, *id)?)))
+            .collect();
         let ids = match &self.size_preview.pinned {
             Some(p) => p.clone(),
             None => self.session.selection.ids().to_vec(),
@@ -958,5 +998,47 @@ mod tests {
             box_words(Rect::new(0.0, 0.0, 1440.0, 899.5)),
             "1440 × 899.5"
         );
+    }
+
+    /// *Outline shape* on a pinned rectangle swaps it for a new path in its place,
+    /// selected; the pin moves to the path rather than letting go.
+    /// flip: `size_preview_subjects` skipping the heir lookup → fails at "the pin
+    /// moved to the path".
+    #[test]
+    fn the_pin_follows_a_layer_swapped_in_its_place() {
+        use ondin_core::NodeKind;
+        use ondin_core::kurbo::{Affine, Size};
+        let ctx = egui::Context::default();
+        let (mut app, frame) = app_with_preview(&ctx);
+        let rect = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: rect,
+            parent: frame,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(16.0, 16.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }])));
+        app.session.selection.set_one(rect);
+        app.size_preview.pin_selection(&[rect]);
+        assert_eq!(app.size_preview_subjects(), [rect], "the fixture pinned it");
+        app.outline_shape(rect);
+        assert!(
+            app.session.doc.get(rect).is_none(),
+            "the rectangle was replaced"
+        );
+        let path = app.session.selection.ids()[0];
+        assert_eq!(
+            app.size_preview_subjects(),
+            [path],
+            "the pin moved to the path"
+        );
+        assert!(app.size_preview.pinned.is_some());
+        app.session.selection.clear();
+        assert_eq!(app.size_preview_subjects(), [path], "and holds it");
     }
 }

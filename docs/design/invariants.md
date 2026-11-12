@@ -24,6 +24,8 @@ The non-negotiable rules of the Ondin architecture (original §4, numbering pres
      - Kits (§5.3e, D1010, D1012): a vendored kit main is a stored copy of another document's main at a published version, rewritten only by the commit that accepts an update. A kit's own published state is not another member: it is the tree as it stood at publish, with nothing left to derive it from.
      - Kit-carried variables and styles (§5.3f, D1064): copies of the kit's at a published version, each with its origin, rewritten only by the accepting commit.
      - Styles (§5.3f, D1062; type via D1067, container layout via D1075): a styled layer's fills, strokes, effects, type or layout are a copy of its style's list, written by the commit (`style::settle`).
+     - Chart parts (`charts.md`): the nodes under a chart frame, with its `parts`, `generated` and `minted`, are generated from its description and rewritten only by `chart::settle`, in a transaction of its own outside history after a commit, an undo, a redo or a load. No undo step writes a part.
+     - Laid widths (§5.3f, `core-model.md`): `Document::laid_widths` is layout output kept on the document so `modes_at` can pick by width; written only by `Document::settle_widths` after layout, never saved and never compared.
      - Variables add no member: a bound field stores its binding and resolves at read.
 
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview, text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides` (§6.2): per-node patches projected from the very transaction the gesture will commit. Exactly one `Transaction` is committed per completed gesture; history contains only committed transactions.
@@ -75,6 +77,6 @@ The non-negotiable rules of the Ondin architecture (original §4, numbering pres
 
 - Invariant 8 spreads over many doors: a new op or field that writes a number must ask the matching predicate at both its own op and `op_insert_subtree`'s field loop, or paste/import become the hole.
 - Invariant 8's operand guards do not cover derived values (bounds, inverses); test derived output.
-- Invariant 4's list of stored derived values grows with each linked-copy feature; every new member must be rewritten only by the commit pass that owns it.
+- Invariant 4's list of stored derived values grows with each linked-copy feature; every new member must be rewritten only by the pass that owns it (a commit pass, or a settle outside history).
 - Invariant 11: the SVG writer re-decides what the scene walk decides; a change to any of them in `scene.rs` needs the same change in `svg::emit_node`, and `two_walks.rs` is what catches divergence.
 - Invariant 12: check the app id by hand; no test compares it.

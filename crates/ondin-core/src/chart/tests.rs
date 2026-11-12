@@ -435,7 +435,7 @@ fn outlined_marks_are_stroked_over_a_tint() {
     ];
     for (kind, role) in roles {
         let mut chart = Chart::sample(kind);
-        chart.options = Preset::Outline.apply(&chart.options);
+        chart.options = Preset::Outline.apply(kind, &chart.options);
         assert_eq!(chart.validate(), Ok(()), "{kind:?}");
         let g = draw(&chart);
         let marks: Vec<&Part> = g.parts.iter().filter(|p| p.key.role == role).collect();

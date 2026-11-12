@@ -931,7 +931,7 @@ impl OndinApp {
     }
 
     fn chart_style_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
-        let lit = Preset::of(&chart.options);
+        let lit = Preset::of(chart.kind, &chart.options);
         let n = Preset::ALL.len() as f32;
         let cell = (ui.available_width() - STYLE_GAP * (n - 1.0)) / n;
         let ctx = ui.ctx().clone();
@@ -965,7 +965,7 @@ impl OndinApp {
         // part of it still lands on all of it.
         if let Some(p) = pick {
             self.chart_each(id, chart, "Chart style", |c| {
-                c.options = p.apply(&c.options);
+                c.options = p.apply(c.kind, &c.options);
             });
         }
     }
@@ -2742,7 +2742,7 @@ mod tests {
         );
         assert!(cache.left_out.is_empty() && cache.refusal.is_none());
         let chart = app.session.doc.get(id).and_then(|n| n.chart()).unwrap();
-        assert_eq!(Preset::of(&chart.options), Some(Preset::Clean));
+        assert_eq!(Preset::of(chart.kind, &chart.options), Some(Preset::Clean));
     }
 
     /// A Style picture keeps its inset each side in a narrow cell, in whole
@@ -3332,18 +3332,19 @@ mod tests {
             Some((1.0, own.1)),
             "B keeps its maximum"
         );
+        let lit = |c: Chart| Preset::of(c.kind, &c.options);
         assert_ne!(
-            Preset::of(&chart_at(&app, a).options),
-            Preset::of(&chart_at(&app, b).options),
+            lit(chart_at(&app, a)),
+            lit(chart_at(&app, b)),
             "fixture: the two at different styles"
         );
         let first = chart_at(&app, a);
         app.chart_each(a, &first, "Chart style", |c| {
-            c.options = Preset::Bold.apply(&c.options);
+            c.options = Preset::Bold.apply(c.kind, &c.options);
         });
         app.chart_others.clear();
         for id in [a, b] {
-            assert_eq!(Preset::of(&chart_at(&app, id).options), Some(Preset::Bold));
+            assert_eq!(lit(chart_at(&app, id)), Some(Preset::Bold));
         }
     }
 

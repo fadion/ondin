@@ -332,7 +332,8 @@ it applies to; switching kind keeps the others' values.
 - **Style presets** (`chart::Preset`). A preset is a set of option values written over the
   description's style fields in one step, not a link: *Clean* (the defaults), *Soft* (rounded
   marks and slices, filled points, a dashed value grid), *Bold* (heavy marks, no grid, large
-  values outside; a Sankey's nodes 18 wide and its flows at 60%), *Minimal* (no axes, no grid,
+  values outside, but not on a scatter, which draws no value labels; a Sankey's nodes 18 wide and
+  its flows at 60%), *Minimal* (no axes, no grid,
   no legend, no Sankey labels: a sparkline when the chart is small), *Outline* (outlined marks
   at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`). Every preset changes something each
   kind draws, so no two cells of a kind look alike. A preset owns exactly the options some

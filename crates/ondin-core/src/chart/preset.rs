@@ -2,7 +2,7 @@
 //! description in one step, not a link. The Chart card's Style cells and an
 //! agent's `set_chart` write the same values.
 
-use super::{LegendPosition, NodeLabels, Options, PointStyle, ValuePosition};
+use super::{ChartKind, LegendPosition, NodeLabels, Options, PointStyle, ValuePosition};
 
 /// The presets, in the card's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,7 +47,9 @@ impl Preset {
 
     /// `options` with this preset's values written over the style fields it
     /// owns; data, palette, text family and number formats are left as they are.
-    pub fn apply(self, options: &Options) -> Options {
+    /// A scatter draws no value labels, so on one their position and size are
+    /// left as they are too.
+    pub fn apply(self, kind: ChartKind, options: &Options) -> Options {
         let clean = Options::default();
         let mut o = options.clone();
         o.bars.radius = clean.bars.radius;
@@ -109,14 +111,19 @@ impl Preset {
                 o.lines.width = OUTLINE_WIDTH;
             }
         }
+        if kind == ChartKind::Scatter {
+            o.values.position = options.values.position;
+            o.text.value_size = options.text.value_size;
+        }
         o
     }
 
-    /// The preset `options` is exactly at, for the cell that lights.
-    pub fn of(options: &Options) -> Option<Preset> {
+    /// The preset a `kind` chart's `options` is exactly at, for the cell that
+    /// lights.
+    pub fn of(kind: ChartKind, options: &Options) -> Option<Preset> {
         Preset::ALL
             .into_iter()
-            .find(|p| p.apply(options) == *options)
+            .find(|p| p.apply(kind, options) == *options)
     }
 }
 
@@ -128,16 +135,39 @@ mod tests {
     /// one cell lights; the defaults are *Clean*.
     #[test]
     fn a_preset_applied_is_the_one_that_lights() {
-        assert_eq!(Preset::of(&Options::default()), Some(Preset::Clean));
-        for from in Preset::ALL {
-            for to in Preset::ALL {
-                let o = to.apply(&from.apply(&Options::default()));
-                assert_eq!(Preset::of(&o), Some(to), "{from:?} → {to:?}");
+        for kind in [ChartKind::Column, ChartKind::Scatter] {
+            assert_eq!(Preset::of(kind, &Options::default()), Some(Preset::Clean));
+            for from in Preset::ALL {
+                for to in Preset::ALL {
+                    let o = to.apply(kind, &from.apply(kind, &Options::default()));
+                    assert_eq!(
+                        Preset::of(kind, &o),
+                        Some(to),
+                        "{kind:?}: {from:?} → {to:?}"
+                    );
+                }
             }
         }
         let mut custom = Options::default();
         custom.bars.radius = 9.0;
-        assert_eq!(Preset::of(&custom), None, "an edited option lights none");
+        assert_eq!(
+            Preset::of(ChartKind::Column, &custom),
+            None,
+            "an edited option lights none"
+        );
+    }
+
+    /// *Bold* on a scatter, which draws no value labels, leaves them as they
+    /// are; on a column chart it puts them outside.
+    /// flip: `Preset::apply` ignoring the kind → fails at "a scatter's values".
+    #[test]
+    fn bold_leaves_a_scatters_value_labels_alone() {
+        let o = Options::default();
+        let scatter = Preset::Bold.apply(ChartKind::Scatter, &o);
+        assert_eq!(scatter.values, o.values, "a scatter's values");
+        assert_eq!(scatter.text.value_size, o.text.value_size);
+        let column = Preset::Bold.apply(ChartKind::Column, &o);
+        assert_eq!(column.values.position, ValuePosition::Outside);
     }
 
     /// An option no preset sets survives every preset: the category
@@ -148,7 +178,10 @@ mod tests {
         let mut o = Options::default();
         o.category_axis.grid.dashed = true;
         for p in Preset::ALL {
-            assert!(p.apply(&o).category_axis.grid.dashed, "{p:?}: kept");
+            assert!(
+                p.apply(ChartKind::Column, &o).category_axis.grid.dashed,
+                "{p:?}: kept"
+            );
         }
     }
 
@@ -157,7 +190,7 @@ mod tests {
     #[test]
     fn every_preset_changes_what_a_sankey_draws() {
         let flows = |p: Preset| {
-            let o = p.apply(&Options::default());
+            let o = p.apply(ChartKind::Sankey, &Options::default());
             format!("{:?}{:?}", o.flows, o.outline)
         };
         for (i, a) in Preset::ALL.iter().enumerate() {

@@ -176,7 +176,7 @@ impl F {
     }
 }
 
-/// *By width* writes the main's widths, 0 then [`QUERY_STEP`] apart, which its
+/// *By width* writes the main's widths, 0 then `QUERY_STEP` apart, which its
 /// instances follow; each instance's contents then read the mode of its own
 /// width, the same Card Compact at 260, Regular at 400 and Wide at 700.
 /// Flip: `modes_at_in` skipping a frame's queries reads Compact (the default)

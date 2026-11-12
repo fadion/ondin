@@ -317,7 +317,7 @@ fn a_pushed_removal_deletes_the_main_layer_and_spares_edited_copies() {
 }
 
 /// A locked main takes no push, nor one inside a locked parent:
-/// [`push::blocked`] says why and every entry point is empty.
+/// `push::blocked` says why and every entry point is empty.
 /// Two defences keep each entry point empty — its own `blocked` test and
 /// `push::inside` leaving a blocked main out — so flipping one alone stays
 /// green; flip both in `push::fields` → fails at its `is_empty`.

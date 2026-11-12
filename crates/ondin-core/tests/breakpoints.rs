@@ -131,7 +131,7 @@ fn plain() -> F {
     }
 }
 
-/// [`plain`] with Breakpoint picked by width: Mobile 0, Tablet 768, Desktop 1200.
+/// `plain` with Breakpoint picked by width: Mobile 0, Tablet 768, Desktop 1200.
 fn fixture() -> F {
     let mut f = plain();
     let ops = variable::by_width_ops(&f.doc, f.bp, true).expect("the first by width");

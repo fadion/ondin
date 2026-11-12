@@ -1,5 +1,5 @@
 //! The documents the suite measures, generated from a fixed seed so every run of
-//! one [`VERSION`] builds the same document, layer for layer.
+//! one `VERSION` builds the same document, layer for layer.
 //!
 //! Each page is built in one transaction: `Document::apply` checks the whole
 //! document per transaction, so a transaction per frame would make generation

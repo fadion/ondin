@@ -2119,10 +2119,15 @@ impl Walk<'_> {
                 )
             }
         };
-        // A ratio's derived side is left to `aspect-ratio`, as the canvas lays it.
-        let ratio = item
-            .aspect_ratio
-            .filter(|r| r.is_valid() && container::holds_ratio(kind));
+        // A ratio's derived side is left to `aspect-ratio`, as the canvas lays it,
+        // unless two insets stretch that side, which the canvas draws by them.
+        let ratio = item.aspect_ratio.filter(|r| {
+            let derived_stretched = match r.side {
+                container::RatioSide::Width => stretched.0,
+                container::RatioSide::Height => stretched.1,
+            };
+            r.is_valid() && container::holds_ratio(kind) && !derived_stretched
+        });
         let derived = |side| ratio.is_some_and(|r| r.side == side);
         if let Some(w) = w.filter(|_| !stretched.0 && !derived(container::RatioSide::Width)) {
             el.set("width", w);

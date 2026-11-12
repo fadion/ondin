@@ -1144,6 +1144,72 @@ fn aspect_ratios_match_the_canvas() {
     holds("aspect-ratio", &doc, &res);
 }
 
+/// Ratio layers whose insets stretch the side the ratio derives — one pinned on
+/// all four sides, one on top, bottom and left — are drawn by their insets, the
+/// ratio set aside, after the frame is resized; the page writes no
+/// `aspect-ratio` for them, so Chrome stretches them too.
+/// flip: `Walk::sizes` writing the ratio whatever the insets stretch → fails at
+/// the pixels (Chrome derives the side from the other).
+#[test]
+fn a_ratio_layer_stretched_on_its_derived_side_follows_its_insets() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 200.0, 160.0, "Board");
+    let px = |v| Some(LengthPct::Px(v));
+    let mut ratio_layer = |insets: Insets, at: (f64, f64)| {
+        let r = d.rect(f, at.0, at.1, 64.0, 36.0, 0.0);
+        d.fill(r, solid(60, 120, 220, 255));
+        d.apply(vec![
+            Operation::SetLayoutItem {
+                id: r,
+                item: LayoutItem {
+                    aspect_ratio: Some(AspectRatio {
+                        ratio: 16.0 / 9.0,
+                        side: RatioSide::Height,
+                    }),
+                    ..Default::default()
+                },
+            },
+            Operation::SetInsets { id: r, insets },
+        ]);
+        r
+    };
+    let both = ratio_layer(
+        Insets {
+            left: px(10.0),
+            right: px(110.0),
+            top: px(10.0),
+            bottom: px(10.0),
+            ..Default::default()
+        },
+        (10.0, 10.0),
+    );
+    let tall = ratio_layer(
+        Insets {
+            left: px(120.0),
+            top: px(10.0),
+            bottom: px(10.0),
+            ..Default::default()
+        },
+        (120.0, 10.0),
+    );
+    d.apply(vec![Operation::SetGeometry {
+        id: f,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(240.0, 200.0)),
+    }]);
+    let (doc, res) = d.done();
+    let size = |id| match res.used_kind(&doc, id) {
+        Some(NodeKind::Rect { size, .. }) => *size,
+        _ => panic!("a rect"),
+    };
+    assert_eq!(
+        (size(both), size(tall)),
+        (Size::new(120.0, 180.0), Size::new(64.0, 180.0)),
+        "the fixture: the canvas draws both by their insets"
+    );
+    holds("ratio-stretched", &doc, &res);
+}
+
 /// A hugging group with a column layout inside a frame, and children pinned by
 /// insets — one to the bottom right, one stretched across.
 #[test]

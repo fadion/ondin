@@ -47,16 +47,58 @@ pub(crate) struct ChartData {
     /// The cursor, and the other corner of the selected range.
     pub(crate) at: Cell,
     pub(crate) anchor: Cell,
-    /// A cell being typed into: its text, kept until committed or abandoned.
-    edit: Option<String>,
+    /// A cell being typed into, kept until committed or abandoned.
+    edit: Option<Typing>,
     /// A header being renamed: its column and text.
     rename: Option<(usize, String)>,
     /// The open header or row menu.
     menu: Option<Menu>,
-    /// Ask for the grid's focus on the next pass.
+    /// Ask for the keyboard on the next pass: the cell or header being typed
+    /// into takes it, else the grid. Asked once, so a press elsewhere keeps it.
     focus: bool,
     /// Scroll the cursor into view on the next pass.
     reveal: bool,
+}
+
+/// A cell being typed into: its text, its cell by row and column id, and the
+/// table it was started on. Any other change to the table (an undo, an import,
+/// an agent's edit) drops it, so `Enter` never writes into a cell that moved.
+#[derive(Clone, Debug)]
+struct Typing {
+    text: String,
+    row: usize,
+    col: ColumnId,
+    base: chart::Table,
+}
+
+impl Typing {
+    /// Typing `text` into `t`'s cell `at`; `None` when there is no such cell.
+    fn new(t: &chart::Table, at: Cell, text: String) -> Option<Self> {
+        let col = t.columns.get(at.1)?.id;
+        t.rows.get(at.0)?;
+        Some(Self {
+            text,
+            row: at.0,
+            col,
+            base: t.clone(),
+        })
+    }
+
+    /// Its cell in `t`, while `t` is still the table it was started on.
+    fn cell(&self, t: &chart::Table) -> Option<Cell> {
+        if *t != self.base {
+            return None;
+        }
+        self.at(t)
+    }
+
+    /// Its cell in `t`, unchecked against the table it was started on: for a
+    /// pass that has already dropped a stale edit ([`grid`]).
+    fn at(&self, t: &chart::Table) -> Option<Cell> {
+        let c = t.index_of(self.col)?;
+        t.rows.get(self.row)?.get(c)?;
+        Some((self.row, c))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,9 +171,24 @@ pub(crate) fn cell_of(chart: &Chart, key: Option<chart::PartKey>) -> Cell {
     let col_of = |id: u32| t.index_of(ColumnId(id));
     let at = |c: Option<ColumnId>| c.and_then(|c| t.index_of(c));
     let last = t.rows.len().saturating_sub(1);
-    let row = (key.index as usize).min(last);
+    // A category mark's index counts the categories, which leave out the rows
+    // with an empty category; a scatter's point and a flow count table rows.
+    let by_row =
+        matches!(key.role, R::Flow) || (key.role == R::Point && chart.kind == ChartKind::Scatter);
+    let row = match at(chart.mapping.category) {
+        Some(c) if !by_row => t
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, cells)| cells.get(c).is_some_and(|v| !v.trim().is_empty()))
+            .nth(key.index as usize)
+            .map_or(last, |(r, _)| r),
+        _ => (key.index as usize).min(last),
+    };
     let first_series = at(chart.mapping.series.first().copied());
     let cell = match key.role {
+        // A pie's value label is its slice's.
+        R::ValueLabel if chart.kind == ChartKind::Pie => first_series.map(|c| (row, c)),
         // A mark's value: its series' column at its row.
         R::Bar | R::Point | R::ValueLabel => col_of(key.series).map(|c| (row, c)),
         // A whole line or area, and a legend entry: its column's first row.
@@ -166,16 +223,57 @@ pub(crate) fn cell_of(chart: &Chart, key: Option<chart::PartKey>) -> Cell {
 
 // --- table edits, pure, so a test reads them without a window ------------------
 
+/// What a paste left out to keep the table inside its limits.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Cut {
+    rows: usize,
+    columns: usize,
+    cells: usize,
+}
+
+impl Cut {
+    /// The status line's note, *Pasted what fits · 2,000 rows left out*;
+    /// `None` when nothing was cut.
+    fn note(self) -> Option<String> {
+        let count = |n: usize, one: &str, many: &str| {
+            format!("{} {}", chart::grouped(n), if n == 1 { one } else { many })
+        };
+        let mut parts = Vec::new();
+        if self.rows > 0 {
+            parts.push(format!("{} left out", count(self.rows, "row", "rows")));
+        }
+        if self.columns > 0 {
+            parts.push(format!(
+                "{} left out",
+                count(self.columns, "column", "columns")
+            ));
+        }
+        if self.cells > 0 {
+            parts.push(format!(
+                "{} cut to {} characters",
+                count(self.cells, "cell", "cells"),
+                chart::MAX_CELL_CHARS
+            ));
+        }
+        (!parts.is_empty()).then(|| format!("Pasted what fits \u{b7} {}", parts.join(", ")))
+    }
+}
+
 /// `table` with `cells` written from `at` down and right, growing the table to
-/// fit (a paste from a spreadsheet); held to the table's limits.
-pub(crate) fn pasted(table: &chart::Table, at: Cell, cells: &[Vec<String>]) -> chart::Table {
+/// fit (a paste from a spreadsheet); held to the table's limits, with what
+/// they left out.
+pub(crate) fn pasted(table: &chart::Table, at: Cell, cells: &[Vec<String>]) -> (chart::Table, Cut) {
     let mut t = table.clone();
+    let mut cut = Cut::default();
     let width = cells.iter().map(Vec::len).max().unwrap_or(0);
-    while t.columns.len() < (at.1 + width).min(chart::MAX_COLUMNS) {
+    let fit_c = (at.1 + width).min(chart::MAX_COLUMNS.max(t.columns.len()));
+    cut.columns = (at.1 + width).saturating_sub(fit_c);
+    while t.columns.len() < fit_c {
         let end = t.columns.len();
         add_column(&mut t, end);
     }
-    let rows = (at.0 + cells.len()).min(chart::MAX_ROWS);
+    let rows = (at.0 + cells.len()).min(chart::MAX_ROWS.max(t.rows.len()));
+    cut.rows = (at.0 + cells.len()).saturating_sub(rows);
     while t.rows.len() < rows {
         t.rows.push(vec![String::new(); t.columns.len()]);
     }
@@ -183,38 +281,75 @@ pub(crate) fn pasted(table: &chart::Table, at: Cell, cells: &[Vec<String>]) -> c
         for (dc, cell) in line.iter().enumerate() {
             let (r, c) = (at.0 + dr, at.1 + dc);
             if r < t.rows.len() && c < t.columns.len() {
+                if cell.chars().nth(chart::MAX_CELL_CHARS).is_some() {
+                    cut.cells += 1;
+                }
                 t.rows[r][c] = cell.chars().take(chart::MAX_CELL_CHARS).collect();
             }
         }
     }
-    t
+    (t, cut)
 }
 
-/// Tab-separated text read as rows of cells, as a spreadsheet copies them.
+/// Tab-separated text read as rows of cells, as a spreadsheet copies them: a
+/// cell holding a tab, a line break or a quote comes quoted, its quotes
+/// doubled. `table_io`'s TSV reader quotes alike but drops blank lines, which
+/// in a pasted range are empty rows that keep the rows below in place.
 pub(crate) fn tsv_cells(text: &str) -> Vec<Vec<String>> {
     let text = text.strip_suffix('\n').unwrap_or(text);
     let text = text.strip_suffix('\r').unwrap_or(text);
-    text.split('\n')
-        .map(|l| {
-            l.strip_suffix('\r')
-                .unwrap_or(l)
-                .split('\t')
-                .map(str::to_string)
-                .collect()
-        })
-        .collect()
+    let mut out = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if quoted {
+            match ch {
+                '"' if chars.peek() == Some(&'"') => {
+                    chars.next();
+                    field.push('"');
+                }
+                '"' => quoted = false,
+                c => field.push(c),
+            }
+            continue;
+        }
+        match ch {
+            '"' if field.is_empty() => quoted = true,
+            '\t' => row.push(std::mem::take(&mut field)),
+            '\r' | '\n' => {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                row.push(std::mem::take(&mut field));
+                out.push(std::mem::take(&mut row));
+            }
+            c => field.push(c),
+        }
+    }
+    row.push(field);
+    out.push(row);
+    out
 }
 
-/// The range's cells as tab-separated text.
+/// The range's cells as tab-separated text, quoted as [`tsv_cells`] reads them.
 fn tsv_of(
     table: &chart::Table,
     rows: std::ops::RangeInclusive<usize>,
     cols: std::ops::RangeInclusive<usize>,
 ) -> String {
+    let quoted = |cell: &str| {
+        if cell.contains(['\t', '\n', '\r', '"']) {
+            format!("\"{}\"", cell.replace('"', "\"\""))
+        } else {
+            cell.to_string()
+        }
+    };
     rows.filter_map(|r| table.rows.get(r))
         .map(|row| {
             cols.clone()
-                .filter_map(|c| row.get(c).map(String::as_str))
+                .filter_map(|c| row.get(c).map(|c| quoted(c)))
                 .collect::<Vec<_>>()
                 .join("\t")
         })
@@ -426,6 +561,7 @@ impl OndinApp {
                 Act::Table(t) => self.commit_table(id, &chart, t),
                 Act::Chart(c) => self.commit_chart(id, *c),
                 Act::Copy(text) => ctx.copy_text(text),
+                Act::Note(text) => self.session.info(text),
             }
         }
     }
@@ -438,6 +574,8 @@ enum Act {
     Table(chart::Table),
     Chart(Box<Chart>),
     Copy(String),
+    /// A word on the status line.
+    Note(String),
 }
 
 /// A toolbar button: its glyph and word, as wide as they need.
@@ -551,6 +689,11 @@ fn grid(
     if !menu_fits {
         s.menu = None;
     }
+    // A table changed from outside (an undo, an import, an agent's edit) drops
+    // the cell being typed into, whose cell may have moved or gone.
+    if s.edit.as_ref().is_some_and(|e| e.cell(t).is_none()) {
+        s.edit = None;
+    }
 
     let grid_id = egui::Id::new(GRID_ID);
     let content = egui::vec2(GUTTER + COL_W * nc as f32, ROW_H * (nr as f32 + 1.0));
@@ -567,11 +710,14 @@ fn grid(
     scroll.show_viewport(ui, |ui, view| {
         let (rect, _) = ui.allocate_exact_size(content, egui::Sense::hover());
         let resp = ui.interact(rect, grid_id, egui::Sense::click_and_drag());
-        if s.focus {
+        // A cell or header being typed into takes the keyboard below.
+        if s.focus && s.edit.is_none() && s.rename.is_none() {
             resp.request_focus();
             s.focus = false;
         }
         if resp.has_focus() {
+            // The card holds `Tab` among its controls; the grid's moves its cursor.
+            ui::keep_tab(ui.ctx(), grid_id);
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(
                     grid_id,
@@ -627,6 +773,7 @@ fn grid(
                 (Some(r), None) if resp.secondary_clicked() => s.menu = Some(Menu::Row(r, p)),
                 (None, Some(c)) => {
                     // A header click selects its column.
+                    commit_edit_text(chart, s, linked, act);
                     s.anchor = (0, c);
                     s.at = (nr.saturating_sub(1), c);
                 }
@@ -644,8 +791,15 @@ fn grid(
             && let Some((r, c)) = at_pointer(p)
         {
             match (r, c) {
-                (Some(_), Some(_)) if !linked => s.edit = Some(t.rows[s.at.0][s.at.1].clone()),
-                (None, Some(c)) if !linked => s.rename = Some((c, t.columns[c].name.clone())),
+                (Some(_), Some(_)) if !linked => {
+                    let text = t.rows[s.at.0][s.at.1].clone();
+                    s.edit = Typing::new(t, s.at, text);
+                    s.focus = true;
+                }
+                (None, Some(c)) if !linked => {
+                    s.rename = Some((c, t.columns[c].name.clone()));
+                    s.focus = true;
+                }
                 _ => {}
             }
         }
@@ -659,12 +813,15 @@ fn grid(
         let hairline = egui::Stroke::new(1.0, theme::color::field_border());
         let font = egui::FontId::proportional(ui::CONTROL_PT);
         let numeric: Vec<bool> = t.columns.iter().map(|c| t.is_numeric(c.id)).collect();
-        // The dim grid past the table: the cells' own lines on the card's ground.
-        let v_last = ((view.max.y / ROW_H).ceil() as usize).max(nr);
-        let vc_last = (((view.max.x - GUTTER).max(0.0) / COL_W).ceil() as usize).max(nc);
+        let typing_at = s.edit.as_ref().and_then(|e| e.at(t));
+        // The dim grid past the table: the cells' own lines on the card's ground,
+        // only those in view.
+        let v_last = (view.max.y / ROW_H).ceil() as usize + 1;
+        let vc_first = ((view.min.x - GUTTER).max(0.0) / COL_W).floor() as usize;
+        let vc_last = ((view.max.x - GUTTER).max(0.0) / COL_W).ceil() as usize + 1;
         let faint = egui::Stroke::new(1.0, theme::color::card_border());
         for r in first..v_last {
-            for c in c_first..vc_last {
+            for c in vc_first..vc_last {
                 if r >= nr || c >= nc {
                     p.rect_stroke(cell_rect(r, c), 0.0, faint, egui::StrokeKind::Inside);
                 }
@@ -685,7 +842,7 @@ fn grid(
                 );
                 p.rect_stroke(rc, 0.0, hairline, egui::StrokeKind::Inside);
                 let text = &t.rows[r][c];
-                if !text.is_empty() && !(s.edit.is_some() && s.at == (r, c)) {
+                if !text.is_empty() && typing_at != Some((r, c)) {
                     let ink = if linked {
                         theme::text::muted()
                     } else {
@@ -854,19 +1011,28 @@ fn grid(
 
         // The cell being typed into turns editable in place: its ground and the
         // cursor's square edge stay the grid's, and its text where it was drawn.
-        if let Some(text) = &mut s.edit {
-            let rc = cell_rect(s.at.0, s.at.1);
-            let align = match numeric.get(s.at.1) {
+        // It takes the keyboard once; losing it to a press elsewhere commits it,
+        // as a layer's rename does, so the canvas keymap is never muted by it.
+        let mut lost = false;
+        if let (Some(e), Some((r, c))) = (&mut s.edit, typing_at) {
+            let rc = cell_rect(r, c);
+            let align = match numeric.get(c) {
                 Some(true) => egui::Align::Max,
                 _ => egui::Align::Min,
             };
             let id = egui::Id::new((GRID_ID, "cell"));
-            let resp = ui::label_edit_set(ui, rc, text, id, ui::CONTROL_PT, align);
-            if !resp.has_focus() && !ui.memory(|m| m.has_focus(resp.id)) {
+            let resp = ui::label_edit_set(ui, rc, &mut e.text, id, ui::CONTROL_PT, align);
+            if s.focus {
                 resp.request_focus();
+                s.focus = false;
             }
+            lost = resp.lost_focus();
+        }
+        if lost {
+            commit_edit_text(chart, s, linked, act);
         }
         // A header being renamed: a cell's ground under the cursor's edge.
+        let mut lost = false;
         if let Some((c, text)) = &mut s.rename {
             let hr = egui::Rect::from_min_size(
                 egui::pos2(cell_rect(0, *c).left(), hy),
@@ -877,9 +1043,14 @@ fn grid(
             p.rect_stroke(hr, 0.0, edge, egui::StrokeKind::Inside);
             let id = egui::Id::new((GRID_ID, "rename"));
             let resp = ui::label_edit_set(ui, hr, text, id, ui::SMALL_PT, egui::Align::Min);
-            if !resp.has_focus() {
+            if s.focus {
                 resp.request_focus();
+                s.focus = false;
             }
+            lost = resp.lost_focus();
+        }
+        if lost {
+            commit_rename(t, s, act);
         }
     });
 
@@ -908,19 +1079,21 @@ fn keys(
             .iter()
             .any(|e| matches!(e, egui::Event::Key { key, pressed: true, .. } if *key == k))
     };
+    // An open menu holds the keyboard: `Escape` closes only it, and the
+    // arrows leave the grid under it alone.
+    if s.menu.is_some() {
+        if pressed(egui::Key::Escape) {
+            s.menu = None;
+        }
+        return;
+    }
     if editing {
-        if let Some((c, name)) = &s.rename {
+        if s.rename.is_some() {
             if pressed(egui::Key::Escape) {
                 s.rename = None;
                 s.focus = true;
             } else if pressed(egui::Key::Enter) || pressed(egui::Key::Tab) {
-                let name = name.trim();
-                if !name.is_empty() && name != t.columns[*c].name {
-                    let mut next = t.clone();
-                    next.columns[*c].name = name.chars().take(chart::MAX_CELL_CHARS).collect();
-                    act.push(Act::Table(next));
-                }
-                s.rename = None;
+                commit_rename(t, s, act);
                 s.focus = true;
             }
             return;
@@ -970,6 +1143,7 @@ fn keys(
     if pressed(egui::Key::Tab) {
         s.at = moved(s.at, 0, if shift { -1 } else { 1 }, nr, nc);
         s.anchor = s.at;
+        s.reveal = true;
     }
     if pressed(egui::Key::Escape) {
         act.push(Act::Close);
@@ -985,8 +1159,25 @@ fn keys(
         return;
     }
     if pressed(egui::Key::F2) || pressed(egui::Key::Enter) {
-        s.edit = Some(t.rows[s.at.0][s.at.1].clone());
+        s.edit = Typing::new(t, s.at, t.rows[s.at.0][s.at.1].clone());
+        s.focus = true;
         return;
+    }
+    // Typing replaces the cell: every character this frame brought, the editor
+    // being drawn only after this pass's events are read.
+    if !command {
+        let typed: String = events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        if !typed.is_empty() {
+            s.edit = Typing::new(t, s.at, typed);
+            s.focus = true;
+            return;
+        }
     }
     if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
         let (rows, cols) = s.range();
@@ -1001,10 +1192,6 @@ fn keys(
     }
     for e in &events {
         match e {
-            egui::Event::Text(text) if !command => {
-                s.edit = Some(text.clone());
-                return;
-            }
             egui::Event::Copy => {
                 let (r, c) = s.range();
                 act.push(Act::Copy(tsv_of(t, r, c)));
@@ -1023,11 +1210,19 @@ fn keys(
             egui::Event::Paste(text) => {
                 let cells = tsv_cells(text);
                 let at = (*s.range().0.start(), *s.range().1.start());
-                act.push(Act::Table(pasted(t, at, &cells)));
+                let (next, cut) = pasted(t, at, &cells);
+                let (fit_r, fit_c) = (next.rows.len(), next.columns.len());
+                act.push(Act::Table(next));
+                if let Some(note) = cut.note() {
+                    act.push(Act::Note(note));
+                }
                 let h = cells.len().max(1);
                 let w = cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
                 s.anchor = at;
-                s.at = (at.0 + h - 1, at.1 + w - 1);
+                s.at = (
+                    (at.0 + h - 1).min(fit_r.saturating_sub(1)),
+                    (at.1 + w - 1).min(fit_c.saturating_sub(1)),
+                );
             }
             _ => {}
         }
@@ -1046,23 +1241,48 @@ fn moved(at: Cell, dr: isize, dc: isize, nr: usize, nc: usize) -> Cell {
 /// dropping it.
 fn with_typed(t: &chart::Table, s: &mut ChartData) -> chart::Table {
     let mut next = t.clone();
-    if let Some(text) = s.edit.take()
-        && let Some(cell) = next.rows.get_mut(s.at.0).and_then(|r| r.get_mut(s.at.1))
+    if let Some(e) = s.edit.take()
+        && let Some((r, c)) = e.cell(t)
     {
-        *cell = text.chars().take(chart::MAX_CELL_CHARS).collect();
+        next.rows[r][c] = e.text.chars().take(chart::MAX_CELL_CHARS).collect();
     }
     next
 }
 
-/// Write the cell being typed into, if any.
+/// Write the cell being typed into, if any, into the cell it was started on;
+/// dropped when that cell is gone or the table changed under it.
 fn commit_edit_text(chart: &Chart, s: &mut ChartData, linked: bool, act: &mut Vec<Act>) {
-    let Some(text) = s.edit.take() else { return };
-    let (r, c) = s.at;
-    if linked || chart.table.rows.get(r).and_then(|row| row.get(c)) == Some(&text) {
+    let Some(e) = s.edit.take() else { return };
+    if linked {
         return;
     }
+    let Some((r, c)) = e.cell(&chart.table) else {
+        return;
+    };
+    let text: String = e.text.chars().take(chart::MAX_CELL_CHARS).collect();
     let mut next = chart.table.clone();
-    next.rows[r][c] = text.chars().take(chart::MAX_CELL_CHARS).collect();
+    let Some(cell) = next.rows.get_mut(r).and_then(|row| row.get_mut(c)) else {
+        return;
+    };
+    if *cell == text {
+        return;
+    }
+    *cell = text;
+    act.push(Act::Table(next));
+}
+
+/// Write the header being renamed, if any: a name left empty or unchanged
+/// writes nothing.
+fn commit_rename(t: &chart::Table, s: &mut ChartData, act: &mut Vec<Act>) {
+    let Some((c, name)) = s.rename.take() else {
+        return;
+    };
+    let name: String = name.trim().chars().take(chart::MAX_CELL_CHARS).collect();
+    if name.is_empty() || t.columns.get(c).is_none_or(|col| col.name == name) {
+        return;
+    }
+    let mut next = t.clone();
+    next.columns[c].name = name;
     act.push(Act::Table(next));
 }
 
@@ -1091,14 +1311,24 @@ fn menus(
         .show(ui.ctx(), |ui| {
             ui::menu_frame(4.0).show(ui, |ui| {
                 ui.set_width(200.0);
-                let row = |ui: &mut egui::Ui, glyph, label| {
-                    ui::menu_row(
-                        ui,
-                        ui::MenuRow::new(glyph, label).enabled(!linked),
-                        ui::MENU_ROW_H,
-                    )
-                    .clicked()
+                // A row that edits the table, dimmed with its reason on a linked
+                // chart or where `room` says the table is full.
+                let lock = linked.then(|| linked_line(chart));
+                let row = |ui: &mut egui::Ui, row: ui::MenuRow, room: Option<String>| {
+                    let why = lock.clone().or(room);
+                    let resp = ui::menu_row(ui, row.enabled(why.is_none()), ui::MENU_ROW_H);
+                    match why {
+                        Some(why) => {
+                            resp.on_hover_text(why);
+                            false
+                        }
+                        None => resp.clicked(),
+                    }
                 };
+                let full_cols = (t.columns.len() >= chart::MAX_COLUMNS)
+                    .then(|| format!("At most {} columns", chart::MAX_COLUMNS));
+                let full_rows = (t.rows.len() >= chart::MAX_ROWS)
+                    .then(|| format!("At most {} rows", chart::MAX_ROWS));
                 match menu {
                     Menu::Header(c, _) => {
                         let id = t.columns[c].id;
@@ -1107,14 +1337,10 @@ fn menus(
                         } else {
                             "Use as category"
                         };
-                        if ui::menu_row(
-                            ui,
-                            ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename").enabled(!linked),
-                            ui::MENU_ROW_H,
-                        )
-                        .clicked()
-                        {
+                        if row(ui, ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename"), None) {
+                            commit_edit_text(chart, s, linked, act);
                             s.rename = Some((c, t.columns[c].name.clone()));
+                            s.focus = true;
                             s.menu = None;
                         }
                         if chart.kind != ChartKind::Sankey {
@@ -1135,6 +1361,7 @@ fn menus(
                             };
                             if resp.clicked() {
                                 let mut next = chart.clone();
+                                next.table = with_typed(t, s);
                                 next.mapping.category = Some(id);
                                 next.mapping.series.retain(|x| *x != id);
                                 act.push(Act::Chart(Box::new(next)));
@@ -1149,6 +1376,7 @@ fn menus(
                             .clicked()
                             {
                                 let mut next = chart.clone();
+                                next.table = with_typed(t, s);
                                 if shown {
                                     next.mapping.series.retain(|x| *x != id);
                                 } else {
@@ -1162,60 +1390,49 @@ fn menus(
                             }
                         }
                         ui::menu_sep(ui);
+                        // Each table edit carries the cell being typed into, in
+                        // its own cell, before the rows or columns move.
                         for (label, at) in
                             [("Insert column left", c), ("Insert column right", c + 1)]
                         {
-                            if row(ui, icon::PLUS, label) && t.columns.len() < chart::MAX_COLUMNS {
-                                let mut next = t.clone();
+                            if row(ui, ui::MenuRow::new(icon::PLUS, label), full_cols.clone()) {
+                                let mut next = with_typed(t, s);
                                 add_column(&mut next, at);
                                 act.push(Act::Table(next));
                                 s.menu = None;
                             }
                         }
                         for (label, up) in [("Sort ascending", true), ("Sort descending", false)] {
-                            if row(
-                                ui,
-                                if up { icon::ARROW_UP } else { icon::ARROW_DOWN },
-                                label,
-                            ) {
-                                act.push(Act::Table(sorted(t, c, up)));
+                            let glyph = if up { icon::ARROW_UP } else { icon::ARROW_DOWN };
+                            if row(ui, ui::MenuRow::new(glyph, label), None) {
+                                act.push(Act::Table(sorted(&with_typed(t, s), c, up)));
                                 s.menu = None;
                             }
                         }
                         ui::menu_sep(ui);
-                        if ui::menu_row(
-                            ui,
-                            ui::MenuRow::new(icon::TRASH, "Delete column")
-                                .danger(true)
-                                .enabled(!linked),
-                            ui::MENU_ROW_H,
-                        )
-                        .clicked()
-                        {
-                            act.push(Act::Chart(Box::new(without_column(chart, c))));
+                        let delete = ui::MenuRow::new(icon::TRASH, "Delete column").danger(true);
+                        if row(ui, delete, None) {
+                            let typed = Chart {
+                                table: with_typed(t, s),
+                                ..chart.clone()
+                            };
+                            act.push(Act::Chart(Box::new(without_column(&typed, c))));
                             s.menu = None;
                         }
                     }
                     Menu::Row(r, _) => {
                         for (label, at) in [("Insert row above", r), ("Insert row below", r + 1)] {
-                            if row(ui, icon::PLUS, label) && t.rows.len() < chart::MAX_ROWS {
-                                let mut next = t.clone();
+                            if row(ui, ui::MenuRow::new(icon::PLUS, label), full_rows.clone()) {
+                                let mut next = with_typed(t, s);
                                 next.rows.insert(at, vec![String::new(); t.columns.len()]);
                                 act.push(Act::Table(next));
                                 s.menu = None;
                             }
                         }
                         ui::menu_sep(ui);
-                        if ui::menu_row(
-                            ui,
-                            ui::MenuRow::new(icon::TRASH, "Delete row")
-                                .danger(true)
-                                .enabled(!linked),
-                            ui::MENU_ROW_H,
-                        )
-                        .clicked()
-                        {
-                            let mut next = t.clone();
+                        let delete = ui::MenuRow::new(icon::TRASH, "Delete row").danger(true);
+                        if row(ui, delete, None) {
+                            let mut next = with_typed(t, s);
                             next.rows.remove(r);
                             act.push(Act::Table(next));
                             s.menu = None;
@@ -1258,12 +1475,99 @@ mod tests {
     fn a_paste_grows_the_table_to_fit() {
         let t = table(&[&["a", "1"], &["b", "2"]]);
         let cells = tsv_cells("x\t9\t8\r\ny\t7\t6\r\n");
-        let next = pasted(&t, (1, 0), &cells);
+        let (next, cut) = pasted(&t, (1, 0), &cells);
+        assert_eq!(cut, Cut::default(), "nothing cut");
         assert_eq!(next.columns.len(), 3);
         assert_eq!(next.rows.len(), 3);
         assert_eq!(next.rows[1], ["x", "9", "8"]);
         assert_eq!(next.rows[2], ["y", "7", "6"]);
         assert_eq!(next.rows[0], ["a", "1", ""]);
+    }
+
+    /// A paste past the row limit keeps what fits and says how much it left out.
+    /// flip: `pasted` leaving `cut.rows` at zero → fails at "one row left out".
+    #[test]
+    fn a_paste_past_the_limits_says_what_it_cut() {
+        let t = table(&[&["a", "1"]]);
+        let cells: Vec<Vec<String>> = (0..=chart::MAX_ROWS).map(|i| vec![i.to_string()]).collect();
+        let (next, cut) = pasted(&t, (0, 0), &cells);
+        assert_eq!(next.rows.len(), chart::MAX_ROWS);
+        assert_eq!(cut.rows, 1, "one row left out");
+        assert_eq!(
+            cut.note().as_deref(),
+            Some("Pasted what fits \u{b7} 1 row left out")
+        );
+        let (_, cut) = pasted(&t, (0, 0), &[vec!["x".repeat(chart::MAX_CELL_CHARS + 1)]]);
+        assert_eq!(cut.cells, 1, "a long cell is cut");
+    }
+
+    /// A spreadsheet's quoted cells paste whole, and the window's copy quotes
+    /// them back.
+    /// flip: `tsv_cells` splitting on every line break → fails at "one row".
+    #[test]
+    fn a_quoted_paste_keeps_its_line_breaks() {
+        let cells = tsv_cells("\"North\nregion\"\t5\n\"12\"\" pipe\"\t\n\nlast\t1\r\n");
+        assert_eq!(
+            cells,
+            [
+                vec!["North\nregion".to_string(), "5".into()],
+                vec!["12\" pipe".to_string(), String::new()],
+                vec![String::new()],
+                vec!["last".to_string(), "1".into()],
+            ],
+            "one row per record, the blank one kept"
+        );
+        let t = table(&[&["North\nregion", "5"], &["12\" pipe", "x\ty"]]);
+        let back = tsv_cells(&tsv_of(&t, 0..=1, 0..=1));
+        assert_eq!(back, t.rows, "the copy reads back as it was");
+    }
+
+    /// A category mark's index counts the categories, so a row with an empty
+    /// category above it does not shift the cell; a pie's value label opens its
+    /// slice's value.
+    /// flip: `cell_of` reading the index as the table row → fails at "Mar's row".
+    #[test]
+    fn a_mark_opens_its_own_row_past_an_empty_category() {
+        let mut c = Chart::sample(ChartKind::Column);
+        c.table = table(&[&["Jan", "10"], &["", "20"], &["Mar", "30"]]);
+        c.mapping.category = Some(ColumnId(0));
+        c.mapping.series = vec![ColumnId(1)];
+        let key = |role, series, index| {
+            Some(chart::PartKey {
+                role,
+                series,
+                index,
+            })
+        };
+        assert_eq!(
+            cell_of(&c, key(chart::PartRole::Bar, 1, 1)),
+            (2, 1),
+            "Mar's row"
+        );
+        c.kind = ChartKind::Pie;
+        assert_eq!(
+            cell_of(&c, key(chart::PartRole::ValueLabel, 0, 0)),
+            (0, 1),
+            "the slice's value, not the category"
+        );
+    }
+
+    /// A cell being typed into whose row a *Delete row* emptied writes nothing
+    /// rather than indexing a table with no rows. Three defences each hold it
+    /// alone (`Typing::cell`'s base check, `Typing::at`'s bounds, the `get_mut`
+    /// in `commit_edit_text`), so no single flip bites.
+    #[test]
+    fn typing_into_a_deleted_row_writes_nothing() {
+        let one = table(&[&["a", "1"]]);
+        let mut chart = Chart::sample(ChartKind::Column);
+        chart.table = one.clone();
+        let mut s = ChartData::new(NodeId { actor: 1, seq: 1 }, (0, 0));
+        s.edit = Typing::new(&one, (0, 0), "x".into());
+        chart.table.rows.clear();
+        let mut act = Vec::new();
+        commit_edit_text(&chart, &mut s, false, &mut act);
+        assert!(act.is_empty(), "nothing written");
+        assert!(s.edit.is_none(), "the typing is dropped");
     }
 
     /// A number column sorts by value, text by letters, empty cells last.
@@ -1592,7 +1896,7 @@ mod tests {
             let data = app.chart_data.as_mut().unwrap();
             (data.at, data.anchor, data.edit) = (at, at, None);
             let drawn = text_pos(&ctx, &mut app, &text);
-            app.chart_data.as_mut().unwrap().edit = Some(text.clone());
+            app.chart_data.as_mut().unwrap().edit = Typing::new(&t, at, text.clone());
             for _ in 0..3 {
                 pass(&ctx, &mut app, Vec::new());
             }
@@ -1635,12 +1939,13 @@ mod tests {
     fn add_row_moves_onto_it_and_keeps_the_typing() {
         let ctx = egui::Context::default();
         let (mut app, id) = opened(&ctx);
-        let rows = table_of(&app, id).rows.len();
+        let t = table_of(&app, id);
+        let rows = t.rows.len();
         assert!(rows > 2, "the sample has rows to stand in");
         let data = app.chart_data.as_mut().unwrap();
         data.at = (1, 0);
         data.anchor = (1, 0);
-        data.edit = Some("typed".into());
+        data.edit = Typing::new(&t, (1, 0), "typed".into());
         let at = text_pos(&ctx, &mut app, "Add row");
         click(&ctx, &mut app, at);
         let t = table_of(&app, id);
@@ -1678,5 +1983,193 @@ mod tests {
             app.chart_data.as_ref().is_some_and(|d| d.menu.is_none()),
             "the menu closed"
         );
+    }
+
+    /// *Insert row above* while a cell is being typed into writes the typing
+    /// into its own row first, which then sits below the new one.
+    /// flip: the row menu's insert built from `t.clone()` rather than
+    /// `with_typed` → fails at "the typing kept its row".
+    #[test]
+    fn a_row_inserted_above_keeps_the_typing_in_its_row() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let t = table_of(&app, id);
+        let data = app.chart_data.as_mut().unwrap();
+        (data.at, data.anchor, data.focus) = ((1, 0), (1, 0), false);
+        data.edit = Typing::new(&t, (1, 0), "typed".into());
+        data.menu = Some(Menu::Row(1, egui::pos2(500.0, 400.0)));
+        // A new area is laid out unseen on its first pass.
+        pass(&ctx, &mut app, Vec::new());
+        let at = text_pos(&ctx, &mut app, "Insert row above");
+        click(&ctx, &mut app, at);
+        let next = table_of(&app, id);
+        assert_eq!(next.rows.len(), t.rows.len() + 1, "a row was added");
+        assert_eq!(next.rows[1][0], "", "the new row is empty");
+        assert_eq!(next.rows[2][0], "typed", "the typing kept its row");
+    }
+
+    /// A table changed from outside while a cell is being typed into drops the
+    /// typing: `Enter` then writes nowhere, not into the row that moved there.
+    /// flip: `Typing::cell` skipping the check against the table it was started
+    /// on → fails at "written nowhere".
+    #[test]
+    fn a_table_changed_under_the_typing_drops_it() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let t = table_of(&app, id);
+        let data = app.chart_data.as_mut().unwrap();
+        (data.at, data.anchor, data.focus) = ((1, 0), (1, 0), false);
+        data.edit = Typing::new(&t, (1, 0), "typed".into());
+        let chart = app.session.doc.get(id).and_then(|n| n.chart()).cloned();
+        let mut moved = t.clone();
+        moved.rows.insert(0, vec![String::new(); t.columns.len()]);
+        app.commit_table(id, &chart.unwrap(), moved);
+        pass(&ctx, &mut app, Vec::new());
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter)]);
+        let next = table_of(&app, id);
+        assert!(
+            next.rows.iter().all(|r| r[0] != "typed"),
+            "written nowhere: {:?}",
+            next.rows
+        );
+    }
+
+    /// `Escape` on an open header menu closes the menu and leaves the window.
+    /// flip: `keys` answering `Escape` with *Close* while a menu is open →
+    /// fails at "the window stays".
+    #[test]
+    fn escape_on_a_menu_closes_only_the_menu() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = opened(&ctx);
+        app.chart_data.as_mut().unwrap().menu = Some(Menu::Header(0, egui::pos2(500.0, 400.0)));
+        pass(&ctx, &mut app, Vec::new());
+        assert!(
+            ctx.memory(|m| m.has_focus(egui::Id::new(GRID_ID))),
+            "fixture: the grid has the keyboard"
+        );
+        pass(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.chart_data.is_some(), "the window stays");
+        assert!(
+            app.chart_data.as_ref().is_some_and(|d| d.menu.is_none()),
+            "the menu closed"
+        );
+    }
+
+    /// Two characters typed in one frame onto a selected cell both land.
+    /// flip: `keys` starting the edit from the first `Text` event alone →
+    /// fails at "both characters".
+    #[test]
+    fn keys_typed_in_one_frame_all_land() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        pass(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("4".into()), egui::Event::Text("2".into())],
+        );
+        pass(&ctx, &mut app, Vec::new());
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(table_of(&app, id).rows[0][0], "42", "both characters");
+    }
+
+    /// `Tab` on a wide table moves the cursor, the card's focus ring leaving it
+    /// to the grid, and scrolls it into view, as the arrows do.
+    /// flip: `keys`' `Tab` arm leaving `reveal` unset → fails at "scrolled";
+    /// `grid` not calling `ui::keep_tab` → fails at the cursor's cell.
+    #[test]
+    fn tab_scrolls_the_cursor_into_view() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut wide = Chart::sample(ChartKind::Column);
+        let mut t = table(&[&["a"; 10], &["1"; 10]]);
+        t.columns[0].name = "Category".into();
+        wide.table = t;
+        wide.mapping = chart::Mapping::guess(ChartKind::Column, &wide.table);
+        app.insert_chart_at(ondin_core::kurbo::Point::new(-4000.0, 0.0), wide);
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        let left = |ctx: &egui::Context| {
+            ctx.read_response(egui::Id::new(GRID_ID))
+                .expect("the grid is drawn")
+                .rect
+                .left()
+        };
+        let before = left(&ctx);
+        for _ in 0..8 {
+            pass(&ctx, &mut app, vec![key(egui::Key::Tab)]);
+        }
+        pass(&ctx, &mut app, Vec::new());
+        assert_eq!(app.chart_data.as_ref().map(|d| d.at), Some((0, 8)));
+        assert!(
+            left(&ctx) < before - 1.0,
+            "scrolled: {before} → {}",
+            left(&ctx)
+        );
+    }
+
+    /// A cell being typed into lets go of the keyboard when it is taken
+    /// elsewhere, and its typing lands.
+    /// flip: `grid` asking the cell's focus back every pass → fails at "let go".
+    #[test]
+    fn a_cell_typed_into_lets_go_of_the_keyboard() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        pass(&ctx, &mut app, vec![egui::Event::Text("7".into())]);
+        pass(&ctx, &mut app, Vec::new());
+        let cell = egui::Id::new((GRID_ID, "cell"));
+        assert!(
+            ctx.memory(|m| m.has_focus(cell)),
+            "fixture: the cell has the keyboard"
+        );
+        ctx.memory_mut(|m| m.surrender_focus(cell));
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        assert!(!ctx.memory(|m| m.has_focus(cell)), "let go");
+        assert_eq!(table_of(&app, id).rows[0][0], "7", "the typing landed");
+    }
+
+    /// The dim grid past a long, narrow table strokes only the cells in view.
+    /// flip: the dim grid's rows running to the table's last row → fails at
+    /// "only the view".
+    #[test]
+    fn the_dim_grid_draws_only_the_view() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut long = Chart::sample(ChartKind::Column);
+        long.table = chart::Table {
+            columns: vec![
+                chart::Column {
+                    id: ColumnId(0),
+                    name: "Category".into(),
+                },
+                chart::Column {
+                    id: ColumnId(1),
+                    name: "Value".into(),
+                },
+            ],
+            rows: (0..chart::MAX_ROWS)
+                .map(|i| vec![format!("r{i}"), i.to_string()])
+                .collect(),
+        };
+        long.mapping = chart::Mapping::guess(ChartKind::Column, &long.table);
+        app.insert_chart_at(ondin_core::kurbo::Point::new(-4000.0, 0.0), long);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut shapes = 0;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                ..Default::default()
+            };
+            let out = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+            shapes = out.shapes.len();
+        }
+        assert!(shapes < 10_000, "only the view: {shapes} shapes");
     }
 }

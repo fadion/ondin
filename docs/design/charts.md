@@ -421,8 +421,10 @@ A chart has no title or caption of its own: a text layer next to it does that, a
   its parts.
 - **Double-click opens the data window** with the cell behind the clicked mark selected
   (`query::chart_part_at` finds the part, `chart_data::cell_of` its cell): a bar's, point's or
-  value label's series at its row, a slice's value, a category label's row, a flow's row, a
-  Sankey node's first row naming it; a line, an area or a legend entry its column's first row.
+  value label's series at its row, a slice's value (its value label's too), a category label's
+  row, a flow's row, a Sankey node's first row naming it; a line, an area or a legend entry its
+  column's first row. A category mark counts the categories, which leave out the rows with an
+  empty category, so its row is found by skipping those; a scatter's point carries its row.
   Anything else selects the first cell.
 - **Resize** is the frame's: the chart lays itself out again into the new size, its type staying
   the size it is.
@@ -548,7 +550,7 @@ read, since they name this document's node ids.
   linked chart hides the adds and shows its source line under the toolbar.
 - **The grid** is one focusable region that locks the arrows, `Tab` and `Escape` while it has
   the keyboard, so the canvas keymap stays quiet (undo, redo and save still reach the
-  document). A header row of column names, each with its type tag (`Aa` text, `#` number), a
+  document); it keeps `Tab` from the card's focus ring (`ui::keep_tab`). A header row of column names, each with its type tag (`Aa` text, `#` number), a
   series' swatch, the name (dim when unmapped) and, against the right edge, its role's mark: the
   category's `icon::KEY` (11 pt, faint; tooltip *The chart's categories*, a scatter's *The chart's
   X values*) or a Sankey's *From*, *To* or *Value* in words. The name is cut with an ellipsis
@@ -560,7 +562,8 @@ read, since they name this document's node ids.
   neither scrolls nor takes a click, so only real rows and columns make the grid scroll. The
   scroll bars are hidden, as Settings' are; the wheel and the cursor still scroll it. A column
   is a number column while every non-empty cell in it parses as one; the type is read, never set.
-- **Keyboard**, the spreadsheet's: arrows move; typing starts an edit replacing the cell, `F2` or
+- **Keyboard**, the spreadsheet's: arrows and `Tab` move, scrolling the cursor into view; typing
+  starts an edit replacing the cell with every character the frame brought, `F2` or
   `Enter` edits it in place (`ui::label_edit_set`, with no ground or edge of its own, so the
   cell's ground and the cursor's edge stay and the text stays where it was drawn, right-aligned
   in a number column; a header renames the same way at `SMALL_PT`, over a field-ground cell
@@ -569,12 +572,18 @@ read, since they name this document's node ids.
   grid answers it; with nothing holding the keyboard it reaches the window through
   `OndinApp::escape`); `Delete` and `Backspace` clear the selected cells; `Shift`+arrows, a
   `Shift`-click and a drag select a range, a header click its column. `Ctrl+C` / `Ctrl+X` /
-  `Ctrl+V` read and write tab-separated text, so a range pasted from a spreadsheet lands as cells
-  from the range's corner, growing the table to fit (`chart_data::pasted`). A double-click edits
-  a cell or renames a header.
+  `Ctrl+V` read and write tab-separated text, quoted as a spreadsheet quotes a cell holding a
+  tab, a line break or a quote, so a range pasted from a spreadsheet lands as cells from the
+  range's corner, growing the table to fit (`chart_data::pasted`); what the table's limits left
+  out is said on the status line (*Pasted what fits · 2,000 rows left out*). A double-click edits
+  a cell or renames a header. A cell or header being typed into takes the keyboard once; a press
+  elsewhere commits it, as a layer's rename does, so the canvas keymap is live again. An open
+  header or row menu holds the keyboard: `Escape` closes only it.
 - **Commits**: each committed cell, paste, clear, insert, sort or delete is one `SetChart`, undo
-  step *Edit chart data*. A cell being typed into is the window's own, dropped when the window
-  closes or moves to another chart.
+  step *Edit chart data*. A cell being typed into is the window's own, kept by its row and
+  column and the table it began on: a menu edit commits it into its own cell first, a table
+  changed from outside (an undo, an import, an agent's edit) drops it, and so do closing the
+  window and moving it to another chart.
 - **Header menu** (on `ui::menu_frame`, opened by a right-click on the header at the pointer;
   a click selects the column): *Rename*, *Use as category* / *Use as X* (`icon::KEY`, dimmed on
   the column that already is, its tooltip saying so),
@@ -582,11 +591,12 @@ read, since they name this document's node ids.
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /
   *below*, *Delete row*. Both are placed by `ui::menu_place`; a menu or a rename whose column or
-  row an undo removes closes.
+  row an undo removes closes. An insert at the table's limit is disabled with *At most 64
+  columns* / *At most 10000 rows*, as the toolbar's adds are.
 - **While the import box is up** the window gives up the keyboard and is not drawn; it takes the
   keyboard back after.
 - **Linked**, the grid is read-only and says so in the line under the toolbar (*Edited in
-  sales.csv — unlink to edit here*): the menus' rows that write the table, *Rename* among them, are disabled and a
+  sales.csv — unlink to edit here*): the menus' rows that write the table, *Rename* among them, are disabled with that line as their tooltip, and a
   double-click on a header does nothing. The mapping (the menu's *Use as category* and *Show as
   series* too), series and options stay editable.
 

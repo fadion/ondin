@@ -4258,7 +4258,10 @@ impl KeyboardFocus {
         let pointed = !keyed && ctx.input(|i| i.pointer.any_pressed());
         let escaped = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let focused = ctx.memory(|m| m.focused());
-        let tab = pressed.filter(|_| focused.is_some() || !canvas_tab);
+        let kept = ctx.data(|d| d.get_temp::<egui::Id>(kept_tab_id()));
+        let tab = pressed
+            .filter(|_| focused.is_some() || !canvas_tab)
+            .filter(|_| focused.is_none() || focused != kept);
         let open = ctx.data(|d| d.get_temp::<Option<egui::LayerId>>(open_id()).flatten());
         let held = match (tab, open) {
             (Some(_), Some(top)) => holds(ctx, top, focused),
@@ -4356,6 +4359,19 @@ pub fn hold_tab(ui: &egui::Ui) {
             holders.push(layer);
         }
     });
+}
+
+/// Leaves `Tab` with the focused control `id`, which reads it itself (the chart
+/// data grid moves its cursor), rather than [`hold_tab`]'s surface moving the
+/// focus on. Call it every frame `id` holds the focus; egui's own focus lock
+/// filter does not reach the surface's ring.
+pub fn keep_tab(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|d| d.insert_temp(kept_tab_id(), id));
+}
+
+/// The control that last called [`keep_tab`].
+fn kept_tab_id() -> egui::Id {
+    egui::Id::new("focus-kept-tab")
 }
 
 /// Which frame's controls [`cycle_focus`] walks.

@@ -402,6 +402,9 @@ impl OndinApp {
             t.read = r;
         }
         if go == Some(true) || (enter && go.is_none()) {
+            // The box's `Enter` is spent here, not read again by the data
+            // window drawn after it this frame.
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let link = (t.link && t.linkable).then(|| {
                 let (modified, size) = t.stat.unwrap_or_default();
                 DataLink {

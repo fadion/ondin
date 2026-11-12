@@ -1266,8 +1266,12 @@ impl OndinApp {
     ///
     /// `artboards()` is depth-first in paint order, so the last match is the
     /// innermost frame.
-    fn frame_at_world(&self, world: Point) -> Option<NodeId> {
+    pub(crate) fn frame_at_world(&self, world: Point) -> Option<NodeId> {
+        // A chart holds no guides; one dropped over it lands on what holds it.
         self.artboards().into_iter().rev().find(|id| {
+            if crate::app::is_chart(&self.session.doc, *id) {
+                return false;
+            }
             let Some(t) = self.session.preview_world_transform(*id) else {
                 return false;
             };

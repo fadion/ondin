@@ -4876,10 +4876,12 @@ impl OndinApp {
     fn target_artboard(&self, world: Point) -> Option<(NodeId, Affine)> {
         // Reversed: `artboards()` is in z-order, so the last hit is the topmost.
         let id = self.artboards().into_iter().rev().find(|id| {
-            self.session
-                .resolved
-                .world_bounds(*id)
-                .is_some_and(|b| b.contains(world))
+            !crate::app::is_chart(&self.session.doc, *id)
+                && self
+                    .session
+                    .resolved
+                    .world_bounds(*id)
+                    .is_some_and(|b| b.contains(world))
         })?;
         Some((id, self.session.resolved.world_transform(id)?))
     }
@@ -8822,9 +8824,11 @@ impl OndinApp {
         .iter()
         .copied()
         .find(|id| {
+            // A chart picks whole, its parts never: the frame is the leaf.
             !self.is_occupied_frame(*id)
                 || group_fence(doc, *id).is_some()
                 || ondin_core::component::instance_root(doc, *id).is_some()
+                || crate::app::is_chart(doc, *id)
         })
     }
 
@@ -12290,6 +12294,38 @@ mod tests {
             node.children().iter().all(|c| !range.contains(c)),
             "the chart, not its parts"
         );
+    }
+
+    /// A chart on the page is one layer to every older door: a click there
+    /// picks it, a rect drawn over it lands beside it on the page, a guide
+    /// dropped over it scopes to no part, bulk selects take no part, and its
+    /// generated padding offers no spacing handle.
+    /// flip: `FrameIndex` keeping part frames → the draw target is a part,
+    /// failing at "not a part, nor the chart"; `pick_leaf` without its chart
+    /// arm → fails at "the chart picks".
+    #[test]
+    fn a_chart_on_the_page_is_one_layer_to_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.rail.chart = ondin_core::chart::ChartKind::Column;
+        app.choose_tool(Tool::Chart);
+        app.click_create(Point::new(-5000.0, -5000.0), false);
+        let [chart] = *app.session.selection.ids() else {
+            panic!("one layer selected");
+        };
+        let centre = app.session.resolved.world_bounds(chart).unwrap().center();
+        assert_eq!(app.pick_leaf(centre), Some(chart), "the chart picks");
+        assert_eq!(
+            app.target_artboard(centre),
+            None,
+            "not a part, nor the chart"
+        );
+        assert_eq!(app.frame_at_world(centre), None, "no guide scope inside");
+        let doc = &app.session.doc;
+        let part = doc.get(chart).unwrap().children()[0];
+        assert!(!app.may_select_in_bulk(part), "a part never in bulk");
+        assert!(app.may_select_in_bulk(chart));
+        assert!(app.spacing_subject(None).is_none(), "no spacing handles");
     }
 
     /// Alt centres the default box on the press and leaves its size alone (the centre and size assertions each catch a different wrong version).

@@ -550,7 +550,12 @@ impl OndinApp {
         // a drag the press turns into a shape. Here, so the drawing, the cursor,
         // the guide gate and the press all read the one answer —
         // `draw_hover_outline`'s precedent.
-        if !self.selecting() || self.editing_in_place() || !self.shown_visible(id) {
+        // A chart's padding and gap are its regeneration's, set on the Chart card.
+        if !self.selecting()
+            || self.editing_in_place()
+            || !self.shown_visible(id)
+            || crate::app::is_chart(&self.session.doc, id)
+        {
             return None;
         }
         let (doc, res, ov) = self.session.render_inputs();
@@ -651,7 +656,7 @@ impl OndinApp {
         let doc = &self.session.doc;
         let top = *ondin_core::hit_test(&self.session.resolved, doc, self.session.page, world, 0.0)
             .first()?;
-        let laid = doc.resolved_display(top).is_some();
+        let laid = doc.resolved_display(top).is_some() && !crate::app::is_chart(doc, top);
         let free = ondin_core::group_chain(doc, top, self.entered_group).is_empty()
             && ondin_core::component::instance_root(doc, top).is_none()
             && !ondin_core::is_effectively_locked(doc, top);

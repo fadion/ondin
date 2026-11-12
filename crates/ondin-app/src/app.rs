@@ -415,6 +415,12 @@ mod in_flight_tests {
     }
 }
 
+/// Whether `id` is a chart frame: a layer, never a container — nothing is drawn,
+/// dropped, pasted or scoped into it but its regeneration's parts.
+pub(crate) fn is_chart(doc: &ondin_core::Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| n.chart().is_some())
+}
+
 /// Whether `id` wears a name tag on the canvas: a frame, a main or a component
 /// set sitting on its page, and a variant in a set that does, whose tag is all
 /// that tells the variants apart. Anything inside another frame, group or
@@ -3612,8 +3618,10 @@ impl OndinApp {
     /// The effective lock, so a layer inside a locked group is refused too. Visibility is
     /// deliberately not part of it: a hidden layer is editable.
     pub(crate) fn may_select_in_bulk(&self, id: NodeId) -> bool {
-        // A slice is picked on its own (`crate::slice`), never swept up with the art.
+        // A slice is picked on its own (`crate::slice`), never swept up with the
+        // art; a chart's part never, as a chart selects whole.
         !ondin_core::is_effectively_locked(&self.session.doc, id)
+            && ondin_core::chart::owner(&self.session.doc, id).is_none()
             && !self
                 .session
                 .doc
@@ -4428,18 +4436,22 @@ impl OndinApp {
                 .filter(|id| matches!(doc.get(*id).map(|n| n.kind()), Some(NodeKind::Slice { .. })))
                 .collect();
             index.instances = None;
+            // A chart's generated part frames are never a frame of the page:
+            // no guide, drop or draw lands in one.
             index.frames = all
                 .into_iter()
                 .filter(|id| {
                     matches!(
                         doc.get(*id).map(|n| n.kind()),
                         Some(NodeKind::Artboard { .. })
-                    )
+                    ) && ondin_core::chart::owner(doc, *id).is_none()
                 })
                 .collect();
+            // Move destinations: a chart holds only what its regeneration makes.
             index.boxes = index
                 .frames
                 .iter()
+                .filter(|id| !is_chart(doc, **id))
                 .filter_map(|id| Some((*id, self.session.resolved.world_bounds(*id)?)))
                 .collect();
             index.at = Some(at);
@@ -5335,6 +5347,7 @@ impl OndinApp {
             doc.get(frame).map(|n| n.kind()),
             Some(NodeKind::Artboard { .. })
         ) || ondin_core::is_effectively_locked(doc, frame)
+            || is_chart(doc, frame)
         {
             return false;
         }

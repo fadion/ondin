@@ -3480,14 +3480,8 @@ impl OndinApp {
             });
         };
         let doc = &self.session.doc;
-        let node = doc.get(id).ok_or(crate::menu::NEEDS_SELECTION)?;
-        let has = match same {
-            Same::Fill => !node.paint().fills.is_empty(),
-            Same::Stroke => !node.paint().strokes.is_empty(),
-            Same::Font => !text_families(doc, id).is_empty(),
-            Same::Effect => !node.effects().is_empty(),
-        };
-        if has {
+        doc.get(id).ok_or(crate::menu::NEEDS_SELECTION)?;
+        if has_same(doc, id, same) {
             return Ok(id);
         }
         Err(match same {
@@ -3507,37 +3501,7 @@ impl OndinApp {
             return;
         };
         let doc = &self.session.doc;
-        let key = doc.get(source).expect("the source is in the document");
-        let families = text_families(doc, source);
-        let matches = |id: NodeId| -> bool {
-            let Some(n) = doc.get(id) else { return false };
-            match same {
-                Same::Fill => {
-                    n.paint().fills.len() == key.paint().fills.len()
-                        && n.paint()
-                            .fills
-                            .iter()
-                            .zip(&key.paint().fills)
-                            .all(|(a, b)| a.value == b.value)
-                }
-                Same::Stroke => {
-                    n.paint().strokes.len() == key.paint().strokes.len()
-                        && n.paint()
-                            .strokes
-                            .iter()
-                            .zip(&key.paint().strokes)
-                            .all(|(a, b)| a.value == b.value)
-                }
-                Same::Font => text_families(doc, id).iter().any(|f| families.contains(f)),
-                Same::Effect => {
-                    n.effects().len() == key.effects().len()
-                        && n.effects()
-                            .iter()
-                            .zip(key.effects())
-                            .all(|(a, b)| a.value == b.value)
-                }
-            }
-        };
+        let matches = |id: NodeId| shares(doc, source, id, same);
         let mut found = Vec::new();
         let mut stack: Vec<NodeId> = doc
             .get(self.session.page)
@@ -7391,7 +7355,7 @@ impl OndinApp {
     /// Load every font family the document's text nodes reference, so an opened
     /// file renders with its real fonts rather than the Inter fallback, with their
     /// files for the scripts the text uses and a fallback for any script none has.
-    fn ensure_document_fonts(&mut self) {
+    pub(crate) fn ensure_document_fonts(&mut self) {
         let subsets = ondin_core::fallback_fonts::subsets_of(&self.session.doc);
         self.fonts.set_document_subsets(subsets);
         let families: Vec<String> = self.document_families().into_iter().collect();
@@ -7584,6 +7548,43 @@ fn text_families(doc: &ondin_core::Document, id: NodeId) -> Vec<String> {
         }
     }
     out
+}
+
+/// Whether layer `id` has the property `same` names, which *Select same* and
+/// the agent's `find_like` match by.
+pub(crate) fn has_same(doc: &ondin_core::Document, id: NodeId, same: Same) -> bool {
+    let Some(node) = doc.get(id) else {
+        return false;
+    };
+    match same {
+        Same::Fill => !node.paint().fills.is_empty(),
+        Same::Stroke => !node.paint().strokes.is_empty(),
+        Same::Font => !text_families(doc, id).is_empty(),
+        Same::Effect => !node.effects().is_empty(),
+    }
+}
+
+/// Whether layer `id` shares `key`'s fills, strokes or effects, the whole list
+/// by value, or one of its fonts — *Select same*'s match.
+pub(crate) fn shares(doc: &ondin_core::Document, key: NodeId, id: NodeId, same: Same) -> bool {
+    let (Some(k), Some(n)) = (doc.get(key), doc.get(id)) else {
+        return false;
+    };
+    fn alike<T>(a: &[ondin_core::item::Keyed<T>], b: &[ondin_core::item::Keyed<T>]) -> bool
+    where
+        T: PartialEq,
+    {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.value == y.value)
+    }
+    match same {
+        Same::Fill => alike(&n.paint().fills, &k.paint().fills),
+        Same::Stroke => alike(&n.paint().strokes, &k.paint().strokes),
+        Same::Font => {
+            let families = text_families(doc, key);
+            text_families(doc, id).iter().any(|f| families.contains(f))
+        }
+        Same::Effect => alike(n.effects(), k.effects()),
+    }
 }
 
 /// What *Paste properties*' bindings land as in `doc` (`variable::rebind`): the

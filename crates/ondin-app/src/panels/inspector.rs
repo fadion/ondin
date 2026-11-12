@@ -5352,10 +5352,12 @@ impl OndinApp {
                     });
                 }
             }
-            // A frame's "clip content", as a switch. An overridden clip is reset by
-            // the toggle itself, so its tooltip names the main's value.
+            // A frame's "clip content", as a switch at every switch list's height.
+            // An overridden clip is reset by the toggle itself, so its tooltip
+            // names the main's value.
+            let switch_h = crate::settings::SWITCH_H;
             if let Some(clip) = clip0
-                && ui::switch_row_marked(ui, "Clip content", clip, BOOL_ROW_H, marks.clip.is_some())
+                && ui::switch_row_marked(ui, "Clip content", clip, switch_h, marks.clip.is_some())
                     .on_hover_text(match &marks.clip {
                         Some(m) => m.tip.as_str(),
                         None => "Hide anything that falls outside this frame",
@@ -5372,7 +5374,7 @@ impl OndinApp {
                     ui,
                     "Show fill in exports",
                     !hidden,
-                    BOOL_ROW_H,
+                    switch_h,
                     marks.fill_in_export.is_some(),
                 )
                 .on_hover_text(match &marks.fill_in_export {

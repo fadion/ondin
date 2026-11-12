@@ -310,7 +310,7 @@ The document's families this machine can never have, and a replace-all for each
 
 ### Clip content and Show fill in exports
 
-"Clip content" is a `switch_row`, the same control the OpenType list uses, not an `egui::checkbox`.
+"Clip content" is a `switch_row`, the same control the OpenType list uses, not an `egui::checkbox`, at every switch list's height (`settings::SWITCH_H`, 22).
 
 "Show fill in exports" sits directly under it on a frame, a `ui::switch_row_marked` that reads on while the file draws the frame's fills (`!Node::fill_hidden_in_export`, `export.md`, *Plan*). Tooltip *Paint this frame's fill in exported files. Off, the files are transparent behind its content*; undo step *Show fill in exports* with `icon::EXPORT`. A copy's override is marked through `AppearanceMarks::fill_in_export`, whose mark text names the switch's on or off.
 

@@ -2976,7 +2976,7 @@ mod tests {
         shapes.iter().find_map(|c| find(&c.shape, s))
     }
 
-    /// A click at `at` in the app's frame of [`shapes`]: move, press, release.
+    /// A click at `at` in the app's frame of `shapes`: move, press, release.
     fn click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
         let button = |pressed| egui::Event::PointerButton {
             pos: at,

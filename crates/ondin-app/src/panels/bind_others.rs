@@ -257,10 +257,22 @@ fn slot_word(key: FieldKey) -> &'static str {
 
 /// Which of `uses` start ticked in the list, and are what the offer line's
 /// one-click bind takes: those that can be bound, of a family `scope` already
-/// takes, so neither binds a locked layer or widens the scope unasked.
+/// takes, so neither binds a locked layer or widens the scope unasked. A main
+/// starts ticked only with every copy row it needs (`Use::needs`), as the
+/// bind takes it only with them, so the offer counts what it binds.
 pub(crate) fn ticked_by_default(uses: &[Use], scope: Option<Scope>) -> Vec<bool> {
-    uses.iter()
+    let own: Vec<bool> = uses
+        .iter()
         .map(|u| u.why_not.is_none() && scope.is_none_or(|s| s.contains(u.field)))
+        .collect();
+    let ticked = |k: &FieldKey| {
+        uses.iter()
+            .zip(&own)
+            .any(|(other, t)| *t && other.key == *k)
+    };
+    uses.iter()
+        .zip(&own)
+        .map(|(u, t)| *t && u.needs.iter().all(ticked))
         .collect()
 }
 

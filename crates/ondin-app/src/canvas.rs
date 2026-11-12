@@ -8220,6 +8220,16 @@ impl OndinApp {
         self.editing_in_place() || self.chrome_hold.holding()
     }
 
+    /// Whether the canvas marks the visual centres: the toggle is on, and nothing is
+    /// moving the selection. A drag or a field's scrub previews new geometry the
+    /// marks, weighed on the committed document, would lag behind.
+    pub(crate) fn visual_marks_shown(&self) -> bool {
+        self.align_visual
+            && self.mode == Mode::Normal
+            && self.drag.is_none()
+            && !self.session.has_gesture_preview()
+    }
+
     /// The visual centres of the layers the Align card's centre buttons would move
     /// by weight: the outermost selected, less the key layer, whose centre is the
     /// target. Weighed again only when the document or the selection changes.
@@ -10387,7 +10397,7 @@ impl OndinApp {
 
         // Where the Align card's visual centres would land, over the boxes and
         // under the handles.
-        if chrome && self.mode == Mode::Normal && self.align_visual {
+        if chrome && self.visual_marks_shown() {
             for at in self.visual_centre_marks() {
                 paint_visual_centre(painter, self.to_screen(at, rect, ppp) + offset);
             }

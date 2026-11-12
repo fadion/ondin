@@ -17189,6 +17189,33 @@ mod align_card_tests {
         assert_eq!(app.visual_centre_marks(), vec![p]);
     }
 
+    /// The marks hide while a drag or a scrub moves the selection: they are weighed
+    /// on the committed document and would stay behind.
+    ///
+    /// flip: `visual_marks_shown` ignoring the drag → fails at "hidden while dragging".
+    #[test]
+    fn the_marks_hide_while_the_selection_moves() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, play, _) = app_with_play(&ctx);
+        assert!(!app.visual_marks_shown(), "off with the toggle");
+        app.align_visual = true;
+        assert!(app.visual_marks_shown());
+        app.drag = crate::preview::Drag::Move {
+            anchor: Point::new(0.0, 0.0),
+        };
+        assert!(!app.visual_marks_shown(), "hidden while dragging");
+        app.drag = crate::preview::Drag::None;
+        let (doc, res) = (&app.session.doc, &app.session.resolved);
+        let nudge = build::move_by_world(doc, res, &[play], Vec2::new(4.0, 0.0)).unwrap();
+        app.session.set_preview(&nudge);
+        assert!(
+            app.session.has_gesture_preview(),
+            "fixture: a gesture's preview"
+        );
+        assert!(!app.visual_marks_shown(), "hidden while a scrub previews");
+    }
+
     /// The status line names the text layers measured by their box.
     #[test]
     fn the_status_names_the_text_that_fell_back() {

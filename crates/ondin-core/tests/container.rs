@@ -673,6 +673,145 @@ fn a_layer_moved_inside_a_stretched_group_stays_where_it_was_put() {
     );
 }
 
+/// An edit that changes a pinned group's union without moving a layer —
+/// deleting, hiding or adding one — moves nothing already drawn, at the
+/// group's own size and stretched alike: a frame 200 × 100 holding a group
+/// pinned 0% on every side, with rect A on the left half and B on the right.
+/// flip: `keep_stretched` without its `reunited` groups → B is drawn across
+/// the whole box, failing at "B stays put".
+#[test]
+fn deleting_hiding_or_adding_in_a_pinned_group_moves_nothing_else() {
+    for stretched in [false, true] {
+        for edit in ["delete", "hide", "add"] {
+            let mut s = Scene::new();
+            let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+            let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+            let a = s.add(g, rect(100.0, 100.0), (0.0, 0.0));
+            let b = s.add(g, rect(100.0, 100.0), (100.0, 0.0));
+            s.pin(g, all_pct(0.0));
+            if stretched {
+                s.resize(f, 400.0, 100.0);
+            }
+            let (was_a, was_b) = (s.bounds(a), s.bounds(b));
+            match edit {
+                "delete" => s.commit(vec![Operation::DeleteNode { id: a }]),
+                "hide" => s.commit(vec![Operation::SetVisible {
+                    id: a,
+                    visible: false,
+                }]),
+                _ => {
+                    s.add(g, rect(50.0, 50.0), (200.0, 0.0));
+                }
+            }
+            assert_eq!(
+                s.bounds(b),
+                was_b,
+                "{edit}, stretched {stretched}: B stays put"
+            );
+            if edit == "add" {
+                assert_eq!(s.bounds(a), was_a, "{edit}, stretched {stretched}: A too");
+            }
+        }
+    }
+}
+
+/// A frame with a layout inside a stretched group keeps its share of the box,
+/// as a frame without one does: frame 200 × 100 resized to 400, the group
+/// pinned 0% holding rect A on the left half and frame L, laid out, on the
+/// right half. L is drawn at 200–400.
+/// flip: `used_geometry` placing a layout root by `root_used` alone → L stays
+/// at 100–200, failing at "its share".
+#[test]
+fn a_laid_out_frame_in_a_stretched_group_keeps_its_share() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(100.0, 100.0), (0.0, 0.0));
+    let l = s.add(g, frame(100.0, 100.0), (100.0, 0.0));
+    s.add(l, rect(20.0, 20.0), (0.0, 0.0));
+    s.commit(vec![Operation::SetDisplay {
+        id: l,
+        display: Some(ondin_core::container::Display::Flex(
+            ondin_core::container::Flex::default(),
+        )),
+    }]);
+    s.pin(g, all_pct(0.0));
+    s.resize(f, 400.0, 100.0);
+    assert_eq!(
+        s.bounds(l),
+        Rect::new(200.0, 0.0, 400.0, 100.0),
+        "its share"
+    );
+}
+
+/// A path its insets squeeze to no height keeps its end inset through an
+/// unrelated nudge, and comes back at its own height when the frame grows.
+/// flip: `keep_insets` judging stretch on the used kind → bottom 40, failing
+/// at "bottom kept".
+#[test]
+fn a_squeezed_path_keeps_its_end_inset_through_a_nudge() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 300.0), (0.0, 0.0));
+    let p = s.add(f, square(0.0, 0.0, 100.0, 180.0), (0.0, 60.0));
+    let px = |v: f64| Some(LengthPct::Px(v));
+    s.pin(
+        p,
+        Insets {
+            left: px(0.0),
+            top: px(60.0),
+            bottom: px(60.0),
+            ..Default::default()
+        },
+    );
+    s.resize(f, 200.0, 100.0);
+    let drawn = s.res.used_local(&s.doc, p).unwrap();
+    s.commit(vec![Operation::SetTransform {
+        id: p,
+        transform: Affine::translate((10.0, 0.0)) * drawn,
+    }]);
+    assert_eq!(
+        s.doc.get(p).unwrap().insets().bottom,
+        px(60.0),
+        "bottom kept"
+    );
+}
+
+/// A layer nudged inside a group squeezed to no width keeps its share there:
+/// back at the group's own width, it is drawn where it was.
+/// flip: `keep_stretched` without its flat-axis arm → B at 0–200, failing at
+/// "its share".
+#[test]
+fn a_nudge_in_a_squeezed_group_keeps_the_layers_share() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(100.0, 100.0), (0.0, 0.0));
+    let b = s.add(g, rect(100.0, 100.0), (100.0, 0.0));
+    let px = Some(LengthPct::Px(0.0));
+    s.pin(
+        g,
+        Insets {
+            left: px,
+            right: px,
+            top: px,
+            bottom: px,
+            ..Default::default()
+        },
+    );
+    s.resize(f, 0.0, 100.0);
+    let drawn = s.res.used_local(&s.doc, b).unwrap();
+    s.commit(vec![Operation::SetTransform {
+        id: b,
+        transform: Affine::translate((0.0, 5.0)) * drawn,
+    }]);
+    s.resize(f, 200.0, 100.0);
+    let at = s.bounds(b);
+    assert!(
+        (at.x0 - 100.0).abs() < 1e-6 && (at.x1 - 200.0).abs() < 1e-6,
+        "its share: {at:?}"
+    );
+}
+
 /// A layer moved out past a stretched group's box grows the box without moving
 /// anything already drawn: the pinned group takes new insets.
 /// flip: `keep_stretched` skipping the groups above → fails at "the rect has

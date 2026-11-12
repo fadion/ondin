@@ -412,6 +412,27 @@ fn used_geometry(
                 ..Used::default()
             });
         }
+        // A layout root inside a stretched group keeps its share of the
+        // group's box, as every sibling does, at the size its pass gave it.
+        if let Some(stretch) = node
+            .parent()
+            .and_then(|p| used.get(&p))
+            .and_then(|u| u.stretch)
+            .filter(|s| !(s.is_identity() && s.from.origin() == s.to.origin()))
+            && let (kind, frame) = crate::container::root_sized(&DocView(doc), id, l.size)
+            && let Some(own) = kind
+                .clone()
+                .or_else(|| doc.resolved_kind(id).map(std::borrow::Cow::into_owned))
+            && let Some((local, stretched, _)) =
+                crate::container::place_in_stretch(&stretch, node.transform(), &own, None)
+        {
+            return Some(Used {
+                local: Some(local),
+                kind: stretched.or(kind),
+                frame,
+                ..Used::default()
+            });
+        }
         return root_used(doc, used, node, l.size);
     }
     let parent = doc.get(node.parent()?)?;

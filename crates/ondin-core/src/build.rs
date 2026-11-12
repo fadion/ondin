@@ -8930,8 +8930,10 @@ fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
 /// in the group's specified space ([`crate::container::unstretched`]), and
 /// each plain group above it up to the pinned one is placed again so that its
 /// new union is drawn where the old map put it — the pinned group by new
-/// insets, a group inside it by a new transform. A pinned group moved whole
-/// takes new insets. Every other layer passes through.
+/// insets, a group inside it by a new transform. So is every group whose union
+/// the edit changes otherwise: a layer deleted, hidden, masked, retyped, made,
+/// pasted, or dragged in or out. A pinned group moved whole takes new insets.
+/// Every other layer passes through.
 ///
 /// An axis-aligned map is fixed by any two boxes it takes onto each other, so
 /// placing the new union where the old map puts it draws every layer inside
@@ -8943,11 +8945,19 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         doc.get(id)
             .is_some_and(|n| placed_by_contents(n.kind(), n.display()) && n.insets().is_authored())
     };
-    // The plain groups and booleans `id` sits in, innermost first, up to the
+    // Where a layer the edit reparents now sits: it is inside the groups it
+    // lands in, not those it left.
+    let landed: FxHashMap<NodeId, NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::Reparent { id, new_parent, .. } => Some((*id, *new_parent)),
+                _ => None,
+            })
+            .collect();
+    // The plain groups and booleans from `at` up, innermost first, up to the
     // outermost pinned one.
-    let chain = |id: NodeId| -> Vec<NodeId> {
+    let chain_from = |mut at: Option<NodeId>| -> Vec<NodeId> {
         let mut out = Vec::new();
-        let mut at = doc.get(id).and_then(|n| n.parent());
         while let Some(p) = at.and_then(|p| doc.get(p)) {
             if !placed_by_contents(p.kind(), p.display()) {
                 break;
@@ -8963,6 +8973,39 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
             None => Vec::new(),
         }
     };
+    // The groups `id` sits in, after the edit.
+    let chain = |id: NodeId| -> Vec<NodeId> {
+        let parent = landed
+            .get(&id)
+            .copied()
+            .or_else(|| doc.get(id).and_then(|n| n.parent()));
+        chain_from(parent)
+    };
+    // The groups whose union the edit changes without moving a layer: a layer
+    // deleted, hidden, masked, retyped, made, pasted or dragged in or out. Each
+    // is placed again below, so nothing already drawn in it moves.
+    let mut reunited: Vec<NodeId> = Vec::new();
+    for op in &tx.0 {
+        match op {
+            Operation::DeleteNode { id }
+            | Operation::SetVisible { id, .. }
+            | Operation::SetVisibleVar { id, .. }
+            | Operation::SetMask { id, .. }
+            | Operation::SetText { id, .. }
+            | Operation::SetTextStyle { id, .. } => {
+                reunited.extend(chain_from(doc.get(*id).and_then(|n| n.parent())));
+            }
+            Operation::CreateNode { parent, .. } | Operation::InsertSubtree { parent, .. } => {
+                reunited.extend(chain_from(Some(*parent)));
+            }
+            Operation::Reparent { id, new_parent, .. } => {
+                reunited.extend(chain_from(doc.get(*id).and_then(|n| n.parent())));
+                reunited.extend(chain_from(Some(*new_parent)));
+            }
+            _ => {}
+        }
+    }
+    reunited.retain(|g| doc.get(*g).is_some() && !doc.in_vault(*g));
     let mut moved: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
     // Groups whose insets the edit sets itself: it writes what it means inside
     // them (the Position card, baking a stretched group's contents as it re-pins).
@@ -8984,6 +9027,7 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
             _ => {}
         }
     }
+    reunited.retain(|g| !explicit.contains(g));
     let inside: Vec<NodeId> = {
         let mut v: Vec<NodeId> = moved
             .keys()
@@ -9010,7 +9054,7 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         v.sort();
         v
     };
-    if inside.is_empty() && whole.is_empty() {
+    if inside.is_empty() && whole.is_empty() && reunited.is_empty() {
         return tx;
     }
     let mut after = doc.clone();
@@ -9040,8 +9084,9 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         Rect::from_points(at(r.x0, r.y0), at(r.x1, r.y1))
     };
     let mut out = tx;
+    let edit_len = out.0.len();
     // Each edited layer, written back in its group's specified space.
-    let mut groups: Vec<NodeId> = Vec::new();
+    let mut groups: Vec<NodeId> = reunited;
     for id in inside {
         let Some(node) = after.get(id) else { continue };
         let Some(parent) = node.parent() else {
@@ -9070,6 +9115,21 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
         let Some((stored, back)) = crate::container::unstretched(&s, local, &kind, contents) else {
             continue;
         };
+        // On an axis the group is squeezed to nothing, the map back has no
+        // share to read: the layer keeps its stored place there, or a nudge
+        // would store its collapsed one and lose its share for good.
+        let stored = {
+            let flat = |to: f64, from: f64| to <= crate::container::FLAT_EXTENT && from > to;
+            let was = doc.get(id).map_or(stored, |n| n.transform()).as_coeffs();
+            let mut c = stored.as_coeffs();
+            if flat(s.to.width(), s.from.width()) {
+                c[4] = was[4];
+            }
+            if flat(s.to.height(), s.from.height()) {
+                c[5] = was[5];
+            }
+            Affine::new(c)
+        };
         // A move alone keeps the stored kind: the stretched one read back is it,
         // up to float noise.
         let back = if geometry_changed {
@@ -9082,8 +9142,13 @@ fn keep_stretched(doc: &Document, res: &Resolved, tx: Transaction) -> Transactio
     // Each group above, innermost first, placed again by its new union.
     groups.sort_by_key(|g| std::cmp::Reverse(depth_of(doc, *g)));
     groups.dedup();
-    let mut settled = after.clone();
-    if settled.apply_unchecked(&out).is_err() {
+    // `after` already holds the edit; only what was baked above goes on it —
+    // the edit applied twice would refuse a second delete.
+    let mut settled = after;
+    if settled
+        .apply_unchecked(&Transaction(out.0[edit_len..].to_vec()))
+        .is_err()
+    {
         return out;
     }
     for g in groups.into_iter().chain(whole) {
@@ -9278,7 +9343,10 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         let Some(bx) = crate::geometry::local_bounds(&kind, None) else {
             continue;
         };
-        let insets = crate::container::inverse(node.insets(), frame, local, bx, &kind);
+        // Which axes stretch is the stored kind's, as `place` reads it: a used
+        // kind its insets squeezed flat would read a path as flat, and rewrite
+        // an end inset it never set.
+        let insets = crate::container::inverse(node.insets(), frame, local, bx, node.kind());
         if insets != *node.insets() {
             out.0.push(Operation::SetInsets { id, insets });
         } else if !geometry_changed

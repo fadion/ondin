@@ -341,7 +341,7 @@ pub fn scale_pins(frame: Size, local: Affine, bx: Rect) -> Insets {
 
 /// The extent below which a path's axis is flat and does not stretch: scaling
 /// from a box this thin multiplies its float noise into the drawing.
-const FLAT_EXTENT: f64 = 1e-6;
+pub(crate) const FLAT_EXTENT: f64 = 1e-6;
 
 /// Whether `kind` can be placed by insets at all — every kind with a box of its
 /// own. A group and a boolean take their box from their children and are not

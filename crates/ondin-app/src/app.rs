@@ -983,6 +983,9 @@ pub struct OndinApp {
     pub(crate) export_turns: crate::panels::ExportTurns,
     /// The window's context, for work that must wake the frame loop from a worker.
     pub(crate) egui_ctx: egui::Context,
+    /// The MCP endpoint agents reach this window through; `None` in tests and
+    /// when it could not be made.
+    pub(crate) mcp: Option<crate::mcp::window::WindowHost>,
     /// The styles and variables browser; it shares a place with the insert picker.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
     /// The browser's collapsed groups per document root; view state, not saved.
@@ -1610,6 +1613,7 @@ impl OndinApp {
         );
         app.updater = crate::update::Updater::start(&cc.egui_ctx);
         app.spell = crate::spell::Speller::system(&cc.egui_ctx);
+        app.mcp = crate::mcp::window::start(&cc.egui_ctx);
         app.open_at_launch(open.as_deref());
         app
     }
@@ -1832,6 +1836,7 @@ impl OndinApp {
             png_copy: None,
             export_turns: Default::default(),
             egui_ctx: ctx.clone(),
+            mcp: None,
             var_browser: None,
             var_collapsed: Default::default(),
             var_collection: Default::default(),
@@ -2039,6 +2044,8 @@ impl eframe::App for OndinApp {
     /// work a quit reads, taken after every early return of the body so an edit
     /// made anywhere in the frame counts.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Before input, so this frame draws the agents' edits and acts on them.
+        self.drain_mcp();
         self.frame_body(ui, frame);
         #[cfg(target_os = "macos")]
         crate::quit::set_unsaved(self.any_unsaved());

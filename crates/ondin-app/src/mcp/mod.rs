@@ -9,6 +9,7 @@
 pub(crate) mod endpoint;
 pub(crate) mod proxy;
 pub(crate) mod serve;
+pub(crate) mod window;
 
 use crate::session::EditorSession;
 use ondin_core::NodeId;

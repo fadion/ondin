@@ -93,6 +93,22 @@ pub(crate) struct Parked {
     kit_return: Option<(PathBuf, String)>,
 }
 
+impl Parked {
+    /// A document opened straight into a tab behind, never shown yet: an agent's
+    /// `use_document` (`mcp::window`).
+    pub(crate) fn opened(session: EditorSession) -> Self {
+        Self {
+            session,
+            recovery_key: None,
+            recovery_at: None,
+            recovery_last: None,
+            last_autosave: Instant::now(),
+            collapsed: Default::default(),
+            kit_return: None,
+        }
+    }
+}
+
 impl Tabs {
     /// One tab, active and in front: the state the headless app starts in, its
     /// starter document open as the launch screen never leaves it.

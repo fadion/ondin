@@ -188,8 +188,11 @@ or turned, which value labels fit.
   label is not drawn over the legend (`generate::turned_label`, the one placement every axis
   label takes). Value tick marks sit at the ticks, category ones at the centre of every category
   a label is written for, thinned with the labels (a scatter's at its X ticks). Past
-  `MEASURE_ALL_CATEGORIES` categories only the longest labels by characters are measured, the rest
-  standing in at the widest and tallest of them for the axis's reach and thinning, and the labels
+  `MEASURE_ALL_CATEGORIES` categories each label's width is estimated as the sum of its
+  characters' advances (each character measured once, whitespace between two letters), only the
+  widest by that estimate are measured, the rest standing in at the widest and tallest of those and
+  of the estimates for the axis's reach and thinning (a count of characters would let a few long
+  narrow labels stand in for many wide ones), and the labels
   written are measured again once thinned (`generate::category_boxes`): measuring every label of a
   long axis cost most of a generation. A pie or donut sits in a square frame
   (`aspect-ratio: 1`) centred in the plot.

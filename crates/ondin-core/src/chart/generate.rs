@@ -978,20 +978,47 @@ fn legend_items(
 /// generation (10,000 labels took about 90 ms).
 const MEASURE_ALL_CATEGORIES: usize = 256;
 
-/// Each category label's box. Past [`MEASURE_ALL_CATEGORIES`] only the
-/// longest by characters are measured, and every other label stands in at
-/// the widest and tallest of them: the axis's reach and thinning read the
-/// largest box, and the labels written are measured again once thinned.
+/// Each category label's box. Past [`MEASURE_ALL_CATEGORIES`] each label's
+/// width is estimated as the sum of its characters' advances, the widest by
+/// that estimate are measured, and every other label stands in at the widest
+/// and tallest of those and of the estimates: the axis's reach and thinning
+/// read the largest box, and the labels written are measured again once thinned.
 fn category_boxes(names: &[String], measure: impl Fn(&str) -> Rect) -> Vec<Rect> {
     if names.len() <= MEASURE_ALL_CATEGORIES {
         return names.iter().map(|c| measure(c)).collect();
     }
-    let mut longest: Vec<usize> = (0..names.len()).collect();
-    longest.sort_by_key(|i| std::cmp::Reverse(names[*i].chars().count()));
-    longest.truncate(64);
-    let measured: Vec<(usize, Rect)> = longest.iter().map(|i| (*i, measure(&names[*i]))).collect();
-    let widest = measured.iter().map(|(_, b)| b.width()).fold(0.0, f64::max);
-    let tallest = measured.iter().map(|(_, b)| b.height()).fold(0.0, f64::max);
+    // A lone space sets no width, so whitespace is measured between letters.
+    let between = measure("xx").width();
+    let mut advance: rustc_hash::FxHashMap<char, f64> = Default::default();
+    let mut tallest: f64 = 0.0;
+    let mut estimate = vec![0.0; names.len()];
+    for (e, name) in estimate.iter_mut().zip(names) {
+        for c in name.chars() {
+            *e += *advance.entry(c).or_insert_with(|| {
+                let b = if c.is_whitespace() {
+                    let b = measure(&format!("x{c}x"));
+                    b.with_size((b.width() - between, b.height()))
+                } else {
+                    measure(c.encode_utf8(&mut [0; 4]))
+                };
+                tallest = tallest.max(b.height());
+                b.width().max(0.0)
+            });
+        }
+    }
+    let mut widest_first: Vec<usize> = (0..names.len()).collect();
+    widest_first.sort_by(|a, b| estimate[*b].total_cmp(&estimate[*a]));
+    let (exact, rest) = widest_first.split_at(64);
+    let measured: Vec<(usize, Rect)> = exact.iter().map(|i| (*i, measure(&names[*i]))).collect();
+    let widest = measured
+        .iter()
+        .map(|(_, b)| b.width())
+        .chain(rest.iter().map(|i| estimate[*i]))
+        .fold(0.0, f64::max);
+    let tallest = measured
+        .iter()
+        .map(|(_, b)| b.height())
+        .fold(tallest, f64::max);
     let mut out = vec![Rect::new(0.0, 0.0, widest, tallest); names.len()];
     for (i, b) in measured {
         out[i] = b;
@@ -3858,25 +3885,48 @@ fn value_place(
 mod category_box_tests {
     use super::*;
 
-    /// Past the cap only the longest labels are measured, the rest standing
-    /// in at their widest, so no box is under its label's real size.
-    /// flip: `category_boxes` measuring none past the cap → its count of
-    /// measured labels is 0, failing at "the longest".
+    /// A width where `W` is three times `i`, and leading and trailing spaces
+    /// set nothing, as in a laid line.
+    fn weighted(s: &str) -> Rect {
+        let w: f64 = s
+            .trim()
+            .chars()
+            .map(|c| if c == 'W' { 3.0 } else { 1.0 })
+            .sum();
+        Rect::new(0.0, 0.0, w, 10.0)
+    }
+
+    /// Past the cap only 64 labels are measured whole, and no box is under its
+    /// label's real size, though the labels longest by characters are the
+    /// narrowest and the widest are wide only with their spaces.
+    /// flip: `category_boxes` measuring a space alone, or picking the labels
+    /// longest by characters with the stand-in from those alone → fails at
+    /// "never under a label's size". Either the ranking or the stand-in alone
+    /// keeps the boxes covered.
     #[test]
-    fn many_labels_measure_only_the_longest() {
-        let names: Vec<String> = (0..1000).map(|i| "x".repeat(1 + i % 50)).collect();
-        let count = std::cell::Cell::new(0);
+    fn many_labels_measure_only_the_widest() {
+        let names: Vec<String> = (0..1000)
+            .map(|i| match i % 3 {
+                0 => "i".repeat(12),
+                1 => "W".repeat(7),
+                _ => "W W W W W W".to_string(),
+            })
+            .collect();
+        let real: Vec<f64> = names[..3].iter().map(|n| weighted(n).width()).collect();
+        assert_eq!(real, [12.0, 21.0, 23.0], "the fixture's widths");
+        let whole = std::cell::Cell::new(0);
         let boxes = category_boxes(&names, |s| {
-            count.set(count.get() + 1);
-            Rect::new(0.0, 0.0, s.len() as f64, 10.0)
+            if names.iter().any(|n| n == s) {
+                whole.set(whole.get() + 1);
+            }
+            weighted(s)
         });
-        assert_eq!(count.get(), 64, "the longest");
-        assert!(
-            boxes
-                .iter()
-                .zip(&names)
-                .all(|(b, n)| b.width() >= n.len() as f64),
-            "never under a label's size"
-        );
+        assert_eq!(whole.get(), 64, "measured whole");
+        for (b, n) in boxes.iter().zip(&names) {
+            assert!(
+                b.width() >= weighted(n).width(),
+                "never under a label's size: {n}"
+            );
+        }
     }
 }

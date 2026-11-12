@@ -1,13 +1,36 @@
 # Ondin — Roadmap
 
-Open work only. The **Later** sections wait on each other or on a stated trigger;
+Open work only. **Now** is in the order it is taken up; **Later** waits on a stated trigger;
 **Considerations** are ideas not yet decided. Decided non-goals are in `non-goals.md`; built
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read
 the code before picking an item up — an item's premise can go stale while its ask still reads
 true.
 
-## Later
+## Now
 
+- **Tangent and perpendicular point snaps** — two more kinds for `snap::point_target`, beside
+  anchor, intersection, midpoint, centre and on path, so a logo's line meets a circle exactly
+  instead of by eye. *Tangent*: the point on a curve where the line from the run's previous anchor
+  touches it. *Perpendicular*: the foot of that line on a segment. They need the previous anchor,
+  so they apply to the pen and a line's or a dragged point's other end, not to a first anchor.
+  Drawn by `canvas::draw_snap_target` with its ring and a pill, as the others are; place them in
+  the precedence order.
+- **ICO and ICNS export** — favicon and app-icon files without a trip to another tool. An ICO holds
+  several PNG sizes in one file (16, 32, 48 by default; up to 256) and the `image` crate writes it;
+  an ICNS holds the macOS ladder (16 to 1024). Each is an export format whose spec lists sizes
+  instead of one scale, rendered through `png::raster_of` once per size. Includes a one-pick size
+  set for the export panel, a CLI flag, and a decision on whether the small sizes take a
+  pixel-fitted render or only the scaled one.
+- **A multi-size preview** — a card that keeps the selected frame drawn at several fixed pixel
+  sizes at once (16, 20, 24, 32, 48 by default), at 1x and on a light and a dark ground, updating as
+  it is edited, so a small icon is judged at the sizes it ships at without zooming back and forth.
+  Reuses pixel preview's 1x raster path; renders on a worker, as the trace and offset cards do.
+  Settle its door (View menu, palette, a chord) and whether it can float beside the canvas while
+  the pen is in use.
+- **Align by visual centre** — an option that aligns on a shape's centre of mass (from its outline's
+  area, curves included) rather than its box's centre, so a play triangle sits centred in its
+  circle. Box centre stays the default. Build it only if it finds a clean place in the Align
+  controls; also consider *Centroid* as a point snap.
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run

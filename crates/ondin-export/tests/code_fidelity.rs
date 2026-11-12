@@ -3133,6 +3133,132 @@ fn a_width_query_is_written_as_a_container_query() {
     assert!(marked, "no file marks the frame with its query");
 }
 
+/// **A width query picks in the browser as on the canvas**: a padded *Card*
+/// whose child's fill reads a *Density* colour, used with a content box exactly
+/// at Wide's 320 (Wide, the threshold inclusive as `min-width` is), just below
+/// it (Compact), wide enough only with its padding (Compact: the content box is
+/// what is queried), and narrow but pinned to Wide on the use (`data-pin`).
+/// flip: `Tokens::query_blocks` writing no pin blocks → 136.7 at the pinned use.
+#[test]
+fn a_width_querys_pick_matches_the_canvas() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, CollectionId, Mode, Value, VarKind, Variable};
+    let mut d = Doc::new();
+    let (compact, wide) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (index, (id, name)) in [(compact, "Compact"), (wide, "Wide")]
+        .into_iter()
+        .enumerate()
+    {
+        d.apply(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let (red, blue) = (
+        Color::from_rgba8(230, 70, 50, 255),
+        Color::from_rgba8(60, 120, 240, 255),
+    );
+    let ink = d.ids.mint_var();
+    d.apply(vec![
+        Operation::SetCollectionName {
+            id: CollectionId::FIRST,
+            name: "Density".into(),
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "ink".into(),
+                kind: VarKind::Color,
+                cells: [(compact, Cell::Color(red)), (wide, Cell::Color(blue))]
+                    .into_iter()
+                    .collect(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let board = d.frame(None, 0.0, 0.0, 360.0, 250.0, "Board");
+    let card = d.frame(Some(board), 10.0, 0.0, 340.0, 40.0, "Card");
+    let dot = d.rect(card, 0.0, 0.0, 60.0, 20.0, 0.0);
+    d.apply(vec![
+        Operation::SetFills {
+            id: dot,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: ink,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+        Operation::SetDisplay {
+            id: card,
+            display: Some(Display::Flex(Flex {
+                padding: [10.0, 10.0, 10.0, 10.0],
+                ..Default::default()
+            })),
+        },
+        Operation::SetQueries {
+            id: card,
+            queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+        },
+        Operation::SetComponent {
+            id: card,
+            component: true,
+        },
+    ]);
+    // At the threshold, just below it, wide only with its padding, and pinned.
+    let mut uses = Vec::new();
+    for (i, width) in [340.0, 339.0, 330.0, 200.0].into_iter().enumerate() {
+        let y = 50.0 * (i + 1) as f64;
+        let (tx, used) = ondin_core::build::place_instance(
+            &d.doc,
+            &mut d.ids,
+            card,
+            board,
+            Some(Point::new(180.0, y + 20.0)),
+        )
+        .expect("an instance");
+        d.apply(tx.0);
+        let res = Resolved::rebuild(&d.doc);
+        let tx = ondin_core::edit::resize_to(&d.doc, &res, used, Size::new(width, 40.0));
+        d.apply(tx.0);
+        uses.push(used);
+    }
+    d.apply(vec![Operation::SetModes {
+        id: uses[3],
+        modes: vec![wide],
+    }]);
+    let (doc, res) = d.done();
+    let drawn = |used: NodeId| {
+        let dot = ondin_core::build::subtree_nodes(&doc, &[used])
+            .into_iter()
+            .find(|n| doc.get(*n).unwrap().name() == "Rect")
+            .unwrap();
+        doc.resolve_var(dot, ink)
+    };
+    assert_eq!(
+        uses.iter().map(|u| drawn(*u)).collect::<Vec<_>>(),
+        [blue, red, red, blue].map(|c| Some(Value::Color(c))),
+        "the fixture: Wide at the threshold, Compact below it and padded, Wide pinned"
+    );
+    holds_as(
+        "width-query-picks",
+        &doc,
+        &res,
+        0,
+        MAX_CELL_ERROR,
+        html_of_components,
+    );
+}
+
 /// **A query container whose width would come from its content is measured
 /// empty**, on the canvas as `container-type: inline-size` lays it in Chrome:
 /// a frame hugging its contents is its padding wide, and one whose ratio

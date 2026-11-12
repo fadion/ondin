@@ -170,6 +170,11 @@ Decided non-goals are in `docs/non-goals.md`.
 ## Agents and Command Mode
 
 - **AI comes through a configured agent harness, never an embedded model or a provider key of Ondin's own** (2026-11-10). The person picks a headless coding agent they already use and are signed in to; Ondin starts it, points it at its own MCP endpoint and shows the turn in a chat window, with layers attached from the canvas (`ai.md`). The harness holds the model, the account and the billing. Command Mode's `/ai` is a door into the same assistant and is built after it.
+- **One configured MCP server reaches any document** (2026-11-12): `ondin mcp-proxy` takes no file; `use_document` picks one by name or path and every later call acts on it until the next. A document not open anywhere opens as a background tab in the running window, else in a headless `serve` (`mcp.md` §8.1).
+- **The MCP wire is hand-rolled** (2026-11-12): JSON-RPC 2.0 over newline-delimited JSON on std threads, as `one_window.rs` already serves its socket. The tool schemas come from the verb registry, so an SDK's derive would go unused, and its async runtime would be the only one in the workspace.
+- **The MCP endpoint admits the same user on the same machine, with no token** (2026-11-12): a same-user process can already read and write the `.ondin` files the endpoint would guard.
+- **Change notices ride in tool results** (2026-11-12): every result carries the document's revision and, when it moved since the client last looked, what changed. Harnesses do not put a server's own notifications in front of the model mid-turn.
+- **An agent's write never edits through the style browser's *Edit*** (2026-11-12): the same call does the same thing whatever is open on screen; an agent changes a style with `set_style_value`.
 - **Leap labels outline what they label** (2026-11-10): dashed for a group or frame with a dark label, solid for any other layer with the yellow label, and the first typed letter keeps outlines only on what it still matches (`foundations.md` §13). In a tight spot the question is *the group, or the layer inside it?*, and line style and label lightness answer it without hue.
 
 ## Distribution

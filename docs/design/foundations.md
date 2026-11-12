@@ -31,7 +31,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 - Undo/redo: unlimited, transactional, gesture-granular.
 - Save/load: native versioned document format with deterministic bytes.
 - Export: SVG (semantic), PNG and JPEG (CPU renderer, no GPU needed), JSON snapshot (AI handoff).
-- MCP server (read/query/export, then write operations against the live document) and headless mode `ondin serve <file>` (§8.4).
+- MCP server (read/query/export, then write operations against the live document) and headless mode `ondin serve` (§8.2).
 - Platforms: Windows, Linux, and Apple Silicon macOS. Nobody developing Ondin has a Mac; CI's macOS leg is its only compiler. v0.4.0 was the first release built by CI for every platform; no build has been run by hand on a Mac.
 
 ### Deferred (design for, do not build)

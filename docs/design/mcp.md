@@ -1,33 +1,42 @@
 # 8. ondin-mcp
 
-The MCP endpoint: the running Ondin process hosts it, agents connect over a local socket or a stdio proxy, and every write goes through the same op queue and commit door as the app's own edits.
+The MCP endpoint: the running Ondin process hosts it, agents connect through a stdio proxy configured once, and every write goes through the same op queue and commit door as the app's own edits.
 
 ## 8. ondin-mcp
 
-### 8.1 Topology: the app is the server
+### 8.1 Topology: one configured server, any document
 
-The document lives in a running Ondin process (GUI or headless), so that process hosts the MCP endpoint and agents connect to it.
+Documents live in a running Ondin process, the window or a headless `serve`, so that process hosts the MCP endpoint and agents connect to it. A person configures one server in their harness, `ondin mcp-proxy` with no arguments, and it reaches any document.
 
-- It listens on a local socket: Unix domain socket (Linux) or named pipe (Windows), at a well-known per-user path, with a discovery file recording endpoint and open document path: `$XDG_RUNTIME_DIR/ondin/<pid>.json` on Linux, `machine_dir::root()/run/<pid>.json` on Windows. It is not `%LOCALAPPDATA%\ondin\`, which is the Velopack installer's own folder under another case (Setup deletes it, uninstall empties it, and a non-empty one makes Setup ask about an existing installation).
-- A thin **stdio proxy** (`ondin mcp-proxy`) bridges agents that spawn an MCP server over stdio: it connects to the running instance's socket and forwards. With no instance running it exits with an error naming `ondin serve`.
-- With several documents or instances, the proxy picks by document path argument, else the single running instance, else errors listing candidates.
+- **Hosts.** The window (one per machine, holding its documents as tabs, `one_window.rs`) and `ondin serve` each listen on a local endpoint and serve any number of documents, addressed by absolute path. Each writes a discovery file naming its endpoint: `$XDG_RUNTIME_DIR/ondin/<pid>.json` on Linux, `machine_dir::root()/run/<pid>.json` on Windows. It is not `%LOCALAPPDATA%\ondin\`, which is the Velopack installer's own folder under another case (Setup deletes it, uninstall empties it, and a non-empty one makes Setup ask about an existing installation).
+- **The proxy** (`ondin mcp-proxy`) bridges an agent that spawns its server over stdio. It connects to the window's endpoint when a window runs, else to a running `serve`, else starts `ondin serve` and connects to that. It forwards lines and remembers one thing: the connection's current document, so that when its host goes away or a window starts it reconnects to the window and restores it.
+- **The current document** is per connection. `use_document(document)` sets it and every other tool acts on it until the next `use_document`; a tool called before any fails naming `use_document`. The document is an absolute path, or a name or relative path matched against the host's open documents, then the library, then the client's roots. Several matches fail with the candidates, for the agent to ask. The tool's description tells the agent to switch only when the person names another file.
+- **Opening.** In the window, a document not yet open opens as a tab in the background: the window is not raised and the tab in front does not change, and the agent's edits show when the person looks at it. In `serve` it loads into memory.
+- **Security.** Same user, same machine, no token: a same-user process can already read and write the files the endpoint guards. On Windows the pipe rejects remote clients, its DACL admits only the current user, and the host checks that the connecting process runs as that user (`one_window.rs`'s check, from the other side). On Linux the socket sits in the per-user runtime directory (0700), is 0600, and the host checks the peer's uid. TCP or remote transport is parked.
+
+### 8.1a Wire
+
+JSON-RPC 2.0, one message per line, on std threads with `serde_json`; no SDK and no async runtime. The methods are `initialize` (one pinned protocol version, negotiated), `ping`, `tools/list`, `tools/call` and the `initialized` and `cancelled` notifications. Each tool's input schema is generated from its verb's `Param`s, with `verbs::example` showing a model parameter's shape. No resources, prompts or server-sent notifications: see *Revisions* below.
 
 ### 8.2 Headless mode
 
-`ondin serve <file.ondin>` opens a document with no window: core, history, CPU renderer and the MCP endpoint. Same op queue, same tools, so an agent can build, edit and export on a machine with no display. This follows from the headless-core invariant and is a first-class v1 deliverable.
+`ondin serve` hosts documents with no window: core, history, CPU renderer and the MCP endpoint. Same op queue, same tools, so an agent can build, edit and export on a machine with no display, or edit a file nobody has open. This follows from the headless-core invariant and is a first-class v1 deliverable.
+
+- `serve` writes each commit to its file: there is no person to save later, and a window with the same file open as a clean tab follows it (`library.md`, *the file is watched*).
+- `serve` exits when a window takes the window lock, and after its last connection closes; the proxy moves its connection to the window.
 
 ### 8.3 Concurrency model
 
 - The owning process holds `Document`, `History` and `Resolved` on its main thread.
 - All mutations funnel through a single-writer **op queue**: `mpsc<OpRequest { tx: Transaction, reply: oneshot<Result<ApplyOutcome, OpError>> }>`.
 - **Document-level actions** (invariant 10, §15 D1097): `make_kit`, `publish_kit(note)`, `stop_sharing_kit`, `create_document(name, project?)` ride the **same queue** as a second request kind, `ActionRequest { action, reply }`, so they are ordered against surrounding edits (a publish sent after a batch of writes publishes those writes). The owning thread runs the app's own code: `make_kit`, `publish_now`, `stop_sharing_kit` (the verbs the document menu's rows end in, past their dialogs) and `library::store::file_document`, and replies with the result. None is a `Transaction`, none enters history, `undo` reverts none.
-- MCP handlers (async, own thread/runtime) build transactions with their session `IdSource`, submit to the queue and await the reply. The GUI pumps the queue every frame; `serve` pumps it in its main loop. One source of truth and one history; AI edits appear live on the canvas through the same path as UI edits. An MCP edit's undo step is named by the tool it called and remembers the client (`EditorSession::name_mcp_step`, `Origin::Mcp`), so the History section can mark it; the transport does not call it yet.
+- MCP handlers (one thread per connection) build transactions with their session `IdSource`, submit to the queue and await the reply. The GUI pumps the queue every frame; `serve` pumps it in its main loop. One source of truth and one history; AI edits appear live on the canvas through the same path as UI edits. An MCP edit's undo step is named by the tool it called and remembers the client (`EditorSession::name_mcp_step`, `Origin::Mcp`), so the History section can mark it; the transport does not call it yet.
 - No MCP handler ever touches `Document` directly (invariant 10).
 
 ### 8.4 Tools
 
 Phase 1 — read/export (ship first):
-`get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `hit_test(x,y)`,
+`use_document(document)`, `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `find_nodes(query)`, `hit_test(x,y)`,
 `get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`,
 `run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
 `list_styles() -> StyleTable`.
@@ -78,13 +87,24 @@ Which of this is built: the `ondin-mcp` crate holds the tool list (`PHASE_1` to 
 - `set_blend(ids, mode)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.
-- `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct.
+- `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct. Its longest side is capped by default, and an argument raises the cap.
+- `find_nodes(query)` is how an agent reaches "the home header" without reading the whole document: layers whose name or text contains the query, each with its id, name, kind and the names of its ancestors. A request about one part of a page is a find and a subtree read, not a snapshot.
+
+#### Revisions
+
+The person and the agent edit one live document, so an agent's earlier read goes stale without its knowing. Each document has a revision that every commit advances, the agent's or the person's, undo and redo included.
+
+- Every tool result carries `rev`. The host remembers, per connection, the revision it last showed; when the document moved since, the result also carries `changed`: the layers added, changed and removed since then, by id and name, read from the history's commits.
+- `get_document`, `get_node` and `list_children` take `since: rev` and answer `unchanged`, or only the layers changed and removed since. Nothing is withheld unless the agent passes `since`: a harness may have summarised its earlier read away.
+- A write takes `base_rev`. If a layer it writes changed after that revision the write is refused and the refusal lists them; without `base_rev` it applies.
+
+Server-sent notifications would be the protocol's own channel for this, but harnesses do not put them in front of the model mid-turn; a tool result always reaches it.
 
 #### The commit door
 
 Every write goes through the commit door the app's edits use (`EditorSession`), so the same passes run for an agent's transaction: `keep_insets` and `keep_flex_sizes`, the eight `keep_*_bindings` passes, then `propagate::owed`, which runs `style::settle`, `swap::settle`, `propagate_structure`, `component::settle_links`, `variant::settle`, `propagate`, `style::settle` once more, `keep_size_bindings` again and the inert-spacing clear, in that order (pinned by core tests). An agent never has to know a copy exists to keep it in step with its main.
 
-**Not reachable headless**: that sequence lives in `ondin-app` (`EditorSession::commit_inner`). The component and style half is one core function (`propagate::owed`) but the passes before it (the last `paint_box::keep_gradients`) are called in that order nowhere else, and `ondin-app` has no lib target (§15 D786's wall). The sequence must become reachable without a window before `serve` can honour the paragraph above. The door also reads an edit of a styled layer as an edit of the style while the style browser's *Edit* is open (`style::edit_through`, first in `commit_inner`, §15 D1063), so an agent's write landing then would change the style and all its users; the GUI half of M6 must answer that.
+That sequence lives in `EditorSession::commit_inner`, in `ondin-app`, which has no lib target (§15 D786's wall), so `ondin-mcp` cannot call it. It never needs to: the handlers hand transactions to the owning thread, and `serve` is the same `ondin` binary as the window, so both own an `EditorSession` per document and commit through it. The door also reads an edit of a styled layer as an edit of the style while the style browser's *Edit* is open (`style::edit_through`, first in `commit_inner`, §15 D1063). An agent's transaction skips that step: the same call does the same thing whatever is open on screen, and an agent changes a style with `set_style_value`.
 
 #### Phase 3: verbs, not ops
 
@@ -118,7 +138,7 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 
 **No dialog (§15 D1097).** The agent publishes, stops sharing and files documents on request: the request is the person's ask, the publish note is the tool's argument, and a dialog would hang the agent on a window it cannot see. The person instead gets the status line saying the agent did it. The three kit actions already write a status line through `EditorSession::info` (for example *Published Atlas v4 · 3 components*), but none says who acted, and filing a document writes none (the dashboard's *New file* opens the document instead). Wording "by the agent" on the three, and a line for filing, is still to write (M6).
 
-**One document per endpoint (§8.1).** `create_document` files a new document in the library (`library::store::file_document`) and returns its path. The agent reaches it through the proxy's pick-by-path once the GUI has opened it or `serve` hosts it; the endpoint never switches documents under the person using it. Renaming, moving, duplicating and trashing documents stay with the person on the dashboard.
+**Documents by path (§8.1).** `create_document` files a new document in the library (`library::store::file_document`) and returns its path, which the agent passes to `use_document`; opening it never changes the tab in front of the person. Renaming, moving, duplicating and trashing documents stay with the person on the dashboard.
 
 **Half of Phase 4 is `ondin-app` code.** Not a linking wall (`serve` is the same `ondin` binary) but the windowed app holds it: kit actions are `OndinApp` methods, which windowless `serve` does not construct. The verbs are core (`kit::insert`, `update_all`, `make_local`, `publish`, `swap_offers`, `vendored`, `tokens::plan`); everything that finds and reads a kit is the app's: which documents are kits and their published states (the library scan's `meta.kit` and `KitShelf`, `kits/index.rs`), which updates wait (`kits_waiting` and the watch), the saves around marking and publishing, and filing a document (`library/`). Phase 4 is GUI-only until those move.
 
@@ -141,4 +161,4 @@ Guides, layout grids, a page's ground, the fill rule and the proportions lock (v
 - **The four phase paragraphs above are parsed by a test.** `ondin-mcp/src/tools.rs` holds the same names as `PHASE_1` to `PHASE_4`, and a `#[cfg(test)]` module `include_str!`s the architecture document and diffs every phase in order. The parser anchors on each phase's opening sentence, takes the paragraph up to the first blank line, and reads **every backticked token in it as a tool name**, dropping any signature at the `(`. Do not reword a phase's opening sentence, do not merge a phase paragraph into the next, and do not put a backticked aside inside one; put asides after the last phase. A rename fails at the comparison, a moved heading fails loudly at the parse. **When the architecture file is split, `tools.rs` must point its `include_str!` at this file (`docs/design/mcp.md`) or it will read the old path.**
 - Phase 3 tools wrap verbs; writing the raw op (`RemoveStyle`, `SetCornerVars`) hands the commit a transaction it refuses or a non-canonical literal.
 - Kit actions and document creation are not `Transaction`s: they bypass history, so `undo()` is not a safety net for them.
-- The commit-door pass order (`commit_inner`) is not reachable from `serve`; a headless write would skip the `keep_*` passes.
+- A write applied to the `Document` anywhere but `EditorSession::commit` skips the `keep_*` passes and the propagation, and every gate stays green.

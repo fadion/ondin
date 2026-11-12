@@ -11,10 +11,12 @@
 
 /// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
 /// reordering shows as a diff.
-pub const PHASE_1: [&str; 13] = [
+pub const PHASE_1: [&str; 15] = [
+    "use_document",
     "get_document",
     "get_node",
     "list_children",
+    "find_nodes",
     "hit_test",
     "get_bounds",
     "get_selection",

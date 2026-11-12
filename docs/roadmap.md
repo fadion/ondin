@@ -18,8 +18,7 @@ true.
   *Assistant* section, the agent log. Open in `ai.md` §9.
 - **MCP and headless (M6)** — `architecture.md` §8, §10; `ondin-mcp` is a stub. Its Phase 2 tools
   are the registry's verbs (`ondin_core::verbs`), held to them by a test; each tool's schema shows
-  `verbs::example` for its model parameters. Also owed:
-  the commit pass sequence out of `EditorSession::commit_inner`; kits and library code out of the app
+  `verbs::example` for its model parameters. Also owed: kits and library code out of the app
   for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and
   specified beside used values (§15 D868). The page verbs are built; `export_svg` and `export_png`

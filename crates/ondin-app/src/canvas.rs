@@ -4662,6 +4662,29 @@ impl OndinApp {
             sides: tools::drawn_count(shape),
             last: world,
         };
+        // A chart cannot live inside a component, an instance or a mask: said at
+        // the press, in the tool's words, rather than refused at the release.
+        if shape == Tool::Chart && self.chart_barred_here(world) {
+            self.drag = Drag::None;
+            self.session
+                .fail("A chart can't go inside a component, an instance or a mask");
+        }
+    }
+
+    /// Whether a chart drawn at `world` would be refused for where it lands:
+    /// tried on a copy of the document, so the rule stays the core's alone.
+    fn chart_barred_here(&self, world: Point) -> bool {
+        let Some(tx) = self.create_tx(world, world + Vec2::new(1.0, 1.0)) else {
+            return false;
+        };
+        let mut trial = self.session.doc.clone();
+        matches!(
+            trial.apply(&tx),
+            Err(ondin_core::OpError::ChartPlacement(
+                _,
+                ondin_core::chart::PlacementRule::InComponent
+            ))
+        )
     }
 
     /// Turn the live `Drag::Create` into a committed layer spanning `from`–`to`:
@@ -12326,6 +12349,33 @@ mod tests {
         assert!(!app.may_select_in_bulk(part), "a part never in bulk");
         assert!(app.may_select_in_bulk(chart));
         assert!(app.spacing_subject(None).is_none(), "no spacing handles");
+    }
+
+    /// The chart tool pressed inside a main component makes nothing and says why
+    /// in its own words, not the core's diagnostic.
+    /// flip: `begin_create` without its `chart_barred_here` check → fails at "the tool's words".
+    #[test]
+    fn the_chart_tool_inside_a_main_says_why() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.choose_tool(Tool::Frame);
+        app.click_create(Point::new(-5000.0, -5000.0), false);
+        let main = *app.session.selection.ids().first().expect("the frame");
+        app.session.selection.set_one(main);
+        app.create_component();
+        assert!(
+            app.session.doc.get(main).is_some_and(|n| n.component()),
+            "fixture: a main"
+        );
+        app.choose_tool(Tool::Chart);
+        app.click_create(Point::new(-4990.0, -4990.0), false);
+        let main_node = app.session.doc.get(main).unwrap();
+        assert!(main_node.children().is_empty(), "nothing made");
+        assert_eq!(
+            app.session.status().text,
+            "A chart can't go inside a component, an instance or a mask",
+            "the tool's words"
+        );
     }
 
     /// Alt centres the default box on the press and leaves its size alone (the centre and size assertions each catch a different wrong version).

@@ -408,7 +408,9 @@ A chart has no title or caption of its own: a text layer next to it does that, a
   *From*, *To*, *Value* with eight flows over three columns), the *Clean* preset and the *Ondin*
   palette, and the data window
   opens on it with the first cell selected, so typing or pasting replaces the sample. Undo step
-  *Insert chart*.
+  *Insert chart*. A press where the chart would land inside a main component, an instance or a
+  mask makes nothing and says *A chart can't go inside a component, an instance or a mask*
+  (tried on a copy of the document, so the placement rule stays the core's).
 - **Other doors**: the palette's *Insert chart* (aliases *chart*, *graph*, *plot*), which arms
   the tool; a `.csv` or `.tsv` dropped on the canvas, which makes a chart at the drop from the file
   (*Import*, below): a Scatter when the file's first column is numeric, a Sankey when it has

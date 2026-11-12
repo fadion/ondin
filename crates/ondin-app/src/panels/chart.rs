@@ -72,47 +72,61 @@ fn lit<T: PartialEq>(options: &[(T, &str)], now: T) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// The kinds' variants as the Type section's segments name them, with the
-/// variant `chart` is at; `None` for a kind with none to pick.
-fn variants(chart: &Chart) -> Option<(&'static [&'static str], usize)> {
-    let o = &chart.options;
-    let stacking = |s: Stacking| match s {
-        Stacking::Apart => 0,
-        Stacking::Stacked => 1,
-        Stacking::Percent => 2,
-    };
-    Some(match chart.kind {
-        ChartKind::Column | ChartKind::Bar => {
-            (&["Grouped", "Stacked", "100%"], stacking(o.bars.stacking))
-        }
-        ChartKind::Line => (
-            &["Straight", "Smooth", "Step"],
-            match o.lines.curve {
-                Curve::Straight => 0,
-                Curve::Smooth => 1,
-                Curve::Step => 2,
-            },
-        ),
-        ChartKind::Area => (
-            &["Overlapping", "Stacked", "100%"],
-            stacking(o.lines.area_stacking),
-        ),
-        ChartKind::Pie => (&["Pie", "Donut"], usize::from(o.slices.donut)),
-        ChartKind::Scatter | ChartKind::Sankey => return None,
-    })
+/// One variant of a kind: its segment's name, and the option it writes,
+/// which also tells whether a chart is at it.
+type Variant = (&'static str, fn(&mut chart::Options));
+
+/// A kind's variants as the Type section's segments name them, one table so a
+/// name never drifts from what it writes; empty for a kind with none to pick.
+fn variant_table(kind: ChartKind) -> &'static [Variant] {
+    match kind {
+        ChartKind::Column | ChartKind::Bar => &[
+            ("Grouped", |o| o.bars.stacking = Stacking::Apart),
+            ("Stacked", |o| o.bars.stacking = Stacking::Stacked),
+            ("100%", |o| o.bars.stacking = Stacking::Percent),
+        ],
+        ChartKind::Line => &[
+            ("Straight", |o| o.lines.curve = Curve::Straight),
+            ("Smooth", |o| o.lines.curve = Curve::Smooth),
+            ("Step", |o| o.lines.curve = Curve::Step),
+        ],
+        ChartKind::Area => &[
+            ("Overlapping", |o| o.lines.area_stacking = Stacking::Apart),
+            ("Stacked", |o| o.lines.area_stacking = Stacking::Stacked),
+            ("100%", |o| o.lines.area_stacking = Stacking::Percent),
+        ],
+        ChartKind::Pie => &[
+            ("Pie", |o| o.slices.donut = false),
+            ("Donut", |o| o.slices.donut = true),
+        ],
+        ChartKind::Scatter | ChartKind::Sankey => &[],
+    }
+}
+
+/// The kind's variant names with the one `chart` is at — none lit
+/// (`usize::MAX`) when no variant leaves its options as they are; `None` for
+/// a kind with none to pick.
+fn variants(chart: &Chart) -> Option<(Vec<&'static str>, usize)> {
+    let table = variant_table(chart.kind);
+    if table.is_empty() {
+        return None;
+    }
+    let at = table
+        .iter()
+        .position(|(_, set)| {
+            let mut o = chart.options.clone();
+            set(&mut o);
+            o == chart.options
+        })
+        .unwrap_or(usize::MAX);
+    Some((table.iter().map(|(name, _)| *name).collect(), at))
 }
 
 /// `chart` at variant `i` of its kind ([`variants`]).
 fn with_variant(chart: &Chart, i: usize) -> Chart {
     let mut next = chart.clone();
-    let stacking = [Stacking::Apart, Stacking::Stacked, Stacking::Percent];
-    let o = &mut next.options;
-    match chart.kind {
-        ChartKind::Column | ChartKind::Bar => o.bars.stacking = stacking[i.min(2)],
-        ChartKind::Line => o.lines.curve = [Curve::Straight, Curve::Smooth, Curve::Step][i.min(2)],
-        ChartKind::Area => o.lines.area_stacking = stacking[i.min(2)],
-        ChartKind::Pie => o.slices.donut = i == 1,
-        ChartKind::Scatter | ChartKind::Sankey => {}
+    if let Some((_, set)) = variant_table(chart.kind).get(i) {
+        set(&mut next.options);
     }
     next
 }
@@ -910,7 +924,7 @@ impl OndinApp {
             self.chart_commit(id, "Chart type", chart.with_kind(kind));
         }
         if let Some((names, at)) = variants(chart) {
-            self.chart_segments(ui, id, chart, "Chart type", names, at, |c, i| {
+            self.chart_segments(ui, id, chart, "Chart type", &names, at, |c, i| {
                 *c = with_variant(c, i);
             });
         }

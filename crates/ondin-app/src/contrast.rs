@@ -1373,12 +1373,7 @@ fn paint_badge(
     let glyph_at = egui::pos2(r.left() + 6.0 + 5.5, r.center().y);
     if stale {
         // A spinner where the glyph was.
-        let g = painter.layout_no_wrap(icon::CIRCLE_NOTCH.into(), theme::icon_font(11.0), ink);
-        let angle = (now * 6.0 % std::f64::consts::TAU) as f32;
-        let half = g.size() / 2.0;
-        let rot = egui::emath::Rot2::from_angle(angle);
-        let pos = glyph_at - rot * half;
-        painter.add(egui::epaint::TextShape::new(pos, g, ink).with_angle(angle));
+        crate::ui::paint_spinner(painter, glyph_at, 11.0, ink, now);
     } else {
         painter.text(
             glyph_at,

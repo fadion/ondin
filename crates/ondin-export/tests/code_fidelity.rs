@@ -1210,6 +1210,58 @@ fn a_ratio_layer_stretched_on_its_derived_side_follows_its_insets() {
     holds("ratio-stretched", &doc, &res);
 }
 
+/// A 16 : 9 ratio layer pinned left, right and top, its frame resized from 400
+/// to 800 wide: the insets stretch its width and the ratio derives its height,
+/// 800 × 450 on the canvas and in Chrome.
+/// flip: `resolve`'s inset placement handed no ratio → the canvas draws
+/// 800 × 225 and fails at "the fixture". `Walk::sizes` leaving `aspect-ratio`
+/// out does not bite: the page is shot at the frame's own size, where the used
+/// height it then writes is the same 450.
+#[test]
+fn a_ratio_layer_stretched_on_its_other_side_derives_its_own() {
+    use ondin_core::container::{AspectRatio, RatioSide};
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 400.0, 500.0, "Board");
+    let r = d.rect(f, 0.0, 0.0, 400.0, 225.0, 0.0);
+    d.fill(r, solid(60, 120, 220, 255));
+    let zero = Some(LengthPct::Px(0.0));
+    d.apply(vec![
+        Operation::SetLayoutItem {
+            id: r,
+            item: LayoutItem {
+                aspect_ratio: Some(AspectRatio {
+                    ratio: 16.0 / 9.0,
+                    side: RatioSide::Height,
+                }),
+                ..Default::default()
+            },
+        },
+        Operation::SetInsets {
+            id: r,
+            insets: Insets {
+                left: zero,
+                right: zero,
+                top: zero,
+                ..Default::default()
+            },
+        },
+        Operation::SetGeometry {
+            id: f,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(800.0, 500.0)),
+        },
+    ]);
+    let (doc, res) = d.done();
+    assert!(
+        matches!(
+            res.used_kind(&doc, r),
+            Some(NodeKind::Rect { size, .. }) if *size == Size::new(800.0, 450.0)
+        ),
+        "the fixture: the canvas draws 800 × 450, {:?}",
+        res.used_kind(&doc, r)
+    );
+    holds("ratio-derived-from-insets", &doc, &res);
+}
+
 /// A hugging group with a column layout inside a frame, and children pinned by
 /// insets — one to the bottom right, one stretched across.
 #[test]

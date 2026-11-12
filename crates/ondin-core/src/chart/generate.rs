@@ -924,6 +924,32 @@ fn legend_items(
     }
 }
 
+/// The category count up to which every label is measured. Past it a long
+/// axis writes only every so many, and measuring all of them cost most of a
+/// generation (10,000 labels took about 90 ms).
+const MEASURE_ALL_CATEGORIES: usize = 256;
+
+/// Each category label's box. Past [`MEASURE_ALL_CATEGORIES`] only the
+/// longest by characters are measured, and every other label stands in at
+/// the widest and tallest of them: the axis's reach and thinning read the
+/// largest box, and the labels written are measured again once thinned.
+fn category_boxes(names: &[String], measure: impl Fn(&str) -> Rect) -> Vec<Rect> {
+    if names.len() <= MEASURE_ALL_CATEGORIES {
+        return names.iter().map(|c| measure(c)).collect();
+    }
+    let mut longest: Vec<usize> = (0..names.len()).collect();
+    longest.sort_by_key(|i| std::cmp::Reverse(names[*i].chars().count()));
+    longest.truncate(64);
+    let measured: Vec<(usize, Rect)> = longest.iter().map(|i| (*i, measure(&names[*i]))).collect();
+    let widest = measured.iter().map(|(_, b)| b.width()).fold(0.0, f64::max);
+    let tallest = measured.iter().map(|(_, b)| b.height()).fold(0.0, f64::max);
+    let mut out = vec![Rect::new(0.0, 0.0, widest, tallest); names.len()];
+    for (i, b) in measured {
+        out[i] = b;
+    }
+    out
+}
+
 /// A value read along a value axis: 0 at its min, 1 at its max.
 fn ticks_for(axis: &Axis, lo: f64, hi: f64, length: f64, label_h: f64) -> Ticks {
     let fit = (length / (label_h * 2.2)).floor().max(1.0) as u32;
@@ -1167,16 +1193,12 @@ fn axes(
             .collect()
     });
     // Category labels: flat, or turned and thinned where they would touch.
-    let cat_boxes: Vec<Rect> = match &x_ticks {
+    let mut cat_boxes: Vec<Rect> = match &x_ticks {
         Some(_) => x_text
             .iter()
             .map(|s| out.text.measure(s, tick_size))
             .collect(),
-        None => data
-            .categories
-            .iter()
-            .map(|c| out.text.measure(c, tick_size))
-            .collect(),
+        None => category_boxes(&data.categories, |c| out.text.measure(c, tick_size)),
     };
     let band_len_guess = if horizontal {
         body.height
@@ -1202,6 +1224,13 @@ fn axes(
     } else {
         category_turn(ca.angle, &cat_boxes, band_len_guess, label_h)
     };
+    // The labels written are measured exactly, wherever `category_boxes`
+    // stood in its widest guess.
+    if x_ticks.is_none() && data.categories.len() > MEASURE_ALL_CATEGORIES {
+        for (c, name) in data.categories.iter().enumerate().step_by(every.max(1)) {
+            cat_boxes[c] = out.text.measure(name, tick_size);
+        }
+    }
     let ca_thick = if !ca_show {
         ca_tick
     } else {
@@ -3773,5 +3802,32 @@ fn value_place(
         };
         insets.top = pct(share_y(y));
         Some((Point::new(x, y - b.y0), insets))
+    }
+}
+
+#[cfg(test)]
+mod category_box_tests {
+    use super::*;
+
+    /// Past the cap only the longest labels are measured, the rest standing
+    /// in at their widest, so no box is under its label's real size.
+    /// flip: `category_boxes` measuring none past the cap → its count of
+    /// measured labels is 0, failing at "the longest".
+    #[test]
+    fn many_labels_measure_only_the_longest() {
+        let names: Vec<String> = (0..1000).map(|i| "x".repeat(1 + i % 50)).collect();
+        let count = std::cell::Cell::new(0);
+        let boxes = category_boxes(&names, |s| {
+            count.set(count.get() + 1);
+            Rect::new(0.0, 0.0, s.len() as f64, 10.0)
+        });
+        assert_eq!(count.get(), 64, "the longest");
+        assert!(
+            boxes
+                .iter()
+                .zip(&names)
+                .all(|(b, n)| b.width() >= n.len() as f64),
+            "never under a label's size"
+        );
     }
 }

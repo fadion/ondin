@@ -134,7 +134,7 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
 - **Pixels** (`PIXEL_PREVIEW` in the head). Off, a tile renders at the display's density, N × ppp,
   drawn at N points. On, it renders exactly N pixels and is nearest-sampled, so a 2× display shows
   the blocks a 1× screen gets; hovering a tile then rings it and opens a loupe beside the card: the
-  tile at ×10 (×5 from 40 pixels up, so the loupe stays a sane size) on a checkerboard with a
+  tile at ×5 (enough to count a 12's pixels; a 64 stands 320pt) on a checkerboard with a
   hairline between pixels. The loupe is not shown while the ⋯ menu is open, which takes the same side.
 - **Head**, left to right: `icon::SIZE_PREVIEW` and the layer's name (or the layer count), set as a
   menu row's glyph and label; the size is the Transform card's to show. Then the controls of the

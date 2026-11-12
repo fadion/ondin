@@ -39,11 +39,9 @@ const CAPS_H: f32 = 14.0;
 /// The sizes menu's narrowest: its labels are two digits, and a list sized to
 /// them alone would stand narrower than its tick column is wide.
 const MENU_W: f32 = 80.0;
-/// The loupe's magnification of a pixel tile `px` across: ×10, or ×5 from 40
-/// pixels up, so a 64 tile stands 320 points rather than 640.
-fn loupe_zoom(px: usize) -> f32 {
-    if px >= 40 { 5.0 } else { 10.0 }
-}
+/// The loupe's magnification of a pixel tile: enough to count a 12's pixels, and
+/// a 64 tile still stands only 320 points.
+const LOUPE_ZOOM: f32 = 5.0;
 /// Between the card and the status bar or the loupe beside it, the minimap's.
 pub(crate) const GAP: f32 = 8.0;
 
@@ -681,7 +679,7 @@ impl OndinApp {
         }
     }
 
-    /// The loupe beside the card: the hovered pixel tile at [`loupe_zoom`], each
+    /// The loupe beside the card: the hovered pixel tile at [`LOUPE_ZOOM`], each
     /// pixel a block with a hairline between, never resampled.
     fn size_preview_loupe(&self, ctx: &egui::Context, card: egui::Rect, r: usize, c: usize) {
         let Some(tex) = self
@@ -693,7 +691,7 @@ impl OndinApp {
             return;
         };
         let [w, _] = tex.size();
-        let zoom = loupe_zoom(w);
+        let zoom = LOUPE_ZOOM;
         let side = w as f32 * zoom;
         egui::Area::new(egui::Id::new("size-preview-loupe"))
             .order(egui::Order::Foreground)
@@ -949,14 +947,6 @@ mod tests {
         assert_eq!(toggled(&[16, 24], 16), Some(vec![24]));
         assert_eq!(toggled(&[16], 16), None, "one at least");
         assert_eq!(toggled(&[12, 16, 20, 24, 32, 48], 64), None, "six at most");
-    }
-
-    /// The loupe magnifies ×10 below 40 pixels and ×5 from there up.
-    #[test]
-    fn the_loupe_halves_its_zoom_from_forty_pixels() {
-        assert_eq!(loupe_zoom(32), 10.0);
-        assert_eq!(loupe_zoom(40), 5.0);
-        assert_eq!(loupe_zoom(64), 5.0);
     }
 
     /// *Outline shape* on a pinned rectangle swaps it for a new path in its place,

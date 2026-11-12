@@ -192,7 +192,136 @@ pub static TOOLS: &[Tool] = &[
         doc: "Select these layers in the open tab, as the person would.",
         params: &[param("ids", ParamKind::Nodes, true, "The layers.")],
     },
+    Tool {
+        name: "list_documents",
+        doc: "Every document in the person's library: path, name, project and whether it is a kit. Needs no current document.",
+        params: &[],
+    },
+    Tool {
+        name: "create_document",
+        doc: "File a new, empty document in the library and answer its path, for `use_document`. Only when the person asks for a new file. Needs no current document.",
+        params: &[
+            param("name", ParamKind::Text, true, "Its name."),
+            param(
+                "project",
+                ParamKind::Text,
+                false,
+                "A project's name or id; outside every project when absent.",
+            ),
+        ],
+    },
+    Tool {
+        name: "list_kits",
+        doc: "Every kit in the library: id, name, path, the version it last published and that publish's note. Needs no current document.",
+        params: &[],
+    },
+    Tool {
+        name: "get_kit",
+        doc: "A kit's published components, variables and styles: what `insert_from_kit` places, by the ids listed here.",
+        params: &[KIT],
+    },
+    Tool {
+        name: "insert_from_kit",
+        doc: "Place an instance of a kit's published component or set in this document, bringing the component and the variables and styles it reads; answers the instance.",
+        params: &[
+            KIT,
+            param(
+                "main",
+                ParamKind::Node,
+                true,
+                "The component or set, by its id in `get_kit`.",
+            ),
+            param(
+                "parent",
+                ParamKind::Node,
+                true,
+                "The frame, group or page to place it in.",
+            ),
+            param(
+                "x",
+                ParamKind::Number,
+                false,
+                "Where its box is centred, across the parent; at the component's own place unless given.",
+            ),
+            param(
+                "y",
+                ParamKind::Number,
+                false,
+                "Where its box is centred, down the parent.",
+            ),
+        ],
+    },
+    Tool {
+        name: "list_kit_updates",
+        doc: "The kits this document uses that published since: the version held, the version waiting, its note, and how many components and instances it touches.",
+        params: &[],
+    },
+    Tool {
+        name: "accept_kit_updates",
+        doc: "Take the waiting kit updates in one undo step: instances keep their overrides, and a component a kit removed becomes a local main. Answers what changed.",
+        params: &[param(
+            "kit",
+            ParamKind::Text,
+            false,
+            "Only this kit's, by name or id; every kit's when absent.",
+        )],
+    },
+    Tool {
+        name: "make_local",
+        doc: "Make kit components this document's own mains, placed beside the content; they stop taking the kit's updates.",
+        params: &[param(
+            "ids",
+            ParamKind::Nodes,
+            true,
+            "Instances of kit components, or the components themselves.",
+        )],
+    },
+    Tool {
+        name: "map_kit_modes",
+        doc: "Choose which of a kit's modes each of this document's modes reads; a mode left unmapped reads the kit mode of its name, then the first.",
+        params: &[
+            param(
+                "kit",
+                ParamKind::Text,
+                true,
+                "The kit, by name or id, as `list_variables` shows its collections.",
+            ),
+            param(
+                "mapping",
+                ParamKind::Model("KitModeMap"),
+                true,
+                "An object from the document's mode ids to the kit's, as `list_variables` shows them: {\"<document mode>\": \"<kit mode>\"}; null for a kit mode takes that mapping away.",
+            ),
+        ],
+    },
+    Tool {
+        name: "make_kit",
+        doc: "Make this document a kit, so other documents can use its components once it publishes. Saved at once; `undo` does not revert it.",
+        params: &[],
+    },
+    Tool {
+        name: "publish_kit",
+        doc: "Publish this kit's components, variables and styles; every document using it is offered the update. Only when the person asks. Saved at once; `undo` does not revert it.",
+        params: &[param(
+            "note",
+            ParamKind::Text,
+            false,
+            "What changed, in a line, shown with the update.",
+        )],
+    },
+    Tool {
+        name: "stop_sharing_kit",
+        doc: "Stop sharing this kit; documents using it keep their copies. Only when the person asks. Saved at once; `undo` does not revert it.",
+        params: &[],
+    },
 ];
+
+const KIT: Param = param(
+    "kit",
+    ParamKind::Text,
+    true,
+    "The kit, by its name or its id in `list_kits`.",
+);
 
 /// The non-verb tool called `name`.
 pub fn tool(name: &str) -> Option<&'static Tool> {
@@ -248,7 +377,8 @@ fn property(p: &Param) -> Value {
     let kind_note = match p.kind {
         ParamKind::Node => " A layer id, \"<actor-hex>:<seq>\".".to_owned(),
         ParamKind::Nodes => " Layer ids, \"<actor-hex>:<seq>\".".to_owned(),
-        ParamKind::Model(model) => format!(" A `{model}`."),
+        // A model with no example is described by its parameter's own words.
+        ParamKind::Model(model) if verbs::example(model).is_some() => format!(" A `{model}`."),
         ParamKind::Id(what) => format!(" A {what} id."),
         _ => String::new(),
     };
@@ -264,14 +394,19 @@ fn property(p: &Param) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{PHASE_1, PHASE_2, PHASE_3};
+    use crate::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
 
-    /// Every Phase 1 to 3 tool has a definition.
+    /// Every tool of every phase has a definition.
     ///
     /// flip: dropping `find_nodes` from `TOOLS` → fails at "no definition".
     #[test]
     fn every_phase_tool_has_a_definition() {
-        for name in PHASE_1.iter().chain(&PHASE_2).chain(&PHASE_3) {
+        for name in PHASE_1
+            .iter()
+            .chain(&PHASE_2)
+            .chain(&PHASE_3)
+            .chain(&PHASE_4)
+        {
             assert!(definition(name).is_some(), "`{name}` has no definition");
         }
     }

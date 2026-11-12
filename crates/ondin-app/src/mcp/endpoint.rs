@@ -32,13 +32,14 @@ pub(crate) fn run_dir() -> Option<PathBuf> {
     Some(crate::one_window::window_dir()?.join("mcp"))
 }
 
-/// The tool definitions a host serves: every Phase 1 to 3 tool with a handler.
+/// The tool definitions a host serves: every tool of every phase.
 pub(crate) fn tools() -> Vec<serde_json::Value> {
-    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3};
+    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
     PHASE_1
         .iter()
         .chain(&PHASE_2)
         .chain(&PHASE_3)
+        .chain(&PHASE_4)
         .filter_map(|name| ondin_mcp::schema::definition(name))
         .collect()
 }

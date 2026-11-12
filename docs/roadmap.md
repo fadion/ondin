@@ -12,13 +12,12 @@ true.
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
   disclosure, schema place, kit scripts. `/ai` is built after the assistant.
-- **The assistant** — `ai.md`. Waits on `ondin-mcp` serving its Phase 1 reads. Then: finding and
+- **The assistant** — `ai.md`. `ondin-mcp` serves every phase's tools. Open: finding and
   probing each harness, the sealed spawn per harness and its stream parser, `propose_edit` and its
   card, the chat window, attaching layers from the canvas and the layers tree, Settings'
   *Assistant* section, the agent log. Open in `ai.md` §9.
 - **MCP and headless (M6)** — `design/mcp.md`. The wire, proxy, `serve`, the window as a host and
-  Phase 1–3 are built. Owed: the status line saying "by the agent"; kits and library code out of
-  the app for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
+  every phase's tools are built. The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980),
   specified beside used values (§15 D868), and an instance's overrides and property values.
 

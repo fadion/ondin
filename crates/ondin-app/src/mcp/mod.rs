@@ -7,11 +7,13 @@
 //! the door the app's own edits use.
 
 pub(crate) mod endpoint;
+mod kits;
 pub(crate) mod proxy;
 mod reads;
 pub(crate) mod serve;
 pub(crate) mod window;
 
+use crate::library::state::Library;
 use crate::session::EditorSession;
 use ondin_core::NodeId;
 use ondin_mcp::queue::{Call, Conn};
@@ -29,6 +31,15 @@ pub(crate) trait Documents {
     fn session(&mut self, path: &Path) -> Option<&mut EditorSession>;
     /// The document at `path` changed through a tool: `serve` writes it.
     fn committed(&mut self, path: &Path);
+    /// The library as it now stands on disk, or `None` with no base folder.
+    fn library(&mut self) -> Option<&Library>;
+    /// The open document at `path` and the library together, for a kit tool
+    /// that reads both.
+    fn with_library(&mut self, path: &Path) -> Option<(&mut EditorSession, Option<&Library>)>;
+    /// Write the document at `path` now, as the kit mark's changes are.
+    fn save(&mut self, path: &Path) -> Result<(), String>;
+    /// Put `line` on the status line, where a person would read it.
+    fn tell(&mut self, line: String);
 }
 
 /// The document `wanted` names: an absolute path; else a name or relative path
@@ -235,6 +246,12 @@ impl Engine {
                 Err(why) => Output::error(why),
             };
         }
+        if kits::WITHOUT_DOCUMENT.contains(&call.tool.as_str()) {
+            return match kits::without_document(docs, &call) {
+                Ok(v) => Output::json(v),
+                Err(why) => Output::error(why),
+            };
+        }
         let Some(path) = conn.document.clone() else {
             return Output::error(
                 "No document yet: call `use_document` with the file the person named.",
@@ -251,7 +268,13 @@ impl Engine {
         // undos included, reported before the call runs.
         let before = session.revision();
         let changed = catch_up(conn, session);
-        let answer = run(conn, session, &call);
+        let answer = match kits::is_kit_tool(&call.tool) {
+            true => kits::run(docs, &path, &call),
+            false => run(conn, session, &call),
+        };
+        let Some(session) = docs.session(&path) else {
+            return Output::error(format!("{} closed during the call", path.display()));
+        };
         let after = session.revision();
         let mut output = match answer {
             Ok(Answer::Json(v)) => Output::json(v),
@@ -653,21 +676,33 @@ fn write(
         let base = base.as_u64().ok_or("`base_rev` must be a `rev`")?;
         stale(conn, s, base, &done.tx)?;
     }
-    s.name_mcp_step(client, verb.name, "");
-    let held = s.style_edit.take();
-    let applied = s.try_commit(done.tx);
-    s.style_edit = held;
-    applied.map_err(|e| match e {
-        crate::session::CommitError::Op(e) => format!("Refused: {e}"),
-        crate::session::CommitError::ReadOnly => {
-            "The document is read-only while the person compares versions.".to_owned()
-        }
-    })?;
+    commit(s, client, verb.name, done.tx)?;
     Ok(Answer::Json(json!({
         "created": done.created.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
         "made": done.made,
     })))
 }
+
+/// Commit an agent's `tx` as one undo step named by `tool`, with the style
+/// browser's *Edit* set aside: an agent's edit means the same whatever is open.
+fn commit(
+    s: &mut EditorSession,
+    client: &str,
+    tool: &str,
+    tx: ondin_core::Transaction,
+) -> Result<(), String> {
+    s.name_mcp_step(client, tool, "");
+    let held = s.style_edit.take();
+    let applied = s.try_commit(tx);
+    s.style_edit = held;
+    applied.map_err(|e| match e {
+        crate::session::CommitError::Op(e) => format!("Refused: {e}"),
+        crate::session::CommitError::ReadOnly => READ_ONLY.to_owned(),
+    })
+}
+
+/// Why nothing an agent asks changes a document the person is comparing.
+const READ_ONLY: &str = "The document is read-only while the person compares versions.";
 
 /// Refuse a write whose layers changed after `base`.
 fn stale(
@@ -743,6 +778,16 @@ mod tests {
         fn committed(&mut self, _: &Path) {
             self.committed += 1;
         }
+        fn library(&mut self) -> Option<&Library> {
+            None
+        }
+        fn with_library(&mut self, path: &Path) -> Option<(&mut EditorSession, Option<&Library>)> {
+            self.session(path).map(|s| (s, None))
+        }
+        fn save(&mut self, _: &Path) -> Result<(), String> {
+            Ok(())
+        }
+        fn tell(&mut self, _: String) {}
     }
 
     fn call(engine: &mut Engine, docs: &mut One, conn: Conn, tool: &str, args: Value) -> Output {

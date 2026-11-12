@@ -9,6 +9,7 @@
 use super::endpoint::{self, Endpoint, Host};
 use super::{Documents, Engine};
 use crate::app::OndinApp;
+use crate::library::state::Library;
 use crate::session::EditorSession;
 use crate::tabs::{Body, Parked};
 use ondin_mcp::queue::{self, Request};
@@ -143,22 +144,66 @@ impl Documents for OndinApp {
     }
 
     fn committed(&mut self, path: &Path) {
-        let Some(id) = self.tab_of_path(path) else {
-            return;
-        };
-        if self.tabs.active == Some(id) {
-            return;
+        let behind = self
+            .tab_of_path(path)
+            .is_some_and(|id| self.tabs.active != Some(id));
+        if behind && let Err(e) = self.write_behind(path) {
+            log::warn!(target: "ondin", "mcp: {e}");
         }
+    }
+
+    fn library(&mut self) -> Option<&Library> {
+        self.library.refresh();
+        Some(&self.library)
+    }
+
+    fn with_library(&mut self, path: &Path) -> Option<(&mut EditorSession, Option<&Library>)> {
+        self.library.refresh();
+        let id = self.tab_of_path(path)?;
+        let session = match self.tabs.active == Some(id) {
+            true => &mut self.session,
+            false => match &mut self.tabs.get_mut(id)?.body {
+                Body::Parked(p) => &mut p.session,
+                _ => return None,
+            },
+        };
+        Some((session, Some(&self.library)))
+    }
+
+    fn save(&mut self, path: &Path) -> Result<(), String> {
+        let id = self
+            .tab_of_path(path)
+            .ok_or_else(|| format!("{} is no longer open", path.display()))?;
+        if self.tabs.active != Some(id) {
+            return self.write_behind(path);
+        }
+        match self.save_file(false) {
+            true => Ok(()),
+            false => Err(format!(
+                "{} could not be saved; the window's status line says why",
+                path.display()
+            )),
+        }
+    }
+
+    fn tell(&mut self, line: String) {
+        self.session.info(line);
+    }
+}
+
+impl OndinApp {
+    /// Write the tab behind holding `path` to its file, as a tab behind is
+    /// kept clean.
+    fn write_behind(&mut self, path: &Path) -> Result<(), String> {
+        let id = self.tab_of_path(path).ok_or("the tab closed")?;
         let Some(Body::Parked(p)) = self.tabs.get_mut(id).map(|t| &mut t.body) else {
-            return;
+            return Err(format!("{} is not loaded", path.display()));
         };
-        match crate::library::store::write_document_digest(path, &p.session.doc) {
-            Ok(digest) => {
-                p.session.disk = crate::library::disk::Stamp::of(path, digest);
-                p.session.mark_saved(path.to_path_buf());
-            }
-            Err(e) => log::warn!(target: "ondin", "mcp: cannot write {}: {e}", path.display()),
-        }
+        let digest = crate::library::store::write_document_digest(path, &p.session.doc)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        p.session.disk = crate::library::disk::Stamp::of(path, digest);
+        p.session.mark_saved(path.to_path_buf());
+        Ok(())
     }
 }
 
@@ -226,5 +271,130 @@ mod tests {
         };
         assert!(!p.session.is_dirty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A kit made and published by an agent from a tab behind, used by another
+    /// document behind through `get_kit` and `insert_from_kit`, then published
+    /// again and taken with `accept_kit_updates` — each saved where it must be,
+    /// and the publish said on the status line with the client's name.
+    ///
+    /// flip: `waiting` keeping kits at the held version (`>` to `>=`) → fails at
+    /// the empty update list right after the insert.
+    #[test]
+    fn an_agent_makes_publishes_uses_and_updates_a_kit() {
+        use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let root = crate::kits::picker::tests::temp_root("mcp-phase4");
+        let ctx = egui::Context::default();
+        let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
+        let front = app.tabs.active;
+        let mut engine = Engine::default();
+        let mut go =
+            |app: &mut OndinApp, tool: &str, args: Value| call(&mut engine, app, tool, args);
+
+        // Atlas holds one main, Badge; Consumer is empty.
+        let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+        let mut atlas = ondin_core::Document::new(ids.mint());
+        let badge = ids.mint();
+        atlas
+            .apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: badge,
+                    parent: atlas.first_page(),
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(40.0, 20.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: Some(Affine::IDENTITY),
+                    name: Some("Badge".into()),
+                },
+                Operation::SetComponent {
+                    id: badge,
+                    component: true,
+                },
+            ]))
+            .unwrap();
+        let atlas_path =
+            crate::library::store::file_document(&root, None, "Atlas", &mut atlas).unwrap();
+        let made = go(&mut app, "create_document", json!({ "name": "Consumer" }));
+        let consumer = made["path"].as_str().unwrap().to_owned();
+        assert!(
+            app.session
+                .status()
+                .text
+                .contains("Filed Consumer · by test"),
+            "{}",
+            app.session.status().text
+        );
+
+        go(
+            &mut app,
+            "use_document",
+            json!({ "document": atlas_path.display().to_string() }),
+        );
+        go(&mut app, "make_kit", json!({}));
+        let published = go(&mut app, "publish_kit", json!({ "note": "First" }));
+        assert_eq!(published["version"], json!(1));
+        assert!(
+            app.session.status().text.ends_with(" · by test"),
+            "{}",
+            app.session.status().text
+        );
+        let on_disk = ondin_core::io::load(&std::fs::read(&atlas_path).unwrap()).unwrap();
+        assert!(on_disk.published().is_some(), "the publish was saved");
+        let kits = go(&mut app, "list_kits", json!({}));
+        assert_eq!(kits["kits"][0]["name"], json!("Atlas"));
+
+        go(&mut app, "use_document", json!({ "document": consumer }));
+        let kit = go(&mut app, "get_kit", json!({ "kit": "atlas" }));
+        assert_eq!(kit["components"][0]["id"], json!(badge.to_wire()));
+        let consumer_page = {
+            let path = std::path::PathBuf::from(&consumer);
+            let session = Documents::session(&mut app, &path).unwrap();
+            session.doc.first_page().to_wire()
+        };
+        let placed = go(
+            &mut app,
+            "insert_from_kit",
+            json!({ "kit": "Atlas", "main": badge.to_wire(), "parent": consumer_page }),
+        );
+        assert_eq!(placed["created"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            go(&mut app, "list_kit_updates", json!({}))["updates"],
+            json!([])
+        );
+
+        go(
+            &mut app,
+            "use_document",
+            json!({ "document": atlas_path.display().to_string() }),
+        );
+        go(
+            &mut app,
+            "set_name",
+            json!({ "node": badge.to_wire(), "name": "Pill" }),
+        );
+        assert_eq!(go(&mut app, "publish_kit", json!({}))["version"], json!(2));
+
+        go(&mut app, "use_document", json!({ "document": consumer }));
+        let waiting = go(&mut app, "list_kit_updates", json!({}));
+        assert_eq!(waiting["updates"][0]["held"], json!(1));
+        assert_eq!(waiting["updates"][0]["version"], json!(2));
+        let accepted = go(&mut app, "accept_kit_updates", json!({}));
+        assert_eq!(accepted["accepted"][0]["version"], json!(2));
+        assert_eq!(
+            go(&mut app, "list_kit_updates", json!({}))["updates"],
+            json!([]),
+            "nothing waits after the accept"
+        );
+        let written = ondin_core::io::load(&std::fs::read(&consumer).unwrap()).unwrap();
+        assert!(
+            written.vault().is_some(),
+            "the consumer's file holds the kit's main"
+        );
+        assert_eq!(app.tabs.active, front, "the tab in front never changed");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

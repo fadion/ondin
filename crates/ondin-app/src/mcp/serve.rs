@@ -7,6 +7,7 @@
 
 use super::endpoint::{self, Host};
 use super::{Documents, Engine};
+use crate::library::state::Library;
 use crate::session::EditorSession;
 use ondin_mcp::queue::{self, Request};
 use std::collections::HashMap;
@@ -24,6 +25,8 @@ const WINDOW_EVERY: Duration = Duration::from_secs(2);
 pub(crate) struct Headless {
     open: HashMap<PathBuf, EditorSession>,
     library: Option<PathBuf>,
+    /// The library, scanned the first time a kit tool asks for it.
+    scanned: Option<Library>,
 }
 
 impl Headless {
@@ -31,6 +34,16 @@ impl Headless {
         Self {
             open: HashMap::new(),
             library,
+            scanned: None,
+        }
+    }
+
+    /// The library, scanned again.
+    fn rescan(&mut self) {
+        match (&mut self.scanned, &self.library) {
+            (Some(lib), _) => lib.refresh(),
+            (None, Some(root)) => self.scanned = Some(Library::open(root.clone())),
+            (None, None) => {}
         }
     }
 }
@@ -56,13 +69,35 @@ impl Documents for Headless {
     }
 
     fn committed(&mut self, path: &Path) {
-        let Some(session) = self.open.get_mut(path) else {
-            return;
-        };
-        match crate::library::store::write_document(path, &session.doc) {
-            Ok(()) => session.mark_saved(path.to_path_buf()),
-            Err(e) => log::warn!(target: "ondin", "serve: cannot write {}: {e}", path.display()),
+        if let Err(e) = self.save(path) {
+            log::warn!(target: "ondin", "serve: {e}");
         }
+    }
+
+    fn library(&mut self) -> Option<&Library> {
+        self.rescan();
+        self.scanned.as_ref()
+    }
+
+    fn with_library(&mut self, path: &Path) -> Option<(&mut EditorSession, Option<&Library>)> {
+        self.rescan();
+        Some((self.open.get_mut(path)?, self.scanned.as_ref()))
+    }
+
+    fn save(&mut self, path: &Path) -> Result<(), String> {
+        let session = self
+            .open
+            .get_mut(path)
+            .ok_or_else(|| format!("{} is no longer open", path.display()))?;
+        crate::library::store::write_document(path, &session.doc)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        session.mark_saved(path.to_path_buf());
+        Ok(())
+    }
+
+    /// Nobody reads a status line here; the log keeps it.
+    fn tell(&mut self, line: String) {
+        log::info!(target: "ondin", "serve: {line}");
     }
 }
 

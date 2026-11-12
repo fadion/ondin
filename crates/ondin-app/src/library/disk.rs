@@ -91,6 +91,14 @@ impl Stamp {
         Some(Self::from_meta(&std::fs::metadata(path).ok()?, digest))
     }
 
+    /// The stamp of `path` as it is now, its bytes read and digested. `None` when
+    /// it cannot be read.
+    pub fn read(path: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        let bytes = std::fs::read(path).ok()?;
+        Some(Self::from_meta(&meta, super::history::digest(&bytes)))
+    }
+
     /// The stamp of a file whose metadata was `meta` **before** its bytes, with
     /// digest `digest`, were read: a write between the two then leaves a stamp
     /// whose time no longer matches, which [`Self::check`] reads again, rather than

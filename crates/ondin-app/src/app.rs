@@ -6748,8 +6748,12 @@ impl OndinApp {
     /// Save the open document over a file someone else changed: *Changed on
     /// disk*'s *Overwrite*.
     fn overwrite_disk(&mut self) {
-        // Unchecked once: the save stamps the file it writes.
-        self.session.disk = None;
+        // Stamped with the version being written over, not left unchecked: the
+        // save passes for exactly that file, and if it fails, a later outside
+        // change is still asked about rather than autosaved over.
+        if let Some(path) = self.session.path.clone() {
+            self.session.disk = crate::library::disk::Stamp::read(&path);
+        }
         self.session.clash = crate::session::Clash::Clear;
         if self.save_file(false) {
             let name = self.shown_title();
@@ -6783,8 +6787,8 @@ impl OndinApp {
 
     /// Look at the open document's file while it is open: every
     /// `disk::WATCH_EVERY` seconds and when the window gets the focus back, as the
-    /// kits it uses are. A clean document whose file changed is read again, since
-    /// nothing here is lost; one with unsaved changes asks now (*Changed on
+    /// kits it uses are. A clean document whose file changed is read again
+    /// ([`Self::follow_disk`]); one with unsaved changes asks now (*Changed on
     /// disk*), before more edits land on the old version.
     pub(crate) fn watch_disk(&mut self, ctx: &egui::Context) {
         let (now, focused) = ctx.input(|i| (i.time, i.viewport().focused.unwrap_or(true)));
@@ -6797,22 +6801,18 @@ impl OndinApp {
     /// the next look — `None` when there is nothing to watch.
     pub(crate) fn watch_disk_at(&mut self, now: f64, focused: bool) -> Option<f64> {
         use crate::library::disk::WATCH_EVERY;
-        let due = self.disk_watch.due(now, focused);
         // Unstamped, or a question already out.
         if self.session.disk.is_none() || self.session.clash != crate::session::Clash::Clear {
+            let _ = self.disk_watch.due(now, focused);
             return None;
         }
-        if let Err(wait) = due {
-            return Some(wait);
-        }
-        // A write of its own in flight would read as a change; a modal, a text
-        // edit or a drag holds ids or input a reload would pull away.
-        if self.session.is_saving()
-            || self.modal_is_up()
-            || self.text.is_some()
-            || !matches!(self.drag, Drag::None)
-        {
+        // Before `due`, which would spend a look owed (the focus coming back) on
+        // a frame that cannot take it; the first frame free of these takes it.
+        if self.holds_off_the_watch() {
             return Some(WATCH_EVERY);
+        }
+        if let Err(wait) = self.disk_watch.due(now, focused) {
+            return Some(wait);
         }
         let session = &mut self.session;
         let changed = match (session.path.as_deref(), session.disk.as_mut()) {
@@ -6824,13 +6824,50 @@ impl OndinApp {
         }
         if self.session.is_dirty() {
             self.session.clash = crate::session::Clash::Ask;
-        } else if self.read_again().is_ok() {
+        } else if self.follow_disk().is_ok() {
             let name = self.shown_title();
             self.session
                 .info(format!("Reloaded “{name}”: it changed on disk"));
         }
         // A failed read (a file still being written) is looked at again next time.
         Some(WATCH_EVERY)
+    }
+
+    /// Whether something live would make the watch's silent reload lose work or
+    /// pull ids from under it: a write of the app's own in flight, which would
+    /// read as a change; a modal; a text edit, a drag, a pen path or a pencil
+    /// stroke; or a name, description or link being typed.
+    fn holds_off_the_watch(&self) -> bool {
+        self.session.is_saving()
+            || self.modal_is_up()
+            || self.text.is_some()
+            || !matches!(self.drag, Drag::None)
+            || self.pen.is_some()
+            || self.pencil.is_some()
+            || self.name_edit.is_some()
+            || self.desc_edit.is_some()
+            || self.link_edit.is_some()
+            || self.href_edit.is_some()
+            || self.renaming_layer.is_some()
+    }
+
+    /// The watch's reload of a clean document whose file changed: [`Self::read_again`],
+    /// keeping where the user was — the page, the camera, the folds and the layers
+    /// still in the file selected.
+    fn follow_disk(&mut self) -> Result<(), String> {
+        self.remember_view();
+        let selected = self.session.selection.ids().to_vec();
+        let collapsed = self.collapsed.clone();
+        self.read_again()?;
+        let doc = &self.session.doc;
+        let page = self.session.page;
+        let kept: Vec<NodeId> = selected
+            .into_iter()
+            .filter(|id| doc.page_of(*id) == Some(page))
+            .collect();
+        self.session.selection.set(kept);
+        self.collapsed = collapsed;
+        Ok(())
     }
 
     /// The in-app confirmation shown after a cancelled close of the window, listing
@@ -6904,6 +6941,7 @@ impl OndinApp {
                         self.discard_tab(id);
                     }
                 }
+                self.front_a_held_save();
             }
             Some(CloseChoice::Save) => {
                 self.confirming_close = false;
@@ -6919,6 +6957,7 @@ impl OndinApp {
                 // restart is called off as *Cancel* does.
                 if self.any_unsaved() {
                     self.updater.restart_called_off();
+                    self.front_a_held_save();
                 } else {
                     // Not in `recovery_tick`: there is no next frame.
                     self.drop_recovery();
@@ -6949,6 +6988,23 @@ impl OndinApp {
                 self.updater.restart_called_off();
             }
             None => {}
+        }
+    }
+
+    /// Bring forward a tab whose save is waiting on *Changed on disk*, unless the
+    /// tab in front is one: a *Save and close* that stays open for it then shows
+    /// its card rather than nothing.
+    fn front_a_held_save(&mut self) {
+        use crate::session::Clash;
+        if self.session.clash == Clash::Ask {
+            return;
+        }
+        let held = self.tabs.list.iter().find_map(|t| match &t.body {
+            crate::tabs::Body::Parked(p) if p.session.clash == Clash::Ask => Some(t.id),
+            _ => None,
+        });
+        if let Some(id) = held {
+            self.activate_tab(id);
         }
     }
 
@@ -13257,6 +13313,232 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The focus coming back on a frame the watch is held off (a modal) is
+    /// looked at on the first frame free of it, not 45 s later.
+    ///
+    /// flip: `watch_disk_at` asking `Watch::due` before `holds_off_the_watch`
+    /// → fails at "the owed look is taken".
+    #[test]
+    fn a_held_off_watch_keeps_the_look_it_owes() {
+        let ctx = egui::Context::default();
+        let (mut app, _, root) = app_with_a_changed_file(&ctx, "watch-owed");
+        app.session.mark_clean();
+        // The first look, due at once, spent unstamped.
+        let stamp = app.session.disk.take();
+        app.watch_disk_at(0.0, true);
+        app.session.disk = stamp;
+        app.watch_disk_at(1.0, false);
+        app.versions_open = true;
+        assert!(app.modal_is_up(), "the fixture: a modal");
+        app.watch_disk_at(2.0, true);
+        assert_ne!(
+            app.session.doc.meta().name.as_deref(),
+            Some("Theirs"),
+            "held off under the modal"
+        );
+        app.versions_open = false;
+        app.watch_disk_at(3.0, true);
+        assert_eq!(
+            app.session.doc.meta().name.as_deref(),
+            Some("Theirs"),
+            "the owed look is taken"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The watch's reload of a clean document waits while a pen path is being
+    /// drawn, then keeps the page, the camera and the selection.
+    ///
+    /// flip: `holds_off_the_watch` without its `pen` arm → fails at "a pen path
+    /// holds it off"; `follow_disk` not calling `remember_view` → fails at "the
+    /// camera stays".
+    #[test]
+    fn the_watchs_reload_waits_for_a_pen_path_and_keeps_the_view() {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let ctx = egui::Context::default();
+        let root = temp_root("watch-keeps");
+        let mut app = app_at(&ctx, root.clone());
+        let page = app.session.page;
+        let id = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }])));
+        assert!(app.save_file(false), "fixture: filed");
+        let path = app.session.path.clone().unwrap();
+        app.session.selection.set_one(id);
+        app.session.home_pending = false;
+        app.session.camera.center = ondin_core::kurbo::Point::new(321.0, -55.0);
+        app.session.camera.set_zoom(2.0);
+        let camera = app.session.camera;
+        // Their change keeps the document's id and layers, as an edit elsewhere does.
+        let mut theirs = app.session.doc.clone();
+        let mut meta = theirs.meta().clone();
+        meta.name = Some("Theirs".into());
+        theirs.set_meta(meta);
+        crate::library::store::write_document(&path, &theirs).unwrap();
+
+        app.pen = Some(crate::preview::PenState {
+            parent: page,
+            parent_world: ondin_core::kurbo::Affine::IDENTITY,
+            anchors: vec![crate::preview::PenAnchor::corner(
+                ondin_core::kurbo::Point::ZERO,
+            )],
+            shaping: false,
+            editing: None,
+        });
+        app.watch_disk_at(0.0, true);
+        assert!(
+            app.pen.is_some() && app.session.doc.meta().name.as_deref() != Some("Theirs"),
+            "a pen path holds it off"
+        );
+        app.pen = None;
+        app.watch_disk_at(1.0, true);
+        assert_eq!(
+            app.session.doc.meta().name.as_deref(),
+            Some("Theirs"),
+            "the fixture: read again"
+        );
+        assert_eq!(app.session.page, page, "the page stays");
+        // `home_pending` is the camera the next canvas frame would put in.
+        assert_eq!(
+            (
+                app.session.camera.center,
+                app.session.camera.zoom,
+                app.session.home_pending
+            ),
+            (camera.center, camera.zoom, false),
+            "the camera stays"
+        );
+        assert_eq!(app.session.selection.ids(), &[id], "the selection stays");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The watch waits out the app's own autosave: bytes it wrote, whose result
+    /// is not taken up yet, are not an outside change.
+    ///
+    /// flip: `holds_off_the_watch` without its `is_saving` arm → fails at "no
+    /// question over its own save".
+    #[test]
+    fn the_watch_waits_out_its_own_autosave() {
+        let ctx = egui::Context::default();
+        let root = temp_root("watch-own");
+        let mut app = app_at(&ctx, root.clone());
+        assert!(app.save_file(false));
+        let path = app.session.path.clone().unwrap();
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Edited".into());
+        app.session.doc.set_meta(meta);
+        app.session.mark_unsaved();
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        assert!(app.session.is_saving(), "the fixture: a write in flight");
+        // Landed on disk, its result held back from the session.
+        let done = app.writer.as_mut().unwrap().settle();
+        assert_eq!(
+            name_on_disk(&path).as_deref(),
+            Some("Edited"),
+            "the fixture: the bytes are down"
+        );
+        app.watch_disk_at(0.0, true);
+        assert_eq!(
+            app.session.clash,
+            crate::session::Clash::Clear,
+            "no question over its own save"
+        );
+        app.apply_disk(done);
+        assert!(!app.session.is_dirty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A *Reload* whose read fails holds autosave and says why.
+    ///
+    /// flip: `reload_from_disk`'s `Err` arm not setting `Held` → fails at
+    /// "autosave is held".
+    #[test]
+    fn a_reload_that_fails_holds() {
+        let ctx = egui::Context::default();
+        let (mut app, path, root) = app_with_a_changed_file(&ctx, "reload-fails");
+        assert!(!app.save_file(false));
+        std::fs::write(&path, b"not a document").unwrap();
+        app.reload_from_disk();
+        assert_eq!(
+            app.session.clash,
+            crate::session::Clash::Held,
+            "autosave is held"
+        );
+        assert_eq!(
+            app.session.status().kind,
+            crate::session::StatusKind::Error,
+            "and the status line says why"
+        );
+        assert!(app.session.is_dirty(), "the work is kept");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Make the next write of `path` fail: a read-only file on Windows, a
+    /// read-only folder on Linux and macOS (`atomic`'s tests do the same).
+    fn refuse_writes(path: &std::path::Path, refuse: bool) {
+        #[cfg(windows)]
+        // `set_readonly(false)` is one flag on a file this test made.
+        #[allow(clippy::permissions_set_readonly_false)]
+        {
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_readonly(refuse);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if refuse { 0o555 } else { 0o755 };
+            let dir = path.parent().unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+    }
+
+    /// An *Overwrite* whose write fails still asks about a later outside change
+    /// rather than autosaving over it.
+    ///
+    /// flip: `overwrite_disk` clearing the stamp instead of reading it → fails
+    /// at "a later change is asked about".
+    #[test]
+    fn a_failed_overwrite_still_asks_about_a_later_change() {
+        let ctx = egui::Context::default();
+        let (mut app, path, root) = app_with_a_changed_file(&ctx, "overwrite-fails");
+        assert!(!app.save_file(false));
+        refuse_writes(&path, true);
+        app.overwrite_disk();
+        refuse_writes(&path, false);
+        assert_eq!(
+            name_on_disk(&path).as_deref(),
+            Some("Theirs"),
+            "the fixture: the overwrite failed"
+        );
+        let mut later = ondin_core::Document::new(ondin_core::IdSource::new(0x7e3).mint());
+        let mut meta = later.meta().clone();
+        meta.name = Some("Later".into());
+        later.set_meta(meta);
+        crate::library::store::write_document(&path, &later).unwrap();
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        app.disk_settle();
+        assert_eq!(
+            app.session.clash,
+            crate::session::Clash::Ask,
+            "a later change is asked about"
+        );
+        assert_eq!(name_on_disk(&path).as_deref(), Some("Later"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The app's own writes move the stamp: an autosave, then a save by hand,
     /// never asks.
     ///
@@ -18454,6 +18736,38 @@ mod close_confirmation_tests {
         assert!(app.tabs.get(b).is_some(), "the failed tab stays");
         assert!(app.dirty_tabs().contains(&b), "with its work");
         assert!(app.closing_tabs.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A window's *Save and close* held by a tab whose file changed outside,
+    /// saved before another, stays open with that tab in front and its
+    /// *Changed on disk* card up.
+    ///
+    /// flip: `close_confirmation` not calling `front_a_held_save` → fails at
+    /// "the held tab comes forward".
+    #[test]
+    fn save_and_close_held_by_an_outside_change_shows_its_card() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [a, _, _], root) = three_tabs(&ctx, "save-held");
+        app.activate_tab(a);
+        let path = root.join("a.ondin");
+        app.session.path = Some(path.clone());
+        app.session.disk = crate::library::disk::Stamp::read(&path);
+        let mut theirs = ondin_core::Document::new(ondin_core::IdSource::new(0x7e2).mint());
+        let mut meta = theirs.meta().clone();
+        meta.name = Some("Theirs".into());
+        theirs.set_meta(meta);
+        crate::library::store::write_document(&path, &theirs).unwrap();
+        app.confirming_close = true;
+        answer(&mut app, &ctx, "Save and close");
+        assert!(app.any_unsaved(), "the fixture: the close stays open");
+        assert_eq!(
+            (app.tabs.active, app.session.clash),
+            (Some(a), crate::session::Clash::Ask),
+            "the held tab comes forward"
+        );
+        assert!(app.modal_is_up(), "with its card");
         let _ = std::fs::remove_dir_all(&root);
     }
 

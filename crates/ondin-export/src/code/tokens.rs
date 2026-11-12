@@ -6,7 +6,7 @@
 //! because one number variable may be bound to both, and an opacity reads its
 //! number as a percentage.
 //!
-//! The default mode is declared on `:root` and on its own `[data-mode="…"]` (a
+//! The default mode is declared on `:root` and on its own `[data-mode~="…"]` (a
 //! frame may set it inside one set to another), every other mode on its own,
 //! **each block declaring every token, aliases included**: a custom property's
 //! `var()` is substituted on the element that declares it, so an alias declared
@@ -187,7 +187,7 @@ impl Tokens {
     /// where a frame's width beats what it inherits. Every block is `:where()`,
     /// of no weight, so source order alone ranks them and a child pinning a mode
     /// of its own keeps it, the nearer pin winning as on the canvas.
-    fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, eq: &str, out: &mut String) {
+    fn query_blocks(&self, t: &Variables, shaken: &BTreeSet<VarId>, out: &mut String) {
         // Kit queries after the document's, so a kit's own pick beats the
         // mapping from a document query on the same frame, as on the canvas.
         let (kits, ours): (Vec<_>, Vec<_>) = self
@@ -237,8 +237,9 @@ impl Tokens {
                 }
                 out.push_str("}\n");
             }
-            let pinned = |word: &str, eq: &str| {
-                let pin = format!("[data-mode{eq}\"{word}\"]");
+            // `~=`: a frame names every mode it sets, a kit's among them.
+            let pinned = |word: &str| {
+                let pin = format!("[data-mode~=\"{word}\"]");
                 let own = format!("[data-pin~=\"{word}\"]");
                 format!(":where({own} > {at}) > *, :where({pin}{at}) > *")
             };
@@ -251,21 +252,21 @@ impl Tokens {
                 for dm in &onto.modes {
                     if let Some(km) = t.kit_mode_at(k, kc, &[dm.id]) {
                         let word = self.mode(dm.id).unwrap_or_default();
-                        self.kit_block(t, shaken, pinned(word, "~="), km, out);
+                        self.kit_block(t, shaken, pinned(word), km, out);
                     }
                 }
             }
-            // A kit mode may share `data-mode` with a document mode, so `~=`.
-            let eq = if col.is_some() { eq } else { "~=" };
             for m in &modes {
-                block(pinned(self.mode(*m).unwrap_or_default(), eq), *m, out);
+                block(pinned(self.mode(*m).unwrap_or_default()), *m, out);
             }
         }
     }
 
     /// Kit mode `mode`'s block under `selector`: every kit variable read with a
-    /// value in that mode, and every alias of the document's reaching one,
-    /// redeclared as `mode_block` redeclares them. Nothing for none.
+    /// value in that mode. Nothing for none. A document alias of one is not
+    /// redeclared, so it keeps the value its document mode gave it, as the
+    /// canvas reads it: a walk from a document variable reads every kit step
+    /// in the document's modes alone (`Document::resolve_var`).
     fn kit_block(
         &self,
         t: &Variables,
@@ -274,18 +275,10 @@ impl Tokens {
         mode: ModeId,
         out: &mut String,
     ) {
-        let in_mode = |v: &variable::Variable| v.kit().is_some() && v.cells.contains_key(&mode);
         let mut body = String::new();
         for id in shaken {
             let Some(v) = t.get(*id) else { continue };
             if v.kit().is_none() {
-                if let Some(to) = one_alias(t, v).filter(|to| reaches_by(t, *to, in_mode)) {
-                    body.push_str(&format!(
-                        "  --{}: var(--{});\n",
-                        self.name(*id),
-                        self.name(to)
-                    ));
-                }
                 continue;
             }
             if let Some(value) = v.cells.get(&mode).and_then(|c| self.value(t, v, c)) {
@@ -408,9 +401,9 @@ impl Tokens {
         let t = doc.variables();
         let shaken = self.reached(t);
         let mut out = String::new();
-        // A frame names every mode it sets in one `data-mode`, so with two
-        // collections a block matches one word of it.
-        let eq = if t.has_collections() { "~=" } else { "=" };
+        // A frame names every mode it sets in one `data-mode`, a kit's beside
+        // the document's, so a block matches one word of it.
+        let eq = "~=";
         for c in t.collections() {
             // Picked by width: the default on `:root`, every other mode in a
             // media block of its minimum, then each mode's pin, after every
@@ -461,7 +454,7 @@ impl Tokens {
         }
         // After every collection's blocks, so a container's pick beats the
         // modes its children inherit from around it.
-        self.query_blocks(t, &shaken, eq, &mut out);
+        self.query_blocks(t, &shaken, &mut out);
         for km in t.kits().values() {
             // `~=`: a frame setting a kit mode may name a document mode beside it.
             for m in &km.modes {
@@ -496,7 +489,17 @@ impl Tokens {
                     }
                     t.kit_mode_at(kit, kc, mode.as_slice())
                 }
-                None if t.collection_of(*id).is_some_and(|x| x.id == c.id) => mode,
+                None if t.collection_of(*id).is_some_and(|x| x.id == c.id) => {
+                    // An alias of a kit variable is its value in this mode,
+                    // not a `var()`: substituted on an element a kit query or
+                    // a kit mode also sets, a `var()` would read the kit's
+                    // column, where the canvas reads this mode's.
+                    if let Some(value) = mode.and_then(|m| self.kit_alias_value(t, v, c, m)) {
+                        out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
+                        continue;
+                    }
+                    mode
+                }
                 // An alias into this collection is redeclared here too, or the
                 // root's substitution would stand.
                 None => match one_alias(t, v) {
@@ -530,6 +533,33 @@ impl Tokens {
             }
         }
         out.push_str("}\n");
+    }
+
+    /// Document variable `v`'s value in `mode` of its collection `c` when it
+    /// aliases there a kit variable whose kit collection maps from `c`: the
+    /// value a walk from `v` reads (`Variables::resolve_at`). `None` otherwise.
+    fn kit_alias_value(
+        &self,
+        t: &Variables,
+        v: &variable::Variable,
+        c: &variable::Collection,
+        mode: ModeId,
+    ) -> Option<String> {
+        let Some(Cell::Alias(to)) = v.cells.get(&mode) else {
+            return None;
+        };
+        let kit = t.get(*to).filter(|k| k.kit().is_some())?;
+        let kc = t.kit_collection_of(kit)?;
+        if t.kit_onto(kc).is_none_or(|o| o.id != c.id) {
+            return None;
+        }
+        let cell = match t.resolve_at(v.id, &[mode])? {
+            variable::Value::Color(x) => Cell::Color(x),
+            variable::Value::Number(x) => Cell::Number(x),
+            variable::Value::Boolean(x) => Cell::Boolean(x),
+            variable::Value::String(x) => Cell::String(x),
+        };
+        self.value(t, v, &cell)
     }
 
     /// The variables read that alias into another collection of several modes

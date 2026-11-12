@@ -2762,7 +2762,7 @@ fn variables_match_the_canvas_in_every_mode() {
         String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
     assert!(
         tokens.contains(
-            "[data-mode=\"dark\"] {\n  --brand-500: #3c78f0;\n  --accent: var(--brand-500);"
+            "[data-mode~=\"dark\"] {\n  --brand-500: #3c78f0;\n  --accent: var(--brand-500);"
         ),
         "the alias is redeclared in the dark block:\n{tokens}"
     );
@@ -2912,7 +2912,7 @@ fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
             "{name}: tokens.css lacks the media block:\n{tokens}"
         );
         assert!(
-            tokens.contains("[data-mode=\"mobile\"] {"),
+            tokens.contains("[data-mode~=\"mobile\"] {"),
             "{name}: a pin's block:\n{tokens}"
         );
         let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
@@ -3007,7 +3007,7 @@ fn a_width_query_is_written_as_a_container_query() {
     assert!(
         tokens.contains(
             ":where([data-pin~=\"wide\"] > [data-query~=\"card-variables\"]) > *, \
-             :where([data-mode=\"wide\"][data-query~=\"card-variables\"]) > *"
+             :where([data-mode~=\"wide\"][data-query~=\"card-variables\"]) > *"
         ),
         "tokens.css lacks the pin:\n{tokens}"
     );
@@ -3108,14 +3108,15 @@ fn a_query_container_is_measured_empty_as_chrome_measures_it() {
 
 /// A kit collection's width query is written as the document's are: named after
 /// the kit collection, its children given the kit's narrowest mode and each
-/// other one under `@container`, with the kit's variables in that mode's column
-/// and a document alias of one redeclared beside it; a kit mode's pin is `~=`.
-/// Its blocks follow the frame's document query, listed after it, so they win;
-/// a document pin on the frame, mapped onto the kit, follows them, and the kit's
-/// own pins follow that.
+/// other one under `@container`, with the kit's variables in that mode's column;
+/// a kit mode's pin is `~=`. Its blocks follow the frame's document query,
+/// listed after it, so they win; a document pin on the frame, mapped onto the
+/// kit, follows them, and the kit's own pins follow that. A document alias of a
+/// kit variable keeps its document mode's column, as the canvas reads it, so
+/// the narrow card draws Light's Wide, not the query's Compact.
 ///
 /// flip: `Tokens::query_attr` skipping a kit's modes → "lacks the container";
-/// `Tokens::kit_block` without its alias arm → "redeclares the alias";
+/// `Tokens::kit_alias_value` answering `None` → 136.7 at the rect;
 /// `Tokens::query_blocks` in stored order → "after the document's"; without its
 /// mapped pins → no `light` pin block.
 #[test]
@@ -3199,7 +3200,9 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
             description: String::new(),
         },
     }]);
-    let card = d.frame(None, 0.0, 0.0, 400.0, 120.0, "Card");
+    // Narrower than Wide's threshold, so the kit query picks Compact, which a
+    // walk from the document's `bg` does not read: the canvas draws Light's Wide.
+    let card = d.frame(None, 0.0, 0.0, 200.0, 120.0, "Card");
     let r = d.rect(card, 10.0, 10.0, 60.0, 60.0, 0.0);
     d.apply(vec![
         Operation::SetFills {
@@ -3244,8 +3247,8 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
         "a document pin beats the kit query, mapped, and loses to the kit's own pins:\n{tokens}"
     );
     assert!(
-        tokens.contains("  --brand-ink: #3c78f0;\n    --bg: var(--brand-ink);\n  }\n}\n"),
-        "the wide block redeclares the alias:\n{tokens}"
+        tokens.contains("    --brand-ink: #3c78f0;\n  }\n}\n"),
+        "the wide block leaves the document's alias alone:\n{tokens}"
     );
     assert!(
         tokens.contains(
@@ -3273,6 +3276,118 @@ fn a_kit_collections_width_query_is_written_as_a_container_query() {
         String::from_utf8_lossy(&f.bytes).contains("data-query=\"card-density card-variables\"")
     });
     assert!(marked, "no file marks the frame with its queries");
+    assert_eq!(
+        doc.resolve_var(r, bg),
+        Some(ondin_core::variable::Value::Color(Color::from_rgba8(
+            60, 120, 240, 255
+        ))),
+        "the fixture: the canvas reads the alias in Light's Wide"
+    );
+    holds("kit-query-alias", &doc, &res);
+}
+
+/// With one collection, a frame that sets a document mode beside a kit mode
+/// still reads the document mode: the block matches one word of `data-mode`.
+/// flip: `Tokens::css` matching a one-collection document's blocks with `=` →
+/// 136.7 at the rect, drawn in Light.
+#[test]
+fn a_document_mode_beside_a_kit_mode_is_kept() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{
+        Cell, CollectionId, KitMode, KitModes, Mode, VarKind, VarOrigin, Variable,
+    };
+    const KIT: &str = "0123456789abcdef0123456789abcdef";
+    let mut d = Doc::new();
+    let (light, dark, compact) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_mode());
+    let (ink, theirs, bg) = (d.ids.mint_var(), d.ids.mint_var(), d.ids.mint_var());
+    for (index, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        d.apply(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let from = d.ids.mint_mode();
+    d.apply(vec![
+        Operation::SetKitModes {
+            kit: KIT.into(),
+            modes: Some(KitModes {
+                name: Some("Brand".into()),
+                modes: vec![KitMode {
+                    id: compact,
+                    name: "Compact".into(),
+                    from,
+                    collection: String::new(),
+                }],
+                map: Default::default(),
+            }),
+        },
+        // Something of the kit's read, so its mode is written.
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "gap".into(),
+                kind: VarKind::Number,
+                cells: [(compact, Cell::Number(4.0))].into_iter().collect(),
+                scope: None,
+                origin: Some(VarOrigin {
+                    kit: KIT.into(),
+                    var: theirs,
+                    version: 1,
+                }),
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: bg,
+                name: "bg".into(),
+                kind: VarKind::Color,
+                cells: [
+                    (light, Cell::Color(Color::from_rgba8(230, 70, 50, 255))),
+                    (dark, Cell::Color(Color::from_rgba8(60, 120, 240, 255))),
+                ]
+                .into_iter()
+                .collect(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let card = d.frame(None, 0.0, 0.0, 120.0, 80.0, "Card");
+    let r = d.rect(card, 10.0, 10.0, 60.0, 60.0, 0.0);
+    d.apply(vec![
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: bg,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+        Operation::SetModes {
+            id: card,
+            modes: vec![compact, dark],
+        },
+    ]);
+    let (doc, res) = d.done();
+    assert_eq!(
+        doc.resolve_var(r, bg),
+        Some(ondin_core::variable::Value::Color(Color::from_rgba8(
+            60, 120, 240, 255
+        ))),
+        "the fixture: the canvas draws Dark"
+    );
+    holds("document-mode-beside-kit", &doc, &res);
 }
 
 /// A text's bound type numbers write their variables in the unit each literal
@@ -3497,8 +3612,8 @@ fn a_content_varying_by_mode_draws_each_modes_text() {
     let tokens =
         String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
     for block in [
-        ":root, [data-mode=\"light\"] {\n  --greeting-light: initial;\n  --greeting-dark: none;\n}",
-        "[data-mode=\"dark\"] {\n  --greeting-light: none;\n  --greeting-dark: initial;\n}",
+        ":root, [data-mode~=\"light\"] {\n  --greeting-light: initial;\n  --greeting-dark: none;\n}",
+        "[data-mode~=\"dark\"] {\n  --greeting-light: none;\n  --greeting-dark: initial;\n}",
     ] {
         assert!(tokens.contains(block), "lacks {block:?}:\n{tokens}");
     }

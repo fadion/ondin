@@ -234,26 +234,32 @@ impl<'de> serde::Deserialize<'de> for Ordered {
                     }
                     out.push(Some((k, v)));
                 }
-                Ok(Ordered(out.into_iter().flatten().collect()))
+                // Shrunk: a file of small objects holds many of these at once.
+                let mut keys: Vec<_> = out.into_iter().flatten().collect();
+                keys.shrink_to_fit();
+                Ok(Ordered(keys))
             }
         }
         d.deserialize_map(Visit)
     }
 }
 
+/// `text` read as an array of objects in one pass, so a file near the read cap
+/// never holds two trees of itself at once.
 fn read_json(text: &str) -> Result<Read, Unreadable> {
-    let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Unreadable::BadJson)?;
-    let serde_json::Value::Array(items) = value else {
-        return Err(Unreadable::NotObjects);
-    };
+    let items: Vec<Ordered> = serde_json::from_str(text).map_err(|e| {
+        // A wrong shape stops the parse where it is met, before the rest of
+        // the file is checked: invalid JSON past it is still said as such.
+        let valid = serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok();
+        if e.is_data() && valid {
+            Unreadable::NotObjects
+        } else {
+            Unreadable::BadJson
+        }
+    })?;
     if items.is_empty() {
         return Err(Unreadable::Empty);
     }
-    if items.iter().any(|i| !i.is_object()) {
-        return Err(Unreadable::NotObjects);
-    }
-    // Read again in order: the first pass only says it is an array of objects.
-    let items: Vec<Ordered> = serde_json::from_str(text).map_err(|_| Unreadable::BadJson)?;
     let (names, past) = json_columns(&items);
     let column: rustc_hash::FxHashMap<&str, usize> =
         (0..).zip(&names).map(|(i, k)| (k.as_str(), i)).collect();
@@ -469,6 +475,19 @@ mod tests {
         assert_eq!(read("{}", Format::Json, None), Err(Unreadable::NotObjects));
         assert_eq!(read("[1]", Format::Json, None), Err(Unreadable::NotObjects));
         assert_eq!(read("[", Format::Json, None), Err(Unreadable::BadJson));
+    }
+
+    /// A non-object element is said as the wrong shape, and invalid JSON past
+    /// it as invalid, though the one parse stops at the element.
+    /// flip: `read_json` mapping every data error to `NotObjects` → fails at `[1, x`.
+    #[test]
+    fn json_shape_and_syntax_are_told_apart() {
+        let r = |t| read(t, Format::Json, None);
+        assert_eq!(r(r#"[{"a":1}, 2]"#), Err(Unreadable::NotObjects));
+        assert_eq!(r(r#"[{"a":1}, "b"]"#), Err(Unreadable::NotObjects));
+        assert_eq!(r("[1, x"), Err(Unreadable::BadJson));
+        assert_eq!(r(r#"[{"a":1}] x"#), Err(Unreadable::BadJson));
+        assert_eq!(r("[]"), Err(Unreadable::Empty));
     }
 
     /// A JSON number written with an exponent lands as a cell `parse_number`

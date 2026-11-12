@@ -2968,6 +2968,47 @@ fn set_chart_patches_the_kind_mapping_and_options() {
     assert_eq!(refused_param(&doc, &mut ids, "set_chart", plain), "node");
 }
 
+/// `set_chart` switching to or from a Sankey re-reads the mapping off the
+/// table's columns, as the Chart card does (`Chart::with_kind`).
+/// flip: the verb assigning `chart.kind` alone → fails at "a column chart maps
+/// a category and series".
+#[test]
+fn set_chart_rereads_the_mapping_across_a_sankey() {
+    use ondin_core::chart::{ChartKind, ColumnId};
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "sankey" }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "kind": "column" }),
+    );
+    let got = chart_of(&doc, c);
+    assert_eq!(got.kind, ChartKind::Column);
+    assert_eq!(
+        (got.mapping.category, got.mapping.series.as_slice()),
+        (Some(ColumnId(0)), &[ColumnId(2)][..]),
+        "a column chart maps a category and series"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "kind": "sankey" }),
+    );
+    let got = chart_of(&doc, c);
+    assert_eq!(
+        (got.mapping.from, got.mapping.to, got.mapping.value),
+        (Some(ColumnId(0)), Some(ColumnId(1)), Some(ColumnId(2))),
+        "a Sankey maps its flows"
+    );
+}
+
 /// A null in `set_chart`'s options resets the key to the chart's default, not
 /// to the default of the struct holding it: the value axis's line and the
 /// category axis's gridlines start off.

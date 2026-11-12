@@ -32,7 +32,8 @@ everything below.
   moving, copying or deleting it whole, are not part edits.
 - **`SetChart`** writes the whole description (`None` flattens), refused off a frame and for a
   description `Chart::validate` refuses: the table's limits and shape, a mapping naming columns the
-  table has, every option finite and in range. The loader holds a file to the same rule and refuses
+  table has and each series once (a series' parts are keyed by its column), every option finite
+  and in range. The loader holds a file to the same rule and refuses
   it rather than loading the parts as plain shapes.
 - **Where a chart may sit.** Anywhere a frame may, except inside a main component, an instance,
   a kit main, a boolean or a mask (*A chart can't be part of a component — flatten it first*;
@@ -421,7 +422,7 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
 - **Type** — always shown: a full-width `ComboBox` with the kind's glyph and name
   (`ui::combo_chevron`, `ui::menu_rows`, each row its glyph, `rail::chart_glyph`), then the
   variants on `ui::segmented`. A switch to or from a Sankey re-reads the mapping off the
-  table's columns. Undo step *Chart type*.
+  table's columns (`Chart::with_kind`, which the verb uses too). Undo step *Chart type*.
 - **Style** — the preset cells in a row, each a drawing of its preset for the chart's kind
   (`panels/chart_picture.rs`) on a 44 × 32 grid, not the chart shrunk: few, thick marks that
   change only what the preset changes. A narrow cell draws it smaller, keeping 5 px each side
@@ -657,8 +658,9 @@ without one (`menu::KIND_VERBS`).
   frame named *Chart* on the kind's sample table, or on a table given, its mapping read off the
   column types unless one is given (`Mapping::guess`: a Sankey's first two text columns and first
   number column, a scatter's first number column as X and the rest as Y, else the first text
-  column as the category and the number columns as series); `set_chart` changes the kind and
-  merge-patches the mapping and options, a null setting a key back to its value in the whole
+  column as the category and the number columns as series); `set_chart` changes the kind
+  (`Chart::with_kind`, re-reading the mapping across a Sankey) and then merge-patches the
+  mapping and options, a null setting a key back to its value in the whole
   struct's default (`Options::default()`, not a nested struct's own); `set_chart_data` replaces
   the table by *Import*'s rule (`Chart::with_table`; a mapping of which nothing survives is
   guessed) and drops the link; `flatten_chart` is `chart::flatten_ops` for each chart. Any other verb writing a part is refused at the commit by

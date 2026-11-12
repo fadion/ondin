@@ -2843,7 +2843,7 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_chart",
-        doc: "Change a chart's kind, or patch its mapping or options; its parts follow",
+        doc: "Change a chart's kind, or patch its mapping or options; its parts follow. A switch to or from a Sankey re-reads the mapping off the table's columns before `mapping` patches it",
         params: &[
             req("node", NODE, "the chart"),
             opt("kind", ParamKind::Choice(CHART_KINDS), "what it draws"),
@@ -2866,7 +2866,7 @@ pub static VERBS: &[Verb] = &[
                 ));
             }
             if let Some(word) = a.choice("kind") {
-                chart.kind = chart_kind(word);
+                chart = chart.with_kind(chart_kind(word));
             }
             if let Some(patch) = a.get("mapping") {
                 chart.mapping = patched(a, "mapping", &chart.mapping, patch)?;

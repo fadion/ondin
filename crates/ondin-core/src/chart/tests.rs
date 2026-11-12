@@ -667,3 +667,29 @@ fn a_chart_with_no_room_for_its_plot_draws_finite_parts() {
         }
     }
 }
+
+/// A table holding the largest column id still names a new column with an id
+/// none holds, and a replaced table keeps its ids distinct.
+/// flip: `next_column_id` adding one to the highest id unchecked → overflows
+/// (debug) before "a free id".
+#[test]
+fn a_column_id_at_the_top_still_leaves_room() {
+    let mut c = Chart::sample(ChartKind::Column);
+    c.table.columns[3].id = ColumnId(u32::MAX);
+    c.mapping.series = vec![ColumnId(1), ColumnId(2), ColumnId(u32::MAX)];
+    assert_eq!(c.validate(), Ok(()), "the fixture");
+    let free = c.table.next_column_id();
+    assert!(c.table.index_of(free).is_none(), "a free id: {free:?}");
+    let mut table = c.table.clone();
+    for (i, name) in ["New", "Newer"].into_iter().enumerate() {
+        table.columns.push(Column {
+            id: ColumnId(i as u32),
+            name: name.into(),
+        });
+        for r in &mut table.rows {
+            r.push("1".into());
+        }
+    }
+    let next = c.with_table(table);
+    assert_eq!(next.validate(), Ok(()), "{:?}", next.table.columns);
+}

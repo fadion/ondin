@@ -210,10 +210,28 @@ impl Table {
         any
     }
 
-    /// An id no column of this table has.
+    /// An id no column of this table has: past the highest, or the lowest free
+    /// one when the highest is `u32::MAX`, as an agent may send.
     pub fn next_column_id(&self) -> ColumnId {
-        ColumnId(self.columns.iter().map(|c| c.id.0 + 1).max().unwrap_or(0))
+        let taken: FxHashSet<ColumnId> = self.columns.iter().map(|c| c.id).collect();
+        let past = self
+            .columns
+            .iter()
+            .map(|c| c.id.0)
+            .max()
+            .map_or(0, |m| m.wrapping_add(1));
+        free_column_id(&taken, past)
     }
+}
+
+/// The first id from `from` up, wrapping, that `taken` does not hold. A table
+/// holds at most [`MAX_COLUMNS`], so the search is short.
+fn free_column_id(taken: &FxHashSet<ColumnId>, from: u32) -> ColumnId {
+    let mut id = from;
+    while taken.contains(&ColumnId(id)) {
+        id = id.wrapping_add(1);
+    }
+    ColumnId(id)
 }
 
 /// A cell read as a number: an optional sign, digits with an optional `,`
@@ -887,7 +905,7 @@ pub enum ChartRule {
     DuplicateColumn,
     #[error("a chart's mapping or series names a column its table does not have")]
     UnknownColumn,
-    #[error("a chart's series are styled once each")]
+    #[error("a chart's series are mapped and styled once each")]
     DuplicateSeries,
     #[error("a chart option is out of range")]
     BadOption,
@@ -923,6 +941,12 @@ impl Chart {
         }
         if self.mapping.columns().any(|c| !ids.contains(&c)) {
             return Err(ChartRule::UnknownColumn);
+        }
+        // A series is keyed by its column, so one mapped twice draws two parts
+        // under every key.
+        let mut mapped = FxHashSet::default();
+        if !self.mapping.series.iter().all(|c| mapped.insert(*c)) {
+            return Err(ChartRule::DuplicateSeries);
         }
         let mut styled = FxHashSet::default();
         for s in &self.series {
@@ -1132,6 +1156,18 @@ impl Chart {
         })
     }
 
+    /// This chart as `kind`: a switch to or from a Sankey re-reads the mapping
+    /// off the table's columns ([`Mapping::guess`]), since a Sankey maps *From*,
+    /// *To* and *Value* where the other kinds map a category and series.
+    pub fn with_kind(&self, kind: ChartKind) -> Chart {
+        let mut next = self.clone();
+        if kind != self.kind && (kind == ChartKind::Sankey || self.kind == ChartKind::Sankey) {
+            next.mapping = Mapping::guess(kind, &self.table);
+        }
+        next.kind = kind;
+        next
+    }
+
     /// This chart on `table` in place of its own (`charts.md`, *Import*): a
     /// column whose name the old table also has takes that column's id, so the
     /// mapping and the series styles naming it are kept; the rest are dropped.
@@ -1140,7 +1176,8 @@ impl Chart {
     /// were, for the caller to say.
     pub fn with_table(&self, mut table: Table) -> Chart {
         let old = &self.table;
-        let mut next = old.next_column_id().0.max(table.next_column_id().0);
+        let next = old.next_column_id().0.max(table.next_column_id().0);
+        let mut taken: FxHashSet<ColumnId> = old.columns.iter().map(|c| c.id).collect();
         let mut kept = FxHashSet::default();
         for c in &mut table.columns {
             let same = old
@@ -1149,11 +1186,9 @@ impl Chart {
                 .find(|o| o.name == c.name && !kept.contains(&o.id));
             c.id = match same {
                 Some(o) => o.id,
-                None => {
-                    next += 1;
-                    ColumnId(next - 1)
-                }
+                None => free_column_id(&taken, next),
             };
+            taken.insert(c.id);
             kept.insert(c.id);
         }
         let keep = |c: &Option<ColumnId>| c.filter(|id| kept.contains(id));

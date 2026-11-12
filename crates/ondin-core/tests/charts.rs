@@ -331,6 +331,8 @@ fn a_chart_sits_only_on_a_frame_outside_any_component() {
 }
 
 /// A description `Chart::validate` refuses is refused by the operation.
+/// flip: `validate` not checking `mapping.series` for repeats → fails at
+/// "refused".
 #[test]
 fn a_description_out_of_shape_is_refused() {
     let mut f = fixture();
@@ -344,9 +346,12 @@ fn a_description_out_of_shape_is_refused() {
     tall.table.rows = vec![vec!["a".into(), "1".into(), "2".into()]; 10_001];
     let mut odd = sample();
     odd.options.lines.area_opacity = 2.0;
+    let mut twice = sample();
+    twice.mapping.series.push(ColumnId(1));
     for (chart, rule) in [
         (ragged, ChartRule::RaggedRow),
         (unknown, ChartRule::UnknownColumn),
+        (twice, ChartRule::DuplicateSeries),
         (long, ChartRule::CellTooLong),
         (tall, ChartRule::TooLarge),
         (odd, ChartRule::BadOption),

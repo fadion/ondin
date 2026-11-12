@@ -513,10 +513,7 @@ impl OndinApp {
                 };
                 let mut carried = own.clone();
                 if next.kind != before.kind {
-                    carried.kind = next.kind;
-                    if next.kind == ChartKind::Sankey || own.kind == ChartKind::Sankey {
-                        carried.mapping = chart::Mapping::guess(next.kind, &own.table);
-                    }
+                    carried = own.with_kind(next.kind);
                 }
                 carried.options =
                     chart::Options::carried(&before.options, &next.options, &own.options);
@@ -716,12 +713,7 @@ impl OndinApp {
                 });
         });
         if let Some(kind) = pick.filter(|k| *k != chart.kind) {
-            let mut next = chart.clone();
-            next.kind = kind;
-            if kind == ChartKind::Sankey || chart.kind == ChartKind::Sankey {
-                next.mapping = chart::Mapping::guess(kind, &chart.table);
-            }
-            self.chart_commit(id, "Chart type", next);
+            self.chart_commit(id, "Chart type", chart.with_kind(kind));
         }
         if let Some((names, at)) = variants(chart) {
             self.chart_segments(ui, id, chart, "Chart type", names, at, |c, i| {

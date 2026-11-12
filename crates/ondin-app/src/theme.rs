@@ -1094,6 +1094,9 @@ pub mod icon {
     /// A chart's data: a table with a header row — the data window and *Edit
     /// data…*.
     pub const TABLE: &str = "\u{f066}";
+    /// The Align card's visual-centre toggle and its undo step: a play triangle
+    /// with a dot at its centroid, the point it aligns on.
+    pub const VISUAL_CENTRE: &str = "\u{f067}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1443,6 +1446,7 @@ pub mod icon {
         ("chart-scatter", CHART_SCATTER),
         ("chart-sankey", CHART_SANKEY),
         ("table", TABLE),
+        ("visual-centre", VISUAL_CENTRE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

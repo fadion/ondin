@@ -423,6 +423,10 @@ pub enum ViewSwitch {
     /// (`crate::private`). A preference, not a workspace switch, so it survives a
     /// restart.
     Private,
+    /// The Align card's visual-centre toggle (`OndinApp::align_visual`), in the
+    /// palette beside the card's head. Unbound and on no menu: *Align centres*
+    /// keeps its chord and follows the toggle. Never saved.
+    AlignVisual,
 }
 
 impl ViewSwitch {
@@ -449,6 +453,7 @@ impl ViewSwitch {
             Self::SnapBaselines => "Snap to baselines",
             Self::Lasso => "Lasso select",
             Self::Private => "Private mode",
+            Self::AlignVisual => "Align by visual centre",
         }
     }
 
@@ -490,7 +495,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -510,6 +515,7 @@ impl ViewSwitch {
         Self::SnapBaselines,
         Self::Lasso,
         Self::Private,
+        Self::AlignVisual,
     ];
 
     /// The Snap menu's rows.

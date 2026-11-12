@@ -291,7 +291,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
   the area `OndinApp::flyout_id` names. The marquee's *Lasso select* is on no menu: `Q`, the palette,
-  the cheatsheet and the rail's Select slot carry it (`app-selection.md`).
+  the cheatsheet and the rail's Select slot carry it (`app-selection.md`). Nor is *Align by
+  visual centre*: the Align card's head and the palette carry it (`tools.md`).
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Tools** (`OndinApp::tools_menu`, rows from `ToolsRow::ALL`) holds what works across the
@@ -348,12 +349,12 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
     texture at device pixels.
   - Per session, as outline mode is: a launch into blurred artwork would look like a broken
     renderer.
-- The switches are **view state**, not document state. All but focus mode, outline view and pixel preview are kept in `prefs.view`
+- The switches are **view state**, not document state. All but focus mode, outline view, pixel preview and align by visual centre are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
-  *Show history*, *Show minimap*, *Lasso select*, outline view, pixel preview and focus mode; a launch never opens in focus mode,
-  outline view or pixel preview. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
+  *Show history*, *Show minimap*, *Lasso select*, outline view, pixel preview, align by visual centre and focus mode; a launch never opens in focus mode,
+  outline view, pixel preview or align by visual centre. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
   (`rail_slice`, `rail_pencil`; `tools.md`, *The tool rail*). Private mode is a preference of its own (`Prefs::private`), below.
 
 ### Settings

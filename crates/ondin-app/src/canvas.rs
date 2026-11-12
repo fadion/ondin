@@ -8220,6 +8220,31 @@ impl OndinApp {
         self.editing_in_place() || self.chrome_hold.holding()
     }
 
+    /// The visual centres of the layers the Align card's centre buttons would move
+    /// by weight: the outermost selected, less the key layer, whose centre is the
+    /// target. Weighed again only when the document or the selection changes.
+    pub(crate) fn visual_centre_marks(&mut self) -> Vec<Point> {
+        let rev = self.session.revision();
+        let ids = self.session.selection.ids().to_vec();
+        if let Some((r, held, marks)) = &self.visual_marks
+            && *r == rev
+            && *held == ids
+        {
+            return marks.clone();
+        }
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let members = ondin_core::build::outermost(doc, &ids);
+        let key = self.session.selection.key().filter(|_| members.len() > 1);
+        let marks: Vec<Point> = members
+            .iter()
+            .filter(|id| Some(**id) != key)
+            .filter_map(|id| ondin_core::centroid::visual_centre(doc, res, *id))
+            .map(|c| c.at())
+            .collect();
+        self.visual_marks = Some((rev, ids, marks.clone()));
+        marks
+    }
+
     /// The first two of [`Self::chrome_hidden`]'s reasons: a path, an image or a
     /// gradient being edited on the canvas, the pen's included, or a warp's
     /// envelope open over the selection.
@@ -10360,6 +10385,14 @@ impl OndinApp {
             None => {}
         }
 
+        // Where the Align card's visual centres would land, over the boxes and
+        // under the handles.
+        if chrome && self.mode == Mode::Normal && self.align_visual {
+            for at in self.visual_centre_marks() {
+                paint_visual_centre(painter, self.to_screen(at, rect, ppp) + offset);
+            }
+        }
+
         // The rail handle: a filled dot where the type starts.
         if chrome
             && self.mode == Mode::Normal
@@ -11329,6 +11362,28 @@ fn paint_pivot_badge(painter: &egui::Painter, at: egui::Pos2, name: &str) {
         name,
         color::BADGE,
     );
+}
+
+/// Half the diagonal of the diamond marking a visual centre, in screen pt: a 12 pt
+/// mark.
+const VISUAL_CENTRE_PX: f32 = 6.0;
+
+/// A visual centre the Align card would land on: a diamond in the accent, the
+/// toggle's own colour, with a light rim. Solid and armless, so it cannot be taken
+/// for the pivot's open crosshair.
+fn paint_visual_centre(painter: &egui::Painter, at: egui::Pos2) {
+    let r = VISUAL_CENTRE_PX;
+    let points = vec![
+        at + egui::vec2(0.0, -r),
+        at + egui::vec2(r, 0.0),
+        at + egui::vec2(0.0, r),
+        at + egui::vec2(-r, 0.0),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        color::accent(),
+        egui::Stroke::new(1.0, color::on_accent()),
+    ));
 }
 
 /// The desktop cursor in physical screen pixels, or `None` off Windows.

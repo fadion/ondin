@@ -1159,6 +1159,11 @@ fn sweep_on(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let found = inspector(&ctx, &mut app);
     check("rect inspector", app, found);
+    // The Align card's head toggle on, its centre buttons lit.
+    let mut app = with_a_rect(&ctx);
+    app.align_visual = true;
+    let found = inspector(&ctx, &mut app);
+    check("align by visual centre", app, found);
     let mut app = with_a_text(&ctx);
     let found = inspector(&ctx, &mut app);
     check("text inspector", app, found);

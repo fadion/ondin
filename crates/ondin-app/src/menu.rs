@@ -584,7 +584,8 @@ impl ViewState {
             | ViewSwitch::SnapGrid
             | ViewSwitch::SnapBaselines
             | ViewSwitch::Lasso
-            | ViewSwitch::Private => None,
+            | ViewSwitch::Private
+            | ViewSwitch::AlignVisual => None,
         }
     }
 }
@@ -1027,6 +1028,7 @@ impl Item {
                     ViewSwitch::Outline => icon::OUTLINE_VIEW,
                     ViewSwitch::PixelPreview => icon::PIXEL_PREVIEW,
                     ViewSwitch::Lasso => icon::LASSO,
+                    ViewSwitch::AlignVisual => icon::VISUAL_CENTRE,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
@@ -6143,7 +6145,7 @@ mod view_switch_registry_tests {
             .count();
             assert_eq!(
                 on,
-                usize::from(sw != ViewSwitch::Lasso),
+                usize::from(!matches!(sw, ViewSwitch::Lasso | ViewSwitch::AlignVisual)),
                 "{} is on {on} of the View menu's groups and the Snap menu",
                 sw.label()
             );

@@ -232,7 +232,7 @@ the pattern).
 |---|---|---|
 | `Alt+A` / `Alt+D` | align left / right | ✅ Figma |
 | `Alt+W` / `Alt+S` | align top / bottom | ✅ Figma |
-| `Alt+H` / `Alt+V` | align centres horizontally / vertically | ✅ Figma |
+| `Alt+H` / `Alt+V` | align centres horizontally / vertically; by visual centre while the Align card's toggle is on | ✅ Figma |
 | `Alt+Shift+H` / `V` | distribute horizontally / vertically | ✅ **invented** |
 | `Alt+Shift+T` | tidy up | ✅ **invented** — Figma's `Ctrl+Alt+T` is the boolean namespace here |
 
@@ -676,10 +676,11 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
   grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, pixel preview, focus, private
-  mode, the marquee's shape (lasso) and the snap switches.
+  mode, the marquee's shape (lasso), align by visual centre and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows, labelled by one `label()` but for the View menu's
   short *Panels ▸* list, so a row and the state it drives stay in step while the chord is a second
-  caller that never sees the row. The lasso has no row: `Q`, the palette and the rail's Select slot carry it.
+  caller that never sees the row. The lasso has no row: `Q`, the palette and the rail's Select slot carry it. Align by visual
+  centre has none either, and no chord: the Align card's head and the palette carry it.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,
   because they address the buffer. A chord that reaches the *document* is the one that wants an
   `Action`: all five text-styling chords are `Action::TextStyle`. The arrows are the seam.

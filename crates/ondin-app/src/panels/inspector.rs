@@ -2815,7 +2815,19 @@ impl OndinApp {
             }
         };
         let on_points = points.is_some();
-        self.panel(ui, "Align", None, |app, ui| {
+        // Points have no ink to weigh: the toggle dims and keeps its state.
+        let visual = self.align_visual && !on_points;
+        let action = ui::HeadAction::toggle(
+            icon::VISUAL_CENTRE,
+            visual,
+            !on_points,
+            match (on_points, visual) {
+                (true, _) => "Points align by position",
+                (false, false) => "Centre by visual weight — align centres on the ink, not the box",
+                (false, true) => "Centre by the box again",
+            },
+        );
+        let toggled = self.panel(ui, "Align", Some(action), |app, ui| {
             ui.horizontal(|ui| {
                 // Spread evenly across the row, with a 3pt floor.
                 let ink = 8.0 * ALIGN_CELL.x + 2.0;
@@ -2861,7 +2873,19 @@ impl OndinApp {
                     match cell {
                         AlignCell::Rule => ui::rule(ui, ALIGN_CELL.y),
                         AlignCell::To(glyph, axis, at, tip) => {
-                            if ui::icon_button_sized(ui, glyph, ALIGN_CELL, 15.0, false, can_align)
+                            let lit = visual && at == Edge::Mid;
+                            let button = match lit {
+                                true => ui::icon_button_lit(ui, glyph, ALIGN_CELL, 15.0, can_align),
+                                false => ui::icon_button_sized(
+                                    ui, glyph, ALIGN_CELL, 15.0, false, can_align,
+                                ),
+                            };
+                            let tip = match (lit, axis) {
+                                (false, _) => tip,
+                                (true, Axis::X) => "Align visual centres",
+                                (true, Axis::Y) => "Align visual middles",
+                            };
+                            if button
                                 .on_hover_text(match (can_align, on_points) {
                                     (true, _) => tip,
                                     (false, true) => "Select two or more points",
@@ -2909,6 +2933,9 @@ impl OndinApp {
             });
             app.spacing_row(ui, on_points, can_space);
         });
+        if toggled {
+            self.align_visual = !self.align_visual;
+        }
     }
 
     /// The Align card's second row: the gap between neighbours, **named** rather
@@ -11392,8 +11419,14 @@ impl OndinApp {
             },
         }
     }
-    /// Align the selection along one axis, against [`Self::align_target`].
+    /// Align the selection along one axis, against [`Self::align_target`]; centres
+    /// align by weight while the Align card's visual-centre toggle is on
+    /// ([`Self::align_visual_centres`]).
     pub(crate) fn align(&mut self, axis: Axis, edge: Edge) {
+        if self.align_visual && edge == Edge::Mid {
+            self.align_visual_centres(axis);
+            return;
+        }
         let Some(target) = self.align_target() else {
             return;
         };
@@ -11409,6 +11442,38 @@ impl OndinApp {
         if !tx.0.is_empty() && self.commit_edit(tx) {
             self.session.info("Aligned");
         }
+    }
+    /// Put each selected layer's visual centre ([`ondin_core::centroid`]) where its
+    /// box centre would go: the container's centre for a lone layer, the key layer's
+    /// visual centre with a key, the selection's centre line otherwise. Text is
+    /// measured by its box, and the status line says how many were.
+    fn align_visual_centres(&mut self, axis: Axis) {
+        let Some(target) = self.align_target() else {
+            return;
+        };
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let ids = build::outermost(doc, self.session.selection.ids());
+        let key = self
+            .session
+            .selection
+            .key()
+            .filter(|k| ids.len() > 1 && ids.contains(k));
+        let at = key
+            .and_then(|k| ondin_core::centroid::visual_centre(doc, res, k))
+            .map_or(target.center(), |c| c.at());
+        let at = match axis {
+            Axis::X => at.x,
+            Axis::Y => at.y,
+        };
+        let (tx, text) = ondin_core::centroid::align(doc, res, &ids, at, axis);
+        let moved = ids.len();
+        self.session
+            .name_step("Align visual centres", icon::VISUAL_CENTRE);
+        if tx.0.is_empty() || !self.commit_edit(tx) {
+            self.session.forget_step_name();
+            return;
+        }
+        self.session.info(visual_align_status(moved, text));
     }
     /// Mirror the selection across the centreline of the box it occupies.
     pub(crate) fn flip(&mut self, axis: Axis) {
@@ -11465,6 +11530,21 @@ impl OndinApp {
             gap,
         )
     }
+}
+
+/// The status line after aligning `layers` by visual centre, `text` of them text
+/// measured by its box: *Aligned 3 layers; 1 text layer by its box*.
+fn visual_align_status(layers: usize, text: usize) -> String {
+    if text == 0 {
+        return "Aligned".into();
+    }
+    let s = |n: usize| if n == 1 { "" } else { "s" };
+    let whose = if text == 1 { "its" } else { "their" };
+    format!(
+        "Aligned {layers} layer{}; {text} text layer{} by {whose} box",
+        s(layers),
+        s(text)
+    )
 }
 
 /// The gaps the spacing field shows over the selection, read through the preview.
@@ -16983,6 +17063,143 @@ mod align_card_tests {
             app.session.resolved.world_bounds(id).map(|b| b.min_x()),
             Some(0.0),
             "inside a group the same press should land it on the group's left edge"
+        );
+    }
+
+    /// A 24-unit frame holding a filled play triangle 7 × 8 at (8, 8), and a filled
+    /// square beside it; the triangle is selected.
+    fn app_with_play(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(2);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (frame, play, square) = (ids.mint(), ids.mint(), ids.mint());
+        let mut path = ondin_core::kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((7.0, 4.0));
+        path.line_to((0.0, 8.0));
+        path.close_path();
+        let fill = |id| Operation::SetFills {
+            id,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
+                visible: true,
+            }]),
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(24.0, 24.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: play,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Path {
+                    path,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                    mirror: ondin_core::symmetry::PathMirror::NONE,
+                },
+                transform: Some(Affine::translate((8.0, 8.0))),
+                name: None,
+            },
+            fill(play),
+            Operation::CreateNode {
+                id: square,
+                parent: frame,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(4.0, 4.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((18.0, 2.0))),
+                name: None,
+            },
+            fill(square),
+        ]))
+        .expect("the fixture");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(play);
+        (app, play, square)
+    }
+
+    fn centroid_of(app: &OndinApp, id: NodeId) -> Point {
+        let (doc, res) = (&app.session.doc, &app.session.resolved);
+        ondin_core::centroid::visual_centre(doc, res, id)
+            .expect("a centre")
+            .at()
+    }
+
+    /// With the toggle on, *Align centres* puts a lone triangle's centroid on its
+    /// frame's centre, a third of its width from the flat side; off, its box's.
+    ///
+    /// flip: `align` ignoring `align_visual` → fails at "the centroid on the centre".
+    #[test]
+    fn align_centres_by_weight_while_the_toggle_is_on() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, play, _) = app_with_play(&ctx);
+        app.align_visual = true;
+        app.align(Axis::X, Edge::Mid);
+        let at = centroid_of(&app, play).x;
+        assert!((at - 12.0).abs() < 1e-6, "the centroid on the centre: {at}");
+        let box_x = app.session.resolved.world_bounds(play).unwrap().center().x;
+        assert!((box_x - (12.0 + 3.5 - 7.0 / 3.0)).abs() < 1e-6, "{box_x}");
+
+        // Edges are about boxes, so the toggle leaves them alone.
+        app.align(Axis::X, Edge::Min);
+        let left = app.session.resolved.world_bounds(play).unwrap().min_x();
+        assert!(left.abs() < 1e-9, "{left}");
+
+        app.align_visual = false;
+        app.align(Axis::X, Edge::Mid);
+        let box_x = app.session.resolved.world_bounds(play).unwrap().center().x;
+        assert!((box_x - 12.0).abs() < 1e-9, "off, the box: {box_x}");
+    }
+
+    /// With a key layer, the others' centroids go to the key's, and only they are
+    /// marked on the canvas: the key's centre is the target, not a mover.
+    #[test]
+    fn a_key_layer_is_the_target_and_not_marked() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, play, square) = app_with_play(&ctx);
+        app.session.selection.set(vec![play, square]);
+        app.session.selection.set_key(square);
+        app.align_visual = true;
+        assert_eq!(app.visual_centre_marks(), vec![centroid_of(&app, play)]);
+
+        app.align(Axis::Y, Edge::Mid);
+        let (p, s) = (centroid_of(&app, play), centroid_of(&app, square));
+        assert!(
+            (p.y - s.y).abs() < 1e-6 && (s.y - 4.0).abs() < 1e-9,
+            "{p:?} {s:?}"
+        );
+        // Weighed again once the document moved.
+        assert_eq!(app.visual_centre_marks(), vec![p]);
+    }
+
+    /// The status line names the text layers measured by their box.
+    #[test]
+    fn the_status_names_the_text_that_fell_back() {
+        assert_eq!(visual_align_status(3, 0), "Aligned");
+        assert_eq!(
+            visual_align_status(3, 1),
+            "Aligned 3 layers; 1 text layer by its box"
+        );
+        assert_eq!(
+            visual_align_status(2, 2),
+            "Aligned 2 layers; 2 text layers by their box"
         );
     }
 }

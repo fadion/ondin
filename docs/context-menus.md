@@ -174,7 +174,8 @@ on a lone rounded mirrored path, where the two do different things: *Flatten* dr
 *Horizontal centres* (`Alt+H`) · *Right* (`Alt+D`) · *Top* (`Alt+W`) · *Vertical centres* (`Alt+V`) ·
 *Bottom* (`Alt+S`), each an `Item::Align(axis, edge)`. The labels are short (`align_row_label`)
 because *Align horizontal centres* does not fit beside its chord at 210pt; the palette keeps the
-full *Align …* labels.
+full *Align …* labels. While the Align card's visual-centre toggle is on, the two centre rows keep
+their labels and align by weight (`tools.md`, *Align by visual centre*).
 
 **Arrange ▸**, one group:
 

@@ -347,7 +347,7 @@ const TEXT_CHORDS: [TextChord; 13] = [
     TextChord::Align(ondin_core::TextAlign::Justify),
 ];
 
-const SWITCHES: [ViewSwitch; 19] = [
+const SWITCHES: [ViewSwitch; 20] = [
     ViewSwitch::Rulers,
     ViewSwitch::Guides,
     ViewSwitch::GuideLock,
@@ -367,6 +367,7 @@ const SWITCHES: [ViewSwitch; 19] = [
     ViewSwitch::SnapBaselines,
     ViewSwitch::Lasso,
     ViewSwitch::Private,
+    ViewSwitch::AlignVisual,
 ];
 
 /// The highlighted row's ground: the accent at 18%.

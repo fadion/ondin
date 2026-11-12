@@ -1168,6 +1168,15 @@ pub struct OndinApp {
     /// Sticky and app-wide; the pivots themselves are per node and saved. Escape turns it
     /// off after cancelling any gesture ([`Self::escape`]).
     pub(crate) show_pivot: bool,
+    /// The Align card's visual-centre toggle: *Align centres* and *Align middles*
+    /// put each layer's ink centroid where its box centre would go
+    /// ([`ondin_core::centroid`]). Off at every launch and never saved: a mode left on
+    /// from yesterday is one nobody remembers when things stop aligning as expected.
+    pub(crate) align_visual: bool,
+    /// The visual centres the canvas marks while [`Self::align_visual`] is on, with
+    /// the document revision and selection they were weighed for: weighing unions
+    /// every layer's ink, too slow to redo each frame.
+    pub(crate) visual_marks: Option<(u64, Vec<NodeId>, Vec<Point>)>,
     /// The four *Snap* menu toggles, read only by [`OndinApp::snapping`].
     pub(crate) snap_shapes: bool,
     pub(crate) snap_guides: bool,
@@ -1888,6 +1897,8 @@ impl OndinApp {
             focus: false,
             // Off: a marker on every selection would be permanent chrome.
             show_pivot: false,
+            align_visual: false,
+            visual_marks: None,
             snap_shapes: view.snap_shapes,
             snap_guides: view.snap_guides,
             snap_grid: view.snap_grid,
@@ -8541,6 +8552,7 @@ impl OndinApp {
             ViewSwitch::SnapBaselines => self.snap_baselines,
             ViewSwitch::Lasso => self.lasso,
             ViewSwitch::Private => self.prefs.private,
+            ViewSwitch::AlignVisual => self.align_visual,
         }
     }
 
@@ -8607,6 +8619,7 @@ impl OndinApp {
                 self.set_private(on);
                 return;
             }
+            ViewSwitch::AlignVisual => self.align_visual = on,
         }
         self.session
             .info(format!("{} {}", sw.label(), if on { "on" } else { "off" }));

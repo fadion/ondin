@@ -20,10 +20,6 @@ true.
   Reuses pixel preview's 1x raster path; renders on a worker, as the trace and offset cards do.
   Settle its door (View menu, palette, a chord) and whether it can float beside the canvas while
   the pen is in use.
-- **Align by visual centre** — an option that aligns on a shape's centre of mass (from its outline's
-  area, curves included) rather than its box's centre, so a play triangle sits centred in its
-  circle. Box centre stays the default. Build it only if it finds a clean place in the Align
-  controls; also consider *Centroid* as a point snap.
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
@@ -68,6 +64,9 @@ Ideas worth weighing, not yet decided or scheduled.
   (*Parked decisions*); a compare that forgives edge pixels and still catches a moved shape is what
   would unblock it. The same harness could hold approved screenshots of the chrome as regression
   baselines.
+- **A centroid snap during a move.** A layer's visual centre (`ondin_core::centroid`) as a source
+  in `snap_rect` while the Align card's visual-centre toggle is on. Worth weighing only once the
+  toggle has seen use.
 
 ## Parked decisions
 

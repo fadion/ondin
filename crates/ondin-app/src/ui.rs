@@ -4220,6 +4220,44 @@ pub fn icon_button_padded(
     enabled: bool,
     pad: egui::Margin,
 ) -> egui::Response {
+    icon_button_face(ui, glyph, box_size, glyph_size, active, false, enabled, pad)
+}
+
+/// [`icon_button_sized`] whose glyph wears the accent with no ground of its own: a
+/// button whose act a mode of its card has changed, as the Align card's centre
+/// buttons while its visual-centre toggle is on. Not *On*: the button is not
+/// latched, its card is.
+pub fn icon_button_lit(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    box_size: egui::Vec2,
+    glyph_size: f32,
+    enabled: bool,
+) -> egui::Response {
+    icon_button_face(
+        ui,
+        glyph,
+        box_size,
+        glyph_size,
+        false,
+        true,
+        enabled,
+        egui::Margin::ZERO,
+    )
+}
+
+/// The one painter behind [`icon_button_padded`] and [`icon_button_lit`].
+#[allow(clippy::too_many_arguments)]
+fn icon_button_face(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    box_size: egui::Vec2,
+    glyph_size: f32,
+    active: bool,
+    lit: bool,
+    enabled: bool,
+    pad: egui::Margin,
+) -> egui::Response {
     let sense = if pad == egui::Margin::ZERO {
         egui::Sense::click()
     } else {
@@ -4235,6 +4273,11 @@ pub fn icon_button_padded(
     let p = ui.painter();
     let fg = if active {
         color::accent_100()
+    } else if lit && enabled {
+        match hovered {
+            true => color::accent_200(),
+            false => color::accent_300(),
+        }
     } else if hovered {
         color::text()
     } else {

@@ -122,25 +122,30 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
   drops out, and the pin lets go when none is left. The pin is view state and never saved.
 - **Tiles.** For each size N, the layer's box (`preview_world_bounds`, so a drag is followed) is
   squared on its longer side (`ondin_export::icon::square_of`, the icon export's framing) and drawn
-  at N, centred in its column. A column is N + 28 wide, a ground strip the tallest size + 20. Several
-  rows add a name column. A caption row under the strips names each size; a size every row's layer
-  already is (its box's longer side is N units) wears an accent dot. The card's width depends only on
-  the sizes and the name column, floored at 244pt inside, so it never jumps while a layer is edited.
+  at N, centred in its column. A column is N + 28 wide, a ground strip the tallest size + 20, with
+  no hairline (on the dark ground one reads as an inset). Several rows stack their strips with no
+  names. A caption row under the strips names each size; a size every row's layer already is (its
+  box's longer side is N units) wears an accent dot. The card's width depends only on the sizes,
+  floored at 244pt inside, so it never jumps while a layer is edited.
 - **Grounds**, fixed whatever the chrome's theme (`color::light_ground`, white; `color::dark_ground`,
   the dark theme's canvas), so an icon is judged on the grounds it ships on. A frame's own fill
-  draws over either. *Both* stacks a light and a dark strip for one layer; with several it is
-  disabled (*One ground at a time for several layers*) and the card shows light.
+  draws over either. *Both* stacks a light and a dark strip for one layer; with several its cell is
+  hidden and a stored *Both* shows light.
 - **Pixels** (`PIXEL_PREVIEW` in the head). Off, a tile renders at the display's density, N × ppp,
   drawn at N points. On, it renders exactly N pixels and is nearest-sampled, so a 2× display shows
   the blocks a 1× screen gets; hovering a tile then rings it and opens a loupe beside the card: the
-  tile at ×10 on a checkerboard with a hairline between pixels.
-- **Head**, left to right: `icon::SIZE_PREVIEW`, the layer's name and `W × H` (or the layer count),
-  then the grounds as a `ui::segmented_tipped` of toolbar-height cells painted as colour chips (light,
-  dark, halved) rather than glyphs, since `SUN` already means Filters and the font has no moon; the
-  pixels toggle, the pin and ⋯. The ⋯ menu is a *Sizes* eyebrow over tick rows for 12, 16, 18, 20,
-  24, 28, 32, 40, 48 and 64; a seventh is refused (*Six sizes at most*) and the last cannot go
-  (*One size at least*). Sizes, ground and pixels are `prefs.size_preview` (`SizePreviewPrefs`:
-  16, 20, 24, 32, 48, both grounds, pixels off).
+  tile at ×10 (×5 from 40 pixels up, so the loupe stays a sane size) on a checkerboard with a
+  hairline between pixels. The loupe is not shown while the ⋯ menu is open, which takes the same side.
+- **Head**, left to right: `icon::SIZE_PREVIEW` and the layer's name (or the layer count), set as a
+  menu row's glyph and label; the size is the Transform card's to show. Then the controls of the
+  comparison bar: the grounds as a `ui::segmented_tipped` of toolbar-height cells painted as colour
+  chips (light, dark, halved; `ui::swatch_hairline`) rather than glyphs, since `SUN` already means
+  Filters and the font has no moon; then `ui::field_button`s at `ui::TOOLBAR_H` for the pixels
+  toggle, the pin and ⋯. The ⋯ menu is a `ui::flyout` beside the card, level with the ⋯, so the ⋯
+  stays clear to close it: tick rows for 12, 16, 18, 20, 24, 28, 32, 40, 48 and 64, 80pt wide at
+  least; a seventh is refused (*Six sizes at most*) and the last cannot go (*One size at least*).
+  Sizes, ground and pixels are `prefs.size_preview` (`SizePreviewPrefs`: 16, 20, 24, 32, 48, both
+  grounds, pixels off).
 - **Rendering** is on a worker (`job::Job`), one render at a time, the newest landed shown, through
   `VelloCpuRenderer::render_subtrees_with` with the session's overrides minus the outline ink and
   chrome ghost, so a drag or scrub shows. The `ImageStore` is handed to the worker and back, so a

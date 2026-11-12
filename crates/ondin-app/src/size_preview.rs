@@ -31,20 +31,19 @@ const HEAD_H: f32 = ui::MENU_ROW_H;
 const TILE_AIR: f32 = 28.0;
 /// The air a ground strip adds round its tallest tile.
 const STRIP_AIR: f32 = 20.0;
-/// The layer-name column of a row, shown when there are several.
-const LABEL_W: f32 = 46.0;
 /// The narrowest the card's inside gets, so the head's name and its four controls
 /// fit however few sizes are ticked.
 const MIN_INNER_W: f32 = 244.0;
-/// A head button's side, and its glyph.
-const BUTTON: f32 = 22.0;
-const BUTTON_GLYPH: f32 = 13.0;
-/// The grounds' segmented control: three cells of a toolbar's height.
-const GROUND_W: f32 = 76.0;
 /// The size-caption row under the tiles.
 const CAPS_H: f32 = 14.0;
-/// The loupe's magnification of a pixel tile.
-const LOUPE_ZOOM: f32 = 10.0;
+/// The sizes menu's narrowest: its labels are two digits, and a list sized to
+/// them alone would stand narrower than its tick column is wide.
+const MENU_W: f32 = 80.0;
+/// The loupe's magnification of a pixel tile `px` across: ×10, or ×5 from 40
+/// pixels up, so a 64 tile stands 320 points rather than 640.
+fn loupe_zoom(px: usize) -> f32 {
+    if px >= 40 { 5.0 } else { 10.0 }
+}
 /// Between the card and the status bar or the loupe beside it, the minimap's.
 pub(crate) const GAP: f32 = 8.0;
 
@@ -118,15 +117,6 @@ fn column_w(n: u32) -> f32 {
 /// The width of the tiles alone.
 fn tiles_w(sizes: &[u32]) -> f32 {
     sizes.iter().map(|n| column_w(*n)).sum()
-}
-
-/// `24 × 24`, the box in whole units, or to two places where it is not whole.
-fn box_words(b: Rect) -> String {
-    let n = |v: f64| {
-        let s = format!("{v:.2}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    };
-    format!("{} × {}", n(b.width()), n(b.height()))
 }
 
 /// Where `id` sits: its parent and its index among the parent's children.
@@ -395,8 +385,7 @@ impl OndinApp {
             (SizeGround::Dark, _) => vec![color::dark_ground()],
             (SizeGround::Both, false) => vec![color::light_ground(), color::dark_ground()],
         };
-        let label_w = if several { LABEL_W + PAD } else { 0.0 };
-        let inner_w = (tiles_w(&prefs.sizes) + label_w).max(MIN_INNER_W);
+        let inner_w = tiles_w(&prefs.sizes).max(MIN_INNER_W);
         let mut next = prefs.clone();
         let mut pin = None;
         let mut hovered_tile: Option<(usize, usize, egui::Rect)> = None;
@@ -420,13 +409,13 @@ impl OndinApp {
                             .layout(egui::Layout::right_to_left(egui::Align::Center)),
                     );
                     head_ui.spacing_mut().item_spacing.x = 4.0;
-                    let more = ui::icon_button(
+                    // The comparison bar's controls: a toolbar-height segmented
+                    // track, and grounded toggles as tall as it.
+                    let more = ui::field_button(
                         &mut head_ui,
                         icon::DOTS_THREE,
-                        BUTTON,
-                        BUTTON_GLYPH,
-                        self.size_preview.menu,
-                        true,
+                        ui::TOOLBAR_H,
+                        ui::FieldButton::on_if(self.size_preview.menu),
                     )
                     .on_hover_text("Sizes");
                     if more.clicked() {
@@ -434,28 +423,24 @@ impl OndinApp {
                     }
                     menu_button = Some(more.rect);
                     let pinned = self.size_preview.pinned.is_some();
-                    let pin_button = ui::icon_button(
-                        &mut head_ui,
-                        icon::PUSH_PIN,
-                        BUTTON,
-                        BUTTON_GLYPH,
-                        pinned,
-                        pinned || !rows.is_empty(),
-                    )
-                    .on_hover_text(match pinned {
-                        true => "Follow the selection again",
-                        false => "Keep showing these layers",
-                    });
-                    if pin_button.clicked() && (pinned || !rows.is_empty()) {
+                    let pin_state = match (pinned, rows.is_empty()) {
+                        (true, _) => ui::FieldButton::On,
+                        (false, empty) => ui::FieldButton::enabled_if(!empty),
+                    };
+                    let pin_button =
+                        ui::field_button(&mut head_ui, icon::PUSH_PIN, ui::TOOLBAR_H, pin_state)
+                            .on_hover_text(match pinned {
+                                true => "Follow the selection again",
+                                false => "Keep showing these layers",
+                            });
+                    if pin_button.clicked() && pin_state.is_enabled() {
                         pin = Some(!pinned);
                     }
-                    let px = ui::icon_button(
+                    let px = ui::field_button(
                         &mut head_ui,
                         icon::PIXEL_PREVIEW,
-                        BUTTON,
-                        BUTTON_GLYPH,
-                        prefs.pixels,
-                        true,
+                        ui::TOOLBAR_H,
+                        ui::FieldButton::on_if(prefs.pixels),
                     )
                     .on_hover_text(match prefs.pixels {
                         true => "Show the vector at this screen's density",
@@ -464,6 +449,8 @@ impl OndinApp {
                     if px.clicked() {
                         next.pixels = !prefs.pixels;
                     }
+                    // Several layers show one ground at a time, so *Both* goes.
+                    let cells = if several { 2 } else { 3 };
                     let lit = match (prefs.ground, several) {
                         (SizeGround::Light, _) | (SizeGround::Both, true) => 0,
                         (SizeGround::Dark, _) => 1,
@@ -472,58 +459,54 @@ impl OndinApp {
                     let tips = ["Light ground", "Dark ground", "Both grounds"];
                     if let Some(i) = ui::segmented_tipped(
                         &mut head_ui,
-                        GROUND_W,
+                        // Each cell a toolbar button wide, inside the track's inset.
+                        cells as f32 * ui::TOOLBAR_H + 4.0,
                         ui::TOOLBAR_CELL_H,
-                        3,
+                        cells,
                         lit,
-                        |i| i < 2 || !several,
-                        |i| match (i, several) {
-                            (2, true) => "One ground at a time for several layers",
-                            _ => tips[i],
-                        },
+                        |_| true,
+                        |i| tips[i],
                         |p, i, r, _| paint_ground_cell(p, i, r),
                     ) {
                         next.ground = [SizeGround::Light, SizeGround::Dark, SizeGround::Both][i];
                     }
-                    // The subject, left of the controls, cut to the room they leave.
+                    // The subject, left of the controls, cut to the room they leave;
+                    // glyph and name set as a menu row's.
                     let room = head_ui.available_rect_before_wrap();
                     let p = ui.painter().with_clip_rect(room);
-                    let mut x = room.left() + 4.0;
                     let ink = theme::text::muted();
-                    let glyph_at = egui::pos2(x + 6.5, room.center().y);
+                    let glyph_pt = ui::TOOLBAR_GLYPH_PT;
+                    let glyph_at = egui::pos2(room.left() + glyph_pt / 2.0, room.center().y);
                     if slow {
-                        ui::paint_spinner(&p, glyph_at, 12.0, ink, now);
+                        ui::paint_spinner(&p, glyph_at, glyph_pt, ink, now);
                     } else {
                         p.text(
                             glyph_at,
                             egui::Align2::CENTER_CENTER,
                             icon::SIZE_PREVIEW,
-                            theme::icon_font(12.0),
+                            theme::icon_font(glyph_pt),
                             ink,
                         );
                     }
-                    x += 13.0 + 6.0;
-                    let (name, size) = match rows.as_slice() {
-                        [] => (String::new(), String::new()),
-                        [(id, b)] => (
-                            crate::private::layer(&self.session.doc, *id).into_owned(),
-                            box_words(*b),
-                        ),
-                        _ => (ui::count(total, "layer"), String::new()),
+                    let x = room.left() + glyph_pt + 6.0;
+                    let name = match rows.as_slice() {
+                        [] => String::new(),
+                        [(id, _)] => crate::private::layer(&self.session.doc, *id).into_owned(),
+                        _ => ui::count(total, "layer"),
                     };
-                    let font = egui::FontId::proportional(ui::SMALL_PT);
-                    let size_g = p.layout_no_wrap(size, font.clone(), theme::text::faint());
-                    let name_w = (room.right() - x - size_g.size().x - 6.0).max(0.0);
                     let name_g = ui.ctx().fonts_mut(|f| {
-                        let mut job =
-                            egui::text::LayoutJob::simple_singleline(name, font.clone(), ink);
-                        job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
+                        let mut job = egui::text::LayoutJob::simple_singleline(
+                            name,
+                            egui::FontId::proportional(ui::SMALL_PT),
+                            ink,
+                        );
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(
+                            (room.right() - x).max(0.0),
+                        );
                         f.layout_job(job)
                     });
                     let y = room.center().y - name_g.size().y / 2.0;
-                    let after = x + name_g.size().x + 6.0;
                     p.galley(egui::pos2(x, y), name_g, ink);
-                    p.galley(egui::pos2(after, y), size_g, theme::text::faint());
 
                     // --- the tiles ---------------------------------------------
                     if rows.is_empty() {
@@ -541,40 +524,13 @@ impl OndinApp {
                                 egui::Sense::empty(),
                             );
                             let p = ui.painter();
-                            if several {
-                                let name = crate::private::layer(&self.session.doc, *id);
-                                let label = egui::Rect::from_min_size(
-                                    line.min,
-                                    egui::vec2(LABEL_W, strip_h),
-                                );
-                                let g = ui.ctx().fonts_mut(|f| {
-                                    let mut job = egui::text::LayoutJob::simple_singleline(
-                                        name.into_owned(),
-                                        egui::FontId::proportional(ui::CAPTION_PT),
-                                        theme::text::dim(),
-                                    );
-                                    job.wrap = egui::text::TextWrapping::truncate_at_width(LABEL_W);
-                                    f.layout_job(job)
-                                });
-                                p.galley(
-                                    egui::pos2(label.left(), label.center().y - g.size().y / 2.0),
-                                    g,
-                                    theme::text::dim(),
-                                );
-                            }
                             let strip = egui::Rect::from_min_size(
-                                line.min + egui::vec2(label_w, 0.0),
+                                line.min,
                                 egui::vec2(tiles_w(&prefs.sizes), strip_h),
                             );
+                            // No hairline: on the dark ground it reads as an inset,
+                            // and the dark strip looks narrower than the light.
                             p.rect_filled(strip, egui::CornerRadius::same(4), *ground);
-                            if *ground == color::dark_ground() {
-                                p.rect_stroke(
-                                    strip,
-                                    egui::CornerRadius::same(4),
-                                    egui::Stroke::new(1.0, color::divider()),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
                             let mut x = strip.left();
                             for (c, n) in prefs.sizes.iter().enumerate() {
                                 let cell = egui::Rect::from_min_size(
@@ -618,7 +574,7 @@ impl OndinApp {
                     let (caps, _) =
                         ui.allocate_exact_size(egui::vec2(inner_w, CAPS_H), egui::Sense::empty());
                     let p = ui.painter();
-                    let mut x = caps.left() + label_w;
+                    let mut x = caps.left();
                     for n in &prefs.sizes {
                         let mid = egui::pos2(x + column_w(*n) / 2.0, caps.center().y);
                         x += column_w(*n);
@@ -661,12 +617,16 @@ impl OndinApp {
         if let Some(on) = pin {
             self.size_preview.pinned = on.then(|| subjects.clone());
         }
+        let card = area.response.rect;
         if let Some(button) = menu_button
             && self.size_preview.menu
         {
-            self.size_preview_menu(ctx, button, &mut next);
+            self.size_preview_menu(ctx, card, button, &mut next);
         }
-        if let (Some((r, c, _)), Some(card)) = (hovered_tile, self.size_preview.card) {
+        // The menu and the loupe both hang off the card's right edge.
+        if let Some((r, c, _)) = hovered_tile
+            && !self.size_preview.menu
+        {
             self.size_preview_loupe(ctx, card, r, c);
         }
         if next != prefs {
@@ -675,47 +635,42 @@ impl OndinApp {
         }
     }
 
-    /// The ⋯ menu: the sizes, ten ticks, six at most and one at least.
+    /// The ⋯ menu: the sizes, ten ticks, six at most and one at least. It opens
+    /// beside the card, level with the ⋯, so the ⋯ stays clear to close it.
     fn size_preview_menu(
         &mut self,
         ctx: &egui::Context,
+        card: egui::Rect,
         button: egui::Rect,
         next: &mut SizePreviewPrefs,
     ) {
         let id = egui::Id::new("size-preview-menu");
         let labels: Vec<String> = SIZE_CHOICES.iter().map(u32::to_string).collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let w = ui::menu_check_width(ctx, &refs, ui::MENU_PAD, 120.0);
-        let h = ui::menu_height(SIZE_CHOICES.len() + 1, 0);
-        let at = ui::dropdown_place(ctx, button, egui::vec2(w, h), ui::MENU_GAP);
-        let menu = egui::Area::new(id)
+        let w = ui::menu_check_width(ctx, &refs, ui::MENU_PAD, MENU_W);
+        let beside = egui::Rect::from_x_y_ranges(card.x_range(), button.y_range());
+        let menu = ui::flyout(id, beside, w)
             .order(egui::Order::Foreground)
-            .fixed_pos(at)
-            .show(ctx, |ui| {
-                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
-                    ui.set_width(w - ui::MENU_PAD * 2.0);
-                    ui::menu_eyebrow(ui, "Sizes");
-                    for (n, label) in SIZE_CHOICES.iter().zip(&labels) {
-                        let on = next.sizes.contains(n);
-                        let allowed = toggled(&next.sizes, *n);
-                        let row = ui::MenuRow::new("", label)
-                            .checked(on)
-                            .enabled(allowed.is_some());
-                        let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);
-                        let resp = match (allowed.is_some(), on) {
-                            (true, _) => resp,
-                            (false, true) => resp.on_hover_text("One size at least"),
-                            (false, false) => resp.on_hover_text("Six sizes at most"),
-                        };
-                        if resp.clicked()
-                            && let Some(sizes) = allowed
-                        {
-                            next.sizes = sizes;
-                        }
+            .show(ctx, (SIZE_CHOICES.len(), 0), |ui| {
+                for (n, label) in SIZE_CHOICES.iter().zip(&labels) {
+                    let on = next.sizes.contains(n);
+                    let allowed = toggled(&next.sizes, *n);
+                    let row = ui::MenuRow::new("", label)
+                        .checked(on)
+                        .enabled(allowed.is_some());
+                    let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);
+                    let resp = match (allowed.is_some(), on) {
+                        (true, _) => resp,
+                        (false, true) => resp.on_hover_text("One size at least"),
+                        (false, false) => resp.on_hover_text("Six sizes at most"),
+                    };
+                    if resp.clicked()
+                        && let Some(sizes) = allowed
+                    {
+                        next.sizes = sizes;
                     }
-                });
-            })
-            .response;
+                }
+            });
         let away = ctx.input(|i| i.pointer.any_click())
             && !menu.contains_pointer()
             && !ctx
@@ -726,8 +681,8 @@ impl OndinApp {
         }
     }
 
-    /// The loupe beside the card: the hovered pixel tile at ×10, each pixel a block
-    /// with a hairline between, never resampled.
+    /// The loupe beside the card: the hovered pixel tile at [`loupe_zoom`], each
+    /// pixel a block with a hairline between, never resampled.
     fn size_preview_loupe(&self, ctx: &egui::Context, card: egui::Rect, r: usize, c: usize) {
         let Some(tex) = self
             .size_preview
@@ -738,7 +693,8 @@ impl OndinApp {
             return;
         };
         let [w, _] = tex.size();
-        let side = w as f32 * LOUPE_ZOOM;
+        let zoom = loupe_zoom(w);
+        let side = w as f32 * zoom;
         egui::Area::new(egui::Id::new("size-preview-loupe"))
             .order(egui::Order::Foreground)
             .interactable(false)
@@ -748,7 +704,7 @@ impl OndinApp {
                 ui::menu_frame(PAD + 2.0).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = PAD;
                     ui.label(
-                        egui::RichText::new(format!("{w} × {w} · ×{}", LOUPE_ZOOM as u32))
+                        egui::RichText::new(format!("{w} × {w} · ×{}", zoom as u32))
                             .size(ui::SMALL_PT)
                             .color(theme::text::dim()),
                     );
@@ -759,7 +715,7 @@ impl OndinApp {
                     p.image(tex.id(), at, crate::thumbs::FULL_UV, egui::Color32::WHITE);
                     let line = egui::Stroke::new(1.0, color::text_a(28));
                     for i in 1..w {
-                        let o = i as f32 * LOUPE_ZOOM;
+                        let o = i as f32 * zoom;
                         p.line_segment(
                             [
                                 egui::pos2(at.left() + o, at.top()),
@@ -785,7 +741,7 @@ impl OndinApp {
 fn paint_ground_cell(p: &egui::Painter, i: usize, r: egui::Rect) {
     let chip = egui::Rect::from_center_size(r.center(), egui::vec2(10.0, 10.0));
     let radius = egui::CornerRadius::same(2);
-    let edge = egui::Stroke::new(1.0, color::divider());
+    let edge = egui::Stroke::new(1.0, ui::swatch_hairline());
     match i {
         0 => {
             p.rect_filled(chip, radius, color::light_ground());
@@ -993,11 +949,14 @@ mod tests {
         assert_eq!(toggled(&[16, 24], 16), Some(vec![24]));
         assert_eq!(toggled(&[16], 16), None, "one at least");
         assert_eq!(toggled(&[12, 16, 20, 24, 32, 48], 64), None, "six at most");
-        assert_eq!(box_words(Rect::new(0.0, 0.0, 24.0, 24.0)), "24 × 24");
-        assert_eq!(
-            box_words(Rect::new(0.0, 0.0, 1440.0, 899.5)),
-            "1440 × 899.5"
-        );
+    }
+
+    /// The loupe magnifies ×10 below 40 pixels and ×5 from there up.
+    #[test]
+    fn the_loupe_halves_its_zoom_from_forty_pixels() {
+        assert_eq!(loupe_zoom(32), 10.0);
+        assert_eq!(loupe_zoom(40), 5.0);
+        assert_eq!(loupe_zoom(64), 5.0);
     }
 
     /// *Outline shape* on a pinned rectangle swaps it for a new path in its place,

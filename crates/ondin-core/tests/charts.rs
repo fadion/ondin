@@ -348,7 +348,10 @@ fn a_description_out_of_shape_is_refused() {
     odd.options.lines.area_opacity = 2.0;
     let mut twice = sample();
     twice.mapping.series.push(ColumnId(1));
+    let mut wide = sample();
+    wide.options.value_axis.range = Some((-1e308, 1e308));
     for (chart, rule) in [
+        (wide, ChartRule::BadOption),
         (ragged, ChartRule::RaggedRow),
         (unknown, ChartRule::UnknownColumn),
         (twice, ChartRule::DuplicateSeries),

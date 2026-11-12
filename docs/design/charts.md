@@ -343,7 +343,8 @@ it applies to; switching kind keeps the others' values.
   columns 45° and then thins them to every *n*th when they would touch, and keeps every other
   axis's flat; a set angle beside the plot thins a bar chart's category labels by their turned
   height),
-  a title, and for a value axis its range (Auto or a typed min and max), *Start at zero* (always
+  a title, and for a value axis its range (Auto or a typed min and max, refused when its width
+  overflows a number), *Start at zero* (always
   on for columns and bars, whose length is the value), the tick count (Auto aims for five on
   1-2-5 steps), side (left or right, top or bottom) and number format. Gridlines per axis: on or
   off, solid or dashed, colour.
@@ -353,7 +354,9 @@ it applies to; switching kind keeps the others' values.
 - **Legend** (not Sankey): Off, Top, Bottom, Left, Right, with its alignment; a one-series chart
   starts with it off.
 - **Number format** (one per value axis and one for values): decimals, thousands separator,
-  prefix and suffix (`$`, `%`, ` kg`), *Compact* (1.2k, 3.4M), *Percent* (×100 with `%`).
+  prefix and suffix (`$`, `%`, ` kg`), *Compact* (1.2k, 3.4M), *Percent* (×100 with `%`). Auto
+  decimals are the tick step's own (a step of 1e-9 writes nine places), and a number past 21
+  digits takes an exponent (`1e200`, `2.5e-25`; `chart::scale::format`).
 - **Text**: one family and weight for the chart, a size each for tick labels, values, legend and
   axis titles, and the ink colour, from the Type controls the inspector already has. A chart starts
   with the document's default text family, as the Text tool's first node does.

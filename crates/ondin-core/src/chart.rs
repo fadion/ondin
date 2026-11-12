@@ -1336,7 +1336,7 @@ impl Options {
         let axis = |a: &Axis| {
             text(&a.title)
                 && a.range
-                    .is_none_or(|(lo, hi)| lo.is_finite() && hi.is_finite() && lo < hi)
+                    .is_none_or(|(lo, hi)| (hi - lo).is_finite() && lo < hi)
                 && a.tick_count.is_none_or(|n| (1..=100).contains(&n))
                 && format(&a.format)
         };

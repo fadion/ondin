@@ -113,15 +113,38 @@ fn walk(from: f64, to: f64, step: f64) -> Vec<f64> {
     out
 }
 
-/// The decimals a step of `step` needs.
+/// The decimals a step of `step` needs: judged against the step's own size, so
+/// a step of 1e-9 needs nine. A step finer than [`MAX_DECIMALS`] places is
+/// written with an exponent by [`format`].
 pub fn decimals_of(step: f64) -> u8 {
     let mut d = 0u8;
     let mut s = step.abs();
-    while d < 10 && (s - s.round()).abs() > 1e-9 * s.max(1.0) {
+    if !(s.is_finite() && s > 0.0) {
+        return 0;
+    }
+    while d < MAX_DECIMALS && (s - s.round()).abs() > 1e-9 * s {
         s *= 10.0;
         d += 1;
     }
     d
+}
+
+/// The most decimals a step is written with.
+const MAX_DECIMALS: u8 = 30;
+
+/// The most digits a number is written with before it takes an exponent.
+const MAX_DIGITS: usize = 21;
+
+/// `v` with an exponent, its mantissa's trailing zeros dropped: `1e300`,
+/// `2.5e-21`. Twelve places, so a sum's rounding error is not written.
+fn with_exponent(v: f64) -> String {
+    let s = format!("{:.12e}", v.abs());
+    match s.split_once('e') {
+        Some((m, e)) if m.contains('.') => {
+            format!("{}e{e}", m.trim_end_matches('0').trim_end_matches('.'))
+        }
+        _ => s,
+    }
 }
 
 /// `v` written by `f`; `fallback` is the decimals used when `f` names none.
@@ -149,7 +172,15 @@ pub fn format(v: f64, f: &NumberFormat, fallback: u8) -> String {
         u8::from((v - v.round()).abs() > 1e-9)
     });
     let mut body = format!("{:.*}", usize::from(decimals), v.abs());
-    if f.thousands {
+    // Past a digit budget an exponent: 1e200 is not two hundred digits, and a
+    // tick on a step of 1e-25 is not twenty-five places.
+    if body.chars().filter(char::is_ascii_digit).count() > MAX_DIGITS {
+        body = if v == 0.0 {
+            "0".into()
+        } else {
+            with_exponent(v)
+        };
+    } else if f.thousands {
         body = grouped(&body);
     }
     let sign = if v < 0.0 && body.chars().any(|c| c.is_ascii_digit() && c != '0') {
@@ -247,5 +278,32 @@ mod tests {
         assert_eq!(format(-0.0001, &plain, 0), "0", "no minus on a zero");
         assert_eq!(decimals_of(0.25), 2);
         assert_eq!(decimals_of(20.0), 0);
+    }
+
+    /// An axis over very small values writes each tick apart, and one over very
+    /// large values with an exponent rather than every digit.
+    /// flip: `decimals_of` judging the step against 1 rather than itself →
+    /// fails at "1e-9 ticks"; `format` never taking an exponent → fails at
+    /// "1e200".
+    #[test]
+    fn extreme_magnitudes_are_written_apart_and_short() {
+        let plain = NumberFormat::default();
+        for (lo, hi, what) in [(1e-9, 4e-9, "1e-9 ticks"), (1e-11, 4e-11, "1e-11 ticks")] {
+            let t = ticks(lo, hi, 5, None);
+            let labels: Vec<String> = t
+                .values
+                .iter()
+                .map(|v| format(*v, &plain, t.decimals()))
+                .collect();
+            let mut distinct = labels.clone();
+            distinct.dedup();
+            assert_eq!(distinct, labels, "{what}");
+        }
+        assert_eq!(decimals_of(1e-9), 9);
+        assert_eq!(decimals_of(5e-12), 12);
+        assert_eq!(format(1e200, &plain, 0), "1e200", "1e200");
+        assert_eq!(format(-2.5e-25, &plain, 26), "-2.5e-25");
+        assert_eq!(format(0.0, &plain, 26), "0");
+        assert_eq!(format(0.0, &plain, 2), "0.00");
     }
 }

@@ -2477,6 +2477,13 @@ pub trait LayoutView {
     fn visible(&self, id: crate::NodeId) -> bool;
     fn mask(&self, id: crate::NodeId) -> bool;
     fn local(&self, id: crate::NodeId) -> Affine;
+    /// Whether `id` has width queries, so a layout laying it out contains its
+    /// inline size as CSS lays `container-type: inline-size`. False by default,
+    /// for a view with no queries.
+    fn contained(&self, id: crate::NodeId) -> bool {
+        let _ = id;
+        false
+    }
     /// The box a pinned child of `id`'s parent is placed against — the parent
     /// frame's **used** size, or a laid group's box — `None` for a parent with no
     /// edges. What [`lay_out`] stretches a pinned layout root to (§15 D933).
@@ -3006,6 +3013,9 @@ struct FlexTree<'v> {
     children: Vec<Vec<taffy::NodeId>>,
     styles: Vec<taffy::Style>,
     leaves: Vec<Leaf>,
+    /// A query container's padding width ([`LayoutView::contained`]), the
+    /// width it is laid at wherever its content would otherwise size it.
+    contained: Vec<Option<f32>>,
     caches: Vec<taffy::Cache>,
     layouts: Vec<taffy::Layout>,
     /// Text measurements already made this pass, keyed by node and the width
@@ -3032,6 +3042,7 @@ impl<'v> FlexTree<'v> {
             children: Vec::new(),
             styles: Vec::new(),
             leaves: Vec::new(),
+            contained: Vec::new(),
             caches: Vec::new(),
             layouts: Vec::new(),
             measured: Default::default(),
@@ -3066,6 +3077,11 @@ impl<'v> FlexTree<'v> {
             }
         };
         self.leaves.push(leaf);
+        self.contained
+            .push(display.as_ref().filter(|_| view.contained(id)).map(|d| {
+                let [_, right, _, left] = d.padding();
+                (right.max(0.0) + left.max(0.0)) as f32
+            }));
         if let Some(display) = display {
             for child in self.view.children(id) {
                 if in_flow(self.view, child)
@@ -3100,6 +3116,42 @@ impl<'v> FlexTree<'v> {
             }
         }
         Some(index)
+    }
+
+    /// `inputs` with a query container's width fixed at its padding, clamped by
+    /// its limits, wherever nothing else fixes it: no width handed in, and none
+    /// of its own that resolves (an intrinsic measure, or a percentage of a
+    /// hugging parent). CSS's inline-size containment, so the min- and
+    /// max-content a parent sizes by never come from what the queries pick.
+    fn contain(
+        &self,
+        index: usize,
+        mut inputs: taffy::tree::LayoutInput,
+    ) -> taffy::tree::LayoutInput {
+        use taffy::MaybeResolve;
+        let Some(padding) = self.contained[index] else {
+            return inputs;
+        };
+        let style = &self.styles[index];
+        let parent = inputs.parent_size.width;
+        // Its own width, or one a ratio derives from a height not from content.
+        let height = inputs.known_dimensions.height.or_else(|| {
+            let parent = inputs.parent_size.height;
+            style.size.height.maybe_resolve(parent, |_, _| 0.0)
+        });
+        let own = style.size.width.maybe_resolve(parent, |_, _| 0.0).is_some()
+            || (style.aspect_ratio.is_some() && height.is_some());
+        if inputs.known_dimensions.width.is_some()
+            || (inputs.sizing_mode == taffy::SizingMode::InherentSize && own)
+        {
+            return inputs;
+        }
+        let min = style.min_size.width.maybe_resolve(parent, |_, _| 0.0);
+        let max = style.max_size.width.maybe_resolve(parent, |_, _| 0.0);
+        let width = max.map_or(padding, |m| padding.min(m));
+        inputs.known_dimensions.width = Some(min.map_or(width, |m| width.max(m)).max(padding));
+        inputs.known_dimensions_are_definite.width = true;
+        inputs
     }
 
     fn measure(
@@ -3656,9 +3708,13 @@ impl taffy::LayoutPartialTree for FlexTree<'_> {
             let index = usize::from(node);
             match tree.leaves[index] {
                 Leaf::Container if tree.styles[index].display == taffy::Display::Grid => {
+                    let inputs = tree.contain(index, inputs);
                     taffy::compute_grid_layout(tree, node, inputs)
                 }
-                Leaf::Container => taffy::compute_flexbox_layout(tree, node, inputs),
+                Leaf::Container => {
+                    let inputs = tree.contain(index, inputs);
+                    taffy::compute_flexbox_layout(tree, node, inputs)
+                }
                 _ => {
                     let style = tree.styles[index].clone();
                     let mut out = taffy::compute_leaf_layout(

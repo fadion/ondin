@@ -158,13 +158,9 @@ impl crate::container::LayoutView for DocView<'_> {
     fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
         self.0.resolved_display(id)
     }
-    /// Bound limits resolved and a querying frame contained
-    /// ([`Document::laid_item_in`]).
+    /// Bound limits resolved ([`Document::resolved_item`]).
     fn item(&self, id: NodeId) -> crate::container::LayoutItem {
-        match self.0.get(id) {
-            Some(n) => self.0.laid_item_in(self.0.variables(), id, *n.item()),
-            None => Default::default(),
-        }
+        self.0.resolved_item(id)
     }
     fn insets(&self, id: NodeId) -> crate::container::Insets {
         self.0.get(id).map(|n| *n.insets()).unwrap_or_default()
@@ -178,6 +174,9 @@ impl crate::container::LayoutView for DocView<'_> {
     }
     fn local(&self, id: NodeId) -> Affine {
         self.0.get(id).map(|n| n.transform()).unwrap_or_default()
+    }
+    fn contained(&self, id: NodeId) -> bool {
+        self.0.get(id).is_some_and(|n| !n.queries().is_empty())
     }
 }
 
@@ -219,6 +218,9 @@ impl crate::container::LayoutView for UsedView<'_> {
     }
     fn local(&self, id: NodeId) -> Affine {
         DocView(self.doc).local(id)
+    }
+    fn contained(&self, id: NodeId) -> bool {
+        DocView(self.doc).contained(id)
     }
     fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
         frame_box(self.used, self.doc.get(self.doc.get(id)?.parent()?)?)
@@ -306,6 +308,9 @@ impl crate::container::LayoutView for CommittedView<'_> {
     }
     fn local(&self, id: NodeId) -> Affine {
         DocView(self.doc).local(id)
+    }
+    fn contained(&self, id: NodeId) -> bool {
+        DocView(self.doc).contained(id)
     }
     fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
         frame_box(&self.res.used, self.doc.get(self.doc.get(id)?.parent()?)?)

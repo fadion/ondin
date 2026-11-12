@@ -2024,8 +2024,7 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             None => self.doc.resolved_display(id),
         }
     }
-    /// Bound limits resolved and a querying frame contained, as
-    /// `Document::laid_item_in` lays them out.
+    /// Bound limits resolved, as `Document::resolved_item` answers them.
     fn item(&self, id: NodeId) -> ondin_core::container::LayoutItem {
         let item = match self.ov.get(id).and_then(|o| o.item) {
             Some(item) => item,
@@ -2034,7 +2033,7 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
                 None => return Default::default(),
             },
         };
-        self.doc.laid_item_in(self.doc.variables(), id, item)
+        self.doc.limits_drawn_in(self.doc.variables(), id, item)
     }
     fn insets(&self, id: NodeId) -> ondin_core::Insets {
         self.ov
@@ -2055,6 +2054,9 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             .and_then(|o| o.transform)
             .or_else(|| self.doc.get(id).map(|n| n.transform()))
             .unwrap_or_default()
+    }
+    fn contained(&self, id: NodeId) -> bool {
+        self.doc.get(id).is_some_and(|n| !n.queries().is_empty())
     }
     fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
         let parent = self.doc.get(id)?.parent()?;

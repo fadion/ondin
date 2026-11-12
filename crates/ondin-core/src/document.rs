@@ -1075,29 +1075,6 @@ impl Document {
         item
     }
 
-    /// `item` as layout reads it: [`Self::limits_drawn_in`], and a querying
-    /// frame's `Auto` minimum width held at its padding. That minimum is the
-    /// rest of inline-size containment: a shrinking flex row would otherwise
-    /// hold the frame at a min-content its own pick sizes, and the pick would
-    /// flip every settle round. Layout only — the inspector's limit fields read
-    /// `Auto` from [`Self::resolved_item`].
-    pub fn laid_item_in(
-        &self,
-        t: &crate::variable::Variables,
-        id: NodeId,
-        item: crate::container::LayoutItem,
-    ) -> crate::container::LayoutItem {
-        let queries = self.nodes.get(&id).is_some_and(|n| !n.queries.is_empty());
-        if !queries && item.limit_vars.iter().all(Option::is_none) {
-            return item;
-        }
-        let mut item = self.limits_drawn_in(t, id, item);
-        if queries && item.min_width == crate::container::Dimension::Auto {
-            item.min_width = crate::container::Dimension::Px(self.side_padding(id));
-        }
-        item
-    }
-
     /// `id`'s layout item as it is laid out: its bound limits resolved
     /// ([`Self::limits_drawn_in`]). **What every layout view answers `item`
     /// with**, so a bound limit never lays out at the 0 its literal holds.

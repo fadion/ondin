@@ -336,8 +336,8 @@ fn a_width_derived_from_a_fit_content_height_is_contained() {
 /// pick settles at the row's 300 (Compact, the bar overflowing) instead of
 /// flipping between Compact and Regular every round, as Chrome lays a
 /// `container-type: inline-size` item.
-/// flip: `Document::laid_item_in` leaving `min_width` at `Auto` → laid 400,
-/// fails at "the row's width".
+/// flip: `FlexTree::contain` returning `inputs` unchanged → laid 400, fails at
+/// "the row's width".
 #[test]
 fn a_querying_frame_shrunk_by_a_row_is_contained_at_its_minimum() {
     let mut f = fixture();
@@ -402,6 +402,122 @@ fn a_querying_frame_shrunk_by_a_row_is_contained_at_its_minimum() {
         f.doc.query_width_in(f.doc.variables(), q),
         Some(300.0),
         "the row's width"
+    );
+    assert_eq!(f.inside(q), Some(f.compact));
+    let mut res = Resolved::rebuild(&f.doc);
+    assert!(
+        res.settle(&mut f.doc).0.is_empty(),
+        "settled: nothing moves"
+    );
+}
+
+/// A querying frame with no layout keeps its width in an overflowing row:
+/// nothing inside it can size it, so it is not contained, and the export's
+/// `min-width` of its own width holds it there in the browser too.
+/// flip: `Document::resolved_item` holding every querying frame's minimum
+/// width at its padding → laid 250, fails at "its own width".
+#[test]
+fn a_querying_frame_without_a_layout_keeps_its_width_in_a_row() {
+    let mut f = fixture();
+    let (row, q, other) = (f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let page = f.page;
+    f.commit(vec![
+        frame(row, page, 300.0),
+        Operation::SetDisplay {
+            id: row,
+            display: Some(Display::Flex(Flex::default())),
+        },
+        frame(other, row, 50.0),
+        frame(q, row, 500.0),
+    ]);
+    let ops = variable::query_ops(&f.doc, q, ModeOwner::Collection(f.density), true)
+        .expect("a plain frame picks by width");
+    f.commit(ops);
+    let _ = Resolved::settled(&mut f.doc);
+    assert_eq!(
+        f.doc.query_width_in(f.doc.variables(), q),
+        Some(500.0),
+        "its own width"
+    );
+}
+
+/// A percentage-width querying frame under a hugging row contributes only its
+/// padding to the row, as Chrome lays a `container-type: inline-size` item,
+/// so the row hugs to 0 and the pick settles in one pass instead of flipping
+/// between Compact and Wide every round.
+/// flip: `FlexTree::contain` returning `inputs` unchanged → the row hugs the
+/// bar, fails at "contained".
+#[test]
+fn a_percentage_querying_frame_under_a_hugging_row_settles() {
+    let mut f = fixture();
+    let (outer, hug, q, bar) = (f.ids.mint(), f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let w: VarId = f.ids.mint_var();
+    let page = f.page;
+    let row = || Some(Display::Flex(Flex::default()));
+    f.commit(vec![
+        frame(outer, page, 1000.0),
+        Operation::SetDisplay {
+            id: outer,
+            display: row(),
+        },
+        frame(hug, outer, 100.0),
+        Operation::SetDisplay {
+            id: hug,
+            display: row(),
+        },
+        frame(q, hug, 700.0),
+        Operation::SetDisplay {
+            id: q,
+            display: row(),
+        },
+        Operation::CreateNode {
+            id: bar,
+            parent: q,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: w,
+                name: "density/bar".into(),
+                kind: VarKind::Number,
+                cells: [
+                    (f.compact, Cell::Number(700.0)),
+                    (f.regular, Cell::Number(100.0)),
+                    (f.wide, Cell::Number(100.0)),
+                ]
+                .into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let mut item = *f.doc.get(hug).unwrap().item();
+    item.width = Dimension::FitContent;
+    f.commit(vec![Operation::SetLayoutItem { id: hug, item }]);
+    let mut item = *f.doc.get(q).unwrap().item();
+    item.width = Dimension::Percent(100.0);
+    f.commit(vec![Operation::SetLayoutItem { id: q, item }]);
+    let ops = ondin_core::bind_size_ops(&f.doc, bar, [Some(w), None]);
+    assert!(!ops.is_empty(), "the fixture: the bar's width binds");
+    f.commit(ops);
+    let ops = variable::query_ops(&f.doc, q, ModeOwner::Collection(f.density), true)
+        .expect("a flex frame picks by width");
+    f.commit(ops);
+
+    let _ = Resolved::settled(&mut f.doc);
+    assert_eq!(
+        f.doc.query_width_in(f.doc.variables(), q),
+        Some(0.0),
+        "contained"
     );
     assert_eq!(f.inside(q), Some(f.compact));
     let mut res = Resolved::rebuild(&f.doc);

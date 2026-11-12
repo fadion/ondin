@@ -99,14 +99,17 @@ pub struct Lent<'a> {
     pub contrast: Option<&'a mut dyn crate::contrast::Probe>,
 }
 
-/// A verb's answer: the edit to commit, the nodes it creates, in order, and the
-/// id of what else it made (a picture, a variable, a mode, a style) as a caller
-/// names it.
+/// A verb's answer: the edit to commit, the nodes it creates, in order, the id
+/// of what else it made (a picture, a variable, a mode, a style) as a caller
+/// names it, and a line on what it did.
 #[derive(Debug, Default)]
 pub struct Done {
     pub tx: Transaction,
     pub created: Vec<NodeId>,
     pub made: Option<String>,
+    /// A line on what the edit did that its caller cannot read off the document:
+    /// how many matches a replace wrote, what an import left out.
+    pub said: Option<String>,
 }
 
 impl Done {
@@ -125,7 +128,15 @@ impl Done {
         Self {
             tx,
             created,
-            made: None,
+            ..Self::default()
+        }
+    }
+
+    /// `self`, with `said` saying what it did.
+    fn saying(self, said: String) -> Self {
+        Self {
+            said: Some(said),
+            ..self
         }
     }
 
@@ -406,6 +417,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "StyleValue" => reads::<StyleInput>(v),
         "BoundField" => reads::<build::BoundField>(v),
         "Color" => reads::<peniko::Color>(v),
+        "[Color]" => reads::<Vec<peniko::Color>>(v),
         "PropValue" => match v {
             Value::Bool(_) | Value::String(_) => Ok(()),
             _ => Err("expected true, false or a string".into()),
@@ -502,6 +514,10 @@ pub fn example(model: &str) -> Option<Value> {
         "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
         "BoundField" => json(&build::BoundField::Fill(0)),
         "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
+        "[Color]" => json(&vec![
+            Color::from_rgb8(0x1f, 0x3a, 0x5f),
+            Color::from_rgb8(0x20, 0x3b, 0x5e),
+        ]),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
@@ -543,6 +559,11 @@ pub fn example(model: &str) -> Option<Value> {
         }),
         _ => return None,
     })
+}
+
+/// `n` with the noun that counts it: "1 match", "3 matches".
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The verb called `name`.
@@ -931,6 +952,68 @@ pub static VERBS: &[Verb] = &[
             let mut done = Done::default();
             tree_ops(ctx, a, &tree, parent, index, &mut done)?;
             Ok(done)
+        },
+    },
+    Verb {
+        name: "import_svg",
+        doc: "Read SVG markup into layers, in one new group in `parent`; answers the group",
+        params: &[
+            req("parent", NODE, "the frame, group or page to place it in"),
+            req("svg", TEXT, "the markup, one `<svg>` element"),
+            opt(
+                "x",
+                ParamKind::Number,
+                "how far right of the parent's origin it goes, 0 unless given",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "how far down from the parent's origin it goes, 0 unless given",
+            ),
+            opt("name", TEXT, "the group's name"),
+            opt(
+                "index",
+                INDEX,
+                "the group's place among the parent's children, 0 the bottom; on top unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let parent = a.node("parent")?;
+            let count = node(ctx, parent)?.children().len();
+            let index = a.index("index").unwrap_or(count).min(count);
+            let svg = a.text("svg").unwrap_or_default();
+            // Reborrowed to the one lifetime `import` asks of both; `as_deref_mut`
+            // keeps the sink's own, and the borrow checker refuses the call.
+            let images: Option<&mut dyn ImageSink> = match &mut ctx.images {
+                Some(s) => Some(&mut **s),
+                None => None,
+            };
+            let mut out = crate::svg_in::import(svg, &mut *ctx.ids, parent, index, images)
+                .map_err(|e| a.invalid("svg", e))?;
+            if out.shapes == 0 {
+                return Err(VerbError::Nothing("the markup draws nothing"));
+            }
+            let root = out.root;
+            let shift =
+                Affine::translate((a.number("x").unwrap_or(0.0), a.number("y").unwrap_or(0.0)));
+            if let Some(Operation::CreateNode {
+                transform, name, ..
+            }) = out
+                .tx
+                .0
+                .iter_mut()
+                .find(|op| matches!(op, Operation::CreateNode { id, .. } if *id == root))
+            {
+                *transform = Some(shift * transform.unwrap_or(Affine::IDENTITY));
+                if let Some(given) = a.text("name") {
+                    *name = Some(given.to_owned());
+                }
+            }
+            let done = Done::made(out.tx, vec![root]);
+            Ok(match out.skipped.is_empty() {
+                true => done,
+                false => done.saying(format!("Left out: {}", out.skipped.join(", "))),
+            })
         },
     },
     Verb {
@@ -2470,6 +2553,80 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "replace_text",
+        doc: "Replace what text layers say wherever `find` matches, each replacement styled as its match was; locked layers are left alone",
+        params: &[
+            req("find", TEXT, "what to look for"),
+            req("replace", TEXT, "what takes its place"),
+            opt(
+                "nodes",
+                NODES,
+                "only the text in and under these layers; every page but drafts unless given",
+            ),
+            opt(
+                "match_case",
+                BOOL,
+                "match capitals exactly; false unless given",
+            ),
+            opt(
+                "whole_words",
+                BOOL,
+                "match only whole words; false unless given",
+            ),
+            opt(
+                "pattern",
+                BOOL,
+                "`find` is a regular expression, and `[1]` in `replace` inserts its first group; false unless given",
+            ),
+            opt(
+                "keep_case",
+                BOOL,
+                "give each replacement the capitals of what it replaces; false unless given",
+            ),
+            opt(
+                "inside_instances",
+                BOOL,
+                "also override text inside instances; false unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::find::{self, Query, Scope};
+            let flag = |name| a.bool(name).unwrap_or(false);
+            let query = Query::new(
+                a.text("find").unwrap_or_default(),
+                a.text("replace").unwrap_or_default(),
+                flag("match_case"),
+                flag("whole_words"),
+                flag("pattern"),
+                flag("keep_case"),
+            )
+            .map_err(|why| a.invalid("find", why))?;
+            let scope = match a.get("nodes") {
+                Some(_) => Scope::Under(a.nodes("nodes")?),
+                None => Scope::Pages {
+                    here: ctx.doc.first_page(),
+                },
+            };
+            let hits = find::find(ctx.doc, &scope, &query);
+            let done = find::replace(ctx.doc, &hits, &query, flag("inside_instances"));
+            if done.matches == 0 {
+                return Err(VerbError::Nothing(match hits.is_empty() {
+                    true => "nothing matches",
+                    false => "every match is locked or inside an instance",
+                }));
+            }
+            let alone = match hits.len() - done.matches {
+                0 => String::new(),
+                n => format!("; {n} locked or in an instance left alone"),
+            };
+            Ok(Done::edit(done.tx).saying(format!(
+                "Replaced {} in {}{alone}",
+                plural(done.matches, "match", "matches"),
+                plural(done.layers, "layer", "layers"),
+            )))
+        },
+    },
+    Verb {
         name: "set_text_style",
         doc: "Set a text layer's character style, and optionally its runs",
         params: &[
@@ -2636,6 +2793,71 @@ pub static VERBS: &[Verb] = &[
             let own = node(ctx, id)?.effects().to_vec();
             let effects = rekeyed(ctx, &own, effects);
             Ok(Done::ops(vec![Operation::SetEffects { id, effects }]))
+        },
+    },
+    Verb {
+        name: "merge_colours",
+        doc: "Make near-identical colours one, as Colour review merges a group: every place painted in one of `colours` takes `into`",
+        params: &[
+            req(
+                "colours",
+                ParamKind::Model("[Color]"),
+                "the colours to replace, as `review_colours` lists them",
+            ),
+            req(
+                "into",
+                ParamKind::Model("Color"),
+                "the colour they become, one the document uses",
+            ),
+            opt(
+                "nodes",
+                NODES,
+                "only the layers in and under these; every page unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::color_review::{self, Group};
+            let bytes = |c: peniko::Color| c.to_rgba8().to_u8_array();
+            let into = bytes(a.model::<peniko::Color>("into")?);
+            let from: Vec<[u8; 4]> = a
+                .model::<Vec<peniko::Color>>("colours")?
+                .into_iter()
+                .map(bytes)
+                .collect();
+            let scope = match a.get("nodes") {
+                Some(_) => Some(a.nodes("nodes")?),
+                None => None,
+            };
+            let roots = color_review::roots(ctx.doc, scope.as_deref());
+            let census = color_review::census(ctx.doc, &roots);
+            let raw = |i: usize| census[i].is_raw().then(|| bytes(census[i].color));
+            let target = (0..census.len())
+                .find(|i| raw(*i) == Some(into))
+                .ok_or_else(|| a.invalid("into", "no paint in scope is this colour"))?;
+            let mut members = vec![target];
+            members.extend(
+                (0..census.len())
+                    .filter(|i| *i != target && raw(*i).is_some_and(|b| from.contains(&b))),
+            );
+            if members.len() < 2 {
+                return Err(VerbError::Nothing("none of the colours is used in scope"));
+            }
+            let merged = color_review::merge(ctx.doc, &roots, &census, &Group { members }, 0);
+            if merged.uses == 0 {
+                return Err(VerbError::Nothing("every place is on a locked layer"));
+            }
+            let locked = match merged.locked {
+                0 => String::new(),
+                n => format!(
+                    "; {} on locked layers left alone",
+                    plural(n, "place", "places")
+                ),
+            };
+            Ok(Done::edit(merged.tx).saying(format!(
+                "Merged {} on {}{locked}",
+                plural(merged.uses, "place", "places"),
+                plural(merged.layers, "layer", "layers"),
+            )))
         },
     },
     Verb {

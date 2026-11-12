@@ -677,10 +677,14 @@ fn write(
         stale(conn, s, base, &done.tx)?;
     }
     commit(s, client, verb.name, done.tx)?;
-    Ok(Answer::Json(json!({
+    let mut answer = json!({
         "created": done.created.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
         "made": done.made,
-    })))
+    });
+    if let Some(said) = done.said {
+        answer["said"] = json!(said);
+    }
+    Ok(Answer::Json(answer))
 }
 
 /// Commit an agent's `tx` as one undo step named by `tool`, with the style
@@ -1066,6 +1070,31 @@ mod tests {
             docs.session.doc.get(path).map(|n| n.kind()),
             Some(ondin_core::NodeKind::Path { .. })
         ));
+    }
+
+    /// A verb's line on what it did reaches the agent as `said`.
+    ///
+    /// flip: `write` dropping `done.said` → fails at the `said` assertion.
+    #[test]
+    fn a_verbs_said_line_reaches_the_agent() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "create_text",
+            json!({ "parent": page, "text": "Log in" }),
+        ));
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "replace_text",
+            json!({ "find": "Log in", "replace": "Sign in" }),
+        );
+        assert_eq!(ok(&out)["said"], "Replaced 1 match in 1 layer");
     }
 
     /// An agent's write leaves the style browser's *Edit* as it found it.

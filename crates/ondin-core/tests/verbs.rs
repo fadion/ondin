@@ -3620,3 +3620,165 @@ fn add_variant_and_duplicate_as_component_make_mains() {
     );
     assert_ne!(copy, lone);
 }
+
+/// `import_svg` reads markup into one group placed at `x`/`y`, named as asked,
+/// says what it left out, and refuses markup that draws nothing.
+///
+/// flip: `import_svg` leaving the root's transform alone → fails at "placed".
+#[test]
+fn import_svg_reads_markup_into_a_placed_group() {
+    let (mut doc, mut ids, page) = blank();
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/><blink/></svg>"#;
+    let args = json!({ "parent": page.to_wire(), "svg": svg, "x": 100, "y": 50, "name": "Icon" });
+    let done = answer(&doc, &mut ids, "import_svg", args.clone()).unwrap();
+    assert!(
+        done.said.as_deref().is_some_and(|s| s.contains("blink")),
+        "{:?}",
+        done.said
+    );
+    let g = run(&mut doc, &mut ids, "import_svg", args)[0];
+    assert_eq!(doc.get(g).unwrap().name(), "Icon");
+    let r = Resolved::rebuild(&doc).world_bounds(g).unwrap();
+    assert_eq!((r.x0, r.y0), (100.0, 50.0), "placed");
+
+    let empty = answer(
+        &doc,
+        &mut ids,
+        "import_svg",
+        json!({ "parent": page.to_wire(), "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>" }),
+    );
+    assert!(matches!(empty, Err(VerbError::Nothing(_))), "{empty:?}");
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "import_svg",
+            json!({ "parent": page.to_wire(), "svg": "<html/>" })
+        ),
+        "svg"
+    );
+}
+
+/// `replace_text` rewrites every match in scope, keeps a styled run's styling,
+/// leaves a locked layer alone and says so.
+///
+/// flip: `replace_text` writing through `set_text`'s empty runs → fails at "the
+/// run survives".
+#[test]
+fn replace_text_rewrites_matches_and_keeps_their_styling() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let a = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": p, "text": "Sign in to Acme" }),
+    )[0];
+    let b = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": p, "text": "Acme rules" }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "style_text",
+        json!({ "node": a.to_wire(), "attrs": [{ "Weight": 700 }], "start": 11, "end": 15 }),
+    );
+    let spans = |doc: &Document| match doc.get(a).unwrap().kind() {
+        NodeKind::Text { spans, .. } => spans.as_slice().len(),
+        _ => 0,
+    };
+    assert_eq!(spans(&doc), 1, "fixture: the name is bold");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_locked",
+        json!({ "nodes": [b.to_wire()], "locked": true }),
+    );
+    let done = answer(
+        &doc,
+        &mut ids,
+        "replace_text",
+        json!({ "find": "acme", "replace": "Ondin" }),
+    )
+    .unwrap();
+    assert_eq!(
+        done.said.as_deref(),
+        Some("Replaced 1 match in 1 layer; 1 locked or in an instance left alone")
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "replace_text",
+        json!({ "find": "acme", "replace": "Ondin" }),
+    );
+    let text = |id: NodeId, doc: &Document| match doc.get(id).unwrap().kind() {
+        NodeKind::Text { content, .. } => content.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(text(a, &doc), "Sign in to Ondin");
+    assert_eq!(text(b, &doc), "Acme rules", "the locked layer");
+    assert_eq!(spans(&doc), 1, "the run survives");
+    let none = answer(
+        &doc,
+        &mut ids,
+        "replace_text",
+        json!({ "find": "zebra", "replace": "x" }),
+    );
+    assert!(matches!(none, Err(VerbError::Nothing(_))), "{none:?}");
+}
+
+/// `merge_colours` repaints a near-identical colour as the one named, and
+/// refuses an `into` no paint uses.
+///
+/// flip: `merge_colours` merging into the other member rather than `into` →
+/// fails at the last assertion: both still match, in the wrong colour.
+#[test]
+fn merge_colours_repaints_near_identical_colours() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, b) = two_rects(&mut doc, &mut ids, page, 60.0, 0.0);
+    let fill = |r, g, b| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(Color::from_rgb8(r, g, b)).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": a.to_wire(), "fills": fill(0x1f, 0x3a, 0x5f) }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": b.to_wire(), "fills": fill(0x20, 0x3b, 0x5e) }),
+    );
+    let into = serde_json::to_value(Color::from_rgb8(0x1f, 0x3a, 0x5f)).unwrap();
+    let other = serde_json::to_value(Color::from_rgb8(0x20, 0x3b, 0x5e)).unwrap();
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "merge_colours",
+            json!({ "colours": [into], "into": serde_json::to_value(Color::from_rgb8(1, 2, 3)).unwrap() })
+        ),
+        "into"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "merge_colours",
+        json!({ "colours": [other], "into": into }),
+    );
+    let solid = |id: NodeId| match &doc.get(id).unwrap().paint().fills[0].brush.literal() {
+        Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
+        _ => [0; 4],
+    };
+    assert_eq!(solid(a), solid(b), "both take `into`");
+    assert_eq!(solid(b), [0x1f, 0x3a, 0x5f, 0xff]);
+}

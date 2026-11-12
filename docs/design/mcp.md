@@ -42,16 +42,16 @@ Phase 1 — read/export (ship first):
 `list_styles() -> StyleTable`.
 
 Phase 2 — write (1:1 with operations/composites):
-`create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `delete_node`,
+`create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `import_svg(parent, svg, x?, y?, name?)`, `delete_node`,
 `reparent`, `reorder`, `arrange(ids, move)`, `group(ids)`, `frame(ids)`, `ungroup(id)`, `boolean(ids, op)`, `flatten(ids)`,
 `outline_shape(id)`, `outline_stroke(id)`, `outline_text(id)`, `divide(ids)`, `blend_shapes(ids, steps?, paint?, reverse?)`,
 `duplicate(id)`, `join_paths(id, other)`, `repeat(ids, count, angle?, turn?)`, `align(ids, edge)`,
 `distribute(ids, axis)`, `tidy_up(ids)`, `slice(ids)`, `set_transform`, `set_pivot`, `set_geometry`,
 `set_size(id, width, height)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
-`set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
+`set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `replace_text(find, replace, ids?, …)`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
-`set_effects`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
+`set_effects`, `merge_colours(colours, into, ids?)`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
 `insert_chart(parent, kind, table?, mapping?, x?, y?, width?, height?)`, `set_chart(id, kind?, mapping?, options?)`, `set_chart_data(id, table)`, `flatten_chart(ids)`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.

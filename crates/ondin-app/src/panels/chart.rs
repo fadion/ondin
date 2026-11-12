@@ -472,6 +472,20 @@ impl OndinApp {
         }
     }
 
+    /// The extent chart `id` draws its value axis (`value`) or numeric X axis
+    /// at now, as the generator ticked it at its drawn size; [`auto_extent`]'s
+    /// estimate where it draws none.
+    fn drawn_extent(&self, id: NodeId, chart: &Chart, value: bool) -> (f64, f64) {
+        let size = match self.session.resolved.used_kind(&self.session.doc, id) {
+            Some(ondin_core::NodeKind::Artboard { size, .. }) => Some(*size),
+            _ => None,
+        };
+        let family = ondin_core::typography::TextStyle::default().font_family;
+        size.and_then(|s| chart::generate(chart, s, &family).ok())
+            .and_then(|g| g.extents[usize::from(!value)])
+            .unwrap_or_else(|| auto_extent(chart, value))
+    }
+
     /// Rebuild [`ChartCardCache`] when the description or the drawn size moved.
     fn refresh_chart_cache(&mut self, ctx: &egui::Context, id: NodeId, chart: &Chart) {
         let size = match self.session.resolved.used_kind(&self.session.doc, id) {
@@ -1973,18 +1987,32 @@ impl OndinApp {
                     );
                 }
                 let auto_range = axis.range.is_none();
-                self.chart_switch(
-                    ui,
-                    id,
-                    chart,
-                    if value { "Auto range" } else { "Auto X range" },
-                    auto_range,
-                    move |c, on| {
-                        let mut a = pick(c);
-                        a.range = (!on).then(|| auto_extent(c, value));
-                        put(c, a);
-                    },
-                );
+                let label = if value { "Auto range" } else { "Auto X range" };
+                if ui::switch_row(ui, label, auto_range, crate::settings::SWITCH_H).clicked() {
+                    // Turned off, each chart starts at the extent it draws now.
+                    let doc = &self.session.doc;
+                    let mut ops = Vec::new();
+                    let others = self
+                        .chart_others
+                        .iter()
+                        .filter_map(|n| Some((*n, doc.get(*n).and_then(|x| x.chart())?.clone())));
+                    for (n, own) in std::iter::once((id, chart.clone())).chain(others) {
+                        let mut next = own.clone();
+                        let mut a = pick(&next);
+                        a.range = auto_range.then(|| self.drawn_extent(n, &own, value));
+                        put(&mut next, a);
+                        if doc.get(n).and_then(|x| x.chart()) != Some(&next) {
+                            ops.push(Operation::SetChart {
+                                id: n,
+                                chart: Some(Box::new(next)),
+                            });
+                        }
+                    }
+                    if !ops.is_empty() {
+                        self.session.name_step(label, icon::CHART);
+                        self.commit_edit(Transaction(ops));
+                    }
+                }
                 if let Some((lo, hi)) = axis.range {
                     let step = ((hi - lo).abs() / 100.0).max(0.01);
                     let places = chart::scale::decimals_of(step).min(3);
@@ -2847,6 +2875,28 @@ mod tests {
         chart.options.bars.stacking = Stacking::Stacked;
         let (_, stacked) = auto_extent(&chart, true);
         assert!(stacked > hi, "a stack reaches past one series: {stacked}");
+    }
+
+    /// *Auto range* off starts at the extent the chart draws at its size, the
+    /// generator's: a chart too short for five value labels ticks fewer and
+    /// wider, which a five-tick estimate would not match.
+    /// flip: `drawn_extent` answering `auto_extent` → fails at "as drawn".
+    #[test]
+    fn auto_range_off_reads_the_drawn_extent() {
+        let ctx = egui::Context::default();
+        let (mut app, a) = charted(&ctx, ChartKind::Column);
+        assert!(app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id: a,
+            geometry: ondin_core::GeometryPatch::Size(kurbo::Size::new(480.0, 120.0)),
+        }])));
+        let chart = chart_at(&app, a);
+        let family = ondin_core::typography::TextStyle::default().font_family;
+        let drawn = chart::generate(&chart, kurbo::Size::new(480.0, 120.0), &family)
+            .unwrap()
+            .extents[0]
+            .expect("a value axis");
+        assert_ne!(drawn, auto_extent(&chart, true), "the fixture: fewer ticks");
+        assert_eq!(app.drawn_extent(a, &chart, true), drawn, "as drawn");
     }
 
     /// The Type section's variants round-trip: each segment written reads back

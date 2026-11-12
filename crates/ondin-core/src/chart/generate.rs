@@ -47,6 +47,9 @@ pub struct Generated {
     pub parts: Vec<Part>,
     /// Values the kind cannot draw, each with its reason, for the card's line.
     pub left_out: Vec<String>,
+    /// The value axis's and a numeric category axis's drawn extent, min to
+    /// max — what *Auto range* turned off starts from, so the axis holds.
+    pub extents: [Option<(f64, f64)>; 2],
 }
 
 /// Why a chart draws nothing new.
@@ -248,6 +251,7 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     let mut out = Out {
         parts: &mut parts,
         text: &text,
+        extents: [None; 2],
     };
 
     let legend_at = match o.legend.position {
@@ -371,12 +375,14 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
         padding: [pad; 4],
         ..Flex::default()
     });
+    let extents = out.extents;
     let mut left_out = data.left_out;
     left_out.extend(sankey_left);
     Ok(Generated {
         display,
         parts,
         left_out,
+        extents,
     })
 }
 
@@ -448,6 +454,8 @@ impl Text {
 struct Out<'a> {
     parts: &'a mut Vec<Part>,
     text: &'a Text,
+    /// [`Generated::extents`], written where the axes are ticked.
+    extents: [Option<(f64, f64)>; 2],
 }
 
 fn fill(brush: BrushSource) -> Vec<Fill> {
@@ -1092,6 +1100,7 @@ fn axes(
     let mut axis_va = va.clone();
     axis_va.start_at_zero = zero || va.start_at_zero;
     let t = ticks_for(&axis_va, lo, hi, along, label_h);
+    out.extents[0] = Some((t.min, t.max));
     let tick_text: Vec<String> = t
         .values
         .iter()
@@ -1150,6 +1159,7 @@ fn axes(
         };
         scale::ticks(lo, hi, count, ca.range)
     });
+    out.extents[1] = x_ticks.as_ref().map(|t| (t.min, t.max));
     let x_text: Vec<String> = x_ticks.as_ref().map_or_else(Vec::new, |xt| {
         xt.values
             .iter()

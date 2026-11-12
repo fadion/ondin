@@ -6659,6 +6659,7 @@ fn a_previewed_charts_parts_read_their_charts_mode() {
             display: ondin_core::container::Display::Flex(Default::default()),
             parts: vec![bar],
             left_out: vec![],
+            extents: [None; 2],
         },
     );
     let fills: Vec<Brush> = record(&doc, &res, &ov)

@@ -924,7 +924,7 @@ impl OndinApp {
         let job = crate::job::Job::spawn("ondin-kit-place", &self.egui_ctx, move || {
             ondin_core::text::register_font_data(&fonts);
             let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
-            build_placement(&doc, &mut ids, &built, parent, centre, size)
+            build_placement(&doc, &mut ids, &built, parent, Some(centre), size)
         });
         self.kit_placing = Some(Placing {
             key: key_of(&source),
@@ -1002,14 +1002,15 @@ impl OndinApp {
 /// What a placement whose worker died says.
 const STOPPED: &str = "That component could not be placed: the worker stopped";
 
-/// An instance of `source` under `parent`, centred on `centre`, as a transaction
-/// over `doc` and the instance's id, or what to tell the user — on any thread.
-fn build_placement(
+/// An instance of `source` under `parent`, centred on the world point `centre`
+/// or at its main's own place without one, as a transaction over `doc` and the
+/// instance's id, or what to tell the user — on any thread.
+pub(crate) fn build_placement(
     doc: &Document,
     ids: &mut ondin_core::IdSource,
     source: &Source,
     parent: NodeId,
-    centre: ondin_core::kurbo::Point,
+    centre: Option<ondin_core::kurbo::Point>,
     size: Option<f64>,
 ) -> Result<(Transaction, NodeId), String> {
     let (mut tx, instance) = match source {
@@ -1049,14 +1050,14 @@ fn build_placement(
             },
         )?,
         Source::Local(main) => {
-            return ondin_core::build::place_instance(doc, ids, *main, parent, Some(centre))
+            return ondin_core::build::place_instance(doc, ids, *main, parent, centre)
                 .ok_or_else(|| "That component is no longer here".to_string());
         }
     };
     if let Some(size) = size {
         tx.0.extend(scaled_to(doc, &tx, instance, size).0);
     }
-    if let Some(op) = ondin_core::build::centred_on(doc, &tx, instance, centre) {
+    if let Some(op) = centre.and_then(|c| ondin_core::build::centred_on(doc, &tx, instance, c)) {
         tx.0.push(op);
     }
     Ok((tx, instance))

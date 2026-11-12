@@ -209,9 +209,7 @@ impl OndinApp {
             return;
         }
         let name = self.shown_title();
-        self.session.info(format!(
-            "{name} is a kit — nothing is shared until you publish it"
-        ));
+        self.session.info(made_kit_said(&name));
     }
 
     /// What a paste carrying kit mains says when the kit refuses it: an update
@@ -279,9 +277,7 @@ impl OndinApp {
             return;
         }
         let name = self.shown_title();
-        self.session.info(format!(
-            "{name} is no longer shared — documents using it keep their copies"
-        ));
+        self.session.info(stopped_sharing_said(&name));
     }
 
     /// *Show in Icons tab* on the open kit: write the flag and save, as
@@ -383,9 +379,9 @@ impl OndinApp {
         self.kit_mark_written(path);
         let name = self.library.shown_entry(&entry);
         self.session.info(if sharing {
-            format!("{name} is a kit — nothing is shared until you publish it")
+            made_kit_said(&name)
         } else {
-            format!("{name} is no longer shared — documents using it keep their copies")
+            stopped_sharing_said(&name)
         });
     }
 
@@ -510,6 +506,16 @@ impl OndinApp {
             self.kit_users = None;
         }
     }
+}
+
+/// The status line after `name` is made a kit.
+pub(crate) fn made_kit_said(name: &str) -> String {
+    format!("{name} is a kit — nothing is shared until you publish it")
+}
+
+/// The status line after the kit `name` stops sharing.
+pub(crate) fn stopped_sharing_said(name: &str) -> String {
+    format!("{name} is no longer shared — documents using it keep their copies")
 }
 
 /// The status line after *Show in Icons tab* on the kit `name`.

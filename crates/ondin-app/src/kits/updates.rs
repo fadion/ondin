@@ -200,92 +200,103 @@ impl OndinApp {
     /// document per vendored main — the open popover's, never the pill's, which
     /// asks every frame.
     pub(crate) fn kits_waiting(&self, count: bool) -> Vec<Waiting> {
-        let doc = &self.session.doc;
-        let tops: &[NodeId] = doc
-            .vault()
-            .and_then(|v| doc.get(v))
-            .map_or(&[], |v| v.children());
-        let own = doc.meta().id.clone();
-        let library = kits_in(&self.library, own.as_deref());
-        let later = own
-            .as_ref()
-            .and_then(|d| self.library.local.kit_later.get(d))
-            .cloned()
-            .unwrap_or_default();
-        let mut out: Vec<Waiting> = Vec::new();
-        for top in tops {
-            let Some(o) = doc.get(*top).and_then(|n| n.origin()) else {
-                continue;
-            };
-            let Some(k) = library.iter().find(|k| k.id == o.kit) else {
-                continue;
-            };
-            let instances: usize = if count {
-                let mains: Vec<NodeId> = match doc.get(*top) {
-                    Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, *top),
-                    _ => vec![*top],
-                };
-                mains
-                    .iter()
-                    .map(|m| ondin_core::component::instances_of(doc, *m).len())
-                    .sum()
-            } else {
-                0
-            };
-            match out.iter_mut().find(|w| w.kit.id == o.kit) {
-                Some(w) => {
-                    w.held = w.held.min(o.version);
-                    w.mains += 1;
-                    w.instances += instances;
-                }
-                None => out.push(Waiting {
-                    kit: k.clone(),
-                    held: o.version,
-                    mains: 1,
-                    instances,
-                    later: false,
-                }),
-            }
-        }
-        let tokens = doc
-            .variables()
-            .iter()
-            .filter_map(|v| v.origin.as_ref().map(|o| (o.kit.as_str(), o.version)))
-            .chain(
-                doc.styles()
-                    .iter()
-                    .filter_map(|s| s.origin.as_ref().map(|o| (o.kit.as_str(), o.version))),
-            );
-        for (kit, version) in tokens {
-            if tops.iter().any(|t| {
-                doc.get(*t)
-                    .and_then(|n| n.origin())
-                    .is_some_and(|o| o.kit == kit)
-            }) {
-                continue;
-            }
-            let Some(k) = library.iter().find(|k| k.id == kit) else {
-                continue;
-            };
-            match out.iter_mut().find(|w| w.kit.id == kit) {
-                Some(w) => w.held = w.held.min(version),
-                None => out.push(Waiting {
-                    kit: k.clone(),
-                    held: version,
-                    mains: 0,
-                    instances: 0,
-                    later: false,
-                }),
-            }
-        }
-        out.retain(|w| w.kit.version > w.held);
-        for w in &mut out {
-            w.later = later.get(&w.kit.id).is_some_and(|v| *v >= w.kit.version);
-        }
-        out.sort_by_key(|w| w.kit.name.to_lowercase());
-        out
+        waiting(&self.session.doc, &self.library, count)
     }
+}
 
+/// [`OndinApp::kits_waiting`] for any document: the kits `doc` uses with a newer
+/// publish in `lib`, each with what it holds of them.
+pub(crate) fn waiting(
+    doc: &ondin_core::Document,
+    lib: &crate::library::state::Library,
+    count: bool,
+) -> Vec<Waiting> {
+    let tops: &[NodeId] = doc
+        .vault()
+        .and_then(|v| doc.get(v))
+        .map_or(&[], |v| v.children());
+    let own = doc.meta().id.clone();
+    let library = kits_in(lib, own.as_deref());
+    let later = own
+        .as_ref()
+        .and_then(|d| lib.local.kit_later.get(d))
+        .cloned()
+        .unwrap_or_default();
+    let mut out: Vec<Waiting> = Vec::new();
+    for top in tops {
+        let Some(o) = doc.get(*top).and_then(|n| n.origin()) else {
+            continue;
+        };
+        let Some(k) = library.iter().find(|k| k.id == o.kit) else {
+            continue;
+        };
+        let instances: usize = if count {
+            let mains: Vec<NodeId> = match doc.get(*top) {
+                Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, *top),
+                _ => vec![*top],
+            };
+            mains
+                .iter()
+                .map(|m| ondin_core::component::instances_of(doc, *m).len())
+                .sum()
+        } else {
+            0
+        };
+        match out.iter_mut().find(|w| w.kit.id == o.kit) {
+            Some(w) => {
+                w.held = w.held.min(o.version);
+                w.mains += 1;
+                w.instances += instances;
+            }
+            None => out.push(Waiting {
+                kit: k.clone(),
+                held: o.version,
+                mains: 1,
+                instances,
+                later: false,
+            }),
+        }
+    }
+    let tokens = doc
+        .variables()
+        .iter()
+        .filter_map(|v| v.origin.as_ref().map(|o| (o.kit.as_str(), o.version)))
+        .chain(
+            doc.styles()
+                .iter()
+                .filter_map(|s| s.origin.as_ref().map(|o| (o.kit.as_str(), o.version))),
+        );
+    for (kit, version) in tokens {
+        if tops.iter().any(|t| {
+            doc.get(*t)
+                .and_then(|n| n.origin())
+                .is_some_and(|o| o.kit == kit)
+        }) {
+            continue;
+        }
+        let Some(k) = library.iter().find(|k| k.id == kit) else {
+            continue;
+        };
+        match out.iter_mut().find(|w| w.kit.id == kit) {
+            Some(w) => w.held = w.held.min(version),
+            None => out.push(Waiting {
+                kit: k.clone(),
+                held: version,
+                mains: 0,
+                instances: 0,
+                later: false,
+            }),
+        }
+    }
+    out.retain(|w| w.kit.version > w.held);
+    for w in &mut out {
+        w.later = later.get(&w.kit.id).is_some_and(|v| *v >= w.kit.version);
+    }
+    out.sort_by_key(|w| w.kit.name.to_lowercase());
+    out
+}
+
+impl OndinApp {
     /// The pill beside the save state: *N kit updates*, or after
     /// *Later* its glyph and count; its popover summarises them.
     pub(crate) fn kit_update_pill(&mut self, ui: &mut egui::Ui) {

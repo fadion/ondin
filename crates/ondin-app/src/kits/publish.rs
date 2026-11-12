@@ -371,26 +371,7 @@ impl OndinApp {
         // `open_publish` finished it; this is the verb, and any other caller.
         self.finish_text_first();
         let changes = self.kit_changes();
-        let count = changes.as_ref().map_or(0, |c| c.count());
-        // What a publish of no component carried, for its toast: the zero
-        // arm was written for the name alone, and said *"its new name"* over
-        // a publish of the order (the record's reading of `0d540f8`).
-        let other = changes.as_ref().map_or("its new name".to_string(), |c| {
-            joined(&[
-                (c.renamed, "its new name"),
-                (c.reordered, "its components' new order"),
-                (c.tokens, "its variables and styles"),
-            ])
-        });
-        // Mains on draft pages a published main uses go too, and are named.
-        let carried: Vec<String> = ondin_core::kit::carried_from_drafts(&self.session.doc)
-            .into_iter()
-            .filter_map(|id| {
-                let doc = &self.session.doc;
-                doc.get(id)
-                    .map(|_| crate::private::layer(doc, id).into_owned())
-            })
-            .collect();
+        let carried = carried_names(&self.session.doc);
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,
             Some(note),
@@ -404,25 +385,59 @@ impl OndinApp {
             return;
         }
         let name = self.shown_title();
-        let drafts = match carried.as_slice() {
-            [] => String::new(),
-            [one] => format!(" · {one} from a draft page, which a component uses"),
-            many => format!(
-                " · {} from draft pages, which components use",
-                many.join(", ")
-            ),
-        };
-        self.session.info(match count {
-            0 => format!("Published {name} v{version} · {other}{drafts}"),
-            n if changes.as_ref().is_some_and(|c| c.tokens) => format!(
-                "Published {name} v{version} · {} and its variables and styles{drafts}",
-                ui::count(n, "component")
-            ),
-            n => format!(
-                "Published {name} v{version} · {}{drafts}",
-                ui::count(n, "component")
-            ),
-        });
+        self.session
+            .info(published_said(&name, version, changes.as_ref(), &carried));
+    }
+}
+
+/// The mains on draft pages a publish of `doc` carries, because a published
+/// main uses them — named, for the status line.
+pub(crate) fn carried_names(doc: &Document) -> Vec<String> {
+    ondin_core::kit::carried_from_drafts(doc)
+        .into_iter()
+        .filter_map(|id| {
+            doc.get(id)
+                .map(|_| crate::private::layer(doc, id).into_owned())
+        })
+        .collect()
+}
+
+/// The status line after `name` published `version` with `changes`, carrying
+/// the draft mains `carried`.
+pub(crate) fn published_said(
+    name: &str,
+    version: u32,
+    changes: Option<&Changes>,
+    carried: &[String],
+) -> String {
+    let count = changes.map_or(0, |c| c.count());
+    // What a publish of no component carried: the zero arm was written for the
+    // name alone, and said *"its new name"* over a publish of the order.
+    let other = changes.map_or("its new name".to_string(), |c| {
+        joined(&[
+            (c.renamed, "its new name"),
+            (c.reordered, "its components' new order"),
+            (c.tokens, "its variables and styles"),
+        ])
+    });
+    let drafts = match carried {
+        [] => String::new(),
+        [one] => format!(" · {one} from a draft page, which a component uses"),
+        many => format!(
+            " · {} from draft pages, which components use",
+            many.join(", ")
+        ),
+    };
+    match count {
+        0 => format!("Published {name} v{version} · {other}{drafts}"),
+        n if changes.is_some_and(|c| c.tokens) => format!(
+            "Published {name} v{version} · {} and its variables and styles{drafts}",
+            ui::count(n, "component")
+        ),
+        n => format!(
+            "Published {name} v{version} · {}{drafts}",
+            ui::count(n, "component")
+        ),
     }
 }
 

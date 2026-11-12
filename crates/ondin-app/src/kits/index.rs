@@ -887,9 +887,11 @@ mod tests {
 
     /// A picture of one colour becomes white coverage with its alpha kept; one of
     /// two colours, or of nothing, has no silhouette; a faint edge pixel of
-    /// another colour does not count.
+    /// another colour does not count, and neither does an edge a few levels off.
     ///
-    /// flip: `silhouette` testing faint pixels too → fails at *"a faint edge"*.
+    /// flip: `silhouette` testing faint pixels too → fails at *"a faint edge"*;
+    /// `NEAR` at 4 → fails at *"a few levels off"*; at 26 → fails at *"just past
+    /// near"*.
     #[test]
     fn a_tile_of_one_colour_has_a_silhouette() {
         let of = |px: &[[u8; 4]]| Pixels {
@@ -917,6 +919,15 @@ mod tests {
         assert!(
             of(&[ink, [200, 0, 0, 20]]).silhouette().is_some(),
             "a faint edge"
+        );
+        // An edge at moderate alpha carries a few levels of rounding.
+        assert!(
+            of(&[ink, [26, 18, 22, 64]]).silhouette().is_some(),
+            "a few levels off"
+        );
+        assert!(
+            of(&[ink, [45, 20, 20, 255]]).silhouette().is_none(),
+            "just past near"
         );
         assert!(of(&[clear]).silhouette().is_none(), "nothing drawn");
     }

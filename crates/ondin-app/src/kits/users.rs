@@ -26,6 +26,9 @@ pub(crate) struct KitUsers {
     rx: mpsc::Receiver<usize>,
     /// The number, once the worker has it.
     pub count: Option<usize>,
+    /// The worker ended without one (a panic on a library file): the dialog
+    /// stops waiting and says what it can without a number.
+    lost: bool,
     /// Set when the count is dropped, so the worker stops between files rather
     /// than loading the rest of the library for nobody — otherwise each reopening
     /// of the dialog starts another whole-library load beside it (§15 D1024).
@@ -63,6 +66,7 @@ impl KitUsers {
             kit,
             rx,
             count: None,
+            lost: false,
             stop,
         }
     }
@@ -70,12 +74,19 @@ impl KitUsers {
     /// Take the number if the worker has finished; answers whether it is still
     /// counting.
     pub(crate) fn pass(&mut self) -> bool {
-        if self.count.is_none()
-            && let Ok(n) = self.rx.try_recv()
-        {
-            self.count = Some(n);
+        if self.counting() {
+            match self.rx.try_recv() {
+                Ok(n) => self.count = Some(n),
+                Err(mpsc::TryRecvError::Disconnected) => self.lost = true,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
         }
-        self.count.is_none()
+        self.counting()
+    }
+
+    /// Whether the number is still on its way.
+    pub(crate) fn counting(&self) -> bool {
+        self.count.is_none() && !self.lost
     }
 
     /// Wait for the number — the tests', `Covers::settle`'s shape (§15 D820).
@@ -114,10 +125,15 @@ fn uses(path: &std::path::Path, kit: &str) -> bool {
 pub(crate) const CHECKING: &str = "Checking kit usages…";
 
 /// The dialog's first sentence: how many documents use the kit and what
-/// happens to them, or [`CHECKING`] while the count is still arriving.
-pub(crate) fn sentence(name: &str, count: Option<usize>) -> String {
+/// happens to them, [`CHECKING`] while the count is still arriving, and what
+/// happens without the number when none is coming.
+pub(crate) fn sentence(name: &str, count: Option<usize>, counting: bool) -> String {
     match count {
-        None => CHECKING.to_string(),
+        None if counting => CHECKING.to_string(),
+        None => format!(
+            "Documents that use components from {name} keep their copies, which keep \
+             working, and stop receiving updates."
+        ),
         Some(0) => format!("No document in your library uses components from {name}."),
         Some(1) => format!(
             "1 document in your library uses components from {name}. It keeps its copies, \
@@ -220,12 +236,36 @@ mod tests {
     /// The sentence reads the count, and says it is checking until it has one.
     #[test]
     fn the_sentence_says_the_count() {
-        assert_eq!(sentence("Atlas", None), CHECKING);
+        assert_eq!(sentence("Atlas", None, true), CHECKING);
         assert_eq!(
-            sentence("Atlas", Some(0)),
+            sentence("Atlas", Some(0), false),
             "No document in your library uses components from Atlas."
         );
-        assert!(sentence("Atlas", Some(1)).starts_with("1 document in your library uses"));
-        assert!(sentence("Atlas", Some(3)).starts_with("3 documents in your library use "));
+        assert!(sentence("Atlas", Some(1), false).starts_with("1 document in your library uses"));
+        assert!(sentence("Atlas", Some(3), false).starts_with("3 documents in your library use "));
+    }
+
+    /// A worker that ended without a count stops the wait, and the sentence
+    /// stands without the number rather than checking for good.
+    ///
+    /// flip: `pass` reading `Disconnected` as still counting → fails at "the
+    /// wait ends".
+    #[test]
+    fn a_lost_count_stops_checking() {
+        let (tx, rx) = mpsc::channel();
+        drop(tx);
+        let mut users = KitUsers {
+            kit: "atlas".into(),
+            rx,
+            count: None,
+            lost: false,
+            stop: Default::default(),
+        };
+        assert!(!users.pass(), "the wait ends");
+        let said = sentence("Atlas", users.count, users.counting());
+        assert!(
+            said.starts_with("Documents that use components from Atlas"),
+            "{said}"
+        );
     }
 }

@@ -461,6 +461,10 @@ impl OndinApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         let count = self.kit_users.as_ref().and_then(|u| u.count);
+        let counting = self
+            .kit_users
+            .as_ref()
+            .is_some_and(users::KitUsers::counting);
         let mut decision: Option<bool> = None;
         let modal = crate::settings::card("stop-sharing-kit", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));
@@ -475,7 +479,7 @@ impl OndinApp {
                     "You can make it a kit again later. Publishing then continues from v{version}."
                 )
             };
-            for line in [users::sentence(&name, count), again] {
+            for line in [users::sentence(&name, count, counting), again] {
                 ui.label(
                     egui::RichText::new(line)
                         .size(crate::ui::CONTROL_PT)

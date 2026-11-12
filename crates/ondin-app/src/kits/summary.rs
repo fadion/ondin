@@ -129,13 +129,16 @@ pub(crate) struct Summary {
 impl Summary {
     /// The layers every removal detaches, and the one removed name when there
     /// is a single removal — the footer's *"4 layers using atlas/Label keep
-    /// its values"*.
-    pub(crate) fn detaching(&self) -> (usize, Option<&str>) {
+    /// its values"*. A removal a held top in `off` keeps detaches nothing.
+    pub(crate) fn detaching(
+        &self,
+        off: &std::collections::HashSet<NodeId>,
+    ) -> (usize, Option<&str>) {
         let removed: Vec<&Token> = self
             .kits
             .iter()
             .flat_map(|k| &k.removed)
-            .filter(|t| t.detach > 0)
+            .filter(|t| t.detach > 0 && !t.readers.iter().any(|r| off.contains(r)))
             .collect();
         let n = removed.iter().map(|t| t.detach).sum();
         let one = match removed[..] {
@@ -244,6 +247,16 @@ fn instances_outside(doc: &Document, mains: &[NodeId]) -> (usize, usize) {
         .filter(|i| ondin_core::reset::drift(doc, **i).any())
         .count();
     (all.len(), drifted)
+}
+
+/// The vault tops that keep a removed token while held: [`reader_tops`], or
+/// none for one whose name the publish gives another (`Update::named_over`),
+/// which is removed however its readers are held.
+fn keepers(named_over: bool, doc: &Document, users: &[NodeId]) -> Vec<NodeId> {
+    match named_over {
+        true => Vec::new(),
+        false => reader_tops(doc, users),
+    }
 }
 
 /// The vault tops of `users`, each once.
@@ -407,7 +420,7 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old: read(doc, held, &lookup_old, &held_kits),
             new: None,
             detach,
-            readers: reader_tops(doc, &users),
+            readers: keepers(update.named_over.0.contains(v), doc, &users),
         });
     }
     for s in &update.styles_removed {
@@ -424,7 +437,7 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             old: None,
             new: None,
             detach,
-            readers: reader_tops(doc, &users),
+            readers: keepers(update.named_over.1.contains(s), doc, &users),
         });
     }
     // A main the sync leaves as it is still changes when it reads what the
@@ -871,7 +884,15 @@ mod tests {
         assert_eq!(removed.name, "old");
         assert_eq!(removed.detach, 1, "the page's layer, not Badge's copy");
         assert_eq!(headline(k), "2 components · 3 variables");
-        assert_eq!(s.detaching(), (1, Some("old")));
+        let mut off = std::collections::HashSet::new();
+        assert_eq!(s.detaching(&off), (1, Some("old")));
+        // Badge, which reads `old`, held back keeps it: nothing detaches.
+        // flip: `detaching` ignoring `off` → (1, Some("old")).
+        let [badge] = removed.readers[..] else {
+            panic!("the fixture: Badge reads old, {:?}", removed.readers)
+        };
+        off.insert(badge);
+        assert_eq!(s.detaching(&off), (0, None), "kept for Badge");
     }
 
     /// **A main whose only change is a removed variable is a row**: v2 detaches
@@ -968,5 +989,42 @@ mod tests {
         let held =
             ondin_core::kit::update_holding(&d, &mut ids, d.first_page(), &v2, &[top]).unwrap();
         assert!(held.vars_removed.is_empty(), "old kept for Badge");
+
+        // v3 brings a new variable named `old`: the held one can no longer be
+        // kept, so the review neither offers Badge's row nor says "kept for".
+        // flip: `keepers` ignoring `named_over` → fails at "kept by nothing".
+        let new_old = ids.mint_var();
+        kit.apply(&Transaction(vec![
+            var(new_old, "old", day, Cell::Color(WHITE)),
+            Operation::SetFills {
+                id: badge,
+                fills: bound(new_old),
+            },
+        ]))
+        .unwrap();
+        ondin_core::kit::publish(&mut kit, None, 3);
+        let v3 = [(KIT, 3, kit.published().unwrap())];
+        let u = ondin_core::kit::update_all(&d, &mut ids, d.first_page(), &v3).unwrap();
+        assert_eq!(u.named_over.0.len(), 1, "the fixture: `old` named over");
+        let s = summary(&d, &u);
+        let [k] = &s.kits[..] else {
+            panic!("one kit: {s:?}")
+        };
+        assert!(
+            k.removed
+                .iter()
+                .any(|t| t.name == "old" && t.readers.is_empty()),
+            "the old `old` removed, kept by nothing: {:?}",
+            k.removed
+        );
+        assert!(
+            !k.components
+                .iter()
+                .any(|c| matches!(c.change, Change::Unbinds(..))),
+            "no detach row: holding Badge cannot keep it"
+        );
+        let held =
+            ondin_core::kit::update_holding(&d, &mut ids, d.first_page(), &v3, &[top]).unwrap();
+        assert!(!held.vars_removed.is_empty(), "removed while Badge is held");
     }
 }

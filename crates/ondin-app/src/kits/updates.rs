@@ -494,7 +494,7 @@ impl OndinApp {
                 };
                 ui.add_space(4.0);
                 // The layers the kits' removals detach keep their values.
-                if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
+                if let Some((n, one)) = summary.as_ref().map(|s| s.detaching(&app.kit_review.off))
                     && n > 0
                 {
                     let layers = ui::count(n, "layer");

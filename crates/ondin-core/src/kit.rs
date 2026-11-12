@@ -1360,6 +1360,10 @@ pub struct Update {
     /// The same for the kits' styles.
     pub styles_changed: Vec<crate::style::StyleId>,
     pub styles_removed: Vec<crate::style::StyleId>,
+    /// Of those removed, the variables and styles whose name the publish gives
+    /// another of the kit's: removed even while a held top reads them, so a
+    /// review never offers holding as a way to keep them.
+    pub named_over: (Vec<crate::variable::VarId>, Vec<crate::style::StyleId>),
     /// Pairs `(a, b)` of vault tops this update changes, where
     /// `a` as the update leaves it reaches into `b` — a nested instance, a swap,
     /// a bound layer. Taking `a` without `b` would point `a`'s new version at
@@ -1493,6 +1497,7 @@ fn update_in_order(
             vars_removed: Vec::new(),
             styles_changed: Vec::new(),
             styles_removed: Vec::new(),
+            named_over: (Vec::new(), Vec::new()),
             needs: Vec::new(),
         });
     };
@@ -1515,6 +1520,10 @@ fn update_in_order(
     let (mut changed, mut removed) = (Vec::new(), Vec::new());
     let (mut vars_changed, mut vars_removed) = (Vec::new(), Vec::new());
     let (mut styles_changed, mut styles_removed) = (Vec::new(), Vec::new());
+    let mut named_over = (Vec::new(), Vec::new());
+    // Each variant lifted out of its set, with the set: the two are held or
+    // taken together ([`Update::needs`]).
+    let mut lifted: Vec<(NodeId, NodeId)> = Vec::new();
     for (at, &(kit, version, published)) in kits.iter().enumerate() {
         (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
@@ -1577,6 +1586,8 @@ fn update_in_order(
         push_new(&mut vars_removed, &tokens.removed_vars);
         push_new(&mut styles_changed, &tokens.changed_styles);
         push_new(&mut styles_removed, &tokens.removed_styles);
+        push_new(&mut named_over.0, &tokens.named_over_vars);
+        push_new(&mut named_over.1, &tokens.named_over_styles);
         b.tokens = tokens;
         let mut tops: Vec<NodeId> = b
             .scratch
@@ -1608,6 +1619,9 @@ fn update_in_order(
                     && !in_held.contains(&h)
                     && b.scratch.get(h).and_then(|n| n.parent) != Some(v)
                 {
+                    if let Some(set) = top_of(&b.scratch, h) {
+                        lifted.push((h, set));
+                    }
                     let index = b.scratch.get(v).map_or(0, |n| n.children.len());
                     b.push(Operation::Reparent {
                         id: h,
@@ -1685,7 +1699,12 @@ fn update_in_order(
         }
         // What a sync dropped and no other sync moved away is gone from the
         // publish; what was moved is where its new parent's sync put it.
+        // A held node stays where it is: a variant the kit lifted out of a set
+        // the user takes is the set's no longer, but is not removed.
         for (n, from) in std::mem::take(&mut b.dropped) {
+            if in_held.contains(&n) {
+                continue;
+            }
             if b.scratch.get(n).and_then(|n| n.parent) == Some(from) {
                 if b.scratch.get(n).is_some_and(|n| n.component) {
                     removed.push(n);
@@ -1785,6 +1804,17 @@ fn update_in_order(
             }
         }
     }
+    // A lifted variant and the set it left need each other: the variant's row
+    // sits under the set in the document, so holding either holds both.
+    for (v, set) in lifted {
+        if changed.contains(&v) && changed.contains(&set) {
+            for pair in [(v, set), (set, v)] {
+                if !needs.contains(&pair) {
+                    needs.push(pair);
+                }
+            }
+        }
+    }
     for op in make_local(&b.scratch, ids, page, &made_local).0 {
         b.push(op)?;
     }
@@ -1818,6 +1848,7 @@ fn update_in_order(
         vars_removed,
         styles_changed,
         styles_removed,
+        named_over,
         needs,
     })
 }

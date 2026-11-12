@@ -2764,6 +2764,97 @@ fn a_held_back_main_keeps_its_version_and_needs_are_named() {
     );
 }
 
+/// **A held-back variant the kit lifted out of its set stays, its instances
+/// with it**: the kit drags *Small* out of *Button* and resizes it. Holding
+/// *Small* (its row top, still inside D's *Button*) keeps it where it is and
+/// linked; it is not removed.
+/// flip: `update_in_order`'s dropped loop not sparing held nodes → fails at
+/// "not removed".
+#[test]
+fn a_held_variant_the_kit_lifted_stays_and_keeps_its_instances() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.small);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let (root, small) = (k.doc.first_page(), k.small);
+    edit_and_publish(
+        &mut k,
+        vec![
+            Operation::Reparent {
+                id: small,
+                new_parent: root,
+                index: 1,
+            },
+            Operation::SetGeometry {
+                id: small,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(90.0, 30.0)),
+            },
+        ],
+    );
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let u = kit::update_holding(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version, published(&k))],
+        &[main],
+    )
+    .unwrap();
+    assert!(!u.removed.contains(&main), "not removed");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("a partial update commits");
+    assert!(d.get(main).is_some(), "the held variant is still there");
+    assert_eq!(d.get(inst).unwrap().link(), Some(main), "still followed");
+}
+
+/// **A lifted variant and the set it left need each other**: the kit drags
+/// *Small* out of *Button* and widens *Button*. Both change, and each needs
+/// the other, so the review holds or takes them together.
+/// flip: drop the lifted pairs from `Update::needs` → fails at "each needs the
+/// other".
+#[test]
+fn a_lifted_variant_and_its_set_need_each_other() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.small);
+    let small_d = d.get(inst).unwrap().link().unwrap();
+    let (root, small, set) = (k.doc.first_page(), k.small, k.set);
+    edit_and_publish(
+        &mut k,
+        vec![
+            Operation::Reparent {
+                id: small,
+                new_parent: root,
+                index: 1,
+            },
+            Operation::SetGeometry {
+                id: set,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(320.0, 200.0)),
+            },
+        ],
+    );
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let set_d = copy_of(&d, set);
+    let all = kit::update_all(
+        &d,
+        &mut ids,
+        d.first_page(),
+        &[(L_ID, version, published(&k))],
+    )
+    .unwrap();
+    assert!(
+        all.changed.contains(&small_d) && all.changed.contains(&set_d),
+        "the fixture: both change, {:?}",
+        all.changed
+    );
+    assert!(
+        all.needs.contains(&(small_d, set_d)) && all.needs.contains(&(set_d, small_d)),
+        "each needs the other: {:?}",
+        all.needs
+    );
+}
+
 /// **A layer the kit moved out of a held-back main stays in it**: the kit
 /// moves Icon's Dot into Card. With Icon held, Card's sync copies the Dot in
 /// fresh rather than taking Icon's, which keeps its Dot.

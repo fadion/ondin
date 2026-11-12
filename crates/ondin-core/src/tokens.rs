@@ -258,6 +258,10 @@ pub(crate) struct Plan {
     /// the publish no longer has, detached from their users and removed.
     pub removed_vars: Vec<VarId>,
     pub removed_styles: Vec<StyleId>,
+    /// For an update: the removed ones whose name the publish gives another of
+    /// the kit's, which holding a reader cannot keep.
+    pub named_over_vars: Vec<VarId>,
+    pub named_over_styles: Vec<StyleId>,
     /// For an update: the kit's variables and styles it added or rewrote.
     pub changed_vars: Vec<VarId>,
     pub changed_styles: Vec<StyleId>,
@@ -466,22 +470,20 @@ pub(crate) fn plan<'a>(
         .copied()
         .filter(|v| t.get(*v).is_some_and(|v| !taken_var(v)))
         .collect();
+    let taken_style = |h: &Style| {
+        want_styles.iter().any(|w| {
+            src.styles.get(*w).is_some_and(|x| {
+                x.name == h.name
+                    && x.slot() == h.slot()
+                    && src.style_origin(x).map(|o| o.style) != h.origin.as_ref().map(|o| o.style)
+            })
+        })
+    };
     let keep_styles: FxHashSet<StyleId> = keep
         .styles
         .iter()
         .copied()
-        .filter(|s| {
-            doc.styles().get(*s).is_some_and(|h| {
-                !want_styles.iter().any(|w| {
-                    src.styles.get(*w).is_some_and(|x| {
-                        x.name == h.name
-                            && x.slot() == h.slot()
-                            && src.style_origin(x).map(|o| o.style)
-                                != h.origin.as_ref().map(|o| o.style)
-                    })
-                })
-            })
-        })
+        .filter(|s| doc.styles().get(*s).is_some_and(|h| !taken_style(h)))
         .collect();
     let mut plan = Plan::default();
     let mut scoped: Vec<(VarId, Option<crate::variable::Scope>)> = Vec::new();
@@ -836,6 +838,18 @@ pub(crate) fn plan<'a>(
             .filter(|s| s.origin.as_ref().is_some_and(|o| o.kit == kit))
             .map(|s| s.id)
             .filter(|s| !kept_s.contains(s) && !keep_styles.contains(s))
+            .collect();
+        plan.named_over_vars = t
+            .of_kit(kit)
+            .filter(|v| !kept_v.contains(&v.id) && taken_var(v))
+            .map(|v| v.id)
+            .collect();
+        plan.named_over_styles = doc
+            .styles()
+            .iter()
+            .filter(|s| s.origin.as_ref().is_some_and(|o| o.kit == kit))
+            .filter(|s| !kept_s.contains(&s.id) && taken_style(s))
+            .map(|s| s.id)
             .collect();
         // A kept variable takes a cell in each mode the publish added to its
         // collection — its first cell there, as a rewritten one's is filled —

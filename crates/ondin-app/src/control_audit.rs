@@ -731,6 +731,118 @@ fn with_a_set(ctx: &egui::Context) -> OndinApp {
     app
 }
 
+/// A selected grid frame holding two rects: a column track that repeats to fill
+/// and two named areas, so the Container card shows its track, repeat and area
+/// rows.
+fn with_a_grid(ctx: &egui::Context) -> OndinApp {
+    use ondin_core::container::{self, Display, Grid};
+    let mut app = OndinApp::headless(ctx);
+    let mut ids = ondin_core::IdSource::new(0xA11);
+    app.session.adopt_document(Document::new(ids.mint()), None);
+    let ids = &mut app.session.ids;
+    let [frame, a, b] = [(); 3].map(|_| ids.mint());
+    let parent = app.session.doc.first_page();
+    let rect = |id, index, name: &str| Operation::CreateNode {
+        id,
+        parent: frame,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(40.0, 40.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: None,
+        name: Some(name.into()),
+    };
+    let grid = Grid {
+        columns: container::parse_tracks("repeat(auto-fill, minmax(80px, 1fr))")
+            .expect("a filling track"),
+        rows: container::parse_tracks("auto auto").expect("two rows"),
+        areas: container::parse_areas("\"head head\" \"side main\"").expect("areas"),
+        ..Default::default()
+    };
+    app.session
+        .try_commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 200.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((40.0, 40.0))),
+                name: Some("Layout".into()),
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Grid(grid)),
+            },
+            rect(a, 0, "Head"),
+            rect(b, 1, "Side"),
+        ]))
+        .expect("a grid frame");
+    app.session.selection.set_one(frame);
+    app
+}
+
+/// A main frame holding a rect, and an instance of it whose rect is made
+/// half-opaque, selected: its card's ⋯ menu has something to push.
+fn with_an_overridden_instance(ctx: &egui::Context) -> OndinApp {
+    let mut app = OndinApp::headless(ctx);
+    let mut ids = ondin_core::IdSource::new(0xA12);
+    app.session.adopt_document(Document::new(ids.mint()), None);
+    let ids = &mut app.session.ids;
+    let [main, dot] = [(); 2].map(|_| ids.mint());
+    let parent = app.session.doc.first_page();
+    app.session
+        .try_commit(Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Card".into()),
+            },
+            Operation::CreateNode {
+                id: dot,
+                parent: main,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Dot".into()),
+            },
+        ]))
+        .expect("a frame holding a rect");
+    app.session.selection.set_one(main);
+    app.create_component();
+    app.duplicate_selection();
+    let copy = app
+        .session
+        .selection
+        .single()
+        .expect("the copy is selected");
+    let inner = app.session.doc.get(copy).expect("the copy").children()[0];
+    app.session
+        .try_commit(Transaction(vec![Operation::SetOpacity {
+            id: inner,
+            opacity: 0.5,
+        }]))
+        .expect("an override");
+    app.session.selection.set_one(copy);
+    app
+}
+
 /// The rect's document saved to `scratch`, then the rect renamed and two more
 /// added, and the two compared: the bar and the changes card, three rows.
 fn compared(app: &mut OndinApp, scratch: &std::path::Path) {
@@ -1001,7 +1113,9 @@ fn audit(name: &str, found: &[Ground], dim: f32, faults: &mut Vec<String>) -> us
 ///
 /// flip: `ui::button_face` rounding to 4 → fails at the faults assertion, a
 /// "corner off the standard" for every field button; `colour_review`'s row
-/// ground 20 tall → a list row's fault for each of its rows.
+/// ground 20 tall → a list row's fault for each of its rows; `push_rows`' rows
+/// 22 tall, `ui::tick_row` lit under the pointer, the grid areas' CSS line or
+/// the publish note 30 tall → a fault on that surface.
 #[test]
 fn every_control_ground_is_on_the_standard() {
     sweep(Theme::Dark);
@@ -1411,6 +1525,17 @@ fn sweep_on(theme: Theme) {
     app.prefs.assets.photo_services = vec!["openverse".into()];
     let found = opened(&ctx, &mut app, |_, a| a.toggle_assets());
     check("assets photo controls", app, found);
+    // *Changed on disk*: its three footer buttons. All are `footer_buttons`',
+    // so no flip reaches this card alone.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        a.session.clash = crate::session::Clash::Ask;
+    });
+    check("disk clash card", app, found);
+    // A grid's Container card: its tracks, the filling repeat and the area rows.
+    let mut app = with_a_grid(&ctx);
+    let found = inspector(&ctx, &mut app);
+    check("grid container", app, found);
     // The Credits card over a layer carrying a CC BY icon's credit and one
     // carrying a photo's, with its links.
     let mut app = with_a_rect(&ctx);
@@ -1564,6 +1689,66 @@ fn sweep_on(theme: Theme) {
             .collect::<Vec<_>>()
             .join("; ")
     );
+    // The kit update popover over a document whose kit published again: its
+    // footer at rest, and under the pointer the kit's fold and its component's
+    // tick row.
+    let kits = scratch.join("kits");
+    std::fs::create_dir_all(&kits).expect("a kits folder");
+    let (kit_path, kit, badge, dot) = crate::kits::updates::tests::file_kit(&kits);
+    let (mut app, _) = crate::kits::updates::tests::consumer(&ctx, &kits, &kit, badge);
+    crate::kits::updates::tests::republish(
+        &kit_path,
+        vec![Operation::SetOpacity {
+            id: dot,
+            opacity: 0.5,
+        }],
+        "Softer dot",
+    );
+    app.library.refresh();
+    crate::kits::updates::tests::settle_for_accept(&mut app);
+    let (resting, update_rows) = swept(&ctx, &mut app, |_, a| a.open_kit_updates());
+    let at_rest = audit("kit updates", &resting, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "kit updates", &resting, &mut faults);
+    let update_rows: Vec<Ground> = update_rows
+        .into_iter()
+        .filter(|g| g.rect.width() > 200.0)
+        .collect();
+    for g in &update_rows {
+        if let Some(why) = tall_row_fault(g) {
+            faults.push(format!("kit updates: {why}: {g}"));
+        }
+    }
+    assert!(
+        at_rest >= 2 && hovered >= 2 && !update_rows.is_empty(),
+        "kit updates: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds, hovered {hovered} and swept {} rows",
+        update_rows.len()
+    );
+    // The publish popover under *Publish N*, a main never published: its note
+    // field and its footer.
+    let mut app = with_an_overridden_instance(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let library = scratch.join("publish");
+        a.prefs.base_folder = Some(library.clone());
+        a.library = crate::library::state::Library::open(library);
+        a.make_kit();
+        a.open_publish();
+    });
+    assert!(app.publishing.is_some(), "the publish popover opened");
+    let at_rest = audit("kit publish", &found, disabled_alpha(&ctx), &mut faults);
+    let hovered = hover(&ctx, &mut app, "kit publish", &found, &mut faults);
+    assert!(
+        at_rest >= 3 && hovered >= 2,
+        "kit publish: the fixture is not in the state it is about — it painted \
+         {at_rest} control grounds and hovered {hovered}"
+    );
+    // An instance's ⋯ menu with a field overridden: its reset and push rows.
+    let mut app = with_an_overridden_instance(&ctx);
+    let (resting, push_rows) = swept(&ctx, &mut app, |c, a| {
+        let at = painted_at(c, a, crate::theme::icon::DOTS_THREE);
+        open_popup_at(c, a, at);
+    });
+    audit("instance menu", &resting, disabled_alpha(&ctx), &mut faults);
     let _ = std::fs::remove_dir_all(&scratch);
 
     // A value chip's popup, then its *State ▸* flyout over it: list rows, whose
@@ -1588,6 +1773,7 @@ fn sweep_on(theme: Theme) {
         .filter(|g| g.rect.width() > 200.0 && !column.contains(g.rect.center()))
         .collect();
     rows_audit("colour review", &review_rows, &mut faults);
+    rows_audit("instance push rows", &push_rows, &mut faults);
     let chip = |c: &egui::Context, a: &mut OndinApp| {
         let at = painted_at(c, a, "Hover");
         open_popup_at(c, a, at);

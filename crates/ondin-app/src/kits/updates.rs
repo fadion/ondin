@@ -1149,7 +1149,7 @@ enum RowClick {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::app::OndinApp;
     use crate::library::state::Library;
     use eframe::egui;
@@ -1166,7 +1166,7 @@ mod tests {
     }
 
     /// A kit *Atlas* in `root`, published at v4: one main *Badge* holding a dot.
-    fn file_kit(root: &Path) -> (PathBuf, String, NodeId, NodeId) {
+    pub(crate) fn file_kit(root: &Path) -> (PathBuf, String, NodeId, NodeId) {
         let mut ids = IdSource::new(0xAC);
         let r = ids.mint();
         let mut doc = Document::new(r);
@@ -1215,7 +1215,7 @@ mod tests {
     }
 
     /// Edit the kit file with `ops` and publish it again, as its author would.
-    fn republish(path: &Path, ops: Vec<Operation>, note: &str) {
+    pub(crate) fn republish(path: &Path, ops: Vec<Operation>, note: &str) {
         let mut doc = ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap();
         doc.apply(&Transaction(ops)).unwrap();
         ondin_core::kit::publish(&mut doc, Some(note.into()), 2).unwrap();
@@ -1228,7 +1228,12 @@ mod tests {
     }
 
     /// A consumer with an instance of the kit's Badge, and the app open on it.
-    fn consumer(ctx: &egui::Context, root: &Path, kit: &str, badge: NodeId) -> (OndinApp, NodeId) {
+    pub(crate) fn consumer(
+        ctx: &egui::Context,
+        root: &Path,
+        kit: &str,
+        badge: NodeId,
+    ) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         app.prefs.base_folder = Some(root.to_path_buf());
         app.library = Library::open(root.to_path_buf());
@@ -1339,7 +1344,7 @@ mod tests {
         assert_eq!((w[0].held, w[0].kit.version, w[0].mains), (4, 5, 0));
     }
 
-    fn settle_for_accept(app: &mut OndinApp) {
+    pub(crate) fn settle_for_accept(app: &mut OndinApp) {
         for w in app.kits_waiting(false) {
             app.kit_shelf.ask(&w.kit);
         }

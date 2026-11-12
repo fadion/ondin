@@ -187,7 +187,11 @@ or turned, which value labels fit.
   past an end of its axis is pinned inside that end instead of centred on its tick, so the last
   label is not drawn over the legend (`generate::turned_label`, the one placement every axis
   label takes). Value tick marks sit at the ticks, category ones at the centre of every category
-  a label is written for, thinned with the labels (a scatter's at its X ticks). A pie or donut sits in a square frame
+  a label is written for, thinned with the labels (a scatter's at its X ticks). Past
+  `MEASURE_ALL_CATEGORIES` categories only the longest labels by characters are measured, the rest
+  standing in at the widest and tallest of them for the axis's reach and thinning, and the labels
+  written are measured again once thinned (`generate::category_boxes`): measuring every label of a
+  long axis cost most of a generation. A pie or donut sits in a square frame
   (`aspect-ratio: 1`) centred in the plot.
 - **Value labels** sit outside, inside or at the end of their bar. In a stack only the outermost
   segment each way takes an outside or end label, and a zero, covering nothing, is never the
@@ -420,8 +424,16 @@ A chart has no title or caption of its own: a text layer next to it does that, a
 
 - **A chart selects as one layer.** `query::hit_test` answers a hit on any part with its chart
   frame, once, so a click, a hover, a double-click and `Enter` all meet the frame and never step
-  inside it; the marquee and `Ctrl+A` offer a chart on the page whole (`marquee_range`), never
-  its parts.
+  inside it; the app's own pick (`pick_leaf`) takes the chart frame as the leaf. Every older canvas
+  door meets it as one layer too:
+  - The frame index (`FrameIndex`) leaves out its part frames, and the chart frame is never a draw,
+    drop, paste or guide target (`target_artboard`, the move destinations,
+    `paste_into_selected_frame`, `frame_at_world`): the layer lands beside it in what holds it.
+  - Bulk selects take no part (`may_select_in_bulk`): the marquee and `Ctrl+A` offer a chart on
+    the page whole (`marquee_range`), and *Select same* and the Group colours' select pass over
+    its parts.
+  - Its generated padding and gap offer no spacing handles (`spacing_subject`); the Chart card
+    owns them.
 - **Double-click opens the data window** with the cell behind the clicked mark selected
   (`query::chart_part_at` finds the part, `chart_data::cell_of` its cell): a bar's, point's or
   value label's series at its row, a slice's value (its value label's too), a category label's
@@ -507,8 +519,8 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   gridlines*, no rows under its switch), and a scatter's Values section, under *A scatter draws
   no value labels*. An area's *Curve* offers every curve it draws: *Straight*, *Smooth*, *Step*.
   A value axis (and
-  a scatter's X) has *Auto range*; turned off it starts at the extent the data already draws on
-  nice steps, zero held where the kind holds it, with *Min* and *Max* fields that refuse to
+  a scatter's X) has *Auto range*; turned off it starts at the extent the chart draws at its own
+  size (`Generated::extents`, the generator's ticks at the frame's drawn size), with *Min* and *Max* fields that refuse to
   cross. The number format is one control, *Format*: a dropdown whose closed face is 12,345.6
   written through the format, opening on *Prefix* and *Suffix*, *Decimals* (Auto, 0–3), and
   *Thousands separator*, *Compact* and *Percent*, the same rows whatever is set so the popup

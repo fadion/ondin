@@ -273,8 +273,11 @@ on — an instance still equal to the main's old value takes the new one, one wi
 
 - **One link up.** A copy pushes into `reset::source_of`, the node Reset compares it with, and never
   past the main holding that node (`push::home`). A swapped copy's slot fields go to its link and the
-  rest to its swap, the split `reset::overrides` makes; a target outside `home`'s subtree is skipped,
-  so a swapped copy's content overrides inside an instance are not pushed (its swap is).
+  rest to its swap, the split `reset::overrides` makes. A swapped root also reaches its slot's main:
+  every target lies in `push::inside`, the home's subtree and the slot's main's, each that takes a
+  push, so a selected swapped nested copy pushes its Swap or variant choice into its slot. A target
+  outside it is skipped, so a swapped copy's content overrides inside an instance are not pushed (its
+  swap is).
 - **Five families** (`push::Kind`), counted by `push::pushable`: properties (a field a boolean, text
   or swap property drives, `variant::property_fields`), fields (every other override), local layers,
   order, removals. *Push all* is the first four in one transaction: the layers first, the order read
@@ -297,13 +300,15 @@ on — an instance still equal to the main's old value takes the new one, one wi
 - **Placement is stated** (`push::stated`): every pushed `SetTransform` or resizing `SetGeometry`
   with no `SetInsets` beside it carries the target's insets, and every resize the target's layout
   item, so `keep_insets` and `keep_flex_sizes` do not read the push as a hand's move or resize.
-- **Refused**: `push::blocked` — the main in the vault (`Kit`) or effectively locked (`Locked`).
+- **Refused**: `push::blocked` — the main in the vault (`Kit`) or effectively locked (`Locked`); a
+  swapped root is refused only when its home and its slot's main both are.
   `push::layer_blocked` — `WrapsLinked`, a local group holding linked copies, which would carry the
   main's own children; `HoldsMain`, where `component::can_hold` refuses the layer under its parent's
   source (an instance of the main, or of one reaching it).
 - **Counted**: `push::outcome(before, after, root, ops)` counts the main's other instances that took
-  the push and those that kept their own (a removal: lost it, or kept it unlinked);
-  `push::predicted` runs `propagate::owed` on a scratch document, for a row's tooltip.
+  the push and those that kept their own (a removal: lost it, or kept it unlinked). The whole
+  outermost instance the push came from (`component::outermost_instance_root`) is excluded, so a push
+  from a nested copy never counts its own instance as following. `push::predicted` runs `propagate::owed` on a scratch document, for a row's tooltip.
 
 ### The verbs
 
@@ -576,9 +581,15 @@ Inspector:
   to main* under its reset row), a ghost row (*Restore* / *Push removal to main*). The header's hover
   chip stays the reset alone: a push reaches every instance, so it is never one stray click away. A
   menu's push reaches the reset door as that reset with `ui::request_push` set; `commit_reset` and the
-  property rows' commit loop take it (`ui::take_push`) and commit `push::fields` instead, refused
-  with *Select one instance to push* when the reset spans several instances. Each frame
+  property rows' commit loop take it (`ui::take_push`) and commit `push::fields` instead
+  (`push_from_reset`), refused with *Select one instance to push* when its copies span two outermost
+  instances or are homed in two mains, or when the push writes one field of one main node twice
+  (`push::writes_twice`) — the last write would win silently. Each frame
   clears a request no door took before any widget runs, so it cannot turn a later reset into a push.
+- Every one of those menus' push rows (marks, marked labels, ghost rows, a dropdown's reset rows,
+  `component::menu_reset_row`) is shown disabled with the kit or lock reason: the inspector sets the
+  frame's refusal (`ui::set_push_refusal`, from `menu::push_refused`) before drawing any card, and
+  `ui::reset_push_menu` reads it.
 - A push is one undo step, *Push to main* (`icon::PUSH_TO_MAIN`), with no confirmation; its toast says
   what followed: *Pushed 3 fields into Card · 9 instances follow · 2 keep their own · Ctrl+Z to undo*,
   *Pushed “Badge” into Card · 11 other instances now have it*, *Deleted “Footer” from Card · 9

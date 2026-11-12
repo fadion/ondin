@@ -94,7 +94,7 @@ insets (`inset_subjects`). A laid group's child is measured against the group's 
 - **Default hold.** Outside a layout, top and left are held by default: an axis with neither inset keeps its offset from the container's top-left. It shows as held (solid strut, distance with no unit) without writing an inset. Clicking a held strut pins it; pinning the opposite edge ends the default.
 - **Centre buttons**, one per axis: both insets at their current distances plus `margin: auto`. Off unpins the end edge and the margins.
 - **Badge.** The *Absolute* header badge (`ui::section_head_badged`) shows only inside a container with a layout, with the selection not mixed and the insets authored.
-- **Baked placement.** Every pin, unpin and centre commit also writes where the layer is drawn into its stored transform, and for a stretched layer its stored size (`baked_placement`), so unpinning never jumps. Taking an in-flow item out of a hugging container measures against that container's post-edit box (`kept_in_place`).
+- **Baked placement.** Every pin, unpin, centre and *Scale* commit also writes where the layer is drawn into its stored transform, and for a stretched layer its stored size (`baked_placement`), so unpinning never jumps. Taking an in-flow item out of a hugging container re-pins it against that container's post-edit box (`kept_in_place`), so it never moves; a plain group or boolean is re-pinned from its contents' box with `container::inverse_group`, as `place_group` reads it back.
 - Reads `DisplayNode::insets`.
 
 ### Item and Container (§5.3c)

@@ -33,7 +33,8 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - Marquee: `canvas::apply_marquee` picks frame contents plus loose layers, from
   `OndinApp::marquee_candidates`, filtered by `OndinApp::may_select_in_bulk`
   (`query::is_effectively_locked`, and never a slice: a slice is picked on its own, by its edge, its
-  row or the Slice tool, never swept up with the art). The visibility filter is `apply_marquee`'s own and uses the
+  row or the Slice tool, never swept up with the art; and never a chart's part, as a chart selects
+  whole). The visibility filter is `apply_marquee`'s own and uses the
   node's own flag: a layer inside a hidden group *can* be marqueed. A lasso takes the same
   candidates (below).
 - `Ctrl+A` (`OndinApp::select_all`): same candidates (locked and slices excluded, hidden included), all on the

@@ -25,7 +25,7 @@ through the system clipboard), and the hand-kept lists of transient state. Part 
   instances' tags.
 - **Why the tag exists**: an occupied page frame's background passes the press through to the marquee
   (`canvas::pick_leaf` skips it, §5.10), unless the frame is an instance, which picks like a group,
-  background included. A nested frame's own fill is clickable like any layer's. An **empty** frame is
+  background included, or a chart, which picks whole (`charts.md`). A nested frame's own fill is clickable like any layer's. An **empty** frame is
   clickable anywhere; a page frame that is already the selection stays draggable from anywhere inside
   it (`selected_frame_at`).
 - **One pick chain**: `canvas::pick_at_pointer` = tag, then `pick_leaf`, then the **edge**

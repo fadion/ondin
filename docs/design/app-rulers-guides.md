@@ -53,7 +53,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
   `commit_inner` also drops a no-op `SetGuideScope`.
 - **Scope comes from the release point**: inside a frame scopes the guide to the innermost frame
   (`rulers::frame_at_world`, via the frame's inverse world transform, so rotated frames count by their
-  true rectangle); outside, the guide runs the whole canvas, owned by the current page. The commit
+  true rectangle), never a chart frame, which holds no guides, so a guide released over a chart
+  scopes to what holds it; outside, the guide runs the whole canvas, owned by the current page. The commit
   is one `SetGuideScope`.
 - A frame-scoped guide's position field and ruler chip show the **offset from its frame** — the one
   exception to §9.3's world-space rule.

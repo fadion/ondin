@@ -524,3 +524,299 @@ fn mark(docs: &mut impl Documents, path: &Path, call: &Call) -> Result<Answer, S
     docs.tell(format!("{said}{}", by(&call.client)));
     Ok(Answer::Json(answer))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::serve::Headless;
+    use super::super::{Documents, Engine};
+    use ondin_mcp::queue::Call;
+    use ondin_mcp::wire::{Content, Output};
+    use serde_json::{Value, json};
+    use std::path::PathBuf;
+
+    fn send(engine: &mut Engine, docs: &mut Headless, tool: &str, args: Value) -> Output {
+        let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+        engine.handle(
+            docs,
+            Call {
+                conn: 1,
+                client: "test".into(),
+                tool: tool.into(),
+                args,
+                reply,
+            },
+        )
+    }
+
+    fn ok(engine: &mut Engine, docs: &mut Headless, tool: &str, args: Value) -> Value {
+        let out = send(engine, docs, tool, args);
+        assert!(!out.is_error, "{tool}: {:?}", out.content);
+        out.structured.unwrap()
+    }
+
+    /// The refusal's text.
+    fn refused(engine: &mut Engine, docs: &mut Headless, tool: &str, args: Value) -> String {
+        let out = send(engine, docs, tool, args);
+        assert!(out.is_error, "{tool} was not refused: {:?}", out.structured);
+        match out.content.first() {
+            Some(Content::Text(t)) => t.clone(),
+            other => panic!("{tool}: {other:?}"),
+        }
+    }
+
+    /// A `serve` host on a fresh library, holding Atlas — a kit whose one
+    /// component's fill reads a colour variable in two modes, *Light* and *Dark*,
+    /// published at v1 — and Consumer, with a mode of its own, *Night*, and an
+    /// instance of that component. Every step is a tool call.
+    struct Fixture {
+        root: PathBuf,
+        engine: Engine,
+        docs: Headless,
+        atlas: PathBuf,
+        consumer: PathBuf,
+        kit: String,
+        instance: String,
+        night: String,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn fixture(tag: &str) -> Fixture {
+        let root = crate::kits::picker::tests::temp_root(tag);
+        let mut engine = Engine::default();
+        let mut docs = Headless::new(Some(root.clone()));
+        let (e, d) = (&mut engine, &mut docs);
+        let path = |v: &Value| PathBuf::from(v["path"].as_str().unwrap());
+
+        let atlas = path(&ok(e, d, "create_document", json!({ "name": "Atlas" })));
+        let page = ok(e, d, "use_document", json!({ "document": atlas }))["pages"][0]["id"].clone();
+        ok(e, d, "add_mode", json!({ "name": "Light" }));
+        ok(e, d, "add_mode", json!({ "name": "Dark" }));
+        let ink = ok(
+            e,
+            d,
+            "add_variable",
+            json!({ "kind": "color", "name": "ink" }),
+        )["made"]
+            .clone();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let rect = ok(
+            e,
+            d,
+            "create_node",
+            json!({ "parent": page, "kind": kind, "name": "Badge" }),
+        )["created"][0]
+            .clone();
+        let fills = ondin_core::verbs::example("[Fill]").unwrap();
+        ok(e, d, "set_fills", json!({ "node": rect, "fills": fills }));
+        ok(
+            e,
+            d,
+            "bind_variable",
+            json!({ "nodes": [rect], "field": { "fill": 0 }, "variable": ink }),
+        );
+        let main = ok(e, d, "make_component", json!({ "nodes": [rect] }))["created"][0].clone();
+        let kit = ok(e, d, "make_kit", json!({}))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        ok(e, d, "publish_kit", json!({ "note": "First" }));
+
+        let consumer = path(&ok(e, d, "create_document", json!({ "name": "Consumer" })));
+        let page =
+            ok(e, d, "use_document", json!({ "document": consumer }))["pages"][0]["id"].clone();
+        let night = ok(e, d, "add_mode", json!({ "name": "Night" }))["made"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let instance = ok(
+            e,
+            d,
+            "insert_from_kit",
+            json!({ "kit": "Atlas", "main": main, "parent": page }),
+        )["created"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        Fixture {
+            root,
+            engine,
+            docs,
+            atlas,
+            consumer,
+            kit,
+            instance,
+            night,
+        }
+    }
+
+    fn on_disk(path: &PathBuf) -> ondin_core::Document {
+        ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    /// `serve` answers Phase 4 from its own library: it lists what it filed,
+    /// writes the kit's mark and publish and the consumer's insert to their
+    /// files at once, and finds nothing waiting until the kit publishes again.
+    ///
+    /// flip: `Headless::with_library` lending no library → fails at
+    /// `insert_from_kit` in the fixture, "There is no library folder".
+    #[test]
+    fn serve_files_publishes_and_inserts_through_its_own_library() {
+        let mut f = fixture("serve");
+        let (e, d) = (&mut f.engine, &mut f.docs);
+        let listed = ok(e, d, "list_documents", json!({}));
+        let names: Vec<&str> = listed["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|x| x["name"].as_str())
+            .collect();
+        assert!(
+            names.contains(&"Atlas") && names.contains(&"Consumer"),
+            "{names:?}"
+        );
+
+        let atlas = on_disk(&f.atlas);
+        assert!(
+            atlas
+                .meta()
+                .kit
+                .as_ref()
+                .is_some_and(|k| k.is_shared() && k.version == 1)
+        );
+        assert!(atlas.published().is_some(), "the publish is in the file");
+        let consumer = on_disk(&f.consumer);
+        let vault = consumer.vault().and_then(|v| consumer.get(v)).unwrap();
+        assert_eq!(vault.children().len(), 1, "the insert is in the file");
+        assert_eq!(
+            ok(e, d, "list_kit_updates", json!({}))["updates"],
+            json!([])
+        );
+
+        ok(e, d, "use_document", json!({ "document": f.atlas }));
+        assert!(
+            refused(e, d, "publish_kit", json!({})).contains("Nothing changed since v1"),
+            "an unchanged kit has nothing to publish"
+        );
+        ok(e, d, "stop_sharing_kit", json!({}));
+        assert!(
+            on_disk(&f.atlas)
+                .meta()
+                .kit
+                .as_ref()
+                .is_some_and(|k| !k.is_shared())
+        );
+        assert_eq!(ok(e, d, "list_kits", json!({}))["kits"], json!([]));
+    }
+
+    /// `make_local` takes an instance to its kit component and reveals that as a
+    /// local main on the page, out of the vault; a layer in no instance is
+    /// refused by name.
+    ///
+    /// flip: `vault_top` returning the instance root rather than climbing to the
+    /// main → fails at "no kit component".
+    #[test]
+    fn make_local_reveals_the_kit_component_an_instance_shows() {
+        let mut f = fixture("make-local");
+        let (e, d) = (&mut f.engine, &mut f.docs);
+        let session = Documents::session(d, &f.consumer).unwrap();
+        let page = session.doc.first_page();
+        let page_wire = page.to_wire();
+        let before = session.doc.get(page).unwrap().children().len();
+
+        let why = refused(e, d, "make_local", json!({ "ids": [page_wire] }));
+        assert!(why.contains("no kit component"), "{why}");
+
+        let made = ok(e, d, "make_local", json!({ "ids": [f.instance] }));
+        let top = made["made_local"][0].as_str().unwrap().to_owned();
+        let s = Documents::session(d, &f.consumer).unwrap();
+        let doc = &s.doc;
+        let top = ondin_core::NodeId::from_wire(&top).unwrap();
+        assert!(!doc.in_vault(top), "out of the vault");
+        assert_eq!(
+            doc.get(top).unwrap().parent(),
+            Some(page),
+            "a main on the page"
+        );
+        assert_eq!(doc.get(page).unwrap().children().len(), before + 1);
+        let vault = doc.vault().and_then(|v| doc.get(v)).unwrap();
+        assert!(vault.children().is_empty(), "nothing left vendored");
+        assert!(
+            on_disk(&f.consumer)
+                .get(top)
+                .is_some_and(|n| n.parent() == Some(page)),
+            "written to the file"
+        );
+    }
+
+    /// `map_kit_modes` maps the document's own mode onto a kit mode by id, `null`
+    /// takes the mapping away, and a kit mode as the key or an unknown kit is
+    /// refused, the record left as it was.
+    ///
+    /// flip: `map_modes` inserting into a clone it then drops → fails at the
+    /// mapped mode.
+    #[test]
+    fn map_kit_modes_sets_and_clears_one_mapping() {
+        let mut f = fixture("kit-modes");
+        let (e, d) = (&mut f.engine, &mut f.docs);
+        let night = serde_json::from_value::<ondin_core::variable::ModeId>(json!(f.night)).unwrap();
+        let held = |d: &mut Headless| {
+            Documents::session(d, &f.consumer)
+                .unwrap()
+                .doc
+                .variables()
+                .kits()
+                .get(&f.kit)
+                .cloned()
+                .expect("the consumer holds Atlas's modes")
+        };
+        let modes = held(d);
+        let dark = modes
+            .modes
+            .iter()
+            .find(|m| m.name == "Dark")
+            .expect("the kit's Dark mode")
+            .id;
+        let dark_wire = serde_json::to_value(dark).unwrap();
+
+        ok(
+            e,
+            d,
+            "map_kit_modes",
+            json!({ "kit": "Atlas", "mapping": { (f.night.clone()): dark_wire } }),
+        );
+        assert_eq!(held(d).map.get(&night), Some(&dark), "the mapped mode");
+
+        let why = refused(
+            e,
+            d,
+            "map_kit_modes",
+            json!({ "kit": "Atlas", "mapping": { (dark_wire.as_str().unwrap()): dark_wire } }),
+        );
+        assert!(why.contains("no mode of this document's own"), "{why}");
+        let why = refused(
+            e,
+            d,
+            "map_kit_modes",
+            json!({ "kit": "Nope", "mapping": { (f.night.clone()): null } }),
+        );
+        assert!(why.contains("holds no modes of a kit"), "{why}");
+        assert_eq!(
+            held(d).map.get(&night),
+            Some(&dark),
+            "refusals change nothing"
+        );
+
+        ok(
+            e,
+            d,
+            "map_kit_modes",
+            json!({ "kit": f.kit, "mapping": { (f.night.clone()): null } }),
+        );
+        assert_eq!(held(d).map.get(&night), None, "null takes it away");
+    }
+}

@@ -570,11 +570,16 @@ read, since they name this document's node ids.
   canvas makes a chart there from it, linked (*Making one*); a `.json` dropped anywhere but on a
   chart stays the tokens import's door.
 - **The readers** are core's (`chart::table_io`), each holding the table's limits and noting what
-  it cut. **CSV** (RFC 4180): the delimiter is detected among comma, semicolon and tab; the first row is
+  it cut, and naming no more columns or rows than a table holds, so a small file of many keys or
+  one long line never builds a cell for each. **CSV** (RFC 4180): the delimiter is detected among
+  comma, semicolon and tab, counted outside quotes as the reader reads them (a quote opens only at
+  a field's start, so an inch mark quotes nothing); the first row is
   the header unless it parses as numbers. **TSV** the same with tab. **JSON** is an array of
-  objects; every key seen becomes a column, in first-seen order (each object read in its own key
-  order, which `serde_json`'s sorted map would lose); numbers are numbers, written into the cell
-  without an exponent, which `parse_number` refuses; strings are
+  objects; the first 64 keys seen become columns, in first-seen order (each object read in its own
+  key order, which `serde_json`'s sorted map would lose, a repeated key keeping its last value);
+  numbers are numbers, written into the cell without an exponent, which `parse_number` refuses,
+  except one too long for a cell that way (`1e300`), which keeps the file's spelling as text and
+  is named in the note; strings are
   text, `true`/`false` are text, `null` is empty, and a nested object or array leaves its cell
   empty and is named in the note. Anything else is refused: *Not an array of objects*. Numbers
   written with a thousands separator (`1,234.5`) parse; a decimal comma does not.

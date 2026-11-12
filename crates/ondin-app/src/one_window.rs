@@ -5,7 +5,7 @@
 //! same ones, and the two would save over each other.
 //!
 //! The window is the process holding an exclusive lock on `window.lock` in
-//! `machine_dir::root()`. It listens on a local socket: a named pipe on Windows,
+//! [`window_dir`]. It listens on a local socket: a named pipe on Windows,
 //! `window.sock` beside the lock elsewhere. A launch that cannot take the lock
 //! connects, sends one request line, and exits once the window answers that it
 //! has queued it (`opens`). A window that is closing answers so, and the launch
@@ -68,7 +68,7 @@ static CLOSING: AtomicBool = AtomicBool::new(false);
 /// window: refusing to start over a broken folder would cost more than the rare
 /// second window.
 pub(crate) fn claim(open: Option<&Path>) -> Claim {
-    let Some(dir) = crate::machine_dir::root() else {
+    let Some(dir) = window_dir() else {
         return Claim::Window;
     };
     let request = Request {
@@ -83,6 +83,27 @@ pub(crate) fn claim(open: Option<&Path>) -> Claim {
         }
         Outcome::Forwarded => Claim::Forwarded,
         Outcome::Unanswered => Claim::Unanswered,
+    }
+}
+
+/// The folder holding the window's lock, and its socket off Windows.
+///
+/// Off Windows not the machine folder, which is a cache folder that cleaners
+/// empty: a deleted socket cannot be reached, so the next launch would start a
+/// second window. The user's runtime folder (`XDG_RUNTIME_DIR`) is kept for
+/// exactly this; without one, the local data folder.
+fn window_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        crate::machine_dir::root()
+    }
+    #[cfg(not(windows))]
+    {
+        Some(
+            dirs::runtime_dir()
+                .or_else(dirs::data_local_dir)?
+                .join("ondin"),
+        )
     }
 }
 
@@ -122,6 +143,11 @@ fn claim_in(dir: &Path, addr: &Path, request: &Request, patience: Duration, sink
     loop {
         match take_lock(dir) {
             Lock::Taken(lock) => {
+                // A window whose lock file was deleted under it still listens:
+                // it takes the request rather than a second window starting.
+                if send(addr, request) == Sent::Taken {
+                    return Outcome::Forwarded;
+                }
                 // Taken before the listener exists, so a launch meanwhile finds no
                 // listener and tries again.
                 if let Err(e) = listen(addr, sink) {
@@ -286,6 +312,10 @@ fn listen(addr: &Path, sink: Sink) -> std::io::Result<()> {
 
 /// Connect to the window's pipe, and let it take the foreground: Windows gives
 /// that only to a process the user just started, which this one is.
+///
+/// The pipe's name is one any user on the machine could make first, so a pipe
+/// served by another user's process is refused: it would be handed the file's
+/// path and the foreground.
 #[cfg(windows)]
 fn connect(addr: &Path) -> std::io::Result<File> {
     use std::os::windows::io::AsRawHandle as _;
@@ -298,11 +328,74 @@ fn connect(addr: &Path) -> std::io::Result<File> {
     let mut pid = 0u32;
     // SAFETY: `pipe` is an open pipe handle for the whole call, and `pid` a
     // writable `u32`.
-    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as _, &mut pid) } != 0 {
-        // SAFETY: takes a process id by value.
-        unsafe { AllowSetForegroundWindow(pid) };
+    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as _, &mut pid) } == 0
+        || !same_user(pid)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the pipe is not served by this user's window",
+        ));
     }
+    // SAFETY: takes a process id by value.
+    unsafe { AllowSetForegroundWindow(pid) };
     Ok(pipe)
+}
+
+/// Whether process `pid` runs as this process's user. `false` when that cannot
+/// be read, which a process of another user's usually cannot.
+#[cfg(windows)]
+fn same_user(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: takes plain values; a null handle is checked below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process == 0 {
+        return false;
+    }
+    let theirs = process_user(process);
+    // SAFETY: `process` is a handle this function opened.
+    unsafe { CloseHandle(process) };
+    // SAFETY: the pseudo-handle needs no closing.
+    let mine = process_user(unsafe { GetCurrentProcess() });
+    theirs.is_some() && theirs == mine
+}
+
+/// The security identifier of the user `process` runs as, as its bytes.
+#[cfg(windows)]
+fn process_user(process: windows_sys::Win32::Foundation::HANDLE) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::{
+        GetLengthSid, GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows_sys::Win32::System::Threading::OpenProcessToken;
+    let mut token = 0;
+    // SAFETY: `process` is a valid handle and `token` a writable handle slot.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+        return None;
+    }
+    let mut len = 0u32;
+    // SAFETY: a size query: no buffer, `len` writable.
+    unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len) };
+    // `u64`s, so the `TOKEN_USER` read below is aligned.
+    let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+    // SAFETY: `buf` holds at least `len` bytes, and `len` is writable.
+    let ok =
+        unsafe { GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len) };
+    // SAFETY: `token` is a handle this function opened.
+    unsafe { CloseHandle(token) };
+    if ok == 0 {
+        return None;
+    }
+    // SAFETY: the call filled `buf` with a `TOKEN_USER`, whose SID points into
+    // `buf`, alive for this block.
+    unsafe {
+        let user = &*buf.as_ptr().cast::<TOKEN_USER>();
+        let sid = user.User.Sid;
+        let n = GetLengthSid(sid) as usize;
+        Some(std::slice::from_raw_parts(sid.cast::<u8>(), n).to_vec())
+    }
 }
 
 /// Listen at `addr` on a thread of its own, one more thread per connection.
@@ -517,6 +610,48 @@ mod tests {
         );
         drop(first);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A window whose lock file was deleted (a cleared folder) still takes a
+    /// launch's file: the launch that takes the fresh lock asks it first rather
+    /// than start a second window.
+    ///
+    /// flip: `claim_in` listening at once on a taken lock → fails at
+    /// "forwarded".
+    #[test]
+    fn a_window_whose_lock_went_missing_still_takes_the_file() {
+        let (dir, addr) = fixture("lost-lock");
+        let (sink, got) = recorder(Arc::new(AtomicBool::new(true)));
+        let none = Request { open: None };
+        let first = claim_in(&dir, &addr, &none, Duration::ZERO, sink.clone());
+        assert!(matches!(first, Outcome::Window(Some(_))), "{first:?}");
+        // The lock file gone, and a new one made: another folder, same address.
+        let (fresh, _) = fixture("lost-lock-fresh");
+        let file = Request {
+            open: Some(dir.join("a.ondin")),
+        };
+        let second = claim_in(&fresh, &addr, &file, PATIENCE, sink);
+        assert!(
+            matches!(second, Outcome::Forwarded),
+            "forwarded: {second:?}"
+        );
+        assert_eq!(*got.lock().unwrap(), [file]);
+        drop(first);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&fresh);
+    }
+
+    /// The pipe's server is checked to be this user's: this process is, the
+    /// System process, which cannot be read, is not.
+    ///
+    /// flip: `same_user` answering `true` for a process it cannot open → fails
+    /// at "not System". The comparison of two readable users is not reached: no
+    /// test runs a second account.
+    #[cfg(windows)]
+    #[test]
+    fn only_this_users_process_may_serve_the_pipe() {
+        assert!(same_user(std::process::id()), "this process");
+        assert!(!same_user(4), "not System");
     }
 
     /// The hash naming the pipe is FNV-1a's, whose published value for "a" is

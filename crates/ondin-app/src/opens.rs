@@ -68,6 +68,8 @@ mod tests {
     ///
     /// flip: the frame taking the queue before its modal check → fails at "still
     /// queued". flip: the raise inside the modal check → fails at "focused".
+    /// flip (Linux): the raise without its attention request → fails at
+    /// "flagged".
     #[test]
     fn an_outside_open_waits_out_a_modal() {
         let dir = std::env::temp_dir().join(format!("ondin-opens-{}", std::process::id()));
@@ -92,6 +94,16 @@ mod tests {
                 .any(|c| matches!(c, egui::ViewportCommand::Focus))
         });
         assert!(focused, "focused");
+        // Wayland ignores the focus; the panel flags the window instead.
+        #[cfg(target_os = "linux")]
+        assert!(
+            out.viewport_output.values().any(|v| {
+                v.commands
+                    .iter()
+                    .any(|c| matches!(c, egui::ViewportCommand::RequestUserAttention(_)))
+            }),
+            "flagged"
+        );
         for _ in 0..2 {
             let _ = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
         }

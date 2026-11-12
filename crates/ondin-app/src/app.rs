@@ -2101,6 +2101,13 @@ impl OndinApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                // Wayland lets no window focus itself without the launch's
+                // activation token, which winit cannot use on a running window;
+                // the panel's flag at least shows where the file went.
+                #[cfg(target_os = "linux")]
+                ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                    egui::UserAttentionType::Informational,
+                ));
             }
             if !self.modal_is_up() {
                 for path in crate::opens::take() {

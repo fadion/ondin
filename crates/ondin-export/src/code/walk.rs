@@ -1815,7 +1815,7 @@ impl Walk<'_> {
         match place {
             Place::Flow { grid } => {
                 el.set("position", "relative");
-                self.sizes(el, node, kind, bx, (false, false));
+                self.sizes(el, node, kind, bx, (false, false), true);
                 if !grid {
                     if item.grow != 0.0 {
                         el.set("flex-grow", fmt(item.grow));
@@ -1940,7 +1940,7 @@ impl Walk<'_> {
                     el.set("left", px(slot.x));
                     el.set("top", px(slot.y));
                 }
-                self.sizes(el, node, kind, bx, stretched);
+                self.sizes(el, node, kind, bx, stretched, false);
                 if bx.is_none() {
                     el.set("transform-origin", "0 0");
                 }
@@ -1972,7 +1972,8 @@ impl Walk<'_> {
                             };
                         let (left, width) = axis(at.x, b.width(), of.x0, of.width(), on.0);
                         let (top, height) = axis(at.y, b.height(), of.y0, of.height(), on.1);
-                        self.sizes(el, node, kind, bx, (width.is_some(), height.is_some()));
+                        let on = (width.is_some(), height.is_some());
+                        self.sizes(el, node, kind, bx, on, false);
                         el.set("left", left);
                         el.set("top", top);
                         if let Some(w) = width {
@@ -1996,7 +1997,7 @@ impl Walk<'_> {
                         let slot = container::slot_of(local, bx_or_point);
                         el.set("left", px(slot.x - of.x0));
                         el.set("top", px(slot.y - of.y0));
-                        self.sizes(el, node, kind, bx, (false, false));
+                        self.sizes(el, node, kind, bx, (false, false), false);
                         if bx.is_none() {
                             el.set("transform-origin", "0 0");
                         }
@@ -2008,7 +2009,7 @@ impl Walk<'_> {
             }
             Place::Root => {
                 el.set("position", "relative");
-                self.sizes(el, node, kind, bx, (false, false));
+                self.sizes(el, node, kind, bx, (false, false), false);
                 if bx.is_none() {
                     el.set("transform-origin", "0 0");
                 }
@@ -2028,6 +2029,7 @@ impl Walk<'_> {
     /// Width and height as specified: a shape's or a frame's own size, a group's
     /// `LayoutItem` sizes (`auto` hugging, as the model reads it), a text box's
     /// sizing mode. An axis `stretched` between two insets is left to them.
+    /// `in_flow` is a layout's item, the only place a frame's typed size is read.
     fn sizes(
         &mut self,
         el: &mut Element,
@@ -2035,6 +2037,7 @@ impl Walk<'_> {
         kind: &NodeKind,
         bx: Option<Rect>,
         stretched: (bool, bool),
+        in_flow: bool,
     ) {
         let item = node.item();
         // A bound size stands for the kind's own size, the axis's px.
@@ -2061,12 +2064,14 @@ impl Walk<'_> {
                     (d, _) => own_or(d, size.height),
                 }),
             ),
-            // A frame without a layout: a typed size as the layout reads it (a
-            // chart's plot is 100% of its grid cell), else its own box.
+            // A frame without a layout: in a layout's flow, a typed size as the
+            // layout reads it (a chart's plot is 100% of its grid cell), else
+            // its own box, which is all the canvas reads of a free one.
             NodeKind::Artboard { .. } => {
                 let s = bx.map(|b| b.size()).unwrap_or_default();
                 let typed = |d: Dimension| {
-                    matches!(d, Dimension::Px(_) | Dimension::Percent(_)).then(|| dimension(d))
+                    (in_flow && matches!(d, Dimension::Px(_) | Dimension::Percent(_)))
+                        .then(|| dimension(d))
                 };
                 (
                     Some(typed(item.width).unwrap_or_else(|| self.axis_size(node, 0, s.width))),

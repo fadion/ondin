@@ -1741,6 +1741,35 @@ fn auto_width_text_in_a_pinned_group_wraps_in_a_narrower_use() {
     holds_components("pinned-group-text-wraps", &doc, &res);
 }
 
+/// A frame without a layout, placed freely, is written at its own box even with
+/// a typed `LayoutItem` size left from a layout it was in: no layout reads it.
+/// flip: `Walk::sizes` taking a free frame's typed size → 105.3 at the frame's
+/// edge.
+#[test]
+fn a_free_frame_ignores_a_stale_item_size() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 400.0, 160.0, "Board");
+    let inner = d.frame(Some(board), 20.0, 20.0, 300.0, 120.0, "Inner");
+    d.fill(inner, solid(60, 120, 220, 255));
+    d.apply(vec![Operation::SetLayoutItem {
+        id: inner,
+        item: LayoutItem {
+            width: ondin_core::container::Dimension::Percent(50.0),
+            height: ondin_core::container::Dimension::Px(40.0),
+            ..Default::default()
+        },
+    }]);
+    let (doc, res) = d.done();
+    assert!(
+        matches!(
+            res.used_kind(&doc, inner),
+            Some(NodeKind::Artboard { size, .. }) if *size == Size::new(300.0, 120.0)
+        ),
+        "the fixture: the canvas draws the frame at its own box"
+    );
+    holds("free-frame-stale-item", &doc, &res);
+}
+
 /// What a stretched picture scales that the canvas keeps is reported: a PNG in
 /// a pinned group (placed by its share, its strokes and effects scaled with it),
 /// and a rounded path stretched by its own insets.

@@ -58,6 +58,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         opacity,
         blend,
         clip,
+        fill_hidden_in_export,
         mask,
         mask_mode,
         fill_rule,
@@ -124,6 +125,10 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         },
         O::SetBlend { id, blend: *blend },
         O::SetClip { id, clip: *clip },
+        O::SetFillHiddenInExport {
+            id,
+            hidden: *fill_hidden_in_export,
+        },
         O::SetMask { id, mask: *mask },
         O::SetMaskMode {
             id,

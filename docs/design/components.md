@@ -93,7 +93,7 @@ copies at every depth through the reverse link map, each level compared against 
   op writing its node alone.
 - `propagate::mode`, wildcard-free, picks the comparison:
   - **whole** — transform, geometry, text with spans, the span ops, name, visibility, opacity, blend mode, pivot,
-    clip, mask, mask mode, fill rule, a frame's mode set (`SetModes`, one field for every collection), its width queries (`SetQueries`, likewise; `reset::state_ops` writes them back), the variable bindings (`SetCornerVars`,
+    clip, fill in exports, mask, mask mode, fill rule, a frame's mode set (`SetModes`, one field for every collection), its width queries (`SetQueries`, likewise; `reset::state_ops` writes them back), the variable bindings (`SetCornerVars`,
     `SetSpacingVars`, `SetVisibleVar`, `SetSizeVars`, `SetOpacityVar`) and the card
     styles (`SetFillStyle`, `SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle`, `SetLayoutStyle`);
   - **fields** — text/paragraph/block style, insets, display, layout item: a JSON merge

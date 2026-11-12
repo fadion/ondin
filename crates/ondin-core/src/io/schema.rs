@@ -262,6 +262,10 @@ pub(crate) struct NodeDto {
     /// file's frames all clipped, which `true` reproduces.
     #[serde(default = "clips_by_default")]
     pub clip: bool,
+    /// Whether exports leave the frame's fills out. Additive, off by default and
+    /// skipped when off, as `mask` (invariant 9).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fill_hidden_in_export: bool,
     /// Whether the node masks the siblings above it (§5.3). Additive; unlike
     /// `clip` it defaults to off, and is skipped when off (invariant 9).
     #[serde(default, skip_serializing_if = "is_false")]
@@ -506,6 +510,8 @@ impl NodeDto {
             // open-and-save. The loader's normalization stays as the guard
             // against a hand-edited file.
             clip: n.clip() && n.kind().clips_children(),
+            // Normalized out as `clip` is, so a stray flag cannot move the bytes.
+            fill_hidden_in_export: n.fill_hidden_in_export() && n.kind().clips_children(),
             mask: n.mask(),
             mask_mode: n.mask_mode(),
             // The stored field, not `fill_rule()`, which answers the effective
@@ -575,6 +581,8 @@ impl NodeDto {
         // Inert on kinds with no frame to clip to, so a pre-`clip` file (default
         // "yes") does not arrive with every group claiming to clip.
         let clip = self.clip && self.kind.clips_children();
+        // Dropped on a kind with no frame, as `clip` is.
+        let fill_hidden_in_export = self.fill_hidden_in_export && self.kind.clips_children();
         // Inert on kinds that cannot be a mask, like `clip`; guards against a
         // hand-edited or future file.
         let mask = self.mask && self.kind.can_mask();
@@ -629,6 +637,7 @@ impl NodeDto {
             },
             blend,
             clip,
+            fill_hidden_in_export,
             mask,
             // Not gated on `mask`: the mode is remembered while the mask is off.
             mask_mode: self.mask_mode,

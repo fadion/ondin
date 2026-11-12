@@ -1220,6 +1220,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetOpacityVar { .. }
         | O::SetBlend { .. }
         | O::SetClip { .. }
+        | O::SetFillHiddenInExport { .. }
         | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
         // A card's style is that card's: *Reset fill* restores the main's style

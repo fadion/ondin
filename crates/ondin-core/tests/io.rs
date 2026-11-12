@@ -968,6 +968,29 @@ fn clipping_turned_off_round_trips() {
     assert_eq!(doc, loaded);
 }
 
+/// A frame's fill left out of exports survives the round trip, and is absent
+/// from the bytes while off, so a file that never set it does not move.
+/// flip: `NodeDto::from` dropping `fill_hidden_in_export` → fails at the load.
+#[test]
+fn a_fill_hidden_in_export_round_trips_and_is_absent_while_off() {
+    let (mut doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    assert!(
+        doc.get(frame).unwrap().kind().clips_children(),
+        "fixture: a frame"
+    );
+    let off = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    assert!(!off.contains("fill_hidden_in_export"), "absent while off");
+    doc.apply(&Transaction(vec![Operation::SetFillHiddenInExport {
+        id: frame,
+        hidden: true,
+    }]))
+    .unwrap();
+    let loaded = io::load(&io::save(&doc).unwrap()).unwrap();
+    assert!(loaded.get(frame).unwrap().fill_hidden_in_export());
+    assert_eq!(doc, loaded);
+}
+
 /// The proportion lock is additive in the same way, and its default is the one
 /// that needs no argument: while the lock was session state no file recorded it,
 /// so every node in every existing file meant "unlocked".

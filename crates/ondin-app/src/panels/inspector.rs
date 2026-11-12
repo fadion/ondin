@@ -177,6 +177,7 @@ pub(super) struct AppearanceMarks {
     /// Corner smoothing of a frame, rect, polygon, star or path.
     pub(super) smoothing: Option<Mark>,
     pub(super) clip: Option<Mark>,
+    pub(super) fill_in_export: Option<Mark>,
 }
 
 /// A signed integer for an adjustment field: `+12`, `-8`, `0` (offsets from a
@@ -5015,6 +5016,19 @@ impl OndinApp {
                 |id, clip| Operation::SetClip { id, clip },
                 |v| if *v { "on" } else { "off" }.to_owned(),
             ),
+            // The switch reads "shown", the flag "hidden": the mark says the switch's.
+            fill_in_export: self.sub_mark(
+                s,
+                |op| match op {
+                    Operation::SetFillHiddenInExport { hidden, .. } => Some(*hidden),
+                    _ => None,
+                },
+                |n| Some(n.fill_hidden_in_export()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, hidden| Operation::SetFillHiddenInExport { id, hidden },
+                |v| if *v { "off" } else { "on" }.to_owned(),
+            ),
         }
     }
     /// One layer's opacity field, `fw` wide, for both Appearance cards. Bound, it
@@ -5350,6 +5364,28 @@ impl OndinApp {
             {
                 app.session.name_step("Clip content", icon::CROP);
                 app.commit_edit(Transaction(vec![Operation::SetClip { id, clip: !clip }]));
+            }
+            // Beside it, the frame's fills in exports: on is the file drawing them.
+            if clip0.is_some()
+                && let Some(hidden) = app.session.doc.get(id).map(|n| n.fill_hidden_in_export())
+                && ui::switch_row_marked(
+                    ui,
+                    "Show fill in exports",
+                    !hidden,
+                    BOOL_ROW_H,
+                    marks.fill_in_export.is_some(),
+                )
+                .on_hover_text(match &marks.fill_in_export {
+                    Some(m) => m.tip.as_str(),
+                    None => "Paint this frame's fill in exported files. Off, the files are transparent behind its content",
+                })
+                .clicked()
+            {
+                app.session.name_step("Show fill in exports", icon::EXPORT);
+                app.commit_edit(Transaction(vec![Operation::SetFillHiddenInExport {
+                    id,
+                    hidden: !hidden,
+                }]));
             }
         });
     }

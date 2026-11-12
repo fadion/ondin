@@ -156,6 +156,12 @@ pub enum Operation {
         id: NodeId,
         clip: bool,
     },
+    /// Whether exports leave a frame's fills out; the canvas draws them either
+    /// way. An inert flag on a kind with no frame, as `SetClip`'s.
+    SetFillHiddenInExport {
+        id: NodeId,
+        hidden: bool,
+    },
     /// Whether this layer is a mask for the siblings above it (§5.3).
     ///
     /// **One node, not a run.** The masked layers carry nothing — being masked
@@ -644,6 +650,7 @@ impl Operation {
             | Operation::SetBlend { id, .. }
             | Operation::SetPivot { id, .. }
             | Operation::SetClip { id, .. }
+            | Operation::SetFillHiddenInExport { id, .. }
             | Operation::SetMask { id, .. }
             | Operation::SetMaskMode { id, .. }
             | Operation::SetFillRule { id, .. }
@@ -755,6 +762,7 @@ impl Operation {
             | Operation::SetBlend { id, .. }
             | Operation::SetPivot { id, .. }
             | Operation::SetClip { id, .. }
+            | Operation::SetFillHiddenInExport { id, .. }
             | Operation::SetMask { id, .. }
             | Operation::SetMaskMode { id, .. }
             | Operation::SetFillRule { id, .. }
@@ -867,6 +875,8 @@ impl Operation {
             // Export settings say what a file would contain; nothing on the
             // canvas draws from them.
             | Operation::SetExports { .. }
+            // The canvas draws a frame's fills whether or not exports keep them.
+            | Operation::SetFillHiddenInExport { .. }
             // A layout grid is drawn over a frame and is never in it.
             | Operation::SetLayoutGrids { .. }
             // Being a main or linked is not drawn: the label chip and the
@@ -1280,6 +1290,9 @@ impl Operation {
                 node(id).is_some_and(|n| n.pivot() == pivot.map(crate::node::Pivot::clamped))
             }
             Operation::SetClip { id, clip } => node(id).is_some_and(|n| n.clip() == *clip),
+            Operation::SetFillHiddenInExport { id, hidden } => {
+                node(id).is_some_and(|n| n.fill_hidden_in_export() == *hidden)
+            }
             Operation::SetMask { id, mask } => node(id).is_some_and(|n| n.mask() == *mask),
             Operation::SetMaskMode { id, mode } => node(id).is_some_and(|n| n.mask_mode() == *mode),
             Operation::SetFillRule { id, rule } => node(id).is_some_and(|n| n.fill_rule() == *rule),
@@ -1806,6 +1819,8 @@ mod changes_ink_tests {
                 exports: vec![],
             },
             Operation::SetLayoutGrids { id, grids: vec![] },
+            // Read by exports only; the canvas draws the fills either way.
+            Operation::SetFillHiddenInExport { id, hidden: true },
             Operation::SetComponent {
                 id,
                 component: true,
@@ -1917,7 +1932,7 @@ mod changes_ink_tests {
                 href: String::new(),
             },
         ];
-        assert_eq!(invisible.len(), 42, "the whole false arm");
+        assert_eq!(invisible.len(), 43, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

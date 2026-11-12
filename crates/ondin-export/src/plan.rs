@@ -10,7 +10,8 @@
 use ondin_core::kurbo::Rect;
 use ondin_core::peniko::Color;
 use ondin_core::{
-    Document, ExportBackground, ExportFormat, ExportScale, ExportSpec, NodeId, NodeKind, Resolved,
+    Document, ExportBackground, ExportFormat, ExportScale, ExportSpec, NodeId, NodeKind, Operation,
+    Resolved, Transaction,
 };
 
 /// How a set of layers is laid out under the destination folder.
@@ -255,6 +256,46 @@ pub(crate) fn acting_extras(spec: &ondin_core::ExportSpec) -> bool {
         || spec.each_variant
 }
 
+/// The document an export of `roots` draws: `doc` with the fills of every frame
+/// under them set to stay out of exports (`Node::fill_hidden_in_export`) taken
+/// off, and its `Resolved`; `None` when there is no such frame, so the caller
+/// draws `doc` itself. One copy every writer draws from, so PNG, JPEG, SVG, PDF
+/// and icon files agree, and a frame's own background (`Frame`) reads none.
+pub fn for_export(doc: &Document, roots: &[NodeId]) -> Option<(Document, Resolved)> {
+    let mut ops = Vec::new();
+    let mut stack: Vec<NodeId> = roots.to_vec();
+    while let Some(id) = stack.pop() {
+        let Some(n) = doc.get(id) else { continue };
+        stack.extend(n.children().iter().copied());
+        if n.fill_hidden_in_export() && n.kind().clips_children() && !n.paint().fills.is_empty() {
+            // The style link first: a linked list is the style's to write.
+            ops.push(Operation::SetFillStyle { id, style: None });
+            ops.push(Operation::SetFills {
+                id,
+                fills: Vec::new(),
+            });
+        }
+    }
+    if ops.is_empty() {
+        return None;
+    }
+    let mut copy = doc.clone();
+    // Two setters on nodes just read from `doc`: nothing for `apply` to refuse.
+    let applied = copy.apply(&Transaction(ops));
+    debug_assert!(applied.is_ok(), "stripping fills was refused: {applied:?}");
+    applied.ok()?;
+    let res = Resolved::rebuild(&copy);
+    Some((copy, res))
+}
+
+/// The layers a file of `node` draws: a slice's region's origins, else itself.
+pub fn origins_of(doc: &Document, res: &Resolved, node: NodeId) -> Vec<NodeId> {
+    match slice_region(doc, res, node) {
+        Some((_, origins)) => origins,
+        None => vec![node],
+    }
+}
+
 /// Render one planned file to bytes. `None` when the layer has no bounds to
 /// frame — the one refusal both writers already make.
 ///
@@ -262,6 +303,10 @@ pub(crate) fn acting_extras(spec: &ondin_core::ExportSpec) -> bool {
 /// halfway through a drag cannot leak an uncommitted position into a file
 /// (§15 D264). Nothing here can check that.
 pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<u8>> {
+    // Once at most: the copy holds no fill left to take off.
+    if let Some((doc, res)) = for_export(doc, &origins_of(doc, res, file.node)) {
+        return render(&doc, &res, file);
+    }
     // A slice's box included: `svg_spec` frames it as it frames anything else.
     if file.spec.format == ExportFormat::Svg {
         let out = crate::svg::svg_spec(doc, res, file.node, &file.spec);
@@ -386,6 +431,11 @@ fn frame_background(doc: &Document, node: NodeId) -> Option<Color> {
     while let Some(id) = at {
         let n = doc.get(id)?;
         if matches!(n.kind(), NodeKind::Artboard { .. }) {
+            // A frame whose fill stays out of exports has no ground to give, even
+            // above the layers `for_export` strips.
+            if n.fill_hidden_in_export() {
+                return None;
+            }
             // Resolved: a variable-bound frame uses the mode in force.
             let paint = doc.resolved_paint(id, n.paint());
             let visible: Vec<&ondin_core::Brush> = paint

@@ -170,6 +170,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         opacity: 1.0,
         blend: BlendMode::Normal,
         clip: false,
+        fill_hidden_in_export: false,
         mask: false,
         mask_mode: MaskMode::default(),
         fill_rule: FillRule::default(),
@@ -1691,6 +1692,9 @@ impl Document {
             Operation::SetBlend { id, blend } => self.op_set_blend(*id, *blend, dirty),
             Operation::SetPivot { id, pivot } => self.op_set_pivot(*id, *pivot, dirty),
             Operation::SetClip { id, clip } => self.op_set_clip(*id, *clip, dirty),
+            Operation::SetFillHiddenInExport { id, hidden } => {
+                self.op_set_fill_hidden_in_export(*id, *hidden)
+            }
             Operation::SetMask { id, mask } => self.op_set_mask(*id, *mask, dirty),
             Operation::SetMaskMode { id, mode } => self.op_set_mask_mode(*id, *mode, dirty),
             Operation::SetFillRule { id, rule } => self.op_set_fill_rule(*id, *rule, dirty),
@@ -2462,6 +2466,7 @@ impl Document {
             // Frames clip by default (Figma's "clip content", on); nothing else
             // has a frame to clip to, so the flag is inert for other kinds.
             clip: kind.clips_children(),
+            fill_hidden_in_export: false,
             // Nothing is a mask until someone says so: a layer that started out
             // clipping its siblings would be a shape that draws nothing, which
             // reads as the tool having failed.
@@ -3668,6 +3673,19 @@ impl Document {
         Ok(Operation::SetClip { id, clip: old })
     }
 
+    /// Dirties nothing: the canvas draws the frame's fills either way, and only an
+    /// export reads the flag. Inert on a kind with no frame, as [`Self::op_set_clip`]'s.
+    fn op_set_fill_hidden_in_export(
+        &mut self,
+        id: NodeId,
+        hidden: bool,
+    ) -> Result<Operation, OpError> {
+        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
+        let old = node.fill_hidden_in_export;
+        node.fill_hidden_in_export = hidden;
+        Ok(Operation::SetFillHiddenInExport { id, hidden: old })
+    }
+
     /// **Refused on a kind that cannot be one**, unlike [`Self::op_set_clip`],
     /// whose flag sits inert: the walk has to decide whether a mask paints, so a
     /// state with no answer must not get into the tree.
@@ -3998,6 +4016,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             opacity: n.opacity,
             blend: n.blend,
             clip: n.clip,
+            fill_hidden_in_export: n.fill_hidden_in_export,
             // A copy of a mask is a mask; the duplicate starts a second run at the
             // index it was inserted at.
             mask: n.mask,
@@ -4345,6 +4364,7 @@ mod tests {
             proportions_locked: false,
             opacity: 1.0,
             clip: false,
+            fill_hidden_in_export: false,
             mask: false,
             mask_mode: MaskMode::default(),
             fill_rule: FillRule::default(),

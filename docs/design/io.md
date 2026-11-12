@@ -72,6 +72,7 @@ Fields in that form, and the particular rule each adds:
 | --- | --- |
 | `Stroke::align` | Missing means `Center`, how v1 files were drawn. |
 | `Node::clip` | Named default says "yes", so it is re-checked against the kind on load (`dto.clip && dto.kind.clips_children()`). It is also normalized on the way **out** (`DocumentDto::from_document`), because `op_set_clip` accepts an inert flag on purpose. The loader's copy stays to guard hand-edited files. |
+| `NodeDto::fill_hidden_in_export` | Skipped when false. Normalized against `kind.clips_children()` on save and on load, as `clip` is, since `op_set_fill_hidden_in_export` accepts an inert flag. |
 | `DocumentDto::guides` | Absent means none. |
 | `DocumentDto::tokens_link` | Absent means linked to no tokens file (`styles-variables.md`, *Design tokens*). After `images`, before `published`. Its `into`, the collection the root tokens landed in, is skipped when absent, which reads as the collection on show. Not in the library block (§5.11a): the scan reads a file's first 4 KB, and the applied copy can be any size. |
 | `Node::proportions_locked` | Bare default; no normalization (inert on every kind). |

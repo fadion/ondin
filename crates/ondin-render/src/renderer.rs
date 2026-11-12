@@ -1684,6 +1684,7 @@ impl RenderOverrides {
             | Operation::SetProportionsLocked { .. }
             | Operation::SetPivot { .. }
             | Operation::SetExports { .. }
+            | Operation::SetFillHiddenInExport { .. }
             | Operation::SetLayoutGrids { .. }
             // Being a main or linked draws nothing (`changes_ink` agrees), nor does a
             // swap (the children its commit rewrites do) or a set's, variant's or

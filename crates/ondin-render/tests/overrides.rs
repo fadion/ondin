@@ -2820,6 +2820,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             id,
             exports: vec![],
         },
+        Operation::SetFillHiddenInExport { id, hidden: true },
         Operation::SetLayoutGrids { id, grids: vec![] },
         Operation::SetComponent {
             id,
@@ -2974,7 +2975,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     ];
 
     assert_eq!(styles.len(), 10, "and the styles' ten");
-    assert_eq!(chrome.len(), 19, "the chrome list is nineteen operations");
+    assert_eq!(chrome.len(), 20, "the chrome list is twenty operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(
         table_chrome.len() + table_ink.len(),

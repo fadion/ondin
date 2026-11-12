@@ -205,7 +205,7 @@ comes from the committed document.
 
 | Kind | Rows |
 | --- | --- |
-| Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them, above a frame's Clip content |
+| Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them, above a frame's Clip content and Show fill in exports |
 | Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row. A polygon's Sides takes the whole count row; a star's Points lines up under opacity and Inner ratio takes the rest |
 | Ellipse | a 2 × 2 grid of equal fields: opacity and Sweep, then Start and Ratio; icons only (pie slice, arc start, dashed circle), no labels, the polygon's pattern |
 | Spiral, arc | one row of two equal fields: opacity, then a spiral's *Turns* (`SPIRAL` glyph, two decimals) or an arc's *Sweep* (`ARC` glyph, signed degrees, negative bulging the other way) |
@@ -308,9 +308,11 @@ The document's families this machine can never have, and a replace-all for each
 - **Row.** The family's name after a `TEXT_AA` glyph in `color::warn()` (a click selects the layers set in it that are not locked, `may_select_in_bulk`), *N layers* right-aligned, then, when the family is drawn in a stand-in (`FontService::drawn_in`, `text.md`), a faint *Drawn in X* line, since an approximation is said rather than hidden, then a *Replace with…* dropdown over the Type panel's family list (`family_list`), which opens scrolled to and highlighting the stand-in, the likeliest replacement.
 - **Replacing** is `families::replace_family`, one transaction through `commit_edit`, with the status line *Replaced X with Y*. It rewrites the document's own text styles (their users follow through `style::settle`); a layer's own family, from that layer's own style so a copy's other overrides stand, except under a text style, where writing the defaults would detach it; matching runs on every layer; and matching cells of bound family variables and of every variable their aliases reach, where the family is held. A style or a layer's defaults that change family drop their axis and feature settings, as a family pick in the Type panel does; a run's stay. Kit styles and variables and the vault are left: a kit's mains are rewritten by its next update, and a family named only there says so on the status line instead. Names match without case. Through the commit door, instances whose family follows their main keep following.
 
-### Clip content
+### Clip content and Show fill in exports
 
 "Clip content" is a `switch_row`, the same control the OpenType list uses, not an `egui::checkbox`.
+
+"Show fill in exports" sits directly under it on a frame, a `ui::switch_row_marked` that reads on while the file draws the frame's fills (`!Node::fill_hidden_in_export`, `export.md`, *Plan*). Tooltip *Paint this frame's fill in exported files. Off, the files are transparent behind its content*; undo step *Show fill in exports* with `icon::EXPORT`. A copy's override is marked through `AppearanceMarks::fill_in_export`, whose mark text names the switch's on or off.
 
 ## Traps
 

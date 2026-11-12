@@ -2090,6 +2090,7 @@ mod tests {
             proportions_locked: false,
             opacity: 1.0,
             clip: false,
+            fill_hidden_in_export: false,
             mask: false,
             mask_mode: Default::default(),
             fill_rule: Default::default(),

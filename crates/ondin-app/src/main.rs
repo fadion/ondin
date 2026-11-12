@@ -1265,6 +1265,21 @@ fn run_export(
     let mut doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
     let res = Resolved::settled(&mut doc);
     let page = chosen_page(&doc, page)?;
+    // A drawing draws what the app's exports draw, frames' fills left out as
+    // asked (`plan::for_export`); a document format carries the fill as data.
+    let draws = matches!(
+        format,
+        ExportFormat::Svg
+            | ExportFormat::Pdf
+            | ExportFormat::PdfFrames
+            | ExportFormat::Png
+            | ExportFormat::Ico
+            | ExportFormat::Icns
+    );
+    let stripped = draws
+        .then(|| ondin_export::plan::for_export(&doc, &[page]))
+        .flatten();
+    let (doc, res) = stripped.unwrap_or((doc, res));
 
     let out_path = out
         .map(std::path::PathBuf::from)

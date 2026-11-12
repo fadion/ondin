@@ -600,12 +600,15 @@ impl OndinApp {
     /// origins, as its file is drawn.
     fn vector_note(&self, node: NodeId, spec: &ExportSpec) -> Option<String> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let origins = ondin_export::plan::origins_of(doc, res, node);
+        // The file's own drawing: a fill it leaves out cannot be approximated.
+        let stripped = ondin_export::plan::for_export(doc, &origins);
+        let (doc, res) = match &stripped {
+            Some((d, r)) => (d, r),
+            None => (doc, res),
+        };
         match spec.format {
             ExportFormat::Pdf => {
-                let origins = match ondin_export::plan::slice_region(doc, res, node) {
-                    Some((_, origins)) => origins,
-                    None => vec![node],
-                };
                 let approximated = ondin_export::pdf::approximated(doc, res, &origins, spec.text);
                 fidelity_clauses(&approximated, &[])
             }
@@ -626,6 +629,13 @@ impl OndinApp {
         key: PreviewKey,
     ) -> Option<ExportPreview> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
+        // The copy the file is drawn from, frames' fills left out as asked.
+        let origins = ondin_export::plan::origins_of(doc, res, key.node);
+        let stripped = ondin_export::plan::for_export(doc, &origins);
+        let (doc, res) = match &stripped {
+            Some((d, r)) => (d, r),
+            None => (doc, res),
+        };
         // A slice previews its box of the page, as its file is (`plan::render`).
         let region = ondin_export::plan::slice_region(doc, res, key.node);
         if key.spec.format.is_icon() {
@@ -1553,6 +1563,13 @@ impl OndinApp {
             return *n;
         }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
+        // Counted in the file's own drawing, which may leave frames' fills out.
+        let stripped =
+            ondin_export::plan::for_export(doc, &ondin_export::plan::origins_of(doc, res, node));
+        let (doc, res) = match &stripped {
+            Some((d, r)) => (d, r),
+            None => (doc, res),
+        };
         let n = ondin_export::svg::svg_spec(doc, res, node, spec).merged;
         self.export_merged = Some((key, n));
         n
@@ -2566,8 +2583,19 @@ impl OndinApp {
             if cancel.cancelled() {
                 return Delivered::cancelled();
             }
+            // Drawn from the copy every export draws from, frames' fills left out
+            // as asked (`plan::for_export`).
+            let roots: Vec<NodeId> = pages
+                .iter()
+                .flat_map(|(_, ids)| ids.iter().copied())
+                .collect();
+            let stripped = ondin_export::plan::for_export(&doc, &roots);
+            let (doc, resolved) = match &stripped {
+                Some((d, r)) => (d, r),
+                None => (&doc, &resolved),
+            };
             let made =
-                ondin_export::pdf::pdf_pages(&doc, &resolved, &pages, ondin_core::ExportText::Live);
+                ondin_export::pdf::pdf_pages(doc, resolved, &pages, ondin_core::ExportText::Live);
             turn.wait();
             if !cancel.begin_write() {
                 return Delivered::cancelled();

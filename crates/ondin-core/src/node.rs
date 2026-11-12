@@ -55,6 +55,10 @@ pub struct Node {
     /// Whether this node clips what its children draw to its own frame.
     /// Node-level like `visible`/`locked`; ignored by kinds with no frame.
     pub(crate) clip: bool,
+    /// Whether exports leave this frame's fills out, so an icon drawn on a
+    /// working ground exports transparent. Canvas ink is unchanged; read only
+    /// by `ondin_export::plan::for_export`. Inert on kinds with no frame.
+    pub(crate) fill_hidden_in_export: bool,
     /// Whether this node is a **mask**: it draws nothing itself, and its outline
     /// clips the *run* of siblings painted above it, up to the next mask. Unlike
     /// [`Self::clip`], which cuts children; a frame cannot do it
@@ -429,6 +433,10 @@ impl Node {
     /// with a frame — artboards — act on it today.
     pub fn clip(&self) -> bool {
         self.clip
+    }
+    /// Whether exports leave this frame's fills out (`SetFillHiddenInExport`).
+    pub fn fill_hidden_in_export(&self) -> bool {
+        self.fill_hidden_in_export
     }
     /// Whether this node is a mask: it paints nothing, and its outline clips the
     /// run of siblings above it. Not [`Self::clip`], which is about children.

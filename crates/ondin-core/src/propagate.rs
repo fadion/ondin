@@ -65,6 +65,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetBlend { .. }
         | Operation::SetPivot { .. }
         | Operation::SetClip { .. }
+        | Operation::SetFillHiddenInExport { .. }
         | Operation::SetMask { .. }
         | Operation::SetMaskMode { .. }
         | Operation::SetFillRule { .. }
@@ -1209,6 +1210,7 @@ pub(crate) fn untouched(
         && c.opacity == s.opacity
         && c.blend == s.blend
         && c.clip == s.clip
+        && c.fill_hidden_in_export == s.fill_hidden_in_export
         && c.mask == s.mask
         && c.mask_mode == s.mask_mode
         && c.fill_rule == s.fill_rule

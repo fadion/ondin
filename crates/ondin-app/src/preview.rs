@@ -492,6 +492,17 @@ pub struct PenState {
     pub editing: Option<PenEdit>,
 }
 
+/// A pen press made by a finger, kept until its release: a second finger landing
+/// first turns it into a pinch, which takes the press back.
+pub struct PenTouch {
+    /// How many anchors the run held before the press; `None` when the press
+    /// started or resumed the run.
+    pub anchors: Option<usize>,
+    /// A press that would close or join the run, and so commit: where it landed
+    /// and whether Shift was held. It waits for the release.
+    pub deferred: Option<(Point, bool)>,
+}
+
 /// The existing `Path` node a pen gesture is extending.
 pub struct PenEdit {
     pub id: NodeId,

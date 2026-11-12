@@ -801,6 +801,9 @@ pub struct OndinApp {
     /// and through the frame they do, so the first finger's emulated press, which
     /// egui-winit sends as a mouse button, never reaches a tool.
     pub(crate) pinch_held: bool,
+    /// What a touch press did to the pen, held until its release so a second
+    /// finger landing first can take it back (`canvas::undo_pen_touch`).
+    pub(crate) pen_touch: Option<crate::preview::PenTouch>,
     /// Every value a gesture is holding while it runs ([`InFlight`]).
     pub(crate) in_flight: InFlight,
     /// The detached colour picker, when one is open.
@@ -1902,6 +1905,7 @@ impl OndinApp {
             entered_group: None,
             gesture_cancelled: false,
             pinch_held: false,
+            pen_touch: None,
             in_flight: InFlight::default(),
             picker: None,
             key_colour: None,
@@ -2958,6 +2962,7 @@ impl OndinApp {
     /// release frame at all (the selection changed under it).
     pub(crate) fn end_released_gestures(&mut self) {
         self.gesture_cancelled = false;
+        self.pen_touch = None;
         self.in_flight.session_scrub = None;
         self.in_flight.settings_scrub = None;
         self.in_flight.rename_scrub = None;

@@ -1999,6 +1999,7 @@ impl OndinApp {
         // press started is abandoned, and the tools sit the touch out.
         let (began, pinching) = self.track_pinch(ui.ctx());
         if began {
+            self.undo_pen_touch();
             self.cancel_gesture(ui.ctx());
             self.gesture_cancelled = true;
         }
@@ -2063,6 +2064,24 @@ impl OndinApp {
         let was = self.pinch_held;
         self.pinch_held = pinch || (was && touching);
         (pinch && !was, self.pinch_held || was)
+    }
+
+    /// A pinch began: take back what its first finger's press did to the pen —
+    /// the anchor it planted, or the run it started or resumed — and end the
+    /// shaping, whose release the pinch keeps from the pen.
+    pub(crate) fn undo_pen_touch(&mut self) {
+        match self.pen_touch.take().map(|t| t.anchors) {
+            Some(None) => self.pen = None,
+            Some(Some(n)) => {
+                if let Some(pen) = self.pen.as_mut() {
+                    pen.anchors.truncate(n);
+                }
+            }
+            None => {}
+        }
+        if let Some(pen) = self.pen.as_mut() {
+            pen.shaping = false;
+        }
     }
 
     /// The canvas's door onto the context menu (`docs/context-menus.md` §2).
@@ -4922,7 +4941,7 @@ impl OndinApp {
     /// handles out symmetrically; release settles it. On press, not click, since
     /// a click resolves only after the shaping drag.
     fn pen_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
-        let (enter, pressed, released, alt, shift, ctrl) = ui.input(|i| {
+        let (enter, pressed, released, alt, shift, ctrl, touch) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Enter),
                 i.pointer.primary_pressed(),
@@ -4930,6 +4949,7 @@ impl OndinApp {
                 i.modifiers.alt,
                 i.modifiers.shift,
                 i.modifiers.ctrl || i.modifiers.command,
+                i.any_touches(),
             )
         });
         // Escape also finishes, but `OndinApp::escape` owns it.
@@ -4968,7 +4988,24 @@ impl OndinApp {
             && resp.contains_pointer()
             && let Some(p) = ui.ctx().pointer_interact_pos()
         {
-            self.pen_press(self.to_world(p, rect, ppp), shift);
+            let world = self.to_world(p, rect, ppp);
+            if touch {
+                // A second finger may yet make this press a pinch's, which takes
+                // it back (`undo_pen_touch`); a commit cannot be, so it waits.
+                let commits = self.pen_press_commits(world, shift);
+                self.pen_touch = Some(crate::preview::PenTouch {
+                    anchors: self.pen.as_ref().map(|p| p.anchors.len()),
+                    deferred: commits.then_some((world, shift)),
+                });
+                if !commits {
+                    self.pen_press(world, shift);
+                }
+            } else {
+                self.pen_press(world, shift);
+            }
+        }
+        if released && let Some((world, shift)) = self.pen_touch.take().and_then(|t| t.deferred) {
+            self.pen_press(world, shift);
         }
         if self.pen.as_ref().is_some_and(|p| p.shaping)
             && let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos())
@@ -5213,6 +5250,18 @@ impl OndinApp {
             .as_ref()
             .is_some_and(|e| e.id == target.id && e.active == target.active);
         (!same_run).then_some(target)
+    }
+
+    /// Whether a pen press at `world` would close or join the run, which commits
+    /// it, by the tests [`Self::pen_press`] makes.
+    fn pen_press_commits(&self, world: Point, shift: bool) -> bool {
+        let Some(pen) = self.pen.as_ref() else {
+            return false;
+        };
+        let at = self.pen_point(world, shift).0;
+        let ppw = self.points_per_world();
+        tools::pen_close_snap(&pen.anchors, at, ppw, f64::from(PEN_PICK_PX)).is_some()
+            || self.pen_join_target(world).is_some()
     }
 
     /// Join the run being drawn to the open endpoint under the pointer, and finish.
@@ -26812,6 +26861,107 @@ mod pinch_tests {
             canvas_frame(&ctx, &mut app, Vec::new());
         }
         assert!(app.text.is_some(), "the session stays open");
+    }
+
+    /// A pinch whose first finger lands a frame before the second takes back
+    /// that finger's pen press: no stray anchor, no shaping left on, and a press
+    /// on the first anchor, which would close the run, commits nothing.
+    ///
+    /// flip: `canvas_ui` not calling `undo_pen_touch` → fails at "no stray
+    /// anchor"; `pen_input` pressing a closing touch at once → fails at "nothing
+    /// committed".
+    #[test]
+    fn a_pinch_takes_back_its_first_fingers_pen_press() {
+        use egui::TouchPhase::{End, Move, Start};
+        for on_first in [false, true] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let (mut app, first, centre) = app_with_a_pen_run(&ctx);
+            let nodes = app.session.doc.len();
+
+            let a = if on_first {
+                first
+            } else {
+                centre + egui::vec2(-120.0, 90.0)
+            };
+            canvas_frame(&ctx, &mut app, finger(0, Start, a));
+            let mut b = a + egui::vec2(0.0, 40.0);
+            canvas_frame(&ctx, &mut app, finger(1, Start, b));
+            for _ in 0..3 {
+                b.y += 15.0;
+                let mut ev = finger(0, Move, a);
+                ev.extend(finger(1, Move, b));
+                canvas_frame(&ctx, &mut app, ev);
+            }
+            let mut ev = finger(1, End, b);
+            ev.extend(finger(0, End, a));
+            canvas_frame(&ctx, &mut app, ev);
+            for _ in 0..3 {
+                canvas_frame(&ctx, &mut app, Vec::new());
+            }
+            assert_eq!(
+                app.session.doc.len(),
+                nodes,
+                "nothing committed (on the first anchor: {on_first})"
+            );
+            let pen = app.pen.as_ref().expect("the run is still being drawn");
+            assert_eq!(
+                pen.anchors.len(),
+                2,
+                "no stray anchor (on the first anchor: {on_first})"
+            );
+            assert!(!pen.shaping, "and no shaping left on");
+        }
+    }
+
+    /// [`app_with_rect`] with the pen drawing a run of two anchors, clicked with
+    /// the mouse, and where its first anchor is on screen.
+    fn app_with_a_pen_run(ctx: &egui::Context) -> (OndinApp, egui::Pos2, egui::Pos2) {
+        let (mut app, _id, centre) = app_with_rect(ctx);
+        app.session.selection.clear();
+        app.tool = Tool::Pen;
+        let first = centre + egui::vec2(120.0, -100.0);
+        let second = centre + egui::vec2(160.0, -60.0);
+        for at in [first, second] {
+            for _ in 0..3 {
+                canvas_frame(ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+            }
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            canvas_frame(ctx, &mut app, vec![button(true)]);
+            canvas_frame(ctx, &mut app, vec![button(false)]);
+            for _ in 0..40 {
+                canvas_frame(ctx, &mut app, Vec::new());
+            }
+        }
+        let anchors = app.pen.as_ref().map(|p| p.anchors.len());
+        assert_eq!(anchors, Some(2), "the fixture: a run of two anchors");
+        (app, first, centre)
+    }
+
+    /// A one-finger tap on the run's first anchor still closes it, on the
+    /// release the close waits for.
+    ///
+    /// flip: `pen_input` dropping the deferred press at the release → fails at
+    /// "the tap closes the run".
+    #[test]
+    fn a_finger_tap_on_the_first_anchor_closes_the_run() {
+        use egui::TouchPhase::{End, Start};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, first, _) = app_with_a_pen_run(&ctx);
+        let nodes = app.session.doc.len();
+        canvas_frame(&ctx, &mut app, finger(0, Start, first));
+        assert_eq!(app.session.doc.len(), nodes, "nothing yet, on the press");
+        canvas_frame(&ctx, &mut app, finger(0, End, first));
+        assert!(
+            app.pen.is_none() && app.session.doc.len() == nodes + 1,
+            "the tap closes the run"
+        );
     }
 }
 

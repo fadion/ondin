@@ -115,7 +115,7 @@ preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the 
   `ui::menu_frame` with 6pt padding, and the same status-bar clearance (`size_preview_clearance`, the card's width + 8pt).
   `size_preview_ui` runs right after `minimap_ui`, so focus mode keeps it and present mode hides it.
 - **Subject:** the selection, outermost only (`build::in_document_order`, reversed so the top
-  layer comes first), one row per layer, five rows at most, past which a footer counts the rest (*Showing 5 of 8 layers*).
+  layer comes first), one row per layer with a box, five rows at most, past which a footer counts the rest (*Showing 5 of 8 layers*). A layer with no box gets no row and is not counted.
   The head's pin (`PUSH_PIN`) holds the current layers instead of following the selection; a
   deleted layer drops out of the pin, and the pin lets go when none is left. The pin is view state
   and never saved.

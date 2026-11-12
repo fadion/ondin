@@ -149,7 +149,8 @@ pub(crate) fn toggled(sizes: &[u32], n: u32) -> Option<Vec<u32>> {
 }
 
 /// Every tile of `want` drawn, on the worker. A hidden subject is drawn anyway, on
-/// a copy shown, so a frame can be checked without its guide layers.
+/// a copy shown, so a frame can be checked without its guide layers. A hidden
+/// parent needs nothing: a subtree draws from its own layer down.
 fn render(
     doc: &Document,
     res: &Resolved,
@@ -320,12 +321,13 @@ impl OndinApp {
         }
         let prefs = self.prefs.size_preview.clone();
         let subjects = self.size_preview_subjects();
-        let total = subjects.len();
-        let rows: Vec<(NodeId, Rect)> = subjects
+        // A layer with no box gets no row, so it is not counted either.
+        let mut rows: Vec<(NodeId, Rect)> = subjects
             .iter()
-            .take(MAX_ROWS)
             .filter_map(|id| Some((*id, self.session.preview_world_bounds(*id)?)))
             .collect();
+        let total = rows.len();
+        rows.truncate(MAX_ROWS);
         let live = !self.session.render_inputs().2.is_empty();
         let ppp = ctx.pixels_per_point();
         let want = (!rows.is_empty()).then(|| Want {
@@ -877,6 +879,71 @@ mod tests {
         );
         assert!(app.size_preview_subjects().is_empty());
         assert!(app.size_preview.pinned.is_none(), "the pin let go");
+    }
+
+    /// A layer in a hidden group is drawn as it is, with nothing shown on a copy:
+    /// its subtree draws from the layer down.
+    #[test]
+    fn a_layer_in_a_hidden_group_is_drawn() {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::{Brush, Fill, IdSource, NodeKind, keyed_by_position};
+        let mut ids = IdSource::new(0x5A0);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (group, dot) = (ids.mint(), ids.mint());
+        let ops = vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: dot,
+                parent: group,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(8.0, 8.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetFills {
+                id: dot,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
+                    visible: true,
+                }]),
+            },
+            Operation::SetVisible {
+                id: group,
+                visible: false,
+            },
+        ];
+        doc.apply(&Transaction(ops)).expect("the fixture");
+        let res = Resolved::rebuild(&doc);
+        let want = Want {
+            rows: vec![(dot, Rect::new(0.0, 0.0, 8.0, 8.0))],
+            sizes: vec![8],
+            pixels: true,
+            ppp: 1.0f32.to_bits(),
+            revision: 0,
+        };
+        let tiles = render(
+            &doc,
+            &res,
+            &RenderOverrides::default(),
+            &mut ImageStore::new(),
+            &want,
+        );
+        let (rgba, px) = &tiles[0][0];
+        assert_eq!(*px, 8);
+        let centre = ((4 * 8 + 4) * 4 + 3) as usize;
+        assert_eq!(rgba[centre], 255, "the dot is drawn");
     }
 
     /// Sizes tick in order, a seventh and the last one going out are refused.

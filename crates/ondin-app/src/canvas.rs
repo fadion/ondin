@@ -27357,6 +27357,32 @@ mod point_snap_tests {
         assert_eq!(xs(&subs, (0, 3), &[]), [2.0, 0.0]);
     }
 
+    /// While the node tool edits a path, the align and distribute chords act on the
+    /// selected points, as the Align card does, and not on the layer.
+    ///
+    /// flip: `dispatch` sending `Action::Align` to `align` → fails at "the point moved".
+    #[test]
+    fn the_align_chords_act_on_points_in_the_node_tool() {
+        use crate::input::Action;
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_rect_and_path(&ctx);
+        app.points.set_one(id, (0, 0));
+        app.points.toggle(id, (0, 2));
+        app.dispatch(&ctx, Action::Align(build::Axis::X, build::Edge::Min));
+        let at = app.anchor_position(id, (0, 2));
+        assert_eq!(at, Some(Point::new(200.0, 100.0)), "the point moved");
+        assert_eq!(
+            app.anchor_position(id, (0, 0)),
+            Some(Point::new(200.0, 0.0))
+        );
+
+        // Three points spread to equal steps along y: (300, 0) is already between.
+        app.points.toggle(id, (0, 1));
+        app.dispatch(&ctx, Action::Distribute(build::Axis::Y));
+        let mid = app.anchor_position(id, (0, 1)).map(|p| p.y);
+        assert_eq!(mid, Some(50.0), "the middle point spread");
+    }
+
     /// Shift steps a handle to an eighth of a turn on the canvas, its length the
     /// pointer's projection, from a pointer too far off the diagonal for the soft
     /// axis pull to catch.

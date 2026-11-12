@@ -239,7 +239,8 @@ the pattern).
 Figma's distributes (`Ctrl+Alt+H`/`V`) collide with paste-properties (§7), and `Ctrl+Alt` is this
 keymap's **boolean namespace**. Illustrator has no align shortcuts. `Alt+S` does not collide with
 `Ctrl+Alt+S` (subtract): the block is `!cmd`. `build::align`/`distribute` honour the key layer when
-one is designated (§15 D113).
+one is designated (§15 D113). While the node tool edits a path, these chords align and distribute
+its selected points instead, as the Align card does (`OndinApp::dispatch`).
 
 ## 6. View, grid, guides and snapping — Adobe's set
 

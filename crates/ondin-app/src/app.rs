@@ -2746,8 +2746,16 @@ impl OndinApp {
             Action::FillContent => self.open_fill_content(),
             Action::FindText { replace } => self.open_find(replace),
             Action::Flip(axis) => self.flip(axis),
-            Action::Align(axis, edge) => self.align(axis, edge),
-            Action::Distribute(axis) => self.distribute(axis),
+            // While the node tool edits a path, the Align card acts on its points,
+            // and so does every other door to these verbs.
+            Action::Align(axis, edge) => match self.edited_path() {
+                Some(_) => self.align_points(axis, edge),
+                None => self.align(axis, edge),
+            },
+            Action::Distribute(axis) => match self.edited_path() {
+                Some(_) => self.distribute_points(axis),
+                None => self.distribute(axis),
+            },
             Action::TidyUp => self.tidy_up(),
             Action::OpacityDigit(d) => self.opacity_digit(ctx, d),
             Action::BlendChord(d) => self.blend_chord(d),

@@ -1370,9 +1370,12 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
-        app.update_linked_charts(r"C:\nowhere\sales.csv");
+        // Built by `join`, so every platform reads `sales.csv` as its name.
+        let path = std::env::temp_dir().join("nowhere").join("sales.csv");
+        let path = path.to_string_lossy();
+        app.update_linked_charts(&path);
         let first = Arc::clone(&app.chart_read.as_ref().expect("a read")._stop.0);
-        app.update_linked_charts(r"C:\nowhere\sales.csv");
+        app.update_linked_charts(&path);
         assert!(!first.load(Ordering::Relaxed), "not replaced");
         assert_eq!(app.session.status().text, "Reading sales.csv\u{2026}");
     }

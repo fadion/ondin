@@ -2167,7 +2167,7 @@ fn refit(
 
 /// How finely [`polyline`] cuts a curve.
 #[derive(Clone, Copy)]
-struct Flatten {
+pub(crate) struct Flatten {
     /// How far a chord may stray from its curve, in units.
     tol: f64,
     /// The half-width of a stroke that bevels every vertex, whose bevels must stay
@@ -2180,7 +2180,7 @@ struct Flatten {
 
 impl Flatten {
     /// Chords within `tol`, for a fill or an offset's polygon.
-    fn chords(tol: f64) -> Self {
+    pub(crate) fn chords(tol: f64) -> Self {
         Self {
             tol,
             bevel: 0.0,
@@ -2200,7 +2200,7 @@ impl Flatten {
 /// read as a curve. And each curve starts and ends with a chord a tolerance long at
 /// most, so the polygon meets a corner along the curve's own tangent, as the
 /// corner's mitre does.
-fn polyline(sub: &kurbo::BezPath, how: Flatten, min: usize) -> Option<Vec<[f64; 2]>> {
+pub(crate) fn polyline(sub: &kurbo::BezPath, how: Flatten, min: usize) -> Option<Vec<[f64; 2]>> {
     use kurbo::{ParamCurve, ParamCurveArclen};
     let mut points: Vec<[f64; 2]> = Vec::new();
     let mut push = |p: kurbo::Point| {
@@ -8126,7 +8126,13 @@ fn reorder_ops(current: &[NodeId], desired: &[NodeId]) -> Vec<Operation> {
 
 /// Push the `SetTransform` that shifts `id` by a world-space `delta`, skipping
 /// no-ops so an align that changes nothing is an empty transaction.
-fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mut Vec<Operation>) {
+pub(crate) fn push_offset(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+    delta: Vec2,
+    ops: &mut Vec<Operation>,
+) {
     if delta.hypot() < 1e-9 {
         return;
     }

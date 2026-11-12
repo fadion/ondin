@@ -132,8 +132,9 @@ fn a_mask_and_its_run_become_a_masked_group() {
 
 /// A pinned group's layers are written as scaling with it on both axes, since
 /// Penpot reads a group child's own constraints, and the group by its insets.
-/// flip: `item` writing each layer's own insets inside the group → fails at
-/// the layers' constraints.
+/// flip: `item` writing each layer's own insets inside the group, or
+/// `scales_with_group` asking only the layer's parent → fails at the layers'
+/// constraints.
 #[test]
 fn a_pinned_groups_layers_scale_with_it() {
     let f = rich::pinned_icon();
@@ -152,9 +153,9 @@ fn a_pinned_groups_layers_scale_with_it() {
     };
     let scale = ("scale".to_owned(), "scale".to_owned());
     assert_eq!(
-        (constraints("Bar"), constraints("Dot")),
-        (scale.clone(), scale.clone()),
-        "the layers' constraints"
+        (constraints("Bar"), constraints("Dot"), constraints("Nib")),
+        (scale.clone(), scale.clone(), scale.clone()),
+        "the layers' constraints, through a nested group and a boolean"
     );
     assert_eq!(constraints("Art"), scale, "the group, by its percentages");
 }

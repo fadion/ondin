@@ -79,12 +79,13 @@ fn png() -> Vec<u8> {
 }
 
 /// A 20 × 20 *Icon* component whose *Art*, a plain group pinned 20% in from
-/// every side, holds two rects, *Bar* and *Dot*: art its group scales.
+/// every side, holds art its group scales: the rect *Bar*, the rect *Dot* in
+/// the plain group *Inner*, and the rect *Nib* in the boolean *Badge*.
 pub fn pinned_icon() -> Fixture {
     let mut ids = IdSource::new(0x1C0);
     let root = ids.mint();
     let mut doc = Document::new(root);
-    let [icon, art, bar, dot] = [(); 4].map(|_| ids.mint());
+    let [icon, art, bar, inner, dot, badge, nib] = [(); 7].map(|_| ids.mint());
     let pct = Some(ondin_core::LengthPct::Percent(20.0));
     let named = |id, name: &str| Operation::SetName {
         id,
@@ -112,11 +113,32 @@ pub fn pinned_icon() -> Fixture {
             name: Some("Art".into()),
         },
         rect(bar, art, 0, (12.0, 4.0), Affine::translate((4.0, 4.0))),
-        rect(dot, art, 1, (4.0, 4.0), Affine::translate((12.0, 12.0))),
+        Operation::CreateNode {
+            id: inner,
+            parent: art,
+            index: 1,
+            kind: NodeKind::Group,
+            transform: None,
+            name: Some("Inner".into()),
+        },
+        rect(dot, inner, 0, (4.0, 4.0), Affine::translate((12.0, 12.0))),
+        Operation::CreateNode {
+            id: badge,
+            parent: art,
+            index: 2,
+            kind: NodeKind::Boolean {
+                op: ondin_core::node::BoolOp::Union,
+            },
+            transform: None,
+            name: Some("Badge".into()),
+        },
+        rect(nib, badge, 0, (2.0, 2.0), Affine::translate((14.0, 4.0))),
         named(bar, "Bar"),
         named(dot, "Dot"),
+        named(nib, "Nib"),
         solid(bar, [40, 40, 40]),
         solid(dot, [40, 40, 40]),
+        solid(badge, [40, 40, 40]),
         Operation::SetInsets {
             id: art,
             insets: ondin_core::Insets {

@@ -1704,7 +1704,7 @@ impl Walk<'_> {
                 over_children = self.paint(&mut el, node, *size);
             }
             NodeKind::Text { .. } => {
-                self.text(&mut el, node);
+                self.text(&mut el, node, matches!(place, Place::Share { .. }));
                 if let Some(b) = self.bound.get(&id).filter(|b| b.kind == PropKind::Text) {
                     // One value in the first paragraph's style, which is what the
                     // canvas does with a value that is not the main's.
@@ -1952,31 +1952,40 @@ impl Walk<'_> {
                 el.set("position", "absolute");
                 // The unturned box's share, turned about its centre as CSS turns
                 // by default: the canvas stretches a turned layer's own box and
-                // turns that. Text keeps its type size there too.
-                let share = bx.and_then(|b| {
-                    let at = container::slot_of(local, b);
-                    let pct = |v: f64, len: f64| {
-                        (len > 1e-9).then(|| format!("{}%", fmt(v / len * 100.0)))
-                    };
-                    Some((
-                        pct(at.x - of.x0, of.width())?,
-                        pct(at.y - of.y0, of.height())?,
-                        pct(b.width(), of.width())?,
-                        pct(b.height(), of.height())?,
-                    ))
-                });
-                match share {
-                    Some((left, top, width, height)) => {
-                        self.sizes(el, node, kind, bx, (true, true));
+                // turns that. Text keeps its type size there too. An axis the
+                // kind does not stretch on (`share_axes`) keeps the layer's own
+                // length at its share's start; an axis the group is flat on
+                // keeps its offset in px, as `container::share_of` does.
+                match bx {
+                    Some(b) => {
+                        let at = container::slot_of(local, b);
+                        let on = share_axes(kind, b);
+                        let axis =
+                            |start: f64, len: f64, lo: f64, extent: f64, on: bool| match extent
+                                > FLAT_EXTENT
+                            {
+                                true => (
+                                    format!("{}%", fmt((start - lo) / extent * 100.0)),
+                                    on.then(|| format!("{}%", fmt(len / extent * 100.0))),
+                                ),
+                                false => (px(start - lo), None),
+                            };
+                        let (left, width) = axis(at.x, b.width(), of.x0, of.width(), on.0);
+                        let (top, height) = axis(at.y, b.height(), of.y0, of.height(), on.1);
+                        self.sizes(el, node, kind, bx, (width.is_some(), height.is_some()));
                         el.set("left", left);
                         el.set("top", top);
-                        el.set("width", width);
-                        el.set("height", height);
+                        if let Some(w) = width {
+                            el.set("width", w);
+                        }
+                        if let Some(h) = height {
+                            el.set("height", h);
+                        }
                         if let Some(m) = css::matrix(css::linear(local)) {
                             el.set("transform", m);
                         }
                     }
-                    // With no extent to share: at its drawn place from the group's
+                    // With no box to share: at its drawn place from the group's
                     // box, which a resize leaves where it is.
                     None => {
                         self.report.approximate(format!(
@@ -2460,8 +2469,9 @@ impl Walk<'_> {
 
     /// A text node: the face on the element, a `p` per paragraph, its runs as
     /// [`Self::run`] writes them, and the content already cased as the canvas
-    /// cases it.
-    fn text(&mut self, el: &mut Element, node: &Node) {
+    /// cases it. `shared` is text a pinned group scales, whose box is a wrap
+    /// width whatever its sizing (`container::resized`).
+    fn text(&mut self, el: &mut Element, node: &Node, shared: bool) {
         let kind = self.res.used_kind_of(node);
         let NodeKind::Text {
             content,
@@ -2564,7 +2574,7 @@ impl Walk<'_> {
         }
         el.text_class = self.text_class(node, el);
         // On each paragraph, not here: the indentation between `p`s would be kept.
-        let white_space = if matches!(sizing, TextSizing::Auto) {
+        let white_space = if matches!(sizing, TextSizing::Auto) && !shared {
             "pre"
         } else {
             "pre-wrap"
@@ -3110,43 +3120,66 @@ impl Walk<'_> {
         pic.set("height", px(ink.height()));
         pic.set("transform-origin", "0 0");
         let at_ink = Affine::translate(ink.origin().to_vec2());
-        // A path or a line stretched between its insets: a box the insets place,
-        // and the picture filling it as the canvas stretches the points — the
-        // geometry box as the view, scaled unevenly, the stroke not scaled.
-        // An axis it does not stretch on keeps the ink as its view, at its size,
-        // so a flat rule (no height to scale) still draws. Its offset into the
-        // box is a whole number, the view starting that far out: Chrome snaps a
-        // replaced element's box to the pixel, and a fractional `top` moved the
-        // stroke by up to half a pixel.
-        if pic.markup.is_some()
+        // A path or a line stretched between its insets, or a picture in a group
+        // its insets scale: a box the insets or the share place, and the picture
+        // filling it as the canvas stretches the points — the geometry box as
+        // the view, scaled unevenly, the stroke not scaled. An axis it does not
+        // stretch on keeps the ink as its view, at its size, so a flat rule (no
+        // height to scale) still draws. Its offset into the box is a whole
+        // number, the view starting that far out: Chrome snaps a replaced
+        // element's box to the pixel, and a fractional `top` moved the stroke by
+        // up to half a pixel. A PNG has no view, so it is placed in the box by
+        // percentages of it.
+        let markup = pic.markup.is_some();
+        if (markup || matches!(place, Place::Share { .. }))
             && let Some(Stretching {
                 mut holder,
                 view: g,
                 stretched: on,
                 into_own,
-            }) = self.stretching_holder(node, ink, world, place)
+            }) = self.stretching_holder(node, ink, world, place, markup)
         {
-            let span = |on: bool, g0: f64, g1: f64, len: f64| match on {
-                true => (g0, g1, "0".to_string(), "100%".to_string()),
-                false => {
-                    let out = g0.ceil();
-                    (g0 - out, len, px(-out), px(len - (g0 - out)))
-                }
-            };
-            let (x0, x1, left, width) = span(on.0, g.x0, g.x1, ink.width());
-            let (y0, y1, top, height) = span(on.1, g.y0, g.y1, ink.height());
+            if on.0 || on.1 {
+                self.report_stretch_distortion(node, &drawn, pic.markup.as_deref());
+            }
             if let Some(m) = pic.markup.take() {
+                let span = |on: bool, g0: f64, g1: f64, len: f64| match on {
+                    true => (g0, g1, "0".to_string(), "100%".to_string()),
+                    false => {
+                        let out = g0.ceil();
+                        (g0 - out, len, px(-out), px(len - (g0 - out)))
+                    }
+                };
+                let (x0, x1, left, width) = span(on.0, g.x0, g.x1, ink.width());
+                let (y0, y1, top, height) = span(on.1, g.y0, g.y1, ink.height());
                 let m = match into_own {
                     Some(t) => wrapped_markup(&m, t),
                     None => m,
                 };
                 pic.markup = Some(stretched_markup(&m, Rect::new(x0, y0, x1, y1)));
+                pic.set("left", left);
+                pic.set("top", top);
+                pic.set("width", width);
+                pic.set("height", height);
+                pic.set("overflow", "visible");
+            } else {
+                let span = |on: bool, g0: f64, g1: f64, len: f64| {
+                    let extent = g1 - g0;
+                    match on && extent > FLAT_EXTENT {
+                        true => (
+                            format!("{}%", fmt(-g0 / extent * 100.0)),
+                            format!("{}%", fmt(len / extent * 100.0)),
+                        ),
+                        false => (px(-g0), px(len)),
+                    }
+                };
+                let (left, width) = span(on.0, g.x0, g.x1, ink.width());
+                let (top, height) = span(on.1, g.y0, g.y1, ink.height());
+                pic.set("left", left);
+                pic.set("top", top);
+                pic.set("width", width);
+                pic.set("height", height);
             }
-            pic.set("left", left);
-            pic.set("top", top);
-            pic.set("width", width);
-            pic.set("height", height);
-            pic.set("overflow", "visible");
             holder.children.push(Child::Element(Box::new(pic)));
             return Some(holder);
         }
@@ -3185,20 +3218,27 @@ impl Walk<'_> {
     /// For a picture of a path or a line that its insets stretch, or of any
     /// layer in a pinned group, the box that holds it ([`Stretching`]). `None`
     /// for anything else, and for one drawn turned, skewed or scaled that
-    /// stretches one way only, which keeps its size, reported.
+    /// stretches one way only, or that is a PNG (`markup` false), which keeps
+    /// its size, reported.
     fn stretching_holder(
         &mut self,
         node: &Node,
         ink: Rect,
         world: Affine,
         place: Place,
+        markup: bool,
     ) -> Option<Stretching> {
         let kind = self.res.used_kind_of(node).clone();
         let insets = node.insets();
         let shared = self.shared_box(node, place);
         let stretched = match place {
-            // Every picture in a group its insets scale takes its share, both ways.
-            Place::Share { .. } => (true, true),
+            // A picture in a group its insets scale takes its share on the axes
+            // its kind stretches on, and is placed by it on the others.
+            Place::Share { .. } => {
+                let bx = self.box_rect(node).or(shared)?;
+                share_axes(&kind, bx)
+            }
+            Place::Free { .. } if !markup => return None,
             Place::Free { boxed: true, .. }
                 if insets.is_authored()
                     && (matches!(kind, NodeKind::Path { .. } | NodeKind::Line { .. })
@@ -3212,7 +3252,8 @@ impl Walk<'_> {
             }
             _ => return None,
         };
-        if !(stretched.0 || stretched.1) {
+        let share = matches!(place, Place::Share { .. });
+        if !(share || stretched.0 || stretched.1) {
             return None;
         }
         let bx = self.box_rect(node).or(shared)?;
@@ -3230,12 +3271,15 @@ impl Walk<'_> {
         }
         // Drawn turned, skewed or scaled: the picture is taken back into the
         // layer's own axes, where its box is `bx`, and the holder's CSS and its
-        // ancestors' turn it again. Only when it stretches both ways, since an
-        // axis kept at its size keeps the world ink as its view.
-        if stretched != (true, true) || world.determinant().abs() < 1e-12 {
+        // ancestors' turn it again. Only for markup that stretches both ways,
+        // since an axis kept at its size keeps the world ink as its view.
+        if !markup || stretched != (true, true) || world.determinant().abs() < 1e-12 {
+            let why = match share {
+                true => "in a group its insets scale",
+                false => "stretched between its insets",
+            };
             self.report.approximate(format!(
-                "{} {}: stretched between its insets while turned or scaled, \
-                 written at its drawn size",
+                "{} {}: {why} while turned or scaled, written at its drawn size",
                 kind_word(node),
                 label(node)
             ));
@@ -3251,6 +3295,73 @@ impl Walk<'_> {
             stretched,
             into_own: Some(into_own),
         })
+    }
+
+    /// Reports what a stretched picture of `node` (its layers `drawn`, its
+    /// `markup` if inline SVG) scales with it that the canvas keeps in units:
+    /// type, effects, image fills, rounded corners and arcs, and a PNG's
+    /// strokes. Inline SVG's strokes are kept by `stretched_markup`; anything
+    /// else scales as the canvas scales it.
+    fn report_stretch_distortion(&mut self, node: &Node, drawn: &[NodeId], markup: Option<&str>) {
+        let mut what = Vec::new();
+        let has = |tag: &str| markup.is_some_and(|m| m.contains(tag));
+        if markup.is_none() {
+            what.push("strokes");
+        }
+        if has("<text") {
+            what.push("type");
+        }
+        if has("<filter") || markup.is_none() {
+            what.push("effects");
+        }
+        if has("<pattern") {
+            what.push("image fills");
+        }
+        let kinds = || {
+            drawn
+                .iter()
+                .filter_map(|id| self.doc.get(*id))
+                .map(|n| self.res.used_kind_of(n))
+        };
+        if kinds().any(rounded) {
+            what.push("rounded corners");
+        }
+        // An arc stretched on its own is never asked: it stretches on no axis.
+        if kinds().any(|k| matches!(k, NodeKind::Arc { .. })) {
+            what.push("arcs");
+        }
+        let Some(last) = what.pop() else {
+            return;
+        };
+        let list = match what.is_empty() {
+            true => last.to_string(),
+            false => format!("{} and {last}", what.join(", ")),
+        };
+        self.report.approximate(format!(
+            "{} {}: stretched as one picture, which scales its {list} with it",
+            kind_word(node),
+            label(node),
+        ));
+    }
+}
+
+/// Whether `kind` has a rounded corner, which a stretched picture scales
+/// unevenly and the canvas keeps at its radius.
+fn rounded(kind: &NodeKind) -> bool {
+    match kind {
+        NodeKind::Rect { corner_radii, .. } | NodeKind::Artboard { corner_radii, .. } => [
+            corner_radii.top_left,
+            corner_radii.top_right,
+            corner_radii.bottom_right,
+            corner_radii.bottom_left,
+        ]
+        .iter()
+        .any(|r| *r > 0.0),
+        NodeKind::Path { corner_radii, .. } => corner_radii.iter().any(|r| *r > 0.0),
+        NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
+            *corner_radius > 0.0
+        }
+        _ => false,
     }
 }
 
@@ -3396,6 +3507,22 @@ fn stretched_axes(both: (bool, bool), insets: &container::Insets, kind: &NodeKin
     )
 }
 
+/// The extent below which an axis is flat: nothing on it scales, as
+/// `container::inset_stretch` and `container::place_in_stretch` read it.
+const FLAT_EXTENT: f64 = 1e-6;
+
+/// Which axes a layer of `kind` with the box `bx` stretches on in a group its
+/// insets scale, as `container::place_in_stretch` lays it: the axes its kind
+/// stretches on (a flat line only along its length, an arc on neither), and
+/// never one its box is flat on.
+fn share_axes(kind: &NodeKind, bx: Rect) -> (bool, bool) {
+    let can = container::inset_stretch(kind);
+    (
+        can.0 && bx.width() > FLAT_EXTENT,
+        can.1 && bx.height() > FLAT_EXTENT,
+    )
+}
+
 /// The box a stretched picture is drawn in ([`Walk::stretching_holder`]).
 struct Stretching {
     /// The element the layer's insets or share place.
@@ -3430,8 +3557,9 @@ fn wrapped_markup(svg: &str, t: Affine) -> String {
 
 /// An inline `<svg>` from the SVG writer made to stretch: `view` as its view box,
 /// drawn unevenly into whatever box CSS gives it (`preserveAspectRatio="none"`),
-/// its shapes' strokes kept at their width (`vector-effect`), which is the
-/// canvas's rule for a stretched path.
+/// every shape's stroke kept at its width (`vector-effect`), which is the
+/// canvas's rule for a stretched shape. What else the stretch scales is
+/// reported (`Walk::report_stretch_distortion`).
 fn stretched_markup(svg: &str, view: Rect) -> String {
     let open_end = svg.find('>').unwrap_or(svg.len());
     let (open, rest) = svg.split_at(open_end);
@@ -3451,9 +3579,10 @@ fn stretched_markup(svg: &str, view: Rect) -> String {
         ),
         _ => open.to_string(),
     };
-    let rest = rest
-        .replace("<path ", "<path vector-effect=\"non-scaling-stroke\" ")
-        .replace("<line ", "<line vector-effect=\"non-scaling-stroke\" ");
+    let mut rest = rest.to_string();
+    for tag in ["<path ", "<line ", "<rect ", "<ellipse "] {
+        rest = rest.replace(tag, &format!("{tag}vector-effect=\"non-scaling-stroke\" "));
+    }
     open + &rest
 }
 

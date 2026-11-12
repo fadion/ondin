@@ -575,7 +575,8 @@ fn sketch_import_reads_the_export_back() {
 
 /// A pinned group's layers are written as scaling with it (nothing pinned, 63),
 /// so Sketch resizes them as Ondin does, and the reader pins the group again.
-/// flip: `flags` writing each layer's own insets inside the group → fails at
+/// flip: `flags` writing each layer's own insets inside the group, or
+/// `scales_with_group` asking only the layer's parent (*Dot* → 9) → fails at
 /// the layers' constraints.
 #[test]
 fn a_pinned_groups_layers_scale_with_it() {
@@ -587,9 +588,10 @@ fn a_pinned_groups_layers_scale_with_it() {
         l["resizingConstraint"].as_i64()
     };
     assert_eq!(
-        (constraint("Bar"), constraint("Dot")),
-        (Some(63), Some(63)),
-        "the layers' constraints"
+        // Sketch's boolean holds *Nib* as an operand path.
+        (constraint("Bar"), constraint("Dot"), constraint("Operand")),
+        (Some(63), Some(63), Some(63)),
+        "the layers' constraints, through a nested group and a boolean"
     );
     let mut ids = IdSource::new(0x9D);
     let back = ondin_core::sketch_in::read(&mut Zip::of(out.bytes), &mut ids, &mut Pictures)

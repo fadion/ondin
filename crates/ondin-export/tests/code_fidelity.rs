@@ -1552,6 +1552,283 @@ fn turned_and_scaled_pictures_stretch_with_their_group() {
     holds_turned("pinned-group-turned-pictures", &doc, &res);
 }
 
+/// A pinned group holding a flat horizontal and vertical line, an arc and a
+/// stroked oval, used wider and shorter, and narrower and taller: each line
+/// stretches along its length only, the arc keeps its size at its share, the
+/// oval's stroke stays in units, and nothing is reported.
+/// flip: `Walk::stretching_holder` stretching every picture in a share both ways
+/// → fails at "meant to be exact", the arc reported stretched;
+/// `stretched_markup` leaving `<ellipse>` out → 22.0 at the oval.
+#[test]
+fn a_pinned_groups_lines_arc_and_oval_follow_an_uneven_resize() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 200.0, 80.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 40.0, 40.0, "Icon");
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let mut tri = ondin_core::kurbo::BezPath::new();
+    tri.move_to((6.0, 6.0));
+    tri.line_to((18.0, 6.0));
+    tri.line_to((6.0, 18.0));
+    tri.close_path();
+    let tri = d.add(
+        Some(art),
+        NodeKind::Path {
+            path: tri,
+            corner_radii: vec![],
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        },
+        Affine::IDENTITY,
+        "Tri",
+    );
+    d.fill(tri, solid(60, 120, 220, 255));
+    let rule = d.add(
+        Some(art),
+        NodeKind::Line {
+            end: Point::new(28.0, 0.0),
+        },
+        Affine::translate((6.0, 24.0)),
+        "Rule",
+    );
+    d.stroke(rule, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let post = d.add(
+        Some(art),
+        NodeKind::Line {
+            end: Point::new(0.0, 28.0),
+        },
+        Affine::translate((34.0, 6.0)),
+        "Post",
+    );
+    d.stroke(post, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let arc = d.add(
+        Some(art),
+        NodeKind::Arc {
+            end: Point::new(8.0, 0.0),
+            sweep: 180.0,
+        },
+        Affine::translate((22.0, 14.0)),
+        "Arc",
+    );
+    d.stroke(arc, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let oval = d.add(
+        Some(art),
+        NodeKind::Ellipse {
+            size: Size::new(10.0, 6.0),
+            arc: Default::default(),
+        },
+        Affine::translate((10.0, 28.0)),
+        "Oval",
+    );
+    d.stroke(oval, 2.0, StrokeAlign::Center, StrokeSides::All);
+    let uses = pinned_group_uses(
+        &mut d,
+        board,
+        icon,
+        art,
+        &[
+            (Point::new(80.0, 25.0), Size::new(80.0, 30.0)),
+            (Point::new(170.0, 25.0), Size::new(30.0, 70.0)),
+        ],
+    );
+    let (doc, res) = d.done();
+    let ink = |used: NodeId, name: &str| {
+        ondin_core::build::subtree_nodes(&doc, &[used])
+            .into_iter()
+            .find(|n| doc.get(*n).unwrap().name() == name)
+            .and_then(|n| res.ink_bounds(n))
+            .unwrap()
+    };
+    assert!(
+        ink(uses[0], "Rule").width() > 50.0 && ink(uses[1], "Post").height() > 40.0,
+        "the fixture: the lines drawn stretched in the uses"
+    );
+    assert!(
+        (ink(uses[0], "Arc").width() - ink(arc, "Arc").width()).abs() < 0.5,
+        "the fixture: the arc keeps its size"
+    );
+    // Blurred: each layer kept at its size sits at a fractional share, which
+    // Chrome snaps to the pixel.
+    holds_turned("pinned-group-lines", &doc, &res);
+}
+
+/// `icon`, a frame in `board`, made a component with `art`, a plain group in it,
+/// pinned at its contents (so the main is not stretched), and placed in `board`
+/// at each centre and resized about its top-left corner to each size. Returns
+/// the uses.
+fn pinned_group_uses(
+    d: &mut Doc,
+    board: NodeId,
+    icon: NodeId,
+    art: NodeId,
+    uses: &[(Point, Size)],
+) -> Vec<NodeId> {
+    let res = Resolved::rebuild(&d.doc);
+    let frame = match d.doc.get(icon).map(|n| n.kind()) {
+        Some(NodeKind::Artboard { size, .. }) => *size,
+        _ => panic!("the icon is a frame"),
+    };
+    let contents = res
+        .contents_box(&d.doc, art)
+        .expect("the group has contents");
+    d.apply(vec![
+        Operation::SetInsets {
+            id: art,
+            insets: ondin_core::container::scale_pins(frame, Affine::IDENTITY, contents),
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+    ]);
+    let mut out = Vec::new();
+    for &(at, size) in uses {
+        let (tx, used) =
+            ondin_core::build::place_instance(&d.doc, &mut d.ids, icon, board, Some(at))
+                .expect("an instance");
+        d.apply(tx.0);
+        let res = Resolved::rebuild(&d.doc);
+        let tx = ondin_core::edit::resize_to(&d.doc, &res, used, size);
+        let tx = ondin_core::build::keep_insets(&d.doc, &res, tx);
+        d.apply(tx.0);
+        out.push(used);
+    }
+    out
+}
+
+/// Auto-width text in a pinned group wraps in a narrower use, at its share of
+/// the use's width, as the canvas wraps it.
+/// flip: `Walk::text` keeping `white-space: pre` for auto-width text in a share
+/// → 61.8 at the label.
+#[test]
+fn auto_width_text_in_a_pinned_group_wraps_in_a_narrower_use() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 120.0, 40.0, "Icon");
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let label = d.add(
+        Some(art),
+        text_node(
+            "Add item",
+            TextSizing::Auto,
+            TextStyle {
+                font_size: 12.0,
+                line_height: Some(ondin_core::Length::Px(16.0)),
+                ..Default::default()
+            },
+            |_| {},
+        ),
+        Affine::translate((10.0, 12.0)),
+        "Label",
+    );
+    d.fill(label, solid(30, 30, 30, 255));
+    let uses = pinned_group_uses(
+        &mut d,
+        board,
+        icon,
+        art,
+        &[(Point::new(160.0, 30.0), Size::new(50.0, 60.0))],
+    );
+    let (doc, res) = d.done();
+    let drawn = ondin_core::build::subtree_nodes(&doc, &[uses[0]])
+        .into_iter()
+        .find(|n| doc.get(*n).unwrap().name() == "Label")
+        .and_then(|n| res.text_layout(n))
+        .unwrap();
+    assert!(
+        drawn.size.height > 20.0,
+        "the fixture: the label wraps in the use"
+    );
+    holds_components("pinned-group-text-wraps", &doc, &res);
+}
+
+/// What a stretched picture scales that the canvas keeps is reported: a PNG in
+/// a pinned group (placed by its share, its strokes and effects scaled with it),
+/// and a rounded path stretched by its own insets.
+/// flip: `Walk::picture` leaving a PNG in a share at its drawn px → fails at
+/// "the PNG reported"; `rounded` answering false → fails at the rounded corners.
+#[test]
+fn what_a_stretched_picture_distorts_is_reported() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    let icon = d.frame(Some(board), 0.0, 0.0, 20.0, 20.0, "Icon");
+    let art = d.add(Some(icon), NodeKind::Group, Affine::IDENTITY, "Art");
+    let shadowed = d.rect(art, 4.0, 4.0, 6.0, 6.0, 0.0);
+    d.fill(shadowed, solid(200, 200, 200, 255));
+    d.effects(
+        shadowed,
+        vec![EffectKind::DropShadow(Shadow {
+            offset: Vec2::new(1.0, 1.0),
+            blur: 2.0,
+            spread: 1.0,
+            color: Color::BLACK,
+            blend: ondin_core::BlendMode::Normal,
+        })],
+    );
+    let mut p = ondin_core::kurbo::BezPath::new();
+    p.move_to((0.0, 0.0));
+    p.line_to((40.0, 0.0));
+    p.line_to((40.0, 20.0));
+    p.close_path();
+    let corner = d.add(
+        Some(board),
+        NodeKind::Path {
+            path: p,
+            corner_radii: vec![4.0, 4.0, 4.0],
+            corner_smoothing: 0.0,
+            mirror: ondin_core::symmetry::PathMirror::NONE,
+        },
+        Affine::translate((20.0, 60.0)),
+        "Corner",
+    );
+    d.fill(corner, solid(60, 120, 220, 255));
+    d.apply(vec![Operation::SetInsets {
+        id: corner,
+        insets: Insets {
+            left: Some(LengthPct::Px(20.0)),
+            right: Some(LengthPct::Px(140.0)),
+            ..Default::default()
+        },
+    }]);
+    pinned_group_uses(
+        &mut d,
+        board,
+        icon,
+        art,
+        &[(Point::new(100.0, 30.0), Size::new(60.0, 30.0))],
+    );
+    let (doc, res) = d.done();
+    let export = html_of_components(&doc, &res, &[board]);
+    let reported = |name: &str, what: &str| {
+        export
+            .approximated
+            .iter()
+            .any(|s| s.contains(name) && s.contains("stretched as one picture") && s.contains(what))
+    };
+    assert!(
+        reported("“Rect”", "its strokes and effects"),
+        "the PNG reported: {:?}",
+        export.approximated
+    );
+    assert!(
+        reported("“Corner”", "its rounded corners"),
+        "the rounded corners reported: {:?}",
+        export.approximated
+    );
+    let css: String = export
+        .files
+        .iter()
+        .filter(|f| f.path.ends_with(".css"))
+        .map(|f| String::from_utf8_lossy(&f.bytes).into_owned())
+        .collect();
+    // The 14 px of ink over the 6 px box it shares, so a resized use scales it.
+    assert!(
+        css.contains(
+            ".Icon--rect {\n  position: absolute;\n  left: -50%;\n  top: -50%;\n  width: 233.3333%;"
+        ),
+        "the PNG takes its share: {css}"
+    );
+}
+
 /// What CSS cannot draw goes to inline SVG and still matches: a star, a path and
 /// an inner shadow, beside a group with no layout.
 #[test]

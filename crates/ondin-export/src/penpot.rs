@@ -484,9 +484,12 @@ impl Writer<'_> {
                     "Export quality, trimming, square padding and outlined text, left out",
                 );
             }
+            if spec.format.is_icon() {
+                self.approximate("ICO and ICNS exports, as PNG");
+            }
             rows.push(json!({
                 "type": match spec.format {
-                    ExportFormat::Png => "png",
+                    ExportFormat::Png | ExportFormat::Ico | ExportFormat::Icns => "png",
                     ExportFormat::Jpeg => "jpeg",
                     ExportFormat::Webp => "webp",
                     ExportFormat::Svg => "svg",

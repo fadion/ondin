@@ -111,6 +111,7 @@ multiplayer is one of its considerations.
 ## Export
 
 - **Cutting a frame into a grid of slices, nine-slice scaling, and a slice bound to a layer's bounds** — a layer's own Export already exports its bounds.
+- **A web favicon bundle, BMP entries in an ICO, and a Linux icon set** — an icon file holds PNG entries, in the Favicon, Windows and macOS sets (`export.md`, *Icon files*).
 
 ## Code export
 

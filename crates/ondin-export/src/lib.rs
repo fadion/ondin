@@ -4,7 +4,7 @@
 //! SVG is a pure function of core state (also a model-completeness gate), and PDF
 //! is that SVG converted ([`mod@pdf`]). PNG,
 //! JPEG and WebP go through the CPU renderer (no GPU) and differ only in the
-//! encoder at the end. The snapshot is the stable public projection MCP read tools return,
+//! encoder at the end; ICO and ICNS ([`mod@icon`]) render once per size. The snapshot is the stable public projection MCP read tools return,
 //! versioned independently of the save format.
 //!
 //! All the writers take a *set of subtrees* as well as the whole page — `svg_of`,
@@ -42,6 +42,7 @@ pub mod code;
 pub mod contrast;
 pub mod dtcg;
 pub mod dtcg_in;
+pub mod icon;
 pub mod jpeg;
 pub mod pdf;
 pub mod pdf_in;

@@ -193,6 +193,8 @@ enum Command {
         page: Option<String>,
         /// `--outlines`: an SVG's or a PDF's text as glyph outlines.
         text: ExportText,
+        /// `--sizes 16,32,48`: an icon file's sizes, empty for its format's set.
+        sizes: Vec<u32>,
     },
     /// Run the document's own export settings (§7) — every layer that carries any,
     /// at the formats and sizes the file says, into a folder.
@@ -262,6 +264,10 @@ enum ExportFormat {
     /// `--pdf --frames`: one PDF, a page per visible top-level frame.
     PdfFrames,
     Png,
+    /// A Windows icon of the page, one PNG entry per `--sizes` size.
+    Ico,
+    /// A macOS icon of the page, as `Ico` is.
+    Icns,
     Json,
     /// Code export's plain HTML/CSS, zipped.
     Html,
@@ -281,6 +287,8 @@ impl ExportFormat {
             ExportFormat::Svg => "svg",
             ExportFormat::Pdf | ExportFormat::PdfFrames => "pdf",
             ExportFormat::Png => "png",
+            ExportFormat::Ico => "ico",
+            ExportFormat::Icns => "icns",
             ExportFormat::Json => "json",
             ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
             ExportFormat::Penpot => "penpot",
@@ -720,6 +728,7 @@ fn parse_tokens(args: &[String]) -> Result<Command, String> {
 fn parse_export(args: &[String]) -> Result<Command, String> {
     const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot|--sketch] \
          [--outlines] [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
+         ondin export <file.ondin> --ico|--icns [--sizes 16,32,48] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --pdf --frames [--outlines] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
          [--page <name|n>] [-o <dir>]";
@@ -733,12 +742,24 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
     let mut frames = false;
     let mut scale: Option<(&str, ExportScale)> = None;
     let mut over = None;
+    let mut sizes: Option<Vec<u32>> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--svg" => format = Some(ExportFormat::Svg),
             "--pdf" => format = Some(ExportFormat::Pdf),
             "--png" => format = Some(ExportFormat::Png),
+            "--ico" => format = Some(ExportFormat::Ico),
+            "--icns" => format = Some(ExportFormat::Icns),
+            "--sizes" => {
+                i += 1;
+                let text = args.get(i).ok_or_else(|| USAGE.to_string())?;
+                let parsed: Option<Vec<u32>> =
+                    text.split(',').map(|s| s.trim().parse().ok()).collect();
+                sizes = Some(parsed.filter(|v| !v.is_empty()).ok_or_else(|| {
+                    format!("--sizes wants pixel sizes such as 16,32,48, not {text:?}\n{USAGE}")
+                })?);
+            }
             "--json" => format = Some(ExportFormat::Json),
             "--html" => format = Some(ExportFormat::Html),
             "--react" => format = Some(ExportFormat::React),
@@ -809,6 +830,30 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
     if frames {
         format = Some(ExportFormat::PdfFrames);
     }
+    // Checked against what the file can hold, so a typo is refused, not dropped.
+    let icon = match format {
+        Some(ExportFormat::Ico) => Some(ondin_core::ExportFormat::Ico),
+        Some(ExportFormat::Icns) => Some(ondin_core::ExportFormat::Icns),
+        _ => None,
+    };
+    let sizes = match (sizes, icon) {
+        (None, _) => Vec::new(),
+        (Some(_), None) => {
+            return Err(format!("--sizes applies only to --ico and --icns\n{USAGE}"));
+        }
+        (Some(sizes), Some(f)) => {
+            let held = f.icon_sizes();
+            if let Some(bad) = sizes.iter().find(|s| !held.contains(s)) {
+                let list: Vec<String> = held.iter().map(u32::to_string).collect();
+                return Err(format!(
+                    "--{} holds {}, not {bad}\n{USAGE}",
+                    f.extension(),
+                    list.join(", ")
+                ));
+            }
+            sizes
+        }
+    };
     if all {
         // A different command, not a fourth format: `--all` writes many files at
         // the document's formats, so `-o` is a folder and `--png` has nowhere to apply.
@@ -883,6 +928,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             true => ExportText::Outlines,
             false => ExportText::Live,
         },
+        sizes,
     })
 }
 
@@ -977,7 +1023,16 @@ fn main() {
             scale,
             page,
             text,
-        }) => run_export(&file, format, out.as_deref(), scale, page.as_deref(), text),
+            sizes,
+        }) => run_export(
+            &file,
+            format,
+            out.as_deref(),
+            scale,
+            page.as_deref(),
+            text,
+            &sizes,
+        ),
         Ok(Command::ExportAll {
             file,
             out,
@@ -1201,6 +1256,7 @@ fn run_export(
     scale: ExportScale,
     page: Option<&str>,
     text: ExportText,
+    sizes: &[u32],
 ) -> Result<(), String> {
     use ondin_core::Resolved;
 
@@ -1321,6 +1377,20 @@ fn run_export(
                 eprintln!("{note}");
             }
             ondin_export::png::png(&doc, &res, &vp, page)
+        }
+        ExportFormat::Ico | ExportFormat::Icns => {
+            // The page's whole drawing, centred in a square at each size.
+            let format = match format {
+                ExportFormat::Ico => ondin_core::ExportFormat::Ico,
+                _ => ondin_core::ExportFormat::Icns,
+            };
+            let spec = ondin_core::ExportSpec {
+                sizes: sizes.to_vec(),
+                ..ondin_core::ExportSpec::new(format, ExportScale::Times(1.0))
+            };
+            let entries = ondin_export::icon::entries(&doc, &res, page, &spec)
+                .ok_or_else(|| format!("{file}: the page has nothing to draw"))?;
+            ondin_export::icon::encode(format, &entries).unwrap_or_default()
         }
     };
 
@@ -2075,6 +2145,7 @@ mod tests {
                 scale: ExportScale::Times(1.0),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
     }
@@ -2090,6 +2161,7 @@ mod tests {
                 scale: ExportScale::Times(1.0),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
         assert_eq!(
@@ -2101,6 +2173,7 @@ mod tests {
                 scale: ExportScale::Times(1.0),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
         assert_eq!(
@@ -2112,6 +2185,7 @@ mod tests {
                 scale: ExportScale::Times(1.0),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
         for (flag, format) in [
@@ -2129,8 +2203,34 @@ mod tests {
                     scale: ExportScale::Times(1.0),
                     page: None,
                     text: ExportText::Live,
+                    sizes: Vec::new(),
                 }
             );
+        }
+    }
+
+    /// `--ico` and `--icns` take `--sizes`, checked against what each file holds;
+    /// `--sizes` on any other format, a raster size on an icon and a bad list are
+    /// refused.
+    #[test]
+    fn an_icon_export_takes_sizes_its_file_can_hold() {
+        assert!(matches!(
+            export(&["a.ondin", "--ico", "--sizes", "16, 32,256"]),
+            Ok(Command::Export { format: ExportFormat::Ico, ref sizes, .. }) if sizes == &[16, 32, 256]
+        ));
+        assert!(matches!(
+            export(&["a.ondin", "--icns"]),
+            Ok(Command::Export { format: ExportFormat::Icns, ref sizes, .. }) if sizes.is_empty()
+        ));
+        for refused in [
+            &["a.ondin", "--icns", "--sizes", "48"][..],
+            &["a.ondin", "--ico", "--sizes", "512"],
+            &["a.ondin", "--ico", "--sizes", "16,x"],
+            &["a.ondin", "--png", "--sizes", "16"],
+            &["a.ondin", "--ico", "--scale", "2"],
+            &["a.ondin", "--ico", "--outlines"],
+        ] {
+            assert!(export(refused).is_err(), "{refused:?}");
         }
     }
 
@@ -2159,6 +2259,7 @@ mod tests {
                 scale: ExportScale::Times(1.0),
                 page: None,
                 text: ExportText::Outlines,
+                sizes: Vec::new(),
             }
         );
         assert!(
@@ -2186,6 +2287,7 @@ mod tests {
                 scale: ExportScale::Times(2.0),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
         // Fractional, because Figma's ladder starts at 0.5×.
@@ -2198,6 +2300,7 @@ mod tests {
                 scale: ExportScale::Times(0.5),
                 page: None,
                 text: ExportText::Live,
+                sizes: Vec::new(),
             }
         );
 
@@ -2249,6 +2352,7 @@ mod tests {
                     scale: want,
                     page: None,
                     text: ExportText::Live,
+                    sizes: Vec::new(),
                 },
                 "{args:?}"
             );
@@ -2401,6 +2505,8 @@ mod tests {
             (ExportFormat::Pdf, "pdf"),
             (ExportFormat::PdfFrames, "frames.pdf"),
             (ExportFormat::Png, "png"),
+            (ExportFormat::Ico, "ico"),
+            (ExportFormat::Icns, "icns"),
             (ExportFormat::Json, "json"),
             (ExportFormat::Html, "zip"),
             (ExportFormat::React, "zip"),
@@ -2414,6 +2520,7 @@ mod tests {
                 ExportScale::Times(1.0),
                 None,
                 ExportText::Live,
+                &[],
             )
             .expect("export succeeds");
             let written = std::fs::read(&out).expect("output exists");
@@ -2488,6 +2595,7 @@ mod tests {
                 scale,
                 None,
                 ExportText::Live,
+                &[],
             )
             .expect("export succeeds");
             let png = std::fs::read(&out).unwrap();
@@ -2595,6 +2703,7 @@ mod tests {
             ExportScale::Times(1.0),
             None,
             ExportText::Live,
+            &[],
         )
         .unwrap_err();
         assert!(err.contains("refusing"), "{err}");
@@ -2615,6 +2724,7 @@ mod tests {
             ExportScale::Times(1.0),
             None,
             ExportText::Live,
+            &[],
         )
         .unwrap_err();
         assert!(err.contains("cannot read"), "{err}");

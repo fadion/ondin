@@ -118,9 +118,14 @@ fn planned(
     spec: &ExportSpec,
     path: String,
 ) -> PlannedFile {
-    let (pixels, clamped) = match spec.format.is_raster() {
-        true => raster_size(doc, res, node, spec),
-        false => (None, false),
+    let (pixels, clamped) = match (spec.format.is_raster(), spec.format.is_icon()) {
+        (true, _) => raster_size(doc, res, node, spec),
+        // The largest entry, when the layer has a box to draw.
+        (false, true) => (
+            framed_box(doc, res, node).and(spec.icon_sizes().last().map(|&s| (s, s))),
+            false,
+        ),
+        (false, false) => (None, false),
     };
     PlannedFile {
         node,
@@ -262,6 +267,10 @@ pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<
         let out = crate::svg::svg_spec(doc, res, file.node, &file.spec);
         return Some(out.svg.into_bytes());
     }
+    if file.spec.format.is_icon() {
+        let entries = crate::icon::entries(doc, res, file.node, &file.spec)?;
+        return crate::icon::encode(file.spec.format, &entries);
+    }
     let text = file.spec.text;
     if let Some((view, origins)) = slice_region(doc, res, file.node) {
         return match file.spec.format {
@@ -287,15 +296,18 @@ pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<
 }
 
 /// A raster encoded in `spec`'s format. Public because the panel's preview
-/// rasterizes once and both encodes and draws the buffer. A vector spec has no
-/// encoder and gets PNG bytes.
+/// rasterizes once and both encodes and draws the buffer. A vector or icon spec
+/// has no one-raster encoder and gets PNG bytes ([`crate::icon::encode`] writes
+/// an icon file).
 pub fn encode(r: &crate::png::Raster, spec: &ExportSpec) -> Vec<u8> {
     match spec.format {
         ExportFormat::Jpeg => crate::jpeg::encode_rgba8(&r.rgba, r.width, r.height, spec.quality),
         ExportFormat::Webp => crate::webp::encode_rgba8(&r.rgba, r.width, r.height),
-        ExportFormat::Png | ExportFormat::Svg | ExportFormat::Pdf => {
-            crate::png::encode_rgba8(&r.rgba, r.width, r.height)
-        }
+        ExportFormat::Png
+        | ExportFormat::Svg
+        | ExportFormat::Pdf
+        | ExportFormat::Ico
+        | ExportFormat::Icns => crate::png::encode_rgba8(&r.rgba, r.width, r.height),
     }
 }
 

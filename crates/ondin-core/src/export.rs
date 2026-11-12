@@ -85,6 +85,19 @@ pub struct ExportSpec {
     /// rather than one picture of the whole set. Inert on any other layer.
     #[serde(default, skip_serializing_if = "is_false")]
     pub each_variant: bool,
+    /// The pixel sizes an icon file holds, as ticked. Empty means the format's
+    /// default set; read through [`Self::icon_sizes`], which drops sizes the
+    /// format cannot hold. Inert for other formats but kept, as [`Self::quality`] is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sizes: Vec<u32>,
+    /// An icon size whose frame `‹layer›-‹size›` is on the layer's page is drawn
+    /// from that frame instead of being scaled down from the layer.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub size_frames: bool,
+    /// Each scaled icon size is drawn from a copy of the art pixel-fitted to that
+    /// size's grid; the document is not changed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pixel_fit: bool,
 }
 
 impl ExportSpec {
@@ -105,7 +118,37 @@ impl ExportSpec {
             view: SvgView::default(),
             precision: default_precision(),
             each_variant: false,
+            sizes: Vec::new(),
+            size_frames: false,
+            pixel_fit: false,
         }
+    }
+
+    /// The sizes an icon file of this spec holds, smallest first: the ticked ones
+    /// the format can hold, or its default set when none of them is. Empty for a
+    /// format that is no icon file.
+    pub fn icon_sizes(&self) -> Vec<u32> {
+        let allowed = self.format.icon_sizes();
+        let mut sizes: Vec<u32> = allowed
+            .iter()
+            .copied()
+            .filter(|s| self.sizes.contains(s))
+            .collect();
+        if sizes.is_empty() {
+            sizes = IconSet::default_for(self.format)
+                .map(|set| set.sizes().to_vec())
+                .unwrap_or_default();
+        }
+        sizes
+    }
+
+    /// The named set [`Self::icon_sizes`] matches, or `None` for a custom one.
+    pub fn icon_set(&self) -> Option<IconSet> {
+        let sizes = self.icon_sizes();
+        IconSet::of(self.format)
+            .iter()
+            .copied()
+            .find(|set| set.sizes() == sizes.as_slice())
     }
 
     /// What actually goes after the name: [`Self::suffix`] when one was typed,
@@ -263,16 +306,38 @@ pub enum ExportFormat {
     Svg,
     /// Our SVG converted to one PDF page, one point per world unit.
     Pdf,
+    /// A Windows icon: one square PNG entry per size in [`ExportSpec::icon_sizes`].
+    Ico,
+    /// A macOS icon: one square PNG entry per size, under Apple's type codes.
+    Icns,
 }
 
 impl ExportFormat {
-    pub const ALL: [ExportFormat; 5] = [
+    pub const ALL: [ExportFormat; 7] = [
         ExportFormat::Png,
         ExportFormat::Jpeg,
         ExportFormat::Webp,
         ExportFormat::Svg,
         ExportFormat::Pdf,
+        ExportFormat::Ico,
+        ExportFormat::Icns,
     ];
+
+    /// Whether this writes one file holding several square sizes.
+    pub fn is_icon(self) -> bool {
+        matches!(self, ExportFormat::Ico | ExportFormat::Icns)
+    }
+
+    /// Every size an icon file of this format can hold, smallest first; empty for
+    /// the formats that are no icon file. An ICO entry's side is one byte with 0
+    /// for 256; ICNS has a type code per size.
+    pub fn icon_sizes(self) -> &'static [u32] {
+        match self {
+            ExportFormat::Ico => &[16, 20, 24, 32, 40, 48, 64, 96, 128, 256],
+            ExportFormat::Icns => &[16, 32, 64, 128, 256, 512, 1024],
+            _ => &[],
+        }
+    }
 
     /// The extension, lowercase and without the dot.
     pub fn extension(self) -> &'static str {
@@ -282,6 +347,8 @@ impl ExportFormat {
             ExportFormat::Webp => "webp",
             ExportFormat::Svg => "svg",
             ExportFormat::Pdf => "pdf",
+            ExportFormat::Ico => "ico",
+            ExportFormat::Icns => "icns",
         }
     }
 
@@ -293,11 +360,14 @@ impl ExportFormat {
             ExportFormat::Webp => "WebP",
             ExportFormat::Svg => "SVG",
             ExportFormat::Pdf => "PDF",
+            ExportFormat::Ico => "ICO",
+            ExportFormat::Icns => "ICNS",
         }
     }
 
-    /// Whether this goes through the CPU rasterizer, and so whether a scale, trim
-    /// and pad mean anything for it.
+    /// Whether this goes through the CPU rasterizer at one scale, and so whether a
+    /// scale and pad mean anything for it. An icon file is rasterized too, once per
+    /// size, and answers false: its sizes take the scale's place ([`Self::is_icon`]).
     pub fn is_raster(self) -> bool {
         matches!(
             self,
@@ -309,6 +379,50 @@ impl ExportFormat {
     /// [`ExportBackground::Transparent`] resolves to a matte for it.
     pub fn keeps_alpha(self) -> bool {
         !matches!(self, ExportFormat::Jpeg)
+    }
+}
+
+/// A named set of icon sizes, as the export row's size cell offers them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconSet {
+    /// 16, 32 and 48: what a browser tab and the Windows shell read.
+    Favicon,
+    /// The Windows shell's own ladder, up to the 256 its large views draw.
+    Windows,
+    /// Every size an ICNS holds.
+    MacOs,
+}
+
+impl IconSet {
+    /// The sets an icon `format` offers; none for any other format.
+    pub fn of(format: ExportFormat) -> &'static [IconSet] {
+        match format {
+            ExportFormat::Ico => &[IconSet::Favicon, IconSet::Windows],
+            ExportFormat::Icns => &[IconSet::MacOs],
+            _ => &[],
+        }
+    }
+
+    /// The set a new row of `format` starts on.
+    pub fn default_for(format: ExportFormat) -> Option<IconSet> {
+        Self::of(format).first().copied()
+    }
+
+    pub fn sizes(self) -> &'static [u32] {
+        match self {
+            IconSet::Favicon => &[16, 32, 48],
+            IconSet::Windows => &[16, 24, 32, 48, 64, 256],
+            IconSet::MacOs => ExportFormat::Icns.icon_sizes(),
+        }
+    }
+
+    /// What the size cell reads.
+    pub fn label(self) -> &'static str {
+        match self {
+            IconSet::Favicon => "Favicon",
+            IconSet::Windows => "Windows",
+            IconSet::MacOs => "macOS",
+        }
     }
 }
 
@@ -622,6 +736,46 @@ mod tests {
         ] {
             assert_eq!(ExportScale::from_label(bad), None, "{bad:?} was accepted");
         }
+    }
+
+    /// An icon row with nothing ticked holds its format's first set; ticks the
+    /// format cannot hold are dropped, and when none is left the default returns.
+    /// The icon fields write nothing at their defaults.
+    #[test]
+    fn an_icon_spec_holds_its_ticked_sizes_or_its_formats_default() {
+        let mut ico = ExportSpec::new(ExportFormat::Ico, ExportScale::Times(1.0));
+        assert_eq!(ico.icon_sizes(), [16, 32, 48]);
+        assert_eq!(ico.icon_set(), Some(IconSet::Favicon));
+        assert_eq!(
+            serde_json::to_string(&ico).expect("serialize"),
+            r#"{"format":"Ico"}"#
+        );
+        ico.sizes = vec![256, 16, 24, 32, 48, 64];
+        assert_eq!(ico.icon_sizes(), [16, 24, 32, 48, 64, 256], "sorted");
+        assert_eq!(ico.icon_set(), Some(IconSet::Windows));
+        ico.sizes = vec![16, 20];
+        assert_eq!(ico.icon_set(), None, "custom");
+
+        // 48 and 20 have no ICNS type code: 16 alone is left.
+        let icns = ExportSpec {
+            format: ExportFormat::Icns,
+            ..ico.clone()
+        };
+        assert_eq!(icns.icon_sizes(), [16]);
+        let icns = ExportSpec {
+            sizes: vec![20, 48],
+            ..icns
+        };
+        assert_eq!(icns.icon_sizes(), ExportFormat::Icns.icon_sizes());
+        assert_eq!(icns.icon_set(), Some(IconSet::MacOs));
+
+        // An icon file carries no scale marker, as a vector file does not.
+        assert_eq!(ico.file_name("logo"), "logo.ico");
+        assert!(
+            ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))
+                .icon_sizes()
+                .is_empty()
+        );
     }
 
     /// A file name is name, then marker, then extension.

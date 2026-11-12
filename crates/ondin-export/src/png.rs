@@ -241,7 +241,7 @@ fn square_bytes(side: u32) -> usize {
 ///
 /// Straight alpha in and out, so plain `src-over` arithmetic, not the
 /// premultiplied shortcut.
-fn composite_under(r: &mut Raster, bg: ondin_core::peniko::Color) {
+pub(crate) fn composite_under(r: &mut Raster, bg: ondin_core::peniko::Color) {
     let c = bg.to_rgba8();
     let (br, bgc, bb) = (c.r as u32, c.g as u32, c.b as u32);
     for px in r.rgba.as_chunks_mut::<4>().0 {

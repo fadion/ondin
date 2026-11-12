@@ -2764,6 +2764,30 @@ fn a_held_back_main_keeps_its_version_and_needs_are_named() {
     );
 }
 
+/// **A kit instance pushes nothing**: its main is the vault's, so
+/// `push::blocked` says `Kit` and every push is empty.
+/// flip: `push::main_blocked` without its vault arm → fails at `Some(Kit)`.
+#[test]
+fn a_kit_instance_is_blocked_from_every_push() {
+    use ondin_core::push::{self, Blocked, Kind};
+    let k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let dot = d.get(inst).unwrap().children()[0];
+    d.apply(&Transaction(vec![Operation::SetOpacity {
+        id: dot,
+        opacity: 0.5,
+    }]))
+    .unwrap();
+    assert_eq!(push::blocked(&d, inst), Some(Blocked::Kit));
+    assert!(push::push(&d, Kind::All, inst, &mut ids).is_empty());
+    let reset = Operation::SetOpacity {
+        id: dot,
+        opacity: 1.0,
+    };
+    assert!(push::fields(&d, &[reset], &mut ids).is_empty());
+}
+
 /// **A held-back variant the kit lifted out of its set stays, its instances
 /// with it**: the kit drags *Small* out of *Button* and resizes it. Holding
 /// *Small* (its row top, still inside D's *Button*) keeps it where it is and

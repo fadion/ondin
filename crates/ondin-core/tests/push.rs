@@ -316,23 +316,222 @@ fn a_pushed_removal_deletes_the_main_layer_and_spares_edited_copies() {
     assert_eq!(out, Outcome { follow: 1, kept: 1 });
 }
 
-/// A locked main takes no push: [`push::blocked`] says why and every push is
-/// empty.
+/// A locked main takes no push, nor one inside a locked parent:
+/// [`push::blocked`] says why and every entry point is empty.
+/// Two defences keep each entry point empty — its own `blocked` test and
+/// `push::inside` leaving a blocked main out — so flipping one alone stays
+/// green; flip both in `push::fields` → fails at its `is_empty`.
 #[test]
 fn a_locked_main_refuses_every_push() {
-    let mut f = fixture();
-    f.edit(vec![
-        Operation::SetOpacity {
+    for lock_parent in [false, true] {
+        let mut f = fixture();
+        let holder = f.ids.mint();
+        let ka = f.ids.mint();
+        let (m, root, i) = (f.m, f.root, f.i);
+        f.edit(vec![
+            create(holder, root, 0, frame(400.0, 400.0), "Holder"),
+            Operation::Reparent {
+                id: m,
+                new_parent: holder,
+                index: 0,
+            },
+        ]);
+        let item = f.fills(f.ia)[0].id;
+        f.edit(vec![
+            Operation::SetOpacity {
+                id: f.ia,
+                opacity: 0.5,
+            },
+            Operation::SetFills {
+                id: f.ia,
+                fills: Vec::new(),
+            },
+            create(ka, i, 2, rect(), "Local"),
+            Operation::SetLocked {
+                id: if lock_parent { holder } else { m },
+                locked: true,
+            },
+        ]);
+        assert_eq!(push::blocked(&f.doc, i), Some(Blocked::Locked));
+        assert!(push::push(&f.doc, Kind::All, i, &mut f.ids).is_empty());
+        let reset = Operation::SetOpacity {
             id: f.ia,
-            opacity: 0.5,
-        },
-        Operation::SetLocked {
-            id: f.m,
-            locked: true,
+            opacity: 1.0,
+        };
+        assert!(push::fields(&f.doc, &[reset], &mut f.ids).is_empty());
+        let list = Operation::SetFills {
+            id: f.ia,
+            fills: Vec::new(),
+        };
+        assert!(push::item_removal(&f.doc, f.ia, &list, item).is_none());
+        assert!(push::push_layer(&f.doc, ka, &mut f.ids).is_empty());
+    }
+}
+
+/// Pushed from a nested copy, the instance holding it is the one that pushed,
+/// not one that followed: `j` and `k` follow, `i` is not counted, and the
+/// prediction says the same.
+/// flip: `push::outcome` excluding only the nested copy's subtree → 3.
+#[test]
+fn a_push_from_a_nested_copy_counts_the_other_instances() {
+    let mut f = fixture();
+    let (star, shape) = (f.ids.mint(), f.ids.mint());
+    let (root, m) = (f.root, f.m);
+    f.edit(vec![
+        create(star, root, 1, frame(24.0, 24.0), "Star"),
+        create(shape, star, 0, rect(), "Shape"),
+        Operation::SetComponent {
+            id: star,
+            component: true,
         },
     ]);
-    assert_eq!(push::blocked(&f.doc, f.i), Some(Blocked::Locked));
-    assert!(push::push(&f.doc, Kind::All, f.i, &mut f.ids).is_empty());
+    // Committed, so `owed` gives every instance of Card its copy of it.
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(star).unwrap(),
+            parent: m,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let n = made[0];
+    let i = f.i;
+    let r = f.copy_of(i, n).expect("i's copy of the nested Star");
+    let rs = f.kids(r)[0];
+    f.edit(vec![Operation::SetOpacity {
+        id: rs,
+        opacity: 0.3,
+    }]);
+    let reset = Operation::SetOpacity {
+        id: rs,
+        opacity: 1.0,
+    };
+    let ops = push::fields(&f.doc, &[reset], &mut f.ids);
+    assert!(!ops.is_empty(), "the opacity pushes");
+    let predicted = push::predicted(&f.doc, r, &ops, 0x51);
+    let before = f.commit(ops.clone());
+    let out = push::outcome(&before, &f.doc, r, &ops);
+    assert_eq!(out, Outcome { follow: 2, kept: 0 }, "j and k");
+    assert_eq!(predicted, out, "the tooltip's count");
+}
+
+/// Two copies pushing one field into one node is a push that writes it twice,
+/// which the doors refuse: two local Star instances in one Card instance.
+/// flip: `push::writes_twice` always false → fails at "twice".
+#[test]
+fn two_copies_pushing_one_node_write_it_twice() {
+    let mut f = fixture();
+    let (star, shape) = (f.ids.mint(), f.ids.mint());
+    let root = f.root;
+    f.edit(vec![
+        create(star, root, 1, frame(24.0, 24.0), "Star"),
+        create(shape, star, 0, rect(), "Shape"),
+        Operation::SetComponent {
+            id: star,
+            component: true,
+        },
+    ]);
+    let i = f.i;
+    let l1 = instance(&mut f.doc, &mut f.ids, star, i);
+    let l2 = instance(&mut f.doc, &mut f.ids, star, i);
+    let (s1, s2) = (f.kids(l1)[0], f.kids(l2)[0]);
+    f.edit(vec![
+        Operation::SetOpacity {
+            id: s1,
+            opacity: 0.3,
+        },
+        Operation::SetOpacity {
+            id: s2,
+            opacity: 0.7,
+        },
+    ]);
+    let resets = [s1, s2].map(|id| Operation::SetOpacity { id, opacity: 1.0 });
+    let ops = push::fields(&f.doc, &resets, &mut f.ids);
+    assert!(push::writes_twice(&ops), "twice: {ops:?}");
+    let one = push::fields(&f.doc, &resets[..1], &mut f.ids);
+    assert!(!push::writes_twice(&one));
+}
+
+/// The X mark's push moves a rotated copy's main without taking its rotation:
+/// the reset carries the main's matrix with the copy's X, and the push takes
+/// only the parts that differ.
+/// flip: `changed_from` taking the copy's whole number run → the main turns.
+#[test]
+fn an_x_push_keeps_the_mains_rotation() {
+    use ondin_core::kurbo::Affine;
+    let mut f = fixture();
+    let main_t = Affine::translate((5.0, 5.0));
+    let a = f.a;
+    f.commit(vec![Operation::SetTransform {
+        id: a,
+        transform: main_t,
+    }]);
+    let copy_t = Affine::translate((40.0, 5.0)) * Affine::rotate(0.5);
+    f.edit(vec![Operation::SetTransform {
+        id: f.ia,
+        transform: copy_t,
+    }]);
+    // The X mark's reset: the copy's own matrix with the main's X.
+    let mut reset_t = copy_t.as_coeffs();
+    reset_t[4] = 5.0;
+    let reset = Operation::SetTransform {
+        id: f.ia,
+        transform: Affine::new(reset_t),
+    };
+    let ops = push::fields(&f.doc, &[reset], &mut f.ids);
+    f.commit(ops);
+    let got = f.doc.get(a).unwrap().transform().as_coeffs();
+    assert_eq!(&got[..4], &main_t.as_coeffs()[..4], "no rotation taken");
+    assert!((got[4] - 40.0).abs() < 1e-9, "the copy's X: {got:?}");
+}
+
+/// A ghost row's push deletes the one fill the copy removed from the main;
+/// an instance that kept the main's list follows, one that edited its list
+/// keeps its own.
+/// flip: `item_removal`'s fills arm retaining nothing → the main loses both.
+#[test]
+fn a_pushed_removal_of_one_fill_leaves_the_other() {
+    let mut f = fixture();
+    let two = keyed_by_position([
+        Fill {
+            brush: solid(10).into(),
+            visible: true,
+        },
+        Fill {
+            brush: solid(20).into(),
+            visible: true,
+        },
+    ]);
+    let a = f.a;
+    f.commit(vec![Operation::SetFills { id: a, fills: two }]);
+    let fills = f.fills(f.ia);
+    assert_eq!(fills.len(), 2, "the fixture: i's copy has both");
+    let gone = fills[0].id;
+    let ka = f.copy_of(f.k, a).unwrap();
+    f.edit(vec![
+        Operation::SetFills {
+            id: f.ia,
+            fills: fills[1..].to_vec(),
+        },
+        Operation::SetFills {
+            id: ka,
+            fills: fills_of(99),
+        },
+    ]);
+    let list = Operation::SetFills {
+        id: f.ia,
+        fills: Vec::new(),
+    };
+    let tx = push::item_removal(&f.doc, f.ia, &list, gone).expect("a removal to push");
+    f.commit(tx.0);
+    assert_eq!(f.fills(a).len(), 1, "the main lost one");
+    assert_eq!(f.fills(a)[0].id, fills[1].id, "the other stays");
+    let ja = f.copy_of(f.j, a).unwrap();
+    assert_eq!(f.fills(ja).len(), 1, "j follows");
+    assert_eq!(f.fills(ka), fills_of(99), "k keeps its own");
 }
 
 /// Two local layers cannot be pushed, and each says why: a group wrapping a
@@ -470,6 +669,17 @@ fn a_pushed_swap_relinks_the_mains_nested_instance() {
     ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
     doc.apply(&tx).unwrap();
     assert_eq!(push::pushable(&doc, b1).fields, 1, "the swap is a field");
+    // From the swapped copy itself — its Swap row's label — the swap pushes
+    // into its slot's main, not into the Heart it shows.
+    // flip: `push::inside` leaving out the slot's main → 0 from `r`.
+    assert_eq!(push::pushable(&doc, r).fields, 1, "selected, it pushes too");
+    let from_r = push::fields(&doc, &[Operation::SetSwap { id: r, swap: None }], &mut ids);
+    assert!(
+        from_r
+            .iter()
+            .any(|op| matches!(op, Operation::SetLink { id, .. } if *id == n)),
+        "the slot relinked: {from_r:?}"
+    );
 
     let mut tx = Transaction(push::push(&doc, Kind::Fields, b1, &mut ids));
     ondin_core::propagate::owed(&doc, &mut tx, &mut ids);

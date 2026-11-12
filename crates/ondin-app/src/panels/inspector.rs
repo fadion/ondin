@@ -908,6 +908,12 @@ impl OndinApp {
         }
         // Before any card is drawn.
         self.gather_card_overrides();
+        let refused = self
+            .session
+            .selection
+            .single()
+            .and_then(|id| crate::menu::push_refused(&self.session.doc, id));
+        ui::set_push_refusal(ui.ctx(), refused);
         let guides = self.selected_guides();
         if !guides.is_empty() {
             self.inspector_guide(ui, &guides);

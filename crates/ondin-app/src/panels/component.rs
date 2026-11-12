@@ -1386,11 +1386,16 @@ pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
             ui::glyph_and_text(icon::ARROW_COUNTER_CLOCKWISE, &mark.tip),
         )
         .clicked();
+    let refused = ui::push_refusal(ui.ctx());
     let push = ui
-        .selectable_label(
-            false,
-            ui::glyph_and_text(icon::PUSH_TO_MAIN, "Push to main"),
-        )
+        .add_enabled_ui(refused.is_none(), |ui| {
+            ui.selectable_label(
+                false,
+                ui::glyph_and_text(icon::PUSH_TO_MAIN, "Push to main"),
+            )
+        })
+        .inner
+        .on_disabled_hover_text(refused.unwrap_or_default())
         .clicked();
     if push {
         ui::request_push(ui.ctx());

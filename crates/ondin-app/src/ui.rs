@@ -1802,10 +1802,29 @@ pub fn take_push(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
+fn push_refusal_id() -> egui::Id {
+    egui::Id::new("ondin-push-refusal")
+}
+
+/// Say, for this frame's reset menus, why the selection cannot push to its
+/// main (`None`: it can). Set before the cards are drawn; every *Push to main*
+/// row then shows disabled with this reason, as the card's push rows do.
+pub fn set_push_refusal(ctx: &egui::Context, why: Option<&'static str>) {
+    ctx.data_mut(|d| d.insert_temp(push_refusal_id(), why));
+}
+
+/// [`set_push_refusal`]'s reason this frame.
+pub fn push_refusal(ctx: &egui::Context) -> Option<&'static str> {
+    ctx.data(|d| d.get_temp::<Option<&'static str>>(push_refusal_id()))
+        .flatten()
+}
+
 /// The right-click menu of anything that resets one thing to its main: `reset`,
 /// then `push`, the same thing written into the main (§5.3d). Each row wears its
-/// glyph. Sized to its longest row.
+/// glyph. Sized to its longest row; the push row disabled with
+/// [`push_refusal`]'s reason when there is one.
 pub fn reset_push_menu(resp: &egui::Response, reset: &str, push: &str) -> Option<ResetOrPush> {
+    let refused = push_refusal(&resp.ctx);
     let mut picked = None;
     egui::Popup::context_menu(resp).show(|ui| {
         popup_rows(ui);
@@ -1826,7 +1845,14 @@ pub fn reset_push_menu(resp: &egui::Response, reset: &str, push: &str) -> Option
         if menu_item(ui, icon::ARROW_COUNTER_CLOCKWISE, reset, MENU_ROW_H).clicked() {
             picked = Some(ResetOrPush::Reset);
         }
-        if menu_item(ui, icon::PUSH_TO_MAIN, push, MENU_ROW_H).clicked() {
+        let row = MenuRow {
+            enabled: refused.is_none(),
+            ..MenuRow::new(icon::PUSH_TO_MAIN, push)
+        };
+        let resp = menu_row(ui, row, MENU_ROW_H);
+        if let Some(why) = refused {
+            resp.on_disabled_hover_text(why);
+        } else if resp.clicked() {
             picked = Some(ResetOrPush::Push);
         }
     });

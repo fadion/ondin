@@ -83,7 +83,19 @@ impl Pushable {
 /// The main a push from the instance at `root` writes into: the main holding the
 /// node `root` is compared with. `None` outside an instance.
 pub fn home(doc: &Document, root: NodeId) -> Option<NodeId> {
-    let mut at = source_of(doc, root);
+    main_holding(doc, source_of(doc, root))
+}
+
+/// The main holding a swapped `root`'s slot — its link, which its swap and
+/// slot fields are compared with and pushed into — `None` for a root that is
+/// not swapped.
+fn slot_home(doc: &Document, root: NodeId) -> Option<NodeId> {
+    doc.get(root)?.swap?;
+    main_holding(doc, reset::slot_source_of(doc, root))
+}
+
+/// The component at or above `at`.
+fn main_holding(doc: &Document, mut at: Option<NodeId>) -> Option<NodeId> {
     while let Some(n) = at.and_then(|a| doc.get(a)) {
         if n.component {
             return Some(n.id);
@@ -93,9 +105,8 @@ pub fn home(doc: &Document, root: NodeId) -> Option<NodeId> {
     None
 }
 
-/// Why the instance at `root` cannot push, or `None` when it can.
-pub fn blocked(doc: &Document, root: NodeId) -> Option<Blocked> {
-    let main = home(doc, root)?;
+/// Why nothing can be pushed into `main`.
+fn main_blocked(doc: &Document, main: NodeId) -> Option<Blocked> {
     if doc.in_vault(main) {
         Some(Blocked::Kit)
     } else if crate::query::is_effectively_locked(doc, main) {
@@ -105,11 +116,28 @@ pub fn blocked(doc: &Document, root: NodeId) -> Option<Blocked> {
     }
 }
 
-/// The nodes of `root`'s home main — where every push target must lie.
+/// Why the instance at `root` cannot push, or `None` when it can: a swapped
+/// root can while either its home or its slot's main takes a push.
+pub fn blocked(doc: &Document, root: NodeId) -> Option<Blocked> {
+    let main = home(doc, root)?;
+    let why = main_blocked(doc, main)?;
+    match slot_home(doc, root) {
+        Some(slot) if main_blocked(doc, slot).is_none() => None,
+        _ => Some(why),
+    }
+}
+
+/// The nodes of `root`'s home main, and of its slot's main for a swapped root,
+/// each that takes a push — where every push target must lie.
 fn inside(doc: &Document, root: NodeId) -> FxHashSet<NodeId> {
-    home(doc, root)
-        .map(|m| crate::build::subtree_nodes(doc, &[m]).into_iter().collect())
-        .unwrap_or_default()
+    let mains: Vec<NodeId> = [home(doc, root), slot_home(doc, root)]
+        .into_iter()
+        .flatten()
+        .filter(|m| main_blocked(doc, *m).is_none())
+        .collect();
+    crate::build::subtree_nodes(doc, &mains)
+        .into_iter()
+        .collect()
 }
 
 /// The node a field of copy `c` is pushed into: the slot (its link) for a swapped
@@ -420,6 +448,16 @@ pub fn fields(doc: &Document, resets: &[Operation], ids: &mut IdSource) -> Vec<O
     stated(doc, out)
 }
 
+/// Whether a push writes one field of one main node twice: two copies pushing
+/// into the same node, where the last would win silently. A door that pushes
+/// several resets at once refuses such a push.
+pub fn writes_twice(ops: &[Operation]) -> bool {
+    let mut seen = FxHashSet::default();
+    ops.iter()
+        .filter_map(Operation::shape_key)
+        .any(|key| !seen.insert(key))
+}
+
 /// The list item `item` the copy `c` removed, deleted from its source's list —
 /// a ghost row's *Push removal to main*. `list` is the list's reset op (any
 /// value; only its kind is read). `None` where the source has no such item or
@@ -667,7 +705,11 @@ pub fn outcome(before: &Document, after: &Document, root: NodeId, pushed: &[Oper
     let within: FxHashSet<NodeId> = crate::build::subtree_nodes(before, &[main])
         .into_iter()
         .collect();
-    let ours: FxHashSet<NodeId> = crate::build::subtree_nodes(after, &[root])
+    // The whole instance the push came from, not only `root`: pushed from a
+    // nested copy, the instance holding it now matches the main, and is no
+    // other instance following.
+    let outer = component::outermost_instance_root(after, root).unwrap_or(root);
+    let ours: FxHashSet<NodeId> = crate::build::subtree_nodes(after, &[outer])
         .into_iter()
         .collect();
     // The main nodes written, each with the fields written on it; the layers

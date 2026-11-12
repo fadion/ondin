@@ -569,6 +569,19 @@ pub fn instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
     None
 }
 
+/// The instance root at or above `id` that no other instance holds.
+pub fn outermost_instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let mut root = instance_root(doc, id)?;
+    while let Some(outer) = doc
+        .get(root)
+        .and_then(|n| n.parent)
+        .and_then(|p| instance_root(doc, p))
+    {
+        root = outer;
+    }
+    Some(root)
+}
+
 /// Every instance of `main` in the document — each instance root whose chain of
 /// links ends at it, nested copies included — in id order.
 ///

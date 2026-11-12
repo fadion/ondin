@@ -66,19 +66,6 @@ fn named(names: &[String], noun: &str) -> String {
     }
 }
 
-/// The instance root at or above `id` that no other instance holds.
-fn outermost_root(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
-    let mut root = ondin_core::component::instance_root(doc, id)?;
-    while let Some(outer) = doc
-        .get(root)
-        .and_then(|n| n.parent())
-        .and_then(|p| ondin_core::component::instance_root(doc, p))
-    {
-        root = outer;
-    }
-    Some(root)
-}
-
 /// The toast a push leaves (§5.3d): what went into which main,
 /// how many instances took it, and how many kept their own — the surprise a push
 /// can cause, said out loud.
@@ -356,16 +343,26 @@ impl OndinApp {
     /// component property's (its label's row), so the toast counts a property.
     pub(crate) fn push_from_reset(&mut self, tx: Transaction, property: bool) {
         let doc = &self.session.doc;
-        // One instance pushes: two pushing one field into one main would leave
-        // whichever came last, silently. Several layers of one instance are one.
-        let mut roots: Vec<NodeId> =
-            tx.0.iter()
-                .filter_map(|op| op.overwrites())
-                .filter_map(|c| outermost_root(doc, c))
-                .collect();
-        roots.sort();
-        roots.dedup();
-        if roots.len() > 1 {
+        // One instance pushes, into one main: two pushing one field into one
+        // node would leave whichever came last, silently. Several layers of one
+        // instance are one, unless two of its own instances of another main
+        // (local layers) push into that main's one node.
+        let copies: Vec<NodeId> = tx.0.iter().filter_map(|op| op.overwrites()).collect();
+        let distinct = |mut v: Vec<NodeId>| {
+            v.sort();
+            v.dedup();
+            v.len()
+        };
+        let roots = copies
+            .iter()
+            .filter_map(|c| ondin_core::component::outermost_instance_root(doc, *c))
+            .collect();
+        let homes = copies
+            .iter()
+            .filter_map(|c| ondin_core::component::instance_root(doc, *c))
+            .filter_map(|r| push::home(doc, r))
+            .collect();
+        if distinct(roots) > 1 || distinct(homes) > 1 {
             self.session.info("Select one instance to push");
             return;
         }
@@ -381,6 +378,10 @@ impl OndinApp {
             return;
         }
         let ops = push::fields(doc, &tx.0, &mut self.session.ids);
+        if tx.0.len() > 1 && push::writes_twice(&ops) {
+            self.session.info("Select one instance to push");
+            return;
+        }
         if property {
             self.commit_push(root, ops, PushWhat::Properties(1));
             return;

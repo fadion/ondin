@@ -1823,6 +1823,18 @@ pub(crate) const PUSH_KIT: &str = "Its main comes from a kit — change it in th
 /// Why *Push all to main* is dimmed on an instance of a locked main.
 pub(crate) const PUSH_LOCKED: &str = "Its main is locked — unlock it to push into it";
 
+/// Why nothing of `id` can be pushed to its main — [`PUSH_KIT`] or
+/// [`PUSH_LOCKED`] — or `None` when it can.
+pub(crate) fn push_refused(
+    doc: &ondin_core::Document,
+    id: ondin_core::NodeId,
+) -> Option<&'static str> {
+    match ondin_core::push::blocked(doc, id)? {
+        ondin_core::push::Blocked::Kit => Some(PUSH_KIT),
+        ondin_core::push::Blocked::Locked => Some(PUSH_LOCKED),
+    }
+}
+
 /// The parts of the layer under the pointer that decide a row's label or its
 /// presence.
 #[derive(Clone, Copy, Default)]
@@ -3312,12 +3324,11 @@ impl OndinApp {
                 ondin_core::component::instance_root(doc, id) == Some(id)
                     && ondin_core::push::pushable(doc, id).any()
             }),
-            push_refused: self.session.selection.single().and_then(|id| {
-                match ondin_core::push::blocked(&self.session.doc, id)? {
-                    ondin_core::push::Blocked::Kit => Some(PUSH_KIT),
-                    ondin_core::push::Blocked::Locked => Some(PUSH_LOCKED),
-                }
-            }),
+            push_refused: self
+                .session
+                .selection
+                .single()
+                .and_then(|id| push_refused(&self.session.doc, id)),
             layer_name: self
                 .session
                 .selection

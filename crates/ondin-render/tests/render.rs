@@ -2867,6 +2867,148 @@ fn an_alpha_mask_too_large_to_draw_is_still_painted() {
     );
 }
 
+/// A shape at the largest size an operation keeps, turned 45°, is still drawn at
+/// the canvas's deepest zoom on a 3× display (768 device pixels a unit), where
+/// its world box is about 1.1e9 device pixels wide.
+/// flip: `MAX_DEVICE_EXTENT` back at 1e9 → fails at the fill count.
+#[test]
+fn a_turned_shape_within_the_limits_is_drawn_at_the_deepest_zoom() {
+    let (mut doc, _res, near, far) = two_rect_doc();
+    doc.apply(&Transaction(vec![
+        Operation::SetGeometry {
+            id: near,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(1e6, 1e6)),
+        },
+        Operation::SetTransform {
+            id: near,
+            transform: Affine::rotate(std::f64::consts::FRAC_PI_4),
+        },
+        Operation::SetVisible {
+            id: far,
+            visible: false,
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let side = 400.0 / 768.0;
+    let view = Viewport {
+        view: Rect::new(500.0, 600.0, 500.0 + side, 600.0 + side),
+        pixel_size: (400, 400),
+    };
+    let mut painter = RecordingPainter::default();
+    let ov = RenderOverrides::default();
+    scene::build(&doc, &res, &view, &ov, doc.first_page(), &mut painter);
+    assert!(
+        res.ink_bounds(near)
+            .is_some_and(|b| b.width() * 768.0 > 1e9),
+        "the fixture: past 1e9 device pixels"
+    );
+    assert_eq!(painter.fills.len(), 1, "the turned square is drawn");
+}
+
+/// A dropped copy (an Alt-drag's or a paste's ghost) of a layer the commit skips
+/// as too large is skipped too, and a copy of a small one is drawn.
+/// flip: `paint_ghost` without its size check → fails at "the huge copy".
+#[test]
+fn a_ghost_too_large_to_draw_is_skipped() {
+    let (mut doc, _res, near, far) = two_rect_doc();
+    doc.apply(&Transaction(vec![
+        Operation::SetGeometry {
+            id: near,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(1e6, 1e6)),
+        },
+        Operation::SetTransform {
+            id: near,
+            transform: Affine::scale(1e6),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(
+        record(&doc, &res).fills.len(),
+        1,
+        "the fixture: near skipped"
+    );
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
+    let copied = |of: NodeId| {
+        let mut ids = IdSource::new(0xD0D0);
+        let template = doc.capture_subtree(of).unwrap();
+        let (nodes, _) = ondin_core::remap_subtree(&template, &mut ids).unwrap();
+        let tx = Transaction(vec![Operation::InsertSubtree {
+            nodes,
+            parent: ab,
+            index: 2,
+        }]);
+        let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("a preview");
+        let mut painter = RecordingPainter::default();
+        scene::build(
+            &doc,
+            &res,
+            &whole_view(),
+            &ov,
+            doc.first_page(),
+            &mut painter,
+        );
+        painter.fills.len()
+    };
+    assert_eq!(copied(far), 2, "control: the small copy");
+    assert_eq!(copied(near), 1, "the huge copy");
+}
+
+/// A group alpha mask whose one shape is scaled far past
+/// `scene::MAX_DEVICE_EXTENT` still paints that shape: the mask's ink is all of
+/// its group's, and skipping it would erase what it masks.
+/// flip: `paint_node`'s skip not reading `in_mask` → fails at the fill count.
+#[test]
+fn a_group_masks_too_large_shape_is_still_painted() {
+    let (mut doc, _res, near, _far) = two_rect_doc();
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
+    let group = IdSource::new(0xC0DE).mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: group,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::Reparent {
+            id: near,
+            new_parent: group,
+            index: 0,
+        },
+        Operation::SetMask {
+            id: group,
+            mask: true,
+        },
+        Operation::SetMaskMode {
+            id: group,
+            mode: ondin_core::MaskMode::Alpha,
+        },
+        Operation::SetGeometry {
+            id: near,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(1e6, 1e6)),
+        },
+        Operation::SetTransform {
+            id: near,
+            transform: Affine::scale(1e6),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    assert!(
+        res.ink_bounds(near).is_some_and(|b| b.width() > 1e11),
+        "the fixture: the mask's shape is far past the device limit"
+    );
+    let painter = record(&doc, &res);
+    assert_eq!(
+        painter.fills.len(),
+        2,
+        "the masked layer and the group mask's shape, however large"
+    );
+}
+
 /// **An alpha mask draws its own ink, inside a composite layer, after the run.**
 ///
 /// Every clause is an assertion here because each is a different way to get it

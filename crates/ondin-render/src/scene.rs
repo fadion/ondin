@@ -344,7 +344,8 @@ struct Walk<'a> {
     /// draws those whole, since the shadow lies behind everything in the layer.
     in_shadow: std::cell::Cell<usize>,
     /// How many ink masks the walk is drawing the ink of: everything under one
-    /// lands in its mask layer, where a backdrop would become mask.
+    /// lands in its mask layer, where a backdrop would become mask and where
+    /// nothing is skipped for its size.
     in_mask: std::cell::Cell<usize>,
     /// Set while the walk repaints a backdrop, which it stops short of.
     backdrop: Option<Backdrop>,
@@ -844,7 +845,9 @@ fn ink_of(
             Top::Node(id) => {
                 paint_node(doc, res, ov, id, world, view, base, &edges, painter, &walk)
             }
-            Top::Ghost(g) => paint_ghost(doc, ov, g, true, world, base, &edges, painter, None),
+            Top::Ghost(g) => {
+                paint_ghost(doc, ov, g, true, false, world, base, &edges, painter, None)
+            }
         }
     }
     let base = device_base(vp);
@@ -1757,9 +1760,11 @@ fn paint_node_pass<P: ScenePainter>(
     // frame. Asked of what the layer paints itself — a leaf's or boolean's ink
     // before its effects (a shadow is shifted inside a buffer cut to the view, so
     // its offset costs nothing), a frame's own box, which takes its children with
-    // it — and never of a mask, whose skip would erase what it masks. The cache
+    // it — and never of a mask or anything inside one (a group mask's ink is all
+    // its children's), whose skip would erase what it masks. The cache
     // describes the committed layer, so a previewed one is measured as drawn,
     // below.
+    let masking = node.mask() || walk.in_mask.get() > 0;
     let previewed = ov.moved(id) || walk.grown(doc, ov, id);
     let own_box = match node.kind() {
         NodeKind::Artboard { .. } => Some(res.world_bounds(id)),
@@ -1768,7 +1773,7 @@ fn paint_node_pass<P: ScenePainter>(
         _ => None,
     };
     if let Some(own_box) = own_box
-        && !node.mask()
+        && !masking
         && !previewed
         && (res.ink_overflows(doc, id) || own_box.is_some_and(|b| too_large(b, base)))
     {
@@ -1834,7 +1839,7 @@ fn paint_node_pass<P: ScenePainter>(
         base,
         filters: Vec::new(),
     };
-    if previewed && !node.mask() && drawn_too_large(&painted, node.children().is_empty(), world) {
+    if previewed && !masking && drawn_too_large(&painted, node.children().is_empty(), world) {
         return;
     }
 
@@ -2033,7 +2038,7 @@ fn paint_node_pass<P: ScenePainter>(
             push_ink_mask(painter, luminance);
             walk.in_mask.set(walk.in_mask.get() + 1);
             match ov.ghost(id) {
-                Some(g) => paint_ghost(doc, ov, g, false, world, base, edges, painter, None),
+                Some(g) => paint_ghost(doc, ov, g, false, true, world, base, edges, painter, None),
                 None => paint_node(doc, res, ov, id, world, view, base, edges, painter, walk),
             }
             walk.in_mask.set(walk.in_mask.get() - 1);
@@ -2100,7 +2105,19 @@ fn paint_node_pass<P: ScenePainter>(
                     reopen(painter, &mut open, &mut mask);
                 }
                 let top = matches!(node.kind(), NodeKind::Root);
-                paint_ghost(doc, ov, &ghost.node, top, world, base, edges, painter, None);
+                let masking = walk.in_mask.get() > 0;
+                paint_ghost(
+                    doc,
+                    ov,
+                    &ghost.node,
+                    top,
+                    masking,
+                    world,
+                    base,
+                    edges,
+                    painter,
+                    None,
+                );
                 continue;
             }
         };
@@ -2273,10 +2290,11 @@ fn sub_pixel(ink: Rect, base: Affine) -> bool {
 ///
 /// vello's GPU cost grows with a curve's device extent: a filled ellipse takes
 /// about 4 ms at 1e10 px and 90 ms at 3e11, and at 1e12 the whole frame comes back
-/// blank after most of a second. A shape within `build::GEOMETRY_LIMIT` at the
-/// canvas's largest zoom (256×) and 3× display scaling stays under 8e8, so only a
-/// scale — the layer's own or its groups' — carries a layer past it.
-pub const MAX_DEVICE_EXTENT: f64 = 1e9;
+/// blank after most of a second. A shape within `build::GEOMETRY_LIMIT`, turned
+/// (its world box up to √2 wider), at the canvas's largest zoom (256×) and up to
+/// 10× display scaling stays under 3.7e9, so only a scale — the layer's own or
+/// its groups' — carries a layer past it.
+pub const MAX_DEVICE_EXTENT: f64 = 4e9;
 
 /// Whether `ink` is wider or taller than [`MAX_DEVICE_EXTENT`] on the device.
 fn too_large(ink: Rect, base: Affine) -> bool {
@@ -2539,6 +2557,7 @@ fn drawn_children_ink(
             doc,
             ov,
             &ghost.node,
+            false,
             false,
             world,
             base,
@@ -2830,16 +2849,42 @@ fn ghost_ink(ghost: &GhostNode, world: Affine) -> Option<Rect> {
     }
 }
 
+/// Whether a ghost is too large to draw, by [`drawn_too_large`]'s rule: a
+/// frame's own box, a boolean's outline or a leaf's parts, before effects, and
+/// ink that cannot be measured counts as too large. A group is never, its
+/// children being asked in turn.
+fn ghost_too_large(ghost: &GhostNode, world: Affine, base: Affine) -> bool {
+    let (extent, ink) = match &ghost.kind {
+        NodeKind::Group | NodeKind::Root => return false,
+        NodeKind::Artboard { .. } => {
+            let local = geometry::local_bounds(&ghost.kind, None);
+            let ink = local.and_then(|b| geometry::measurable(world.transform_rect_bbox(b)));
+            (local.is_some(), ink)
+        }
+        NodeKind::Boolean { .. } => (
+            ghost.path.as_ref().is_some_and(|p| !p.is_empty()),
+            ghost_ink(ghost, world),
+        ),
+        kind => (
+            geometry::local_bounds(kind, ghost.text.as_ref()).is_some(),
+            ghost_ink(ghost, world),
+        ),
+    };
+    extent && ink.is_none_or(|b| too_large(b, base))
+}
+
 /// Draw a ghost subtree: [`paint_node`]'s walk with children inline and no
 /// culling. `doc` supplies the image table that framing reads; `top` says the
-/// ghost lands directly on a page, for [`blend_layer`]'s top-level frame; `pass`
-/// is one of its [`FxPass`]es, as for [`paint_node_pass`].
+/// ghost lands directly on a page, for [`blend_layer`]'s top-level frame;
+/// `masking` that it is drawn as a mask's ink; `pass` is one of its
+/// [`FxPass`]es, as for [`paint_node_pass`].
 #[allow(clippy::too_many_arguments)]
 fn paint_ghost<P: ScenePainter>(
     doc: &Document,
     ov: &RenderOverrides,
     ghost: &GhostNode,
     top: bool,
+    masking: bool,
     parent_world: Affine,
     base: Affine,
     edges: &Edges<'_>,
@@ -2849,9 +2894,15 @@ fn paint_ghost<P: ScenePainter>(
     if !ghost.visible {
         return;
     }
+    let world = parent_world * ghost.transform;
+    // A copy too large to draw is skipped, as the walk skips the layer it will
+    // become; never a mask or anything inside one, whose skip would erase what
+    // it masks.
+    if !masking && !ghost.mask && ghost_too_large(ghost, world, base) {
+        return;
+    }
     // Not in the document yet, so a bound paint reads in the default mode.
     let paint = doc.resolved_paint(ghost.id, &ghost.paint);
-    let world = parent_world * ghost.transform;
     // Snaps as the node it will become, or the shape twitches on release; the
     // chrome ghost takes the node arm's exemption.
     let shape_world = match snappable_box(&ghost.kind).filter(|_| !ov.unsnapped(ghost.id)) {
@@ -2898,6 +2949,7 @@ fn paint_ghost<P: ScenePainter>(
                 ov,
                 ghost,
                 top,
+                masking,
                 parent_world,
                 base,
                 edges,
@@ -2969,7 +3021,9 @@ fn paint_ghost<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun, ghost: &GhostNode| {
         if let Some((_, luminance)) = mask.ink_to_composite() {
             push_ink_mask(painter, luminance);
-            paint_ghost(doc, ov, ghost, false, world, base, edges, painter, None);
+            paint_ghost(
+                doc, ov, ghost, false, true, world, base, edges, painter, None,
+            );
             painter.pop_layer();
         }
         mask.close(painter);
@@ -2996,7 +3050,9 @@ fn paint_ghost<P: ScenePainter>(
             continue;
         }
         mask.reopen(painter, world);
-        paint_ghost(doc, ov, child, false, world, base, edges, painter, None);
+        paint_ghost(
+            doc, ov, child, false, masking, world, base, edges, painter, None,
+        );
     }
     if let Some(g) = alpha_ghost.take() {
         end_run(painter, &mut mask, g);

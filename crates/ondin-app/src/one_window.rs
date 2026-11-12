@@ -92,7 +92,7 @@ pub(crate) fn claim(open: Option<&Path>) -> Claim {
 /// empty: a deleted socket cannot be reached, so the next launch would start a
 /// second window. The user's runtime folder (`XDG_RUNTIME_DIR`) is kept for
 /// exactly this; without one, the local data folder.
-fn window_dir() -> Option<PathBuf> {
+pub(crate) fn window_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         crate::machine_dir::root()
@@ -261,7 +261,7 @@ fn answer(mut stream: impl Read + Write, sink: &Sink) -> std::io::Result<()> {
 /// The 64-bit FNV-1a hash of `bytes`: stable across builds and toolchains, which
 /// std's `DefaultHasher` does not promise, so every build names the same pipe.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn fnv1a(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
     })
@@ -344,7 +344,7 @@ fn connect(addr: &Path) -> std::io::Result<File> {
 /// Whether process `pid` runs as this process's user. `false` when that cannot
 /// be read, which a process of another user's usually cannot.
 #[cfg(windows)]
-fn same_user(pid: u32) -> bool {
+pub(crate) fn same_user(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -435,7 +435,7 @@ fn listen(addr: &Path, sink: Sink) -> std::io::Result<()> {
 
 /// One instance of the pipe `name` (NUL-terminated UTF-16), waiting for a client.
 #[cfg(windows)]
-fn pipe_instance(name: &[u16], first: bool) -> std::io::Result<File> {
+pub(crate) fn pipe_instance(name: &[u16], first: bool) -> std::io::Result<File> {
     use std::os::windows::io::FromRawHandle as _;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
@@ -474,7 +474,7 @@ fn pipe_instance(name: &[u16], first: bool) -> std::io::Result<File> {
 
 /// Wait for a client on `pipe`.
 #[cfg(windows)]
-fn connected(pipe: File) -> std::io::Result<File> {
+pub(crate) fn connected(pipe: File) -> std::io::Result<File> {
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Foundation::ERROR_PIPE_CONNECTED;
     use windows_sys::Win32::System::Pipes::ConnectNamedPipe;

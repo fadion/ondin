@@ -1516,8 +1516,6 @@ impl EditorSession {
 
     /// [`Self::name_step`] for an edit an assistant makes over MCP: the step is
     /// named by the tool it called, and remembers the client.
-    // Its door is the MCP transport's, which is not wired yet; the tests call it.
-    #[allow(dead_code)]
     pub fn name_mcp_step(
         &mut self,
         client: impl Into<String>,

@@ -51,15 +51,15 @@
 //! ondin tokens export <file> [--mode <name>] [-o out.json]
 //!                                variables and styles as DTCG tokens.json,
 //!                                the default mode's values unless --mode
-//! ondin serve <file>             headless: MCP endpoint over a document (§8.2)
-//! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
+//! ondin serve                    headless: documents behind the MCP endpoint (§8.2)
+//! ondin mcp-proxy                the MCP server an agent harness configures (§8.1)
 //! ```
 //!
 //! `ondin reader` is left out above: it is the app's own child, reading another
 //! tool's file off standard input (`reader`).
 //!
 //! `export` runs on `ondin-core` and the CPU renderer alone, so it works with no
-//! display or graphics driver. `serve`/`mcp-proxy` land at M6.
+//! display or graphics driver, and so does `serve`.
 //!
 //! The rustdoc gate and the lint it allows are explained in `ondin_core`'s crate doc.
 //!
@@ -119,6 +119,7 @@ mod shape_handles;
 mod library;
 mod logging;
 mod machine_dir;
+mod mcp;
 mod measure;
 mod menu;
 mod meter;
@@ -178,9 +179,8 @@ enum Command {
     Gui {
         open: Option<std::path::PathBuf>,
     },
-    Serve {
-        file: String,
-    },
+    /// Host documents with no window, behind the MCP endpoint (§8.2).
+    Serve,
     Export {
         file: String,
         format: ExportFormat,
@@ -357,10 +357,10 @@ fn unicode_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<St
 fn parse(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
         None | Some("gui") => Ok(Command::Gui { open: None }),
-        Some("serve") => args
-            .get(1)
-            .map(|file| Command::Serve { file: file.clone() })
-            .ok_or_else(|| "usage: ondin serve <file>".to_string()),
+        Some("serve") if args.len() == 1 => Ok(Command::Serve),
+        Some("serve") => {
+            Err("usage: ondin serve (an agent picks documents with use_document)".to_string())
+        }
         Some("export") => parse_export(&args[1..]),
         Some("render") => render_cli::parse(&args[1..]).map(Command::Render),
         Some("diff") => parse_diff(&args[1..]),
@@ -1112,8 +1112,8 @@ fn main() {
         Ok(Command::TokensExport { file, mode, out }) => {
             run_tokens_export(&file, mode.as_deref(), out.as_deref())
         }
-        Ok(Command::Serve { file }) => Err(format!("ondin serve {file}: not yet implemented (M6)")),
-        Ok(Command::McpProxy) => Err("ondin mcp-proxy: not yet implemented (M6)".to_string()),
+        Ok(Command::Serve) => mcp::serve::run(),
+        Ok(Command::McpProxy) => mcp::proxy::run(),
         Err(msg) => {
             eprintln!("{msg}");
             std::process::exit(2);
@@ -1720,13 +1720,11 @@ mod tests {
         );
     }
 
+    /// `serve` takes no document: an agent picks them with `use_document`.
     #[test]
-    fn serve_requires_file() {
-        assert!(parse(&["serve".into()]).is_err());
-        assert!(matches!(
-            parse(&["serve".into(), "a.ondin".into()]),
-            Ok(Command::Serve { .. })
-        ));
+    fn serve_takes_no_file() {
+        assert!(matches!(parse(&["serve".into()]), Ok(Command::Serve)));
+        assert!(parse(&["serve".into(), "a.ondin".into()]).is_err());
     }
 
     #[test]

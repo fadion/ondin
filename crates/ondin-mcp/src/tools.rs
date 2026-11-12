@@ -1,13 +1,5 @@
-//! MCP tool → Operation/query adapters (§8.4).
-//!
-//! Selection is app state, not document state, but is deliberately part of the
-//! MCP surface ("the selected layer" is how humans phrase AI requests) — read
-//! from / written to the owning process's session state, never the Document.
-//! Handlers are implemented at M6.
-//!
-//! The tool names are constants rather than prose so a test can compare them with
-//! §8.4; a list written in a comment is a gate nobody built, and this copy would
-//! otherwise sit unread, drifting from the design, until the handlers land.
+//! The MCP tool names by phase (§8.4), held to the design by a test that
+//! parses `docs/design/mcp.md`, and to the verb registry by two more.
 
 /// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
 /// reordering shows as a diff.

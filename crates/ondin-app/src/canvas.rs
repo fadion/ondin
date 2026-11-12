@@ -11696,10 +11696,13 @@ fn size_label(box_: KRect) -> String {
 /// The name of the mode frame `id` picks at `width`, while it picks one by its
 /// width (`Document::width_pick`) or its contents do by a width query of its
 /// own (the first one it pins no mode of); `None` otherwise — a pin names
-/// nothing here, the frame tag does.
+/// nothing here, the frame tag does. A width query reads the content box at
+/// `width`, as the canvas picks (`Document::query_width_in`).
 fn width_mode_label(doc: &ondin_core::Document, id: NodeId, width: f64) -> Option<String> {
     let t = doc.variables();
     if let Some(n) = doc.get(id)
+        && !n.queries().is_empty()
+        && let Some(inside) = doc.query_width_in(&t.with_width(id, width), id)
         && let Some(m) = n
             .queries()
             .iter()
@@ -11708,7 +11711,7 @@ fn width_mode_label(doc: &ondin_core::Document, id: NodeId, width: f64) -> Optio
                     .next()
                     .is_some_and(|k| n.modes().iter().any(|m| var_same(t, *m, *k)))
             })
-            .find_map(|q| ondin_core::variable::query_mode(t, q, width))
+            .find_map(|q| ondin_core::variable::query_mode(t, q, inside))
     {
         return t
             .mode(m)
@@ -12060,6 +12063,159 @@ mod tests {
             name: None,
         }])));
         id
+    }
+
+    /// The size pill names the mode the canvas picks: a frame 650 wide with 24
+    /// of side padding is 602 inside, so Regular (from 320), not Wide (from
+    /// 640). flip: `width_mode_label` passing `width` to `query_mode` → Wide.
+    #[test]
+    fn the_size_pill_names_the_mode_of_the_content_box() {
+        use ondin_core::container::{Display, Flex};
+        use ondin_core::variable::{self as var, ModeOwner};
+        let mut s = EditorSession::new();
+        let card = add(
+            &mut s,
+            NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(300.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        let c = var::CollectionId::FIRST;
+        let (z, a, b) = (s.ids.mint_mode(), s.ids.mint_mode(), s.ids.mint_mode());
+        let mode = |id, name: &str| var::Mode {
+            id,
+            name: name.into(),
+        };
+        let add_mode = |index, id, name| Operation::AddMode {
+            collection: c,
+            mode: mode(id, name),
+            index,
+            cells: vec![],
+        };
+        assert!(s.commit(Transaction(vec![
+            add_mode(0, z, "Compact"),
+            add_mode(1, a, "Regular"),
+            add_mode(2, b, "Wide"),
+            Operation::SetDisplay {
+                id: card,
+                display: Some(Display::Flex(Flex {
+                    padding: [0.0, 12.0, 0.0, 12.0],
+                    ..Default::default()
+                })),
+            },
+        ])));
+        let ops = var::query_ops(&s.doc, card, ModeOwner::Collection(c), true)
+            .expect("a frame 300 wide picks by width");
+        assert!(s.commit(Transaction(ops)));
+        assert_eq!(
+            width_mode_label(&s.doc, card, 650.0).as_deref(),
+            Some("Regular")
+        );
+        assert_eq!(
+            width_mode_label(&s.doc, card, 664.0).as_deref(),
+            Some("Wide")
+        );
+    }
+
+    /// A commit settles nested width queries through the session, round after
+    /// round: the column resized to 700 stretches Shell, which picks Wide, so
+    /// Inner's width bound to 260 / 400 / 700 is 700, and Inner then picks Wide
+    /// itself.
+    /// flip: `EditorSession::settle_derived` running one width round → Inner's
+    /// contents stay Compact, failing at "and so does Inner".
+    #[test]
+    fn a_commit_settles_nested_queries_round_after_round() {
+        use ondin_core::container::{Dimension, Display, Flex, FlexDirection};
+        use ondin_core::variable::{self as var, ModeOwner};
+        let mut s = EditorSession::new();
+        let frame = |w| NodeKind::Artboard {
+            size: ondin_core::kurbo::Size::new(w, 200.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        };
+        let col = add(&mut s, frame(300.0));
+        let c = var::CollectionId::FIRST;
+        let modes = [s.ids.mint_mode(), s.ids.mint_mode(), s.ids.mint_mode()];
+        let (shell, inner, leaf) = (s.ids.mint(), s.ids.mint(), s.ids.mint());
+        let w = s.ids.mint_var();
+        let mut ops: Vec<Operation> = ["Compact", "Regular", "Wide"]
+            .iter()
+            .zip(modes)
+            .enumerate()
+            .map(|(index, (name, id))| Operation::AddMode {
+                collection: c,
+                mode: var::Mode {
+                    id,
+                    name: (*name).into(),
+                },
+                index,
+                cells: vec![],
+            })
+            .collect();
+        let child = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        ops.extend([
+            Operation::SetDisplay {
+                id: col,
+                display: Some(Display::Flex(Flex {
+                    direction: FlexDirection::Column,
+                    ..Default::default()
+                })),
+            },
+            child(shell, col, frame(300.0)),
+            child(inner, shell, frame(300.0)),
+            child(leaf, inner, frame(10.0)),
+            Operation::AddVariable {
+                var: var::Variable {
+                    id: w,
+                    name: "w".into(),
+                    kind: var::VarKind::Number,
+                    cells: [
+                        (modes[0], var::Cell::Number(260.0)),
+                        (modes[1], var::Cell::Number(400.0)),
+                        (modes[2], var::Cell::Number(700.0)),
+                    ]
+                    .into(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]);
+        assert!(s.commit(Transaction(ops)));
+        let mut fill = *s.doc.get(shell).unwrap().item();
+        fill.width = Dimension::Percent(100.0);
+        assert!(s.commit(Transaction(vec![Operation::SetLayoutItem {
+            id: shell,
+            item: fill,
+        }])));
+        for f in [shell, inner] {
+            let ops = var::query_ops(&s.doc, f, ModeOwner::Collection(c), true)
+                .expect("a plain frame picks by width");
+            assert!(s.commit(Transaction(ops)));
+        }
+        let ops = ondin_core::bind_size_ops(&s.doc, inner, [Some(w), None]);
+        assert!(!ops.is_empty(), "the fixture: the width binds");
+        assert!(s.commit(Transaction(ops)));
+        assert_eq!(
+            s.doc.mode_at(leaf, c),
+            Some(modes[0]),
+            "the fixture: 300, Compact"
+        );
+        assert!(s.commit(Transaction(vec![Operation::SetGeometry {
+            id: col,
+            geometry: ondin_core::GeometryPatch::Size(ondin_core::kurbo::Size::new(700.0, 200.0)),
+        }])));
+        assert_eq!(s.doc.mode_at(inner, c), Some(modes[2]), "Shell picks Wide");
+        assert_eq!(s.doc.mode_at(leaf, c), Some(modes[2]), "and so does Inner");
     }
 
     /// Alt while drawing puts the press point at the centre, not at a corner.

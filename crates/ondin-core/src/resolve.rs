@@ -158,9 +158,13 @@ impl crate::container::LayoutView for DocView<'_> {
     fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
         self.0.resolved_display(id)
     }
-    /// Bound limits resolved: laid out at their variables' numbers.
+    /// Bound limits resolved and a querying frame contained
+    /// ([`Document::laid_item_in`]).
     fn item(&self, id: NodeId) -> crate::container::LayoutItem {
-        self.0.resolved_item(id)
+        match self.0.get(id) {
+            Some(n) => self.0.laid_item_in(self.0.variables(), id, *n.item()),
+            None => Default::default(),
+        }
     }
     fn insets(&self, id: NodeId) -> crate::container::Insets {
         self.0.get(id).map(|n| *n.insets()).unwrap_or_default()

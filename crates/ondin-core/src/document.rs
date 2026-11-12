@@ -99,8 +99,8 @@ pub struct Document {
     /// back values this document already held, which the layout operations then
     /// take whether or not CSS accepts them. Never true between calls.
     restoring: bool,
-    /// The laid-out widths of the frames with width queries, which their queries
-    /// pick by ([`Self::settle_widths`]). Derived from layout, never saved and
+    /// The laid-out content-box widths of the frames with width queries, which
+    /// their queries pick by ([`Self::settle_widths`]). Derived from layout, never saved and
     /// never compared: a document that was never settled reads each frame's own
     /// width instead.
     laid_widths: LaidWidths,
@@ -618,16 +618,18 @@ impl Document {
     /// ([`crate::container::LayoutItem::width_from_content`], which layout holds
     /// there, `limits_drawn_in`), else its width, a bound one read in the
     /// modes it and its surroundings set.
+    ///
+    /// The settled width is stored as its content box already: subtracting the
+    /// padding on every read would resolve bound padding through `modes_at`
+    /// inside `modes_at`, exponential in nested querying frames.
     pub fn query_width_in(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
         let outer = match t.previewed_width {
-            Some((frame, w)) if frame == id => Some(w),
-            _ => self
-                .laid_widths
-                .0
-                .get(&id)
-                .copied()
-                .or_else(|| self.own_query_width(t, id)),
-        }?;
+            Some((frame, w)) if frame == id => w,
+            _ => match self.laid_widths.0.get(&id) {
+                Some(content) => return Some(*content),
+                None => self.own_query_width(t, id)?,
+            },
+        };
         Some((outer - self.side_padding(id)).max(0.0))
     }
 
@@ -686,7 +688,7 @@ impl Document {
                 continue;
             }
             if let Some(NodeKind::Artboard { size, .. }) = res.used_kind(self, *id) {
-                widths.insert(*id, size.width);
+                widths.insert(*id, (size.width - self.side_padding(*id)).max(0.0));
             }
         }
         let before: Vec<Vec<Option<crate::variable::ModeId>>> =
@@ -1069,6 +1071,29 @@ impl Document {
             if let Some(r) = item.aspect_ratio.as_mut() {
                 r.side = crate::container::RatioSide::Height;
             }
+        }
+        item
+    }
+
+    /// `item` as layout reads it: [`Self::limits_drawn_in`], and a querying
+    /// frame's `Auto` minimum width held at its padding. That minimum is the
+    /// rest of inline-size containment: a shrinking flex row would otherwise
+    /// hold the frame at a min-content its own pick sizes, and the pick would
+    /// flip every settle round. Layout only — the inspector's limit fields read
+    /// `Auto` from [`Self::resolved_item`].
+    pub fn laid_item_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        item: crate::container::LayoutItem,
+    ) -> crate::container::LayoutItem {
+        let queries = self.nodes.get(&id).is_some_and(|n| !n.queries.is_empty());
+        if !queries && item.limit_vars.iter().all(Option::is_none) {
+            return item;
+        }
+        let mut item = self.limits_drawn_in(t, id, item);
+        if queries && item.min_width == crate::container::Dimension::Auto {
+            item.min_width = crate::container::Dimension::Px(self.side_padding(id));
         }
         item
     }

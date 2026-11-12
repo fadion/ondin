@@ -1995,12 +1995,17 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             None => self.doc.resolved_display(id),
         }
     }
-    /// Bound limits resolved, as `Document::resolved_item` lays them out.
+    /// Bound limits resolved and a querying frame contained, as
+    /// `Document::laid_item_in` lays them out.
     fn item(&self, id: NodeId) -> ondin_core::container::LayoutItem {
-        match self.ov.get(id).and_then(|o| o.item) {
-            Some(item) => self.doc.limits_drawn_in(self.doc.variables(), id, item),
-            None => self.doc.resolved_item(id),
-        }
+        let item = match self.ov.get(id).and_then(|o| o.item) {
+            Some(item) => item,
+            None => match self.doc.get(id) {
+                Some(n) => *n.item(),
+                None => return Default::default(),
+            },
+        };
+        self.doc.laid_item_in(self.doc.variables(), id, item)
     }
     fn insets(&self, id: NodeId) -> ondin_core::Insets {
         self.ov

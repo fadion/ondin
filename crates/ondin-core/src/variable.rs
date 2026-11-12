@@ -2784,15 +2784,28 @@ pub fn copy_mode_ops(
             breakpoints: Some(next),
         });
     }
-    // Every frame's width query over the collection gives the copy a width, by
-    // the rule above on its own widths, [`QUERY_STEP`] past the last at the end.
+    // Every frame's width query over the collection gives the copy a width in
+    // the query's own width order, which a moved mode leaves apart from the
+    // collection's: a copy appended goes [`QUERY_STEP`] past the widest, a
+    // duplicate halfway from its source to the next wider width, or
+    // `QUERY_STEP` past its source where that is the widest. A width tied
+    // with another mode's would never be picked.
+    let appended = index >= c.modes.len();
     ops.extend(queries_ops(doc, |q| {
         if !c.modes.iter().any(|m| q.contains_key(&m.id)) {
             return None;
         }
-        let width = |i: usize| c.modes.get(i).and_then(|m| q.get(&m.id)).copied();
-        let lo = index.checked_sub(1).and_then(width).unwrap_or(0.0);
-        let at = match width(index) {
+        let widest = q.values().copied().fold(0.0, f64::max);
+        let lo = match q.get(&from) {
+            Some(w) if !appended => *w,
+            _ => widest,
+        };
+        let hi = q
+            .values()
+            .copied()
+            .filter(|w| *w > lo)
+            .min_by(f64::total_cmp);
+        let at = match hi {
             Some(hi) => Some(((lo + hi) / 2.0).round())
                 .filter(|w| lo < *w && *w < hi)
                 .unwrap_or((lo + hi) / 2.0),
@@ -3827,17 +3840,20 @@ pub fn query_mode(t: &Variables, q: &Breakpoints, width: f64) -> Option<ModeId> 
             .and_then(|o| owner_modes(t, o).iter().position(|x| x == m))
             .unwrap_or(usize::MAX)
     };
-    let mut held: Vec<(ModeId, f64)> = q
+    let mut held: Vec<(ModeId, f64, usize)> = q
         .iter()
         .filter(|(m, _)| t.has_mode(**m))
-        .map(|(m, w)| (*m, *w))
+        .map(|(m, w)| (*m, *w, order(m)))
         .collect();
-    held.sort_by(|a, b| a.1.total_cmp(&b.1).then(order(&a.0).cmp(&order(&b.0))));
-    let first = held.first().map(|(m, _)| *m);
+    let rank = |a: &(ModeId, f64, usize), b: &(ModeId, f64, usize)| {
+        a.1.total_cmp(&b.1).then(a.2.cmp(&b.2))
+    };
+    held.sort_by(rank);
+    let first = held.first().map(|(m, _, _)| *m);
     held.iter()
-        .filter(|(_, w)| width >= *w)
-        .max_by(|a, b| a.1.total_cmp(&b.1).then(order(&a.0).cmp(&order(&b.0))))
-        .map(|(m, _)| *m)
+        .filter(|(_, w, _)| width >= *w)
+        .max_by(|a, b| rank(a, b))
+        .map(|(m, _, _)| *m)
         .or(first)
 }
 

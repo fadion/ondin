@@ -331,6 +331,86 @@ fn a_width_derived_from_a_fit_content_height_is_contained() {
     assert!(variable::why_no_query(&f.doc, card).is_none());
 }
 
+/// A querying flex frame shrunk by a row is contained in its minimum too: its
+/// automatic minimum is its padding, not contents its own pick sizes, so the
+/// pick settles at the row's 300 (Compact, the bar overflowing) instead of
+/// flipping between Compact and Regular every round, as Chrome lays a
+/// `container-type: inline-size` item.
+/// flip: `Document::laid_item_in` leaving `min_width` at `Auto` → laid 400,
+/// fails at "the row's width".
+#[test]
+fn a_querying_frame_shrunk_by_a_row_is_contained_at_its_minimum() {
+    let mut f = fixture();
+    let (row, q, bar) = (f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let w: VarId = f.ids.mint_var();
+    let page = f.page;
+    f.commit(vec![
+        frame(row, page, 300.0),
+        Operation::SetDisplay {
+            id: row,
+            display: Some(Display::Flex(Flex::default())),
+        },
+        frame(q, row, 700.0),
+        Operation::SetDisplay {
+            id: q,
+            display: Some(Display::Flex(Flex::default())),
+        },
+        Operation::CreateNode {
+            id: bar,
+            parent: q,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: w,
+                name: "density/bar".into(),
+                kind: VarKind::Number,
+                cells: [
+                    (f.compact, Cell::Number(400.0)),
+                    (f.regular, Cell::Number(100.0)),
+                    (f.wide, Cell::Number(100.0)),
+                ]
+                .into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let ops = ondin_core::bind_size_ops(&f.doc, bar, [Some(w), None]);
+    assert!(!ops.is_empty(), "the fixture: the bar's width binds");
+    f.commit(ops);
+    let ops = variable::query_ops(&f.doc, q, ModeOwner::Collection(f.density), true)
+        .expect("a plain frame picks by width");
+    f.commit(ops);
+    assert_eq!(
+        f.inside(q),
+        Some(f.wide),
+        "the fixture: unsettled, its own 700"
+    );
+
+    let _ = Resolved::settled(&mut f.doc);
+    assert_eq!(
+        f.doc.query_width_in(f.doc.variables(), q),
+        Some(300.0),
+        "the row's width"
+    );
+    assert_eq!(f.inside(q), Some(f.compact));
+    let mut res = Resolved::rebuild(&f.doc);
+    assert!(
+        res.settle(&mut f.doc).0.is_empty(),
+        "settled: nothing moves"
+    );
+}
+
 /// A main's widths: the first mode's 0 is fixed, a width at or past a
 /// neighbour's is refused naming it, and unticking takes the query away.
 #[test]
@@ -349,8 +429,26 @@ fn widths_keep_their_order_and_untick_goes() {
     assert!(f.doc.get(f.card).unwrap().queries().is_empty());
 }
 
+/// A width reaching a threshold picks it, as CSS's `@container (min-width)`
+/// does: exactly 320 is Regular, a hair under is Compact.
+/// flip: `query_mode` comparing `width > *w` → Compact at 320.
+#[test]
+fn a_width_at_the_threshold_picks_it() {
+    let mut f = fixture();
+    f.by_width();
+    let page = f.page;
+    let at = f.instance(page, QUERY_STEP);
+    let under = f.instance(page, QUERY_STEP - 0.02);
+    assert_eq!(f.inside(at), Some(f.regular));
+    assert_eq!(f.inside(under), Some(f.compact));
+}
+
 /// Removing a mode drops its width, the next taking 0 when the narrowest goes;
-/// copying one gives the copy a width between its neighbours.
+/// copying one gives the copy a width between its source and the next wider in
+/// width order, whatever the collection's order; a query left with one mode
+/// goes, as does one over a removed collection.
+/// flip: `copy_mode_ops` placing by collection order → the copy of Wide, moved
+/// first, gets Cozy's 320 and fails at "past the widest".
 #[test]
 fn the_mode_verbs_keep_the_queries_in_step() {
     let mut f = fixture();
@@ -364,7 +462,45 @@ fn the_mode_verbs_keep_the_queries_in_step() {
     let ops = variable::copy_mode_ops(&f.doc, f.regular, copy, "Cozy", 1);
     f.commit(ops);
     let q = &f.doc.get(f.card).unwrap().queries()[0];
-    assert_eq!(q.get(&copy), Some(&QUERY_STEP));
+    assert_eq!(q.get(&copy), Some(&QUERY_STEP), "halfway from 0 to 640");
+    let half = f.ids.mint_mode();
+    let ops = variable::copy_mode_ops(&f.doc, f.regular, half, "Snug", 1);
+    f.commit(ops);
+    let q = &f.doc.get(f.card).unwrap().queries()[0];
+    assert_eq!(
+        q.get(&half),
+        Some(&(QUERY_STEP / 2.0)),
+        "halfway, not a step"
+    );
+
+    let ops = variable::move_mode_ops(&f.doc, f.wide, 0);
+    f.commit(ops);
+    let wide2 = f.ids.mint_mode();
+    let ops = variable::copy_mode_ops(&f.doc, f.wide, wide2, "Wide 2", 1);
+    f.commit(ops);
+    let q = &f.doc.get(f.card).unwrap().queries()[0];
+    assert_eq!(
+        q.get(&wide2),
+        Some(&(3.0 * QUERY_STEP)),
+        "past the widest, Wide's 640"
+    );
+
+    for m in [f.regular, copy, half, wide2] {
+        let ops = variable::remove_mode_ops(&f.doc, m);
+        f.commit(ops);
+    }
+    assert!(
+        f.doc.get(f.card).unwrap().queries().is_empty(),
+        "one mode left: the query goes"
+    );
+    let mut f = fixture();
+    f.by_width();
+    let ops = variable::remove_collection_ops(&f.doc, f.density);
+    f.commit(ops);
+    assert!(
+        f.doc.get(f.card).unwrap().queries().is_empty(),
+        "its collection removed: the query goes"
+    );
 }
 
 /// The queries save and load, and only on a frame: a rect holding one is

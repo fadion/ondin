@@ -213,9 +213,8 @@ fn a_pixel_fitted_size_has_no_partial_pixels() {
     assert_eq!(doc, before);
 }
 
-/// A background fills the padding too; trimming a box to its own ink changes
-/// next to nothing. The trim is not flip-proved: a fixture with a transparent margin
-/// would need an effect, and this one has none.
+/// A background fills the padding too, and trimming a box that is all ink changes
+/// next to nothing.
 #[test]
 fn a_background_fills_the_padding() {
     let (doc, res, logo, _) = fixture();
@@ -244,6 +243,118 @@ fn a_background_fills_the_padding() {
         diff < 16,
         "trimming a rect to its own ink changes next to nothing: {diff}"
     );
+}
+
+/// Trimmed, a group whose box is mostly a clear rect is drawn from its ink alone:
+/// the 10 × 10 dot in a 40 × 40 box fills the 32 instead of its top-left quarter.
+/// flip: `icon::entries` skipping `trimmed_view` → fails at "the trimmed dot
+/// fills the square".
+#[test]
+fn trim_draws_the_ink_alone() {
+    let mut ids = IdSource::new(0x2C0);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (mark, clear, dot) = (ids.mint(), ids.mint(), ids.mint());
+    let mut ops = vec![Operation::CreateNode {
+        id: mark,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Group,
+        transform: None,
+        name: Some("mark".into()),
+    }];
+    let mut clear_rect = rect(clear, mark, 0, (0.0, 0.0), (40.0, 40.0));
+    clear_rect[1] = Operation::SetFills {
+        id: clear,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 0)).into(),
+            visible: true,
+        }]),
+    };
+    ops.extend(clear_rect);
+    ops.extend(rect(dot, mark, 1, (0.0, 0.0), (10.0, 10.0)));
+    doc.apply(&Transaction(ops)).expect("the fixture");
+    let res = Resolved::rebuild(&doc);
+    let plain = ExportSpec {
+        sizes: vec![32],
+        ..ico()
+    };
+    let e = icon::entries(&doc, &res, mark, &plain).expect("entries");
+    assert_eq!(alpha(&e[0].raster.rgba, 32, 4, 4), 255, "the dot's corner");
+    assert_eq!(
+        alpha(&e[0].raster.rgba, 32, 24, 24),
+        0,
+        "untrimmed, the clear rect holds the rest"
+    );
+    let trimmed = ExportSpec {
+        trim: true,
+        ..plain
+    };
+    let t = icon::entries(&doc, &res, mark, &trimmed).expect("entries");
+    assert_eq!(
+        alpha(&t[0].raster.rgba, 32, 24, 24),
+        255,
+        "the trimmed dot fills the square"
+    );
+}
+
+/// A slice is drawn through its box, square and padded, and reads neither icon
+/// switch: with frames and pixel-fit on, its entries are the plain ones, though a
+/// frame named for it exists.
+/// flip: `icon::entries` leaving the slice path when frames are on → fails at
+/// "neither switch is read".
+#[test]
+fn a_slice_icon_is_its_box_as_the_page_shows_it() {
+    let (mut doc, _, logo, frame) = fixture();
+    let slice = IdSource::new(0x3C0).mint();
+    let root = doc.get(logo).and_then(|n| n.parent()).expect("the root");
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: slice,
+        parent: root,
+        index: 2,
+        kind: NodeKind::Slice {
+            size: Size::new(47.3, 21.0),
+        },
+        transform: Some(Affine::translate((10.3, 5.2))),
+        name: Some("logo".into()),
+    }]))
+    .expect("the slice");
+    let res = Resolved::rebuild(&doc);
+    let plain = ExportSpec {
+        sizes: vec![16, 32],
+        ..ico()
+    };
+    assert_eq!(
+        icon::size_frames(&doc, slice, &[16, 32]),
+        [(16, frame)],
+        "a frame is named for the slice"
+    );
+    let e = icon::entries(&doc, &res, slice, &plain).expect("entries");
+    for entry in &e {
+        let (r, side) = (&entry.raster, entry.size);
+        assert_eq!((r.width, r.height), (side, side), "the entry is square");
+        assert_eq!(alpha(&r.rgba, side, side / 2, 0), 0, "padded above");
+        assert_eq!(
+            alpha(&r.rgba, side, side / 2, side / 2),
+            255,
+            "the page's ink"
+        );
+        assert_eq!(entry.frame, None);
+    }
+    let both = ExportSpec {
+        size_frames: true,
+        pixel_fit: true,
+        ..plain
+    };
+    let b = icon::entries(&doc, &res, slice, &both).expect("entries");
+    for (x, y) in e.iter().zip(&b) {
+        assert!(
+            x.raster.rgba == y.raster.rgba,
+            "neither switch is read at {}",
+            x.size
+        );
+        assert_eq!(y.frame, None);
+    }
 }
 
 /// An ICNS writes the macOS ladder under Apple's codes, its length declared.

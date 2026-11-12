@@ -249,10 +249,8 @@ impl OndinApp {
         self.pen = None;
         self.pencil = None;
         self.points.clear();
-        self.name_edit = None;
-        self.desc_edit = None;
-        self.link_edit = None;
-        self.href_edit = None;
+        // The inspector drafts stay: the held pass draws the old card once more,
+        // which commits them to their own layer, and a draft not drawn is gone.
         self.renaming_layer = None;
         self.layer_drag = None;
         self.layers_range_anchor = None;

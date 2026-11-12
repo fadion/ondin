@@ -819,16 +819,8 @@ impl OndinApp {
         if resp.has_focus() {
             ui::typing_edge(ui, framed.response.rect);
         }
-        if resp.gained_focus() || resp.changed() {
-            self.desc_edit = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
-        }
-        // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
-        if resp.lost_focus()
-            && let Some(d) = self.desc_edit.take()
-            && d.key == id
-            && ui::defocus_commits(&resp)
-        {
-            let text = d.text.trim().to_string();
+        if let Some(typed) = ui::Draft::follow(&mut self.desc_edit, &resp, id, &text) {
+            let text = typed.trim().to_string();
             if text != saved {
                 self.session.name_step("Description", icon::NOTE);
                 self.commit_edit(Transaction(vec![Operation::SetDescription {
@@ -869,90 +861,34 @@ impl OndinApp {
             text.clear();
         }
         ui.add_space(DESC_GAP);
-        let ring = refused.map(|_| ui::refused_stroke().color);
-        let mut opened = false;
-        let mut frame = ui::field_frame();
-        if ring.is_some() {
-            frame = frame.stroke(ui::refused_stroke());
-        }
         // The open button sits inside the field's right inset, so the field is as
         // wide with it as without.
         let open = !inherited.is_empty() && edit.is_none() && !focused;
-        if open {
-            frame = frame.inner_margin(egui::Margin {
-                left: ui::FIELD_PAD_X as i8,
-                right: 3,
-                top: 0,
-                bottom: 0,
-            });
-        }
-        let framed = frame.show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.set_min_height(ui::CONTROL_H - ui::FIELD_BORDER_H);
-                ui.spacing_mut().item_spacing.x = 7.0;
-                ui.label(theme::icon_text(
-                    icon::GLOBE,
-                    ui::CONTROL_GLYPH_PT,
-                    theme::text::faint(),
-                ));
-                let button = if open { LINK_H + 7.0 } else { 0.0 };
-                let room = ui.available_width() - button;
-                let font = egui::FontId::proportional(FIELD_PT);
-                let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
-                #[expect(
-                    clippy::disallowed_methods,
-                    reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
-                )]
-                let resp = ui
-                    .add_enabled_ui(!private, |ui| {
-                        pad.add(
-                            ui,
-                            room.max(12.0),
-                            egui::TextEdit::singleline(&mut text)
-                                .id(field_id)
-                                .font(font)
-                                .text_color_opt(ring)
-                                .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
-                        )
-                    })
-                    .inner;
-                if open
-                    && ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
-                        .on_hover_text("Open in browser")
-                        .clicked()
-                {
-                    opened = true;
-                }
-                resp
-            })
-            .inner
-        });
-        let resp = framed.inner;
-        if resp.has_focus() && ring.is_none() {
-            ui::typing_edge(ui, framed.response.rect);
-        }
+        let field = ui::GlyphField {
+            refused: refused.is_some(),
+            id: Some(field_id),
+            locked: private,
+            button: open.then_some((icon::ARROW_SQUARE_OUT, "Open in browser")),
+            ..ui::GlyphField::new(icon::GLOBE, &hint)
+        };
+        let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+        let (resp, opened) = ui::text_field_glyph(ui, size, &mut text, field);
         if opened {
             open_doc_link(ui.ctx(), &inherited);
         }
         if resp.gained_focus() && edit.is_none() {
             // The host was drawn this frame; the whole address from the next.
             self.link_edit = Some(ui::Draft::new(ui.ctx(), id, saved.clone()));
-        // Typing only keeps the draft; the commit is the defocus below.
-        // valve-gate-not-a-commit
-        } else if resp.changed() {
-            self.link_edit = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
         }
-        if resp.lost_focus() {
-            if !ui::defocus_commits(&resp) {
-                self.link_edit = None;
-            } else if let Some(e) = self.link_edit.take().filter(|e| e.key == id) {
-                match ondin_core::web_link(&e.text) {
-                    Ok(url) if url == saved => {}
-                    Ok(url) => {
-                        self.session.name_step("Link", icon::GLOBE);
-                        self.commit_edit(Transaction(vec![Operation::SetDocLink { id, url }]));
-                    }
-                    Err(why) => self.link_edit = Some(e.refuse(why)),
+        if let Some(typed) = ui::Draft::follow(&mut self.link_edit, &resp, id, &text) {
+            match ondin_core::web_link(&typed) {
+                Ok(url) if url == saved => {}
+                Ok(url) => {
+                    self.session.name_step("Link", icon::GLOBE);
+                    self.commit_edit(Transaction(vec![Operation::SetDocLink { id, url }]));
+                }
+                Err(why) => {
+                    self.link_edit = Some(ui::Draft::new(ui.ctx(), id, typed).refuse(why));
                 }
             }
         }

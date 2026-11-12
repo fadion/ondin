@@ -457,7 +457,13 @@ fn css_field(
     shown: Option<&str>,
     tip: &str,
 ) -> Option<String> {
-    let held = ui.ctx().data(|d| d.get_temp::<String>(key));
+    // A `ui::Draft`, so text typed into a field that went undrawn mid-edit (its
+    // frame deleted, its display changed) is dropped rather than shown again.
+    let mut slot = ui.ctx().data(|d| d.get_temp::<ui::Draft<egui::Id>>(key));
+    let held = ui::Draft::live(&mut slot, ui.ctx(), key).map(|d| d.text.clone());
+    if held.is_none() {
+        ui.ctx().data_mut(|d| d.remove::<ui::Draft<egui::Id>>(key));
+    }
     let mut text = held.unwrap_or_else(|| shown.unwrap_or_default().to_owned());
     let resp = ui::text_field(
         ui,
@@ -468,7 +474,8 @@ fn css_field(
     .on_hover_text(tip);
     ui::select_all_on_focus(ui, &resp, &text);
     if resp.has_focus() {
-        ui.ctx().data_mut(|d| d.insert_temp(key, text.clone()));
+        let draft = ui::Draft::<egui::Id>::new(ui.ctx(), key, text.clone());
+        ui.ctx().data_mut(|d| d.insert_temp(key, draft));
     }
     // A refusal is about the text that was refused, and a new edit is a new try.
     if resp.gained_focus() {
@@ -479,7 +486,7 @@ fn css_field(
     // The buffer goes on every way out, `Escape` included — a cancelled edit
     // must not sit in the field for the next look. Only the write is gated.
     if resp.lost_focus() {
-        ui.ctx().data_mut(|d| d.remove::<String>(key));
+        ui.ctx().data_mut(|d| d.remove::<ui::Draft<egui::Id>>(key));
         // **Against what the field was seeded with**, not against `shown` (§15
         // D941): a mixed selection seeds it empty with `shown` `None`, and
         // `Some("") != None` read the untouched buffer as typed — a click in and
@@ -1993,6 +2000,40 @@ mod tests {
 
     fn b(b: TrackBreadth) -> Track {
         Track::Size(TrackSize::Breadth(b))
+    }
+
+    /// Text typed into a CSS line whose field then went undrawn without losing
+    /// focus is not shown again as if saved: the field reads what is stored.
+    ///
+    /// flip: `css_field` seeding from its buffer without `Draft::live` → fails
+    /// at "the stored line".
+    #[test]
+    fn a_css_line_left_undrawn_drops_its_typed_text() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let key = egui::Id::new("css-line-test");
+        let draw = |show: bool| {
+            ctx.run_ui(Default::default(), |ui| {
+                if show {
+                    let size = egui::vec2(160.0, ui::CONTROL_H);
+                    let _ = css_field(ui, key, size, Some("1fr"), "");
+                }
+            })
+            .shapes
+        };
+        draw(true);
+        let typed = ui::Draft::<egui::Id>::new(&ctx, key, "1fr 1fr 1fr".to_string());
+        ctx.data_mut(|d| d.insert_temp(key, typed));
+        // The frame went away mid-edit, then came back.
+        draw(false);
+        draw(false);
+        let shapes = draw(true);
+        let shows = |s: &str| {
+            shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == s))
+        };
+        assert!(!shows("1fr 1fr 1fr") && shows("1fr"), "the stored line");
     }
 
     /// **A kind picked from the menu turns the track into one of that kind, and

@@ -518,6 +518,7 @@ pub struct MenuRow<'a> {
     pub highlight: Option<bool>,
     /// The chosen row of a dropdown that holds one value: lit as a ComboBox's
     /// `selectable_label` is (the selection ground and ink), with no tick column.
+    /// A disabled chosen row keeps the ground under the disabled ink.
     pub selected: bool,
 }
 
@@ -581,7 +582,9 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     // `&& enabled` keeps a stale highlight off a row that went dim.
     let hovered = row.highlight.unwrap_or_else(|| resp.hovered()) && row.enabled;
     let on = row.checked == Some(true);
-    let lit = row.selected && row.enabled;
+    // Lit even when dimmed: the value a layer holds may be one now refused, and
+    // the open menu still shows which it is, in the disabled ink.
+    let lit = row.selected;
     let p = ui.painter();
     if lit {
         let selection = ui.visuals().selection.bg_fill;
@@ -2022,7 +2025,7 @@ pub fn field_row<R>(
     size: egui::Vec2,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    framed_row(ui, size, field_frame(), add)
+    framed_row(ui, size, field_frame(), true, add)
 }
 
 /// [`field_row`] with its own side insets, for a row that starts on a button
@@ -2040,14 +2043,17 @@ pub fn field_row_inset<R>(
         top: 0,
         bottom: 0,
     };
-    framed_row(ui, size, field_frame().inner_margin(margin), add)
+    framed_row(ui, size, field_frame().inner_margin(margin), true, add)
 }
 
-/// [`field_row`]'s body, for the callers that need a different frame.
+/// [`field_row`]'s body, for the callers that need a different frame. `edge`
+/// is whether the row wears [`typing_edge`] while typed in: a refused field
+/// keeps its error ring instead.
 fn framed_row<R>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     frame: egui::Frame,
+    edge: bool,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     let row = ui.allocate_ui_with_layout(
@@ -2062,8 +2068,7 @@ fn framed_row<R>(
                 .inner
         },
     );
-    // A refused field keeps its error ring while typed in.
-    if frame.stroke != refused_stroke() && typing_inside(ui.ctx(), row.response.rect) {
+    if edge && typing_inside(ui.ctx(), row.response.rect) {
         typing_edge(ui, row.response.rect);
     }
     row.inner
@@ -2112,7 +2117,7 @@ pub fn field_row_active<R>(
         return field_row(ui, size, add);
     }
     let frame = field_frame().stroke(egui::Stroke::new(1.0, color::accent_700()));
-    framed_row(ui, size, frame, add)
+    framed_row(ui, size, frame, true, add)
 }
 
 /// A [`field_row`] the whole of which is one press target, for a row that opens
@@ -2188,45 +2193,92 @@ pub fn text_field(
     })
 }
 
-/// [`text_field`] led by a faint `glyph` standing in for its label, as the
-/// documentation link's field is: a link's address on the identity card.
-/// `refused` draws it as [`refused_stroke`] says; the caller puts the reason
-/// under it with [`field_refusal`].
+/// What a [`text_field_glyph`] holds besides its text.
+pub struct GlyphField<'a> {
+    /// The faint glyph standing in for the field's label.
+    pub glyph: &'a str,
+    pub hint: &'a str,
+    /// Drawn as [`refused_stroke`] says; the caller puts the reason under it
+    /// with [`field_refusal`].
+    pub refused: bool,
+    /// The edit's own id, for a caller that reads its focus before drawing it.
+    pub id: Option<egui::Id>,
+    /// The text cannot be typed in (private mode's mask); the button stays live.
+    pub locked: bool,
+    /// A button at the field's right end, inside its inset: glyph and tooltip.
+    pub button: Option<(&'a str, &'a str)>,
+}
+
+impl<'a> GlyphField<'a> {
+    /// A field led by `glyph`, showing `hint` while empty.
+    pub fn new(glyph: &'a str, hint: &'a str) -> Self {
+        Self {
+            glyph,
+            hint,
+            refused: false,
+            id: None,
+            locked: false,
+            button: None,
+        }
+    }
+}
+
+/// The square of a [`GlyphField`]'s button, and its inset from the field's
+/// right edge, which a field without one keeps at [`FIELD_PAD_X`].
+const FIELD_BUTTON: f32 = 22.0;
+const FIELD_BUTTON_INSET: f32 = 3.0;
+
+/// A single-line text field led by a faint glyph standing in for its label: a
+/// main's documentation link, a link layer's address. Answers the edit's
+/// response and whether its button was clicked.
 pub fn text_field_glyph(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     text: &mut String,
-    glyph: &str,
-    hint: &str,
-    refused: bool,
-) -> egui::Response {
+    field: GlyphField<'_>,
+) -> (egui::Response, bool) {
     let pt = Scale::of(size.y).text_pt();
     let font = egui::FontId::proportional(pt);
+    let right = match field.button {
+        Some(_) => FIELD_BUTTON_INSET,
+        None => FIELD_PAD_X,
+    };
     let mut frame = field_frame().inner_margin(egui::Margin {
         left: FIELD_PAD_X as i8,
-        right: 0,
+        right: right as i8,
         top: 0,
         bottom: 0,
     });
-    if refused {
+    if field.refused {
         frame = frame.stroke(refused_stroke());
     }
-    framed_row(ui, size, frame, |ui| {
-        ui.spacing_mut().item_spacing.x = 7.0;
+    framed_row(ui, size, frame, !field.refused, |ui| {
+        let gap = 7.0;
+        ui.spacing_mut().item_spacing.x = gap;
         ui.label(theme::icon_text(
-            glyph,
+            field.glyph,
             CONTROL_GLYPH_PT,
             theme::text::faint(),
         ));
-        let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
-        frame.add(
-            ui,
-            f32::INFINITY,
-            egui::TextEdit::singleline(text)
-                .font(font)
-                .text_color_opt(refused.then(color::error))
-                .hint_text(egui::RichText::new(hint).size(pt)),
-        )
+        let button_w = field.button.map_or(0.0, |_| FIELD_BUTTON + gap);
+        let room = (ui.available_width() - button_w).max(12.0);
+        let pad = edit_frame(ui, &font, size.y - FIELD_BORDER_H, 0.0);
+        let mut edit = egui::TextEdit::singleline(text)
+            .font(font)
+            .text_color_opt(field.refused.then(color::error))
+            .hint_text(egui::RichText::new(field.hint).size(pt));
+        if let Some(id) = field.id {
+            edit = edit.id(id);
+        }
+        let resp = ui
+            .add_enabled_ui(!field.locked, |ui| pad.add(ui, room, edit))
+            .inner;
+        let clicked = field.button.is_some_and(|(glyph, tip)| {
+            icon_button(ui, glyph, FIELD_BUTTON, 13.0, false, true)
+                .on_hover_text(tip)
+                .clicked()
+        });
+        (resp, clicked)
     })
 }
 
@@ -6357,6 +6409,30 @@ impl<K: PartialEq + Copy, R> Draft<K, R> {
             _ => None,
         }
     }
+
+    /// The text field's side of a draft in `slot`, after the field `resp`
+    /// drew `text` for `key`: typing (or focusing with no draft held) keeps a
+    /// draft, and a committing defocus takes it out as the text to commit.
+    /// `Escape` drops it. A caller that refuses the text puts it back refused.
+    pub fn follow(
+        slot: &mut Option<Self>,
+        resp: &egui::Response,
+        key: K,
+        text: &str,
+    ) -> Option<String> {
+        let held = slot.as_ref().is_some_and(|d| d.key == key);
+        // Typing only keeps the draft; the commit is the defocus below.
+        // valve-gate-not-a-commit
+        if resp.changed() || (resp.gained_focus() && !held) {
+            *slot = Some(Self::new(&resp.ctx, key, text.to_owned()));
+        }
+        if !resp.lost_focus() {
+            return None;
+        }
+        // Taken before `defocus_commits`, so `Escape` drops it too.
+        let draft = slot.take().filter(|d| d.key == key)?;
+        defocus_commits(resp).then_some(draft.text)
+    }
 }
 
 /// Select the whole of a hex field the moment it takes focus, so typing replaces
@@ -6778,8 +6854,8 @@ mod keyboard_focus_tests {
 
     /// A refused `text_field_glyph` typed in keeps the error ring and no typing
     /// edge; an accepted one wears the edge.
-    /// flip: `framed_row` painting `typing_edge` on a refused frame → fails at
-    /// "no typing edge over the ring".
+    /// flip: `text_field_glyph` passing `framed_row` an edge on a refused field
+    /// → fails at "no typing edge over the ring".
     #[test]
     fn a_refused_glyph_field_keeps_its_ring_while_typed_in() {
         let run = |refused: bool| {
@@ -6793,7 +6869,11 @@ mod keyboard_focus_tests {
                 ctx.run_ui(raw, |ui| {
                     let mut text = "nope".to_string();
                     let size = egui::vec2(160.0, CONTROL_H);
-                    let _ = text_field_glyph(ui, size, &mut text, "@", "", refused);
+                    let field = GlyphField {
+                        refused,
+                        ..GlyphField::new("@", "")
+                    };
+                    let _ = text_field_glyph(ui, size, &mut text, field);
                 })
             };
             frame(Vec::new());
@@ -10864,6 +10944,38 @@ mod context_menu_chrome_tests {
             left(icon::CHECK).is_some(),
             "the tick shows on the checked row"
         );
+    }
+
+    /// The chosen row of a dropdown is lit even when it is dimmed, so the menu
+    /// shows a value now refused; its label takes the disabled ink.
+    ///
+    /// flip: `menu_row` lighting only an enabled row → fails at "lit".
+    #[test]
+    fn a_chosen_row_is_lit_when_dimmed() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut ground = None;
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_width(200.0);
+            ground = Some(ui.visuals().selection.bg_fill);
+            let row = MenuRow::new("", "Link").selected(true).enabled(false);
+            menu_row(ui, row, MENU_ROW_H);
+        });
+        let ground = ground.expect("drawn");
+        assert!(
+            out.shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill == ground)),
+            "lit"
+        );
+        let ink = out.shapes.iter().find_map(|c| match &c.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Link" => {
+                t.galley.job.sections.first().map(|s| s.format.color)
+            }
+            _ => None,
+        });
+        assert_eq!(ink, Some(theme::text::disabled()), "in the disabled ink");
     }
 
     /// A keyboard highlight paints exactly one ground even with the pointer resting on another row (`docs/context-menus.md` §8), a `submenu_row` included.

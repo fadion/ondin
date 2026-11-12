@@ -1258,7 +1258,8 @@ the first segment of a component's. It hides names, not content.
   vision simulation's bar, the minimap, find and replace's list, a compare's bar, card and mark tags, the version card's summaries and opened rows (trails dropped, and what belongs to no page by kind alone, so variable and style names hide there too), present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. A main's or set's description and documentation link
   are masked with the names: the description field is disabled and empty (*Description hidden in
-  private mode*), the link field reads *Link hidden in private mode*, an instance shows no description
+  private mode*), the link field reads *Link hidden in private mode*, as does a link layer's address
+  field on its identity card (its address names the client as readily), an instance shows no description
   note and its book's tooltip drops the host, the swap picker hovers no description, and the insert
   picker's hover card shows only the masked name and the variant count. **What stays:** text, images,
   colours, style, variable and variant property names. Masked, not removed: a frame label still selects its frame, rows still

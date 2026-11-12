@@ -846,37 +846,7 @@ impl OndinApp {
                         self.session.info(crate::private::DECLINE_RENAME);
                     }
                 } else {
-                    // Buffered, committed once on defocus, as a layer's name is.
-                    let mut name = ui::Draft::live(&mut self.name_edit, ui.ctx(), id)
-                        .map_or_else(|| name0.clone(), |d| d.text.clone());
-                    #[expect(
-                        clippy::disallowed_methods,
-                        reason = "the card head's name, a heading edited in place"
-                    )]
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut name)
-                            .frame(egui::Frame::NONE)
-                            .desired_width(140.0)
-                            .font(egui::FontId::proportional(ui::HEAD_PT)),
-                    );
-                    if resp.has_focus() {
-                        ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
-                    }
-                    // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
-                    if resp.gained_focus() || resp.changed() {
-                        self.name_edit = Some(ui::Draft::new(ui.ctx(), id, name.clone()));
-                    }
-                    if resp.lost_focus()
-                        && let Some(d) = self.name_edit.take()
-                        && d.key == id
-                        && ui::defocus_commits(&resp)
-                    {
-                        let name = d.text.trim().to_string();
-                        if !name.is_empty() && name != name0 {
-                            self.session.name_step("Rename page", icon::CURSOR_TEXT);
-                            self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
-                        }
-                    }
+                    self.head_name_field(ui, id, &name0, "Rename page");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
@@ -1770,6 +1740,35 @@ impl OndinApp {
         });
     }
 
+    /// An identity card head's name, edited in place: drafted in `name_edit`
+    /// and renamed once on defocus as the undo step `step`. An empty name is not
+    /// taken.
+    fn head_name_field(&mut self, ui: &mut egui::Ui, id: NodeId, name0: &str, step: &str) {
+        let mut name = ui::Draft::live(&mut self.name_edit, ui.ctx(), id)
+            .map_or_else(|| name0.to_string(), |d| d.text.clone());
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the card head's name, a heading edited in place"
+        )]
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .frame(egui::Frame::NONE)
+                .desired_width(140.0)
+                .font(egui::FontId::proportional(ui::HEAD_PT)),
+        );
+        // The I-beam is kept: the frameless field has no other cue.
+        if resp.has_focus() {
+            ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
+        }
+        if let Some(typed) = ui::Draft::follow(&mut self.name_edit, &resp, id, &name) {
+            let name = typed.trim().to_string();
+            if !name.is_empty() && name != name0 {
+                self.session.name_step(step, icon::CURSOR_TEXT);
+                self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+            }
+        }
+    }
+
     /// The identity card for a *layer*: kind icon, editable name, visibility
     /// and lock.
     ///
@@ -1793,38 +1792,7 @@ impl OndinApp {
                         self.session.info(crate::private::DECLINE_RENAME);
                     }
                 } else {
-                    // Name — buffered, committed once on defocus.
-                    let mut name = ui::Draft::live(&mut self.name_edit, ui.ctx(), id)
-                        .map_or_else(|| name0.to_string(), |d| d.text.clone());
-                    #[expect(
-                        clippy::disallowed_methods,
-                        reason = "the card head's name, a heading edited in place"
-                    )]
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut name)
-                            .frame(egui::Frame::NONE)
-                            .desired_width(140.0)
-                            .font(egui::FontId::proportional(ui::HEAD_PT)),
-                    );
-                    if resp.has_focus() {
-                        ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
-                    }
-                    // The I-beam is kept: the frameless field has no other cue.
-                    if resp.gained_focus() || resp.changed() {
-                        self.name_edit = Some(ui::Draft::new(ui.ctx(), id, name.clone()));
-                    }
-                    // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
-                    if resp.lost_focus()
-                        && let Some(d) = self.name_edit.take()
-                        && d.key == id
-                        && ui::defocus_commits(&resp)
-                    {
-                        let name = d.text.trim().to_string();
-                        if !name.is_empty() && name != name0 {
-                            self.session.name_step("Rename", icon::CURSOR_TEXT);
-                            self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
-                        }
-                    }
+                    self.head_name_field(ui, id, name0, "Rename");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let lock = if locked0 {
@@ -2084,7 +2052,8 @@ impl OndinApp {
     /// A link's address under its Element row: a text field with the link glyph
     /// for a label, applied when it loses focus (`Escape` abandons it), ringed in
     /// red with the reason under it while what was typed is not an address a link
-    /// can take (`element::is_href`), as the documentation link is.
+    /// can take (`element::is_href`), as the documentation link is. Private mode
+    /// masks it as it does the documentation link.
     fn link_address_row(&mut self, ui: &mut egui::Ui, id: NodeId, enabled: bool) {
         let saved = self
             .session
@@ -2092,36 +2061,35 @@ impl OndinApp {
             .get(id)
             .map(|n| n.href().to_string())
             .unwrap_or_default();
+        let private = crate::private::on();
         let (mut text, refused) = match ui::Draft::live(&mut self.href_edit, ui.ctx(), id) {
             Some(d) => (d.text.clone(), d.refused.is_some()),
             None => (saved.clone(), false),
+        };
+        if private {
+            text.clear();
+        }
+        let hint = match private {
+            true => "Link hidden in private mode",
+            false => "https://, /path or #id",
         };
         let mut commit = None;
         let draft = &mut self.href_edit;
         ui.horizontal(|ui| {
             ui::disable_unless(ui, enabled, |ui| {
                 let w = ui.available_width();
-                let resp = ui::text_field_glyph(
-                    ui,
-                    egui::vec2(w, BOOL_ROW_H),
-                    &mut text,
-                    icon::LINK_SIMPLE,
-                    "https://, /path or #id",
+                let field = ui::GlyphField {
                     refused,
-                );
-                // Typing only keeps the draft; the commit is the defocus below.
-                // valve-gate-not-a-commit
-                if resp.changed() {
-                    *draft = Some(ui::Draft::new(ui.ctx(), id, text.clone()));
-                }
-                if resp.lost_focus() {
-                    if !ui::defocus_commits(&resp) {
-                        *draft = None;
-                    } else if ondin_core::element::is_href(text.trim()) {
-                        *draft = None;
-                        commit = Some(text.trim().to_string());
+                    locked: private,
+                    ..ui::GlyphField::new(icon::LINK_SIMPLE, hint)
+                };
+                let (resp, _) =
+                    ui::text_field_glyph(ui, egui::vec2(w, BOOL_ROW_H), &mut text, field);
+                if let Some(typed) = ui::Draft::follow(draft, &resp, id, &text) {
+                    if ondin_core::element::is_href(typed.trim()) {
+                        commit = Some(typed.trim().to_string());
                     } else {
-                        *draft = Some(ui::Draft::new(ui.ctx(), id, text.clone()).refuse(()));
+                        *draft = Some(ui::Draft::new(ui.ctx(), id, typed).refuse(()));
                     }
                 }
                 resp.on_hover_text("Link address");
@@ -14181,6 +14149,172 @@ mod mask_card_tests {
             "the stale draft: {drawn:?}"
         );
         assert!(app.href_edit.is_none(), "and it is gone");
+    }
+
+    /// Private mode masks a link's address as it does a documentation link.
+    ///
+    /// flip: `link_address_row` not clearing the text in private mode → fails
+    /// at "masked".
+    #[test]
+    fn private_mode_masks_a_link_address() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let frame = t.add(
+            root,
+            NodeKind::Artboard {
+                size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        app.session.adopt_document(t.doc.clone(), None);
+        app.session.selection.set(vec![frame]);
+        app.session.commit(Transaction(vec![
+            Operation::SetElement {
+                id: frame,
+                element: Some(ondin_core::element::HtmlElement::Link),
+            },
+            Operation::SetHref {
+                id: frame,
+                href: "https://client.example/brief".into(),
+            },
+        ]));
+        app.prefs.private = true;
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1320.0, 820.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| eframe::App::ui(&mut app, ui, &mut kitten),
+                )
+                .shapes;
+        }
+        crate::private::set(false);
+        let drawn: Vec<String> = shapes
+            .into_iter()
+            .filter_map(|c| match c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !drawn.iter().any(|s| s.contains("client.example")),
+            "masked: {drawn:?}"
+        );
+        assert!(
+            drawn.iter().any(|s| s == "Link hidden in private mode"),
+            "and says so: {drawn:?}"
+        );
+    }
+
+    /// A link address typed and not yet committed is kept when a Pages row
+    /// switches the page: the held pass commits it to its own layer, as any
+    /// other click away does.
+    ///
+    /// flip: `page_changed` clearing `href_edit` → fails at "committed".
+    #[test]
+    fn a_typed_link_address_survives_a_page_switch() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let frame = t.add(
+            root,
+            NodeKind::Artboard {
+                size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        app.session.adopt_document(t.doc.clone(), None);
+        let first = app.session.page;
+        let doc = &app.session.doc;
+        let (tx, other) = ondin_core::page::add(
+            doc,
+            &mut app.session.ids,
+            doc.pages().len(),
+            None,
+            doc.own_ground(first),
+        );
+        assert!(app.session.commit(tx), "the fixture: a second page");
+        app.session.selection.set(vec![frame]);
+        app.session.commit(Transaction(vec![Operation::SetElement {
+            id: frame,
+            element: Some(ondin_core::element::HtmlElement::Link),
+        }]));
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut kitten),
+            )
+            .shapes
+        };
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = pass(&mut app, Vec::new());
+        }
+        let field = shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == "https://, /path or #id" => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .expect("the address field is drawn");
+        let click = |at: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            [
+                vec![egui::Event::PointerMoved(at)],
+                vec![button(true)],
+                vec![button(false)],
+            ]
+        };
+        for events in click(field) {
+            pass(&mut app, events);
+        }
+        pass(&mut app, vec![egui::Event::Text("/pricing".into())]);
+        assert!(
+            app.href_edit.as_ref().is_some_and(|d| d.text == "/pricing"),
+            "the fixture: typed into the address"
+        );
+        // The Pages row's click, earlier in the frame than the inspector.
+        app.go_to_page(other);
+        for events in click(egui::pos2(300.0, 500.0)) {
+            pass(&mut app, events);
+        }
+        for _ in 0..3 {
+            pass(&mut app, Vec::new());
+        }
+        assert_eq!(
+            app.session.doc.get(frame).map(|n| n.href().to_string()),
+            Some("/pricing".into()),
+            "committed"
+        );
     }
 
     /// The fit button beside a frame's kind dropdown resizes the frame to its

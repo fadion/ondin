@@ -64,9 +64,8 @@ pub fn sankey_nodes(chart: &Chart) -> Vec<(String, BrushSource)> {
 /// style from `Chart::nodes` by name, else the palette at its place. `None`
 /// for a chart coloured by series.
 pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
-    let t = &chart.table;
-    let m = &chart.mapping;
     let colours = palette(chart.options.palette, chart.options.dark);
+    let marks = mark_places(chart)?;
     let fill = |name: &str, i: usize| {
         chart
             .nodes
@@ -74,6 +73,23 @@ pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
             .find(|s| s.name == name)
             .map_or_else(|| literal(colours[i % colours.len()]), |s| s.fill.clone())
     };
+    Some(
+        marks
+            .into_iter()
+            .map(|(n, i)| {
+                let f = fill(&n, i);
+                (n, f)
+            })
+            .collect(),
+    )
+}
+
+/// Each of [`named_marks`]' marks with its place in the palette: a pie slice's
+/// at its category row, counting the rows it does not draw, every other mark's
+/// at its order among the marks.
+fn mark_places(chart: &Chart) -> Option<Vec<(String, usize)>> {
+    let t = &chart.table;
+    let m = &chart.mapping;
     let at = |c: Option<ColumnId>| c.and_then(|c| t.index_of(c));
     // The rows the generator reads: those with a category.
     let cat = at(m.category);
@@ -82,9 +98,12 @@ pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
             .iter()
             .filter(move |r| cat.is_none_or(|c| !r[c].trim().is_empty()))
     };
-    let mut out: Vec<(String, BrushSource)> = Vec::new();
+    let mut out: Vec<(String, usize)> = Vec::new();
     match chart.kind {
-        super::ChartKind::Sankey => return Some(sankey_nodes(chart)),
+        super::ChartKind::Sankey => {
+            let nodes = sankey_nodes(chart).into_iter().enumerate();
+            return Some(nodes.map(|(i, (n, _))| (n, i)).collect());
+        }
         super::ChartKind::Pie => {
             // The first visible series, as the generator reads it.
             let first = m
@@ -98,7 +117,7 @@ pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
                 let name = cat.map_or_else(|| (i + 1).to_string(), |c| r[c].trim().to_string());
                 let drawn = parse_number(&r[vc]).is_some_and(|v| v > 0.0);
                 if drawn && !out.iter().any(|(n, _)| *n == name) {
-                    out.push((name.clone(), fill(&name, i)));
+                    out.push((name, i));
                 }
             }
         }
@@ -115,7 +134,7 @@ pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
                 };
                 if !out.iter().any(|(n, _)| n == name) {
                     let i = out.len();
-                    out.push((name.to_string(), fill(name, i)));
+                    out.push((name.to_string(), i));
                 }
             }
         }
@@ -223,7 +242,7 @@ pub fn with_dark(chart: &Chart, dark: bool) -> Chart {
             swap(&mut s.fill, n);
         }
     }
-    for (i, (name, _)) in named_marks(chart).into_iter().flatten().enumerate() {
+    for (name, i) in mark_places(chart).into_iter().flatten() {
         if let Some(s) = next.nodes.iter_mut().find(|s| s.name == name) {
             swap(&mut s.fill, i);
         }
@@ -356,6 +375,31 @@ mod tests {
         let dark = with_dark(&chart, true);
         let night = palette(dark.options.palette, true);
         assert_eq!(named_marks(&dark).unwrap()[0].1, literal(night[0]));
+    }
+
+    /// A pie slice stored at its palette colour follows the ground at its
+    /// category row's place, though a row before it draws no slice, and back.
+    /// flip: `with_dark` numbering the marks by their order among the drawn →
+    /// fails at "the slice follows".
+    #[test]
+    fn a_slice_after_an_undrawn_row_follows_the_ground() {
+        let mut chart = Chart::sample(ChartKind::Pie);
+        chart.table.rows = [["A", "10"], ["B", "0"], ["C", "5"]]
+            .iter()
+            .map(|r| [r[0], r[1], "1", "1"].map(String::from).to_vec())
+            .collect();
+        let day = palette(chart.options.palette, false);
+        let night = palette(chart.options.palette, true);
+        let chart = with_node_fill(&chart, "C", literal(day[2]));
+        let slice = |c: &Chart| named_marks(c).unwrap().into_iter().find(|(n, _)| n == "C");
+        assert_eq!(slice(&chart).map(|s| s.1), Some(literal(day[2])), "drawn");
+        let dark = with_dark(&chart, true);
+        assert_eq!(
+            slice(&dark).map(|s| s.1),
+            Some(literal(night[2])),
+            "the slice follows"
+        );
+        assert_eq!(with_dark(&dark, false), chart, "back to light, as it was");
     }
 
     /// A Sankey's nodes come in the order the rows first name them.

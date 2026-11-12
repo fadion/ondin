@@ -1010,3 +1010,153 @@ fn layout_reads_report_display_item_and_insets() {
     let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
     assert_eq!(back, snap, "the layout fields round-trip");
 }
+
+/// A layer reports what it is bound to — variables by `bind_variable`'s field,
+/// styles by slot, the modes it sets — its part in a component, and each fill's
+/// and stroke's place in its whole list past a hidden one.
+/// flip: `component_summary` without its instance-root test → fails at the
+/// copy's role.
+#[test]
+fn bindings_styles_modes_and_component_links_are_reported() {
+    use ondin_core::build::BoundField;
+    use ondin_core::kurbo::Affine;
+    use ondin_core::style::{Style, StyleValue};
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    use ondin_core::{Brush, Fill, IdSource, Operation, Transaction};
+
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0x8888);
+    let (mode, half, style) = (ids.mint_mode(), ids.mint_var(), ids.mint_style());
+    let (copy_frame, copy_rect) = (ids.mint(), ids.mint());
+    let solid = |r| Fill {
+        brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(r, 0, 0, 255)).into(),
+        visible: true,
+    };
+    let rect = f.doc.get(f.rect).unwrap();
+    let rect_kind = rect.kind().clone();
+    let mut fills = rect.paint().fills.clone();
+    fills.insert(
+        0,
+        ondin_core::Keyed {
+            id: ondin_core::ItemId(ids.mint()),
+            value: Fill {
+                visible: false,
+                ..solid(9)
+            },
+        },
+    );
+    let page = f.doc.first_page();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "A".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: half,
+                    name: "half".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(50.0))].into_iter().collect(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::AddStyle {
+                style: Style {
+                    id: style,
+                    name: "Ink".into(),
+                    value: StyleValue::Fills(keyed_by_position([solid(200)])),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetFills { id: f.rect, fills },
+            Operation::SetOpacityVar {
+                id: f.rect,
+                var: Some(half),
+            },
+            Operation::SetModes {
+                id: f.artboard,
+                modes: vec![mode],
+            },
+            Operation::SetComponent {
+                id: f.artboard,
+                component: true,
+            },
+            Operation::CreateNode {
+                id: copy_frame,
+                parent: page,
+                index: 1,
+                kind: f.doc.get(f.artboard).unwrap().kind().clone(),
+                transform: Some(Affine::translate((600.0, 0.0))),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: copy_rect,
+                parent: copy_frame,
+                index: 0,
+                kind: rect_kind,
+                transform: None,
+                name: None,
+            },
+            Operation::SetLink {
+                id: copy_frame,
+                link: Some(f.artboard),
+            },
+            Operation::SetLink {
+                id: copy_rect,
+                link: Some(f.rect),
+            },
+        ]))
+        .expect("bind, style and copy");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFillStyle {
+            id: f.text,
+            style: Some(style),
+        }]))
+        .expect("style a fill");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+
+    let snap = snapshot(&f.doc, &f.res);
+    let at = |id: ondin_core::NodeId| snap.nodes.iter().find(|n| n.id == wire(id)).unwrap();
+    let rect = at(f.rect);
+    assert!(
+        rect.bindings
+            .iter()
+            .any(|b| b.field == BoundField::Opacity && b.variable == half),
+        "the opacity's variable, got {:?}",
+        rect.bindings
+    );
+    assert_eq!(rect.opacity, 0.5, "and its drawn value");
+    assert_eq!(
+        rect.fill_indices.as_deref(),
+        Some(&[1][..]),
+        "the shown fill sits above a hidden one"
+    );
+    assert_eq!(rect.strokes[0].index, 0);
+    assert_eq!(at(f.artboard).modes, vec![mode.0.to_wire()]);
+
+    let role = |id| at(id).component.as_ref().map(|c| c.role.as_str());
+    assert_eq!(role(f.artboard), Some("main"));
+    assert_eq!(role(copy_frame), Some("instance"));
+    assert_eq!(role(copy_rect), Some("copy"));
+    assert_eq!(role(f.text), None, "the main's own child is no copy");
+    let instance = at(copy_frame).component.as_ref().unwrap();
+    assert_eq!(instance.main.as_deref(), Some(wire(f.artboard).as_str()));
+    let copy = at(copy_rect).component.as_ref().unwrap();
+    assert_eq!(copy.source.as_deref(), Some(wire(f.rect).as_str()));
+    assert_eq!(copy.main, None, "only an instance's root names its main");
+
+    assert_eq!(at(f.text).styles.map(|s| s.fills), Some(Some(style)));
+    let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
+    assert_eq!(back, snap, "the new fields round-trip");
+}

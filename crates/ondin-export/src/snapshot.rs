@@ -42,7 +42,9 @@ use std::collections::BTreeMap;
 ///   each of its parts.
 /// - **18** `NodeSnapshot::display`, `item` and `insets`, the layout a node
 ///   gives its children and takes from its parent.
-pub const SNAPSHOT_VERSION: u32 = 18;
+/// - **19** `NodeSnapshot::bindings`, `styles`, `modes`, `component` and
+///   `fill_indices`; `StrokeSummary::id` and `index`, `EffectSummary::id`.
+pub const SNAPSHOT_VERSION: u32 = 19;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -162,6 +164,52 @@ pub struct NodeSnapshot {
     /// `set_insets` takes; absent when it is placed by its transform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub insets: Option<ondin_core::container::Insets>,
+    /// Each field bound to a variable, named as `bind_variable` takes it; absent
+    /// when none is. The values above are what the variables draw.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<BindingSummary>,
+    /// The style bound in each slot, by the slot names `apply_style` takes;
+    /// absent when the layer uses none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styles: Option<ondin_core::style::StyleRefs>,
+    /// The modes this frame sets, one per collection at most, by mode id; absent
+    /// when it sets none and reads its parent's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<String>,
+    /// The layer's part in a component, absent outside one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<ComponentSummary>,
+    /// Each entry of `fills`' index in the layer's whole list, which
+    /// `bind_variable` counts fills by; absent when no fill is hidden, as each
+    /// entry's index is then its position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_indices: Option<Vec<usize>>,
+}
+
+/// One bound field and the variable it reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BindingSummary {
+    /// The field with its place (`{"fill": 0}`, `"opacity"`), the form
+    /// `bind_variable`'s `field` takes.
+    pub field: ondin_core::build::BoundField,
+    pub variable: ondin_core::VarId,
+}
+
+/// A layer's part in a component.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComponentSummary {
+    /// `"main"`, `"set"` (a frame of variants), `"instance"` (an instance's
+    /// root) or `"copy"` (a layer inside an instance, linked to its main's).
+    pub role: String,
+    /// An instance's main, the one it shows after any swap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+    /// The layer an instance or copy is linked to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// A variant's value per property of its set, by property name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variant: BTreeMap<String, String>,
 }
 
 /// A chart's description as an agent reads it: what it draws, from which
@@ -210,6 +258,8 @@ pub struct SeriesSummary {
 /// not the gaussian deviation the writers take (`ondin_core::effect::BLUR_DEVIATION`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectSummary {
+    /// The effect's item id, which `bind_variable` names an effect's number by.
+    pub id: ondin_core::ItemId,
     /// `"DropShadow"`, `"InnerShadow"`, `"LayerBlur"`, `"BackgroundBlur"` or
     /// `"Filters"`.
     pub kind: String,
@@ -397,6 +447,11 @@ pub struct GradientStopSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrokeSummary {
+    /// The stroke's item id, which `bind_variable` names a stroke's width by.
+    pub id: ondin_core::ItemId,
+    /// Its index in the layer's whole list, which `bind_variable` names a
+    /// stroke's colour by; hidden strokes are counted and not listed.
+    pub index: usize,
     pub paint: PaintSummary,
     pub width: f64,
 }
@@ -534,8 +589,11 @@ fn node_snapshot(
             .paint()
             .strokes
             .iter()
-            .filter(|s: &&ondin_core::Keyed<Stroke>| s.visible)
-            .map(|s| StrokeSummary {
+            .enumerate()
+            .filter(|(_, s): &(usize, &ondin_core::Keyed<Stroke>)| s.visible)
+            .map(|(index, s)| StrokeSummary {
+                id: s.id,
+                index,
                 paint: paint_summary(&doc.resolve_brush(id, &s.brush)),
                 width: match s.width_var {
                     Some(v) => doc.stroke_width_drawn_in(doc.variables(), id, v),
@@ -547,7 +605,7 @@ fn node_snapshot(
             .resolved_effects(id, node.effects())
             .iter()
             .filter(|e| e.visible)
-            .map(|e| effect_summary(e))
+            .map(|e| effect_summary(e.id, e))
             .collect(),
         element: node.element().map(|e| e.tag().to_string()),
         href: (node.element() == Some(ondin_core::element::HtmlElement::Link)
@@ -561,7 +619,102 @@ fn node_snapshot(
         display: doc.resolved_display(id).map(std::borrow::Cow::into_owned),
         item: Some(drawn_item(doc, node)).filter(|i| *i != Default::default()),
         insets: Some(*node.insets()).filter(|i| !i.is_unset()),
+        bindings: bindings(node),
+        styles: Some(node.styles()).filter(|s| *s != Default::default()),
+        modes: node.modes().iter().map(|m| m.0.to_wire()).collect(),
+        component: component_summary(doc, node),
+        fill_indices: {
+            let fills = &node.paint().fills;
+            let shown: Vec<usize> = (0..fills.len()).filter(|i| fills[*i].visible).collect();
+            (shown.len() != fills.len()).then_some(shown)
+        },
     }
+}
+
+/// Every field of `node` bound to a variable, in `bind_variable`'s terms.
+fn bindings(node: &Node) -> Vec<BindingSummary> {
+    use ondin_core::build::BoundField as F;
+    use ondin_core::variable::{TEXT_CONTENT, TEXT_FAMILY};
+    let mut out = Vec::new();
+    let mut push = |field, var: Option<ondin_core::VarId>| {
+        if let Some(variable) = var {
+            out.push(BindingSummary { field, variable });
+        }
+    };
+    let paint = node.paint();
+    for (i, f) in paint.fills.iter().enumerate() {
+        push(F::Fill(i), f.brush.var());
+    }
+    for (i, s) in paint.strokes.iter().enumerate() {
+        push(F::Stroke(i), s.brush.var());
+        push(F::StrokeWidth(s.id), s.width_var);
+    }
+    for (k, v) in node.corner_vars().into_iter().enumerate() {
+        push(F::Corner(k), v);
+    }
+    for (k, v) in node.spacing_vars().into_iter().enumerate() {
+        push(F::Spacing(1 << k), v);
+    }
+    for (k, v) in node.flow_vars().into_iter().enumerate() {
+        push(F::Flow(k), v);
+    }
+    push(F::Visible, node.visible_var());
+    push(F::Opacity, node.opacity_var());
+    for (k, v) in node.size_vars().into_iter().enumerate() {
+        push(F::Size(k), v);
+    }
+    for (k, v) in node.text_vars().into_iter().enumerate() {
+        push(
+            match k {
+                TEXT_CONTENT => F::Content,
+                TEXT_FAMILY => F::Family,
+                _ => F::Type(k),
+            },
+            v,
+        );
+    }
+    for (k, v) in node.item().limit_vars.into_iter().enumerate() {
+        push(F::Limit(k), v);
+    }
+    for e in node.effects() {
+        for (k, v) in e.vars.into_iter().enumerate() {
+            push(F::Effect(e.id, k), v);
+        }
+    }
+    out
+}
+
+/// `node`'s part in a component, or `None` outside one. A layer added inside an
+/// instance is linked to nothing, and is none.
+fn component_summary(doc: &Document, node: &Node) -> Option<ComponentSummary> {
+    let id = node.id();
+    let instance =
+        node.link().is_some() && ondin_core::component::instance_root(doc, id) == Some(id);
+    let role = match () {
+        _ if node.set().is_some() => "set",
+        _ if node.component() => "main",
+        _ if instance => "instance",
+        _ if node.link().is_some() => "copy",
+        _ => return None,
+    };
+    let set = node.parent().and_then(|p| doc.get(p)?.set());
+    Some(ComponentSummary {
+        role: role.to_string(),
+        main: instance
+            .then(|| ondin_core::component::main_of(doc, id))
+            .flatten()
+            .map(|m| m.to_wire()),
+        source: node.link().map(|l| l.to_wire()),
+        variant: match set {
+            Some(set) if node.component() => set
+                .props
+                .iter()
+                .zip(node.variant())
+                .map(|(p, v)| (p.name.clone(), v.clone()))
+                .collect(),
+            _ => BTreeMap::new(),
+        },
+    })
 }
 
 /// `node`'s layout item as authored, its bound limits read as drawn. Not
@@ -613,9 +766,10 @@ fn chart_summary(doc: &Document, id: NodeId, c: &ondin_core::chart::Chart) -> Ch
     }
 }
 
-fn effect_summary(e: &ondin_core::Effect) -> EffectSummary {
+fn effect_summary(id: ondin_core::ItemId, e: &ondin_core::Effect) -> EffectSummary {
     use ondin_core::EffectKind;
     let base = |kind: &str| EffectSummary {
+        id,
         kind: kind.to_string(),
         offset: None,
         blur: None,

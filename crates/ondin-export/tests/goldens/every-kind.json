@@ -1,5 +1,5 @@
 {
-  "snapshot_version": 18,
+  "snapshot_version": 19,
   "pages": [
     {
       "id": "601d:1",
@@ -371,7 +371,10 @@
         "type": "None"
       },
       "fills": [],
-      "strokes": []
+      "strokes": [],
+      "modes": [
+        "601d:15"
+      ]
     },
     {
       "id": "601d:17",
@@ -804,6 +807,8 @@
       "fills": [],
       "strokes": [
         {
+          "id": "0:0",
+          "index": 0,
           "paint": {
             "type": "Solid",
             "color": "#3c3c46",
@@ -859,6 +864,8 @@
       "fills": [],
       "strokes": [
         {
+          "id": "0:0",
+          "index": 0,
           "paint": {
             "type": "Solid",
             "color": "#3c3c46",
@@ -926,6 +933,8 @@
       ],
       "strokes": [
         {
+          "id": "0:0",
+          "index": 0,
           "paint": {
             "type": "Solid",
             "color": "#141e3c",
@@ -936,6 +945,7 @@
       ],
       "effects": [
         {
+          "id": "0:0",
           "kind": "DropShadow",
           "offset": [
             3.0,
@@ -947,6 +957,7 @@
           "opacity": 0.3529412
         },
         {
+          "id": "0:1",
           "kind": "InnerShadow",
           "offset": [
             -2.0,
@@ -958,14 +969,17 @@
           "opacity": 0.47058824
         },
         {
+          "id": "0:2",
           "kind": "LayerBlur",
           "blur": 2.0
         },
         {
+          "id": "0:3",
           "kind": "BackgroundBlur",
           "blur": 5.0
         },
         {
+          "id": "0:4",
           "kind": "Filters",
           "brightness": 1.1,
           "contrast": 0.9,
@@ -1099,6 +1113,8 @@
       ],
       "strokes": [
         {
+          "id": "0:0",
+          "index": 0,
           "paint": {
             "type": "Solid",
             "color": "#0a4632",
@@ -1207,6 +1223,8 @@
       "fills": [],
       "strokes": [
         {
+          "id": "0:0",
+          "index": 0,
           "paint": {
             "type": "Solid",
             "color": "#5a5a64",

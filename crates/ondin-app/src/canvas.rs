@@ -26914,7 +26914,7 @@ mod pinch_tests {
         }
     }
 
-    /// [`app_with_rect`] with the pen drawing a run of two anchors, clicked with
+    /// `app_with_rect` with the pen drawing a run of two anchors, clicked with
     /// the mouse, and where its first anchor is on screen.
     fn app_with_a_pen_run(ctx: &egui::Context) -> (OndinApp, egui::Pos2, egui::Pos2) {
         let (mut app, _id, centre) = app_with_rect(ctx);

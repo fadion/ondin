@@ -568,6 +568,7 @@ const EDGES: &[&str] = &["left", "center", "right", "top", "middle", "bottom"];
 const AXES: &[&str] = &["horizontal", "vertical"];
 const VAR_KINDS: &[&str] = &["color", "number", "boolean", "string"];
 const RESETS: &[&str] = &["all", "fields", "children", "order"];
+const PUSHES: &[&str] = &["all", "properties", "fields", "layers", "order", "removals"];
 const LEVELS: &[&str] = &["aa", "aaa", "apca"];
 const PROP_KINDS: &[&str] = &["boolean", "text", "swap"];
 const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
@@ -994,6 +995,21 @@ pub static VERBS: &[Verb] = &[
         },
     },
     Verb {
+        name: "frame",
+        doc: "Wrap layers in a new frame sized to them, with no fill and no clip; answers the frame",
+        params: &[req("nodes", NODES, "the layers to frame; one is enough")],
+        run: |ctx, a| {
+            let nodes = a.layers(ctx.doc, "nodes")?;
+            if !build::can_frame(ctx.doc, &nodes) {
+                return Err(VerbError::Nothing(
+                    "a frame cannot go inside a boolean or a mask",
+                ));
+            }
+            let (tx, frame) = build::frame(ctx.doc, ctx.res, ctx.ids, &nodes)?;
+            Ok(Done::made(tx, vec![frame]))
+        },
+    },
+    Verb {
         name: "ungroup",
         doc: "Lift each group's or boolean's children into its parent, where they are drawn",
         params: &[req("nodes", NODES, "the groups to ungroup")],
@@ -1030,6 +1046,101 @@ pub static VERBS: &[Verb] = &[
         run: |ctx, a| {
             let (tx, id) = build::flatten(ctx.doc, ctx.res, ctx.ids, &a.nodes("nodes")?)?;
             Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "outline_shape",
+        doc: "Turn a shape into the path its outline traces, corners baked in; answers the path",
+        params: &[req(
+            "node",
+            NODE,
+            "a rectangle, ellipse, polygon, star, line or path",
+        )],
+        run: |ctx, a| {
+            let (tx, id) = build::outline(ctx.doc, ctx.res, ctx.ids, a.layer(ctx.doc, "node")?)?;
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "outline_stroke",
+        doc: "Turn a layer's visible strokes into filled paths; answers the layer to select",
+        params: &[req(
+            "node",
+            NODE,
+            "a shape, path or boolean with a visible stroke",
+        )],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            if !build::can_outline_stroke(ctx.doc, id) {
+                return Err(VerbError::Nothing("this layer has no stroke to outline"));
+            }
+            let (tx, made) = build::outline_stroke(ctx.doc, ctx.res, ctx.ids, id)?;
+            Ok(Done::made(tx, vec![made]))
+        },
+    },
+    Verb {
+        name: "outline_text",
+        doc: "Replace a text layer with the path its glyphs trace; the text is gone. Answers the path",
+        params: &[req("node", NODE, "the text layer")],
+        run: |ctx, a| {
+            let (tx, id) =
+                build::outline_text(ctx.doc, ctx.res, ctx.ids, a.layer(ctx.doc, "node")?)?;
+            Ok(Done::made(tx, vec![id]))
+        },
+    },
+    Verb {
+        name: "divide",
+        doc: "Cut overlapping shapes, and any lines across them, into one path per face, in a new group; answers the group",
+        params: &[req("nodes", NODES, "the shapes and lines to cut")],
+        run: |ctx, a| {
+            use crate::shape_builder::{self, Refusal};
+            let nodes = a.layers(ctx.doc, "nodes")?;
+            let arr = shape_builder::arrange(ctx.doc, ctx.res, &nodes).map_err(|r| match r {
+                Refusal::Abandoned => VerbError::Nothing("the shapes could not be cut"),
+                Refusal::TooFew | Refusal::NoOverlap => VerbError::Nothing(
+                    "divide needs overlapping shapes, or a shape and a line across it",
+                ),
+            })?;
+            let (tx, group) = shape_builder::divide(ctx.doc, ctx.res, ctx.ids, &nodes, &arr)?;
+            Ok(Done::made(tx, vec![group]))
+        },
+    },
+    Verb {
+        name: "blend_shapes",
+        doc: "Put shapes between two, stepping from one to the other, in a new group; answers the group",
+        params: &[
+            req("nodes", NODES, "exactly two shapes, the first lowest"),
+            opt(
+                "steps",
+                INDEX,
+                "how many shapes go between: 1 to 200, 5 unless given",
+            ),
+            opt(
+                "paint",
+                BOOL,
+                "whether fills, strokes and opacity move from one to the other; true unless given",
+            ),
+            opt(
+                "reverse",
+                BOOL,
+                "run the second shape's outline the other way round; false unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let steps = a.index("steps").unwrap_or(5);
+            if !(1..=crate::blend::MAX_STEPS).contains(&steps) {
+                return Err(a.invalid("steps", "expected 1 to 200"));
+            }
+            let blend = crate::blend::Blend {
+                steps,
+                paint: a.bool("paint").unwrap_or(true),
+                start: kurbo::Vec2::ZERO,
+                reverse: a.bool("reverse").unwrap_or(false),
+            };
+            let nodes = a.layers(ctx.doc, "nodes")?;
+            let (tx, group) = crate::blend::blend(ctx.doc, ctx.res, ctx.ids, &nodes, blend)
+                .map_err(|r| VerbError::Nothing(r.says()))?;
+            Ok(Done::made(tx, vec![group]))
         },
     },
     Verb {
@@ -1176,6 +1287,43 @@ pub static VERBS: &[Verb] = &[
                 &a.nodes("nodes")?,
                 axis,
             )))
+        },
+    },
+    Verb {
+        name: "tidy_up",
+        doc: "Lay layers out as the grid they roughly sit in, on even gaps",
+        params: &[req("nodes", NODES, "two or more layers")],
+        run: |ctx, a| {
+            let nodes = a.layers(ctx.doc, "nodes")?;
+            if nodes.len() < 2 {
+                return Err(VerbError::Nothing("tidy up needs two or more layers"));
+            }
+            let tx = build::tidy_up(ctx.doc, ctx.res, &nodes);
+            if tx.0.is_empty() {
+                return Err(VerbError::Nothing("already tidy"));
+            }
+            Ok(Done::edit(tx))
+        },
+    },
+    Verb {
+        name: "slice",
+        doc: "Add a slice fitted to layers' bounds, exporting PNG at 1×, just above the topmost; answers the slice",
+        params: &[req("nodes", NODES, "the layers to slice round")],
+        run: |ctx, a| {
+            let nodes = a.layers(ctx.doc, "nodes")?;
+            let all_slices = nodes.iter().all(|i| {
+                matches!(
+                    ctx.doc.get(*i).map(|n| n.kind()),
+                    Some(NodeKind::Slice { .. })
+                )
+            });
+            if all_slices {
+                return Err(VerbError::Nothing("a slice on a slice cuts nothing new"));
+            }
+            let id = ctx.ids.mint();
+            let tx = build::slice_selection(ctx.doc, ctx.res, &nodes, id)
+                .ok_or(VerbError::Nothing("the layers have no bounds"))?;
+            Ok(Done::made(tx, vec![id]))
         },
     },
     // --- components -----------------------------------------------------------
@@ -1528,6 +1676,118 @@ pub static VERBS: &[Verb] = &[
             Ok(Done::ops(crate::reset::stated(
                 ctx.doc, kind, &scopes, ctx.ids,
             )))
+        },
+    },
+    Verb {
+        name: "push_to_main",
+        doc: "Write an instance's changes into its main, so every instance of it takes them",
+        params: &[
+            req("node", NODE, "the instance, or a layer inside it"),
+            opt(
+                "scope",
+                ParamKind::Choice(PUSHES),
+                "properties, fields, local layers and order (`all`, unless given), or one of them, or the main's layers this instance removed",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::push::{self, Blocked, Kind};
+            let id = a.layer(ctx.doc, "node")?;
+            let root = crate::component::instance_root(ctx.doc, id)
+                .ok_or(VerbError::Nothing("the layer is in no instance"))?;
+            match push::blocked(ctx.doc, root) {
+                Some(Blocked::Kit) => {
+                    return Err(VerbError::Nothing(
+                        "its main comes from a kit — change it in the kit",
+                    ));
+                }
+                Some(Blocked::Locked) => {
+                    return Err(VerbError::Nothing("its main is locked"));
+                }
+                None => {}
+            }
+            let kind = match a.choice("scope") {
+                Some("properties") => Kind::Properties,
+                Some("fields") => Kind::Fields,
+                Some("layers") => Kind::Layers,
+                Some("order") => Kind::Order,
+                Some("removals") => Kind::Removals,
+                _ => Kind::All,
+            };
+            let ops = push::push(ctx.doc, kind, root, ctx.ids);
+            if ops.is_empty() {
+                return Err(VerbError::Nothing("nothing to push"));
+            }
+            Ok(Done::ops(ops))
+        },
+    },
+    Verb {
+        name: "add_variant",
+        doc: "Add a variant to a set: a copy of one variant taking the first free combination of values; answers it",
+        params: &[req(
+            "node",
+            NODE,
+            "the set, copying its last variant, or the variant to copy",
+        )],
+        run: |ctx, a| {
+            use crate::variant;
+            let id = a.layer(ctx.doc, "node")?;
+            let (set, from) = match variant::is_set(ctx.doc, id) {
+                true => (id, None),
+                false => match variant::set_of(ctx.doc, id) {
+                    Some(set) => (set, Some(id)),
+                    None => return Err(a.invalid("node", "neither a set nor a variant")),
+                },
+            };
+            let (tx, new) = variant::add_variant(ctx.doc, ctx.res, ctx.ids, set, from)
+                .ok_or(VerbError::Nothing("this set has no variant to copy"))?;
+            Ok(Done::made(tx, vec![new]))
+        },
+    },
+    Verb {
+        name: "duplicate_as_component",
+        doc: "Copy a main as a new, independent main beside it rather than an instance; answers it",
+        params: &[
+            req("node", NODE, "the main component"),
+            opt(
+                "dx",
+                ParamKind::Number,
+                "how far right to move the copy, 0 unless given",
+            ),
+            opt(
+                "dy",
+                ParamKind::Number,
+                "how far down to move the copy, 0 unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            if !node(ctx, id)?.component() {
+                return Err(a.invalid("node", "not a main component"));
+            }
+            let (Some(nodes), Some(parent)) =
+                (ctx.doc.capture_subtree(id), node(ctx, id)?.parent())
+            else {
+                return Err(VerbError::Nothing("this component cannot be copied"));
+            };
+            let index = node(ctx, parent)?
+                .children()
+                .iter()
+                .position(|c| *c == id)
+                .map(|i| i + 1);
+            let offset =
+                kurbo::Vec2::new(a.number("dx").unwrap_or(0.0), a.number("dy").unwrap_or(0.0));
+            let (tx, created) = build::insert_subtrees_as(
+                ctx.doc,
+                ctx.ids,
+                &[build::Placement {
+                    nodes,
+                    parent,
+                    index,
+                }],
+                offset,
+                crate::component::MainCopy::NewMain,
+            );
+            Ok(Done::made(tx, created.into_iter().take(1).collect()))
         },
     },
     // --- variables and modes ----------------------------------------------------

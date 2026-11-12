@@ -3303,3 +3303,320 @@ fn a_part_edited_by_a_verb_is_refused_at_the_commit() {
         );
     }
 }
+
+/// Two rectangles on the page, `a` (40 × 20) at the origin and `b` (20 × 40) at
+/// `(x, y)`; answers both.
+fn two_rects(
+    doc: &mut Document,
+    ids: &mut IdSource,
+    page: NodeId,
+    x: f64,
+    y: f64,
+) -> (NodeId, NodeId) {
+    let p = page.to_wire();
+    let a = run(
+        doc,
+        ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(40.0, 20.0), "name": "A" }),
+    )[0];
+    let b = run(
+        doc,
+        ids,
+        "create_node",
+        json!({ "parent": p, "kind": rect(20.0, 40.0), "name": "B", "transform": Affine::translate((x, y)) }),
+    )[0];
+    (a, b)
+}
+
+/// `frame` wraps layers in a frame sized to them; `outline_shape` makes a
+/// rectangle a path; `outline_stroke` refuses a layer with no stroke and outlines
+/// one with a stroke; `outline_text` refuses a layer that is not text.
+///
+/// flip: `outline_stroke` without its `can_outline_stroke` check → fails at
+/// "no stroke is refused", since the builder refuses as `Refused`, not `Nothing`.
+#[test]
+fn frame_and_the_outlines_rebuild_layers() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, b) = two_rects(&mut doc, &mut ids, page, 60.0, 0.0);
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "frame",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    assert!(matches!(
+        doc.get(f).unwrap().kind(),
+        NodeKind::Artboard { .. }
+    ));
+    assert_eq!(doc.get(a).unwrap().parent(), Some(f));
+    let bounds = Resolved::rebuild(&doc).world_bounds(f).unwrap();
+    assert_eq!((bounds.width(), bounds.height()), (80.0, 40.0));
+
+    let path = run(
+        &mut doc,
+        &mut ids,
+        "outline_shape",
+        json!({ "node": a.to_wire() }),
+    )[0];
+    assert!(matches!(
+        doc.get(path).unwrap().kind(),
+        NodeKind::Path { .. }
+    ));
+
+    let bare = answer(
+        &doc,
+        &mut ids,
+        "outline_stroke",
+        json!({ "node": b.to_wire() }),
+    );
+    assert!(
+        matches!(bare, Err(VerbError::Nothing(_))),
+        "no stroke is refused: {bare:?}"
+    );
+    let strokes = verbs::example("[Stroke]").unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_strokes",
+        json!({ "node": b.to_wire(), "strokes": strokes }),
+    );
+    let made = run(
+        &mut doc,
+        &mut ids,
+        "outline_stroke",
+        json!({ "node": b.to_wire() }),
+    );
+    assert_eq!(made.len(), 1);
+    assert!(
+        doc.get(made[0]).unwrap().paint().strokes.is_empty(),
+        "the stroke became a fill"
+    );
+
+    let not_text = answer(
+        &doc,
+        &mut ids,
+        "outline_text",
+        json!({ "node": path.to_wire() }),
+    );
+    assert!(not_text.is_err(), "a path is no text");
+}
+
+/// `divide` cuts two crossing rectangles into their four faces in a group,
+/// and refuses two that do not touch.
+///
+/// flip: `divide` answering the first source rather than the group → fails at
+/// "a group of faces".
+#[test]
+fn divide_cuts_overlapping_shapes_into_faces() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, b) = two_rects(&mut doc, &mut ids, page, 400.0, 400.0);
+    let apart = answer(
+        &doc,
+        &mut ids,
+        "divide",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    );
+    assert!(matches!(apart, Err(VerbError::Nothing(_))), "{apart:?}");
+
+    let (c, d) = two_rects(&mut doc, &mut ids, page, 10.0, 0.0);
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "divide",
+        json!({ "nodes": [c.to_wire(), d.to_wire()] }),
+    )[0];
+    let group = doc.get(g).unwrap();
+    assert!(matches!(group.kind(), NodeKind::Group), "a group of faces");
+    assert_eq!(
+        group.children().len(),
+        4,
+        "A's two sides, the overlap, B's foot"
+    );
+    assert!(
+        doc.get(c).is_none() && doc.get(d).is_none(),
+        "the sources go"
+    );
+}
+
+/// `blend_shapes` puts its steps between two shapes in a new group, and refuses
+/// a step count out of range.
+#[test]
+fn blend_shapes_steps_between_two() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, b) = two_rects(&mut doc, &mut ids, page, 200.0, 0.0);
+    let pair = json!([a.to_wire(), b.to_wire()]);
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "blend_shapes",
+            json!({ "nodes": pair, "steps": 0 })
+        ),
+        "steps"
+    );
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "blend_shapes",
+        json!({ "nodes": pair, "steps": 3 }),
+    )[0];
+    assert_eq!(
+        doc.get(g).unwrap().children().len(),
+        5,
+        "the two and three steps"
+    );
+}
+
+/// `tidy_up` evens the gaps of a row, then answers that the row is tidy.
+///
+/// flip: `tidy_up` answering an empty edit as done → fails at "already tidy".
+#[test]
+fn tidy_up_evens_a_row_once() {
+    let (mut doc, mut ids, page) = blank();
+    let p = page.to_wire();
+    let row: Vec<NodeId> = [0.0, 50.0, 130.0]
+        .into_iter()
+        .map(|x| {
+            run(
+                &mut doc,
+                &mut ids,
+                "create_node",
+                json!({ "parent": p, "kind": rect(20.0, 20.0), "transform": Affine::translate((x, 0.0)) }),
+            )[0]
+        })
+        .collect();
+    let wires: Vec<String> = row.iter().map(|i| i.to_wire()).collect();
+    run(&mut doc, &mut ids, "tidy_up", json!({ "nodes": wires }));
+    let res = Resolved::rebuild(&doc);
+    let x: Vec<f64> = row
+        .iter()
+        .map(|i| res.world_bounds(*i).unwrap().x0)
+        .collect();
+    assert!(
+        ((x[1] - x[0]) - (x[2] - x[1])).abs() < 1e-6,
+        "even gaps: {x:?}"
+    );
+    let again = answer(&doc, &mut ids, "tidy_up", json!({ "nodes": wires }));
+    assert!(
+        matches!(again, Err(VerbError::Nothing("already tidy"))),
+        "{again:?}"
+    );
+}
+
+/// `slice` adds a slice over its layers' bounds and refuses to slice a slice.
+#[test]
+fn slice_fits_its_layers_and_skips_a_slice() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, b) = two_rects(&mut doc, &mut ids, page, 60.0, 0.0);
+    let s = run(
+        &mut doc,
+        &mut ids,
+        "slice",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    assert!(matches!(doc.get(s).unwrap().kind(), NodeKind::Slice { .. }));
+    let r = Resolved::rebuild(&doc).world_bounds(s).unwrap();
+    assert_eq!((r.width(), r.height()), (80.0, 40.0));
+    let again = answer(&doc, &mut ids, "slice", json!({ "nodes": [s.to_wire()] }));
+    assert!(matches!(again, Err(VerbError::Nothing(_))), "{again:?}");
+}
+
+/// `push_to_main` writes an instance's overridden fill into its main, and
+/// refuses a layer in no instance.
+///
+/// flip: `push_to_main` pushing `Kind::Order` for every scope → fails at "the
+/// main took the fill".
+#[test]
+fn push_to_main_writes_an_override_into_the_main() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, inner) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    let inst = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": page.to_wire() }),
+    )[0];
+    let copy = doc.get(inst).unwrap().children()[0];
+    let red = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::from_rgb8(200, 0, 0)).into(),
+        visible: true,
+    }])
+    .unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "node": copy.to_wire(), "fills": red }),
+    );
+    assert!(
+        doc.get(inner).unwrap().paint().fills.is_empty(),
+        "fixture: the main is bare"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "push_to_main",
+        json!({ "node": copy.to_wire() }),
+    );
+    assert_eq!(
+        doc.get(inner).unwrap().paint().fills.len(),
+        1,
+        "the main took the fill"
+    );
+
+    let loose = answer(
+        &doc,
+        &mut ids,
+        "push_to_main",
+        json!({ "node": card.to_wire() }),
+    );
+    assert!(matches!(loose, Err(VerbError::Nothing(_))), "{loose:?}");
+}
+
+/// `add_variant` grows a set by one main; `duplicate_as_component` copies a main
+/// as a new main, not an instance.
+#[test]
+fn add_variant_and_duplicate_as_component_make_mains() {
+    let (mut doc, mut ids, page) = blank();
+    let (a, _) = main_component(&mut doc, &mut ids, page, "On", 100.0);
+    let (b, _) = main_component(&mut doc, &mut ids, page, "Off", 100.0);
+    let set = run(
+        &mut doc,
+        &mut ids,
+        "combine_as_variants",
+        json!({ "nodes": [a.to_wire(), b.to_wire()] }),
+    )[0];
+    let new = run(
+        &mut doc,
+        &mut ids,
+        "add_variant",
+        json!({ "node": set.to_wire() }),
+    )[0];
+    assert!(doc.get(new).unwrap().component());
+    assert_eq!(doc.get(set).unwrap().children().len(), 3);
+    let (lone, _) = main_component(&mut doc, &mut ids, page, "Lone", 50.0);
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "add_variant",
+            json!({ "node": lone.to_wire() })
+        ),
+        "node",
+        "a main in no set"
+    );
+
+    let copy = run(
+        &mut doc,
+        &mut ids,
+        "duplicate_as_component",
+        json!({ "node": lone.to_wire(), "dx": 80 }),
+    )[0];
+    let node = doc.get(copy).unwrap();
+    assert!(
+        node.component() && node.link().is_none(),
+        "a main, not an instance"
+    );
+    assert_ne!(copy, lone);
+}

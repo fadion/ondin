@@ -116,20 +116,39 @@ fn local_path(path: &Path) -> bool {
     local && !(cfg!(windows) && device)
 }
 
-/// The linked file's text: a regular local file, read to at most `cap` bytes;
-/// `None` for anything else — a share, a device, a pipe, a stream with no end.
+/// The linked file's text: a regular local file of UTF-8, read to at most `cap`
+/// bytes; `None` for anything else — a share, a device, a pipe, a stream with
+/// no end.
 pub(crate) fn read_linked(path: &Path, cap: u64) -> Option<String> {
+    String::from_utf8(read_linked_bytes(path, cap).ok()?).ok()
+}
+
+/// [`read_linked`]'s bytes, whatever their encoding, or why they could not be
+/// read, in the status line's words: *not a local file*, *file not found*,
+/// *access denied*, *larger than 16 MB*.
+pub(crate) fn read_linked_bytes(path: &Path, cap: u64) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    if !local_path(path) || !std::fs::metadata(path).ok()?.is_file() {
-        return None;
+    let why = |e: std::io::Error| match e.kind() {
+        std::io::ErrorKind::NotFound => "file not found".to_string(),
+        std::io::ErrorKind::PermissionDenied => "access denied".to_string(),
+        _ => format!("cannot be read ({e})"),
+    };
+    if !local_path(path) {
+        return Err("not a local file".into());
     }
-    let mut text = String::new();
+    if !std::fs::metadata(path).map_err(why)?.is_file() {
+        return Err("not a file".into());
+    }
+    let mut bytes = Vec::new();
     std::fs::File::open(path)
-        .ok()?
+        .map_err(why)?
         .take(cap + 1)
-        .read_to_string(&mut text)
-        .ok()?;
-    (text.len() as u64 <= cap).then_some(text)
+        .read_to_end(&mut bytes)
+        .map_err(why)?;
+    match bytes.len() as u64 <= cap {
+        true => Ok(bytes),
+        false => Err(format!("larger than {} MB", cap / (1024 * 1024))),
+    }
 }
 
 /// A file's [`Stat`]; `None` when it cannot be read or is not a local file.

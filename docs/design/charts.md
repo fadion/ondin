@@ -636,17 +636,24 @@ read, since they name this document's node ids.
   draws. **The path is the document's, so untrusted**: the tokens link's rules hold
   (`styles-variables.md`, *A linked file*; `tokens_import::read_linked`) — absolute, on a local
   drive, a regular file of at most 16 MB. The file is read and parsed on a worker
-  (`chart_import::ChartRead`, one at a time, a later read replacing the pending one) for every
-  door that reads a path: *Import…*, a file dropped on a chart or on bare canvas, and *Update*.
-  What it was for lands when it answers (`poll_chart_read`): the import box, the replaced tables,
-  or the new chart; a refusal goes to the status line. A browser drop's bytes are parsed in the
-  frame, having no file to wait on. The watch's `stat`s stay on the UI thread.
+  (`chart_import::ChartRead`, one at a time, a later read replacing the pending one, which stops
+  before its next parse) for every door: *Import…*, a file dropped on a chart or on bare canvas,
+  *Update*, and a browser drop's bytes, refused past 16 MB before they are copied. The status
+  line says *Reading sales.csv…* meanwhile, and a door asked again for the read already pending
+  reads nothing more. The stat is taken before the read, so a write landing during it leaves the
+  link *Changed*. Bytes are text as UTF-8, UTF-16 by its byte-order mark, else Windows-1252 (the
+  code page Excel writes *CSV (Comma delimited)* in); a refusal names what failed (*file not
+  found*, *access denied*, *larger than 16 MB*). What the read was for lands when it answers
+  (`poll_chart_read`), held while a gesture is live or a modal is up, as an import's is: the
+  import box, the replaced tables, or the new chart; a refusal goes to the status line. The
+  watch's `stat`s stay on the UI thread.
 - **Watching**, as the tokens link (`watch_chart_links`): every `WATCH_EVERY` (45 s), when the
   window regains focus, and when a new path is linked, each linked path is `stat`ed. A change
   shows the pill *sales.csv changed · Update chart* (*Update 2 charts* when several link it) after
   the tokens pill, and the Data section's source line says *Changed on disk* with *Update*.
-  Updating reads the file and replaces each
-  linked chart's table in one undo step, *Update chart data*. **A file's contents enter the
+  Updating reads the file once, parsed under each header choice its linking charts made, and
+  replaces each linked chart's table with the one its own choice gives, in one undo step,
+  *Update chart data*. **A file's contents enter the
   document only on the user's click**, never on its own: an opened document's link can name any
   file on the machine, and the next save would carry what it read.
 - **A missing file** shows *File not found* on the source line with *Relink…* and *Unlink*.

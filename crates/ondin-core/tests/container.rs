@@ -716,11 +716,13 @@ fn deleting_hiding_or_adding_in_a_pinned_group_moves_nothing_else() {
 }
 
 /// A frame with a layout inside a stretched group keeps its share of the box,
-/// as a frame without one does: frame 200 × 100 resized to 400, the group
-/// pinned 0% holding rect A on the left half and frame L, laid out, on the
-/// right half. L is drawn at 200–400.
+/// as a frame without one does, and its items are laid again at that share, as
+/// the browser re-lays them: frame 200 × 100 resized to 400, the group pinned
+/// 0% holding rect A on the left half and frame L, laying out its 20-wide rect
+/// C centred, on the right half. L is drawn at 200–400 and C at 290–310.
 /// flip: `used_geometry` placing a layout root by `root_used` alone → L stays
-/// at 100–200, failing at "its share".
+/// at 100–200, failing at "its share"; `place_node` without its second pass
+/// at the share → C at 240–260, failing at "centred in its share".
 #[test]
 fn a_laid_out_frame_in_a_stretched_group_keeps_its_share() {
     let mut s = Scene::new();
@@ -728,19 +730,28 @@ fn a_laid_out_frame_in_a_stretched_group_keeps_its_share() {
     let g = s.add(f, NodeKind::Group, (0.0, 0.0));
     s.add(g, rect(100.0, 100.0), (0.0, 0.0));
     let l = s.add(g, frame(100.0, 100.0), (100.0, 0.0));
-    s.add(l, rect(20.0, 20.0), (0.0, 0.0));
+    let c = s.add(l, rect(20.0, 20.0), (0.0, 0.0));
     s.commit(vec![Operation::SetDisplay {
         id: l,
         display: Some(ondin_core::container::Display::Flex(
-            ondin_core::container::Flex::default(),
+            ondin_core::container::Flex {
+                justify_content: ondin_core::container::JustifyContent::Center,
+                ..Default::default()
+            },
         )),
     }]);
+    assert_eq!(s.bounds(c).x0, 140.0, "the fixture: centred in L");
     s.pin(g, all_pct(0.0));
     s.resize(f, 400.0, 100.0);
     assert_eq!(
         s.bounds(l),
         Rect::new(200.0, 0.0, 400.0, 100.0),
         "its share"
+    );
+    assert_eq!(
+        (s.bounds(c).x0, s.bounds(c).x1),
+        (290.0, 310.0),
+        "centred in its share"
     );
 }
 

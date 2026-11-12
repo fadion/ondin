@@ -417,23 +417,10 @@ fn used_geometry(
                 ..Used::default()
             });
         }
-        // A layout root inside a stretched group keeps its share of the
-        // group's box, as every sibling does, at the size its pass gave it.
-        if let Some(stretch) = node
-            .parent()
-            .and_then(|p| used.get(&p))
-            .and_then(|u| u.stretch)
-            .filter(|s| !(s.is_identity() && s.from.origin() == s.to.origin()))
-            && let (kind, frame) = crate::container::root_sized(&DocView(doc), id, l.size)
-            && let Some(own) = kind
-                .clone()
-                .or_else(|| doc.resolved_kind(id).map(std::borrow::Cow::into_owned))
-            && let Some((local, stretched, _)) =
-                crate::container::place_in_stretch(&stretch, node.transform(), &own, None)
-        {
+        if let Some((local, kind, frame)) = root_in_stretch(doc, used, node, l.size) {
             return Some(Used {
                 local: Some(local),
-                kind: stretched.or(kind),
+                kind,
                 frame,
                 ..Used::default()
             });
@@ -540,6 +527,31 @@ fn root_used(
     }
 }
 
+/// A layout root's placement inside a stretched group, from the `size` its own
+/// pass gave it: its share of the group's box, as every sibling keeps — its
+/// local transform, the kind it is drawn as, and a group root's box. `None`
+/// outside a stretched group.
+fn root_in_stretch(
+    doc: &Document,
+    used: &FxHashMap<NodeId, Used>,
+    node: &Node,
+    size: kurbo::Size,
+) -> Option<(Affine, Option<NodeKind>, Option<kurbo::Size>)> {
+    let stretch = node
+        .parent()
+        .and_then(|p| used.get(&p))
+        .and_then(|u| u.stretch)
+        .filter(|s| !(s.is_identity() && s.from.origin() == s.to.origin()))?;
+    let (kind, frame) = crate::container::root_sized(&DocView(doc), node.id(), size);
+    let own = kind.clone().or_else(|| {
+        doc.resolved_kind(node.id())
+            .map(std::borrow::Cow::into_owned)
+    })?;
+    let (local, stretched, _) =
+        crate::container::place_in_stretch(&stretch, node.transform(), &own, None)?;
+    Some((local, stretched.or(kind), frame))
+}
+
 /// `id`'s used geometry, running its layout pass first when it roots one, so a
 /// chain's items find their results in `laid`.
 fn place_node(
@@ -550,6 +562,21 @@ fn place_node(
     if crate::container::is_layout_root(view, id) {
         for l in crate::container::lay_out(view, id) {
             laid.insert(l.id, l);
+        }
+        // A root drawn at its share of a stretched group has its items laid
+        // again at that size, as the browser re-lays them; its own entry keeps
+        // the size its pass gave it, which its share is taken from.
+        if let (Some(own), Some(node)) = (laid.get(&id).map(|l| l.size), view.doc.get(id))
+            && let Some((_, Some(NodeKind::Artboard { size, .. }), _)) =
+                root_in_stretch(view.doc, view.used, node, own)
+            && !(crate::container::near(size.width, own.width)
+                && crate::container::near(size.height, own.height))
+        {
+            for l in crate::container::lay_out_at(view, id, Some(size)) {
+                if l.id != id {
+                    laid.insert(l.id, l);
+                }
+            }
         }
     }
     let used = with_bound_size(view.doc, id, used_geometry(view, laid, id));

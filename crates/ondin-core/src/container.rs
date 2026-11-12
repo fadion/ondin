@@ -2660,7 +2660,7 @@ pub struct Placed {
 }
 
 /// Approximately equal on the 1/64 grid layout results land on.
-fn near(a: f64, b: f64) -> bool {
+pub(crate) fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1.0 / 128.0
 }
 
@@ -2815,7 +2815,11 @@ fn pinned_size(view: &dyn LayoutView, root: crate::NodeId, out: &[Laid]) -> Opti
 
 /// [`lay_out`]'s pass, with the root at `size` when given — a definite size on
 /// both axes, which is what an absolutely positioned box between two insets is.
-fn lay_out_at(view: &dyn LayoutView, root: crate::NodeId, size: Option<Size>) -> Vec<Laid> {
+pub(crate) fn lay_out_at(
+    view: &dyn LayoutView,
+    root: crate::NodeId,
+    size: Option<Size>,
+) -> Vec<Laid> {
     let mut tree = FlexTree::new(view);
     let Some(r) = tree.push(root) else {
         return Vec::new();

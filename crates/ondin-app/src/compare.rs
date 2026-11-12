@@ -381,10 +381,13 @@ fn charts_whole(d: &mut diff::Diff, then: &Document, now: &Document) {
         let mut out = Vec::with_capacity(page.layers.len());
         for layer in std::mem::take(&mut page.layers) {
             // Owned as the layer is now: a flattened chart's former part that was
-            // edited since is the user's layer, and keeps its change.
+            // edited or deleted since is the user's layer, and keeps its change. A
+            // removed part folds into its chart only while that is still a chart,
+            // or went with it.
             let owner = NodeId::from_wire(&layer.id).and_then(|id| match now.contains(id) {
                 true => chart::owner(now, id),
-                false => chart::owner(then, id),
+                false => chart::owner(then, id)
+                    .filter(|c| now.get(*c).is_none_or(|n| n.chart().is_some())),
             });
             match owner {
                 None => out.push(layer),
@@ -405,6 +408,14 @@ fn charts_whole(d: &mut diff::Diff, then: &Document, now: &Document) {
                 let was = then.get(id).and_then(|n| n.chart());
                 let is = now.get(id).and_then(|n| n.chart());
                 layer.changes.extend(description_changes(was, is));
+                // Only its parts differ: laid out again at another size.
+                if layer.changes.is_empty() {
+                    layer.changes.push(Change {
+                        what: "Chart redrawn".into(),
+                        before: None,
+                        after: None,
+                    });
+                }
             } else {
                 layer.inside = 0;
             }
@@ -448,11 +459,14 @@ fn description_changes(
     match (was, is) {
         (Some(was), Some(is)) => {
             let mut out = Vec::new();
-            if was.table != is.table {
+            // A linked file read again moves the table and the link's stamp
+            // together; both are its data, not its options.
+            if was.table != is.table || was.source != is.source {
                 out.push(line("Chart data changed"));
             }
             let same_table = ondin_core::chart::Chart {
                 table: is.table.clone(),
+                source: is.source.clone(),
                 ..was.clone()
             };
             if !same_table.same_description(is) {
@@ -2222,6 +2236,80 @@ mod tests {
             lines(&mut app),
             ["Chart data changed", "Chart options changed"]
         );
+        let _ = std::fs::remove_file(&version);
+    }
+
+    /// A linked chart read again says only *Chart data changed*, though its
+    /// link's stamp moved; a flattened chart's former part deleted since keeps
+    /// its own removed row beside *Chart flattened*.
+    ///
+    /// flip: `description_changes` comparing options with the link's stamp in
+    /// them → fails at "only its data"; `charts_whole` folding every removed
+    /// part into its old chart → fails at "the part's removal".
+    #[test]
+    fn a_charts_reread_and_a_flattened_part_deleted_are_said() {
+        use ondin_core::chart::{Chart, ChartKind, DataLink};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let first = app.session.page;
+        let frame = app.session.ids.mint();
+        let mut linked = Chart::sample(ChartKind::Column);
+        linked.source = Some(DataLink {
+            path: r"C:\data\sales.csv".into(),
+            size: 10,
+            modified: 1,
+            header: None,
+        });
+        assert!(app.session.commit(Transaction(vec![
+            boxed(frame, first, "Sales", (0.0, 0.0), true),
+            Operation::SetGeometry {
+                id: frame,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(480.0, 280.0)),
+            },
+            Operation::SetChart {
+                id: frame,
+                chart: Some(Box::new(linked)),
+            },
+        ])));
+        let version =
+            std::env::temp_dir().join(format!("ondin-compare-reread-{}.ondin", std::process::id()));
+        std::fs::write(&version, ondin_core::io::save(&app.session.doc).unwrap()).unwrap();
+        let mut c = app.session.doc.get(frame).unwrap().chart().unwrap().clone();
+        c.table.rows[0][1] = "90".into();
+        c.source = Some(DataLink {
+            path: r"C:\data\sales.csv".into(),
+            size: 12,
+            modified: 2,
+            header: None,
+        });
+        assert!(app.session.commit(Transaction(vec![Operation::SetChart {
+            id: frame,
+            chart: Some(Box::new(c)),
+        }])));
+        app.compare_with(pick(&version, "Before"), None);
+        let cmp = app.session.compare.as_deref().expect("the compare opens");
+        let row = cmp.rows.iter().find(|r| r.id == frame).expect("the chart");
+        let whats: Vec<String> = row.all_lines().iter().map(|l| l.what.clone()).collect();
+        assert_eq!(whats, ["Chart data changed"], "only its data");
+        app.leave_compare();
+
+        let part = app.session.doc.get(frame).unwrap().children()[0];
+        let ops = ondin_core::chart::flatten_ops(&app.session.doc, frame).expect("a chart");
+        assert!(app.session.commit(Transaction(ops)));
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: part }]))
+        );
+        app.compare_with(pick(&version, "Before"), None);
+        let cmp = app.session.compare.as_deref().expect("the compare opens");
+        // Its own row, or folded under the flattened frame's.
+        let gone = cmp.rows.iter().find_map(|r| match r.id == part {
+            true => Some(r.status),
+            false => r.folded.iter().find(|f| f.id == part).map(|f| f.status),
+        });
+        assert_eq!(gone, Some(Status::Removed), "the part's removal");
+        app.leave_compare();
         let _ = std::fs::remove_file(&version);
     }
 

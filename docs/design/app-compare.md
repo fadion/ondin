@@ -65,10 +65,13 @@ matched by id, so a renamed or moved layer is one change.
   their status read from which side has a value.
   **A chart is marked whole** (`compare::charts_whole`): its parts are what its regeneration
   made, so none is listed or counted, and the chart frame is a changed row whose lines say *Chart
-  data changed* (the table) and *Chart options changed* (anything else in the description) in
-  place of the description's saved fields, or *Chart flattened* / *Made a chart*. A part is told
-  by the chart owning it now, so a flattened chart's layer edited since keeps its own change. An
-  added or removed chart counts no layers inside it.
+  data changed* (the table, and a linked file's stamp read again with it) and *Chart options
+  changed* (anything else in the description) in place of the description's saved fields, or
+  *Chart flattened* / *Made a chart*, or *Chart redrawn* when only its parts differ (laid out
+  again at another size). A part is told by the chart owning it now, so a flattened chart's
+  layer edited or deleted since keeps its own change; a removed part folds into its old chart
+  only while that is still a chart or went with it. An added or removed chart counts no layers
+  inside it.
 - **The bar** (`compare_bar`) sits where the contrast checker's and the vision bar's do, on their
   frame: centred on the canvas, 12pt below its top (and below the rulers when they show). It holds
   the git-diff glyph, *Comparing ‹name› · ‹when› with now* (an unnamed version: its time; two

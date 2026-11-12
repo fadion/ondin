@@ -2378,79 +2378,71 @@ impl OndinApp {
         }
         let order = |f: &Field| Field::ALL.iter().position(|x| x == f).unwrap_or(0);
         families.sort_by_key(|f| (!own(*f), order(f)));
-        let need = list.uses.len() as f32 * (MENU_ROW_H + 1.0)
-            + families.len() as f32 * (super::binding::FACE_HEAD_H + 1.0);
-        let h = need.min(BIND_LIST_ROWS * MENU_ROW_H);
         let mut hover = None;
-        egui::ScrollArea::vertical()
-            .id_salt("bind-others")
-            .max_height(h)
-            .min_scrolled_height(h)
-            .auto_shrink([false, false])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                let w = ui.available_width();
-                for f in &families {
-                    let n = list.uses.iter().filter(|u| u.field == *f).count();
-                    let (head, _) = ui.allocate_exact_size(
-                        egui::vec2(w, super::binding::FACE_HEAD_H),
-                        egui::Sense::hover(),
+        // Placed by `menu_place` from its painted size, so the cap alone bounds it.
+        ui::fit_scroll(ui, "bind-others", BIND_LIST_ROWS * MENU_ROW_H, |ui| {
+            let w = ui.available_width();
+            for f in &families {
+                let n = list.uses.iter().filter(|u| u.field == *f).count();
+                let (head, _) = ui.allocate_exact_size(
+                    egui::vec2(w, super::binding::FACE_HEAD_H),
+                    egui::Sense::hover(),
+                );
+                let p = ui.painter();
+                let y = head.bottom() - 7.0;
+                ui::paint_eyebrow(
+                    p,
+                    egui::pos2(head.left() + SCOPE_INSET, y),
+                    egui::Align2::LEFT_CENTER,
+                    &format!("{} · {n}", field_label(*f)),
+                );
+                if !own(*f) {
+                    p.text(
+                        egui::pos2(head.right() - SCOPE_INSET, y),
+                        egui::Align2::RIGHT_CENTER,
+                        "widens its scope",
+                        egui::FontId::proportional(ui::CAPTION_PT),
+                        theme::text::muted(),
                     );
-                    let p = ui.painter();
-                    let y = head.bottom() - 7.0;
-                    ui::paint_eyebrow(
-                        p,
-                        egui::pos2(head.left() + SCOPE_INSET, y),
-                        egui::Align2::LEFT_CENTER,
-                        &format!("{} · {n}", field_label(*f)),
-                    );
-                    if !own(*f) {
-                        p.text(
-                            egui::pos2(head.right() - SCOPE_INSET, y),
-                            egui::Align2::RIGHT_CENTER,
-                            "widens its scope",
-                            egui::FontId::proportional(ui::CAPTION_PT),
-                            theme::text::muted(),
-                        );
+                }
+                for (i, u) in list.uses.iter().enumerate() {
+                    if u.field != *f {
+                        continue;
                     }
-                    for (i, u) in list.uses.iter().enumerate() {
-                        if u.field != *f {
-                            continue;
-                        }
-                        let id = u.key.at();
-                        let Some(node) = doc.get(id) else { continue };
-                        let tick = match u.why_not {
-                            Some(_) => ui::Tick::Dead,
-                            None => ui::Tick::Open(list.on[i]),
-                        };
-                        let glyph = super::layers::node_glyph(node).0;
-                        let resp = ui::tick_row(
-                            ui,
-                            w,
-                            tick,
-                            ui::RowMark::Glyph(glyph),
-                            &crate::private::layer(doc, id),
-                            ui::RowTail::Text(u.tail.clone()),
-                            u.why_not.as_deref(),
-                        );
-                        // Outlined only where the canvas shows it.
-                        if resp.hovered() && doc.page_of(id) == Some(self.session.page) {
-                            hover = Some(id);
-                        }
-                        if u.why_not.is_some() {
-                            continue;
-                        }
-                        if ui::double_clicked(ui, &resp) {
-                            // The double-click's first press flipped the
-                            // tick; a reveal leaves it as it was.
-                            list.on[i] = !list.on[i];
-                            acts.push(Act::Reveal(id));
-                        } else if resp.clicked() {
-                            list.on[i] = !list.on[i];
-                        }
+                    let id = u.key.at();
+                    let Some(node) = doc.get(id) else { continue };
+                    let tick = match u.why_not {
+                        Some(_) => ui::Tick::Dead,
+                        None => ui::Tick::Open(list.on[i]),
+                    };
+                    let glyph = super::layers::node_glyph(node).0;
+                    let resp = ui::tick_row(
+                        ui,
+                        w,
+                        tick,
+                        ui::RowMark::Glyph(glyph),
+                        &crate::private::layer(doc, id),
+                        ui::RowTail::Text(u.tail.clone()),
+                        u.why_not.as_deref(),
+                    );
+                    // Outlined only where the canvas shows it.
+                    if resp.hovered() && doc.page_of(id) == Some(self.session.page) {
+                        hover = Some(id);
+                    }
+                    if u.why_not.is_some() {
+                        continue;
+                    }
+                    if ui::double_clicked(ui, &resp) {
+                        // The double-click's first press flipped the
+                        // tick; a reveal leaves it as it was.
+                        list.on[i] = !list.on[i];
+                        acts.push(Act::Reveal(id));
+                    } else if resp.clicked() {
+                        list.on[i] = !list.on[i];
                     }
                 }
-            });
+            }
+        });
         ui::menu_sep(ui);
         let keys: Vec<super::binding::FieldKey> = list
             .uses

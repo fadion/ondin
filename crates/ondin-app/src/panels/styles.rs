@@ -344,18 +344,8 @@ fn capsule(
     }
     let mid = rect.center().y;
     let mut x = rect.left() + 9.0;
-    p.text(
-        egui::pos2(x + 5.5, mid),
-        egui::Align2::CENTER_CENTER,
-        if open {
-            icon::CARET_DOWN
-        } else {
-            icon::CARET_RIGHT
-        },
-        theme::icon_font(11.0),
-        theme::text::dim(),
-    );
-    x += 11.0 + 8.0;
+    ui::fold_caret(p, egui::pos2(x, mid), open, theme::text::dim());
+    x += ui::FOLD_CARET_PT + 8.0;
     let sw = egui::Rect::from_min_size(egui::pos2(x, mid - 7.0), egui::vec2(14.0, 14.0));
     paint_preview(p, doc, style, sw);
     x += 14.0 + 8.0;

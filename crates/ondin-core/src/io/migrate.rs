@@ -408,7 +408,8 @@ fn migrate_13_to_14(value: &mut Value) {
 /// published document's number moves too.
 ///
 /// A set's `element` (Button, Link, Plain; absent is Button) moves onto its
-/// variant roots and every instance of them, where v15 keeps a layer's HTML
+/// variant roots and every copy showing one, through its links or a swap
+/// (`swap::shown_main`'s rule), where v15 keeps a layer's HTML
 /// element: a set with an interaction state writes `button` or `a` on each,
 /// Plain writing nothing (Automatic). A set without states never read it, so it
 /// is dropped.
@@ -461,32 +462,49 @@ fn set_element_onto_roots(value: &mut Value) {
             writes.push((children, tag));
         }
     }
+    if writes.is_empty() {
+        return;
+    }
+    // Each node's link and swap, by id.
+    let key = |v: &Value| v.to_string();
+    let edges: std::collections::HashMap<String, (Option<String>, Option<String>)> = nodes
+        .iter()
+        .filter_map(|n| {
+            let id = key(n.get("id")?);
+            let link = n.get("link").filter(|l| !l.is_null()).map(key);
+            let swap = n.get("swap").filter(|s| !s.is_null()).map(key);
+            Some((id, (link, swap)))
+        })
+        .collect();
+    // The main a node shows, as `swap::shown_main` reads it: down its links to
+    // the first swap, whose target it shows, else to the chain's end. A copy's
+    // element is compared with that main's, so one left without it reads as
+    // an override.
+    let shown = |id: &String| -> String {
+        let mut at = id.clone();
+        for _ in 0..64 {
+            match edges.get(&at) {
+                Some((_, Some(swap))) => return swap.clone(),
+                Some((Some(link), None)) => at = link.clone(),
+                _ => break,
+            }
+        }
+        at
+    };
     for (children, tag) in writes {
-        // The roots, then every copy linked to one, however deeply nested: a
-        // copy's element is its main's, so one left without it reads as an
-        // override.
-        let mut tagged: Vec<Value> = nodes
+        let roots: std::collections::HashSet<String> = nodes
             .iter()
             .filter(|n| {
                 n.get("id").is_some_and(|id| children.contains(id))
                     && n.get("component").and_then(Value::as_bool) == Some(true)
             })
-            .filter_map(|n| n.get("id").cloned())
+            .filter_map(|n| n.get("id").map(key))
             .collect();
-        loop {
-            let more: Vec<Value> = nodes
-                .iter()
-                .filter(|n| n.get("link").is_some_and(|l| tagged.contains(l)))
-                .filter_map(|n| n.get("id").cloned())
-                .filter(|id| !tagged.contains(id))
-                .collect();
-            if more.is_empty() {
-                break;
-            }
-            tagged.extend(more);
-        }
         for node in nodes.iter_mut() {
-            if node.get("id").is_some_and(|id| tagged.contains(id)) {
+            if node
+                .get("id")
+                .is_some_and(|id| roots.contains(&shown(&key(id))))
+            {
                 node["element"] = Value::from(tag);
             }
         }

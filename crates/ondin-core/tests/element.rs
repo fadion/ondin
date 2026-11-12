@@ -429,6 +429,81 @@ fn a_v14_sets_element_moves_onto_its_roots() {
     );
     assert_eq!(with(Some("plain")).get(rest).unwrap().element(), None);
 
+    // Swapped copies take the element of the main they show, not their slot's:
+    // in an instance of Holder, Star's slot swapped to Rest shows a button, and
+    // the set's slot swapped to Star shows none — neither an override.
+    // flip: `set_element_onto_roots` following links alone → fails at "r1".
+    let (mut doc, s, [rest, _]) = set_of_two(true);
+    let mut ids = IdSource::new(0xEA);
+    let page = doc.first_page();
+    let [star, holder] = [(); 2].map(|_| ids.mint());
+    doc.apply(&Transaction(vec![
+        create(star, page, 0, frame(), "Star"),
+        Operation::SetComponent {
+            id: star,
+            component: true,
+        },
+        create(holder, page, 0, frame(), "Holder"),
+    ]))
+    .unwrap();
+    let mut place = |doc: &mut Document, main, parent| {
+        let (tx, id) =
+            ondin_core::build::place_instance(doc, &mut ids, main, parent, None).unwrap();
+        doc.apply(&tx).unwrap();
+        id
+    };
+    let n1 = place(&mut doc, star, holder);
+    let n2 = place(&mut doc, s, holder);
+    doc.apply(&Transaction(vec![Operation::SetComponent {
+        id: holder,
+        component: true,
+    }]))
+    .unwrap();
+    let b1 = place(&mut doc, holder, page);
+    let copy_of = |doc: &Document, src| {
+        doc.get(b1)
+            .unwrap()
+            .children()
+            .iter()
+            .copied()
+            .find(|c| doc.get(*c).and_then(|n| n.link()) == Some(src))
+            .unwrap()
+    };
+    let (r1, r2) = (copy_of(&doc, n1), copy_of(&doc, n2));
+    let mut swap_ids = IdSource::new(0xEB);
+    for (r, to) in [(r1, rest), (r2, star)] {
+        let mut tx = ondin_core::swap::swap(&doc, r, to).unwrap();
+        ondin_core::propagate::owed(&doc, &mut tx, &mut swap_ids);
+        doc.apply(&tx).unwrap();
+    }
+    let all: Vec<NodeId> = ondin_core::subtree_nodes(&doc, &[page]);
+    let clear = Transaction(
+        all.into_iter()
+            .filter(|id| doc.get(*id).is_some_and(|n| n.element().is_some()))
+            .map(|id| Operation::SetElement { id, element: None })
+            .collect(),
+    );
+    doc.apply(&clear).unwrap();
+    let saved = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    let mut value: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    value["schema_version"] = 14.into();
+    let loaded = io::load(serde_json::to_string(&value).unwrap().as_bytes()).unwrap();
+    let (r1, r2) = (copy_of(&loaded, n1), copy_of(&loaded, n2));
+    assert_eq!(
+        loaded.get(r1).unwrap().element(),
+        Some(HtmlElement::Button),
+        "r1"
+    );
+    assert_eq!(loaded.get(r2).unwrap().element(), None, "r2");
+    for r in [r1, r2] {
+        assert!(
+            !ondin_core::reset::overrides(&loaded, r)
+                .iter()
+                .any(|o| matches!(o.reset, Operation::SetElement { .. })),
+            "no element override on {r:?}"
+        );
+    }
+
     let (doc, s2, [rest2, _]) = set_of_two(false);
     let saved = String::from_utf8(io::save(&doc).unwrap()).unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&saved).unwrap();

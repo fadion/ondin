@@ -397,4 +397,96 @@ mod tests {
         assert_eq!(app.tabs.active, front, "the tab in front never changed");
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// On the tab in front, an agent's edit waits for the person's save, while
+    /// `make_kit` saves at once through that save — the waiting edit with it, as
+    /// the app's own *Make this a kit* does — and a save the disk refuses (the
+    /// file changed under the tab) fails the tool and leaves the file alone.
+    ///
+    /// flip: `Documents::save` answering `Ok` for the front tab without saving →
+    /// fails at "the mark is in the file".
+    #[test]
+    fn a_kit_mark_on_the_front_tab_saves_through_the_persons_save() {
+        let root = crate::kits::picker::tests::temp_root("mcp-front-save");
+        let ctx = egui::Context::default();
+        let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
+        let front = app.tabs.active;
+        let file = app.session.path.clone().expect("the front tab is filed");
+        let mut engine = Engine::default();
+        let opened = call(
+            &mut engine,
+            &mut app,
+            "use_document",
+            json!({ "document": file.display().to_string() }),
+        );
+        assert_eq!(
+            app.tabs.active, front,
+            "the agent's document is the front tab"
+        );
+        let read = |file: &Path| ondin_core::io::load(&std::fs::read(file).unwrap()).unwrap();
+
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let made = call(
+            &mut engine,
+            &mut app,
+            "create_node",
+            json!({ "parent": opened["pages"][0]["id"], "kind": kind, "name": "Card" }),
+        );
+        let card = ondin_core::NodeId::from_wire(made["created"][0].as_str().unwrap()).unwrap();
+        assert!(
+            read(&file).get(card).is_none(),
+            "an edit waits for the save"
+        );
+        assert!(app.session.is_dirty());
+
+        call(&mut engine, &mut app, "make_kit", json!({}));
+        let saved = read(&file);
+        assert!(
+            saved.meta().kit.as_ref().is_some_and(|k| k.is_shared()),
+            "the mark is in the file"
+        );
+        assert!(saved.get(card).is_some(), "the waiting edit went with it");
+        assert!(!app.session.is_dirty());
+        assert!(
+            app.session.status().text.ends_with(" · by test"),
+            "{}",
+            app.session.status().text
+        );
+
+        // Another writer changes the file under the tab.
+        let mut theirs = saved.clone();
+        let mut meta = theirs.meta().clone();
+        meta.name = Some("Changed elsewhere".into());
+        theirs.set_meta(meta);
+        std::fs::write(&file, ondin_core::io::save(&theirs).unwrap()).unwrap();
+        let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+        let out = engine.handle(
+            &mut app,
+            ondin_mcp::queue::Call {
+                conn: 1,
+                client: "test".into(),
+                tool: "stop_sharing_kit".into(),
+                args: json!({}),
+                reply,
+            },
+        );
+        assert!(
+            out.is_error
+                && matches!(out.content.first(), Some(ondin_mcp::wire::Content::Text(t))
+                    if t.contains("could not be saved")),
+            "the refused save fails the tool: {:?}",
+            out.content
+        );
+        assert_eq!(
+            app.session.clash,
+            crate::session::Clash::Ask,
+            "the person is asked about the changed file"
+        );
+        assert_eq!(
+            read(&file).meta().name.as_deref(),
+            Some("Changed elsewhere"),
+            "the other writer's file is left alone"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

@@ -6843,29 +6843,37 @@ impl OndinApp {
     /// Whether something live would make the watch's silent reload lose work or
     /// pull ids from under it: a write of the app's own in flight, which would
     /// read as a change; a modal; a text edit, a drag, a pen path or a pencil
-    /// stroke; or a name, description or link being typed.
+    /// stroke; an open colour picker; or a name, description, link, hex or style
+    /// name being typed. The hex and style-name buffers count only while a field
+    /// holds the keyboard, since a row that stops drawing mid-edit leaves its
+    /// buffer behind and would hold the watch off for good.
     fn holds_off_the_watch(&self) -> bool {
+        let typing = || self.egui_ctx.memory(|m| m.focused().is_some());
         self.session.is_saving()
             || self.modal_is_up()
             || self.text.is_some()
             || !matches!(self.drag, Drag::None)
             || self.pen.is_some()
             || self.pencil.is_some()
+            || self.picker.is_some()
             || self.name_edit.is_some()
             || self.desc_edit.is_some()
             || self.link_edit.is_some()
             || self.href_edit.is_some()
             || self.renaming_layer.is_some()
+            || ((self.paint_hex.is_some() || self.style_naming.is_some()) && typing())
     }
 
     /// The watch's reload of a clean document whose file changed: [`Self::read_again`],
-    /// keeping where the user was — the page, the camera, the folds and the layers
-    /// still in the file selected.
+    /// keeping where the user was — the page, the camera, the folds, the layers
+    /// still in the file selected and the kit's way back to its document.
     fn follow_disk(&mut self) -> Result<(), String> {
         self.remember_view();
         let selected = self.session.selection.ids().to_vec();
         let collapsed = self.collapsed.clone();
+        let kit_return = self.kit_return.clone();
         self.read_again()?;
+        self.kit_return = kit_return;
         let doc = &self.session.doc;
         let page = self.session.page;
         let kept: Vec<NodeId> = selected
@@ -13426,6 +13434,51 @@ mod library_wiring_tests {
             "the camera stays"
         );
         assert_eq!(app.session.selection.ids(), &[id], "the selection stays");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The watch's reload waits while a colour picker is open or a hex is typed in
+    /// a focused field, not for a hex buffer whose field let go of the keyboard,
+    /// and keeps the kit's way back to its document.
+    ///
+    /// flip: `holds_off_the_watch` without its `picker` arm → fails at "an open
+    /// picker holds it off"; without its `paint_hex` arm → fails at "a hex being
+    /// typed holds it off"; `follow_disk` not carrying `kit_return` → fails at
+    /// "the way back stays"; the buffers holding it off without the focus → fails
+    /// at "a buffer without the keyboard".
+    #[test]
+    fn the_watchs_reload_waits_for_the_picker_and_a_typed_hex() {
+        let ctx = egui::Context::default();
+        let (mut app, _, root) = app_with_a_changed_file(&ctx, "watch-paint");
+        app.session.mark_clean();
+        let page = app.session.page;
+        let theirs = |app: &OndinApp| app.session.doc.meta().name.as_deref() == Some("Theirs");
+        app.picker = Some(crate::panels::Picker::new(
+            page,
+            crate::panels::PaintSlot::Fill(0),
+            egui::pos2(500.0, 300.0),
+        ));
+        app.watch_disk_at(0.0, true);
+        assert!(!theirs(&app), "an open picker holds it off");
+        app.picker = None;
+        app.paint_hex = Some((page, crate::panels::PaintSlot::Fill(0), "6D8".into()));
+        let field = egui::Id::new("hex-field");
+        ctx.memory_mut(|m| m.request_focus(field));
+        app.watch_disk_at(1.0, true);
+        assert!(!theirs(&app), "a hex being typed holds it off");
+        assert!(app.paint_hex.is_some(), "the typed hex is kept");
+        ctx.memory_mut(|m| m.surrender_focus(field));
+        app.kit_return = Some((root.join("doc.ondin"), "Doc".into()));
+        app.watch_disk_at(2.0, true);
+        assert!(
+            theirs(&app),
+            "a buffer without the keyboard does not hold it off"
+        );
+        assert_eq!(
+            app.kit_return.as_ref().map(|r| r.1.as_str()),
+            Some("Doc"),
+            "the way back stays"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

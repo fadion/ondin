@@ -3758,16 +3758,25 @@ fn merge_colours_repaints_near_identical_colours() {
         "set_fills",
         json!({ "node": b.to_wire(), "fills": fill(0x20, 0x3b, 0x5e) }),
     );
-    let into = serde_json::to_value(Color::from_rgb8(0x1f, 0x3a, 0x5f)).unwrap();
-    let other = serde_json::to_value(Color::from_rgb8(0x20, 0x3b, 0x5e)).unwrap();
+    let (into, other) = ("#1f3a5fff", "#203b5e");
     assert_eq!(
         refused_param(
             &doc,
             &mut ids,
             "merge_colours",
-            json!({ "colours": [into], "into": serde_json::to_value(Color::from_rgb8(1, 2, 3)).unwrap() })
+            json!({ "colours": [into], "into": "#010203" })
         ),
-        "into"
+        "into",
+        "no paint is this colour"
+    );
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "merge_colours",
+            json!({ "colours": ["teal-ish"], "into": into })
+        ),
+        "colours"
     );
     run(
         &mut doc,

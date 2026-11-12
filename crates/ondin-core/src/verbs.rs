@@ -417,7 +417,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "StyleValue" => reads::<StyleInput>(v),
         "BoundField" => reads::<build::BoundField>(v),
         "Color" => reads::<peniko::Color>(v),
-        "[Color]" => reads::<Vec<peniko::Color>>(v),
+        "[Hex]" => reads::<Vec<String>>(v),
         "PropValue" => match v {
             Value::Bool(_) | Value::String(_) => Ok(()),
             _ => Err("expected true, false or a string".into()),
@@ -514,10 +514,7 @@ pub fn example(model: &str) -> Option<Value> {
         "StyleValue" => serde_json::json!({ "fills": [json(&fill)] }),
         "BoundField" => json(&build::BoundField::Fill(0)),
         "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
-        "[Color]" => json(&vec![
-            Color::from_rgb8(0x1f, 0x3a, 0x5f),
-            Color::from_rgb8(0x20, 0x3b, 0x5e),
-        ]),
+        "[Hex]" => serde_json::json!(["#203b5eff", "#1e395fff"]),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
@@ -2801,13 +2798,13 @@ pub static VERBS: &[Verb] = &[
         params: &[
             req(
                 "colours",
-                ParamKind::Model("[Color]"),
-                "the colours to replace, as `review_colours` lists them",
+                ParamKind::Model("[Hex]"),
+                "the colours to replace, `#rrggbbaa` as `review_colours` writes them",
             ),
             req(
                 "into",
-                ParamKind::Model("Color"),
-                "the colour they become, one the document uses",
+                TEXT,
+                "the colour they become, `#rrggbbaa`, one the document uses",
             ),
             opt(
                 "nodes",
@@ -2817,20 +2814,32 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             use crate::color_review::{self, Group};
-            let bytes = |c: peniko::Color| c.to_rgba8().to_u8_array();
-            let into = bytes(a.model::<peniko::Color>("into")?);
-            let from: Vec<[u8; 4]> = a
-                .model::<Vec<peniko::Color>>("colours")?
-                .into_iter()
-                .map(bytes)
-                .collect();
+            let parse = |param: &'static str, s: &str| {
+                peniko::color::parse_color(s.trim())
+                    .map(|c| {
+                        c.to_alpha_color::<peniko::color::Srgb>()
+                            .to_rgba8()
+                            .to_u8_array()
+                    })
+                    .map_err(|_| a.invalid(param, format!("`{s}` is no colour")))
+            };
+            let into = parse("into", a.text("into").unwrap_or_default())?;
+            let from = a
+                .model::<Vec<String>>("colours")?
+                .iter()
+                .map(|s| parse("colours", s))
+                .collect::<Result<Vec<_>, _>>()?;
             let scope = match a.get("nodes") {
                 Some(_) => Some(a.nodes("nodes")?),
                 None => None,
             };
             let roots = color_review::roots(ctx.doc, scope.as_deref());
             let census = color_review::census(ctx.doc, &roots);
-            let raw = |i: usize| census[i].is_raw().then(|| bytes(census[i].color));
+            let raw = |i: usize| {
+                census[i]
+                    .is_raw()
+                    .then(|| census[i].color.to_rgba8().to_u8_array())
+            };
             let target = (0..census.len())
                 .find(|i| raw(*i) == Some(into))
                 .ok_or_else(|| a.invalid("into", "no paint in scope is this colour"))?;

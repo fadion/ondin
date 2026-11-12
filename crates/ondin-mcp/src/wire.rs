@@ -29,6 +29,13 @@ pub enum Content {
         bytes: Vec<u8>,
         mime: &'static str,
     },
+    /// A file, embedded with its name: an export's output. Text travels as
+    /// text, anything else as base64.
+    File {
+        name: String,
+        bytes: Vec<u8>,
+        mime: &'static str,
+    },
 }
 
 /// A tool's answer.
@@ -148,6 +155,25 @@ fn result_of(output: Output) -> Value {
                 "data": base64::engine::general_purpose::STANDARD.encode(bytes),
                 "mimeType": mime,
             }),
+            Content::File { name, bytes, mime } => {
+                let uri = format!("ondin:///{name}");
+                let resource = match String::from_utf8(bytes) {
+                    Ok(text) if is_text(mime) => {
+                        json!({ "uri": uri, "mimeType": mime, "text": text })
+                    }
+                    Ok(text) => json!({
+                        "uri": uri,
+                        "mimeType": mime,
+                        "blob": base64::engine::general_purpose::STANDARD.encode(text),
+                    }),
+                    Err(e) => json!({
+                        "uri": uri,
+                        "mimeType": mime,
+                        "blob": base64::engine::general_purpose::STANDARD.encode(e.into_bytes()),
+                    }),
+                };
+                json!({ "type": "resource", "resource": resource })
+            }
         })
         .collect();
     let mut result = json!({ "content": content, "isError": output.is_error });
@@ -155,6 +181,15 @@ fn result_of(output: Output) -> Value {
         result["structuredContent"] = structured;
     }
     result
+}
+
+/// Whether a file of this media type is sent as text.
+fn is_text(mime: &str) -> bool {
+    mime.starts_with("text/")
+        || matches!(
+            mime,
+            "image/svg+xml" | "application/json" | "application/javascript"
+        )
 }
 
 fn failure(id: Value, code: i64, message: &str) -> Value {
@@ -239,5 +274,29 @@ mod tests {
         assert_eq!(r["content"][0]["data"], "/wA=");
         assert_eq!(r["content"][0]["mimeType"], "image/png");
         assert!(r.get("structuredContent").is_none());
+    }
+
+    /// A text file travels as text and anything else as base64, each as a
+    /// resource named by its path.
+    #[test]
+    fn a_file_is_text_or_a_blob_by_its_type() {
+        let file = |name: &str, bytes: &[u8], mime| Content::File {
+            name: name.into(),
+            bytes: bytes.to_vec(),
+            mime,
+        };
+        let output = Output {
+            content: vec![
+                file("icons/close.svg", b"<svg/>", "image/svg+xml"),
+                file("card.png", b"ab", "image/png"),
+            ],
+            structured: None,
+            is_error: false,
+        };
+        let r = result_of(output);
+        let svg = &r["content"][0]["resource"];
+        assert_eq!(svg["uri"], "ondin:///icons/close.svg");
+        assert_eq!(svg["text"], "<svg/>");
+        assert_eq!(r["content"][1]["resource"]["blob"], "YWI=");
     }
 }

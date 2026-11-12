@@ -31,12 +31,12 @@ pub(crate) use component::PropCache;
 /// A main's documentation link: the card's edit buffer, the link a main shows,
 /// and the one door that opens it.
 pub(crate) use component::{doc_link_of, open_doc_link};
-/// What an SVG export could not say exactly, worded once for every surface that
-/// reports it — the export card and *Copy as SVG* (§15 D780).
-pub(crate) use export::fidelity_clauses;
 pub(crate) use export::{
     EditableFormat, ExportAll, ExportNumber, ExportPreview, ExportTurns, PreviewKey, RunningExport,
 };
+/// What an SVG export could not say exactly, worded once for every surface that
+/// reports it — the export card and *Copy as SVG* (§15 D780).
+pub(crate) use export::{exportable_layers_of, fidelity_clauses};
 pub(crate) use inspector::{ImageCard, MultiField, interacting};
 pub use layers::LayerDrag;
 /// The kind icon shared by the tree and the inspector header.

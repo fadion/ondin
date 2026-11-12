@@ -135,6 +135,49 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "run_exports",
+        doc: "Render the export settings the layers carry (the Export card's rows) and return the files with their names; nothing is written to disk. With no `ids`, every layer with settings, as Export all does.",
+        params: &[param(
+            "ids",
+            ParamKind::Nodes,
+            false,
+            "The layers; all with settings when absent.",
+        )],
+    },
+    Tool {
+        name: "export_code",
+        doc: "Layers as HTML/CSS, React or Vue, keeping their layout, variables and components, with what could not be said exactly. Nothing is written to disk.",
+        params: &[
+            param(
+                "target",
+                ParamKind::Choice(&["html", "react", "vue"]),
+                true,
+                "The code to write.",
+            ),
+            param(
+                "ids",
+                ParamKind::Nodes,
+                false,
+                "The layers; the selection when absent, else the first page's layers.",
+            ),
+        ],
+    },
+    Tool {
+        name: "list_components",
+        doc: "Every main component and variant set: id, name, page, description and documentation link; a variant's set and values, a set's properties.",
+        params: &[],
+    },
+    Tool {
+        name: "list_variables",
+        doc: "Every variable collection with its modes, and every variable with its cells per mode (aliases as written) and the value each resolves to.",
+        params: &[],
+    },
+    Tool {
+        name: "list_styles",
+        doc: "Every style: id, slot, name, value, description and how many layers use it.",
+        params: &[],
+    },
+    Tool {
         name: "undo",
         doc: "Undo the last step in the document's history, whoever made it.",
         params: &[],
@@ -223,22 +266,12 @@ mod tests {
     use super::*;
     use crate::tools::{PHASE_1, PHASE_2, PHASE_3};
 
-    /// Every Phase 1 to 3 tool but the reads still owed has a definition.
+    /// Every Phase 1 to 3 tool has a definition.
     ///
     /// flip: dropping `find_nodes` from `TOOLS` → fails at "no definition".
     #[test]
-    fn every_built_phase_tool_has_a_definition() {
-        const OWED: [&str; 5] = [
-            "run_exports",
-            "export_code",
-            "list_components",
-            "list_variables",
-            "list_styles",
-        ];
+    fn every_phase_tool_has_a_definition() {
         for name in PHASE_1.iter().chain(&PHASE_2).chain(&PHASE_3) {
-            if OWED.contains(name) {
-                continue;
-            }
             assert!(definition(name).is_some(), "`{name}` has no definition");
         }
     }

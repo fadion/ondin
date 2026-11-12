@@ -8,6 +8,7 @@
 
 pub(crate) mod endpoint;
 pub(crate) mod proxy;
+mod reads;
 pub(crate) mod serve;
 pub(crate) mod window;
 
@@ -262,6 +263,11 @@ impl Engine {
                 structured: None,
                 is_error: false,
             },
+            Ok(Answer::Files(report, files)) => {
+                let mut output = Output::json(report);
+                output.content.extend(files);
+                output
+            }
             Err(why) => Output::error(why),
         };
         if after != before {
@@ -317,7 +323,12 @@ fn stamp(output: &mut Output, rev: u64, changed: Option<Value>) {
             if let Some(c) = changed {
                 map.insert("changed".into(), c);
             }
-            output.content = vec![Content::Text(Value::Object(map.clone()).to_string())];
+            // The first content is the structured answer's text; files follow it.
+            let text = Content::Text(Value::Object(map.clone()).to_string());
+            match output.content.first_mut() {
+                Some(first @ Content::Text(_)) => *first = text,
+                _ => output.content.insert(0, text),
+            }
         }
         _ => {
             let mut note = json!({ "rev": rev });
@@ -332,6 +343,8 @@ fn stamp(output: &mut Output, rev: u64, changed: Option<Value>) {
 enum Answer {
     Json(Value),
     Image(Vec<u8>),
+    /// A report and the files it lists.
+    Files(Value, Vec<Content>),
 }
 
 fn node(args: &Value, name: &str) -> Result<Option<NodeId>, String> {
@@ -341,6 +354,25 @@ fn node(args: &Value, name: &str) -> Result<Option<NodeId>, String> {
             .map(Some)
             .ok_or_else(|| format!("`{name}`: `{s}` is not a layer id")),
         Some(other) => Err(format!("`{name}`: expected a layer id, got {other}")),
+    }
+}
+
+/// A list of layer ids, `None` when absent.
+fn nodes(args: &Value, name: &str) -> Result<Option<Vec<NodeId>>, String> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .and_then(NodeId::from_wire)
+                    .ok_or_else(|| format!("`{name}`: `{v}` is not a layer id"))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        Some(other) => Err(format!(
+            "`{name}`: expected a list of layer ids, got {other}"
+        )),
     }
 }
 
@@ -552,6 +584,11 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         }
         "undo" => json(json!({ "undone": s.undo() })),
         "redo" => json(json!({ "redone": s.redo() })),
+        "run_exports" => reads::run_exports(s, nodes(args, "ids")?),
+        "export_code" => reads::export_code(s, args, nodes(args, "ids")?),
+        "list_components" => json(reads::components(&s.doc)),
+        "list_variables" => json(reads::variables(&s.doc)),
+        "list_styles" => json(reads::styles(&s.doc)),
         tool => write(conn, s, &call.client, tool, args),
     }
 }
@@ -849,6 +886,112 @@ mod tests {
             json!({ "since": rev }),
         );
         assert_eq!(ok(&read)["unchanged"], true);
+    }
+
+    /// `run_exports` refuses a document with no settings, then renders a layer's
+    /// settings as a named file it returns rather than writes.
+    ///
+    /// flip: `run_exports` dropping the `Content::File`s → fails at the file count.
+    #[test]
+    fn run_exports_returns_the_files_settings_ask_for() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Badge");
+        assert!(call(&mut engine, &mut docs, 1, "run_exports", json!({})).is_error);
+        let exports = ondin_core::verbs::example("[ExportSpec]").unwrap();
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_exports",
+            json!({ "node": id, "exports": exports }),
+        ));
+        let out = call(&mut engine, &mut docs, 1, "run_exports", json!({}));
+        let listed = ok(&out)["files"].as_array().unwrap().clone();
+        assert!(!listed.is_empty());
+        assert_eq!(listed[0]["layer"], json!(id));
+        let files: Vec<&String> = out
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                Content::File { name, bytes, .. } if !bytes.is_empty() => Some(name),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(files.len(), listed.len());
+        assert!(files[0].contains("Badge"), "{files:?}");
+    }
+
+    /// `export_code` answers files and the three report lists.
+    #[test]
+    fn export_code_answers_files_and_the_report() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Card");
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "export_code",
+            json!({ "target": "html", "ids": [id] }),
+        );
+        let report = ok(&out);
+        assert!(report["files"].as_array().is_some_and(|f| !f.is_empty()));
+        assert!(report.get("approximated").is_some());
+        assert!(
+            out.content
+                .iter()
+                .any(|c| matches!(c, Content::File { name, .. } if name.ends_with(".html")))
+        );
+        let bad = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "export_code",
+            json!({ "target": "svelte" }),
+        );
+        assert!(bad.is_error);
+    }
+
+    /// The three table reads list what the verbs made: a variable with its
+    /// resolved value per mode, a style with its users, a main component.
+    #[test]
+    fn the_lists_show_variables_styles_and_components() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let cell = ondin_core::verbs::example("Cell").unwrap();
+        let args = json!({ "kind": "color", "name": "brand/blue", "value": cell });
+        ok(&call(&mut engine, &mut docs, 1, "add_variable", args));
+        let vars = call(&mut engine, &mut docs, 1, "list_variables", json!({}));
+        let v = &ok(&vars)["variables"][0];
+        assert_eq!(v["name"], "brand/blue");
+        let resolved = v["resolved"].as_object().unwrap();
+        assert_eq!(resolved.values().next(), Some(&json!("#3366ccff")));
+
+        let id = rect(&mut engine, &mut docs, 1, "Chip");
+        let value = ondin_core::verbs::example("StyleValue").unwrap();
+        let args = json!({ "value": value, "name": "Surface", "nodes": [id] });
+        ok(&call(&mut engine, &mut docs, 1, "add_style", args));
+        let styles = call(&mut engine, &mut docs, 1, "list_styles", json!({}));
+        let s = &ok(&styles)["styles"][0];
+        assert_eq!(s["name"], "Surface");
+        assert_eq!(s["slot"], "fills");
+        assert_eq!(s["users"], 1);
+
+        // A rectangle becomes a main inside a frame of its own.
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "make_component",
+            json!({ "nodes": [id] }),
+        );
+        let main = ok(&made)["created"][0].clone();
+        let comps = call(&mut engine, &mut docs, 1, "list_components", json!({}));
+        let listed = ok(&comps)["components"].as_array().unwrap().clone();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["kind"], "main");
+        assert_eq!(listed[0]["id"], main);
     }
 
     /// An agent's write leaves the style browser's *Edit* as it found it.

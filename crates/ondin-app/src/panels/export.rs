@@ -212,6 +212,28 @@ fn human_bytes(n: usize) -> String {
     }
 }
 
+/// Every layer in `doc` set up to export, in document order: what *Export all*
+/// and an agent's `run_exports` render. A draft page's layers are left out.
+pub(crate) fn exportable_layers_of(doc: &ondin_core::Document) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = doc.gathered_pages().collect();
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.get(id) else {
+            continue;
+        };
+        if ondin_core::build::exported_in_bulk(doc, id) {
+            out.push(id);
+        }
+        // The walk's order is discarded: `all_in_document_order` below re-sorts
+        // from the root.
+        stack.extend(node.children().iter().copied());
+    }
+    // `all_in_document_order`, not `in_document_order` (§15 D516): the latter
+    // drops any id with an ancestor in the set, but an export spec on a nested
+    // layer is a deliberate instruction.
+    ondin_core::build::all_in_document_order(doc, &out)
+}
+
 impl OndinApp {
     /// The layers an export acts on: the selection, in document order.
     ///
@@ -2391,23 +2413,7 @@ impl OndinApp {
     /// The whole document, not the selection: the export settings on the layers
     /// already say which they are. A draft page's layers are left out.
     pub(crate) fn exportable_layers(&self) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        let mut stack: Vec<NodeId> = self.session.doc.gathered_pages().collect();
-        while let Some(id) = stack.pop() {
-            let Some(node) = self.session.doc.get(id) else {
-                continue;
-            };
-            if ondin_core::build::exported_in_bulk(&self.session.doc, id) {
-                out.push(id);
-            }
-            // The walk's order is discarded: `all_in_document_order` below re-sorts
-            // from the root.
-            stack.extend(node.children().iter().copied());
-        }
-        // `all_in_document_order`, not `in_document_order` (§15 D516): the latter
-        // drops any id with an ancestor in the set, but an export spec on a nested
-        // layer is a deliberate instruction.
-        ondin_core::build::all_in_document_order(&self.session.doc, &out)
+        exportable_layers_of(&self.session.doc)
     }
 
     /// Re-run every export in the document, into the folder the last one went to.

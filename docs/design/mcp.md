@@ -73,7 +73,7 @@ Phase 4 — kits and the library (the app's own actions, some outside undo):
 
 Selection is app state, not document state (§9.3), but deliberately part of the MCP surface, because "the selected layer" is how humans phrase most AI requests. The MCP layer reads and writes it in the owning process's session state, never the `Document`.
 
-Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp::window`), and every Phase 1 to 3 tool except the reads `run_exports`, `export_code`, `list_components`, `list_variables` and `list_styles`; `tools/list` offers only the built ones (`ondin_mcp::schema`). Phase 4 is not built.
+Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp::window`), and every Phase 1 to 3 tool; `tools/list` offers those (`ondin_mcp::schema`). Phase 4 is not built.
 
 #### Conventions
 
@@ -144,9 +144,9 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 
 #### Exports
 
-`set_exports` writes a layer's export list (the *Export* card's rows: format, scale, prefix and suffix, background, quality, trim, square padding; `ExportSpec`, see export.md §7). `run_exports` renders the listed layers' files through `ondin_export::plan` and `plan::render` (the path `ondin export --all` takes) and **returns bytes with their names** rather than writing them; where files land is the client's and the person's call. The panel's *Export all* uses the same two functions; the panel and CLI each keep a copy of the walk that collects layers carrying settings, held to one answer by `build::all_in_document_order`.
+`set_exports` writes a layer's export list (the *Export* card's rows: format, scale, prefix and suffix, background, quality, trim, square padding; `ExportSpec`, see export.md §7). `run_exports` renders the listed layers' files through `ondin_export::plan` and `plan::render` (the path `ondin export --all` takes) and **returns bytes with their names** rather than writing them, each file an embedded resource (text for SVG, base64 otherwise); where files land is the client's and the person's call. With no `ids` it takes the layers *Export all* takes (`panels::exportable_layers_of`); the CLI keeps its own copy of that walk, held to the same answer by `build::all_in_document_order`.
 
-`export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
+`export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it, and with nothing selected (always, in `serve`) to the first page's layers, as the CLI takes them. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
 
 #### set_pivot
 

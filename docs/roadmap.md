@@ -17,9 +17,8 @@ true.
   card, the chat window, attaching layers from the canvas and the layers tree, Settings'
   *Assistant* section, the agent log. Open in `ai.md` §9.
 - **MCP and headless (M6)** — `design/mcp.md`. The wire, proxy, `serve`, the window as a host and
-  Phase 1–3 are built but for the reads `run_exports`, `export_code`, `list_components`,
-  `list_variables` and `list_styles`. Owed: the status line saying "by the agent"; kits and
-  library code out of the app for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
+  Phase 1–3 are built. Owed: the status line saying "by the agent"; kits and library code out of
+  the app for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and
   specified beside used values (§15 D868). The page verbs are built; `export_svg` and `export_png`
   still take no page.

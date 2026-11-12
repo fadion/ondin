@@ -43,8 +43,10 @@ Phase 1 — read/export (ship first):
 
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `delete_node`,
-`reparent`, `reorder`, `group(ids)`, `ungroup(id)`, `duplicate(id)`, `join_paths(id, other)`,
-`repeat(ids, count, angle?, turn?)`, `set_transform`, `set_pivot`, `set_geometry`,
+`reparent`, `reorder`, `arrange(ids, move)`, `group(ids)`, `frame(ids)`, `ungroup(id)`, `boolean(ids, op)`, `flatten(ids)`,
+`outline_shape(id)`, `outline_stroke(id)`, `outline_text(id)`, `divide(ids)`, `blend_shapes(ids, steps?, paint?, reverse?)`,
+`duplicate(id)`, `join_paths(id, other)`, `repeat(ids, count, angle?, turn?)`, `align(ids, edge)`,
+`distribute(ids, axis)`, `tidy_up(ids)`, `slice(ids)`, `set_transform`, `set_pivot`, `set_geometry`,
 `set_size(id, width, height)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
 `set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
@@ -55,10 +57,10 @@ Phase 2 — write (1:1 with operations/composites):
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 
 Phase 3 — components, variables and styles (through the verbs, never the raw ops):
-`make_component(id)`, `create_instance(main, parent, at)`, `detach_instance(id)`,
-`swap_instance(id, main)`, `combine_as_variants(ids)`, `switch_variant(id, property, value)`,
+`make_component(id)`, `duplicate_as_component(id)`, `create_instance(main, parent, at)`, `detach_instance(id)`,
+`swap_instance(id, main)`, `combine_as_variants(ids)`, `add_variant(id)`, `switch_variant(id, property, value)`,
 `define_property(main, field)`, `set_instance_property(id, property, value)`,
-`reset_overrides(id, scope)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
+`reset_overrides(id, scope)`, `push_to_main(id, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's
 other collections' modes kept),

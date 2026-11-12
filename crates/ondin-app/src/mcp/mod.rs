@@ -1039,6 +1039,35 @@ mod tests {
         assert_eq!(listed[0]["id"], main);
     }
 
+    /// `outline_text` turns a text the session laid out into a path, through the
+    /// engine as an agent calls it.
+    #[test]
+    fn outline_text_turns_text_into_a_path() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "create_text",
+            json!({ "parent": page, "text": "Hello" }),
+        );
+        let text = ok(&made)["created"][0].clone();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "outline_text",
+            json!({ "node": text }),
+        );
+        let path = NodeId::from_wire(ok(&out)["created"][0].as_str().unwrap()).unwrap();
+        assert!(matches!(
+            docs.session.doc.get(path).map(|n| n.kind()),
+            Some(ondin_core::NodeKind::Path { .. })
+        ));
+    }
+
     /// An agent's write leaves the style browser's *Edit* as it found it.
     #[test]
     fn a_write_leaves_the_style_edit_open() {

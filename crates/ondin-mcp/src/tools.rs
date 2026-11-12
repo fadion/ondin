@@ -25,18 +25,31 @@ pub const PHASE_1: [&str; 15] = [
 ///
 /// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
 /// ids: the handler minted them, so it knows them.
-pub const PHASE_2: [&str; 54] = [
+pub const PHASE_2: [&str; 67] = [
     "create_node",
     "create_text",
     "insert_subtree",
     "delete_node",
     "reparent",
     "reorder",
+    "arrange",
     "group",
+    "frame",
     "ungroup",
+    "boolean",
+    "flatten",
+    "outline_shape",
+    "outline_stroke",
+    "outline_text",
+    "divide",
+    "blend_shapes",
     "duplicate",
     "join_paths",
     "repeat",
+    "align",
+    "distribute",
+    "tidy_up",
+    "slice",
     "set_transform",
     "set_pivot",
     "set_geometry",
@@ -89,16 +102,19 @@ pub const PHASE_2: [&str; 54] = [
 /// binding and not the literal beside it, and removing a variable, mode or style
 /// still in use is refused at the commit. `create_instance`, `add_variable`,
 /// `add_mode` and `add_style` return the new ids.
-pub const PHASE_3: [&str; 23] = [
+pub const PHASE_3: [&str; 26] = [
     "make_component",
+    "duplicate_as_component",
     "create_instance",
     "detach_instance",
     "swap_instance",
     "combine_as_variants",
+    "add_variant",
     "switch_variant",
     "define_property",
     "set_instance_property",
     "reset_overrides",
+    "push_to_main",
     "add_variable",
     "remove_variable",
     "rename_variable",

@@ -70,7 +70,7 @@ pub(super) fn colours(chart: &Chart) -> [Color; COLOURS] {
             .filter_map(|b| solid(&b))
             .collect(),
     };
-    let palette = chart::palette(chart.options.palette);
+    let palette = chart::palette(chart.options.palette, chart.options.dark);
     std::array::from_fn(|i| {
         own.get(i).copied().unwrap_or_else(|| {
             let c = palette[i % palette.len()];
@@ -675,7 +675,7 @@ mod tests {
         chart = chart::with_series_fill(&chart, col, ondin_core::Brush::Solid(red).into());
         let got = colours(&chart);
         assert_eq!(got[0], red);
-        let p = chart::palette(chart.options.palette);
+        let p = chart::palette(chart.options.palette, chart.options.dark);
         assert_eq!(got[3], Color::from_rgb8(p[3][0], p[3][1], p[3][2]));
     }
 }

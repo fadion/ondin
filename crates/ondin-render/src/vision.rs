@@ -1019,4 +1019,59 @@ mod tests {
         }
         assert_eq!(Condition::from_key("nonsense"), None);
     }
+
+    /// An sRGB colour in CIELAB (D65), for a colour difference.
+    fn lab([r, g, b]: [u8; 3]) -> [f32; 3] {
+        let [r, g, b] = [r, g, b].map(|c| srgb_to_linear(f32::from(c) / 255.0));
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.9505;
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.089;
+        let f = |t: f32| {
+            if t > 0.008_856 {
+                t.cbrt()
+            } else {
+                7.787 * t + 16.0 / 116.0
+            }
+        };
+        let (fx, fy, fz) = (f(x), f(y), f(z));
+        [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+    }
+
+    /// The least CIE76 difference between two of `colours` as `condition`
+    /// sees them.
+    fn closest_pair(colours: &[[u8; 3]], condition: Condition) -> f32 {
+        let Effect::Tint(t) = condition.effect(1.0) else {
+            unreachable!("a dichromacy is a tint");
+        };
+        let seen: Vec<[f32; 3]> = (colours.iter())
+            .map(|&[r, g, b]| {
+                let [r, g, b, _] = tint_rgba8(&t, [r, g, b, 255]);
+                lab([r, g, b])
+            })
+            .collect();
+        let mut least = f32::MAX;
+        for (i, a) in seen.iter().enumerate() {
+            for b in &seen[i + 1..] {
+                let d =
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+                least = least.min(d);
+            }
+        }
+        least
+    }
+
+    /// The chart's dark *Ondin* palette keeps every two colours at least 7
+    /// apart (CIE76) under each dichromacy the simulation shows.
+    #[test]
+    fn the_dark_ondin_chart_palette_survives_the_dichromacies() {
+        use ondin_core::chart::{Palette, palette};
+        for c in [
+            Condition::Protanopia,
+            Condition::Deuteranopia,
+            Condition::Tritanopia,
+        ] {
+            let d = closest_pair(palette(Palette::Ondin, true), c);
+            assert!(d >= 7.0, "{c:?}: two colours {d:.1} apart");
+        }
+    }
 }

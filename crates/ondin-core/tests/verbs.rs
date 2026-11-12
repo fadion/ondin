@@ -2968,6 +2968,64 @@ fn set_chart_patches_the_kind_mapping_and_options() {
     assert_eq!(refused_param(&doc, &mut ids, "set_chart", plain), "node");
 }
 
+/// `set_chart` turning a chart dark moves its starting ink with it, as the
+/// card's *Dark* does, and a palette patch recolours a stored series colour
+/// as the card's pick does.
+/// flip: `set_chart` writing the patched `dark` as it is → fails at "the ink
+/// follows"; skipping `with_palette` → fails at "the palette pick recolours".
+#[test]
+fn set_chart_dark_and_palette_move_the_colours() {
+    use ondin_core::Brush;
+    use ondin_core::chart::{Palette, chrome, palette, series_fill};
+    let (mut doc, mut ids, page) = blank();
+    let c = run(
+        &mut doc,
+        &mut ids,
+        "insert_chart",
+        json!({ "parent": page.to_wire(), "kind": "column" }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "options": { "dark": true } }),
+    );
+    let got = chart_of(&doc, c);
+    assert!(got.options.dark);
+    assert_eq!(
+        got.options.text.ink,
+        Brush::Solid(chrome(true).ink).into(),
+        "the ink follows"
+    );
+    let first = got.mapping.series[0];
+    let painted = ondin_core::chart::with_series_fill(
+        &got,
+        first,
+        Brush::Solid(Color::from_rgb8(1, 2, 3)).into(),
+    );
+    assert!(
+        doc.apply(&ondin_core::Transaction(vec![
+            ondin_core::Operation::SetChart {
+                id: c,
+                chart: Some(Box::new(painted)),
+            }
+        ]))
+        .is_ok()
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_chart",
+        json!({ "node": c.to_wire(), "options": { "palette": "Warm" } }),
+    );
+    let [r, g, b] = palette(Palette::Warm, true)[0];
+    assert_eq!(
+        series_fill(&chart_of(&doc, c), first),
+        Some(Brush::Solid(Color::from_rgb8(r, g, b)).into()),
+        "the palette pick recolours, in the dark set"
+    );
+}
+
 /// `set_chart` switching to or from a Sankey re-reads the mapping off the
 /// table's columns, as the Chart card does (`Chart::with_kind`).
 /// flip: the verb assigning `chart.kind` alone → fails at "a column chart maps

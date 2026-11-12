@@ -1066,7 +1066,7 @@ fn chart_options_match_their_golden() {
     bars.options.category_axis.side = AxisSide::End;
     // A series in its palette colour, wearing `point`.
     let style = |col: u32, point| {
-        let [r, g, b] = ondin_core::chart::palette(Default::default())[col as usize - 1];
+        let [r, g, b] = ondin_core::chart::palette(Default::default(), false)[col as usize - 1];
         SeriesStyle {
             column: ColumnId(col),
             fill: ondin_core::variable::BrushSource::Literal(Brush::Solid(Color::from_rgb8(

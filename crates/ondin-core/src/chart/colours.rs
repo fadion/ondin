@@ -19,7 +19,7 @@ pub fn series_fill(chart: &Chart, column: ColumnId) -> Option<BrushSource> {
         return Some(s.fill.clone());
     }
     let n = chart.mapping.series.iter().position(|c| *c == column)?;
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     Some(literal(colours[n % colours.len()]))
 }
 
@@ -32,7 +32,7 @@ pub fn sankey_nodes(chart: &Chart) -> Vec<(String, BrushSource)> {
     let (Some(fc), Some(tc), Some(vc)) = (at(m.from), at(m.to), at(m.value)) else {
         return Vec::new();
     };
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     let mut out: Vec<(String, BrushSource)> = Vec::new();
     for row in &t.rows {
         let (from, to) = (row[fc].trim(), row[tc].trim());
@@ -66,7 +66,7 @@ pub fn sankey_nodes(chart: &Chart) -> Vec<(String, BrushSource)> {
 pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
     let t = &chart.table;
     let m = &chart.mapping;
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     let fill = |name: &str, i: usize| {
         chart
             .nodes
@@ -183,17 +183,65 @@ pub fn with_node_fill(chart: &Chart, name: &str, fill: BrushSource) -> Chart {
 }
 
 /// `chart` on palette `p`, every series and node back on the palette's colour
-/// at its place, so picking a palette recolours the whole chart.
+/// at its place (for the ground the chart is drawn for), so picking a palette
+/// recolours the whole chart.
 pub fn with_palette(chart: &Chart, p: super::Palette) -> Chart {
     let mut next = chart.clone();
     next.options.palette = p;
-    let colours = palette(p);
+    let colours = palette(p, next.options.dark);
     for s in &mut next.series {
         if let Some(n) = next.mapping.series.iter().position(|c| *c == s.column) {
             s.fill = literal(colours[n % colours.len()]);
         }
     }
     next.nodes.clear();
+    next
+}
+
+/// `chart` drawn for a light ground or (`dark`) a dark one. Every colour still
+/// at the other ground's value moves to this one's: a series' or a named
+/// mark's palette colour at its place, and the ink, axes and gridlines at
+/// their starting colours ([`super::chrome`]). A colour the user picked, and a
+/// bound one, which its variable's modes already serve, stay.
+pub fn with_dark(chart: &Chart, dark: bool) -> Chart {
+    if chart.options.dark == dark {
+        return chart.clone();
+    }
+    let (from, to) = (
+        palette(chart.options.palette, !dark),
+        palette(chart.options.palette, dark),
+    );
+    let swap = |fill: &mut BrushSource, i: usize| {
+        if *fill == literal(from[i % from.len()]) {
+            *fill = literal(to[i % to.len()]);
+        }
+    };
+    let mut next = chart.clone();
+    next.options.dark = dark;
+    for s in &mut next.series {
+        if let Some(n) = chart.mapping.series.iter().position(|c| *c == s.column) {
+            swap(&mut s.fill, n);
+        }
+    }
+    for (i, (name, _)) in named_marks(chart).into_iter().flatten().enumerate() {
+        if let Some(s) = next.nodes.iter_mut().find(|s| s.name == name) {
+            swap(&mut s.fill, i);
+        }
+    }
+    let (old, new) = (super::chrome(!dark), super::chrome(dark));
+    let solid = |c| BrushSource::Literal(crate::Brush::Solid(c));
+    let o = &mut next.options;
+    for (fill, was, now) in [
+        (&mut o.text.ink, old.ink, new.ink),
+        (&mut o.value_axis.colour, old.axis, new.axis),
+        (&mut o.category_axis.colour, old.axis, new.axis),
+        (&mut o.value_axis.grid.colour, old.grid, new.grid),
+        (&mut o.category_axis.grid.colour, old.grid, new.grid),
+    ] {
+        if *fill == solid(was) {
+            *fill = solid(now);
+        }
+    }
     next
 }
 
@@ -253,7 +301,7 @@ mod tests {
     fn a_series_colour_reads_its_style_else_the_palette() {
         let chart = Chart::sample(ChartKind::Column);
         let second = chart.mapping.series[1];
-        let colours = palette(chart.options.palette);
+        let colours = palette(chart.options.palette, chart.options.dark);
         assert_eq!(series_fill(&chart, second), Some(literal(colours[1])));
         let red = literal([255, 0, 0]);
         let painted = with_series_fill(&chart, second, red.clone());
@@ -261,8 +309,53 @@ mod tests {
         let warm = with_palette(&painted, super::super::Palette::Warm);
         assert_eq!(
             series_fill(&warm, second),
-            Some(literal(palette(super::super::Palette::Warm)[1]))
+            Some(literal(palette(super::super::Palette::Warm, false)[1]))
         );
+    }
+
+    /// A chart turned dark moves what is still on the palette and the starting
+    /// chrome to the dark colours, keeps a picked colour, and turns back.
+    /// flip: `with_dark` leaving the series styles alone → fails at "a palette
+    /// series follows".
+    #[test]
+    fn a_chart_turned_dark_keeps_its_own_colours() {
+        use crate::chart::Palette;
+        let mut chart = with_palette(&Chart::sample(ChartKind::Column), Palette::Ondin);
+        let [first, second, ..] = chart.mapping.series[..] else {
+            panic!("the sample maps three series");
+        };
+        // Stored as a column mapped for the first time stores it.
+        let day = palette(Palette::Ondin, false);
+        chart = with_series_fill(&chart, first, literal(day[0]));
+        let red = literal([255, 0, 0]);
+        chart = with_series_fill(&chart, second, red.clone());
+        let dark = with_dark(&chart, true);
+        let night = palette(Palette::Ondin, true);
+        assert_eq!(
+            series_fill(&dark, first),
+            Some(literal(night[0])),
+            "a palette series follows"
+        );
+        assert_eq!(series_fill(&dark, second), Some(red), "a picked one stays");
+        let solid = |c| BrushSource::Literal(crate::Brush::Solid(c));
+        let o = &dark.options;
+        assert_eq!(o.text.ink, solid(crate::chart::chrome(true).ink));
+        assert_eq!(
+            o.value_axis.grid.colour,
+            solid(crate::chart::chrome(true).grid)
+        );
+        assert_eq!(with_dark(&dark, false), chart, "back to light, as it was");
+    }
+
+    /// A Sankey's styled node on the palette follows the ground too.
+    #[test]
+    fn a_styled_node_follows_the_ground() {
+        let chart = Chart::sample(ChartKind::Sankey);
+        let (name, fill) = named_marks(&chart).unwrap().remove(0);
+        let chart = with_node_fill(&chart, &name, fill);
+        let dark = with_dark(&chart, true);
+        let night = palette(dark.options.palette, true);
+        assert_eq!(named_marks(&dark).unwrap()[0].1, literal(night[0]));
     }
 
     /// A Sankey's nodes come in the order the rows first name them.

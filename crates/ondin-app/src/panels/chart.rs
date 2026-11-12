@@ -975,6 +975,17 @@ impl OndinApp {
                 c.options = p.apply(c.kind, &c.options);
             });
         }
+        // The ground the chart is drawn for: its palette's colours and chrome
+        // follow, a colour of the user's own stays (`chart::with_dark`).
+        self.chart_segments_of(
+            ui,
+            id,
+            chart,
+            "Chart theme",
+            &[(false, "Light"), (true, "Dark")],
+            chart.options.dark,
+            |c, dark| *c = chart::with_dark(c, dark),
+        );
     }
 
     fn chart_data_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
@@ -2951,6 +2962,47 @@ mod tests {
             .shapes
     }
 
+    /// Where a text shape reading `s` is centred among `shapes`.
+    fn text_at(shapes: &[egui::epaint::ClippedShape], s: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        shapes.iter().find_map(|c| find(&c.shape, s))
+    }
+
+    /// A click at `at` in the app's frame of [`shapes`]: move, press, release.
+    fn click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![button(true)],
+            vec![button(false)],
+            vec![],
+        ] {
+            let mut frame = eframe::Frame::_new_kittest();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 4000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+        }
+    }
+
     /// Whether a text shape reading `s` is among `shapes`.
     fn drawn(shapes: &[egui::epaint::ClippedShape], s: &str) -> bool {
         fn find(shape: &egui::Shape, s: &str) -> bool {
@@ -3411,6 +3463,29 @@ mod tests {
             "no rows under it"
         );
         assert!(drawn(&out, "Step"), "an area's step curve");
+    }
+
+    /// The Style section's *Dark* turns the chart dark as one *Chart theme*
+    /// step: its palette series and its ink move to the dark colours.
+    /// flip: the row's setter leaving the chart light → fails at "dark".
+    #[test]
+    fn the_theme_row_turns_the_chart_dark() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Column);
+        app.collapsed_panels.remove("Chart style");
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "Light"), "the row's other segment");
+        let at = text_at(&out, "Dark").expect("the Dark segment");
+        click(&ctx, &mut app, at);
+        let chart = chart_at(&app, id);
+        assert!(chart.options.dark, "dark");
+        let night = chart::chrome(true);
+        assert_eq!(chart.options.text.ink, Brush::Solid(night.ink).into());
+        let step = app.session.history.done().last().unwrap();
+        assert_eq!(step.note.label, "Chart theme");
     }
 
     /// A pie lists its slices, by category, where a series chart lists its

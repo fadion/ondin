@@ -462,6 +462,35 @@ fn outlined_marks_are_stroked_over_a_tint() {
     }
 }
 
+/// A chart turned dark draws its bars in the dark palette, its labels in the
+/// dark ink, and a hollow point filled with the dark ground.
+/// flip: the generator reading the light palette → fails at "the dark
+/// palette's first".
+#[test]
+fn a_dark_chart_draws_dark() {
+    let solid = |c| crate::variable::BrushSource::Literal(crate::Brush::Solid(c));
+    let night = chrome(true);
+    let column = with_dark(&Chart::sample(ChartKind::Column), true);
+    let g = draw(&column);
+    let [r, gr, b] = palette(column.options.palette, true)[0];
+    let bar = all(&g, PartRole::Bar, column.mapping.series[0].0)[0];
+    assert_eq!(
+        bar.fills[0].brush,
+        solid(peniko::Color::from_rgb8(r, gr, b)),
+        "the dark palette's first"
+    );
+    let label = all(&g, PartRole::TickLabel, 0)[0];
+    assert_eq!(label.fills[0].brush, solid(night.ink));
+    let mut line = Chart::sample(ChartKind::Line);
+    line.options.lines.points = PointStyle::Hollow;
+    let g = draw(&with_dark(&line, true));
+    let point = g.parts.iter().find(|p| p.key.role == PartRole::Point);
+    assert_eq!(
+        point.expect("a hollow point").fills[0].brush,
+        solid(night.ground)
+    );
+}
+
 /// The value axis's tick labels, lowest first.
 fn tick_text(g: &Generated) -> Vec<String> {
     all(g, PartRole::TickLabel, 0)

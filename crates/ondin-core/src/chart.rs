@@ -15,8 +15,8 @@ mod settle;
 pub mod table_io;
 
 pub use colours::{
-    bound_variables, named_marks, sankey_nodes, sankey_totals, series_fill, with_node_fill,
-    with_palette, with_series_fill, with_variables,
+    bound_variables, named_marks, sankey_nodes, sankey_totals, series_fill, with_dark,
+    with_node_fill, with_palette, with_series_fill, with_variables,
 };
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::{OUTLINE_WIDTH, Preset};
@@ -423,6 +423,10 @@ pub enum PartRole {
 #[serde(default)]
 pub struct Options {
     pub palette: Palette,
+    /// Drawn for a dark ground: the palette's dark colours, and light ink over
+    /// dim axes and gridlines (`chart::with_dark`, `chart::chrome`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dark: bool,
     pub bars: Bars,
     pub lines: Lines,
     pub slices: Slices,
@@ -451,6 +455,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             palette: Palette::default(),
+            dark: false,
             bars: Bars::default(),
             lines: Lines::default(),
             slices: Slices::default(),
@@ -746,7 +751,7 @@ impl Default for Axis {
             side: AxisSide::Start,
             format: NumberFormat::default(),
             grid: Gridlines::default(),
-            colour: BrushSource::Literal(crate::Brush::Solid(grey(0.75))),
+            colour: BrushSource::Literal(crate::Brush::Solid(chrome(false).axis)),
         }
     }
 }
@@ -765,7 +770,7 @@ impl Default for Gridlines {
         Self {
             show: true,
             dashed: false,
-            colour: BrushSource::Literal(crate::Brush::Solid(grey(0.9))),
+            colour: BrushSource::Literal(crate::Brush::Solid(chrome(false).grid)),
         }
     }
 }
@@ -869,7 +874,41 @@ impl Default for ChartText {
             value_size: 11.0,
             legend_size: 12.0,
             title_size: 12.0,
-            ink: BrushSource::Literal(crate::Brush::Solid(grey(0.35))),
+            ink: BrushSource::Literal(crate::Brush::Solid(chrome(false).ink)),
+        }
+    }
+}
+
+/// The colours a chart's chrome starts with, for one ground.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Chrome {
+    /// The labels' ink.
+    pub ink: peniko::Color,
+    /// The axes' lines and ticks.
+    pub axis: peniko::Color,
+    /// The gridlines.
+    pub grid: peniko::Color,
+    /// What a hollow point is filled with: the ground it is drawn for.
+    pub ground: peniko::Color,
+}
+
+/// The chrome a chart starts with on a light ground, or (`dark`) the one
+/// [`with_dark`] swaps in for a dark ground: the ink as legible, the axes and
+/// gridlines as quiet, against that ground.
+pub fn chrome(dark: bool) -> Chrome {
+    if dark {
+        Chrome {
+            ink: grey(0.72),
+            axis: grey(0.38),
+            grid: grey(0.22),
+            ground: peniko::Color::from_rgb8(0x18, 0x18, 0x1B),
+        }
+    } else {
+        Chrome {
+            ink: grey(0.35),
+            axis: grey(0.75),
+            grid: grey(0.9),
+            ground: peniko::Color::WHITE,
         }
     }
 }

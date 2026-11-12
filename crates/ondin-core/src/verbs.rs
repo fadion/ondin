@@ -2872,7 +2872,15 @@ pub static VERBS: &[Verb] = &[
                 chart.mapping = patched(a, "mapping", &chart.mapping, patch)?;
             }
             if let Some(patch) = a.get("options") {
+                let (palette, dark) = (chart.options.palette, chart.options.dark);
                 chart.options = patched(a, "options", &chart.options, patch)?;
+                // A palette pick and a theme switch carry the colours with them,
+                // as the card's do.
+                let dark = std::mem::replace(&mut chart.options.dark, dark);
+                if chart.options.palette != palette {
+                    chart = crate::chart::with_palette(&chart, chart.options.palette);
+                }
+                chart = crate::chart::with_dark(&chart, dark);
             }
             chart_valid(a, &chart)?;
             Ok(Done::ops(vec![Operation::SetChart {

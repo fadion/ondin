@@ -76,10 +76,17 @@ const TICK_LEN: f64 = 4.0;
 /// A dashed gridline's dash and gap.
 const GRID_DASH: [f64; 2] = [3.0, 3.0];
 
-/// The palettes' colours, in the order series take them.
-pub fn palette(p: super::Palette) -> &'static [[u8; 3]] {
+/// The palettes' colours, in the order series take them, for a light ground or
+/// (`dark`) a dark one. A dark colour is its light twin at the same place,
+/// lifted to hold its contrast against [`super::chrome`]'s dark ground, so a
+/// series keeps its hue when the chart changes ground.
+pub fn palette(p: super::Palette, dark: bool) -> &'static [[u8; 3]] {
+    if dark {
+        return dark_palette(p);
+    }
     match p {
-        // Distinct under the three dichromacies the vision simulation shows.
+        // The orange and the mustard (second and sixth) all but merge under
+        // deuteranopia; the dark set keeps every pair apart.
         super::Palette::Ondin => &[
             [0x3B, 0x6F, 0xE0],
             [0xF0, 0x8C, 0x2E],
@@ -112,6 +119,49 @@ pub fn palette(p: super::Palette) -> &'static [[u8; 3]] {
             [0x4A, 0x7F, 0xC1],
             [0x7B, 0xA4, 0xD9],
             [0xAE, 0xC8, 0xEA],
+        ],
+    }
+}
+
+/// [`palette`]'s dark-ground colours.
+fn dark_palette(p: super::Palette) -> &'static [[u8; 3]] {
+    match p {
+        // Every two at least 7 apart (CIE76) under the three dichromacies
+        // (`ondin-render`'s vision tests).
+        super::Palette::Ondin => &[
+            [0x6B, 0x95, 0xF0],
+            [0xF0, 0x8C, 0x3C],
+            [0x3C, 0xC4, 0xA1],
+            [0xE2, 0x5D, 0x88],
+            [0x94, 0x68, 0xE2],
+            [0xE8, 0xCC, 0x4E],
+            [0x6E, 0xC2, 0xEC],
+            [0x8C, 0x8C, 0x8C],
+        ],
+        super::Palette::Cool => &[
+            [0x5A, 0x8A, 0xD6],
+            [0x4F, 0xA6, 0xDE],
+            [0x5F, 0xDC, 0xC3],
+            [0x8E, 0x9D, 0xAD],
+            [0x9A, 0xE4, 0xF2],
+            [0x2D, 0xBB, 0x8F],
+        ],
+        super::Palette::Warm => &[
+            [0xE5, 0x58, 0x4A],
+            [0xF0, 0x96, 0x4A],
+            [0xF5, 0xD3, 0x3F],
+            [0xD0, 0x6A, 0x26],
+            [0xF2, 0xAA, 0xAA],
+            [0xB2, 0x6F, 0xD0],
+        ],
+        // Brightest first: on a dark ground the first series leads, as the
+        // darkest does on a light one.
+        super::Palette::Mono => &[
+            [0xC7, 0xDB, 0xF5],
+            [0x9C, 0xBE, 0xEB],
+            [0x6E, 0x9D, 0xDC],
+            [0x4A, 0x7F, 0xC1],
+            [0x2F, 0x5C, 0x93],
         ],
     }
 }
@@ -153,7 +203,7 @@ fn read(chart: &Chart) -> Data {
             None => rows.push((i, format!("{}", i + 1))),
         }
     }
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     let mut series = Vec::new();
     for (n, &col) in chart.mapping.series.iter().enumerate() {
         let Some(at) = t.index_of(col) else { continue };
@@ -1934,7 +1984,7 @@ fn sankey(
     let mut flows: Vec<Flow> = Vec::new();
     let mut named: rustc_hash::FxHashMap<String, usize> = Default::default();
     let mut joined: rustc_hash::FxHashMap<(usize, usize), usize> = Default::default();
-    let colours = palette(o.palette);
+    let colours = palette(o.palette, o.dark);
     let mut index = |name: &str, nodes: &mut Vec<Node>| -> usize {
         if let Some(i) = named.get(name) {
             return *i;
@@ -2448,7 +2498,7 @@ fn named_fill(chart: &Chart, name: &str) -> Option<BrushSource> {
 fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
     let t = &chart.table;
     let m = &chart.mapping;
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     let xs: Vec<Option<f64>> = data.categories.iter().map(|c| parse_number(c)).collect();
     let rows: Vec<usize> = {
         // The table's rows that survived `read` (an empty X), in order.
@@ -2689,7 +2739,7 @@ const OTHER: &str = "Other";
 /// it. Colours run through the palette by category.
 fn pie_slices(chart: &Chart, data: &mut Data) -> Vec<Slice> {
     let o = &chart.options.slices;
-    let colours = palette(chart.options.palette);
+    let colours = palette(chart.options.palette, chart.options.dark);
     let Some(s) = data.series.first() else {
         return Vec::new();
     };
@@ -3242,7 +3292,7 @@ fn lines(
                     let (fills, strokes) = if hollow {
                         (
                             fill(BrushSource::Literal(crate::Brush::Solid(
-                                peniko::Color::WHITE,
+                                super::chrome(o.dark).ground,
                             ))),
                             vec![line_stroke(
                                 s.fill.clone(),

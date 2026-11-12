@@ -236,7 +236,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 - **Lines and areas** are one series frame each: the area (a closed path down to the baseline or
   to the stack beneath it, at the area opacity), the line over it (round joins and caps, the
   series' dash), and the points (centred on their values in the series' own point shape, a
-  circle when it has none; *Hollow* is white with the series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
+  circle when it has none; *Hollow* is filled with the ground of the chart's theme,
+  `chart::chrome(dark).ground`, with the series' stroke). A line's value labels sit above their point. A line's axis starts at zero only
   while *Start at zero* is on; an area's always holds zero, and a 100% area's runs to 100%, from
   −100% when any value is negative, as a 100% bar's does.
 - **A scatter** reads its category column as X, numbers on a tick axis like the value axis (a row
@@ -338,18 +339,35 @@ it applies to; switching kind keeps the others' values.
   at 1.5 px and lines as thin, `chart::OUTLINE_WIDTH`). Every preset changes something each
   kind draws, so no two cells of a kind look alike. A preset owns exactly the options some
   preset sets, writing *Clean*'s value into each it does not set itself (`Preset::apply`).
-  Everything else is left alone: data, palette, text family, number formats, and an option no
+  Everything else is left alone: data, palette, theme, text family, number formats, and an option no
   preset sets, so a user's bar gap survives a Style while the group gap (*Bold*) and the radius
   (*Soft*) follow it.
-- **Palette** — *Ondin* (eight colours, distinct under the vision simulation's three dichromacies),
-  *Cool*, *Warm*, *Mono* (one hue in steps), or *From variables*: a group of colour variables
+- **Palette** — *Ondin* (eight colours; on a light ground its orange and mustard, the second and
+  sixth, all but merge under deuteranopia), *Cool*, *Warm*, *Mono* (one hue in steps), or *From
+  variables*: a group of colour variables
   that may bind a fill (the name before the last `/`, else the collection's name; its variables
   in the table's order), bound to the series in order (a Sankey's nodes), round again past the
   last (`chart::with_variables`), so a mode switch recolours the chart. The palette dropdown
   lists the four palettes, then the groups under *From variables*; a group lights while the
   series run through it in order (`chart::bound_variables`), and the dropdown reads *From
-  variables · ‹group›*. Picking a palette recolours and unbinds every series; a series' own
-  swatch, once edited, is its own.
+  variables · ‹group›*. Picking a palette recolours and unbinds every series, in the palette's
+  colours for the chart's theme; a series' own swatch, once edited, is its own.
+- **Theme** (`Options::dark`, saved only when dark, so an older file reads light) — the ground
+  the chart is drawn for, *Light* or *Dark*:
+  - Each palette has dark colours (`chart::palette(p, dark)`), each its light twin at the same
+    place lifted for a dark ground, so a series keeps its hue. Dark *Mono* runs brightest first,
+    so the first series still leads. Dark *Ondin* keeps every two colours at least 7 apart
+    (CIE76) under protanopia, deuteranopia and tritanopia
+    (`vision.rs · the_dark_ondin_chart_palette_survives_the_dichromacies`).
+  - The chrome starts at `chart::chrome(dark)`: ink, axes, gridlines and ground grey 0.35, 0.75,
+    0.9 and white on light; 0.72, 0.38, 0.22 and `#18181B` on dark. The options' defaults read
+    the light one.
+  - Switching (`chart::with_dark`) moves every colour still at the other theme's value to this
+    one's: a series' or named mark's stored colour equal to the palette's at its place, and the
+    ink, both axes' colours and both gridlines' colours equal to the other theme's chrome. A
+    picked colour stays, and so does a bound one, whose variable's modes already serve the
+    ground. Light, dark and light again gives back the chart it was.
+  - The theme does not paint the frame's ground, which stays the frame's fill.
 - **Marks**:
   - *Bars* (Column, Bar): group gap (% of a band), bar gap (% of a bar), corner radius on the end
     away from the baseline or all corners.
@@ -477,14 +495,18 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   snapped to the pixel grid, and drawn at a pixel-aligned spot, so a smaller picture stays
   crisp. Donut and Bubble have drawings of their own; stacking variants
   keep their kind's. The marks wear the chart's first colours (series, a pie's first slices, a
-  Sankey's first nodes; the palette fills the rest), the chrome is the theme's text ink, and
+  Sankey's first nodes; the palette in the chart's theme fills the rest), so a dark chart's
+  cells wear its dark colours; the chrome is the app theme's text ink, and
   there is no ground: a 1 px frame sits over the cell's hover and lit fills. Outline's tint is
   22% there, against the chart's 14%, which vanishes at this size. The pictures are rasterised
   through `rasterize_paths` and cached with the generator's left-out values while the
   description, its bound colours resolved, the drawn size, the display scale and the theme are
   unchanged (`ChartCardCache`), so a bound variable's new value, a mode switch or a theme
   switch redraws them (`style_pictures_follow_a_bound_variables_value`). The preset the
-  options are exactly at lights. Undo step *Chart style*.
+  options are exactly at lights. Undo step *Chart style*. Under the cells, a `ui::segmented`
+  row *Light* / *Dark* sets the theme (`chart_segments_of`, tooltip and undo step *Chart
+  theme*) of every chart the card writes (`chart_each`), each over its own colours; it sits
+  here rather than beside the palette dropdown because Series serves one chart only.
 - **Data** — the summary (*3 series · 12 rows*, a Sankey's *8 flows*), *Edit data…* (an
   `ui::action_button`, tooltip *Open the chart's table over the canvas*), the source line while
   linked, the left-out line (*2
@@ -745,7 +767,9 @@ without one (`menu::KIND_VERBS`).
   column as the category and the number columns as series); `set_chart` changes the kind
   (`Chart::with_kind`, re-reading the mapping across a Sankey) and then merge-patches the
   mapping and options, a null setting a key back to its value in the whole
-  struct's default (`Options::default()`, not a nested struct's own); `set_chart_data` replaces
+  struct's default (`Options::default()`, not a nested struct's own); a changed `palette` goes
+  through `chart::with_palette` and a changed `dark` through `chart::with_dark`, so the colours
+  move with them as on the card; `set_chart_data` replaces
   the table by *Import*'s rule (`Chart::with_table`; a mapping of which nothing survives is
   guessed) and drops the link; `flatten_chart` is `chart::flatten_ops` for each chart. Any other verb writing a part is refused at the commit by
   `chart::guard`.

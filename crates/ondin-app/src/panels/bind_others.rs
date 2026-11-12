@@ -9,8 +9,9 @@
 //! keeps its alpha: a 25% black is a 50% black variable at 50% (`share`). A
 //! field the bind would not write (`build::bind_field_ops` empty) is not offered.
 //!
-//! Left out: fields already bound, the vault and kit instances (their mains
-//! belong to the kit, and its next update would drop the binding), visibility,
+//! Left out: fields already bound, the vault, kit instances and the fields a
+//! copy swapped to a vault main takes from it (their mains belong to the kit,
+//! and its next update would drop the binding), visibility,
 //! and the resting values every layer has — an opacity of 100% and a zero
 //! radius, gap, padding, limit or effect number — which would list every
 //! layer in the document. A copy that draws the value because its main does is
@@ -434,6 +435,10 @@ impl OndinApp {
                 continue;
             };
             for key in keys_of(doc, n) {
+                // A copy swapped to a vault main takes this field from the kit.
+                if copied_from(n, key).is_some_and(|s| doc.in_vault(s)) {
+                    continue;
+                }
                 let field = key.field();
                 if !takes(field) || self.field_var(key).is_some() {
                     continue;
@@ -1359,6 +1364,119 @@ mod tests {
         assert!(u.why_not.is_some(), "dead, with its reason");
         app.bind_ready_uses(var);
         assert!(red(&app), "r stays red");
+    }
+
+    /// **A copy swapped to a vault main takes its fill from the kit**: Holder
+    /// holds an instance n of Star; Holder's instance h has its copy r of n
+    /// swapped to M, a main in the vault, so r draws M's red. r's fill is not
+    /// offered, as M's is not.
+    ///
+    /// flip: `other_uses` without its per-key vault test → fails at "nothing
+    /// offered", r's fill listed.
+    #[test]
+    fn a_copy_swapped_to_a_vault_main_is_not_offered() {
+        use ondin_core::variable::{Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let [vault, m, star, holder] = [(); 4].map(|_| app.session.ids.mint());
+        let light = app.session.ids.mint_mode();
+        let var = app.session.ids.mint_var();
+        let frame = |id, parent, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let main = |id| Operation::SetComponent {
+            id,
+            component: true,
+        };
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::AddMode {
+                    collection: ondin_core::variable::CollectionId::FIRST,
+                    mode: Mode {
+                        id: light,
+                        name: "Light".into(),
+                    },
+                    index: 0,
+                    cells: Vec::new(),
+                },
+                Operation::AddVariable {
+                    var: Variable {
+                        id: var,
+                        name: "brand".into(),
+                        kind: VarKind::Color,
+                        cells: [(light, Cell::Color(RED))].into(),
+                        scope: None,
+                        origin: None,
+                        forked: None,
+                        description: String::new(),
+                    },
+                },
+                Operation::OpenVault { id: vault },
+                frame(m, vault, "M"),
+                fill(m, RED, 1.0),
+                main(m),
+                Operation::SetOrigin {
+                    id: m,
+                    origin: Some(ondin_core::kit::Origin {
+                        kit: "0".repeat(32),
+                        node: m,
+                        version: 1,
+                        name: Some("Kit".into()),
+                    }),
+                },
+                frame(star, page, "Star"),
+                main(star),
+                frame(holder, page, "Holder"),
+            ]))
+            .expect("the mains");
+        let place = |app: &mut OndinApp, main: NodeId, parent: NodeId| {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.commit_edit(tx));
+            made[0]
+        };
+        let n = place(&mut app, star, holder);
+        app.session
+            .try_commit(Transaction(vec![main(holder)]))
+            .expect("Holder a main");
+        let h = place(&mut app, holder, page);
+        let r = app.session.doc.get(h).unwrap().children()[0];
+        assert_eq!(
+            app.session.doc.get(r).unwrap().link(),
+            Some(n),
+            "the fixture: r"
+        );
+        let swap = ondin_core::swap::swap(&app.session.doc, r, m).expect("r swaps to M");
+        assert!(app.commit_edit(swap));
+        let doc = &app.session.doc;
+        let brush = &doc.get(r).unwrap().paint().fills[0].brush;
+        assert_eq!(
+            doc.resolve_brush(r, brush).into_owned(),
+            ondin_core::Brush::Solid(RED),
+            "the fixture: r draws M's red"
+        );
+        let uses = app.other_uses(var);
+        assert!(uses.is_empty(), "nothing offered: {uses:?}");
     }
 
     /// **A chart frame's padding is its regeneration's**: a chart's generated

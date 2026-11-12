@@ -7542,12 +7542,17 @@ impl OndinApp {
                 matches!(p.kind(), NodeKind::Artboard { .. })
                     || (matches!(p.kind(), NodeKind::Group) && p.display().is_some())
             });
-        Some(match top != id && in_frame {
-            true => format!(
-                "Scales with its group “{}”. Pin the group to change how it resizes.",
-                crate::private::layer(doc, top)
-            ),
-            false => "Not inside a frame, so there is nothing to pin it to.".to_owned(),
+        // Only a pinned group scales what it holds; an unpinned one only places it.
+        let pinned = doc.get(top).is_some_and(|g| g.insets().is_authored());
+        let name = crate::private::layer(doc, top);
+        Some(match (top != id && in_frame, pinned) {
+            (true, true) => {
+                format!("Scales with its group “{name}”. Pin the group to change how it resizes.")
+            }
+            (true, false) => {
+                format!("Placed by its group “{name}”. Pin the group to make it resize.")
+            }
+            (false, _) => "Not inside a frame, so there is nothing to pin it to.".to_owned(),
         })
     }
 
@@ -7647,11 +7652,23 @@ impl OndinApp {
             ) else {
                 continue;
             };
-            let Some(bx) = ondin_core::geometry::local_bounds(&kind, None) else {
-                continue;
-            };
             let local = parent_world.inverse() * world;
-            let insets = ondin_core::container::inverse(node.insets(), frame, local, bx, &kind);
+            // A group or a boolean is pinned by its contents' box as drawn, and
+            // read back as `place_group` places it.
+            let insets = match ondin_core::container::placed_by_contents(&kind, node.display()) {
+                true => {
+                    let Some(bx) = res.contents_box(doc, id) else {
+                        continue;
+                    };
+                    ondin_core::container::inverse_group(node.insets(), frame, local, bx)
+                }
+                false => {
+                    let Some(bx) = ondin_core::geometry::local_bounds(&kind, None) else {
+                        continue;
+                    };
+                    ondin_core::container::inverse(node.insets(), frame, local, bx, &kind)
+                }
+            };
             let mut placed = false;
             for op in ops.iter_mut() {
                 match op {
@@ -23762,6 +23779,51 @@ mod inset_card_tests {
         g
     }
 
+    /// *Scale* on a plain group in a hugging flex row moves nothing: the group
+    /// leaves the flow, the row hugs what is left, and the group's insets are
+    /// derived again against that, by its contents' box.
+    /// flip: `kept_in_place` without its group arm → the rect jumps, failing
+    /// at "scaling moved it".
+    #[test]
+    fn scale_on_a_group_in_a_hugging_row_moves_nothing() {
+        use ondin_core::container::{Dimension, Display, Flex};
+        let (mut app, frame, rect) = app_with_pinnable();
+        let lead = app.session.ids.mint();
+        let mut item = *app.session.doc.get(frame).unwrap().item();
+        item.width = Dimension::FitContent;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: lead,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex {
+                    padding: [10.0; 4],
+                    column_gap: 10.0,
+                    ..Default::default()
+                })),
+            },
+            Operation::SetLayoutItem { id: frame, item },
+        ])));
+        let g = group_in_pinnable(&mut app, frame, rect);
+        assert!(
+            ondin_core::build::is_flex_item(&app.session.doc, g),
+            "the fixture: the group is in the row"
+        );
+        let before = drawn(&app, rect);
+        app.toggle_scale(&[g], true);
+        assert_eq!(drawn(&app, rect), before, "scaling moved it");
+    }
+
     /// *Scale* pins a plain group by percentages on every side without moving
     /// it, and its contents then scale with the frame; *Stop scaling* on the
     /// stretched group leaves them as drawn.
@@ -23860,8 +23922,11 @@ mod inset_card_tests {
         let g = group_in_pinnable(&mut app, frame, rect);
         app.session.selection.set(vec![rect]);
         assert!(app.inset_subjects().is_empty(), "the rect is the group's");
+        // An unpinned group places its layer; a pinned one scales it.
+        // flip: `inset_inert_reason` ignoring the group's insets → fails at
+        // "unpinned".
         let why = app.inset_inert_reason().unwrap_or_default();
-        assert!(why.starts_with("Scales with its group"), "{why}");
+        assert!(why.starts_with("Placed by its group"), "unpinned: {why}");
         assert!(
             card_height(&mut app) > 0.0,
             "the card is drawn for a layer in a group"
@@ -23869,6 +23934,12 @@ mod inset_card_tests {
 
         app.session.selection.set(vec![g]);
         assert_eq!(app.inset_subjects(), vec![g], "the group itself is pinned");
+        app.toggle_scale(&[g], true);
+        app.session.selection.set(vec![rect]);
+        let why = app.inset_inert_reason().unwrap_or_default();
+        assert!(why.starts_with("Scales with its group"), "pinned: {why}");
+        app.toggle_scale(&[g], false);
+        app.session.selection.set(vec![g]);
 
         app.session.selection.set(vec![frame]);
         assert_eq!(app.inset_inert_reason(), None, "a top-level frame");

@@ -1757,6 +1757,19 @@ fn auto_fill_lays_as_many_tracks_as_fit() {
     assert_eq!(g.columns.explicit, 4, "four fit in 700");
 }
 
+/// **Areas wider than a template can be are refused before their lines are
+/// counted**: a row of `MAX_TEMPLATE_TRACKS + 1` cells is an error, never a
+/// wrapped column number.
+/// flip: `parse_areas` without its width cap → parses.
+#[test]
+fn areas_past_the_track_cap_are_refused() {
+    use ondin_core::container::{MAX_TEMPLATE_TRACKS, parse_areas};
+    let row = vec!["a"; MAX_TEMPLATE_TRACKS + 1].join(" ");
+    assert!(parse_areas(&format!("\"{row}\"")).is_err());
+    let row = vec!["a"; MAX_TEMPLATE_TRACKS].join(" ");
+    assert!(parse_areas(&format!("\"{row}\"")).is_ok(), "at the cap");
+}
+
 /// **A repeat of `minmax(0px, 1fr)` with no gap is counted at 1px a track**, as
 /// CSS floors it: a 400-wide frame lays 400 columns, not taffy's cap of 10,000.
 /// flip: `template` without `counted` → 10,000, failing at "floored".
@@ -1917,6 +1930,38 @@ fn areas_scene() -> (Scene, NodeId) {
     (s, f)
 }
 
+/// **The explicit grid reaches as far as the areas do**, as CSS sizes it: two
+/// 100px columns under an area three columns wide make three, so an item at
+/// `1 / -1` spans the area's width, not two columns.
+/// flip: `style_of` handing taffy the template alone → two explicit columns,
+/// failing at "three".
+#[test]
+fn the_explicit_grid_reaches_as_far_as_the_areas() {
+    use ondin_core::container::AreaName;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Stretch),
+            areas: vec![area("wide", [1, 4], [1, 2])],
+            ..grid(vec![px(100.0); 2], vec![px(50.0)])
+        })),
+    );
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.item(a, |i| i.grid_area = Some(AreaName::new("wide")));
+    s.item(b, |i| {
+        i.grid_column = GridLines {
+            start: GridPlacement::Line(1),
+            end: GridPlacement::Line(-1),
+        };
+    });
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(g.columns.explicit, 3, "three");
+    assert_eq!(s.bounds(b).width(), s.bounds(a).width(), "the area's width");
+}
+
 /// **An item naming an area is placed in it, its own lines unread**; one naming
 /// an area the grid lacks is placed as if it named nothing and had no lines,
 /// CSS's reading of a `grid-area` no template defines.
@@ -2051,6 +2096,88 @@ fn items_follow_their_area_through_a_rename_and_a_removal() {
     );
     set(&mut s, vec![area("head", [1, 4], [1, 2])]);
     assert_eq!(s.doc.get(a).unwrap().item().grid_area, None, "removed");
+}
+
+/// **A copy that overrides its areas keeps its items on them** when the main
+/// renames or removes an area: main *M* lays `img` then `text`, its child on
+/// `img`; the instance swaps the two. Renaming `img` to `media` on the main,
+/// or removing it, leaves the copy's child on the `img` its own grid still has.
+/// flip: `owed` without `keep_copy_area_names` → the copy's child names
+/// `media`, failing at "rename".
+#[test]
+fn a_copy_overriding_its_areas_keeps_its_items_on_them() {
+    use ondin_core::container::AreaName;
+    for rename in [true, false] {
+        let mut s = Scene::new();
+        let m = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+        let g = |areas| {
+            Some(Display::Grid(Grid {
+                areas,
+                ..grid(vec![px(100.0); 2], vec![px(100.0)])
+            }))
+        };
+        s.display(
+            m,
+            g(vec![
+                area("img", [1, 2], [1, 2]),
+                area("text", [2, 3], [1, 2]),
+            ]),
+        );
+        let a = s.add(m, rect(20.0, 20.0), (0.0, 0.0));
+        s.item(a, |i| i.grid_area = Some(AreaName::new("img")));
+        let owed = |s: &mut Scene, ops: Vec<Operation>| {
+            let mut tx = ondin_core::build::keep_area_names(&s.doc, Transaction(ops));
+            ondin_core::propagate::owed(&s.doc, &mut tx, &mut s.ids);
+            s.commit(tx.0);
+        };
+        owed(
+            &mut s,
+            vec![Operation::SetComponent {
+                id: m,
+                component: true,
+            }],
+        );
+        let (tx, made) = ondin_core::insert_subtrees(
+            &s.doc,
+            &mut s.ids,
+            &[ondin_core::Placement {
+                nodes: s.doc.capture_subtree(m).unwrap(),
+                parent: s.root,
+                index: None,
+            }],
+            Default::default(),
+        );
+        owed(&mut s, tx.0);
+        let inst = made[0];
+        let copy = s.doc.get(inst).unwrap().children()[0];
+        owed(
+            &mut s,
+            vec![Operation::SetDisplay {
+                id: inst,
+                display: g(vec![
+                    area("img", [2, 3], [1, 2]),
+                    area("text", [1, 2], [1, 2]),
+                ]),
+            }],
+        );
+        let main_areas = match rename {
+            true => vec![area("media", [1, 2], [1, 2]), area("text", [2, 3], [1, 2])],
+            false => vec![area("text", [2, 3], [1, 2])],
+        };
+        owed(
+            &mut s,
+            vec![Operation::SetDisplay {
+                id: m,
+                display: g(main_areas),
+            }],
+        );
+        assert_eq!(
+            s.doc.get(copy).unwrap().item().grid_area,
+            Some(AreaName::new("img")),
+            "{}",
+            if rename { "rename" } else { "removal" }
+        );
+    }
 }
 
 /// **Removing tracks shrinks the areas crossing them**: dropping column 2 of

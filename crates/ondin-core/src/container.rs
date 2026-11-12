@@ -1777,6 +1777,12 @@ pub fn parse_areas(text: &str) -> Result<Vec<GridArea>, String> {
     if grid.iter().any(|r| r.len() != width) {
         return Err("Every row needs the same number of cells".into());
     }
+    // Before the cells' lines are counted in `u16`.
+    if width > MAX_TEMPLATE_TRACKS || grid.len() > MAX_TEMPLATE_TRACKS {
+        return Err(format!(
+            "Areas reach at most {MAX_TEMPLATE_TRACKS} tracks a side"
+        ));
+    }
     let mut areas: Vec<GridArea> = Vec::new();
     for (r, row) in grid.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
@@ -3346,8 +3352,27 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
         }
         Some(Display::Grid(g)) => {
             style.display = taffy::Display::Grid;
-            style.grid_template_columns = template(&g.columns);
-            style.grid_template_rows = template(&g.rows);
+            // The explicit grid reaches as far as the areas do, as CSS sizes it
+            // (Grid §7.1), the extra tracks `auto` as implicit ones are; a
+            // line counted from the far end then agrees with the browser's.
+            let reach = |tracks: &[Track], end: fn(&GridArea) -> u16| {
+                let mut t = template(tracks);
+                if !repeats_to_fit(tracks) {
+                    let areas = g
+                        .areas
+                        .iter()
+                        .map(|a| usize::from(end(a)).saturating_sub(1));
+                    let wanted = areas.max().unwrap_or(0).min(MAX_TEMPLATE_TRACKS);
+                    for _ in track_count(tracks)..wanted {
+                        t.push(taffy::GridTemplateComponent::Single(track_size(
+                            TrackSize::Breadth(TrackBreadth::Auto),
+                        )));
+                    }
+                }
+                t
+            };
+            style.grid_template_columns = reach(&g.columns, |a| a.columns[1]);
+            style.grid_template_rows = reach(&g.rows, |a| a.rows[1]);
             style.grid_auto_flow = match g.auto_flow {
                 GridAutoFlow::Row => taffy::GridAutoFlow::Row,
                 GridAutoFlow::Column => taffy::GridAutoFlow::Column,

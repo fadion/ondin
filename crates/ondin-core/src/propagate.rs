@@ -388,6 +388,52 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     out
 }
 
+/// The follows from `from` on that carry a main's renamed or removed area
+/// name onto a copy's item, put back where the copy's own grid — its areas
+/// overridden, as the transaction leaves them — lacks the new name and still
+/// has the old: the copy's grid kept its areas, so its item keeps its place.
+fn keep_copy_area_names(doc: &Document, tx: &mut Transaction, from: usize) {
+    use crate::container::{AreaName, Display};
+    let areas_of = |tx: &Transaction, grid: NodeId| -> Vec<AreaName> {
+        let display =
+            tx.0.iter()
+                .rev()
+                .find_map(|op| match op {
+                    Operation::SetDisplay { id, display } if *id == grid => Some(display.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| doc.resolved_display(grid).map(|d| d.into_owned()));
+        match display {
+            Some(Display::Grid(g)) => g.areas.into_iter().map(|a| a.name).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let mut fixes: Vec<(usize, Option<AreaName>)> = Vec::new();
+    for (i, op) in tx.0.iter().enumerate().skip(from) {
+        let Operation::SetLayoutItem { id, item } = op else {
+            continue;
+        };
+        let Some(n) = doc.get(*id).filter(|n| n.link.is_some()) else {
+            continue;
+        };
+        let old = n.item.grid_area;
+        if item.grid_area == old {
+            continue;
+        }
+        let Some(parent) = n.parent else { continue };
+        let names = areas_of(tx, parent);
+        let lacks_new = item.grid_area.as_ref().is_none_or(|a| !names.contains(a));
+        if lacks_new && old.as_ref().is_some_and(|a| names.contains(a)) {
+            fixes.push((i, old));
+        }
+    }
+    for (i, name) in fixes {
+        if let Operation::SetLayoutItem { item, .. } = &mut tx.0[i] {
+            item.grid_area = name;
+        }
+    }
+}
+
 /// Everything the components owe `tx`, appended to it in the order the passes
 /// must run: what `EditorSession::commit_inner` runs once its doors' rewrites
 /// (`build::keep_insets`, `build::keep_flex_sizes`) are done.
@@ -448,8 +494,10 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // And last, what the edit owes the instances (§5.3d build step 3): a main's
     // change written onto every copy that still holds the main's old value —
     // after the passes above, so what they append to a main propagates too.
+    let followed_from = tx.0.len();
     let follows = propagate(doc, tx);
     tx.0.extend(follows);
+    keep_copy_area_names(doc, tx, followed_from);
     // And the styles once more, after everything: a follow that carried a main's
     // item onto a copy bound to a style of its own, a swap's or a structural
     // pass's copy of a styled node, put back to its style (§15 D1062).

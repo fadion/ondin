@@ -296,6 +296,54 @@ pub(crate) fn ticked_by_default(uses: &[Use], scope: Option<Scope>) -> Vec<bool>
         .collect()
 }
 
+/// Tick or untick row `i` of the list, keeping the ticks whole under
+/// `Use::needs` as the kit update review does: ticking a main ticks the copy
+/// rows it needs, and unticking a copy row unticks the mains that need it.
+/// Dead rows are left as they are.
+pub(crate) fn toggle(uses: &[Use], on: &mut [bool], i: usize) {
+    let to = !on[i];
+    on[i] = to;
+    let mut stack = vec![i];
+    while let Some(j) = stack.pop() {
+        let linked = |u: &Use| match to {
+            true => uses[j].needs.contains(&u.key),
+            false => u.needs.contains(&uses[j].key),
+        };
+        for (k, u) in uses.iter().enumerate() {
+            if on[k] != to && u.why_not.is_none() && linked(u) {
+                on[k] = to;
+                stack.push(k);
+            }
+        }
+    }
+}
+
+/// The fields a bind of the ticked rows binds, as [`OndinApp::bind_other_uses`]
+/// takes them: the live ticked rows, less a main any of whose needed copy rows
+/// is not among them — the popover's *Bind N* counts these.
+pub(crate) fn to_bind(uses: &[Use], on: &[bool]) -> Vec<FieldKey> {
+    let mut keys: Vec<FieldKey> = uses
+        .iter()
+        .zip(on)
+        .filter(|(u, on)| **on && u.why_not.is_none())
+        .map(|(u, _)| u.key)
+        .collect();
+    // Again until nothing drops, as a dropped row may be another's need.
+    loop {
+        let kept: Vec<FieldKey> = (keys.iter().copied())
+            .filter(|k| {
+                uses.iter()
+                    .find(|u| u.key == *k)
+                    .is_none_or(|u| u.needs.iter().all(|n| keys.contains(n)))
+            })
+            .collect();
+        if kept.len() == keys.len() {
+            return keys;
+        }
+        keys = kept;
+    }
+}
+
 /// The offer line under a variable *Extract into variable…* just made.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Offer {
@@ -548,14 +596,9 @@ impl OndinApp {
         // a field's value, or reordered a layer's fills under its key.
         // A main whose bind would change a copy's row left unticked stays as it
         // is: nothing on screen changes.
-        let still: Vec<FieldKey> = self
-            .other_uses(var)
-            .into_iter()
-            .filter(|u| u.why_not.is_none() && u.needs.iter().all(|n| keys.contains(n)))
-            .map(|u| u.key)
-            .collect();
-        let keys: Vec<FieldKey> = keys.iter().copied().filter(|k| still.contains(k)).collect();
-        let keys = &keys[..];
+        let uses = self.other_uses(var);
+        let on: Vec<bool> = uses.iter().map(|u| keys.contains(&u.key)).collect();
+        let keys = &to_bind(&uses, &on)[..];
         let doc = &self.session.doc;
         let Some(v) = doc.variables().get(var).cloned() else {
             return;
@@ -971,9 +1014,64 @@ mod tests {
     /// alone) → fails at "the copy is its own row".
     #[test]
     fn a_copy_needing_another_share_is_its_own_row() {
-        use ondin_core::variable::{Mode, VarKind, Variable};
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
+        let (var, m, inst) = overlay_main_with_a_dark_copy(&ctx, &mut app);
+        let uses = app.other_uses(var);
+        let mut at: Vec<NodeId> = uses.iter().map(|u| u.key.at()).collect();
+        at.sort();
+        let mut want = vec![m, inst];
+        want.sort();
+        assert_eq!(at, want, "the copy is its own row");
+        let keys: Vec<FieldKey> = uses.iter().map(|u| u.key).collect();
+        app.bind_other_uses(var, &keys);
+        let doc = &app.session.doc;
+        for id in [m, inst] {
+            let brush = &doc.get(id).unwrap().paint().fills[0].brush;
+            assert_eq!(brush.var(), Some(var));
+            assert_eq!(
+                doc.resolve_brush(id, brush).into_owned().to_owned(),
+                ondin_core::Brush::Solid(Color::BLACK.with_alpha(0.4)),
+                "{id:?} draws as before"
+            );
+        }
+    }
+
+    /// **The popover's ticks stay whole**: ticking the main ticks the copy row
+    /// it needs, unticking that copy unticks the main, and *Bind N* counts
+    /// only what the bind binds — a main ticked without its copy is not.
+    ///
+    /// flip: `toggle` not following `needs` → fails at "the copy comes with
+    /// it"; `to_bind` keeping a main without its needs → fails at "counts
+    /// nothing".
+    #[test]
+    fn a_main_and_the_copy_it_needs_tick_together() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (var, m, inst) = overlay_main_with_a_dark_copy(&ctx, &mut app);
+        let uses = app.other_uses(var);
+        let row = |id: NodeId| uses.iter().position(|u| u.key.at() == id).unwrap();
+        let (mi, ci) = (row(m), row(inst));
+        assert_eq!(uses[mi].needs, vec![uses[ci].key], "the fixture: M needs C");
+        let mut on = vec![false; uses.len()];
+        toggle(&uses, &mut on, mi);
+        assert!(on[ci], "the copy comes with it");
+        toggle(&uses, &mut on, ci);
+        assert!(!on[mi], "unticking the copy unticks the main");
+        on[mi] = true;
+        assert!(to_bind(&uses, &on).is_empty(), "counts nothing");
+        app.bind_other_uses(var, &[uses[mi].key]);
+        let brush = &app.session.doc.get(m).unwrap().paint().fills[0].brush;
+        assert_eq!(brush.var(), None, "and binds nothing");
+    }
+
+    /// `overlay`, black 40% in Light and 60% in Dark; a main M filled a 40%
+    /// black in Light, and its instance pinned to Dark: `(var, M, instance)`.
+    fn overlay_main_with_a_dark_copy(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+    ) -> (VarId, NodeId, NodeId) {
+        use ondin_core::variable::{Mode, VarKind, Variable};
         let _ = ctx.run_ui(Default::default(), |_| {});
         let page = app.session.doc.first_page();
         let m = app.session.ids.mint();
@@ -1047,24 +1145,7 @@ mod tests {
                 modes: vec![dark],
             }]))
             .expect("the copy in Dark");
-        let uses = app.other_uses(var);
-        let mut at: Vec<NodeId> = uses.iter().map(|u| u.key.at()).collect();
-        at.sort();
-        let mut want = vec![m, inst];
-        want.sort();
-        assert_eq!(at, want, "the copy is its own row");
-        let keys: Vec<FieldKey> = uses.iter().map(|u| u.key).collect();
-        app.bind_other_uses(var, &keys);
-        let doc = &app.session.doc;
-        for id in [m, inst] {
-            let brush = &doc.get(id).unwrap().paint().fills[0].brush;
-            assert_eq!(brush.var(), Some(var));
-            assert_eq!(
-                doc.resolve_brush(id, brush).into_owned().to_owned(),
-                ondin_core::Brush::Solid(black(0.4)),
-                "{id:?} draws as before"
-            );
-        }
+        (var, m, inst)
     }
 
     /// **A main whose bind would recolour a copy in another mode is not

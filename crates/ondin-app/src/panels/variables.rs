@@ -2434,23 +2434,19 @@ impl OndinApp {
                     }
                     if ui::double_clicked(ui, &resp) {
                         // The double-click's first press flipped the
-                        // tick; a reveal leaves it as it was.
+                        // tick; a reveal leaves it as it was. Flipped
+                        // back alone, any row that press ticked or
+                        // unticked with it keeps the ticks whole.
                         list.on[i] = !list.on[i];
                         acts.push(Act::Reveal(id));
                     } else if resp.clicked() {
-                        list.on[i] = !list.on[i];
+                        super::bind_others::toggle(&list.uses, &mut list.on, i);
                     }
                 }
             }
         });
         ui::menu_sep(ui);
-        let keys: Vec<super::binding::FieldKey> = list
-            .uses
-            .iter()
-            .zip(&list.on)
-            .filter(|(u, on)| **on && u.why_not.is_none())
-            .map(|(u, _)| u.key)
-            .collect();
+        let keys = super::bind_others::to_bind(&list.uses, &list.on);
         let bind = format!("Bind {}", keys.len());
         let state = match keys.is_empty() {
             true => ui::FieldButton::Disabled,

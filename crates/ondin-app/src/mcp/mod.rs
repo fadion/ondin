@@ -6,11 +6,14 @@
 //! the host through [`Documents`]. Writes go through `EditorSession::try_commit`,
 //! the door the app's own edits use.
 
+mod actions;
 pub(crate) mod endpoint;
+mod inspect;
 mod kits;
 pub(crate) mod proxy;
 mod reads;
 pub(crate) mod serve;
+mod system_fonts;
 pub(crate) mod window;
 
 use crate::library::state::Library;
@@ -40,6 +43,8 @@ pub(crate) trait Documents {
     fn save(&mut self, path: &Path) -> Result<(), String>;
     /// Put `line` on the status line, where a person would read it.
     fn tell(&mut self, line: String);
+    /// Every font family a text here can be set in, sorted.
+    fn fonts(&mut self) -> Vec<String>;
 }
 
 /// The document `wanted` names: an absolute path; else a name or relative path
@@ -246,6 +251,9 @@ impl Engine {
                 Err(why) => Output::error(why),
             };
         }
+        if call.tool == "list_fonts" {
+            return Output::json(fonts(docs, &call.args));
+        }
         if kits::WITHOUT_DOCUMENT.contains(&call.tool.as_str()) {
             return match kits::without_document(docs, &call) {
                 Ok(v) => Output::json(v),
@@ -268,9 +276,12 @@ impl Engine {
         // undos included, reported before the call runs.
         let before = session.revision();
         let changed = catch_up(conn, session);
-        let answer = match kits::is_kit_tool(&call.tool) {
-            true => kits::run(docs, &path, &call),
-            false => run(conn, session, &call),
+        let answer = if kits::is_kit_tool(&call.tool) {
+            kits::run(docs, &path, &call)
+        } else if actions::TOOLS.contains(&call.tool.as_str()) {
+            actions::run(docs, &path, &call)
+        } else {
+            run(conn, session, &call)
         };
         let Some(session) = docs.session(&path) else {
             return Output::error(format!("{} closed during the call", path.display()));
@@ -612,8 +623,29 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         "list_components" => json(reads::components(&s.doc)),
         "list_variables" => json(reads::variables(&s.doc)),
         "list_styles" => json(reads::styles(&s.doc)),
+        tool if inspect::TOOLS.contains(&tool) => inspect::run(s, tool, args),
         tool => write(conn, s, &call.client, tool, args),
     }
+}
+
+/// `list_fonts`: the families whose name holds `query`, ignoring case, at most
+/// `limit` (100 when absent), and how many matched in all.
+fn fonts(docs: &mut impl Documents, args: &Value) -> Value {
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_lowercase();
+    let limit = index(args, "limit").unwrap_or(100) as usize;
+    let matched: Vec<String> = docs
+        .fonts()
+        .into_iter()
+        .filter(|f| f.to_lowercase().contains(&query))
+        .collect();
+    json!({
+        "families": matched.iter().take(limit).collect::<Vec<_>>(),
+        "matched": matched.len(),
+    })
 }
 
 /// A read's `since`: `unchanged`, or the layers changed and removed since that
@@ -792,6 +824,9 @@ mod tests {
             Ok(())
         }
         fn tell(&mut self, _: String) {}
+        fn fonts(&mut self) -> Vec<String> {
+            vec!["Inter".into(), "Inter Tight".into(), "Lora".into()]
+        }
     }
 
     fn call(engine: &mut Engine, docs: &mut One, conn: Conn, tool: &str, args: Value) -> Output {
@@ -1095,6 +1130,201 @@ mod tests {
             json!({ "find": "Log in", "replace": "Sign in" }),
         );
         assert_eq!(ok(&out)["said"], "Replaced 1 match in 1 layer");
+    }
+
+    /// A fill list of one solid colour, as `set_fills` takes it.
+    fn solid(r: u8, g: u8, b: u8) -> Value {
+        use ondin_core::peniko::{Brush, Color};
+        serde_json::to_value(vec![ondin_core::Fill {
+            brush: Brush::Solid(Color::from_rgb8(r, g, b)).into(),
+            visible: true,
+        }])
+        .unwrap()
+    }
+
+    /// `list_fonts` needs no document and filters by name, ignoring case.
+    #[test]
+    fn list_fonts_filters_by_name() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "list_fonts",
+            json!({ "query": "inter" }),
+        );
+        assert_eq!(ok(&out)["families"], json!(["Inter", "Inter Tight"]));
+        assert_eq!(ok(&out)["matched"], 2);
+    }
+
+    /// `find_like` by fill finds the layers painted the same, the source with
+    /// them, and refuses a layer with nothing to match.
+    ///
+    /// flip: `shares` comparing fill counts only → fails at the two-layer count.
+    #[test]
+    fn find_like_matches_by_fill() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        // One fill each, so only the colour tells C apart.
+        let fills = solid(0, 128, 0);
+        let ids: Vec<String> = ["A", "B", "C"]
+            .iter()
+            .map(|n| rect(&mut engine, &mut docs, 1, n))
+            .collect();
+        for id in &ids[..2] {
+            ok(&call(
+                &mut engine,
+                &mut docs,
+                1,
+                "set_fills",
+                json!({ "node": id, "fills": fills }),
+            ));
+        }
+        let red = solid(255, 0, 0);
+        let set = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_fills",
+            json!({ "node": ids[2], "fills": red }),
+        );
+        ok(&set);
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "find_like",
+            json!({ "id": ids[0], "by": "fill" }),
+        );
+        let found: Vec<&str> = ok(&out)["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(found, ["A", "B"]);
+        let bare = rect(&mut engine, &mut docs, 1, "D");
+        assert!(
+            call(
+                &mut engine,
+                &mut docs,
+                1,
+                "find_like",
+                json!({ "id": bare, "by": "stroke" })
+            )
+            .is_error
+        );
+    }
+
+    /// `check_contrast` measures a text layer on the page and says whether it
+    /// passes.
+    #[test]
+    fn check_contrast_measures_text() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "create_text",
+            json!({ "parent": page, "text": "Hello" }),
+        ));
+        let out = call(&mut engine, &mut docs, 1, "check_contrast", json!({}));
+        let report = ok(&out);
+        let findings = report["findings"].as_array().unwrap();
+        assert!(
+            findings.iter().any(|f| f["trail"] == json!(["Hello"])
+                || f["trail"].as_array().is_some_and(|t| t.len() == 1)),
+            "{report}"
+        );
+        assert_eq!(report["failing"], 0, "black on white passes: {report}");
+        assert!(
+            call(
+                &mut engine,
+                &mut docs,
+                1,
+                "check_contrast",
+                json!({ "level": "x" })
+            )
+            .is_error
+        );
+    }
+
+    /// `review_colours` groups two near-identical fills, and `merge_colours`
+    /// makes them one, after which the review has no group.
+    #[test]
+    fn review_colours_groups_what_merge_colours_merges() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        for (name, r) in [("A", 0x80), ("B", 0x81)] {
+            let id = rect(&mut engine, &mut docs, 1, name);
+            ok(&call(
+                &mut engine,
+                &mut docs,
+                1,
+                "set_fills",
+                json!({ "node": id, "fills": solid(r, 0x33, 0x66) }),
+            ));
+        }
+        let out = call(&mut engine, &mut docs, 1, "review_colours", json!({}));
+        let groups = ok(&out)["groups"].as_array().unwrap().clone();
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        let colours = groups[0]["colours"].as_array().unwrap();
+        let (into, other) = (colours[0]["colour"].clone(), colours[1]["colour"].clone());
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "merge_colours",
+            json!({ "colours": [other], "into": into }),
+        ));
+        let again = call(&mut engine, &mut docs, 1, "review_colours", json!({}));
+        assert_eq!(ok(&again)["groups"], json!([]));
+    }
+
+    /// `import_tokens` adds a token file's variable in one undo step, and
+    /// `export_tokens` writes it back out.
+    ///
+    /// flip: `import_tokens` skipping its commit → fails at the variable count.
+    #[test]
+    fn tokens_import_and_export() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let file = json!({ "brand": { "$type": "color", "$value": "#ff0000" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "import_tokens",
+            json!({ "tokens": file }),
+        );
+        assert!(
+            ok(&out)["added"].as_u64() >= Some(1),
+            "{:?}",
+            out.structured
+        );
+        assert!(
+            docs.session
+                .doc
+                .variables()
+                .iter()
+                .any(|v| v.name == "brand")
+        );
+        assert_eq!(docs.session.history.undo_depth(), 1);
+        let out = call(&mut engine, &mut docs, 1, "export_tokens", json!({}));
+        let written = ok(&out)["tokens"].as_str().unwrap().to_owned();
+        assert!(written.contains("\"brand\""), "{written}");
+        assert!(
+            call(
+                &mut engine,
+                &mut docs,
+                1,
+                "import_tokens",
+                json!({ "tokens": "[1, 2]" })
+            )
+            .is_error
+        );
     }
 
     /// An agent's write leaves the style browser's *Edit* as it found it.

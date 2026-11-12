@@ -36,10 +36,11 @@ JSON-RPC 2.0, one message per line, on std threads with `serde_json`; no SDK and
 ### 8.4 Tools
 
 Phase 1 — read/export (ship first):
-`use_document(document)`, `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `find_nodes(query)`, `hit_test(x,y)`,
+`use_document(document)`, `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `find_nodes(query)`, `find_like(id, by)`, `hit_test(x,y)`,
 `get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`,
 `run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
-`list_styles() -> StyleTable`.
+`list_styles() -> StyleTable`, `export_tokens()`, `list_fonts(query?)`, `check_contrast(ids?, page?, level?, non_text?)`,
+`review_colours(ids?, threshold?)`.
 
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `import_svg(parent, svg, x?, y?, name?)`, `delete_node`,
@@ -71,7 +72,7 @@ Phase 4 — kits and the library (the app's own actions, some outside undo):
 `list_documents()`, `create_document(name, project?) -> Path`, `list_kits()`, `get_kit(kit)`,
 `insert_from_kit(kit, main, parent, at)`, `list_kit_updates()`, `accept_kit_updates(kit?)`,
 `make_local(ids)`, `map_kit_modes(kit, mapping)`, `make_kit()`, `publish_kit(note)`,
-`stop_sharing_kit()`.
+`stop_sharing_kit()`, `import_tokens(tokens, collection?, removals?)`, `list_versions()`, `save_version(name?)`.
 
 Selection is app state, not document state (§9.3), but deliberately part of the MCP surface, because "the selected layer" is how humans phrase most AI requests. The MCP layer reads and writes it in the owning process's session state, never the `Document`.
 
@@ -90,7 +91,10 @@ Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.
 - `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct. Its longest side is capped by default, and an argument raises the cap.
-- `find_nodes(query)` is how an agent reaches "the home header" without reading the whole document: layers whose name or text contains the query, each with its id, name, kind and the names of its ancestors. A request about one part of a page is a find and a subtree read, not a snapshot.
+- `find_nodes(query)` is how an agent reaches "the home header" without reading the whole document: layers whose name or text contains the query, each with its id, name, kind and the names of its ancestors. A request about one part of a page is a find and a subtree read, not a snapshot. `find_like(id, by)` reaches the rest of a kind from one: *Select same* (fill, stroke, font, effect, `app::shares`), *Select matching layers* (`matching::matching_layers`) and a main's or set's instances, over every page.
+- A write answers `created` and `made`, and `said` when its verb has something to say the document does not show: how many matches `replace_text` wrote and how many it left alone, what `import_svg` left out, how many places `merge_colours` changed.
+- Each structure verb refuses where its menu row dims, in that row's words: `frame` where `build::can_frame` refuses, `outline_stroke` without a visible stroke, `divide` without an overlap, `blend_shapes` with `blend::Refusal::says`, `push_to_main` into a kit's or a locked main.
+- Colours travel as `#rrggbbaa` between the reads and `merge_colours`: `review_colours` writes them, `merge_colours` takes them back.
 
 #### Revisions
 
@@ -150,13 +154,20 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 
 `export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it, and with nothing selected (always, in `serve`) to the first page's layers, as the CLI takes them. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
 
+#### Checks, tokens, fonts and versions
+
+- `check_contrast` is `ondin_export::contrast::check_with`, the check *Check contrast* and `ondin check contrast` run, on the host's thread with the faces the canvas uses; `ids` narrows it to the subjects under them. `fix_contrast` is its fix. `review_colours` is *Colour review*'s census and groups (`color_review`).
+- `export_tokens` and `import_tokens` are the DTCG file the *Export tokens* and *Import tokens* doors read and write, as text: the agent hands the file over and takes it back, and nothing is written to disk or linked. An import applies every row the review starts ticked (`dtcg_in::Review`), removals only with `removals`, as one undo step named by the tool.
+- `list_fonts` answers the families the host can set text in: the window's font service (installed, and web fonts it fetches on first use), `serve`'s installed families (`mcp::system_fonts`). A family an agent names is loaded as one the person picked: the window loads the tab in front's families after an agent's commit, a tab behind's when it comes to the front, and `serve` registers the installed faces of each family its document names on opening it and after each commit, then lays the text out again.
+- `save_version(name?)` saves the document and pins it (`library::store::pin_version`), as *Save named version…* does, for a library document only; `undo` does not revert it. `list_versions` reads them back. Restoring one stays with the person, in *Version history*.
+
 #### set_pivot
 
 `set_pivot` is for the person who comes after the agent. An agent can already rotate about any point with `set_transform` and an affine it computes, since the pivot is baked by the gesture that reads it and never composed into the world transform (§15 D55). The stored pivot decides where a person's later turn goes (canvas rotation, the inspector's rotation and skew fields, a flip; resize and skew drag ignore it, §15 D60): a needle about its hub, a door about its hinge.
 
 #### Not exposed, on purpose
 
-Guides, layout grids, a page's ground, the fill rule and the proportions lock (visual only, irrelevant to an agent; §15 D1095, D1096). Paragraph spans travel inside `style_paragraphs`.
+Guides, layout grids, a page's ground, the fill rule and the proportions lock (visual only, irrelevant to an agent; §15 D1095, D1096). Paragraph spans travel inside `style_paragraphs`. *Warp* and *Trace image*, cards whose settings are tuned by eye on the canvas. Restoring a version, which replaces the document outside undo, and linking a tokens or chart data file, which watches a path on the person's disk: both stay with the person.
 
 ## Traps
 

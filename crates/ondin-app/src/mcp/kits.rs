@@ -22,15 +22,18 @@ use std::sync::Arc;
 /// The Phase 4 tools that need no current document.
 pub(super) const WITHOUT_DOCUMENT: [&str; 3] = ["list_documents", "list_kits", "create_document"];
 
-/// Whether `tool` is a Phase 4 tool run on the current document.
+/// Whether `tool` is a Phase 4 kit tool run on the current document; the tokens
+/// and version actions are `actions`'.
 pub(super) fn is_kit_tool(tool: &str) -> bool {
-    ondin_mcp::tools::PHASE_4.contains(&tool) && !WITHOUT_DOCUMENT.contains(&tool)
+    ondin_mcp::tools::PHASE_4.contains(&tool)
+        && !WITHOUT_DOCUMENT.contains(&tool)
+        && !super::actions::TOOLS.contains(&tool)
 }
 
-const NO_LIBRARY: &str = "There is no library folder; the person sets one in Settings.";
+pub(super) const NO_LIBRARY: &str = "There is no library folder; the person sets one in Settings.";
 
 /// The status line's tail naming who acted: the client's name as it gave it.
-fn by(client: &str) -> String {
+pub(super) fn by(client: &str) -> String {
     match client.trim() {
         "" => " · by an agent".to_owned(),
         c => format!(" · by {c}"),

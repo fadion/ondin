@@ -3,12 +3,13 @@
 
 /// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
 /// reordering shows as a diff.
-pub const PHASE_1: [&str; 15] = [
+pub const PHASE_1: [&str; 20] = [
     "use_document",
     "get_document",
     "get_node",
     "list_children",
     "find_nodes",
+    "find_like",
     "hit_test",
     "get_bounds",
     "get_selection",
@@ -19,6 +20,10 @@ pub const PHASE_1: [&str; 15] = [
     "list_components",
     "list_variables",
     "list_styles",
+    "export_tokens",
+    "list_fonts",
+    "check_contrast",
+    "review_colours",
 ];
 
 /// Phase 2 — write, 1:1 with operations/composites (§8.4).
@@ -139,8 +144,9 @@ pub const PHASE_3: [&str; 26] = [
 /// `make_kit`, `publish_kit` and `stop_sharing_kit` write the kit mark, which is
 /// document metadata rather than an operation, so `undo` reverts none of them.
 /// `insert_from_kit` returns the new instance's id and `create_document` the new
-/// file's path.
-pub const PHASE_4: [&str; 12] = [
+/// file's path. `save_version` pins a file, outside history too; `import_tokens`
+/// is one undo step.
+pub const PHASE_4: [&str; 15] = [
     "list_documents",
     "create_document",
     "list_kits",
@@ -153,6 +159,9 @@ pub const PHASE_4: [&str; 12] = [
     "make_kit",
     "publish_kit",
     "stop_sharing_kit",
+    "import_tokens",
+    "list_versions",
+    "save_version",
 ];
 
 #[cfg(test)]

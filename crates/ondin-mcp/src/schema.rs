@@ -83,6 +83,19 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "find_like",
+        doc: "Layers like one: sharing its fills, strokes, font or effects; the same layer in each copy of its block (`matching`); or a main's or set's instances. The layer itself is listed too.",
+        params: &[
+            param("id", ParamKind::Node, true, "The layer to match."),
+            param(
+                "by",
+                ParamKind::Choice(&["fill", "stroke", "font", "effect", "matching", "instances"]),
+                true,
+                "What they share.",
+            ),
+        ],
+    },
+    Tool {
         name: "hit_test",
         doc: "The layers under a point in page coordinates, topmost first.",
         params: &[
@@ -176,6 +189,77 @@ pub static TOOLS: &[Tool] = &[
         name: "list_styles",
         doc: "Every style: id, slot, name, value, description and how many layers use it.",
         params: &[],
+    },
+    Tool {
+        name: "export_tokens",
+        doc: "The document's own variables and styles as a design tokens (DTCG) file, with a note for each left out or changed on the way. Nothing is written to disk.",
+        params: &[],
+    },
+    Tool {
+        name: "list_fonts",
+        doc: "The font families a text can be set in, by name: installed ones, and in the window the web fonts it downloads on first use. Needs no current document.",
+        params: &[
+            param(
+                "query",
+                ParamKind::Text,
+                false,
+                "Only families whose name holds this, ignoring case.",
+            ),
+            param(
+                "limit",
+                ParamKind::Index,
+                false,
+                "At most this many; 100 when absent.",
+            ),
+        ],
+    },
+    Tool {
+        name: "check_contrast",
+        doc: "Measure each shown text layer, and with `non_text` each small shape, against what is drawn behind it, in every mode: its score, what its size needs, and whether it passes. `fix_contrast` fixes a failing one.",
+        params: &[
+            param(
+                "ids",
+                ParamKind::Nodes,
+                false,
+                "Only the layers in and under these; else a page.",
+            ),
+            param(
+                "page",
+                ParamKind::Node,
+                false,
+                "The page when no `ids`; the first when absent.",
+            ),
+            param(
+                "level",
+                ParamKind::Choice(&["aa", "aaa", "apca"]),
+                false,
+                "The standard; `aa` when absent.",
+            ),
+            param(
+                "non_text",
+                ParamKind::Bool,
+                false,
+                "Also measure icons and other shapes under 24 units across.",
+            ),
+        ],
+    },
+    Tool {
+        name: "review_colours",
+        doc: "Every distinct colour painted, most-used first, with where it is used, and the groups of near-identical ones that `merge_colours` makes one.",
+        params: &[
+            param(
+                "ids",
+                ParamKind::Nodes,
+                false,
+                "Only the layers in and under these; every page when absent.",
+            ),
+            param(
+                "threshold",
+                ParamKind::Choice(&["tight", "close", "loose"]),
+                false,
+                "How near counts as one; `close` when absent.",
+            ),
+        ],
     },
     Tool {
         name: "undo",
@@ -313,6 +397,45 @@ pub static TOOLS: &[Tool] = &[
         name: "stop_sharing_kit",
         doc: "Stop sharing this kit; documents using it keep their copies. Only when the person asks. Saved at once; `undo` does not revert it.",
         params: &[],
+    },
+    Tool {
+        name: "import_tokens",
+        doc: "Read a design tokens (DTCG) file into the document's variables and styles in one undo step: new tokens added, changed ones updated, renamed ones renamed. Answers how many of each and what was left out.",
+        params: &[
+            param(
+                "tokens",
+                ParamKind::Text,
+                true,
+                "The file's JSON, as text or as an object.",
+            ),
+            param(
+                "collection",
+                ParamKind::Text,
+                false,
+                "Where tokens the file puts in no collection land, by name; the first collection when absent.",
+            ),
+            param(
+                "removals",
+                ParamKind::Bool,
+                false,
+                "Also remove the variables the file no longer has. Only when the person asks.",
+            ),
+        ],
+    },
+    Tool {
+        name: "list_versions",
+        doc: "The versions kept of this document, newest first: when, and the name given. Documents in the library only.",
+        params: &[],
+    },
+    Tool {
+        name: "save_version",
+        doc: "Save the document and keep it as a version the person can return to from Version history, before a large change or when asked. `undo` does not revert it.",
+        params: &[param(
+            "name",
+            ParamKind::Text,
+            false,
+            "What the version is called.",
+        )],
     },
 ];
 

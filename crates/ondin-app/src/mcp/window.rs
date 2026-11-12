@@ -150,6 +150,16 @@ impl Documents for OndinApp {
         if behind && let Err(e) = self.write_behind(path) {
             log::warn!(target: "ondin", "mcp: {e}");
         }
+        // A family an agent named loads as one the person picked does; a tab
+        // behind loads its families when it comes to the front.
+        if !behind {
+            self.ensure_document_fonts();
+        }
+    }
+
+    fn fonts(&mut self) -> Vec<String> {
+        let all = self.fonts.match_count("");
+        self.fonts.matched_names("", 0..all)
     }
 
     fn library(&mut self) -> Option<&Library> {

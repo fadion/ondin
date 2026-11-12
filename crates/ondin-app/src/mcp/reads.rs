@@ -139,14 +139,17 @@ pub(super) fn components(doc: &Document) -> Value {
     json!({ "components": out })
 }
 
+/// A colour as the reads write one, `#rrggbbaa`.
+pub(super) fn hex(c: ondin_core::peniko::Color) -> Value {
+    let [r, g, b, a] = c.to_rgba8().to_u8_array();
+    json!(format!("#{r:02x}{g:02x}{b:02x}{a:02x}"))
+}
+
 /// A resolved value as JSON: a colour as `#rrggbbaa`.
 fn value(v: ondin_core::variable::Value) -> Value {
     use ondin_core::variable::Value as V;
     match v {
-        V::Color(c) => {
-            let [r, g, b, a] = c.to_rgba8().to_u8_array();
-            json!(format!("#{r:02x}{g:02x}{b:02x}{a:02x}"))
-        }
+        V::Color(c) => hex(c),
         V::Number(n) => json!(n),
         V::Boolean(b) => json!(b),
         V::String(s) => json!(s),

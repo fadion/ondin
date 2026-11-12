@@ -1566,7 +1566,7 @@ fn families_over_budget(
 /// sets to the English one. A face also carries its name in other languages
 /// (macOS's system font has dozens), and each would be a row of its own; those
 /// are [`alias_families`].
-fn listed_families(db: &fontdb::Database) -> BTreeSet<String> {
+pub(crate) fn listed_families(db: &fontdb::Database) -> BTreeSet<String> {
     db.faces()
         .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
         .collect()

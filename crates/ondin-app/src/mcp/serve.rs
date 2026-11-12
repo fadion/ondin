@@ -6,6 +6,7 @@
 //! and after its last connection closes.
 
 use super::endpoint::{self, Host};
+use super::system_fonts::SystemFonts;
 use super::{Documents, Engine};
 use crate::library::state::Library;
 use crate::session::EditorSession;
@@ -27,6 +28,9 @@ pub(crate) struct Headless {
     library: Option<PathBuf>,
     /// The library, scanned the first time a kit tool asks for it.
     scanned: Option<Library>,
+    /// The installed fonts, read the first time a document or `list_fonts`
+    /// needs them.
+    fonts: Option<SystemFonts>,
 }
 
 impl Headless {
@@ -35,6 +39,19 @@ impl Headless {
             open: HashMap::new(),
             library,
             scanned: None,
+            fonts: None,
+        }
+    }
+
+    /// Register the installed families `path`'s document names, and lay its
+    /// text out again when any landed: `serve`'s engine starts with Inter alone.
+    fn load_fonts(&mut self, path: &Path) {
+        let Some(session) = self.open.get_mut(path) else {
+            return;
+        };
+        let fonts = self.fonts.get_or_insert_with(SystemFonts::load);
+        if fonts.register_for(&session.doc) {
+            session.fonts_changed();
         }
     }
 
@@ -60,6 +77,7 @@ impl Documents for Headless {
             let mut session = EditorSession::new();
             session.adopt_document(doc, Some(path.clone()));
             self.open.insert(path.clone(), session);
+            self.load_fonts(&path);
         }
         Ok(path)
     }
@@ -69,6 +87,7 @@ impl Documents for Headless {
     }
 
     fn committed(&mut self, path: &Path) {
+        self.load_fonts(path);
         if let Err(e) = self.save(path) {
             log::warn!(target: "ondin", "serve: {e}");
         }
@@ -98,6 +117,14 @@ impl Documents for Headless {
     /// Nobody reads a status line here; the log keeps it.
     fn tell(&mut self, line: String) {
         log::info!(target: "ondin", "serve: {line}");
+    }
+
+    /// The installed families: `serve` downloads no web font.
+    fn fonts(&mut self) -> Vec<String> {
+        self.fonts
+            .get_or_insert_with(SystemFonts::load)
+            .families()
+            .to_vec()
     }
 }
 

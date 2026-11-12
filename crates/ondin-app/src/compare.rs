@@ -459,17 +459,26 @@ fn description_changes(
     match (was, is) {
         (Some(was), Some(is)) => {
             let mut out = Vec::new();
-            // A linked file read again moves the table and the link's stamp
-            // together; both are its data, not its options.
-            if was.table != is.table || was.source != is.source {
+            // A linked file read again moves the link's stamp with the table:
+            // its data. A link made, dropped or pointed at another file is an
+            // option.
+            let reread = match (&was.source, &is.source) {
+                (Some(a), Some(b)) => a.path == b.path && a != b,
+                _ => false,
+            };
+            if was.table != is.table || reread {
                 out.push(line("Chart data changed"));
             }
-            let same_table = ondin_core::chart::Chart {
+            let same_data = ondin_core::chart::Chart {
                 table: is.table.clone(),
-                source: is.source.clone(),
+                source: if reread {
+                    is.source.clone()
+                } else {
+                    was.source.clone()
+                },
                 ..was.clone()
             };
-            if !same_table.same_description(is) {
+            if !same_data.same_description(is) {
                 out.push(line("Chart options changed"));
             }
             out
@@ -2311,6 +2320,45 @@ mod tests {
         assert_eq!(gone, Some(Status::Removed), "the part's removal");
         app.leave_compare();
         let _ = std::fs::remove_file(&version);
+    }
+
+    /// A link dropped, made or pointed at another file with the table the same
+    /// is an option; its stamp moved alone on the same file is data.
+    ///
+    /// flip: `description_changes` counting any change of the link as data →
+    /// fails at "unlinked".
+    #[test]
+    fn a_charts_link_is_an_option_and_its_stamp_data() {
+        use ondin_core::chart::{Chart, ChartKind, DataLink};
+        let link = |path: &str, modified| DataLink {
+            path: path.into(),
+            size: 10,
+            modified,
+            header: None,
+        };
+        let mut linked = Chart::sample(ChartKind::Column);
+        linked.source = Some(link("sales.csv", 1));
+        let with = |source| Chart {
+            source,
+            ..linked.clone()
+        };
+        let say = |was: &Chart, is: &Chart| -> Vec<String> {
+            description_changes(Some(was), Some(is))
+                .into_iter()
+                .map(|c| c.what)
+                .collect()
+        };
+        let unlinked = with(None);
+        assert_eq!(
+            say(&linked, &unlinked),
+            ["Chart options changed"],
+            "unlinked"
+        );
+        assert_eq!(say(&unlinked, &linked), ["Chart options changed"], "linked");
+        let elsewhere = with(Some(link("costs.csv", 1)));
+        assert_eq!(say(&linked, &elsewhere), ["Chart options changed"], "moved");
+        let touched = with(Some(link("sales.csv", 2)));
+        assert_eq!(say(&linked, &touched), ["Chart data changed"], "read again");
     }
 
     /// A layer that was there before and moved into a new frame keeps its own row

@@ -66,7 +66,8 @@ matched by id, so a renamed or moved layer is one change.
   **A chart is marked whole** (`compare::charts_whole`): its parts are what its regeneration
   made, so none is listed or counted, and the chart frame is a changed row whose lines say *Chart
   data changed* (the table, and a linked file's stamp read again with it) and *Chart options
-  changed* (anything else in the description) in place of the description's saved fields, or
+  changed* (anything else in the description, a link made, dropped or pointed at another file
+  among it) in place of the description's saved fields, or
   *Chart flattened* / *Made a chart*, or *Chart redrawn* when only its parts differ (laid out
   again at another size). A part is told by the chart owning it now, so a flattened chart's
   layer edited or deleted since keeps its own change; a removed part folds into its old chart

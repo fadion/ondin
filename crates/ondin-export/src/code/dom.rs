@@ -607,14 +607,20 @@ impl Element {
     fn open(&self, out: &mut String, syntax: Syntax, void: bool) {
         let _ = write!(out, "<{}", self.tag);
         // What the component does not name reaches its root — `onClick`,
-        // `href` — before its own attributes, which win.
+        // `href` — before its own attributes, which win. A link's own `href`
+        // is a default, written before, so a passed one wins as Vue's
+        // fallthrough lets it.
+        let default_first = |k: &str| k == "href" && self.live.is_some() && syntax == Syntax::Jsx;
         if let Some(live) = &self.live
             && syntax == Syntax::Jsx
         {
+            for (k, v) in self.attrs.iter().filter(|(k, _)| default_first(k)) {
+                let _ = write!(out, " {k}=\"{}\"", escape(v));
+            }
             let _ = write!(out, " {{...{}}}", live.spread);
         }
         self.class_attr(out, syntax);
-        for (k, v) in &self.attrs {
+        for (k, v) in self.attrs.iter().filter(|(k, _)| !default_first(k)) {
             if syntax == Syntax::Jsx && *k == "src" {
                 let _ = write!(out, " src={{{}}}", super::jsx::asset_binding(v));
             } else if syntax == Syntax::Jsx && *k == "tabindex" {

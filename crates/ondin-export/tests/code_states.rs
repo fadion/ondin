@@ -800,11 +800,14 @@ fn a_disabled_tie_on_a_plain_root_reads_aria_disabled() {
 }
 
 /// A Link root is an `<a>`; a set whose variant holds a use of an interactive
-/// component is written as Plain instead, since interactive content cannot
-/// nest, and says so.
+/// component, or of a marked Plain one taking focus, is written as Plain
+/// instead, since interactive content cannot nest, and says so; a use of the
+/// Plain one in a frame that is a link is reported.
 ///
 /// flip: `Walk::component` skipping the nesting check → fails at "written as
-/// Plain".
+/// Plain"; leaving a Plain root out of `focusable` → fails at "a focusable use
+/// in a Link root"; `Walk::node` skipping a focusable use → fails at "a
+/// focusable use in a link frame".
 #[test]
 fn a_root_holding_an_interactive_use_is_written_plain() {
     let mut ids = IdSource::new(0x5D);
@@ -857,36 +860,129 @@ fn a_root_holding_an_interactive_use_is_written_plain() {
         file(&out, "components/Row.tsx").contains("<a {...rest} className="),
         "an anchor"
     );
-}
 
-/// A marked set's Link roots carry their address, and roots of any other
-/// element are written as it, focusable, in React as in plain HTML.
-///
-/// flip: `as_element` leaving out the address → fails at "the address";
-/// `Walk::component` writing a marked root's element only through
-/// `as_element` → fails at "a nav".
-#[test]
-fn a_marked_roots_element_and_address_reach_react() {
-    let mut ids = IdSource::new(0x60);
+    // A Plain root's `div` takes focus, which a link may not hold either: in
+    // the set's own file, and in a frame that is a link.
+    let mut ids = IdSource::new(0x64);
     let mut doc = Document::new(ids.mint());
-    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 0.0, |_, _, _| {});
+    let (chips, chip) = chip_set(&mut doc, &mut ids, "Chip", 0.0, |_, _, _| {});
+    set_element(&mut doc, chips, RootElement::Plain);
+    let mut inner = IdSource::new(0x65);
+    let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 400.0, |doc, rest, hover| {
+        for v in [rest, hover] {
+            let (tx, _) = ondin_core::insert_subtrees(
+                doc,
+                &mut inner,
+                &[Placement {
+                    nodes: doc.capture_subtree(chip).unwrap(),
+                    parent: v,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            doc.apply(&tx).unwrap();
+        }
+    });
     set_element(&mut doc, row, RootElement::Link);
-    let roots = doc.get(row).unwrap().children().to_vec();
-    let href = roots
-        .iter()
-        .map(|r| Operation::SetHref {
-            id: *r,
-            href: "/go".into(),
-        })
-        .collect();
-    doc.apply(&Transaction(href)).unwrap();
     let inst = instance_of(&mut doc, &mut ids, rest);
     let res = Resolved::rebuild(&doc);
     let out = Target::React.export(&doc, &res, &[inst]);
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a == "Row: it holds a Chip, which takes focus, so it is written as Plain"),
+        "a focusable use in a Link root: {:?}",
+        out.approximated
+    );
+    let wrap = ids.mint();
+    let page = doc.first_page();
+    let index = doc.get(page).unwrap().children().len();
+    doc.apply(&Transaction(vec![
+        create(wrap, page, index, frame(120.0, 60.0), (0.0, 300.0), "Wrap"),
+        Operation::SetElement {
+            id: wrap,
+            element: Some(ondin_core::element::HtmlElement::Link),
+        },
+    ]))
+    .unwrap();
+    let (tx, _) = ondin_core::insert_subtrees(
+        &doc,
+        &mut ids,
+        &[Placement {
+            nodes: doc.capture_subtree(chip).unwrap(),
+            parent: wrap,
+            index: None,
+        }],
+        Default::default(),
+    );
+    doc.apply(&tx).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[wrap]);
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a.contains("Chip, which takes focus, sits inside a button or a link")),
+        "a focusable use in a link frame: {:?}",
+        out.approximated
+    );
+}
+
+/// A marked set's Link roots carry their address, written before the spread so
+/// a passed `href` wins, as Vue's fallthrough lets it; an address on a root
+/// other than the default stands for the set too, and roots linking apart are
+/// reported. Roots of any other element are written as it, focusable, in React
+/// as in plain HTML.
+///
+/// flip: `as_element` leaving out the address → fails at "the address";
+/// `Element::open` writing the address after the spread → fails at "the
+/// address"; `Walk::component` reading the default root's address alone →
+/// fails at "another root's address"; `Walk::component` writing a marked root's
+/// element only through `as_element` → fails at "a nav".
+#[test]
+fn a_marked_roots_element_and_address_reach_react() {
+    let linked = |seed: u64, hrefs: &dyn Fn(usize) -> &'static str| {
+        let mut ids = IdSource::new(seed);
+        let mut doc = Document::new(ids.mint());
+        let (row, rest) = chip_set(&mut doc, &mut ids, "Row", 0.0, |_, _, _| {});
+        set_element(&mut doc, row, RootElement::Link);
+        let default = ondin_core::kit::default_variant(&doc, row).unwrap();
+        let roots = doc.get(row).unwrap().children().to_vec();
+        let others = roots.iter().filter(|r| **r != default);
+        let href = std::iter::once(&default)
+            .chain(others)
+            .enumerate()
+            .map(|(i, r)| Operation::SetHref {
+                id: *r,
+                href: hrefs(i).into(),
+            })
+            .collect();
+        doc.apply(&Transaction(href)).unwrap();
+        let inst = instance_of(&mut doc, &mut ids, rest);
+        let res = Resolved::rebuild(&doc);
+        Target::React.export(&doc, &res, &[inst])
+    };
+    let out = linked(0x60, &|_| "/go");
     let tsx = file(&out, "components/Row.tsx");
     assert!(
-        tsx.contains("<a {...rest}") && tsx.contains(" href=\"/go\" "),
+        tsx.contains("<a href=\"/go\" {...rest}"),
         "the address: {tsx}"
+    );
+    assert!(out.approximated.is_empty(), "{:?}", out.approximated);
+
+    // Only a root other than the default holds one.
+    let out = linked(0x62, &|i| if i == 0 { "" } else { "/go" });
+    let tsx = file(&out, "components/Row.tsx");
+    assert!(
+        tsx.contains("<a href=\"/go\" {...rest}"),
+        "another root's address: {tsx}"
+    );
+    let out = linked(0x63, &|i| if i == 0 { "/a" } else { "/b" });
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a == "Row: its variants link to different addresses, written with “/a”"),
+        "roots linking apart: {:?}",
+        out.approximated
     );
 
     let mut ids = IdSource::new(0x61);

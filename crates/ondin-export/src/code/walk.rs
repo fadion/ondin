@@ -330,6 +330,9 @@ struct Components {
     kit_dirs: HashMap<String, String>,
     /// The components whose root is a button or a link, by name.
     interactive: HashSet<String>,
+    /// The components whose root is a marked Plain root, a `div` taking focus,
+    /// which a button or a link may not hold either, by name.
+    focusable: HashSet<String>,
 }
 
 /// What a use of a component needs to know of it.
@@ -482,15 +485,17 @@ impl Walk<'_> {
             Some(_) => None,
         };
         // A use keeps the elements its component wrote, so one inside a button,
-        // or an interactive one inside a link, is invalid HTML that only a
-        // report can flag.
+        // or an interactive or focusable one inside a link, is invalid HTML
+        // that only a report can flag.
         if let Some(i) = used.as_ref().and_then(|u| u.instance.as_ref()) {
             let comps = self.components.as_ref().expect("components are on");
-            let interactive = comps.interactive.contains(&i.component);
+            let in_link = self.inside.iter().any(|a| a.interactive());
             let why = if self.inside.contains(&HtmlElement::Button) {
                 Some(" sits inside a button, which holds only text and pictures")
-            } else if interactive && self.inside.iter().any(|a| a.interactive()) {
+            } else if in_link && comps.interactive.contains(&i.component) {
                 Some(", which is interactive, sits inside a button or a link")
+            } else if in_link && comps.focusable.contains(&i.component) {
+                Some(", which takes focus, sits inside a button or a link")
             } else {
                 None
             };
@@ -1245,6 +1250,22 @@ impl Walk<'_> {
         });
         let mut live = None;
         if let Some((_, rest, ties, element, p)) = &marked {
+            // Every root holds the set's one element, and one address: the
+            // default's, else the first another root holds. Roots linking apart
+            // are reported, since a component's `<a>` has one.
+            let hrefs: Vec<&str> = [&default]
+                .into_iter()
+                .chain(trees.iter().filter(|t| **t != default))
+                .filter_map(|t| doc.get(*t))
+                .map(|n| n.href())
+                .filter(|h| !h.is_empty())
+                .collect();
+            let href = hrefs.first().copied().unwrap_or_default().to_string();
+            if *element == RootElement::Link && hrefs.iter().any(|h| *h != href) {
+                self.report.approximate(format!(
+                    "{name}: its variants link to different addresses, written with “{href}”"
+                ));
+            }
             props[*p].2 = None;
             let mut taken: HashSet<String> = props.iter().map(|(c, _, _)| c.clone()).collect();
             taken.extend(["className", "key", "ref", "children"].map(String::from));
@@ -1261,12 +1282,7 @@ impl Walk<'_> {
                     .find(|(_, s)| **s == Interaction::Disabled)
                     .map(|(v, _)| v.clone()),
                 element: *element,
-                // Every root holds the set's one element; the default's address
-                // stands for them.
-                href: doc
-                    .get(default)
-                    .map(|n| n.href().to_string())
-                    .unwrap_or_default(),
+                href,
             });
         }
 
@@ -1364,30 +1380,34 @@ impl Walk<'_> {
             }
         };
         if let Some(mut live) = live {
-            // Interactive content cannot nest: a root holding a button or a link
-            // is written as Plain.
+            // Interactive content cannot nest: a root holding a button, a link
+            // or a marked Plain root, which takes focus, is written as Plain.
             let comps = self.components.as_ref().expect("components are on");
             let mut nested = None;
             for (_, root) in &bodies {
                 root.each(&mut |e| {
                     if let Some(i) = &e.instance
                         && nested.is_none()
-                        && comps.interactive.contains(&i.component)
                     {
-                        nested = Some(i.component.clone());
+                        if comps.interactive.contains(&i.component) {
+                            nested = Some((i.component.clone(), "is interactive"));
+                        } else if comps.focusable.contains(&i.component) {
+                            nested = Some((i.component.clone(), "takes focus"));
+                        }
                     }
                 });
             }
-            if let Some(inner) = nested.filter(|_| live.element != RootElement::Plain) {
+            if let Some((inner, why)) = nested.filter(|_| live.element != RootElement::Plain) {
                 self.report.approximate(format!(
-                    "{name}: it holds a {inner}, which is interactive, so it is written as Plain"
+                    "{name}: it holds a {inner}, which {why}, so it is written as Plain"
                 ));
                 live.element = RootElement::Plain;
             }
-            if live.element != RootElement::Plain {
-                let comps = self.components.as_mut().expect("components are on");
-                comps.interactive.insert(name.clone());
-            }
+            let comps = self.components.as_mut().expect("components are on");
+            match live.element {
+                RootElement::Plain => comps.focusable.insert(name.clone()),
+                _ => comps.interactive.insert(name.clone()),
+            };
             for (_, root) in &mut bodies {
                 as_element(root, &live);
             }

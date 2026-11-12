@@ -1203,6 +1203,22 @@ fn sweep_on(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c));
     check("settings", app, found);
+    // An ICO row's card: the Sizes chips, the held pad and the icon switches.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        let id = a.session.selection.ids()[0];
+        let ico = ondin_core::ExportSpec::new(
+            ondin_core::ExportFormat::Ico,
+            ondin_core::ExportScale::Times(1.0),
+        );
+        assert!(a.session.commit(Transaction(vec![Operation::SetExports {
+            id,
+            exports: ondin_core::keyed_by_position([ico]),
+        }])));
+        a.collapsed_panels.remove("Export");
+        a.export_row_open = Some(0);
+    });
+    check("icon export settings", app, found);
     let mut app = with_a_text(&ctx);
     // A query with a match, so the list, its lit row and the footer are drawn.
     let found = opened(&ctx, &mut app, |_, a| {

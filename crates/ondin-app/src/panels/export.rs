@@ -14,8 +14,8 @@ use crate::app::OndinApp;
 use crate::theme::{self, icon};
 use crate::ui::{self, Prefix, Scrub, value_field};
 use ondin_core::{
-    ExportBackground, ExportFormat, ExportScale, ExportSpec, ExportText, Keyed, NodeId, Operation,
-    SvgColour, SvgStrokes, SvgView, Transaction,
+    ExportBackground, ExportFormat, ExportScale, ExportSpec, ExportText, IconSet, Keyed, NodeId,
+    Operation, SvgColour, SvgStrokes, SvgView, Transaction,
 };
 use ondin_export::{PlanOptions, PlannedFile};
 use std::sync::Arc;
@@ -152,9 +152,23 @@ pub(crate) struct ExportPreview {
     /// rebuild per edit.
     texture: Option<egui::TextureHandle>,
     pixels: (u32, u32),
+    /// An icon file's sizes, each its own texture, smallest first; empty for any
+    /// other format.
+    icons: Vec<IconTile>,
     /// The line under it: format, size, and what it weighs.
     summary: String,
 }
+
+/// One size of an icon file's preview.
+pub(crate) struct IconTile {
+    size: u32,
+    texture: egui::TextureHandle,
+    /// Drawn from a frame of its own, which the label marks.
+    framed: bool,
+}
+
+/// Between two icon sizes side by side in the preview, and between their lines.
+const ICON_TILE_GAP: f32 = 10.0;
 
 /// What a vector export could not say exactly, as a clause to hang off a message —
 /// `None` when the file is the document (§15 D780).
@@ -533,6 +547,9 @@ impl OndinApp {
             let Some(preview) = &self.export_preview else {
                 return;
             };
+            if !preview.icons.is_empty() {
+                icon_preview(ui, &preview.icons);
+            }
             if let Some(tex) = &preview.texture {
                 // Fit the width, never magnify.
                 let (w, h) = (preview.pixels.0 as f32, preview.pixels.1 as f32);
@@ -580,6 +597,40 @@ impl OndinApp {
             Some((_, origins)) => origins.clone(),
             None => vec![key.node],
         };
+        if key.spec.format.is_icon() {
+            let entries = ondin_export::icon::entries(doc, res, key.node, &key.spec)?;
+            let bytes = ondin_export::icon::encode(key.spec.format, &entries).unwrap_or_default();
+            let summary = format!(
+                "{} · {} · {}",
+                key.spec.format.label(),
+                ui::count(entries.len(), "size"),
+                human_bytes(bytes.len())
+            );
+            let icons = entries
+                .into_iter()
+                .map(|e| {
+                    let side = e.size as usize;
+                    let image =
+                        egui::ColorImage::from_rgba_unmultiplied([side, side], &e.raster.rgba);
+                    IconTile {
+                        size: e.size,
+                        texture: ctx.load_texture(
+                            format!("export-icon-{}", e.size),
+                            image,
+                            egui::TextureOptions::LINEAR,
+                        ),
+                        framed: e.frame.is_some(),
+                    }
+                })
+                .collect();
+            return Some(ExportPreview {
+                key,
+                texture: None,
+                pixels: (0, 0),
+                icons,
+                summary,
+            });
+        }
         // No raster for a vector file: rasterizing it would preview something other
         // than the file.
         if !key.spec.format.is_raster() {
@@ -606,6 +657,7 @@ impl OndinApp {
                 key,
                 texture: None,
                 pixels: (0, 0),
+                icons: Vec::new(),
                 summary,
             });
         }
@@ -632,6 +684,7 @@ impl OndinApp {
                 texture: None,
                 // The padded pair: that is the file the row is about.
                 pixels: (pw, ph),
+                icons: Vec::new(),
                 summary: format!("{pw}×{ph} — too large to preview here"),
             });
         }
@@ -662,6 +715,7 @@ impl OndinApp {
             key,
             texture: Some(texture),
             pixels: (raster.width, raster.height),
+            icons: Vec::new(),
             summary,
         })
     }
@@ -741,7 +795,15 @@ impl OndinApp {
                         .icon(ui::combo_chevron)
                         .width(SCALE_W)
                         .selected_text(ui::combo_text(&spec.scale.label()));
-                    if live {
+                    if spec.format.is_icon() {
+                        // The row's "how big" cell holds the size set instead.
+                        if let Some(sizes) = icon_set_cell(ui, index, spec) {
+                            out.edited = Some(ExportSpec {
+                                sizes,
+                                ..spec.clone()
+                            });
+                        }
+                    } else if live {
                         combo.show_ui(ui, |ui| {
                             ui::menu_rows(ui);
                             for n in ExportScale::COMMON {
@@ -790,14 +852,22 @@ impl OndinApp {
                         .show_ui(ui, |ui| {
                             ui::menu_rows(ui);
                             for f in ExportFormat::ALL {
+                                // The icon files under a rule: the formats above
+                                // make one picture, these a set of them.
+                                if f == ExportFormat::Ico {
+                                    super::inspector::popup_rule(ui);
+                                }
                                 ui.selectable_value(&mut format, f, f.label());
                             }
                         });
                     if format != spec.format {
-                        out.edited = Some(ExportSpec {
-                            format,
-                            ..out.edited.clone().unwrap_or_else(|| spec.clone())
-                        });
+                        let mut next = out.edited.clone().unwrap_or_else(|| spec.clone());
+                        // ICO's ticks are not ICNS's sizes: the other icon format
+                        // starts on its own set. Any other format keeps them inert.
+                        if format.is_icon() && spec.format.is_icon() {
+                            next.sizes.clear();
+                        }
+                        out.edited = Some(ExportSpec { format, ..next });
                     }
                 });
 
@@ -906,6 +976,9 @@ impl OndinApp {
                 None => "No variants to export".to_string(),
             };
         }
+        if spec.format.is_icon() {
+            return self.icon_size_line(spec, id);
+        }
         if !spec.format.is_raster() {
             return String::new();
         }
@@ -914,6 +987,36 @@ impl OndinApp {
             (Some((w, h)), false) => format!("{w}×{h}"),
             (None, _) => String::new(),
         }
+    }
+
+    /// What an icon row's file will hold — `16, 32, 48 px` — and what changes it:
+    /// a layer that is not square is padded, sizes drawn from their own frames are
+    /// counted, and a fit is named. Empty for a layer with no box.
+    fn icon_size_line(&self, spec: &ExportSpec, id: NodeId) -> String {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let Some(b) = res.ink_bounds(id) else {
+            return String::new();
+        };
+        let sizes = spec.icon_sizes();
+        let mut line = sizes_text(&sizes, true);
+        let slice = ondin_export::plan::slice_region(doc, res, id).map(|(v, _)| v);
+        let b = slice.unwrap_or(b);
+        // A hundredth of a unit is no padding anyone would see.
+        if (b.width() - b.height()).abs() > 0.01 {
+            line.push_str(" · padded to square");
+        }
+        if spec.size_frames {
+            let n = ondin_export::icon::size_frames(doc, id, &sizes).len();
+            match n {
+                0 => {}
+                1 => line.push_str(" · 1 from its own frame"),
+                n => line.push_str(&format!(" · {n} from their own frames")),
+            }
+        }
+        if spec.pixel_fit {
+            line.push_str(" · pixel-fitted");
+        }
+        line
     }
 
     /// One row's settings, in a card beside the panel — everything that did not
@@ -981,6 +1084,15 @@ impl OndinApp {
                         edit(&mut out, spec).suffix = text;
                     }
 
+                    // --- sizes, icon files only ----------------------------------
+                    if spec.format.is_icon() {
+                        ui::labelled(ui, "Sizes", |ui| {
+                            if let Some(sizes) = icon_size_chips(ui, spec) {
+                                edit(&mut out, spec).sizes = sizes;
+                            }
+                        });
+                    }
+
                     // --- quality, JPEG only (labelled for its format) ----------
                     if spec.format == ExportFormat::Jpeg {
                         ui::labelled(ui, "JPEG quality", |ui| {
@@ -999,7 +1111,7 @@ impl OndinApp {
                     }
 
                     // --- text, vector only ---------------------------------------
-                    if !spec.format.is_raster() {
+                    if !has_pixels(spec.format) {
                         ui::labelled(ui, "Text", |ui| {
                             ui.scope(|ui| {
                                 ui.spacing_mut().interact_size.y = POP_CELL;
@@ -1114,25 +1226,34 @@ impl OndinApp {
                                 size,
                             )
                             .on_hover_text(
-                                match spec.format.is_raster() {
+                                match has_pixels(spec.format) {
                                     true => "Drop the fully transparent rows and columns",
                                     false => "Trimming reads pixels, and a vector file has none",
                                 },
                             );
-                            if trim.clicked() && spec.format.is_raster() {
+                            if trim.clicked() && has_pixels(spec.format) {
                                 edit(&mut out, spec).trim = !spec.trim;
                             }
                         }
-                        let pad = ui::toggle_row(
-                            ui,
-                            icon::PAD_SQUARE,
-                            "Pad out to a square",
-                            pad_button_state(spec),
-                            size,
-                        )
-                        .on_hover_text("Centre the result in a square of its longer side");
-                        if pad.clicked() {
-                            edit(&mut out, spec).pad_square = !spec.pad_square;
+                        if spec.format.is_icon() {
+                            // Held on, the stored value kept for the other formats.
+                            ui::toggle_row_held(ui, icon::PAD_SQUARE, "Pad out to a square", size)
+                                .on_hover_text("Icon files are always square");
+                        } else {
+                            let pad = ui::toggle_row(
+                                ui,
+                                icon::PAD_SQUARE,
+                                "Pad out to a square",
+                                pad_button_state(spec),
+                                size,
+                            )
+                            .on_hover_text("Centre the result in a square of its longer side");
+                            if pad.clicked() {
+                                edit(&mut out, spec).pad_square = !spec.pad_square;
+                            }
+                        }
+                        if spec.format.is_icon() {
+                            self.icon_switches(ui, spec, sizing, &mut out);
                         }
                         // Only where it means something: every selected layer is a
                         // component set.
@@ -1190,6 +1311,70 @@ impl OndinApp {
             self.export_suffix_text = None;
         }
         out
+    }
+
+    /// An icon row's two switches, each with its caption under it: sizes drawn
+    /// from frames named for them, saying what it finds on the page, and a fit
+    /// per size.
+    fn icon_switches(
+        &mut self,
+        ui: &mut egui::Ui,
+        spec: &ExportSpec,
+        sizing: Option<NodeId>,
+        out: &mut Option<ExportSpec>,
+    ) {
+        let size = egui::vec2(POP_INNER, POP_CELL);
+        let caption = |ui: &mut egui::Ui, text: &str| {
+            ui.label(
+                egui::RichText::new(text)
+                    .size(ui::CAPTION_PT)
+                    .color(theme::text::faint()),
+            );
+        };
+        // The caption annotates its switch, so it sits as close as a size line.
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
+            let frames = ui::toggle_row(
+                ui,
+                icon::FRAME,
+                "Use frames named for their size",
+                ui::FieldButton::on_if(spec.size_frames),
+                size,
+            )
+            .on_hover_text("Draw a size from its own frame on this page instead of scaling");
+            if frames.clicked() {
+                edit(out, spec).size_frames = !spec.size_frames;
+            }
+            let doc = &self.session.doc;
+            let text = match sizing.and_then(|id| Some((id, doc.get(id)?.name()))) {
+                Some((id, name)) => {
+                    let sizes = spec.icon_sizes();
+                    let found = ondin_export::icon::size_frames(doc, id, &sizes);
+                    size_frames_caption(name, &sizes, &found)
+                }
+                None => "Each layer's own frames, named for the layer and the size".to_string(),
+            };
+            caption(ui, &text);
+        });
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
+            let fit = ui::toggle_row(
+                ui,
+                icon::PIXEL_FIT,
+                "Pixel-fit each size",
+                ui::FieldButton::on_if(spec.pixel_fit),
+                size,
+            )
+            .on_hover_text("Text and turned layers are drawn as they are");
+            if fit.clicked() {
+                edit(out, spec).pixel_fit = !spec.pixel_fit;
+            }
+            caption(
+                ui,
+                "Fits a copy of the art to each size's pixel grid before drawing it. \
+                 The document is not changed.",
+            );
+        });
     }
 
     /// The settings card's four SVG rows: *Colour*, *Strokes* and *viewBox* as
@@ -2728,6 +2913,17 @@ impl MenuAct {
 fn preset_name(specs: &[ExportSpec]) -> String {
     let mut parts: Vec<String> = Vec::new();
     for f in ExportFormat::ALL {
+        // An icon row by its sizes, or by its name alone when it holds them all.
+        if f.is_icon() {
+            for s in specs.iter().filter(|s| s.format == f) {
+                let sizes = s.icon_sizes();
+                parts.push(match sizes.as_slice() == f.icon_sizes() {
+                    true => f.label().to_string(),
+                    false => format!("{} {}", f.label(), sizes_text(&sizes, false)),
+                });
+            }
+            continue;
+        }
         let scales: Vec<String> = specs
             .iter()
             .filter(|s| s.format == f)
@@ -3075,6 +3271,223 @@ fn ladder_scale(rows: usize) -> ExportScale {
     ExportScale::Times(rows.min(3) as f32 + 1.0)
 }
 
+/// An icon file's sizes on the preview's checkerboard, each at actual size with its
+/// number under it, in order, as many to a line as fit; a size wider than the
+/// column takes a line of its own, drawn down to the column and labelled
+/// `256, shown at 216`. A size from its own frame wears the frame glyph.
+fn icon_preview(ui: &mut egui::Ui, tiles: &[IconTile]) {
+    let avail = ui.available_width();
+    let inner = avail - PREVIEW_INSET * 2.0;
+    let label_h = ui::CAPTION_PT + 4.0;
+    // Lines of (tile, drawn side), packed left to right.
+    let mut lines: Vec<Vec<(&IconTile, f32)>> = Vec::new();
+    let mut used = f32::INFINITY;
+    for t in tiles {
+        let side = t.size as f32;
+        if side > inner {
+            lines.push(vec![(t, inner.floor())]);
+            used = f32::INFINITY;
+            continue;
+        }
+        if used + ICON_TILE_GAP + side > inner {
+            lines.push(Vec::new());
+            used = -ICON_TILE_GAP;
+        }
+        used += ICON_TILE_GAP + side;
+        if let Some(line) = lines.last_mut() {
+            line.push((t, side));
+        }
+    }
+    let line_h = |l: &[(&IconTile, f32)]| l.iter().map(|(_, s)| *s).fold(0.0, f32::max) + label_h;
+    let h: f32 = lines.iter().map(|l| line_h(l)).sum::<f32>()
+        + ICON_TILE_GAP * lines.len().saturating_sub(1) as f32
+        + PREVIEW_INSET * 2.0;
+    let (ground, _) = ui.allocate_exact_size(egui::vec2(avail, h), egui::Sense::empty());
+    let p = ui.painter().with_clip_rect(ground);
+    ui::paint_checkerboard(&p, ground, 5.0);
+    p.rect_stroke(
+        ground,
+        egui::CornerRadius::same(5),
+        egui::Stroke::new(1.0, theme::color::field_border()),
+        egui::StrokeKind::Inside,
+    );
+    let mut y = ground.top() + PREVIEW_INSET;
+    for line in &lines {
+        let tall = line_h(line) - label_h;
+        let mut x = ground.left() + PREVIEW_INSET;
+        for (t, side) in line {
+            // Bottom-aligned on whole points, so a 16 is not drawn across pixels.
+            let at = egui::Rect::from_min_size(
+                egui::pos2(x, y + tall - side).round(),
+                egui::vec2(*side, *side),
+            );
+            p.image(
+                t.texture.id(),
+                at,
+                crate::thumbs::FULL_UV,
+                egui::Color32::WHITE,
+            );
+            let text = match *side < t.size as f32 {
+                true => format!("{}, shown at {}", t.size, *side as u32),
+                false => t.size.to_string(),
+            };
+            let label = egui::pos2(at.center().x, y + tall + 2.0);
+            let ink = theme::text::faint();
+            let galley = p.layout_no_wrap(text, egui::FontId::proportional(ui::CAPTION_PT), ink);
+            let glyph_w = if t.framed { ui::CAPTION_PT + 3.0 } else { 0.0 };
+            let left = label.x - (galley.size().x + glyph_w) / 2.0;
+            if t.framed {
+                p.text(
+                    egui::pos2(left, label.y),
+                    egui::Align2::LEFT_TOP,
+                    icon::FRAME,
+                    theme::icon_font(ui::CAPTION_PT),
+                    ink,
+                );
+            }
+            p.galley(egui::pos2(left + glyph_w, label.y), galley, ink);
+            x += side + ICON_TILE_GAP;
+        }
+        y += line_h(line) + ICON_TILE_GAP;
+    }
+}
+
+/// Whether `format` is drawn as pixels — one raster or an icon file's several —
+/// and so whether a trim means anything for it.
+fn has_pixels(format: ExportFormat) -> bool {
+    format.is_raster() || format.is_icon()
+}
+
+/// The *Sizes* chips: every size the format can hold, five to a line, lit when
+/// ticked. The last ticked size refuses to go out. Answers the new ticks.
+fn icon_size_chips(ui: &mut egui::Ui, spec: &ExportSpec) -> Option<Vec<u32>> {
+    let allowed = spec.format.icon_sizes();
+    let ticked = spec.icon_sizes();
+    let labels: Vec<String> = allowed.iter().map(u32::to_string).collect();
+    let last = ticked.len() == 1;
+    let i = ui::toggle_grid(
+        ui,
+        POP_INNER,
+        5,
+        &labels,
+        |i| ticked.contains(&allowed[i]),
+        |i| match last && ticked.contains(&allowed[i]) {
+            true => "An icon file needs one size",
+            false => "",
+        },
+    )?;
+    toggled_size(&ticked, allowed[i])
+}
+
+/// `ticked` with `size` ticked or unticked, smallest first; `None` when `size` is
+/// the last one ticked, which an icon file cannot lose.
+fn toggled_size(ticked: &[u32], size: u32) -> Option<Vec<u32>> {
+    let mut next = ticked.to_vec();
+    match next.iter().position(|s| *s == size) {
+        Some(_) if next.len() == 1 => return None,
+        Some(at) => {
+            next.remove(at);
+        }
+        None => {
+            next.push(size);
+            next.sort_unstable();
+        }
+    }
+    Some(next)
+}
+
+/// `a`, `a and b`, `a, b or c`: a list read as a sentence, joined by `word`.
+fn spoken_list(items: &[String], word: &str) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} {word} {last}", rest.join(", ")),
+    }
+}
+
+/// What *Use frames named for their size* finds for the layer called `name`:
+/// which sizes come from which frames, and which are drawn from the layer.
+fn size_frames_caption(name: &str, sizes: &[u32], found: &[(u32, NodeId)]) -> String {
+    let named = |s: u32| format!("{name}-{s}");
+    if found.is_empty() {
+        let names: Vec<String> = sizes.iter().map(|s| named(*s)).collect();
+        return format!("No frame named {} on this page", spoken_list(&names, "or"));
+    }
+    let from: Vec<String> = found.iter().map(|(s, _)| s.to_string()).collect();
+    let frames: Vec<String> = found.iter().map(|(s, _)| named(*s)).collect();
+    let verb = if from.len() == 1 { "comes" } else { "come" };
+    let mut line = format!(
+        "{} {verb} from {}",
+        spoken_list(&from, "and"),
+        spoken_list(&frames, "and")
+    );
+    let rest: Vec<String> = sizes
+        .iter()
+        .filter(|s| !found.iter().any(|(f, _)| f == *s))
+        .map(u32::to_string)
+        .collect();
+    if !rest.is_empty() {
+        let verb = if rest.len() == 1 { "is" } else { "are" };
+        line.push_str(&format!(
+            "; {} {verb} drawn from {name}",
+            spoken_list(&rest, "and")
+        ));
+    }
+    line
+}
+
+/// Up to this many sizes are listed one by one; more read as a range.
+const SIZES_LISTED: usize = 4;
+
+/// `16, 32, 48`, or past [`SIZES_LISTED`] `16 – 1024`. With `unit`, the size
+/// line's form: `16, 32, 48 px`, `16 – 1024 px · 7 sizes`.
+fn sizes_text(sizes: &[u32], unit: bool) -> String {
+    let px = if unit { " px" } else { "" };
+    match (sizes, sizes.len() > SIZES_LISTED) {
+        ([first, .., last], true) => match unit {
+            true => format!("{first} – {last}{px} · {} sizes", sizes.len()),
+            false => format!("{first} – {last}"),
+        },
+        _ => {
+            let list: Vec<String> = sizes.iter().map(u32::to_string).collect();
+            format!("{}{px}", list.join(", "))
+        }
+    }
+}
+
+/// An icon row's size cell: the format's named sets, each naming its sizes, and
+/// *Custom*, lit by itself when the ticks match no set and never picked. Answers
+/// the sizes of a set picked.
+fn icon_set_cell(ui: &mut egui::Ui, index: usize, spec: &ExportSpec) -> Option<Vec<u32>> {
+    let set = spec.icon_set();
+    let mut picked = None;
+    egui::ComboBox::from_id_salt(("export-scale", index))
+        .icon(ui::combo_chevron)
+        .width(SCALE_W)
+        .selected_text(ui::combo_text(set.map_or("Custom", IconSet::label)))
+        .show_ui(ui, |ui| {
+            ui::menu_rows(ui);
+            for s in IconSet::of(spec.format) {
+                let note = sizes_text(s.sizes(), false);
+                let row = ui::MenuRow::new("", s.label())
+                    .note(&note)
+                    .selected(set == Some(*s));
+                if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
+                    picked = Some(s.sizes().to_vec());
+                }
+            }
+            let custom = ui::MenuRow::new("", "Custom")
+                .note("in settings")
+                .selected(set.is_none())
+                .enabled(false);
+            ui::menu_row(ui, custom, ui::MENU_ROW_H)
+                .on_hover_text("Tick sizes in this row's settings");
+        })
+        .response
+        .on_hover_text("The sizes this file holds");
+    picked
+}
+
 /// The settings button's state. [`ui::FieldButton::Set`] says there is something
 /// in a closed popover: the border marks content, the fill marks open (§15 D72).
 fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
@@ -3083,10 +3496,12 @@ fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
         && spec.suffix.is_empty()
         && spec.background == ExportBackground::Transparent
         && !spec.trim
-        && !spec.pad_square
+        // An icon file's pad is held on, not set; its switches are its own.
+        && (spec.format.is_icon() || !spec.pad_square)
+        && (!spec.format.is_icon() || !(spec.size_frames || spec.pixel_fit))
         // Outlines kept from a vector format are inert on a raster, as the
         // popover hides them; so are the SVG settings on any other format.
-        && (spec.format.is_raster() || spec.text == ExportText::Live)
+        && (has_pixels(spec.format) || spec.text == ExportText::Live)
         && (spec.format != ExportFormat::Svg || {
             let plain = ExportSpec::new(spec.format, spec.scale);
             (spec.colour, spec.strokes, spec.view, spec.precision)
@@ -3103,7 +3518,7 @@ fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
 /// format that has none — and it keeps its stored value while it is, so switching
 /// a trimmed PNG to SVG and back does not silently clear it.
 fn trim_button_state(spec: &ExportSpec) -> ui::FieldButton {
-    match (spec.format.is_raster(), spec.trim) {
+    match (has_pixels(spec.format), spec.trim) {
         (false, _) => ui::FieldButton::Disabled,
         (true, true) => ui::FieldButton::On,
         (true, false) => ui::FieldButton::Off,
@@ -4646,6 +5061,105 @@ mod code_export_tests {
             app.export_size_label(&spec, Some(set)),
             "2 files in arrow-icons/"
         );
+    }
+
+    /// An icon row's words: the size line, the menu's ranges, the frames caption and
+    /// the preset name; the last size cannot be unticked; the held pad does not mark
+    /// the settings button and a fit does.
+    #[test]
+    fn an_icon_row_names_its_sizes_and_frames_in_words() {
+        assert_eq!(sizes_text(&[16, 32, 48], true), "16, 32, 48 px");
+        assert_eq!(
+            sizes_text(ExportFormat::Icns.icon_sizes(), true),
+            "16 – 1024 px · 7 sizes"
+        );
+        assert_eq!(sizes_text(&[16, 24, 32, 48, 64, 256], false), "16 – 256");
+        let mut source = ondin_core::IdSource::new(1);
+        let ids = [source.mint(), source.mint()];
+        assert_eq!(
+            size_frames_caption("logo", &[16, 32, 48], &[(16, ids[0]), (32, ids[1])]),
+            "16 and 32 come from logo-16 and logo-32; 48 is drawn from logo"
+        );
+        assert_eq!(
+            size_frames_caption("logo", &[16, 32, 48], &[]),
+            "No frame named logo-16, logo-32 or logo-48 on this page"
+        );
+        assert_eq!(
+            size_frames_caption("logo", &[16, 32], &[(16, ids[0])]),
+            "16 comes from logo-16; 32 is drawn from logo"
+        );
+        assert_eq!(toggled_size(&[16, 48], 32), Some(vec![16, 32, 48]));
+        assert_eq!(toggled_size(&[16, 48], 48), Some(vec![16]));
+        assert_eq!(toggled_size(&[16], 16), None, "the last size stays");
+        let ico = ExportSpec::new(ExportFormat::Ico, ExportScale::Times(1.0));
+        let icns = ExportSpec::new(ExportFormat::Icns, ExportScale::Times(1.0));
+        assert_eq!(preset_name(&[ico.clone(), icns]), "ICO 16, 32, 48 + ICNS");
+        // An icon file's held pad is no setting of the row's; a fit is.
+        let padded = ExportSpec {
+            pad_square: true,
+            ..ico.clone()
+        };
+        assert_eq!(settings_button_state(&padded, false), ui::FieldButton::Off);
+        let fitted = ExportSpec {
+            pixel_fit: true,
+            ..ico
+        };
+        assert_eq!(settings_button_state(&fitted, false), ui::FieldButton::Set);
+    }
+
+    /// An ICO row's settings card offers its sizes as chips and holds the pad on;
+    /// a click on the 256 chip ticks it; the open preview draws one tile per size.
+    /// flip: `icon_size_chips` dropping what `toggled_size` answers → fails at "256
+    /// is ticked".
+    #[test]
+    fn an_ico_rows_card_ticks_a_size_and_previews_each() {
+        let ctx = egui::Context::default();
+        let (mut app, frame) = svg_settings_app(&ctx);
+        let ico = ExportSpec::new(ExportFormat::Ico, ExportScale::Times(1.0));
+        assert!(app.session.commit(Transaction(vec![Operation::SetExports {
+            id: frame,
+            exports: ondin_core::keyed_by_position([ico]),
+        }])));
+        app.collapsed_panels.remove(PREVIEW);
+        let mut out = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        for _ in 0..10 {
+            out = crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+        }
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new(("export-settings", 0usize))))
+            .expect("the card is up");
+        let text_at = |out: &egui::FullOutput, words: &str| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == words && card.contains(t.pos) => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()).center())
+                }
+                _ => None,
+            })
+        };
+        assert!(text_at(&out, "SIZES").is_some(), "the Sizes section");
+        assert!(text_at(&out, "Pad out to a square").is_some());
+        assert!(text_at(&out, "Use frames named for their size").is_some());
+        assert!(
+            text_at(&out, "Text").is_none(),
+            "no text setting on an icon"
+        );
+        let tiles = app.export_preview.as_ref().map(|p| p.icons.len());
+        assert_eq!(tiles, Some(3), "a tile per favicon size");
+        let chip = text_at(&out, "256").expect("the 256 chip");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: chip,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        crate::repeat::tests::pass(&ctx, &mut app, vec![egui::Event::PointerMoved(chip)]);
+        crate::repeat::tests::pass(&ctx, &mut app, vec![button(true)]);
+        crate::repeat::tests::pass(&ctx, &mut app, vec![button(false)]);
+        let now = app.session.doc.get(frame).expect("the frame").exports()[0]
+            .value
+            .icon_sizes();
+        assert_eq!(now, [16, 32, 48, 256], "256 is ticked");
+        assert_eq!(app.export_row_open, Some(0), "the card stays open");
     }
 
     /// A closed SVG row's settings button is marked by any SVG setting off its

@@ -8,12 +8,6 @@ true.
 
 ## Now
 
-- **ICO and ICNS export** — favicon and app-icon files without a trip to another tool. An ICO holds
-  several PNG sizes in one file (16, 32, 48 by default; up to 256) and the `image` crate writes it;
-  an ICNS holds the macOS ladder (16 to 1024). Each is an export format whose spec lists sizes
-  instead of one scale, rendered through `png::raster_of` once per size. Includes a one-pick size
-  set for the export panel, a CLI flag, and a decision on whether the small sizes take a
-  pixel-fitted render or only the scaled one.
 - **A multi-size preview** — a card that keeps the selected frame drawn at several fixed pixel
   sizes at once (16, 20, 24, 32, 48 by default), at 1x and on a light and a dark ground, updating as
   it is edited, so a small icon is judged at the sizes it ships at without zooming back and forth.

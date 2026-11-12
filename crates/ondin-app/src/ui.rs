@@ -5231,6 +5231,29 @@ pub fn toggle_row(
     state: FieldButton,
     size: egui::Vec2,
 ) -> egui::Response {
+    toggle_row_ticked(ui, glyph, label, state, state == FieldButton::On, size)
+}
+
+/// A [`toggle_row`] that is on and cannot be turned off here: dimmed, with its
+/// tick. The caller owes it a tooltip saying why (an icon file's *Pad to square*).
+pub fn toggle_row_held(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    label: &str,
+    size: egui::Vec2,
+) -> egui::Response {
+    toggle_row_ticked(ui, glyph, label, FieldButton::Disabled, true, size)
+}
+
+/// The one implementation behind [`toggle_row`] and [`toggle_row_held`].
+fn toggle_row_ticked(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    label: &str,
+    state: FieldButton,
+    ticked: bool,
+    size: egui::Vec2,
+) -> egui::Response {
     /// The inset, and the gap after the leading glyph.
     const PAD_X: f32 = 8.0;
     const GAP: f32 = 8.0;
@@ -5255,9 +5278,9 @@ pub fn toggle_row(
     p.text(
         egui::pos2(rect.right() - PAD_X, rect.center().y),
         egui::Align2::RIGHT_CENTER,
-        match state {
-            FieldButton::On => icon::CHECK,
-            _ => icon::MINUS,
+        match ticked {
+            true => icon::CHECK,
+            false => icon::MINUS,
         },
         theme::icon_font(glyph_pt),
         fg,
@@ -5577,6 +5600,66 @@ pub fn segmented_marked(
         }
     }
     (clicked, reset)
+}
+
+/// Between two cells of a [`toggle_grid`], across and down: cells that each stand
+/// on their own field ground need a gap their borders can read across, which the
+/// 2pt inside a [`segmented`] track does not give.
+const TOGGLE_GRID_GAP: f32 = 4.0;
+
+/// A grid of independent toggles, `cols` to a line, `width` wide: each cell is a
+/// [`segmented`] cell standing alone, raised when on, on the field ground with its
+/// hairline when off. `tip(i)` is cell `i`'s tooltip, empty for none. Returns the
+/// clicked index (the Export settings card's *Sizes*).
+pub fn toggle_grid(
+    ui: &mut egui::Ui,
+    width: f32,
+    cols: usize,
+    labels: &[String],
+    on: impl Fn(usize) -> bool,
+    tip: impl Fn(usize) -> &'static str,
+) -> Option<usize> {
+    let cols = cols.max(1);
+    let rows = labels.len().div_ceil(cols);
+    let cell_w = (width - TOGGLE_GRID_GAP * (cols - 1) as f32) / cols as f32;
+    let h = rows as f32 * SEGMENT_CELL_H + rows.saturating_sub(1) as f32 * TOGGLE_GRID_GAP;
+    let (grid, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::empty());
+    let mut clicked = None;
+    for (i, label) in labels.iter().enumerate() {
+        let (r, c) = (i / cols, i % cols);
+        let rect = egui::Rect::from_min_size(
+            grid.min
+                + egui::vec2(
+                    c as f32 * (cell_w + TOGGLE_GRID_GAP),
+                    r as f32 * (SEGMENT_CELL_H + TOGGLE_GRID_GAP),
+                ),
+            egui::vec2(cell_w, SEGMENT_CELL_H),
+        );
+        let resp = ui.interact(rect, ui.id().with(("toggle-grid", i)), egui::Sense::click());
+        let lit = on(i);
+        let p = ui.painter();
+        let radius = egui::CornerRadius::same(LIST_ROW_RADIUS);
+        if !lit {
+            p.rect_filled(rect, radius, color::field());
+            p.rect_stroke(
+                rect,
+                radius,
+                egui::Stroke::new(SEGMENT_BORDER, color::field_border()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        segment_ground(p, rect, lit, resp.hovered());
+        segment_label(p, rect, label, lit);
+        let words = tip(i);
+        let resp = match words.is_empty() {
+            true => resp,
+            false => resp.on_hover_text(words),
+        };
+        if resp.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 /// A segmented track `width` wide around cells `cell_h` tall: allocates and paints

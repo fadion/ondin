@@ -16,7 +16,10 @@
 //! layer in the document. A copy that draws the value because its main does is
 //! offered once, as the main's field, with the copies counted; a copy that
 //! overrides it is its own row, and so is one in modes where the main's `%`
-//! would draw it otherwise.
+//! would draw it otherwise. A main is bound only with each such row, and is
+//! dead, with its reason, where a copy following it would change and is no row
+//! of its own. A chart frame's padding and flow are its regeneration's and are
+//! never offered.
 
 use super::binding::{COLUMN_GAP, FieldKey, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, ROW_GAP};
 use super::paint::PaintSlot;
@@ -38,6 +41,9 @@ pub(crate) struct Use {
     pub why_not: Option<String>,
     /// The row's tail: the layer's page, or what a main's row reaches.
     pub tail: String,
+    /// The copies' own rows this main's bind would change unless they are
+    /// bound with it: a main is bound only together with each of them.
+    pub needs: Vec<FieldKey>,
 }
 
 /// The fields one node may bind, of the families a variable of `kind` takes,
@@ -65,7 +71,9 @@ fn keys_of(doc: &Document, n: &ondin_core::Node) -> Vec<FieldKey> {
             out.push(FieldKey::Radius { id });
         }
     }
-    if doc.resolved_display(id).is_some() {
+    // A chart's layout is its regeneration's: its frame's padding and flow
+    // are never bound by hand.
+    if doc.resolved_display(id).is_some() && n.chart().is_none() {
         for slots in [
             COLUMN_GAP, ROW_GAP, PAD_TOP, PAD_RIGHT, PAD_BOTTOM, PAD_LEFT,
         ] {
@@ -334,7 +342,7 @@ impl OndinApp {
                 }
             }
         }
-        for id in ids {
+        for &id in &ids {
             let Some(n) = doc.get(id) else { continue };
             // A chart's parts are written only by its regeneration.
             if n.link().is_some_and(|l| doc.in_vault(l))
@@ -386,6 +394,44 @@ impl OndinApp {
                 .map(|l| on(k, l))
                 .filter(|s| is_found(*s, alpha) && !dead(*s))
         };
+        // Each layer's copies, one link down: a main's binding reaches every
+        // copy that follows the field, found or not.
+        let mut copies: std::collections::HashMap<NodeId, Vec<NodeId>> = Default::default();
+        for &id in &ids {
+            if let Some(l) = doc.get(id).and_then(|n| n.link()) {
+                copies.entry(l).or_default().push(id);
+            }
+        }
+        // The copies following `key` that binding it would change: a copy
+        // that does not draw the variable at the main's `%` in its own modes.
+        // `Err` when one is no row of its own, else those rows, which must be
+        // bound with it, each at its own `%`.
+        let changed_copies = |key: FieldKey| -> Result<Vec<FieldKey>, ()> {
+            let Some(cell) = self.field_value(key) else {
+                return Ok(Vec::new());
+            };
+            let alpha = found_at(key).flatten();
+            let mut stack = copies.get(&key.at()).cloned().unwrap_or_default();
+            let mut seen = std::collections::HashSet::new();
+            let mut rows = Vec::new();
+            while let Some(c) = stack.pop() {
+                if !seen.insert(c) {
+                    continue;
+                }
+                let ck = on(key, c);
+                if self.field_var(ck).is_some() || self.field_value(ck).as_ref() != Some(&cell) {
+                    continue;
+                }
+                if !is_found(ck, alpha) {
+                    match found_at(ck).is_some() {
+                        true => rows.push(ck),
+                        false => return Err(()),
+                    }
+                }
+                stack.extend(copies.get(&c).into_iter().flatten().copied());
+            }
+            Ok(rows)
+        };
         let mut out: Vec<Use> = Vec::new();
         for &(key, field, _) in &found {
             if source(key).is_some() {
@@ -400,9 +446,17 @@ impl OndinApp {
                 .count();
             let id = key.at();
             let n = doc.get(id);
+            let changed = changed_copies(key);
+            let moves_copy =
+                !locked(id) && n.and_then(|n| style_over(n, key)).is_none() && changed.is_err();
             let why_not = if locked(id) {
                 Some(format!(
                     "{} is locked — unlock it to bind",
+                    crate::private::layer(doc, id)
+                ))
+            } else if moves_copy {
+                Some(format!(
+                    "An instance of {} is in another mode — binding would change it",
                     crate::private::layer(doc, id)
                 ))
             } else {
@@ -420,6 +474,7 @@ impl OndinApp {
             // The lock first, as `why_not` names it.
             let tail = match (&why_not, n.and_then(|n| style_over(n, key))) {
                 (Some(_), _) if locked(id) => "locked".to_string(),
+                (Some(_), _) if moves_copy => "instance in another mode".to_string(),
                 (Some(_), None) => "locked".to_string(),
                 (Some(_), Some(s)) => format!(
                     "{} style {}",
@@ -440,6 +495,7 @@ impl OndinApp {
                 follows,
                 why_not,
                 tail,
+                needs: changed.unwrap_or_default(),
             });
         }
         out
@@ -451,10 +507,12 @@ impl OndinApp {
     pub(crate) fn bind_other_uses(&mut self, var: VarId, keys: &[FieldKey]) {
         // Read again: the list may have been open across an edit that changed
         // a field's value, or reordered a layer's fills under its key.
+        // A main whose bind would change a copy's row left unticked stays as it
+        // is: nothing on screen changes.
         let still: Vec<FieldKey> = self
             .other_uses(var)
             .into_iter()
-            .filter(|u| u.why_not.is_none())
+            .filter(|u| u.why_not.is_none() && u.needs.iter().all(|n| keys.contains(n)))
             .map(|u| u.key)
             .collect();
         let keys: Vec<FieldKey> = keys.iter().copied().filter(|k| still.contains(k)).collect();
@@ -494,6 +552,7 @@ impl OndinApp {
         // The fields bound, for the status line; copies following a main bound
         // here are counted in its layers, not as fields.
         let mut n = 0;
+        let mut bound: Vec<Field> = Vec::new();
         for k in keys {
             let Some(bf) = k.bound() else { continue };
             // A paint takes the `%` that keeps it drawing as it did, not its
@@ -516,9 +575,30 @@ impl OndinApp {
                 continue;
             }
             ops.extend(tx.0);
+            bound.push(k.field());
             n += 1;
         }
-        if ops.is_empty() {
+        // The scope widens only by the families a bind landed in.
+        if let Some(scope) = v.scope
+            && widened.iter().any(|f| !bound.contains(f))
+        {
+            widened.retain(|f| bound.contains(f));
+            let next = widened.iter().fold(scope, |s, f| s.with(*f, true));
+            match next == scope {
+                true => {
+                    ops.remove(0);
+                }
+                false => {
+                    ops[0] = Operation::SetVariable {
+                        var: ondin_core::Variable {
+                            scope: Some(next),
+                            ..v.clone()
+                        },
+                    }
+                }
+            }
+        }
+        if n == 0 {
             return;
         }
         self.session
@@ -946,6 +1026,143 @@ mod tests {
                 "{id:?} draws as before"
             );
         }
+    }
+
+    /// **A main whose bind would recolour a copy in another mode is not
+    /// offered**: `brand` is red in Light and blue in Dark; the main's literal
+    /// red draws `brand` in Light, but its instance in Dark draws red too, and
+    /// binding the main would turn it blue. The main's row is dead with its
+    /// reason, and the one-click bind leaves the instance red.
+    ///
+    /// flip: `other_uses` ignoring `changed_copies` → fails at "dead, with its
+    /// reason".
+    #[test]
+    fn a_main_whose_copy_would_change_is_not_bound() {
+        use ondin_core::variable::{Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let m = app.session.ids.mint();
+        let (light, dark) = (app.session.ids.mint_mode(), app.session.ids.mint_mode());
+        let var = app.session.ids.mint_var();
+        let add = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: Vec::new(),
+        };
+        app.session
+            .try_commit(Transaction(vec![
+                add(light, "Light", 0),
+                add(dark, "Dark", 1),
+                Operation::AddVariable {
+                    var: Variable {
+                        id: var,
+                        name: "brand".into(),
+                        kind: VarKind::Color,
+                        cells: [(light, Cell::Color(RED)), (dark, Cell::Color(BLUE))].into(),
+                        scope: None,
+                        origin: None,
+                        forked: None,
+                        description: String::new(),
+                    },
+                },
+                Operation::CreateNode {
+                    id: m,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(40.0, 20.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some("M".into()),
+                },
+                fill(m, RED, 1.0),
+                Operation::SetComponent {
+                    id: m,
+                    component: true,
+                },
+            ]))
+            .expect("the main");
+        let doc = &app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(m).unwrap(),
+                parent: page,
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(app.commit_edit(tx));
+        let inst = made[0];
+        app.session
+            .try_commit(Transaction(vec![Operation::SetModes {
+                id: inst,
+                modes: vec![dark],
+            }]))
+            .expect("the copy in Dark");
+        let uses = app.other_uses(var);
+        let [u] = &uses[..] else {
+            panic!("the main's row alone: {uses:?}")
+        };
+        assert_eq!(u.key.at(), m);
+        assert!(u.why_not.is_some(), "dead, with its reason");
+        app.bind_ready_uses(var);
+        let doc = &app.session.doc;
+        let brush = &doc.get(inst).unwrap().paint().fills[0].brush;
+        assert_eq!(
+            doc.resolve_brush(inst, brush).into_owned().to_owned(),
+            ondin_core::Brush::Solid(RED),
+            "the instance stays red"
+        );
+    }
+
+    /// **A chart frame's padding is its regeneration's**: a chart's generated
+    /// layout offers no Spacing or Flow key.
+    ///
+    /// flip: `keys_of` without its chart test → its Spacing and Flow keys.
+    #[test]
+    fn a_chart_frames_layout_is_not_offered() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        use ondin_core::chart::{Chart, ChartKind};
+        app.insert_chart_at(
+            ondin_core::kurbo::Point::new(0.0, 0.0),
+            Chart::sample(ChartKind::Column),
+        );
+        let doc = &app.session.doc;
+        let mut stack = vec![doc.first_page()];
+        let mut chart = None;
+        while let Some(id) = stack.pop() {
+            let n = doc.get(id).unwrap();
+            if n.chart().is_some() {
+                chart = Some(id);
+                break;
+            }
+            stack.extend(n.children().iter().copied());
+        }
+        let chart = chart.expect("the chart");
+        assert!(
+            app.session.doc.resolved_display(chart).is_some(),
+            "the fixture: a chart frame lays out"
+        );
+        let n = app.session.doc.get(chart).unwrap();
+        let keys = keys_of(&app.session.doc, n);
+        assert!(
+            !keys
+                .iter()
+                .any(|k| matches!(k, FieldKey::Spacing { .. } | FieldKey::Flow { .. })),
+            "{keys:?}"
+        );
     }
 
     #[test]

@@ -1108,8 +1108,8 @@ pub mod icon {
     /// The Align card's visual-centre toggle, its palette row and its undo step:
     /// a weight on a stand, a triangle balanced over a post on its base.
     pub const VISUAL_CENTRE: &str = "\u{f067}";
-    /// The size preview, its View row and palette row: three squares growing on
-    /// one baseline.
+    /// The size preview, its View row, palette row and card head: three squares
+    /// nested in one corner.
     pub const SIZE_PREVIEW: &str = "\u{f068}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.

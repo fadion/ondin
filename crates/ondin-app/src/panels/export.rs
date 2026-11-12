@@ -522,10 +522,33 @@ impl OndinApp {
             }
             _ => return,
         };
+        // A vector file has no picture to show but itself: the section stays shut
+        // and says why, its open state kept for the next raster row. What the file
+        // cannot say exactly is still read before exporting, in the tooltip, worked
+        // out only while it shows.
+        let vector = !has_pixels(spec.format);
         // Closing the section frees the texture.
-        let open = !self.collapsed_panels.contains(PREVIEW);
+        let open = !vector && !self.collapsed_panels.contains(PREVIEW);
         if !open {
             self.export_preview = None;
+        }
+        if vector {
+            let head = ui::disable_unless(ui, false, |ui| {
+                ui::section_head(ui, "Preview", false, None, false);
+            });
+            ui.interact(
+                head.response.rect,
+                ui.id().with("export-preview-off"),
+                egui::Sense::hover(),
+            )
+            .on_hover_ui(|ui| {
+                let head = format!("{} has no pixels to preview", spec.format.label());
+                ui.label(match self.vector_note(subject, &spec) {
+                    None => head,
+                    Some(note) => format!("{head}. In this file: {note}"),
+                });
+            });
+            return;
         }
         // A section inside the card: `section_head` rather than `panel`, with no
         // second ground behind it.
@@ -555,25 +578,10 @@ impl OndinApp {
                 icon_preview(ui, &preview.icons);
             }
             if let Some(tex) = &preview.texture {
-                // Fit the width, never magnify.
-                let (w, h) = (preview.pixels.0 as f32, preview.pixels.1 as f32);
-                let avail = ui.available_width();
-                let scale = (avail / w).min(1.0);
-                let shown = egui::vec2(w * scale, h * scale);
-                // On the checkerboard, inset from it: the only
-                // way a transparent export differs from a white one.
-                let (ground, _) = ui.allocate_exact_size(
-                    egui::vec2(avail, shown.y + PREVIEW_INSET * 2.0),
-                    egui::Sense::empty(),
-                );
-                let p = ui.painter().with_clip_rect(ground);
-                ui::paint_checkerboard(&p, ground, 5.0);
-                p.rect_stroke(
-                    ground,
-                    egui::CornerRadius::same(5),
-                    egui::Stroke::new(1.0, theme::color::field_border()),
-                    egui::StrokeKind::Inside,
-                );
+                // Fit inside the inset on every side, never magnify: the inset is
+                // the only way a transparent export differs from a white one.
+                let shown = preview_fit(preview.pixels, ui.available_width());
+                let (ground, p) = preview_ground(ui, shown.y + PREVIEW_INSET * 2.0);
                 let at = egui::Rect::from_center_size(ground.center(), shown);
                 p.image(tex.id(), at, crate::thumbs::FULL_UV, egui::Color32::WHITE);
             }
@@ -583,6 +591,27 @@ impl OndinApp {
                     .color(theme::text::faint()),
             );
         });
+    }
+
+    /// What a vector row's file cannot say exactly (`fidelity_clauses`), read off
+    /// its writer; `None` when the file is the document. A slice reads its region's
+    /// origins, as its file is drawn.
+    fn vector_note(&self, node: NodeId, spec: &ExportSpec) -> Option<String> {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        match spec.format {
+            ExportFormat::Pdf => {
+                let origins = match ondin_export::plan::slice_region(doc, res, node) {
+                    Some((_, origins)) => origins,
+                    None => vec![node],
+                };
+                let approximated = ondin_export::pdf::approximated(doc, res, &origins, spec.text);
+                fidelity_clauses(&approximated, &[])
+            }
+            _ => {
+                let out = ondin_export::svg::svg_spec(doc, res, node, spec);
+                fidelity_clauses(&out.approximated, &out.round_trip)
+            }
+        }
     }
 
     /// Render one spec and keep the result: its size on disk, and a texture small
@@ -597,10 +626,6 @@ impl OndinApp {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         // A slice previews its box of the page, as its file is (`plan::render`).
         let region = ondin_export::plan::slice_region(doc, res, key.node);
-        let origins = match &region {
-            Some((_, origins)) => origins.clone(),
-            None => vec![key.node],
-        };
         if key.spec.format.is_icon() {
             let entries = ondin_export::icon::entries(doc, res, key.node, &key.spec)?;
             let bytes = ondin_export::icon::encode(key.spec.format, &entries).unwrap_or_default();
@@ -636,34 +661,9 @@ impl OndinApp {
             });
         }
         // No raster for a vector file: rasterizing it would preview something other
-        // than the file.
+        // than the file (`inspector_export_preview` keeps the section shut).
         if !key.spec.format.is_raster() {
-            // The reported form (§15 D780): the card is read before exporting, when
-            // a fidelity note can still change what the user does. A PDF is not
-            // converted per edit, so its line has no size.
-            let (head, note) = match key.spec.format {
-                ExportFormat::Pdf => {
-                    let approximated =
-                        ondin_export::pdf::approximated(doc, res, &origins, key.spec.text);
-                    ("PDF".to_string(), fidelity_clauses(&approximated, &[]))
-                }
-                _ => {
-                    let out = ondin_export::svg::svg_spec(doc, res, key.node, &key.spec);
-                    let note = fidelity_clauses(&out.approximated, &out.round_trip);
-                    (format!("SVG · {}", human_bytes(out.svg.len())), note)
-                }
-            };
-            let summary = match note {
-                None => head,
-                Some(note) => format!("{head} · {note}"),
-            };
-            return Some(ExportPreview {
-                key,
-                texture: None,
-                pixels: (0, 0),
-                icons: Vec::new(),
-                summary,
-            });
+            return None;
         }
 
         let (size, clamped) = ondin_export::plan::raster_size(doc, res, key.node, &key.spec);
@@ -3298,6 +3298,34 @@ fn ladder_scale(rows: usize) -> ExportScale {
     ExportScale::Times(rows.min(3) as f32 + 1.0)
 }
 
+/// The size a raster `pixels` big is drawn at in a preview `avail` wide: inside
+/// [`PREVIEW_INSET`] on every side, never magnified.
+fn preview_fit(pixels: (u32, u32), avail: f32) -> egui::Vec2 {
+    let (w, h) = (pixels.0 as f32, pixels.1 as f32);
+    let scale = ((avail - PREVIEW_INSET * 2.0) / w).min(1.0);
+    egui::vec2(w * scale, h * scale)
+}
+
+/// The preview's ground, the card's width and `h` tall: a checkerboard with a
+/// control's corners and hairline, the corners masked to the card since a
+/// checkerboard is painted square. Answers it and a painter clipped to it.
+fn preview_ground(ui: &mut egui::Ui, h: f32) -> (egui::Rect, egui::Painter) {
+    let (ground, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::empty());
+    let p = ui.painter().with_clip_rect(ground);
+    let radius = egui::CornerRadius::same(ui::BUTTON_R);
+    ui::paint_checkerboard(&p, ground, 5.0);
+    ui::mask_corners(&p, ground, f32::from(ui::BUTTON_R), theme::color::card());
+    // After the mask, or it bites pieces out of the stroke.
+    p.rect_stroke(
+        ground,
+        radius,
+        egui::Stroke::new(1.0, theme::color::field_border()),
+        egui::StrokeKind::Inside,
+    );
+    (ground, p)
+}
+
 /// An icon file's sizes on the preview's checkerboard, each at actual size with its
 /// number under it, in order, as many to a line as fit; a size wider than the
 /// column takes a line of its own, drawn down to the column and labelled
@@ -3329,15 +3357,7 @@ fn icon_preview(ui: &mut egui::Ui, tiles: &[IconTile]) {
     let h: f32 = lines.iter().map(|l| line_h(l)).sum::<f32>()
         + ICON_TILE_GAP * lines.len().saturating_sub(1) as f32
         + PREVIEW_INSET * 2.0;
-    let (ground, _) = ui.allocate_exact_size(egui::vec2(avail, h), egui::Sense::empty());
-    let p = ui.painter().with_clip_rect(ground);
-    ui::paint_checkerboard(&p, ground, 5.0);
-    p.rect_stroke(
-        ground,
-        egui::CornerRadius::same(5),
-        egui::Stroke::new(1.0, theme::color::field_border()),
-        egui::StrokeKind::Inside,
-    );
+    let (ground, p) = preview_ground(ui, h);
     let mut y = ground.top() + PREVIEW_INSET;
     for line in &lines {
         let tall = line_h(line) - label_h;
@@ -4096,6 +4116,23 @@ mod tests {
         assert_eq!(human_bytes(1024), "1 KB");
         assert_eq!(human_bytes(1025), "2 KB", "rounded up, never to 1");
         assert_eq!(human_bytes(1024 * 1024), "1.0 MB");
+    }
+
+    /// A raster wider than the card keeps the inset on its sides as on its top
+    /// and bottom, with its aspect; a small one is not magnified.
+    /// flip: `preview_fit` scaling to `avail` → fails at "inside the side inset".
+    #[test]
+    fn the_preview_fits_inside_its_inset_on_every_side() {
+        let shown = preview_fit((976, 1018), 250.0);
+        assert!(
+            shown.x <= 250.0 - PREVIEW_INSET * 2.0 + 0.01,
+            "inside the side inset: {shown:?}"
+        );
+        assert!(
+            (shown.y / shown.x - 1018.0 / 976.0).abs() < 1e-4,
+            "the aspect kept"
+        );
+        assert_eq!(preview_fit((40, 20), 250.0), egui::vec2(40.0, 20.0));
     }
 
     /// The preview declines a padded export on the size the file would be, and an

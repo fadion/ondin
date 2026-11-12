@@ -67,8 +67,10 @@ impl Preset {
         ] {
             axis.show = default.show;
             axis.grid.show = default.grid.show;
-            axis.grid.dashed = default.grid.dashed;
         }
+        // Only *Soft* dashes, and only the value gridlines: the category
+        // gridlines' dash is the user's.
+        o.value_axis.grid.dashed = clean.value_axis.grid.dashed;
         o.legend.position = clean.legend.position;
         o.values.position = clean.values.position;
         o.text.value_size = clean.text.value_size;
@@ -136,6 +138,18 @@ mod tests {
         let mut custom = Options::default();
         custom.bars.radius = 9.0;
         assert_eq!(Preset::of(&custom), None, "an edited option lights none");
+    }
+
+    /// An option no preset sets survives every preset: the category
+    /// gridlines' dash.
+    /// flip: `Preset::apply` resetting both axes' dash → fails at "kept".
+    #[test]
+    fn a_preset_keeps_the_category_gridlines_dash() {
+        let mut o = Options::default();
+        o.category_axis.grid.dashed = true;
+        for p in Preset::ALL {
+            assert!(p.apply(&o).category_axis.grid.dashed, "{p:?}: kept");
+        }
     }
 
     /// Every preset changes something a Sankey draws, so no two of its cells

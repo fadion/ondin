@@ -693,3 +693,316 @@ fn a_column_id_at_the_top_still_leaves_room() {
     let next = c.with_table(table);
     assert_eq!(next.validate(), Ok(()), "{:?}", next.table.columns);
 }
+
+/// `kind`'s sample chart on `rows`, each a category and then one cell per
+/// series column.
+fn on_rows(kind: ChartKind, rows: &[&[&str]]) -> Chart {
+    let mut c = Chart::sample(kind);
+    c.table.rows = rows
+        .iter()
+        .map(|r| {
+            let mut row: Vec<String> = r.iter().map(|c| (*c).to_string()).collect();
+            row.resize(c.table.columns.len(), String::new());
+            row
+        })
+        .collect();
+    c
+}
+
+/// A part's box in the chart frame's space, through its parents' transforms.
+fn world_box(g: &Generated, p: &Part) -> kurbo::Rect {
+    let mut b = drawn_box(p);
+    let mut at = p.parent;
+    while let Some(k) = at {
+        let parent = g.parts.iter().find(|q| q.key == k).expect("a parent");
+        b = parent.transform.transform_rect_bbox(b);
+        at = parent.parent;
+    }
+    b
+}
+
+/// The path a part draws.
+fn path_of(p: &Part) -> &kurbo::BezPath {
+    match &p.kind {
+        crate::node::NodeKind::Path { path, .. } => path,
+        other => panic!("a path: {other:?}"),
+    }
+}
+
+/// A stacked Smooth area's floor is the smoothed top of the series under it,
+/// not chords across it.
+/// flip: `curve` refusing a floor that runs right to left → fails at "smooth
+/// floor".
+#[test]
+fn a_stacked_smooth_area_stands_on_the_curve_below() {
+    let mut c = on_rows(
+        ChartKind::Area,
+        &[
+            &["a", "1", "1"],
+            &["b", "5", "1"],
+            &["c", "1", "1"],
+            &["d", "5", "1"],
+        ],
+    );
+    c.mapping.series.truncate(2);
+    c.options.lines.area_stacking = Stacking::Stacked;
+    c.options.lines.curve = Curve::Smooth;
+    let g = draw(&c);
+    let upper = part(&g, PartRole::Area, 2, 0).expect("the upper area");
+    let curves = path_of(upper)
+        .elements()
+        .iter()
+        .filter(|e| matches!(e, kurbo::PathEl::CurveTo(..)))
+        .count();
+    // Three segments along its top, three back along its floor.
+    assert_eq!(curves, 6, "smooth floor: {:?}", path_of(upper));
+}
+
+/// With *Connect gaps* on a stacked area, a gap stands on the series below:
+/// the gapped series' line dips to that series' top there.
+/// flip: `runs_of` skipping a stacked gap → fails at "on the stack".
+#[test]
+fn a_connected_gap_in_a_stack_stands_on_the_series_below() {
+    let mut c = on_rows(
+        ChartKind::Area,
+        &[
+            &["a", "1", "1", "1"],
+            &["b", "5", "", "1"],
+            &["c", "1", "1", "1"],
+        ],
+    );
+    c.options.lines.area_stacking = Stacking::Stacked;
+    c.options.lines.connect_gaps = true;
+    let g = draw(&c);
+    let line = |s| path_of(part(&g, PartRole::Line, s, 0).unwrap()).clone();
+    let (a, b) = (line(1), line(2));
+    let mid = |p: &kurbo::BezPath| {
+        p.elements()
+            .iter()
+            .filter_map(|e| match e {
+                kurbo::PathEl::MoveTo(q) | kurbo::PathEl::LineTo(q) => Some(*q),
+                _ => None,
+            })
+            .nth(1)
+            .expect("a middle point")
+    };
+    assert!(
+        (mid(&a).y - mid(&b).y).abs() < 1e-9,
+        "on the stack: A {:?}, B {:?}",
+        mid(&a),
+        mid(&b)
+    );
+    assert!(
+        all(&g, PartRole::Point, 2).is_empty(),
+        "a gap draws no point"
+    );
+}
+
+/// A line value with no neighbour is drawn as a dot, not left as a bare move.
+/// flip: `lines` drawing no dot for a one-point run → fails at "a dot".
+#[test]
+fn a_lone_line_value_draws_a_dot() {
+    let mut c = on_rows(ChartKind::Line, &[&["a", "3"], &["b", ""], &["c", "5"]]);
+    c.mapping.series.truncate(1);
+    let g = draw(&c);
+    let dots = all(&g, PartRole::Point, 1);
+    assert_eq!(dots.len(), 2, "a dot for each lone value");
+    let one = on_rows(ChartKind::Line, &[&["a", "3"]]);
+    assert!(
+        !all(&draw(&one), PartRole::Point, 1).is_empty(),
+        "a dot for a one-row chart"
+    );
+}
+
+/// *Group small slices* never folds every slice: two slices both under the
+/// share draw as two slices, with no progress ring's track.
+/// flip: `pie_slices` folding when every slice is small → fails at "no track".
+#[test]
+fn grouping_leaves_a_pie_a_pie() {
+    let mut c = on_rows(ChartKind::Pie, &[&["a", "30"], &["b", "40"]]);
+    c.options.slices.group_below = Some(60.0);
+    let g = draw(&c);
+    assert!(part(&g, PartRole::Ground, 0, 0).is_none(), "no track");
+    assert_eq!(all(&g, PartRole::Slice, 0).len(), 2);
+}
+
+/// A bubble whose size is below zero is left out and said; a scatter's note
+/// names the table's row even after a row with no X.
+/// flip: `scatter_clouds` naming the row by its place among the kept ones →
+/// fails at "Row 2"; drawing a negative size at its absolute value → fails at
+/// "a negative size".
+#[test]
+fn a_scatters_notes_name_the_tables_rows() {
+    let mut c = Chart::sample(ChartKind::Scatter);
+    c.table.rows = [["", "5", "1"], ["abc", "7", "1"], ["3", "9", "1"]]
+        .iter()
+        .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+        .collect();
+    c.mapping.series.truncate(1);
+    let g = draw(&c);
+    assert!(
+        g.left_out
+            .iter()
+            .any(|n| n == "Row 2: “abc” is not a number"),
+        "Row 2: {:?}",
+        g.left_out
+    );
+    let mut b = Chart::sample(ChartKind::Scatter);
+    b.mapping.series.truncate(1);
+    b.mapping.size = Some(ColumnId(2));
+    b.table.rows[1][2] = "-40".into();
+    let g = draw(&b);
+    assert!(
+        g.left_out.iter().any(|n| n == "Row 2: a negative size"),
+        "a negative size: {:?}",
+        g.left_out
+    );
+    assert_eq!(all(&g, PartRole::Point, 1).len(), b.table.rows.len() - 1);
+}
+
+/// A Sankey with one crowded column still gives its nodes height: the gaps
+/// give way.
+/// flip: `sankey` keeping the set node gap however many nodes share a column
+/// → fails at "taller than 0".
+#[test]
+fn a_crowded_sankey_column_keeps_its_nodes() {
+    let mut c = Chart::sample(ChartKind::Sankey);
+    let mut rows: Vec<Vec<String>> = (0..30)
+        .map(|i| vec![format!("S{i}"), "Hub".into(), "10".into()])
+        .collect();
+    rows.push(vec!["Hub".into(), "End".into(), "300".into()]);
+    c.table.rows = rows;
+    let g = draw(&c);
+    let nodes = all(&g, PartRole::SankeyNode, 0);
+    assert!(!nodes.is_empty(), "the fixture draws nodes");
+    for n in nodes {
+        assert!(box_size(n).height > 0.0, "taller than 0: {}", n.name);
+    }
+}
+
+/// A column chart past the mark limit in categories alone is refused, and a
+/// line chart's category ticks are thinned with its labels.
+/// flip: `bars` counting only bars → fails at "refused"; `category_labels`
+/// marking every category → fails at "thinned".
+#[test]
+fn categories_count_toward_the_limits() {
+    let rows: Vec<Vec<String>> = (0..3_000)
+        .map(|i| vec![format!("c{i}"), "1".into()])
+        .collect();
+    let mut c = Chart::sample(ChartKind::Column);
+    c.table.rows = rows
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.resize(4, String::new());
+            r
+        })
+        .collect();
+    c.mapping.series.clear();
+    c.options.category_axis.ticks = true;
+    assert!(
+        matches!(
+            generate(&c, kurbo::Size::new(480.0, 280.0), "Inter"),
+            Err(Refusal::TooManyMarks {
+                what: "categories",
+                ..
+            })
+        ),
+        "refused"
+    );
+    c.kind = ChartKind::Line;
+    let g = draw(&c);
+    let ticks = all(&g, PartRole::Tick, 1).len();
+    let labels = all(&g, PartRole::CategoryLabel, 0).len();
+    assert!(
+        ticks <= labels.max(1),
+        "thinned: {ticks} ticks, {labels} labels"
+    );
+}
+
+/// A turned value label at the axis's end stays inside its axis frame, so it
+/// is not drawn over the legend above the plot.
+/// flip: `turned_label` centring every label on its tick → fails at "inside".
+#[test]
+fn a_turned_end_label_stays_inside_its_axis() {
+    let mut c = Chart::sample(ChartKind::Column);
+    for r in &mut c.table.rows {
+        for cell in &mut r[1..] {
+            let v: f64 = cell.parse().unwrap();
+            *cell = format!("{}", v * 25_000.0);
+        }
+    }
+    c.options.value_axis.angle = LabelAngle::Upright;
+    let g = generate(&c, kurbo::Size::new(300.0, 200.0), "Inter").unwrap();
+    let axis = world_box(&g, part(&g, PartRole::ValueAxis, 0, 0).unwrap());
+    let labels = all(&g, PartRole::TickLabel, 0);
+    assert!(!labels.is_empty(), "the fixture");
+    for l in labels {
+        let b = world_box(&g, l);
+        assert!(
+            b.y0 >= axis.y0 - 1e-6 && b.y1 <= axis.y1 + 1e-6,
+            "inside: {} at {b:?}, the axis {axis:?}",
+            l.name
+        );
+    }
+}
+
+/// An axis title longer than its axis is cut with an ellipsis to the axis's
+/// length, so it stays inside the chart.
+/// flip: `within` returning the title whole → fails at "inside the chart".
+#[test]
+fn a_long_axis_title_is_cut_to_its_axis() {
+    let mut c = Chart::sample(ChartKind::Column);
+    c.options.value_axis.title = "Revenue in thousands of dollars per month".into();
+    let size = kurbo::Size::new(300.0, 160.0);
+    let g = generate(&c, size, "Inter").unwrap();
+    let t = part(&g, PartRole::AxisTitle, 0, 0).expect("a title");
+    let b = world_box(&g, t);
+    assert!(
+        b.y0 >= -1e-6 && b.y1 <= size.height + 1e-6,
+        "inside the chart: {b:?}"
+    );
+    match &t.kind {
+        crate::node::NodeKind::Text { content, .. } => assert!(content.ends_with('…')),
+        other => panic!("a text: {other:?}"),
+    }
+}
+
+/// A pie's slices and a grouped scatter's groups draw the colours *From
+/// variables* binds by name, and read back as bound.
+/// flip: `pie_slices` taking the palette whatever is styled → fails at "the
+/// slice draws the binding".
+#[test]
+fn named_marks_draw_their_bound_colours() {
+    let mut ids = crate::IdSource::new(2);
+    let vars = [ids.mint_var(), ids.mint_var()];
+    let pie = with_variables(&Chart::sample(ChartKind::Pie), &vars);
+    assert_eq!(bound_variables(&pie).map(|v| v.len()), Some(6));
+    let g = draw(&pie);
+    let slices = all(&g, PartRole::Slice, 0);
+    assert!(!slices.is_empty());
+    for s in slices {
+        assert!(
+            s.fills.iter().any(|f| f.brush.var().is_some()),
+            "the slice draws the binding: {}",
+            s.name
+        );
+    }
+    let mut scatter = Chart::sample(ChartKind::Scatter);
+    scatter.mapping.series.truncate(1);
+    scatter.mapping.group = Some(ColumnId(2));
+    let scatter = with_variables(&scatter, &vars);
+    let g = draw(&scatter);
+    let points = g
+        .parts
+        .iter()
+        .filter(|p| p.key.role == PartRole::Point)
+        .collect::<Vec<_>>();
+    assert!(!points.is_empty());
+    assert!(
+        points
+            .iter()
+            .all(|p| p.fills.iter().any(|f| f.brush.var().is_some())),
+        "the groups draw the binding"
+    );
+}

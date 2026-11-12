@@ -1,6 +1,7 @@
-//! A chart's colours as the generator assigns them: a series' or a Sankey
-//! node's own style, else the palette's colour at its place. The Chart card's
-//! swatches and the picker read and write through these.
+//! A chart's colours as the generator assigns them: a series' or a named
+//! mark's (a Sankey node, a pie's slice, a scatter's group) own style, else
+//! the palette's colour at its place. The Chart card's swatches and the picker
+//! read and write through these.
 
 use super::{Chart, ColumnId, NodeStyle, SeriesStyle, palette, parse_number};
 use crate::variable::BrushSource;
@@ -57,6 +58,72 @@ pub fn sankey_nodes(chart: &Chart) -> Vec<(String, BrushSource)> {
     out
 }
 
+/// The marks a chart colours by name rather than by series, in the order the
+/// generator meets them, each with the fill it draws in: a Sankey's nodes, a
+/// pie's slices (by category) and a grouped scatter's groups. Each takes its
+/// style from `Chart::nodes` by name, else the palette at its place. `None`
+/// for a chart coloured by series.
+pub fn named_marks(chart: &Chart) -> Option<Vec<(String, BrushSource)>> {
+    let t = &chart.table;
+    let m = &chart.mapping;
+    let colours = palette(chart.options.palette);
+    let fill = |name: &str, i: usize| {
+        chart
+            .nodes
+            .iter()
+            .find(|s| s.name == name)
+            .map_or_else(|| literal(colours[i % colours.len()]), |s| s.fill.clone())
+    };
+    let at = |c: Option<ColumnId>| c.and_then(|c| t.index_of(c));
+    // The rows the generator reads: those with a category.
+    let cat = at(m.category);
+    let rows = || {
+        t.rows
+            .iter()
+            .filter(move |r| cat.is_none_or(|c| !r[c].trim().is_empty()))
+    };
+    let mut out: Vec<(String, BrushSource)> = Vec::new();
+    match chart.kind {
+        super::ChartKind::Sankey => return Some(sankey_nodes(chart)),
+        super::ChartKind::Pie => {
+            // The first visible series, as the generator reads it.
+            let first = m
+                .series
+                .iter()
+                .find(|c| !chart.series.iter().any(|s| s.column == **c && !s.visible));
+            let Some(vc) = at(first.copied()) else {
+                return Some(out);
+            };
+            for (i, r) in rows().enumerate() {
+                let name = cat.map_or_else(|| (i + 1).to_string(), |c| r[c].trim().to_string());
+                let drawn = parse_number(&r[vc]).is_some_and(|v| v > 0.0);
+                if drawn && !out.iter().any(|(n, _)| *n == name) {
+                    out.push((name.clone(), fill(&name, i)));
+                }
+            }
+        }
+        super::ChartKind::Scatter if m.group.is_some() => {
+            let Some(gc) = at(m.group) else {
+                return Some(out);
+            };
+            for r in rows() {
+                let g = r[gc].trim();
+                let name = if g.is_empty() {
+                    super::generate::NO_GROUP
+                } else {
+                    g
+                };
+                if !out.iter().any(|(n, _)| n == name) {
+                    let i = out.len();
+                    out.push((name.to_string(), fill(name, i)));
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some(out)
+}
+
 /// Each of [`sankey_nodes`]' nodes' value, in its order: the larger of what flows
 /// in and what flows out, as the generator sizes the node.
 pub fn sankey_totals(chart: &Chart) -> Vec<f64> {
@@ -101,7 +168,8 @@ pub fn with_series_fill(chart: &Chart, column: ColumnId, fill: BrushSource) -> C
     next
 }
 
-/// `chart` with Sankey node `name` drawn in `fill`.
+/// `chart` with the named mark `name` (a Sankey node, a pie's slice, a
+/// scatter's group: [`named_marks`]) drawn in `fill`.
 pub fn with_node_fill(chart: &Chart, name: &str, fill: BrushSource) -> Chart {
     let mut next = chart.clone();
     match next.nodes.iter_mut().find(|s| s.name == name) {
@@ -129,9 +197,10 @@ pub fn with_palette(chart: &Chart, p: super::Palette) -> Chart {
     next
 }
 
-/// `chart` with its series (a Sankey's nodes) bound to `vars` in order, round
-/// again past the last: *From variables*, so a mode switch recolours the chart.
-/// The palette stays what it was, for the series a later edit adds.
+/// `chart` with its series (its [`named_marks`], where it colours by name)
+/// bound to `vars` in order, round again past the last: *From variables*, so a
+/// mode switch recolours the chart. The palette stays what it was, for the
+/// series a later edit adds.
 pub fn with_variables(chart: &Chart, vars: &[crate::VarId]) -> Chart {
     if vars.is_empty() {
         return chart.clone();
@@ -141,30 +210,33 @@ pub fn with_variables(chart: &Chart, vars: &[crate::VarId]) -> Chart {
         alpha: 1.0,
     };
     let mut next = chart.clone();
-    if chart.kind == super::ChartKind::Sankey {
-        for (i, (name, _)) in sankey_nodes(chart).into_iter().enumerate() {
-            next = with_node_fill(&next, &name, bound(i));
+    match named_marks(chart) {
+        Some(marks) => {
+            for (i, (name, _)) in marks.into_iter().enumerate() {
+                next = with_node_fill(&next, &name, bound(i));
+            }
         }
-    } else {
-        for (i, col) in chart.mapping.series.iter().enumerate() {
-            next = with_series_fill(&next, *col, bound(i));
+        None => {
+            for (i, col) in chart.mapping.series.iter().enumerate() {
+                next = with_series_fill(&next, *col, bound(i));
+            }
         }
     }
     next
 }
 
-/// The variables `chart`'s series (a Sankey's nodes) are bound to in order,
-/// when every one is bound; what *From variables* lights against.
+/// The variables `chart`'s series (its [`named_marks`], where it colours by
+/// name) are bound to in order, when every one is bound; what *From variables*
+/// lights against.
 pub fn bound_variables(chart: &Chart) -> Option<Vec<crate::VarId>> {
-    let fills: Vec<BrushSource> = if chart.kind == super::ChartKind::Sankey {
-        sankey_nodes(chart).into_iter().map(|(_, f)| f).collect()
-    } else {
-        chart
+    let fills: Vec<BrushSource> = match named_marks(chart) {
+        Some(marks) => marks.into_iter().map(|(_, f)| f).collect(),
+        None => chart
             .mapping
             .series
             .iter()
             .filter_map(|c| series_fill(chart, *c))
-            .collect()
+            .collect(),
     };
     let vars: Option<Vec<crate::VarId>> = fills.iter().map(|f| f.var()).collect();
     vars.filter(|v| !v.is_empty())

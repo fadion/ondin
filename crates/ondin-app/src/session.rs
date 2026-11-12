@@ -43,6 +43,38 @@ pub(crate) fn next_revision() -> u64 {
 /// (`EditorSession::follow_step`'s two arguments).
 type Followed = (Vec<NodeId>, Vec<NodeId>);
 
+/// One chart a preview generated: its id, description and size, and the parts,
+/// `None` where the chart is past its limits.
+type ChartGenerated = (
+    NodeId,
+    ondin_core::chart::Chart,
+    Size,
+    Option<ondin_core::chart::Generated>,
+);
+
+/// Chart `id` as `chart` generates at `size`, kept in `kept` for the next
+/// preview: taken from `last` when the last preview generated the same,
+/// generated otherwise. `None` past the chart's limits.
+fn generated_once<'a>(
+    kept: &'a mut Vec<ChartGenerated>,
+    last: &mut Vec<ChartGenerated>,
+    id: NodeId,
+    chart: &ondin_core::chart::Chart,
+    size: Size,
+) -> Option<&'a ondin_core::chart::Generated> {
+    let same = |e: &ChartGenerated| e.0 == id && e.2 == size && e.1 == *chart;
+    let entry = match last.iter().position(same) {
+        Some(i) => last.swap_remove(i),
+        None => {
+            let family = ondin_core::typography::TextStyle::default().font_family;
+            let got = ondin_core::chart::generate(chart, size, &family).ok();
+            (id, chart.clone(), size, got)
+        }
+    };
+    kept.push(entry);
+    kept.last().and_then(|e| e.3.as_ref())
+}
+
 /// How a commit joins the history ([`EditorSession::commit_inner`]).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fold {
@@ -497,6 +529,10 @@ pub struct EditorSession {
     /// description is not a node property `RenderOverrides` patches, so the
     /// card and the picker read it here ([`Self::chart_drawn`]).
     chart_preview: Option<(NodeId, Box<ondin_core::chart::Chart>)>,
+    /// What the last preview generated for each chart, by its description and
+    /// size, a refusal as `None`: a field held focused previews the same edit
+    /// every frame, which need not lay the chart out again.
+    chart_generated: Vec<ChartGenerated>,
     /// Whether the document has edits not yet written to `path`.
     dirty: bool,
     /// The revision a write now in flight will put on disk, if one is
@@ -782,6 +818,7 @@ impl EditorSession {
             preview_holds_gesture: false,
             pivot_preview: None,
             chart_preview: None,
+            chart_generated: Vec::new(),
             dirty: false,
             saving: None,
             run: None,
@@ -1220,6 +1257,8 @@ impl EditorSession {
         // A chart's description changes what its parts are, which no patch can
         // say: the parts it would generate are drawn in their place.
         self.chart_preview = None;
+        let mut last = std::mem::take(&mut self.chart_generated);
+        let mut kept: Vec<ChartGenerated> = Vec::new();
         let mut described: Vec<(NodeId, &ondin_core::chart::Chart)> = Vec::new();
         for op in &tx.0 {
             if let Operation::SetChart {
@@ -1228,10 +1267,13 @@ impl EditorSession {
             } = op
             {
                 described.push((*id, chart));
-                if let Some(parts) =
-                    ondin_core::chart::preview(&self.doc, &self.resolved, *id, chart)
-                {
-                    self.overrides.replace_chart(*id, &parts);
+                let Some(NodeKind::Artboard { size, .. }) =
+                    self.resolved.used_kind(&self.doc, *id).cloned()
+                else {
+                    continue;
+                };
+                if let Some(parts) = generated_once(&mut kept, &mut last, *id, chart, size) {
+                    self.overrides.replace_chart(*id, parts);
                     // The first is the card's own chart; the rest follow it.
                     if self.chart_preview.is_none() {
                         self.chart_preview = Some((*id, chart.clone()));
@@ -1256,7 +1298,6 @@ impl EditorSession {
             .collect();
         pies.sort_by_key(|(id, _)| *id);
         pies.dedup_by_key(|(id, _)| *id);
-        let family = ondin_core::typography::TextStyle::default().font_family;
         for (id, size) in pies {
             let Some(chart) = described
                 .iter()
@@ -1266,10 +1307,11 @@ impl EditorSession {
             else {
                 continue;
             };
-            if let Ok(parts) = ondin_core::chart::generate(chart, size, &family) {
-                self.overrides.replace_chart(id, &parts);
+            if let Some(parts) = generated_once(&mut kept, &mut last, id, chart, size) {
+                self.overrides.replace_chart(id, parts);
             }
         }
+        self.chart_generated = kept;
         self.drawn = next_revision();
         self.preview_holds_gesture = true;
         // From the gesture's own operations, never the follows: a `SetPivot` on a

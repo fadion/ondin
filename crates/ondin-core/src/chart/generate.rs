@@ -192,6 +192,20 @@ pub fn generate(chart: &Chart, size: Size, family: &str) -> Result<Generated, Re
     // A pie's slices are its legend's entries; every other kind's are its series.
     let slices = (chart.kind == ChartKind::Pie).then(|| pie_slices(chart, &mut data));
     let clouds = (chart.kind == ChartKind::Scatter).then(|| scatter_clouds(chart, &mut data));
+    // Refused before the legend measures an entry for each.
+    if let Some(s) = slices.as_ref().filter(|s| s.len() > super::MAX_SLICES) {
+        return Err(Refusal::TooManyMarks {
+            count: s.len(),
+            what: "slices",
+        });
+    }
+    let points: usize = clouds.iter().flatten().map(|c| c.points.len()).sum();
+    if points > super::MAX_MARKS {
+        return Err(Refusal::TooManyMarks {
+            count: points,
+            what: "points",
+        });
+    }
     let entries: Vec<Entry> = match (&slices, &clouds) {
         (Some(s), _) => s
             .iter()
@@ -935,6 +949,13 @@ fn bars(
             what: "bars",
         });
     }
+    // Each category is a band of its own, drawn with no series too.
+    if n_cat > super::MAX_MARKS {
+        return Err(Refusal::TooManyMarks {
+            count: n_cat,
+            what: "categories",
+        });
+    }
 
     // Each category's extent: stacked positives up and negatives down, apart
     // the values themselves.
@@ -1348,42 +1369,15 @@ fn axes(
             let share = value_share(t.values[i]);
             let name = format!("Tick {s}");
             let k = key(PartRole::TickLabel, 0, i as u32);
-            // The insets place the unturned box, which layout turns about its
-            // centre; a turned label's centre sits as far out as it reaches.
-            let (across, down) = turned_reach(*b, va_turn);
-            if horizontal {
-                let cx = share * frame_w;
-                let edge = va_gap + (down - b.height()) / 2.0;
-                let y = if bottom_at_top {
-                    frame_h - va_gap - (down + b.height()) / 2.0
-                } else {
-                    edge
-                };
-                let at = Point::new(cx - b.width() / 2.0 - b.x0, y - b.y0);
-                let mut insets = centred_x(share * 100.0);
-                if bottom_at_top {
-                    insets.bottom = px(edge);
-                } else {
-                    insets.top = px(edge);
-                }
-                out.label(k, value_axis_key, name, s, tick_size, at, insets, va_turn);
+            let frame = Size::new(frame_w, frame_h);
+            let (at, insets) = if horizontal {
+                let centre = share * frame_w;
+                turned_label(*b, va_turn, true, centre, va_gap, frame, !bottom_at_top)
             } else {
-                let cy = (1.0 - share) * frame_h;
-                let edge = va_gap + (across - b.width()) / 2.0;
-                let x = if left_at_end {
-                    edge
-                } else {
-                    frame_w - va_gap - (across + b.width()) / 2.0
-                };
-                let at = Point::new(x - b.x0, cy - b.height() / 2.0 - b.y0);
-                let mut insets = centred_y((1.0 - share) * 100.0);
-                if left_at_end {
-                    insets.left = px(edge);
-                } else {
-                    insets.right = px(edge);
-                }
-                out.label(k, value_axis_key, name, s, tick_size, at, insets, va_turn);
-            }
+                let centre = (1.0 - share) * frame_h;
+                turned_label(*b, va_turn, false, centre, va_gap, frame, left_at_end)
+            };
+            out.label(k, value_axis_key, name, s, tick_size, at, insets, va_turn);
         }
     }
     // Value tick marks, out from the plot's edge at each tick.
@@ -1419,12 +1413,18 @@ fn axes(
         let Some((text, b)) = title else { continue };
         let series = u32::from(axis_key.role == PartRole::CategoryAxis);
         let frame = if turned { side_box } else { under_box };
-        let (at, insets, turn) = title_place(*b, frame.size(), turned, edge);
+        let length = if turned {
+            frame.height()
+        } else {
+            frame.width()
+        };
+        let (shown, b) = within(text, *b, length, out.text, o.text.title_size);
+        let (at, insets, turn) = title_place(b, frame.size(), turned, edge);
         out.label(
             key(PartRole::AxisTitle, series, 0),
             axis_key,
             format!("Title {text}"),
-            text,
+            &shown,
             o.text.title_size,
             at,
             insets,
@@ -1736,20 +1736,24 @@ impl Axes {
         let (side_box, under_box, cat_boxes) = (self.side_box, self.under_box, &self.cat_boxes);
         let cat_axis_key = key(PartRole::CategoryAxis, 0, 0);
         let frame = if horizontal { side_box } else { under_box };
-        // Tick marks: at a scatter's X ticks, else at every category's centre.
+        // Tick marks: at a scatter's X ticks, else at the centre of every
+        // category a label is written for, so a long axis draws no more ticks
+        // than labels.
         if let Some(colour) = &self.ca_ticks {
-            let at: Vec<(f64, String)> = match &self.x {
+            let at: Vec<(usize, f64, String)> = match &self.x {
                 Some(xt) => xt
                     .values
                     .iter()
                     .zip(&self.x_text)
-                    .map(|(v, s)| (xt.t(*v), s.clone()))
+                    .enumerate()
+                    .map(|(i, (v, s))| (i, xt.t(*v), s.clone()))
                     .collect(),
                 None => data
                     .categories
                     .iter()
                     .enumerate()
-                    .map(|(c, name)| ((c as f64 + 0.5) * band / across_len, name.clone()))
+                    .filter(|(c, _)| c % every == 0)
+                    .map(|(c, name)| (c, (c as f64 + 0.5) * band / across_len, name.clone()))
                     .collect(),
             };
             let from_start = if horizontal {
@@ -1757,7 +1761,7 @@ impl Axes {
             } else {
                 !bottom_at_top
             };
-            for (i, (along, name)) in at.into_iter().enumerate() {
+            for (i, along, name) in at {
                 let (bx, insets) = tick_mark(horizontal, along, from_start, frame.size());
                 out.rect(
                     key(PartRole::Tick, 1, i as u32),
@@ -1810,64 +1814,21 @@ impl Axes {
                 .collect(),
         };
         for (centre, name, b, k, label_name) in items {
-            if horizontal {
-                // As below, turned about its centre, as far out as it reaches.
-                let across = turned_reach(b, turn).0;
-                let edge = gap + (across - b.width()) / 2.0;
-                let x = if left_at_end {
-                    edge
-                } else {
-                    frame.width() - gap - (across + b.width()) / 2.0
-                };
-                let at = Point::new(x - b.x0, centre - b.height() / 2.0 - b.y0);
-                let mut insets = centred_y(centre / across_len * 100.0);
-                if left_at_end {
-                    insets.left = px(edge);
-                } else {
-                    insets.right = px(edge);
-                }
-                out.label(
-                    k,
-                    cat_axis_key,
-                    label_name,
-                    name,
-                    tick_size,
-                    at,
-                    insets,
-                    turn,
-                );
+            let (at, insets) = if horizontal {
+                turned_label(b, turn, false, centre, gap, frame.size(), left_at_end)
             } else {
-                // A turned label's box is its unturned one, turned about its
-                // centre; its centre sits under the band, as deep as it reaches.
-                let (sn, cs) = turn.sin_cos();
-                let reach = b.width() * sn.abs() + b.height() * cs.abs();
-                let cy = if bottom_at_top {
-                    frame.height() - gap - reach / 2.0
-                } else {
-                    gap + reach / 2.0
-                };
-                let at = Point::new(
-                    centre - b.width() / 2.0 - b.x0,
-                    cy - b.height() / 2.0 - b.y0,
-                );
-                let mut insets = centred_x(centre / across_len * 100.0);
-                let edge = gap + reach / 2.0 - b.height() / 2.0;
-                if bottom_at_top {
-                    insets.bottom = px(edge);
-                } else {
-                    insets.top = px(edge);
-                }
-                out.label(
-                    k,
-                    cat_axis_key,
-                    label_name,
-                    name,
-                    tick_size,
-                    at,
-                    insets,
-                    turn,
-                );
-            }
+                turned_label(b, turn, true, centre, gap, frame.size(), !bottom_at_top)
+            };
+            out.label(
+                k,
+                cat_axis_key,
+                label_name,
+                name,
+                tick_size,
+                at,
+                insets,
+                turn,
+            );
         }
     }
 }
@@ -1927,15 +1888,20 @@ fn sankey(
         return Ok(());
     };
 
-    // Nodes in first-seen order; same-named flows added up.
+    // Nodes in first-seen order; same-named flows added up. Looked up by
+    // hash, so a table of many names costs its rows, not rows × names, before
+    // the limits refuse it.
     let mut nodes: Vec<Node> = Vec::new();
     let mut flows: Vec<Flow> = Vec::new();
+    let mut named: rustc_hash::FxHashMap<String, usize> = Default::default();
+    let mut joined: rustc_hash::FxHashMap<(usize, usize), usize> = Default::default();
     let colours = palette(o.palette);
-    let index = |name: &str, nodes: &mut Vec<Node>| -> usize {
-        if let Some(i) = nodes.iter().position(|n| n.name == name) {
-            return i;
+    let mut index = |name: &str, nodes: &mut Vec<Node>| -> usize {
+        if let Some(i) = named.get(name) {
+            return *i;
         }
         let i = nodes.len();
+        named.insert(name.to_string(), i);
         let fill = chart
             .nodes
             .iter()
@@ -1966,15 +1932,18 @@ fn sankey(
             continue;
         };
         let (a, b) = (index(from, &mut nodes), index(to, &mut nodes));
-        match flows.iter_mut().find(|fl| fl.from == a && fl.to == b) {
-            Some(fl) => fl.value += v,
-            None => flows.push(Flow {
-                from: a,
-                to: b,
-                value: v,
-                sy: 0.0,
-                ty: 0.0,
-            }),
+        match joined.get(&(a, b)) {
+            Some(&k) => flows[k].value += v,
+            None => {
+                joined.insert((a, b), flows.len());
+                flows.push(Flow {
+                    from: a,
+                    to: b,
+                    value: v,
+                    sy: 0.0,
+                    ty: 0.0,
+                });
+            }
         }
     }
     if nodes.len() > super::MAX_SANKEY_NODES {
@@ -2095,7 +2064,17 @@ fn sankey(
     };
 
     // Heights: one scale for every column, so a value is as tall everywhere.
-    let gap = f.node_gap;
+    // The gaps of the most crowded column take at most half the height, so
+    // its nodes keep the rest.
+    let crowd = (0..columns)
+        .map(|c| nodes.iter().filter(|nd| nd.column == c).count())
+        .max()
+        .unwrap_or(0);
+    let gap = if crowd > 1 {
+        f.node_gap.min(plot.height / 2.0 / (crowd - 1) as f64)
+    } else {
+        f.node_gap
+    };
     let ky = (0..columns)
         .filter_map(|c| {
             let members: Vec<&Node> = nodes.iter().filter(|nd| nd.column == c).collect();
@@ -2410,6 +2389,19 @@ fn group_id(n: usize) -> u32 {
     super::MAX_COLUMNS as u32 + n as u32
 }
 
+/// The name a scatter's group of rows with no group value goes by.
+pub(super) const NO_GROUP: &str = "(none)";
+
+/// The colour a named mark (a pie's slice, a scatter's group) is styled in,
+/// from the description's named styles; `None` draws the palette's.
+fn named_fill(chart: &Chart, name: &str) -> Option<BrushSource> {
+    chart
+        .nodes
+        .iter()
+        .find(|s| s.name == name)
+        .map(|s| s.fill.clone())
+}
+
 /// A scatter's series: X read off the category column as numbers (a row whose
 /// X is not a number left out and said), Y off each series column, or off the
 /// first split by the group column; a bubble's size off the size column, a row
@@ -2419,16 +2411,6 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
     let m = &chart.mapping;
     let colours = palette(chart.options.palette);
     let xs: Vec<Option<f64>> = data.categories.iter().map(|c| parse_number(c)).collect();
-    let mut left = Vec::new();
-    for (i, x) in xs.iter().enumerate() {
-        if x.is_none() {
-            left.push(format!(
-                "Row {}: “{}” is not a number",
-                i + 1,
-                data.categories[i]
-            ));
-        }
-    }
     let rows: Vec<usize> = {
         // The table's rows that survived `read` (an empty X), in order.
         let cat = m.category.and_then(|c| t.index_of(c));
@@ -2436,6 +2418,16 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
             .filter(|r| cat.is_none_or(|c| !t.rows[*r][c].trim().is_empty()))
             .collect()
     };
+    let mut left = Vec::new();
+    for (i, x) in xs.iter().enumerate() {
+        if x.is_none() {
+            left.push(format!(
+                "Row {}: “{}” is not a number",
+                rows[i] + 1,
+                data.categories[i]
+            ));
+        }
+    }
     let column = |id: Option<ColumnId>| -> Vec<Option<String>> {
         let at = id.and_then(|c| t.index_of(c));
         rows.iter()
@@ -2447,6 +2439,15 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
         .map(|c| c.and_then(|c| parse_number(&c)))
         .collect();
     let bubble = m.size.is_some();
+    // Why a bubble's row is left out: no size, or one below zero, which has no
+    // area to draw.
+    let no_area = |i: usize| -> Option<String> {
+        match sizes[i] {
+            None => Some(format!("Row {}: no size", rows[i] + 1)),
+            Some(s) if s < 0.0 => Some(format!("Row {}: a negative size", rows[i] + 1)),
+            Some(_) => None,
+        }
+    };
     let shape_of = |col: ColumnId| {
         chart
             .series
@@ -2466,10 +2467,12 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
                     Some(n) => n,
                     None => {
                         names.push(g.clone());
+                        let name = if g.is_empty() { NO_GROUP.into() } else { g };
                         out.push(Cloud {
                             id: group_id(names.len() - 1),
-                            name: if g.is_empty() { "(none)".into() } else { g },
-                            fill: rgb(colours[(names.len() - 1) % colours.len()]),
+                            fill: named_fill(chart, &name)
+                                .unwrap_or_else(|| rgb(colours[(names.len() - 1) % colours.len()])),
+                            name,
                             shape: shape_of(s.column),
                             points: Vec::new(),
                         });
@@ -2477,8 +2480,8 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
                     }
                 };
                 if let (Some(x), Some(y)) = (xs[i], s.values[i]) {
-                    if bubble && sizes[i].is_none() {
-                        left.push(format!("Row {}: no size", rows[i] + 1));
+                    if let Some(why) = no_area(i).filter(|_| bubble) {
+                        left.push(why);
                         continue;
                     }
                     out[n].points.push((x, y, sizes[i], rows[i]));
@@ -2492,9 +2495,9 @@ fn scatter_clouds(chart: &Chart, data: &mut Data) -> Vec<Cloud> {
                 let mut points = Vec::new();
                 for (i, y) in s.values.iter().enumerate() {
                     if let (Some(x), Some(y)) = (xs[i], y) {
-                        if bubble && sizes[i].is_none() {
+                        if let Some(why) = no_area(i).filter(|_| bubble) {
                             if !std::mem::replace(&mut sizeless[i], true) {
-                                left.push(format!("Row {}: no size", rows[i] + 1));
+                                left.push(why);
                             }
                             continue;
                         }
@@ -2527,13 +2530,6 @@ fn scatter(
 ) -> Result<(), Refusal> {
     let o = &chart.options;
     let p = &o.points;
-    let marks: usize = clouds.iter().map(|c| c.points.len()).sum();
-    if marks > super::MAX_MARKS {
-        return Err(Refusal::TooManyMarks {
-            count: marks,
-            what: "points",
-        });
-    }
     let all = || clouds.iter().flat_map(|c| c.points.iter());
     let span = |f: fn(&ScatterPoint) -> f64| {
         let (lo, hi) = all()
@@ -2650,8 +2646,8 @@ const OTHER: &str = "Other";
 
 /// A pie's slices: the first series' values by category, a negative left out
 /// and said, a zero left out, sorted if asked, and those under *Group small
-/// slices*' share folded into *Other*. Colours run through the palette by
-/// category.
+/// slices*' share folded into *Other* while at least one slice stays out of
+/// it. Colours run through the palette by category.
 fn pie_slices(chart: &Chart, data: &mut Data) -> Vec<Slice> {
     let o = &chart.options.slices;
     let colours = palette(chart.options.palette);
@@ -2672,11 +2668,12 @@ fn pie_slices(chart: &Chart, data: &mut Data) -> Vec<Slice> {
         if *v == 0.0 {
             continue;
         }
+        let name = data.categories[c].clone();
         out.push(Slice {
             index: c as u32,
-            name: data.categories[c].clone(),
+            fill: named_fill(chart, &name).unwrap_or_else(|| rgb(colours[c % colours.len()])),
+            name,
             value: *v,
-            fill: rgb(colours[c % colours.len()]),
         });
     }
     data.left_out.extend(left);
@@ -2687,7 +2684,9 @@ fn pie_slices(chart: &Chart, data: &mut Data) -> Vec<Slice> {
         let total: f64 = out.iter().map(|s| s.value).sum();
         let small = |s: &Slice| total > 0.0 && s.value / total * 100.0 < below;
         let folded: f64 = out.iter().filter(|s| small(s)).map(|s| s.value).sum();
-        if out.iter().filter(|s| small(s)).count() > 1 {
+        let n_small = out.iter().filter(|s| small(s)).count();
+        // Folding every slice would leave one, which draws as a progress ring.
+        if n_small > 1 && n_small < out.len() {
             out.retain(|s| !small(s));
             out.push(Slice {
                 index: super::MAX_ROWS as u32,
@@ -2713,12 +2712,6 @@ fn pie(
 ) -> Result<(), Refusal> {
     let o = &chart.options;
     let so = &o.slices;
-    if slices.len() > super::MAX_SLICES {
-        return Err(Refusal::TooManyMarks {
-            count: slices.len(),
-            what: "slices",
-        });
-    }
     let body_key = key(PartRole::Body, 0, 0);
     out.frame(
         body_key,
@@ -3053,6 +3046,25 @@ fn lines(
         }
         layers.push((top, base));
     }
+    let stand = l.connect_gaps && stacking != Stacking::Apart;
+    if !points_on {
+        // A lone value's dot is a mark too.
+        let dots: usize = layers
+            .iter()
+            .map(|(top, base)| {
+                runs_of(top, base, stand, l.connect_gaps)
+                    .iter()
+                    .filter(|r| r.len() == 1)
+                    .count()
+            })
+            .sum();
+        if dots > super::MAX_MARKS {
+            return Err(Refusal::TooManyMarks {
+                count: dots,
+                what: "points",
+            });
+        }
+    }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for (top, base) in &layers {
         for (t, b) in top.iter().zip(base) {
@@ -3101,18 +3113,7 @@ fn lines(
             LayoutItem::default(),
             fill_insets(),
         );
-        // The runs a line draws: broken at an empty cell unless gaps connect.
-        let mut runs: Vec<Vec<(usize, f64)>> = vec![Vec::new()];
-        for (c, v) in top.iter().enumerate() {
-            match v {
-                Some(v) => runs.last_mut().expect("one run").push((c, *v)),
-                None if !l.connect_gaps && !runs.last().expect("one run").is_empty() => {
-                    runs.push(Vec::new())
-                }
-                None => {}
-            }
-        }
-        runs.retain(|r| !r.is_empty());
+        let runs = runs_of(top, base, stand, l.connect_gaps);
 
         if area {
             let mut path = kurbo::BezPath::new();
@@ -3166,12 +3167,37 @@ fn lines(
             vec![line_stroke(s.fill.clone(), l.width, dash)],
             1.0,
         );
+        // A value with no neighbour draws no line, so it is a dot as wide as
+        // the line, unless points mark every value already.
+        if !points_on {
+            for run in runs.iter().filter(|r| r.len() == 1) {
+                let (c, v) = run[0];
+                let p = at(c, v);
+                let bx = Rect::from_center_size(p, (l.width, l.width));
+                out.parts.push(Part {
+                    key: key(PartRole::Point, s.column.0, c as u32),
+                    parent: Some(series_key),
+                    name: format!("{} · {}", s.name, data.categories[c]),
+                    kind: point_kind(super::PointShape::Circle, bx.size()),
+                    transform: Affine::translate(bx.origin().to_vec2()),
+                    fills: fill(s.fill.clone()),
+                    strokes: Vec::new(),
+                    opacity: 1.0,
+                    insets: centred(
+                        p.x / plot.width.max(1e-9) * 100.0,
+                        p.y / plot.height.max(1e-9) * 100.0,
+                    ),
+                    display: None,
+                    item: LayoutItem::default(),
+                });
+            }
+        }
         if points_on {
             let size = l.point_size;
             let hollow = l.points == super::PointStyle::Hollow;
             let shape = style.and_then(|st| st.point).unwrap_or_default();
             for run in &runs {
-                for (c, v) in run {
+                for (c, v) in run.iter().filter(|(c, _)| top[*c].is_some()) {
                     let p = at(*c, *v);
                     let bx = Rect::from_center_size(p, (size, size));
                     let (fills, strokes) = if hollow {
@@ -3265,6 +3291,38 @@ fn lines(
     Ok(())
 }
 
+/// The runs a series' line draws, each `(category, value)`: broken at an empty
+/// cell unless `connect`. A stacked area's gap with `stand` is visited at what
+/// it stands on (`base`), zero thick, so the line and the band above it join on
+/// the stack rather than across it.
+fn runs_of(
+    top: &[Option<f64>],
+    base: &[f64],
+    stand: bool,
+    connect: bool,
+) -> Vec<Vec<(usize, f64)>> {
+    let mut runs: Vec<Vec<(usize, f64)>> = vec![Vec::new()];
+    for (c, v) in top.iter().enumerate() {
+        let run = runs.last_mut().expect("one run");
+        match v {
+            Some(v) => run.push((c, *v)),
+            None if stand => run.push((c, base[c])),
+            None if !connect && !run.is_empty() => runs.push(Vec::new()),
+            None => {}
+        }
+    }
+    // A run starts and ends at a value: only a gap between two is stood on.
+    for run in &mut runs {
+        while run.last().is_some_and(|(c, _)| top[*c].is_none()) {
+            run.pop();
+        }
+        let lead = run.iter().take_while(|(c, _)| top[*c].is_none()).count();
+        run.drain(..lead);
+    }
+    runs.retain(|r| !r.is_empty());
+    runs
+}
+
 /// `pts` appended to `path` as `curve` draws them, starting with a move.
 ///
 /// *Smooth* is a monotone cubic (Fritsch–Carlson): each point's tangent is
@@ -3290,8 +3348,11 @@ fn curve(path: &mut kurbo::BezPath, pts: &[Point], curve: super::Curve) {
         super::Curve::Smooth => {
             let n = pts.len();
             // Points with no room between them (a plot of no width) have no
-            // slope to take, so they draw straight.
-            if n < 3 || pts.windows(2).any(|w| w[1].x - w[0].x <= 0.0) {
+            // slope to take, so they draw straight. Either direction is a
+            // curve: an area's floor runs back right to left.
+            let rising = pts.windows(2).all(|w| w[1].x > w[0].x);
+            let falling = pts.windows(2).all(|w| w[1].x < w[0].x);
+            if n < 3 || !(rising || falling) {
                 for p in &pts[1..] {
                     path.line_to(*p);
                 }
@@ -3462,6 +3523,123 @@ fn tick_mark(stub_horizontal: bool, along: f64, from_start: bool, frame: Size) -
     }
 }
 
+/// A tick label's corner and insets in its axis frame `frame` big: its box `b`,
+/// turned `turn` about its centre, centred at `centre` along the axis (along x
+/// when `along_x`, else along y) and standing `gap` off the frame's edge across
+/// it, the start edge (top or left) when `at_start`, else the far one. The
+/// insets place the unturned box, which layout turns about its centre, so the
+/// centre sits as far from the edge as the turned box reaches. A turned label
+/// that would reach past either end of the axis is pinned inside that end
+/// instead, so the last tick's label is not drawn over the legend.
+fn turned_label(
+    b: Rect,
+    turn: f64,
+    along_x: bool,
+    centre: f64,
+    gap: f64,
+    frame: Size,
+    at_start: bool,
+) -> (Point, Insets) {
+    let (reach_x, reach_y) = turned_reach(b, turn);
+    let (w, h) = (b.width(), b.height());
+    let (along_len, along_reach, across_len, across_reach, along_size, across_size) = if along_x {
+        (frame.width, reach_x, frame.height, reach_y, w, h)
+    } else {
+        (frame.height, reach_y, frame.width, reach_x, h, w)
+    };
+    // Across: as far out as the turned box reaches.
+    let edge = gap + (across_reach - across_size) / 2.0;
+    let across_at = if at_start {
+        edge
+    } else {
+        across_len - gap - (across_reach + across_size) / 2.0
+    };
+    // Along: centred on its tick, or pinned inside an end it would pass.
+    let half = along_reach / 2.0;
+    // `Some(true)` pins it to the axis's start, `Some(false)` to its end.
+    let pin = if turn == 0.0 {
+        None
+    } else if centre - half < 0.0 {
+        Some(true)
+    } else if centre + half > along_len {
+        Some(false)
+    } else {
+        None
+    };
+    let inset = half - along_size / 2.0;
+    let (along_at, mut insets) = match pin {
+        Some(true) => {
+            let mut i = Insets::default();
+            if along_x {
+                i.left = px(inset);
+            } else {
+                i.top = px(inset);
+            }
+            (inset, i)
+        }
+        Some(false) => {
+            let mut i = Insets::default();
+            if along_x {
+                i.right = px(inset);
+            } else {
+                i.bottom = px(inset);
+            }
+            (along_len - half - along_size / 2.0, i)
+        }
+        None => {
+            let share = centre / along_len.max(1e-9) * 100.0;
+            (
+                centre - along_size / 2.0,
+                if along_x {
+                    centred_x(share)
+                } else {
+                    centred_y(share)
+                },
+            )
+        }
+    };
+    match (along_x, at_start) {
+        (true, true) => insets.top = px(edge),
+        (true, false) => insets.bottom = px(edge),
+        (false, true) => insets.left = px(edge),
+        (false, false) => insets.right = px(edge),
+    }
+    let corner = if along_x {
+        Point::new(along_at, across_at)
+    } else {
+        Point::new(across_at, along_at)
+    };
+    (corner - b.origin().to_vec2(), insets)
+}
+
+/// `text` (its box `b` at `size`) cut to `length` with an ellipsis when it is
+/// longer, and the box it then takes: an axis title runs no further than its
+/// axis.
+fn within(text: &str, b: Rect, length: f64, measure: &Text, size: f64) -> (String, Rect) {
+    if b.width() <= length {
+        return (text.to_string(), b);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |k: usize| -> String {
+        let mut s: String = chars[..k].iter().collect::<String>().trim_end().to_string();
+        s.push('…');
+        s
+    };
+    // The most characters that fit with the ellipsis, by halving.
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if measure.measure(&cut(mid), size).width() <= length {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    let s = cut(lo);
+    let b = measure.measure(&s, size);
+    (s, b)
+}
+
 /// An axis title's corner, insets and turn in its axis frame `frame` big, at the
 /// frame's start edge (left or top) or, `at_end`, its end, centred along it.
 /// A side axis's title reads upwards, turned a quarter; its insets place the
@@ -3513,12 +3691,11 @@ fn thin_every(need: f64, band: f64) -> usize {
 fn category_turn(angle: LabelAngle, boxes: &[Rect], band: f64, label_h: f64) -> (f64, usize) {
     let widest = boxes.iter().map(Rect::width).fold(0.0, f64::max);
     let room = band - 4.0;
-    let slant = -std::f64::consts::FRAC_PI_4;
-    let upright = -std::f64::consts::FRAC_PI_2;
+    let slant = set_turn(LabelAngle::Slanted);
     match angle {
         LabelAngle::Flat => (0.0, thin_every(widest + 4.0, band)),
         LabelAngle::Slanted => (slant, thin_every(label_h * 1.5, band)),
-        LabelAngle::Upright => (upright, thin_every(label_h * 1.2, band)),
+        LabelAngle::Upright => (set_turn(angle), thin_every(label_h * 1.2, band)),
         LabelAngle::Auto if widest <= room => (0.0, 1),
         LabelAngle::Auto => (slant, thin_every(label_h * 1.5, band)),
     }

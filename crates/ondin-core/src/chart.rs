@@ -15,13 +15,13 @@ mod settle;
 pub mod table_io;
 
 pub use colours::{
-    bound_variables, sankey_nodes, sankey_totals, series_fill, with_node_fill, with_palette,
-    with_series_fill, with_variables,
+    bound_variables, named_marks, sankey_nodes, sankey_totals, series_fill, with_node_fill,
+    with_palette, with_series_fill, with_variables,
 };
 pub use generate::{Generated, Part, Refusal, generate, palette};
 pub use preset::{OUTLINE_WIDTH, Preset};
 pub(crate) use settle::part_actor;
-pub use settle::{preview, settle, settle_all, settle_round, stale};
+pub use settle::{settle, settle_all, settle_round, stale};
 pub use table_io::grouped;
 
 use crate::id::NodeId;
@@ -59,7 +59,9 @@ pub struct Chart {
     /// its colour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub series: Vec<SeriesStyle>,
-    /// A Sankey's node colours, keyed by node name, so a re-import keeps them.
+    /// The colours of the marks a chart names rather than numbers by series (a
+    /// Sankey's nodes, a pie's slices, a scatter's groups: `named_marks`),
+    /// keyed by name, so a re-import keeps them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nodes: Vec<NodeStyle>,
     /// Every kind's options at once, so switching kind and back keeps them.

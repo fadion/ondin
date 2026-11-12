@@ -143,12 +143,14 @@ everything below.
 - **Previews.** A resize drag mostly needs nothing of its own: the layout reflows the parts as the
   frame is dragged (*Laid out, not placed*), and the release regenerates for the new size. A pie
   is the exception, since its square frame sits centred at its own size and no inset can make it
-  follow the smaller side: `set_preview` generates a pie the preview resizes at the size drawn,
-  every frame. Scrubbing an option field regenerates on every frame (`chart::preview`) the same
-  way, into `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the
-  frame's own, since a patch cannot add a tick or a bar; their bound colours read in the modes
-  in force at the chart (`RenderOverrides::paint_owner`). Nothing enters the document until
-  release (invariant 5).
+  follow the smaller side: `set_preview` generates a pie the preview resizes at the size drawn.
+  Scrubbing an option field generates the edited description the same way, into
+  `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the frame's own,
+  since a patch cannot add a tick or a bar; their bound colours read in the modes in force at
+  the chart (`RenderOverrides::paint_owner`). Each generation is kept by chart, description and
+  size until the next preview (`EditorSession::chart_generated`), so a field held focused, which
+  previews the same edit every frame, lays the chart out once, and a chart past its limits is
+  refused once. Nothing enters the document until release (invariant 5).
 
 ### Laid out, not placed
 
@@ -168,7 +170,8 @@ or turned, which value labels fit.
   (tick labels, tick marks and title, spanning the title's track), *Plot*, and *Category axis*
   under the plot; a bar chart swaps the two axes' places, and an axis's *side* moves its tracks
   to the other edge. A title is centred along its axis at the frame's far edge, a side axis's
-  turned a quarter to read upwards. A legend placed left or right makes the chart a flex row.
+  turned a quarter to read upwards; one longer than its axis is cut to the axis's length with an
+  ellipsis (*Revenue in thous…*). A legend placed left or right makes the chart a flex row.
 - **Inside the plot, marks are pinned by percentage insets** of the plot (`container::Insets`,
   `LengthPct::Percent`). A column's left and right insets are its slot's edges in the band, its
   top inset its value, its bottom inset the baseline, so a wider or taller plot stretches the
@@ -180,8 +183,11 @@ or turned, which value labels fit.
   their percentage by both insets and auto margins (layout's absolute-centring), so they keep
   their size while their place follows the plot; a tick mark (4 px) is pinned against the plot,
   a tick label the axis gap past the tick marks on the other axis, a turned category label as
-  deep as its turned box reaches. Value tick marks sit at the ticks, category ones at every
-  category's centre (a scatter's at its X ticks). A pie or donut sits in a square frame
+  deep as its turned box reaches. A turned tick or category label whose turned box would reach
+  past an end of its axis is pinned inside that end instead of centred on its tick, so the last
+  label is not drawn over the legend (`generate::turned_label`, the one placement every axis
+  label takes). Value tick marks sit at the ticks, category ones at the centre of every category
+  a label is written for, thinned with the labels (a scatter's at its X ticks). A pie or donut sits in a square frame
   (`aspect-ratio: 1`) centred in the plot.
 - **Value labels** sit outside, inside or at the end of their bar. In a stack only the outermost
   segment each way takes an outside or end label, and a zero, covering nothing, is never the
@@ -220,7 +226,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 
 - **Smooth** is a monotone cubic (Fritsch–Carlson), so a smoothed line never overshoots a peak
   the data does not have; points with no width between them have no slope to take and draw
-  straight. **Step** turns halfway between points. A line's points sit at the
+  straight, while a run right to left (a stacked area's floor, back along the curve below it) is
+  smoothed as the curve it follows. **Step** turns halfway between points. A line's points sit at the
   centres of the category bands, as columns do.
 - **Lines and areas** are one series frame each: the area (a closed path down to the baseline or
   to the stack beneath it, at the area opacity), the line over it (round joins and caps, the
@@ -231,17 +238,21 @@ evenly in table order, as typed, so a date column reads as text and no time scal
 - **A scatter** reads its category column as X, numbers on a tick axis like the value axis (a row
   whose X is not a number is left out and said), and each series column as a Y series; with a
   group column, the first series split into one series per group value, coloured through the
-  palette in first-seen order. With a size column it is a bubble chart: a bubble's side is the
+  palette in first-seen order unless the group's name is styled (*Colours by name*, below). With
+  a size column it is a bubble chart: a bubble's side is the
   largest size times the square root of its share of the largest value, so its area follows the
-  value, and a row with no size is left out and said (*Row 4: no size*), once however many series
-  it holds. Points are circles, squares, or diamond and triangle
+  value, and a row with no size, or a size below zero, which has no area, is left out and said
+  (*Row 4: no size*, *Row 5: a negative size*), once however many series it holds. A note names
+  the table's row, counting rows with no X. Points are circles, squares, or diamond and triangle
   paths, centred on their place at their own size: a series' own shape, else the chart's (a
   group takes its series'). Vertical gridlines follow the category axis's
   *Gridlines*. *Start at zero* is off by default on every axis; columns, bars and areas hold zero
   whatever it says.
-- **A pie** reads the first series by category, each slice its palette colour by category, and
-  its legend lists the slices. A zero is not drawn; *Group small slices* folds two or more slices
-  under its share into *Other* (the palette's last colour). The pie sits in a square frame
+- **A pie** reads the first series by category, each slice its palette colour by category unless
+  its name is styled (*Colours by name*, below), and its legend lists the slices. A zero is not
+  drawn; *Group small slices* folds two or more slices under its share into *Other* (the
+  palette's last colour), and never every slice, which would leave one slice to draw as a
+  progress ring. The pie sits in a square frame
   centred in the body at its own size, so it stays round as the chart resizes; each slice is a
   wedge path pinned by its own box; its corner radius rounds the wedge's corners as a path's
   per-anchor radii, and the box is the rounded outline's. Labels sit two thirds out on a pie, mid-ring on a donut, or
@@ -252,13 +263,25 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   series column, a row with an empty category, a Sankey row whose value is not above zero or whose
   From is its To: the card's data line says *2 values left out* with the reasons in its tooltip. Column, bar and area charts draw negatives below the baseline;
   stacked variants stack positives and negatives apart.
-- **Empty cells**: a bar is not drawn; a line breaks, unless *Connect gaps* is on.
+- **Colours by name.** A pie's slices, a grouped scatter's groups and a Sankey's nodes are
+  coloured by name, not by series: each takes the style `Chart::nodes` holds under its name, else
+  the palette at its place (`chart::named_marks`, in the generator's order). *From variables*
+  binds these by name in order, as it binds a series chart's series, so the colours drawn are
+  the ones bound and the dropdown lights only when they are.
+- **Empty cells**: a bar is not drawn; a line breaks, unless *Connect gaps* is on. In a stacked
+  or 100% area with *Connect gaps*, a gap stands on the stack beneath it, zero thick, so the
+  gapped series' line dips to the series below there rather than cutting across it; a gap at a
+  run's start or end is not drawn. A value with no neighbour to join is drawn as a dot as wide as
+  the line, and counts as a mark.
 - **Limits.** A table holds at most 10,000 rows and 64 columns, a cell at most 256 characters.
   A chart draws at most 2,000 marks (bars, points, slices); past that it draws nothing new and the
   card says *Too many marks: 3,400 bars, at most 2,000*. A line or area is one path per series and
   takes all 10,000 rows, but its points and its value labels are one mark per value each, so
-  either shown counts (*points*, else *value labels*). A pie draws at most 100 slices, and *Group small slices* folds those under
-  a percentage into *Other*. A Sankey draws at most 200 nodes and 1,000 flows.
+  either shown counts (*points*, else *value labels*). A column or bar chart draws at most
+  2,000 categories, series or none (*Too many marks: 3,000 categories*). A pie draws at most 100 slices, and *Group small slices* folds those under
+  a percentage into *Other*. A Sankey draws at most 200 nodes and 1,000 flows. A pie's and a
+  scatter's limits are judged before the legend is laid out, and a Sankey's names are looked up
+  by hash, so a table past a limit costs its rows, not rows × names.
 
 ### Sankey
 
@@ -278,6 +301,8 @@ evenly in table order, as typed, so a date column reads as text and no time scal
   fixed count, not a convergence test, so the same table always draws the same chart. *Order:
   Table order* skips the passes. One height scale serves every column, so a value is as tall
   everywhere; a node's place and height are pinned in percent of the body and its width stays.
+  The node gap gives way in a crowded column: the gaps of the column with the most nodes take at
+  most half the body's height, so its nodes keep the rest.
 - **Flows** are ribbons, each a filled path between two cubic curves, as thick as its value,
   stacked on each node in the order of the nodes at their other ends so ribbons cross as little
   as they can.

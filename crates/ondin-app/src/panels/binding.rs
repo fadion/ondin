@@ -1182,9 +1182,8 @@ impl OndinApp {
     pub(crate) fn rebind_alpha_tx(&self, id: NodeId, slot: PaintSlot, alpha: f32) -> Transaction {
         let key = FieldKey::Paint { id, slot };
         if let PaintSlot::Chart(colour) = slot {
-            let var = self.chart_binding(id, colour).map(|(v, _)| v);
-            return match var {
-                Some(var) => self.chart_bind_tx(id, colour, Some(var), Some(alpha)),
+            return match self.chart_binding(id, colour) {
+                Some(_) => self.chart_alpha_tx(id, colour, alpha),
                 None => Transaction::default(),
             };
         }

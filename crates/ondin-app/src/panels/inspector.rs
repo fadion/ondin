@@ -1368,6 +1368,9 @@ impl OndinApp {
         self.inspector_item(ui);
         if let Some(charts) = self.selected_charts() {
             self.inspector_charts(ui, &charts);
+        } else if all_charts {
+            let ids = self.session.selection.ids().to_vec();
+            self.inspector_charts_mixed(ui, &ids);
         }
         if !all_charts {
             self.inspector_container(ui);
@@ -7183,11 +7186,7 @@ impl OndinApp {
         let mut next: Option<Vec<Keyed<LayoutGrid>>> = None;
         let add = self.panel(ui, "Layout grid", action, |app, ui| {
             let Some(grids) = shared.clone() else {
-                ui.label(
-                    egui::RichText::new("Mixed layout grids. Add to override.")
-                        .size(ui::SMALL_PT)
-                        .color(theme::text::faint()),
-                );
+                ui::selection_note(ui, "Mixed layout grids. Add to override.");
                 return;
             };
             let source = match subjects.as_slice() {
@@ -9460,11 +9459,7 @@ impl OndinApp {
             action,
             |app, ui| {
                 if mixed {
-                    ui.label(
-                        egui::RichText::new("These layers have different effects")
-                            .size(ui::SMALL_PT)
-                            .color(theme::text::faint()),
-                    );
+                    ui::selection_note(ui, "These layers have different effects");
                     return;
                 }
                 // An instance that removed every effect still has its ghost rows.
@@ -11685,25 +11680,7 @@ const TEMPLATE_BOX_MIN: f32 = 5.0;
 fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: bool) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(width, TEMPLATE_CELL_H), egui::Sense::click());
-    let hovered = resp.hovered();
-    let r5 = egui::CornerRadius::same(ui::BUTTON_R);
-    let ground = match (on, hovered) {
-        (true, false) => Some(color::accent_900()),
-        (true, true) => Some(color::accent_800()),
-        (false, true) => Some(theme::color::hover()),
-        (false, false) => None,
-    };
-    if let Some(bg) = ground {
-        ui.painter().rect_filled(rect, r5, bg);
-    }
-    if on {
-        ui.painter().rect_stroke(
-            rect,
-            r5,
-            egui::Stroke::new(1.0, color::accent_700()),
-            egui::StrokeKind::Inside,
-        );
-    }
+    ui::tile_ground(ui.painter(), rect, on, resp.hovered());
     // A fixed slot keeps every name in a column at the same x.
     let slot = egui::Rect::from_center_size(
         egui::pos2(

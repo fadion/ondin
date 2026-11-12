@@ -235,22 +235,16 @@ impl Art {
         self.out.push((path, ink.value));
     }
 
-    fn legend(&mut self, cs: &[Color], s: Preset, ink: &Ink) {
+    fn legend(&mut self, cs: &[Color], ink: &Ink) {
         let xs: &[f64] = if cs.len() == 3 {
             &[6.0, 17.0, 28.0]
         } else {
             &[6.0, 18.0]
         };
+        // The chart's legend swatch is one rounded square in every preset.
         for (x, c) in xs.iter().zip(cs) {
             let swatch = Rect::new(*x, 4.5, x + 3.0, 7.5);
-            match s {
-                Preset::Outline => {
-                    self.fill_rect(swatch, 0.0, c.multiply_alpha(TINT));
-                    self.stroke_rect(swatch, *c);
-                }
-                Preset::Soft => self.fill_rect(swatch, 1.5, *c),
-                _ => self.fill_rect(swatch, 0.6, *c),
-            }
+            self.fill_rect(swatch, 0.6, *c);
             self.hline(6.0, x + 5.0, x + 9.0, ink.dash, false);
         }
     }
@@ -313,7 +307,7 @@ fn column(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink) {
     let bottom = if min { 26.0 } else { 27.0 };
     let r = if s == Preset::Soft { 2.2 } else { 0.0 };
     if !min {
-        a.legend(&cs[..2], s, ink);
+        a.legend(&cs[..2], ink);
     }
     a.hgrid(s, ink);
     for (i, (x, h)) in xs.iter().zip(hs).enumerate() {
@@ -345,7 +339,7 @@ fn bar(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink) {
     };
     let r = if s == Preset::Soft { 1.6 } else { 0.0 };
     if !min {
-        a.legend(&cs[..2], s, ink);
+        a.legend(&cs[..2], ink);
     }
     if !matches!(s, Preset::Bold | Preset::Minimal) {
         for x in [19.5, 32.5] {
@@ -380,7 +374,7 @@ fn lineish(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, area: bool)
         (_, false) => 1.75,
     };
     if !min {
-        a.legend(&cs[..2], s, ink);
+        a.legend(&cs[..2], ink);
     }
     a.hgrid(s, ink);
     let poly = |ys: &[f64; 4]| {
@@ -463,19 +457,19 @@ fn slice(c: Point, outer: f64, inner: f64, a1: f64, a2: f64, d: f64) -> BezPath 
 }
 
 /// Three slices, 50/30/20 from twelve. Soft cuts gaps and rounds every corner;
-/// Bold shrinks the pie to make room for its values outside.
+/// Bold writes its values inside the slices, where a pie draws them unless
+/// told to lead them outside.
 fn pieish(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, donut: bool) {
     const SHARES: [(f64, f64); 3] = [(0.0, 0.5), (0.5, 0.8), (0.8, 1.0)];
     let tau = std::f64::consts::TAU;
     let (cy, r) = match s {
         Preset::Minimal => (16.0, 12.0),
-        Preset::Bold => (20.0, 8.0),
         _ => (19.5, 9.5),
     };
     let c = Point::new(22.0, cy);
     let hole = if donut { r * 0.6 } else { 0.0 };
     if s != Preset::Minimal {
-        a.legend(&cs[..3], s, ink);
+        a.legend(&cs[..3], ink);
     }
     for (i, (s0, s1)) in SHARES.iter().enumerate() {
         let (a1, a2, col) = (s0 * tau, s1 * tau, cs[i]);
@@ -494,14 +488,14 @@ fn pieish(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, donut: bool)
         }
         if s == Preset::Bold {
             let mid = (s0 + s1) / 2.0 * tau;
-            let rho = r + 4.2;
+            let rho = (r + hole) / 2.0 + if donut { 0.0 } else { r * 0.15 };
             a.value(c.x + rho * mid.sin(), c.y - rho * mid.cos() - 0.9, ink);
         }
     }
 }
 
-/// Two clouds of five, or six bubbles of four sizes. Bold's values are drawn
-/// over one series only, so the cell stays legible.
+/// Two clouds of five, or six bubbles of four sizes. A scatter draws no value
+/// labels, so Bold here only drops the gridlines.
 fn dots(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, bubble: bool) {
     const SCATTER: [[(f64, f64, f64); 5]; 2] = [
         [
@@ -525,13 +519,12 @@ fn dots(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, bubble: bool) 
     ];
     let min = s == Preset::Minimal;
     let dot = match s {
-        Preset::Bold => 2.3,
         Preset::Outline => 2.0,
         _ => 1.8,
     };
     let shift = if min { -3.0 } else { 0.0 };
     if !min {
-        a.legend(&cs[..2], s, ink);
+        a.legend(&cs[..2], ink);
     }
     a.hgrid(s, ink);
     let sets: [&[(f64, f64, f64)]; 2] = if bubble {
@@ -552,20 +545,14 @@ fn dots(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink, bubble: bool) 
             }
         }
     }
-    if s == Preset::Bold {
-        for &(x, y, size) in sets[0] {
-            let r = if bubble { size } else { dot };
-            a.value(x, y - r - if bubble { 2.5 } else { 3.0 }, ink);
-        }
-    }
     if !min {
         a.hline(27.5, 4.0, 40.0, ink.axis, false);
     }
 }
 
 /// Two sources into two targets, the flows crossing, each in its source's
-/// colour. Labels are dashes outside the columns; Minimal has none, Bold shows
-/// them as value bars.
+/// colour. Labels are dashes outside the columns, which no preset restyles;
+/// Minimal has none.
 fn sankey(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink) {
     let (bold, min) = (s == Preset::Bold, s == Preset::Minimal);
     let nw = if bold { 5.0 } else { 3.0 };
@@ -602,16 +589,9 @@ fn sankey(a: &mut Art, s: Preset, cs: &[Color; COLOURS], ink: &Ink) {
         a.mark(Rect::new(x, y, x + nw, y + 9.0), c, s, r);
     }
     if !min {
-        let label = |a: &mut Art, x0: f64, x1: f64, y: f64| {
-            if bold {
-                a.fill_rect(Rect::new(x0, y - 0.9, x1, y + 0.9), 0.9, ink.value);
-            } else {
-                a.hline(y, x0, x1, ink.dash, false);
-            }
-        };
         for y in [9.5, 22.5] {
-            label(a, 4.0, lx - 2.0, y);
-            label(a, rx + nw + 2.0, 40.0, y);
+            a.hline(y, 4.0, lx - 2.0, ink.dash, false);
+            a.hline(y, rx + nw + 2.0, 40.0, ink.dash, false);
         }
     }
 }
@@ -642,8 +622,8 @@ mod tests {
     }
 
     /// Every kind's five pictures are different drawings, so no two cells look
-    /// alike. It checks that they differ, not in which trait: Soft's dashes
-    /// dropped still leave its round swatches apart.
+    /// alike. It checks that they differ, not that each trait is one the
+    /// preset writes and the generator draws for the kind.
     #[test]
     fn every_kind_draws_its_presets_apart() {
         for pic in ALL {

@@ -1032,14 +1032,15 @@ pub(crate) enum OutOfFlow {
 impl OndinApp {
     /// The selected frames and groups — every layer that can be a container
     /// (`container::is_container`), in document order. Filtered rather than
-    /// all-or-nothing, `frame_subjects`' rule.
+    /// all-or-nothing, `frame_subjects`' rule. A chart is left out: its layout is
+    /// its description's, and a write to it would refuse the whole edit.
     pub(super) fn container_subjects(&self) -> Vec<NodeId> {
         let doc = &self.session.doc;
         ondin_core::build::in_document_order(doc, self.session.selection.ids())
             .into_iter()
             .filter(|id| {
                 doc.get(*id)
-                    .is_some_and(|n| container::is_container(n.kind()))
+                    .is_some_and(|n| container::is_container(n.kind()) && n.chart().is_none())
             })
             .collect()
     }
@@ -4568,6 +4569,47 @@ mod tests {
             |cs| matches!(&cs.shape, egui::epaint::Shape::Text(t) if t.galley.text() == "cards-flow"),
         );
         assert!(named, "the chip names it");
+    }
+
+    /// A chart selected with a frame leaves the Container card to the frame,
+    /// whose gap then changes rather than the whole edit being refused.
+    /// flip: `container_subjects` keeping the chart → fails at "the frame alone".
+    #[test]
+    fn a_chart_beside_a_frame_is_no_container_subject() {
+        let mut s = scene();
+        let chart = s.app.session.ids.mint();
+        let page = s.app.session.doc.first_page();
+        let index = s
+            .app
+            .session
+            .doc
+            .get(page)
+            .map_or(0, |n| n.children().len());
+        let tx = ondin_core::edit::create_chart(
+            chart,
+            page,
+            index,
+            ondin_core::kurbo::Affine::IDENTITY,
+            ondin_core::kurbo::Point::new(-4000.0, 0.0),
+            ondin_core::kurbo::Point::new(-3520.0, 280.0),
+            ondin_core::peniko::Color::WHITE,
+            ondin_core::chart::Chart::sample(ondin_core::chart::ChartKind::Column),
+        );
+        assert!(s.app.session.commit(tx));
+        s.app.session.selection.set(vec![s.frame, chart]);
+        let subjects = s.app.container_subjects();
+        assert_eq!(subjects, vec![s.frame], "the frame alone");
+        let tx = s.app.display_tx(&subjects, |d| {
+            if let Display::Flex(f) = d {
+                f.column_gap = 17.0;
+            }
+        });
+        assert!(s.app.commit_edit(tx), "the edit lands");
+        let gap = match s.app.session.doc.get(s.frame).and_then(|n| n.display()) {
+            Some(Display::Flex(f)) => f.column_gap,
+            _ => 0.0,
+        };
+        assert_eq!(gap, 17.0);
     }
 
     /// Each card offers itself for what it describes and draws without panicking:

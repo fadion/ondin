@@ -63,6 +63,15 @@ pub(crate) struct ChartCardCache {
     track: bool,
 }
 
+/// Where `now` stands in `options`; past the end, lighting none, when it is
+/// not there.
+fn lit<T: PartialEq>(options: &[(T, &str)], now: T) -> usize {
+    options
+        .iter()
+        .position(|(v, _)| *v == now)
+        .unwrap_or(usize::MAX)
+}
+
 /// The kinds' variants as the Type section's segments name them, with the
 /// variant `chart` is at; `None` for a kind with none to pick.
 fn variants(chart: &Chart) -> Option<(&'static [&'static str], usize)> {
@@ -317,6 +326,34 @@ impl OndinApp {
         Transaction(ops)
     }
 
+    /// The `SetChart`s setting the `%` of slot `colour` to `alpha` on chart `id`
+    /// and the charts selected with it, each keeping its own variable; a slot
+    /// holding a colour of its own is left alone, as a layer's paint is.
+    pub(crate) fn chart_alpha_tx(
+        &self,
+        id: NodeId,
+        colour: ChartColour,
+        alpha: f32,
+    ) -> Transaction {
+        let doc = &self.session.doc;
+        let ops = self
+            .chart_slot_targets(id, colour)
+            .into_iter()
+            .filter_map(|at| {
+                let chart = doc.get(at).and_then(|n| n.chart())?;
+                let ondin_core::BrushSource::Bound { var, .. } = fill_of(chart, colour)? else {
+                    return None;
+                };
+                let fill = ondin_core::BrushSource::Bound { var, alpha };
+                Some(Operation::SetChart {
+                    id: at,
+                    chart: Some(Box::new(with_fill(chart, colour, fill))),
+                })
+            })
+            .collect();
+        Transaction(ops)
+    }
+
     /// The Chart card, for one chart frame.
     pub(super) fn inspector_chart(&mut self, ui: &mut egui::Ui, id: NodeId) {
         self.inspector_charts(ui, &[id]);
@@ -358,11 +395,7 @@ impl OndinApp {
             });
             app.chart_section(ui, "Chart data", "Data", |app, ui| {
                 if several {
-                    ui.label(
-                        egui::RichText::new("Edit data one chart at a time")
-                            .size(ui::SMALL_PT)
-                            .color(theme::text::muted()),
-                    );
+                    ui::selection_note(ui, "Edit data one chart at a time");
                 } else {
                     app.chart_data_rows(ui, id, &chart);
                 }
@@ -387,7 +420,13 @@ impl OndinApp {
             }
             if chart.kind != ChartKind::Sankey {
                 app.chart_section(ui, "Chart values", "Values", |app, ui| {
-                    app.chart_value_rows(ui, id, &chart);
+                    // A scatter draws no value labels: its rows stay, dimmed, under
+                    // the reason.
+                    let scatter = chart.kind == ChartKind::Scatter;
+                    if scatter {
+                        ui::selection_note(ui, "A scatter draws no value labels");
+                    }
+                    ui::disable_unless(ui, !scatter, |ui| app.chart_value_rows(ui, id, &chart));
                 });
                 app.chart_section(ui, "Chart legend", "Legend", |app, ui| {
                     app.chart_legend_rows(ui, id, &chart);
@@ -396,22 +435,37 @@ impl OndinApp {
             app.chart_section(ui, "Chart text", "Text", |app, ui| {
                 app.chart_text_rows(ui, id, &chart);
             });
-            let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
-            let tip = crate::input::keys("Keep the shapes and drop the chart's options (Ctrl+E)");
-            if ui::action_button(
-                ui,
-                icon::STACK_SIMPLE,
-                "Flatten chart",
-                ui::FieldButton::Off,
-                size,
-            )
-            .on_hover_text(tip)
-            .clicked()
-            {
-                app.flatten_charts(ids);
-            }
+            app.flatten_button(ui, ids);
         });
         self.chart_others.clear();
+    }
+
+    /// The Chart card over charts of different kinds, which it cannot edit
+    /// together: why, and *Flatten chart*, which applies to any.
+    pub(super) fn inspector_charts_mixed(&mut self, ui: &mut egui::Ui, ids: &[NodeId]) {
+        self.panel(ui, "Chart", None, |app, ui| {
+            ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
+            ui::selection_note(ui, "Select charts of one kind to edit them together");
+            app.flatten_button(ui, ids);
+        });
+    }
+
+    /// *Flatten chart* over `ids`, the card's last row.
+    fn flatten_button(&mut self, ui: &mut egui::Ui, ids: &[NodeId]) {
+        let size = egui::vec2(ui.available_width(), ui::CONTROL_H);
+        let tip = crate::input::keys("Keep the shapes and drop the chart's options (Ctrl+E)");
+        if ui::action_button(
+            ui,
+            icon::STACK_SIMPLE,
+            "Flatten chart",
+            ui::FieldButton::Off,
+            size,
+        )
+        .on_hover_text(tip)
+        .clicked()
+        {
+            self.flatten_charts(ids);
+        }
     }
 
     /// Rebuild [`ChartCardCache`] when the description or the drawn size moved.
@@ -535,8 +589,62 @@ impl OndinApp {
         Transaction(ops)
     }
 
+    /// `set` applied to chart `id` (`chart` as the card shows it) and to each
+    /// other chart the card writes ([`OndinApp::chart_others`]), each on its own
+    /// description: a value read off the data (*Auto range*'s extent), a preset
+    /// and one end of a range land as each chart's own, and a value the first
+    /// chart already holds still reaches the others. The first chart's write
+    /// leads, whether or not it changed; the others' only where they change.
+    fn chart_each_tx(&self, id: NodeId, chart: &Chart, set: impl Fn(&mut Chart)) -> Transaction {
+        let doc = &self.session.doc;
+        let mut next = chart.clone();
+        set(&mut next);
+        let mut ops = vec![Operation::SetChart {
+            id,
+            chart: Some(Box::new(next)),
+        }];
+        for other in &self.chart_others {
+            let Some(own) = doc.get(*other).and_then(|n| n.chart()) else {
+                continue;
+            };
+            let mut next = own.clone();
+            set(&mut next);
+            if next != *own {
+                ops.push(Operation::SetChart {
+                    id: *other,
+                    chart: Some(Box::new(next)),
+                });
+            }
+        }
+        Transaction(ops)
+    }
+
+    /// [`Self::chart_each_tx`] committed as one undo step named `label`, unless
+    /// it changes no chart.
+    fn chart_each(
+        &mut self,
+        id: NodeId,
+        chart: &Chart,
+        label: &'static str,
+        set: impl Fn(&mut Chart),
+    ) {
+        let tx = self.chart_each_tx(id, chart, set);
+        let first_same = match tx.0.first() {
+            Some(Operation::SetChart { chart: Some(c), .. }) => {
+                self.session.doc.get(id).and_then(|n| n.chart()) == Some(&**c)
+            }
+            _ => true,
+        };
+        if first_same && tx.0.len() == 1 {
+            return;
+        }
+        self.session.name_step(label, icon::CHART);
+        self.commit_edit(tx);
+    }
+
     /// A number field over one option: scrubbed, it previews; released or
-    /// typed, it commits as `label`.
+    /// typed, it commits as `label`, each chart the card writes taking the
+    /// number ([`Self::chart_each_tx`]).
     #[allow(clippy::too_many_arguments)]
     fn chart_number(
         &mut self,
@@ -550,7 +658,7 @@ impl OndinApp {
         decimals: usize,
         get: impl Fn(&Chart) -> f64,
         set: impl Fn(&mut Chart, f64),
-    ) {
+    ) -> egui::Response {
         let mut v = get(chart);
         let resp = ui::value_field(
             ui,
@@ -561,10 +669,37 @@ impl OndinApp {
             |d| d.custom_formatter(ui::number(decimals)),
         )
         .on_hover_text(label);
-        let mut next = chart.clone();
-        set(&mut next, v);
-        let tx = self.chart_tx(id, next);
+        let tx = self.chart_each_tx(id, chart, |c| set(c, v));
         self.named_valve(label, icon::CHART, &resp, tx);
+        resp
+    }
+
+    /// [`Self::chart_number`] shown disabled with `why` unless `live`: an option
+    /// this chart does not draw.
+    #[allow(clippy::too_many_arguments)]
+    fn chart_number_if(
+        &mut self,
+        ui: &mut egui::Ui,
+        live: Result<(), &'static str>,
+        id: NodeId,
+        chart: &Chart,
+        width: f32,
+        prefix: &'static str,
+        label: &'static str,
+        scrub: Scrub,
+        decimals: usize,
+        get: impl Fn(&Chart) -> f64,
+        set: impl Fn(&mut Chart, f64),
+    ) {
+        let resp = ui::disable_unless(ui, live.is_ok(), |ui| {
+            self.chart_number(
+                ui, id, chart, width, prefix, label, scrub, decimals, get, set,
+            )
+        })
+        .inner;
+        if let Err(why) = live {
+            resp.on_disabled_hover_text(why);
+        }
     }
 
     /// Two [`Self::chart_number`]s on one line.
@@ -599,11 +734,52 @@ impl OndinApp {
             |p, i, r, on| ui::segment_label(p, r, names[i], on),
         );
         if let Some(i) = pick {
-            self.chart_pick(id, chart, label, i, at, set);
+            self.chart_pick(id, chart, label, i, set);
         }
     }
 
-    /// A switch over one option, committing `set` as `label`.
+    /// [`Self::chart_segments`] over `options`, each value with its name, the
+    /// one `now` lit; a value missing from the table lights none, so any pick
+    /// writes.
+    #[allow(clippy::too_many_arguments)]
+    fn chart_segments_of<T: Copy + PartialEq>(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        label: &'static str,
+        options: &[(T, &str)],
+        now: T,
+        set: impl Fn(&mut Chart, T),
+    ) {
+        let names: Vec<&str> = options.iter().map(|(_, n)| *n).collect();
+        let at = lit(options, now);
+        self.chart_segments(ui, id, chart, label, &names, at, |c, i| {
+            set(c, options[i].0);
+        });
+    }
+
+    /// [`Self::chart_menu`] over `options`, as [`Self::chart_segments_of`].
+    #[allow(clippy::too_many_arguments)]
+    fn chart_menu_of<T: Copy + PartialEq>(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        chart: &Chart,
+        salt: &'static str,
+        label: &'static str,
+        options: &[(T, &str)],
+        now: T,
+        set: impl Fn(&mut Chart, T),
+    ) {
+        let names: Vec<&str> = options.iter().map(|(_, n)| *n).collect();
+        let at = lit(options, now);
+        self.chart_menu(ui, id, chart, salt, label, &names, at, |c, i| {
+            set(c, options[i].0);
+        });
+    }
+
+    /// A switch over one option, committing `set` as `label` on each chart.
     fn chart_switch(
         &mut self,
         ui: &mut egui::Ui,
@@ -614,9 +790,32 @@ impl OndinApp {
         set: impl Fn(&mut Chart, bool),
     ) {
         if ui::switch_row(ui, label, on, crate::settings::SWITCH_H).clicked() {
-            let mut next = chart.clone();
-            set(&mut next, !on);
-            self.chart_commit(id, label, next);
+            self.chart_each(id, chart, label, |c| set(c, !on));
+        }
+    }
+
+    /// [`Self::chart_switch`] shown disabled with `why` unless `live`.
+    #[allow(clippy::too_many_arguments)]
+    fn chart_switch_if(
+        &mut self,
+        ui: &mut egui::Ui,
+        live: Result<(), &'static str>,
+        id: NodeId,
+        chart: &Chart,
+        label: &'static str,
+        on: bool,
+        set: impl Fn(&mut Chart, bool),
+    ) {
+        let resp = ui::disable_unless(ui, live.is_ok(), |ui| {
+            ui::switch_row(ui, label, on, crate::settings::SWITCH_H)
+        })
+        .inner;
+        match live {
+            Err(why) => {
+                resp.on_disabled_hover_text(why);
+            }
+            Ok(()) if resp.clicked() => self.chart_each(id, chart, label, |c| set(c, !on)),
+            Ok(()) => {}
         }
     }
 
@@ -650,11 +849,11 @@ impl OndinApp {
                 });
         });
         if let Some(i) = pick {
-            self.chart_pick(id, chart, label, i, at, set);
+            self.chart_pick(id, chart, label, i, set);
         }
     }
 
-    /// Commit row `i` of a segmented control or dropdown lit at `at`. The lit
+    /// Commit row `i` of a segmented control or dropdown on each chart. The lit
     /// row changes nothing on the first chart, so over several charts it
     /// writes the others, which the card does not show and which may differ.
     fn chart_pick(
@@ -663,32 +862,9 @@ impl OndinApp {
         chart: &Chart,
         label: &'static str,
         i: usize,
-        at: usize,
         set: impl Fn(&mut Chart, usize),
     ) {
-        if i != at {
-            let mut next = chart.clone();
-            set(&mut next, i);
-            return self.chart_commit(id, label, next);
-        }
-        let doc = &self.session.doc;
-        let ops: Vec<Operation> = self
-            .chart_others
-            .iter()
-            .filter_map(|other| {
-                let own = doc.get(*other).and_then(|n| n.chart())?;
-                let mut next = own.clone();
-                set(&mut next, i);
-                (next != *own).then(|| Operation::SetChart {
-                    id: *other,
-                    chart: Some(Box::new(next)),
-                })
-            })
-            .collect();
-        if !ops.is_empty() {
-            self.session.name_step(label, icon::CHART);
-            self.commit_edit(Transaction(ops));
-        }
+        self.chart_each(id, chart, label, |c| set(c, i));
     }
 
     fn chart_type_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
@@ -753,12 +929,12 @@ impl OndinApp {
                 }
             }
         });
+        // Each chart takes the preset over its own options, so one already on
+        // part of it still lands on all of it.
         if let Some(p) = pick {
-            let next = Chart {
-                options: p.apply(&chart.options),
-                ..chart.clone()
-            };
-            self.chart_commit(id, "Chart style", next);
+            self.chart_each(id, chart, "Chart style", |c| {
+                c.options = p.apply(&c.options);
+            });
         }
     }
 
@@ -979,8 +1155,10 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let buttons = usize::from(shown.is_some()) + usize::from(style_button);
                 let field = w - buttons as f32 * (ui::CONTROL_H + ui::CARD_COL_GAP);
+                // A hidden series keeps its colour, dimmed as its name is.
                 let swatch = match (colour, shown) {
-                    (_, Some(false)) | (None, _) => ui::Swatch::Mixed,
+                    (None, _) => ui::Swatch::Mixed,
+                    (Some(c), Some(false)) => ui::Swatch::Solid(c.gamma_multiply(0.4)),
                     (Some(c), _) => ui::Swatch::Solid(c),
                 };
                 self.chart_colour_row(
@@ -1033,8 +1211,9 @@ impl OndinApp {
     }
 
     /// One colour of the chart as a field `width` wide, the whole of which opens
-    /// the picker on the slot while `live`: its swatch, its name (dim when not), a
-    /// right-aligned `total`, and, bound, its variable's name in a capsule.
+    /// the picker on the slot while `live` (a hidden series' row is not, and says
+    /// so): its swatch, its name (dim when not), a right-aligned `total`, and,
+    /// bound, its variable's name in a capsule.
     #[allow(clippy::too_many_arguments)]
     fn chart_colour_row(
         &mut self,
@@ -1052,7 +1231,7 @@ impl OndinApp {
             .as_ref()
             .is_some_and(|p| p.slot == PaintSlot::Chart(slot));
         let size = egui::vec2(width, ui::CONTROL_H);
-        let (_, resp) = ui::field_row_pressable(ui, size, open, |ui, ground| {
+        let (_, resp) = ui::field_row_pressable(ui, size, open, live, |ui, ground| {
             ui.spacing_mut().item_spacing.x = 7.0;
             let (chip, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
             ui::paint_swatch(ui.painter(), chip, ground, swatch);
@@ -1090,7 +1269,9 @@ impl OndinApp {
                 });
             });
         });
-        if resp.clicked() && live {
+        if !live {
+            resp.on_hover_text("Show the series to change its colour");
+        } else if resp.clicked() {
             self.open_picker(ui, id, PaintSlot::Chart(slot), resp.rect.left_top());
         }
     }
@@ -1235,22 +1416,21 @@ impl OndinApp {
                 });
             }
             ChartKind::Line | ChartKind::Area => {
+                // A line picks its curve as its Type variant; an area here, every
+                // curve the generator draws for it.
                 if chart.kind == ChartKind::Area {
-                    let at = usize::from(chart.options.lines.curve == Curve::Smooth);
-                    self.chart_segments(
+                    self.chart_segments_of(
                         ui,
                         id,
                         chart,
                         "Curve",
-                        &["Straight", "Smooth"],
-                        at,
-                        |c, i| {
-                            c.options.lines.curve = if i == 1 {
-                                Curve::Smooth
-                            } else {
-                                Curve::Straight
-                            }
-                        },
+                        &[
+                            (Curve::Straight, "Straight"),
+                            (Curve::Smooth, "Smooth"),
+                            (Curve::Step, "Step"),
+                        ],
+                        chart.options.lines.curve,
+                        |c, v| c.options.lines.curve = v,
                     );
                 }
                 self.chart_pair(ui, |app, ui, w| {
@@ -1279,22 +1459,18 @@ impl OndinApp {
                         |c, v| c.options.lines.point_size = v,
                     );
                 });
-                let at = match chart.options.lines.points {
-                    PointStyle::None => 0,
-                    PointStyle::Hollow => 1,
-                    PointStyle::Filled => 2,
-                };
-                self.chart_segments(
+                self.chart_segments_of(
                     ui,
                     id,
                     chart,
                     "Points",
-                    &["None", "Hollow", "Filled"],
-                    at,
-                    |c, i| {
-                        c.options.lines.points =
-                            [PointStyle::None, PointStyle::Hollow, PointStyle::Filled][i]
-                    },
+                    &[
+                        (PointStyle::None, "None"),
+                        (PointStyle::Hollow, "Hollow"),
+                        (PointStyle::Filled, "Filled"),
+                    ],
+                    chart.options.lines.points,
+                    |c, v| c.options.lines.points = v,
                 );
                 if chart.kind == ChartKind::Area {
                     self.chart_number(
@@ -1316,9 +1492,14 @@ impl OndinApp {
                 });
             }
             ChartKind::Pie => {
+                let donut = match chart.options.slices.donut {
+                    true => Ok(()),
+                    false => Err("Only a donut has a hole"),
+                };
                 self.chart_pair(ui, |app, ui, w| {
-                    app.chart_number(
+                    app.chart_number_if(
                         ui,
+                        donut,
                         id,
                         chart,
                         w,
@@ -1399,6 +1580,10 @@ impl OndinApp {
                 }
             }
             ChartKind::Scatter => {
+                let bubbles = match chart.mapping.size {
+                    Some(_) => Ok(()),
+                    None => Err("Only bubbles use it: their points take a size column"),
+                };
                 self.chart_pair(ui, |app, ui, w| {
                     app.chart_number(
                         ui,
@@ -1412,8 +1597,9 @@ impl OndinApp {
                         |c| c.options.points.size,
                         |c, v| c.options.points.size = v,
                     );
-                    app.chart_number(
+                    app.chart_number_if(
                         ui,
+                        bubbles,
                         id,
                         chart,
                         w,
@@ -1437,24 +1623,19 @@ impl OndinApp {
                     |c| c.options.points.opacity * 100.0,
                     |c, v| c.options.points.opacity = v / 100.0,
                 );
-                let shapes = [
-                    PointShape::Circle,
-                    PointShape::Square,
-                    PointShape::Diamond,
-                    PointShape::Triangle,
-                ];
-                let at = shapes
-                    .iter()
-                    .position(|s| *s == chart.options.points.shape)
-                    .unwrap_or(0);
-                self.chart_segments(
+                self.chart_segments_of(
                     ui,
                     id,
                     chart,
                     "Point shape",
-                    &["Circle", "Square", "Diamond", "Triangle"],
-                    at,
-                    move |c, i| c.options.points.shape = shapes[i],
+                    &[
+                        (PointShape::Circle, "Circle"),
+                        (PointShape::Square, "Square"),
+                        (PointShape::Diamond, "Diamond"),
+                        (PointShape::Triangle, "Triangle"),
+                    ],
+                    chart.options.points.shape,
+                    |c, v| c.options.points.shape = v,
                 );
             }
             ChartKind::Sankey => {
@@ -1510,72 +1691,60 @@ impl OndinApp {
                         |c, v| c.options.flows.opacity = v / 100.0,
                     );
                 });
-                let aligns = [
-                    FlowAlign::Justify,
-                    FlowAlign::Left,
-                    FlowAlign::Right,
-                    FlowAlign::Centre,
-                ];
-                let at = aligns
-                    .iter()
-                    .position(|a| *a == chart.options.flows.align)
-                    .unwrap_or(0);
-                self.chart_menu(
+                self.chart_menu_of(
                     ui,
                     id,
                     chart,
                     "chart-flow-align",
                     "Alignment",
-                    &["Justify", "Left", "Right", "Centre"],
-                    at,
-                    move |c, i| c.options.flows.align = aligns[i],
+                    &[
+                        (FlowAlign::Justify, "Justify"),
+                        (FlowAlign::Left, "Left"),
+                        (FlowAlign::Right, "Right"),
+                        (FlowAlign::Centre, "Centre"),
+                    ],
+                    chart.options.flows.align,
+                    |c, v| c.options.flows.align = v,
                 );
-                let at = usize::from(!chart.options.flows.relax);
-                self.chart_segments(
+                self.chart_segments_of(
                     ui,
                     id,
                     chart,
                     "Node order",
-                    &["Automatic", "Table order"],
-                    at,
-                    |c, i| c.options.flows.relax = i == 0,
+                    &[(true, "Automatic"), (false, "Table order")],
+                    chart.options.flows.relax,
+                    |c, v| c.options.flows.relax = v,
                 );
-                let colours = [
-                    FlowColour::Source,
-                    FlowColour::Target,
-                    FlowColour::Gradient,
-                    FlowColour::Neutral,
-                ];
-                let at = colours
-                    .iter()
-                    .position(|f| *f == chart.options.flows.colour)
-                    .unwrap_or(0);
-                self.chart_menu(
+                self.chart_menu_of(
                     ui,
                     id,
                     chart,
                     "chart-flow-colour",
                     "Flow colour",
-                    &["Source", "Target", "Gradient", "Neutral"],
-                    at,
-                    move |c, i| c.options.flows.colour = colours[i],
+                    &[
+                        (FlowColour::Source, "Source"),
+                        (FlowColour::Target, "Target"),
+                        (FlowColour::Gradient, "Gradient"),
+                        (FlowColour::Neutral, "Neutral"),
+                    ],
+                    chart.options.flows.colour,
+                    |c, v| c.options.flows.colour = v,
                 );
                 if chart.options.flows.colour == FlowColour::Neutral {
                     self.chart_slot_row(ui, id, chart, ChartColour::Neutral, "Neutral colour");
                 }
-                let labels = [NodeLabels::Name, NodeLabels::NameAndValue, NodeLabels::Off];
-                let at = labels
-                    .iter()
-                    .position(|l| *l == chart.options.flows.labels)
-                    .unwrap_or(0);
-                self.chart_segments(
+                self.chart_segments_of(
                     ui,
                     id,
                     chart,
                     "Node labels",
-                    &["Name", "Name and value", "Off"],
-                    at,
-                    move |c, i| c.options.flows.labels = labels[i],
+                    &[
+                        (NodeLabels::Name, "Name"),
+                        (NodeLabels::NameAndValue, "Name and value"),
+                        (NodeLabels::Off, "Off"),
+                    ],
+                    chart.options.flows.labels,
+                    |c, v| c.options.flows.labels = v,
                 );
             }
         }
@@ -1687,8 +1856,15 @@ impl OndinApp {
                 };
                 self.chart_slot_row(ui, id, chart, ChartColour::Axis(value), name);
             }
-            self.chart_switch(
+            // A band axis (columns, bars, lines, areas) draws no gridlines of its
+            // own: only a scatter's X axis is a scale with ticks to rule.
+            let grid = match value || chart.kind == ChartKind::Scatter {
+                true => Ok(()),
+                false => Err("Only a scatter's X axis draws gridlines"),
+            };
+            self.chart_switch_if(
                 ui,
+                grid,
                 id,
                 chart,
                 if value {
@@ -1703,7 +1879,7 @@ impl OndinApp {
                     put(c, a);
                 },
             );
-            if axis.grid.show {
+            if axis.grid.show && grid.is_ok() {
                 self.chart_switch(
                     ui,
                     id,
@@ -1727,14 +1903,7 @@ impl OndinApp {
                 };
                 self.chart_slot_row(ui, id, chart, ChartColour::Grid(value), name);
             }
-            let angles = [
-                LabelAngle::Auto,
-                LabelAngle::Flat,
-                LabelAngle::Slanted,
-                LabelAngle::Upright,
-            ];
-            let at = angles.iter().position(|a| *a == axis.angle).unwrap_or(0);
-            self.chart_segments(
+            self.chart_segments_of(
                 ui,
                 id,
                 chart,
@@ -1743,20 +1912,24 @@ impl OndinApp {
                 } else {
                     "Category label angle"
                 },
-                &["Auto", "0°", "45°", "90°"],
-                at,
-                move |c, i| {
+                &[
+                    (LabelAngle::Auto, "Auto"),
+                    (LabelAngle::Flat, "0°"),
+                    (LabelAngle::Slanted, "45°"),
+                    (LabelAngle::Upright, "90°"),
+                ],
+                axis.angle,
+                move |c, v| {
                     let mut a = pick(c);
-                    a.angle = angles[i];
+                    a.angle = v;
                     put(c, a);
                 },
             );
-            let sides: &[&str] = match (chart.kind == ChartKind::Bar) == value {
-                true => &["Bottom", "Top"],
-                false => &["Left", "Right"],
+            let sides: &[(AxisSide, &str)] = match (chart.kind == ChartKind::Bar) == value {
+                true => &[(AxisSide::Start, "Bottom"), (AxisSide::End, "Top")],
+                false => &[(AxisSide::Start, "Left"), (AxisSide::End, "Right")],
             };
-            let at = usize::from(axis.side == AxisSide::End);
-            self.chart_segments(
+            self.chart_segments_of(
                 ui,
                 id,
                 chart,
@@ -1766,14 +1939,10 @@ impl OndinApp {
                     "Category axis side"
                 },
                 sides,
-                at,
-                move |c, i| {
+                axis.side,
+                move |c, v| {
                     let mut a = pick(c);
-                    a.side = if i == 1 {
-                        AxisSide::End
-                    } else {
-                        AxisSide::Start
-                    };
+                    a.side = v;
                     put(c, a);
                 },
             );
@@ -1957,9 +2126,8 @@ impl OndinApp {
             ui.data_mut(|d| d.remove::<String>(key));
         }
         if ui::defocus_commits(&resp) && text != stored {
-            let mut next = chart.clone();
-            *slot(&mut next) = text.chars().take(chart::MAX_TEXT_CHARS).collect();
-            self.chart_commit(id, label, next);
+            let text: String = text.chars().take(chart::MAX_TEXT_CHARS).collect();
+            self.chart_each(id, chart, label, |c| *slot(c) = text.clone());
         }
     }
 
@@ -2015,16 +2183,21 @@ impl OndinApp {
                             move |c| &mut slot(c).suffix,
                         );
                     });
-                    let at = f.decimals.map_or(0, |d| usize::from(d.min(3)) + 1);
                     ui.label(ui::eyebrow("Decimals"));
-                    self.chart_segments(
+                    self.chart_segments_of(
                         ui,
                         id,
                         chart,
                         "Decimals",
-                        &["Auto", "0", "1", "2", "3"],
-                        at,
-                        move |c, i| slot(c).decimals = i.checked_sub(1).map(|d| d as u8),
+                        &[
+                            (None, "Auto"),
+                            (Some(0), "0"),
+                            (Some(1), "1"),
+                            (Some(2), "2"),
+                            (Some(3), "3"),
+                        ],
+                        f.decimals,
+                        move |c, v| slot(c).decimals = v,
                     );
                     for (name, on, set) in [
                         (
@@ -2045,11 +2218,6 @@ impl OndinApp {
 
     fn chart_value_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
         if chart.kind == ChartKind::Pie {
-            let labels = [PieLabel::Value, PieLabel::Percent, PieLabel::Category];
-            let at = labels
-                .iter()
-                .position(|l| *l == chart.options.values.pie)
-                .unwrap_or(0);
             let off = chart.options.values.position == ValuePosition::Off;
             self.chart_switch(ui, id, chart, "Slice labels", !off, |c, on| {
                 c.options.values.position = if on {
@@ -2059,14 +2227,18 @@ impl OndinApp {
                 };
             });
             if !off {
-                self.chart_segments(
+                self.chart_segments_of(
                     ui,
                     id,
                     chart,
                     "Slice label",
-                    &["Value", "Percent", "Category"],
-                    at,
-                    move |c, i| c.options.values.pie = labels[i],
+                    &[
+                        (PieLabel::Value, "Value"),
+                        (PieLabel::Percent, "Percent"),
+                        (PieLabel::Category, "Category"),
+                    ],
+                    chart.options.values.pie,
+                    |c, v| c.options.values.pie = v,
                 );
                 let outside = chart.options.values.pie_outside;
                 self.chart_switch(
@@ -2081,24 +2253,19 @@ impl OndinApp {
                 );
             }
         } else {
-            let places = [
-                ValuePosition::Off,
-                ValuePosition::Inside,
-                ValuePosition::Outside,
-                ValuePosition::End,
-            ];
-            let at = places
-                .iter()
-                .position(|p| *p == chart.options.values.position)
-                .unwrap_or(0);
-            self.chart_segments(
+            self.chart_segments_of(
                 ui,
                 id,
                 chart,
                 "Value labels",
-                &["Off", "Inside", "Outside", "End"],
-                at,
-                move |c, i| c.options.values.position = places[i],
+                &[
+                    (ValuePosition::Off, "Off"),
+                    (ValuePosition::Inside, "Inside"),
+                    (ValuePosition::Outside, "Outside"),
+                    (ValuePosition::End, "End"),
+                ],
+                chart.options.values.position,
+                |c, v| c.options.values.position = v,
             );
         }
         self.chart_format(ui, id, chart, "chart-values-format", |c| {
@@ -2107,40 +2274,34 @@ impl OndinApp {
     }
 
     fn chart_legend_rows(&mut self, ui: &mut egui::Ui, id: NodeId, chart: &Chart) {
-        let places = [
-            LegendPosition::Off,
-            LegendPosition::Top,
-            LegendPosition::Bottom,
-            LegendPosition::Left,
-            LegendPosition::Right,
-        ];
-        let at = places
-            .iter()
-            .position(|p| *p == chart.options.legend.position)
-            .unwrap_or(0);
-        self.chart_segments(
+        self.chart_segments_of(
             ui,
             id,
             chart,
             "Legend position",
-            &["Off", "Top", "Bottom", "Left", "Right"],
-            at,
-            move |c, i| c.options.legend.position = places[i],
+            &[
+                (LegendPosition::Off, "Off"),
+                (LegendPosition::Top, "Top"),
+                (LegendPosition::Bottom, "Bottom"),
+                (LegendPosition::Left, "Left"),
+                (LegendPosition::Right, "Right"),
+            ],
+            chart.options.legend.position,
+            |c, v| c.options.legend.position = v,
         );
         if chart.options.legend.position != LegendPosition::Off {
-            let aligns = [Align::Start, Align::Centre, Align::End];
-            let at = aligns
-                .iter()
-                .position(|a| *a == chart.options.legend.align)
-                .unwrap_or(0);
-            self.chart_segments(
+            self.chart_segments_of(
                 ui,
                 id,
                 chart,
                 "Legend alignment",
-                &["Start", "Centre", "End"],
-                at,
-                move |c, i| c.options.legend.align = aligns[i],
+                &[
+                    (Align::Start, "Start"),
+                    (Align::Centre, "Centre"),
+                    (Align::End, "End"),
+                ],
+                chart.options.legend.align,
+                |c, v| c.options.legend.align = v,
             );
         }
     }
@@ -2151,23 +2312,39 @@ impl OndinApp {
             "" => ondin_core::typography::TextStyle::default().font_family,
             f => f.to_string(),
         };
-        let head = if self.fonts.family_status(&shown) == crate::fonts::FamilyStatus::Missing {
+        let missing = self.fonts.family_status(&shown) == crate::fonts::FamilyStatus::Missing;
+        let head = if missing {
             ui::glyph_and_text_tinted(icon::TEXT_AA, &shown, color::warn())
         } else {
             ui::glyph_and_text(icon::TEXT_AA, &shown)
         };
-        let (picked, _) = self.family_dropdown(
+        let (picked, combo) = self.family_dropdown(
             ui,
             ("chart-family", id),
             egui::vec2(ui.available_width(), ui::CONTROL_H),
             head,
             &shown,
         );
-        if let Some(family) = picked.filter(|f| *f != shown) {
+        if missing {
+            combo.on_hover_text(
+                "This font is not installed and cannot be downloaded — \
+                 the text is drawn in the fallback face",
+            );
+        }
+        // The family shown picked again still brings the other charts to it.
+        // A chart drawn in it already, by name or as the default, keeps its own.
+        if let Some(family) = picked {
             self.fonts.ensure_loaded(&family);
-            let mut next = chart.clone();
-            next.options.text.family = family;
-            self.chart_commit(id, "Chart font", next);
+            let default = ondin_core::typography::TextStyle::default().font_family;
+            self.chart_each(id, chart, "Chart font", |c| {
+                let drawn = match c.options.text.family.as_str() {
+                    "" => default.as_str(),
+                    f => f,
+                };
+                if drawn != family {
+                    c.options.text.family = family.clone();
+                }
+            });
         }
         self.chart_slot_row(ui, id, chart, ChartColour::Ink, "Text colour");
         self.chart_pair(ui, |app, ui, w| {
@@ -2222,18 +2399,47 @@ impl OndinApp {
                 |c, v| c.options.text.title_size = v,
             );
         });
-        self.chart_number(
-            ui,
-            id,
-            chart,
-            ui.available_width(),
-            "Weight",
-            "Chart text weight",
-            Scrub::whole(2.0).range(1.0..=1000.0),
-            0,
-            |c| f64::from(c.options.text.weight),
-            |c, v| c.options.text.weight = v.round().clamp(1.0, 1000.0) as u16,
-        );
+        // The weight is picked from the family's upright faces, as the Type
+        // card's variant dropdown picks a text's; a family the app cannot read
+        // faces from keeps the number.
+        let mut faces: Vec<(u16, String)> = Vec::new();
+        for v in ondin_core::text::family_variants(&shown) {
+            if !v.italic && !faces.iter().any(|(w, _)| *w == v.weight) {
+                faces.push((v.weight, v.name));
+            }
+        }
+        if faces.is_empty() {
+            self.chart_number(
+                ui,
+                id,
+                chart,
+                ui.available_width(),
+                "Weight",
+                "Chart text weight",
+                Scrub::whole(2.0).range(1.0..=1000.0),
+                0,
+                |c| f64::from(c.options.text.weight),
+                |c, v| c.options.text.weight = v.round().clamp(1.0, 1000.0) as u16,
+            );
+        } else {
+            let now = chart.options.text.weight;
+            let mut options: Vec<(u16, &str)> =
+                faces.iter().map(|(w, n)| (*w, n.as_str())).collect();
+            // A weight no face has reads *Custom*, as the Type card's does.
+            if !faces.iter().any(|(w, _)| *w == now) {
+                options.push((now, "Custom"));
+            }
+            self.chart_menu_of(
+                ui,
+                id,
+                chart,
+                "chart-weight",
+                "Weight",
+                &options,
+                now,
+                |c, w| c.options.text.weight = w,
+            );
+        }
     }
 
     /// *Flatten chart*: each chart keeps its parts and drops its description, one
@@ -2376,8 +2582,8 @@ fn show_series(chart: &mut Chart, col: chart::ColumnId, on: bool) {
     }
 }
 
-/// A Style cell: the preset's picture over its name, the lit one in the accent,
-/// grounded as `inspector::template_cell`'s cells are.
+/// A Style cell: the preset's picture over its name on a [`ui::tile_ground`],
+/// the lit one in the accent.
 fn style_cell(
     ui: &mut egui::Ui,
     width: f32,
@@ -2387,25 +2593,8 @@ fn style_cell(
 ) -> egui::Response {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(width, STYLE_CELL_H), egui::Sense::click());
-    let r5 = egui::CornerRadius::same(ui::BUTTON_R);
-    let ground = match (on, resp.hovered()) {
-        (true, false) => Some(color::accent_900()),
-        (true, true) => Some(color::accent_800()),
-        (false, true) => Some(theme::color::hover()),
-        (false, false) => None,
-    };
     let p = ui.painter();
-    if let Some(bg) = ground {
-        p.rect_filled(rect, r5, bg);
-    }
-    if on {
-        p.rect_stroke(
-            rect,
-            r5,
-            egui::Stroke::new(1.0, color::accent_700()),
-            egui::StrokeKind::Inside,
-        );
-    }
+    ui::tile_ground(p, rect, on, resp.hovered());
     // On whole device pixels, at exactly the texture's size, so no texel is
     // sampled between two pixels.
     let ppp = ui.ctx().pixels_per_point();
@@ -3004,7 +3193,8 @@ mod tests {
 
     /// Picking the lit segment over two charts that disagree writes the other
     /// chart, in one step.
-    /// flip: `chart_pick` returning when `i == at` → fails at "the second chart stacks".
+    /// flip: `chart_each` returning when the first chart is unchanged → fails at
+    /// "the second chart stacks".
     #[test]
     fn picking_the_lit_segment_brings_the_others_to_it() {
         let ctx = egui::Context::default();
@@ -3014,7 +3204,7 @@ mod tests {
         app.chart_commit(a, "Chart type", stacked.clone());
         assert_eq!(chart_at(&app, b).options.bars.stacking, Stacking::Apart);
         app.chart_others = vec![b];
-        app.chart_pick(a, &stacked, "Chart type", 1, 1, |c, i| {
+        app.chart_pick(a, &stacked, "Chart type", 1, |c, i| {
             *c = with_variant(c, i);
         });
         app.chart_others.clear();
@@ -3031,5 +3221,117 @@ mod tests {
             "one step"
         );
         assert_eq!(chart_at(&app, a).options.bars.stacking, Stacking::Stacked);
+    }
+
+    /// Over two charts each takes an edit on its own description: *Auto range*
+    /// off at its own extent, a *Min* keeping its own *Max*, and a preset whole.
+    /// flip: `chart_each_tx` writing the others the first chart's options diff
+    /// (`Options::carried`) → fails at "B's own extent".
+    #[test]
+    fn several_charts_each_take_an_edit_on_their_own() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_charts(&ctx);
+        let mut big = chart_at(&app, b);
+        for row in &mut big.table.rows {
+            for cell in row.iter_mut().skip(1) {
+                *cell = format!("{}00", cell);
+            }
+        }
+        big.options.outline = Some(chart::OUTLINE_WIDTH);
+        app.chart_commit(b, "Edit chart data", big);
+        app.chart_others = vec![b];
+        let first = chart_at(&app, a);
+        app.chart_each(a, &first, "Auto range", |c| {
+            c.options.value_axis.range = Some(auto_extent(c, true));
+        });
+        let own = auto_extent(&chart_at(&app, b), true);
+        assert_ne!(own, auto_extent(&chart_at(&app, a), true), "fixture");
+        assert_eq!(
+            chart_at(&app, b).options.value_axis.range,
+            Some(own),
+            "B's own extent"
+        );
+        let first = chart_at(&app, a);
+        app.chart_each(a, &first, "Axis minimum", |c| {
+            if let Some(r) = c.options.value_axis.range.as_mut().filter(|r| 1.0 < r.1) {
+                r.0 = 1.0;
+            }
+        });
+        assert_eq!(
+            chart_at(&app, b).options.value_axis.range,
+            Some((1.0, own.1)),
+            "B keeps its maximum"
+        );
+        assert_ne!(
+            Preset::of(&chart_at(&app, a).options),
+            Preset::of(&chart_at(&app, b).options),
+            "fixture: the two at different styles"
+        );
+        let first = chart_at(&app, a);
+        app.chart_each(a, &first, "Chart style", |c| {
+            c.options = Preset::Bold.apply(&c.options);
+        });
+        app.chart_others.clear();
+        for id in [a, b] {
+            assert_eq!(Preset::of(&chart_at(&app, id).options), Some(Preset::Bold));
+        }
+    }
+
+    /// A bound colour's `%` changed over two charts keeps each chart's own
+    /// variable and leaves a chart holding a colour of its own alone.
+    /// flip: `rebind_alpha_tx` writing through `chart_bind_tx` with the first
+    /// chart's variable → fails at "B keeps its own colour".
+    #[test]
+    fn a_bound_colours_percent_keeps_each_charts_own() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_charts(&ctx);
+        let (var, _) = colour_var(&mut app, "grid", ondin_core::peniko::Color::WHITE);
+        let slot = ChartColour::Grid(true);
+        let tx = app.chart_bind_tx(a, slot, Some(var), Some(1.0));
+        assert!(app.commit_edit(tx));
+        let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        let literal = with_colour(&chart_at(&app, b), slot, red);
+        app.chart_commit(b, "Chart gridline colour", literal);
+        let tx = app.rebind_alpha_tx(a, PaintSlot::Chart(slot), 0.5);
+        assert!(app.commit_edit(tx));
+        assert_eq!(app.chart_binding(a, slot), Some((var, 0.5)));
+        assert_eq!(
+            fill_of(&chart_at(&app, b), slot),
+            Some(Brush::Solid(red).into()),
+            "B keeps its own colour"
+        );
+    }
+
+    /// Controls a chart does not draw stay on the card, dimmed under their
+    /// reason: a scatter's value labels; a band axis's gridlines show no rows
+    /// under their switch; an area offers every curve it draws.
+    /// flip: `inspector_charts` leaving out the scatter's note → fails at its text.
+    #[test]
+    fn options_a_chart_does_not_draw_say_so() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = charted(&ctx, ChartKind::Scatter);
+        app.collapsed_panels.remove("Chart values");
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "A scatter draws no value labels"));
+        assert!(drawn(&out, "Outside"), "the rows stay");
+
+        let (mut app, id) = charted(&ctx, ChartKind::Area);
+        app.collapsed_panels.remove("Chart axes");
+        app.collapsed_panels.remove("Chart marks");
+        let mut chart = chart_at(&app, id);
+        chart.options.category_axis.grid.show = true;
+        app.chart_commit(id, "Category gridlines", chart);
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "Category gridlines"), "the switch stays");
+        assert!(
+            !drawn(&out, "Dashed category gridlines"),
+            "no rows under it"
+        );
+        assert!(drawn(&out, "Step"), "an area's step curve");
     }
 }

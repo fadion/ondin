@@ -292,6 +292,44 @@ pub fn empty_note(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
+/// A tile cell's ground over `rect` (a frame template, a chart Style): none at
+/// rest, [`color::hover`] under the pointer, and the lit one in the accent with
+/// a 1 px inside ring, at [`BUTTON_R`]. A list of tiles, not a wall of buttons.
+pub fn tile_ground(p: &egui::Painter, rect: egui::Rect, on: bool, hovered: bool) {
+    let r = egui::CornerRadius::same(BUTTON_R);
+    let ground = match (on, hovered) {
+        (true, false) => Some(color::accent_900()),
+        (true, true) => Some(color::accent_800()),
+        (false, true) => Some(color::hover()),
+        (false, false) => None,
+    };
+    if let Some(bg) = ground {
+        p.rect_filled(rect, r, bg);
+    }
+    if on {
+        p.rect_stroke(
+            rect,
+            r,
+            egui::Stroke::new(1.0, color::accent_700()),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// What a card says in place of rows the selection cannot show (the layers
+/// disagree, or the card edits one at a time): one line of [`SMALL_PT`]
+/// `text::faint()`.
+pub fn selection_note(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(SMALL_PT)
+                .color(theme::text::faint()),
+        )
+        .wrap(),
+    )
+}
+
 /// What a whole surface says when it is empty, where [`empty_note`] is too
 /// little: an optional glyph, a [`CONTROL_PT`] heading in `text::strong()` and a
 /// [`SMALL_PT`] `text::dim()` line saying how to fill it, centred. `below` adds
@@ -1147,6 +1185,41 @@ pub const FOLD_HEAD_H: f32 = 20.0;
 /// centred by its ink reads low beside the capitals.
 pub const FOLD_CARET_LIFT: f32 = 2.0;
 
+/// The gap between a fold head's caret and its eyebrow.
+const FOLD_WORD_GAP: f32 = 6.0;
+
+/// A fold head's caret, open or shut, and its eyebrow, laid out in
+/// `PLACEHOLDER` so the painter's colour is the one drawn: [`fold_head`]'s and
+/// [`fold_rule`]'s, which differ only in placement.
+fn fold_galleys(
+    ui: &egui::Ui,
+    label: &str,
+    open: bool,
+) -> (std::sync::Arc<egui::Galley>, std::sync::Arc<egui::Galley>) {
+    let caret = if open {
+        icon::CARET_DOWN
+    } else {
+        icon::CARET_RIGHT
+    };
+    let lay = |text: String, font| {
+        ui.painter()
+            .layout_no_wrap(text, font, egui::Color32::PLACEHOLDER)
+    };
+    (
+        lay(caret.into(), theme::icon_font(12.0)),
+        lay(label.to_uppercase(), egui::FontId::proportional(EYEBROW_PT)),
+    )
+}
+
+/// A fold head's ink: brighter while its press target is hovered.
+fn fold_ink(resp: &egui::Response) -> egui::Color32 {
+    if resp.hovered() {
+        theme::text::muted()
+    } else {
+        theme::text::faint()
+    }
+}
+
 /// A pane section's fold header (Pages, Layers): [`section_head`]'s caret and
 /// eyebrow, but one press target over just the two, which both brighten while it
 /// is hovered. Answers the press and the eyebrow's baseline, for text set beside it.
@@ -1154,26 +1227,11 @@ pub const FOLD_CARET_LIFT: f32 = 2.0;
 /// Placed by ink, not by layout box: the eyebrow's capitals sit on the row's
 /// centre line, and the caret [`FOLD_CARET_LIFT`] above it.
 pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response, f32) {
-    let caret = if open {
-        icon::CARET_DOWN
-    } else {
-        icon::CARET_RIGHT
-    };
-    // `PLACEHOLDER`, so the painter's colour is the one drawn.
-    let lay = |text: String, font| {
-        ui.painter()
-            .layout_no_wrap(text, font, egui::Color32::PLACEHOLDER)
-    };
-    let glyph = lay(caret.into(), theme::icon_font(12.0));
-    let word = lay(label.to_uppercase(), egui::FontId::proportional(EYEBROW_PT));
-    let word_x = glyph.size().x + 6.0;
+    let (glyph, word) = fold_galleys(ui, label, open);
+    let word_x = glyph.size().x + FOLD_WORD_GAP;
     let size = egui::vec2(word_x + word.size().x, FOLD_HEAD_H);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-    let ink = if resp.hovered() {
-        theme::text::muted()
-    } else {
-        theme::text::faint()
-    };
+    let ink = fold_ink(&resp);
     let ppp = ui.ctx().pixels_per_point();
     // The galley's top that puts its ink's centre on the row's, on a pixel.
     let top = |g: &egui::Galley| {
@@ -1200,29 +1258,15 @@ pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response,
 /// section rule. The whole row is one press target, and the caret and eyebrow
 /// brighten while it is hovered.
 pub fn fold_rule(ui: &mut egui::Ui, label: &str, open: bool) -> egui::Response {
-    let caret = if open {
-        icon::CARET_DOWN
-    } else {
-        icon::CARET_RIGHT
-    };
-    let lay = |text: String, font| {
-        ui.painter()
-            .layout_no_wrap(text, font, egui::Color32::PLACEHOLDER)
-    };
-    let glyph = lay(caret.into(), theme::icon_font(12.0));
-    let word = lay(label.to_uppercase(), egui::FontId::proportional(EYEBROW_PT));
+    let (glyph, word) = fold_galleys(ui, label, open);
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), FOLD_HEAD_H),
         egui::Sense::click(),
     );
-    let ink = if resp.hovered() {
-        theme::text::muted()
-    } else {
-        theme::text::faint()
-    };
+    let ink = fold_ink(&resp);
     let ppp = ui.ctx().pixels_per_point();
     let top = |h: f32| ((rect.center().y - h / 2.0) * ppp).round() / ppp;
-    let word_x = rect.left() + glyph.size().x + 6.0;
+    let word_x = rect.left() + glyph.size().x + FOLD_WORD_GAP;
     let rule_x = word_x + word.size().x + CARD_COL_GAP;
     let p = ui.painter();
     p.galley(egui::pos2(rect.left(), top(glyph.size().y)), glyph, ink);
@@ -2075,33 +2119,39 @@ pub fn field_row_active<R>(
 /// something rather than holding a value to type (a chart's colour row opens
 /// its picker). It hovers as a dropdown's face does — the ground lifts to
 /// [`color::hover`], the hairline unchanged — and wears [`field_row_active`]'s
-/// accent hairline while `active`. `add` gets the ground it lays out on, for a
-/// [`paint_swatch`]'s corners; hover-only widgets inside keep their tooltips.
+/// accent hairline while `active`. Not `enabled`, it senses hover only and
+/// keeps the field's ground, and the caller hangs its reason off the response.
+/// The ground, hairline, corner and inset are [`field_frame`]'s. `add` gets the
+/// ground it lays out on, for a [`paint_swatch`]'s corners; hover-only widgets
+/// inside keep their tooltips.
 pub fn field_row_pressable<R>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     active: bool,
+    enabled: bool,
     add: impl FnOnce(&mut egui::Ui, egui::Color32) -> R,
 ) -> (R, egui::Response) {
-    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-    let ground = if resp.hovered() || resp.is_pointer_button_down_on() {
-        color::hover()
-    } else {
-        color::field()
+    let sense = match enabled {
+        true => egui::Sense::click(),
+        false => egui::Sense::hover(),
     };
-    let edge = if active {
-        color::accent_700()
-    } else {
-        color::field_border()
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+    let frame = field_frame();
+    let lifted = enabled && (resp.hovered() || resp.is_pointer_button_down_on());
+    let ground = if lifted { color::hover() } else { frame.fill };
+    let edge = match active {
+        true => egui::Stroke::new(1.0, color::accent_700()),
+        false => frame.stroke,
     };
     ui.painter().rect(
         rect,
-        egui::CornerRadius::same(5),
+        frame.corner_radius,
         ground,
-        egui::Stroke::new(1.0, edge),
+        edge,
         egui::StrokeKind::Inside,
     );
-    let inner = rect.shrink2(egui::vec2(FIELD_PAD_X, FIELD_BORDER_H / 2.0));
+    let pad = f32::from(frame.inner_margin.left);
+    let inner = rect.shrink2(egui::vec2(pad, FIELD_BORDER_H / 2.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)

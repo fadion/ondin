@@ -372,10 +372,11 @@ it applies to; switching kind keeps the others' values.
   overflows a number), *Start at zero* (always
   on for columns and bars, whose length is the value), the tick count (Auto aims for five on
   1-2-5 steps), side (left or right, top or bottom) and number format. Gridlines per axis: on or
-  off, solid or dashed, colour.
+  off, solid or dashed, colour; a band axis (columns, bars, lines, areas) draws none, so only a
+  scatter has category gridlines.
 - **Values** (value labels): Off, Inside, Outside, End; a label that does not fit inside its mark
   is not drawn. Pie labels: the value, the percentage or the category, inside or outside with a
-  leader line.
+  leader line. A scatter draws no value labels.
 - **Legend** (not Sankey): Off, Top, Bottom, Left, Right, with its alignment; a one-series chart
   starts with it off.
 - **Number format** (one per value axis and one for values): decimals, thousands separator,
@@ -479,7 +480,8 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   (swatch and name), which opens the picker on `PaintSlot::Chart` (solid colours, and the *Variables* tab: a
   binding written into the description, `chart_bind_tx`, *Solid* detaching it to the colour
   drawn), and the eye, which
-  shows the column as a series or hides it (a hidden series keeps its place and colour). A bound
+  shows the column as a series or hides it (a hidden series keeps its place and colour; its row
+  shows that colour dimmed, and is disabled with *Show the series to change its colour*). A bound
   colour row (a series', a node's, and the card's other colour rows) shows its variable's name
   right-aligned in a capsule (`binding::capsule`, at most half the row, `binding::chip_tip` its
   tooltip). On a
@@ -493,7 +495,14 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   Picking a palette puts every series and node back on it (`chart::with_palette`).
 - **Marks**, **Axes**, **Values**, **Legend** — the options above for the kind, as
   `ui::value_field`, `ui::switch_row`, `ui::segmented` and dropdown rows, number fields two to a
-  line. Each field's undo step is its label (*Bar radius*, *Legend position*). A value axis (and
+  line. Each field's undo step is its label (*Bar radius*, *Legend position*). Each segmented or
+  dropdown option is one table of value and name (`chart_segments_of`, `chart_menu_of`), and a
+  value outside it lights no row. An option the chart does not draw stays on the card, disabled
+  with its reason: *Hole* on a plain pie (*Only a donut has a hole*), *Largest* on a scatter with
+  no size column, the category gridlines on a band axis (*Only a scatter's X axis draws
+  gridlines*, no rows under its switch), and a scatter's Values section, under *A scatter draws
+  no value labels*. An area's *Curve* offers every curve it draws: *Straight*, *Smooth*, *Step*.
+  A value axis (and
   a scatter's X) has *Auto range*; turned off it starts at the extent the data already draws on
   nice steps, zero held where the kind holds it, with *Min* and *Max* fields that refuse to
   cross. The number format is one control, *Format*: a dropdown whose closed face is 12,345.6
@@ -510,20 +519,28 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   *Neutral flow colour* and *Track colour*.
 - **Text** — the family (the Type card's family dropdown, `family_dropdown`; empty is the
   document's default family and shows its name), *Text colour* (the ink, a series row's swatch
-  field on `ChartColour::Ink`, bindable the same way), the four sizes and the weight. Undo steps
-  *Chart font* and *Chart text colour*.
+  field on `ChartColour::Ink`, bindable the same way, its tooltip on a missing family the Type
+  card's), the four sizes and the weight, a dropdown of the family's upright faces as the Type
+  card's variant dropdown is (*Custom* when the weight matches none; a family whose faces cannot
+  be read keeps a number field). Undo steps *Chart font* and *Chart text colour*.
 - At the foot, **Flatten chart** (`ui::action_button`), with `Ctrl+E` in its tooltip.
 
 A multi-selection of charts shows the Chart card when every chart is the same kind
-(`selected_charts`), drawn from the first and writing each in one step: the kind, and every
-option the edit changed (`chart::Options::carried`, a diff of the first chart's options carried
-onto each), so each keeps its own data and the options left alone. Picking the segment or
-dropdown row already lit changes nothing on the first chart, so it writes the others to that
-value, one step (`chart_pick`). A chart-wide colour (text, axis, gridline, neutral, track) picked
+(`selected_charts`), drawn from the first and writing each in one step. A kind change carries the
+kind and every option it changed (`chart::Options::carried`); every other edit is applied to
+each chart's own description (`chart_each`), so a value read off the data lands as each chart's
+own (*Auto range* off starts each at its own extent), a *Min* keeps each chart's *Max*, a preset
+lands whole on a chart already on part of it, and picking the row, family or number already
+shown on the first chart still writes the others to it. A chart-wide colour's `%` changed keeps
+each chart's own variable and leaves a chart holding a colour of its own alone
+(`chart_alpha_tx`). Charts of different kinds show the Chart card with *Select charts of one kind
+to edit them together* and *Flatten chart*. A chart-wide colour (text, axis, gridline, neutral, track) picked
 or bound in the picker writes every selected chart (`chart_slot_targets`); a series' or node's
 colour belongs to its table and writes only the shown chart. The Data section says *Edit
 data one chart at a time* and the Series section is left out. A selection of charts only drops
-the frame's own cards and group colours as one chart does. A scrub previews every chart, the
+the frame's own cards and group colours as one chart does; a chart selected with other frames
+is left out of the Container card's subjects (`container_subjects`), which edits the frames
+alone. A scrub previews every chart, the
 render overrides minting each chart's ghost ids past the others'.
 
 ### The data window (`chart_data.rs`)

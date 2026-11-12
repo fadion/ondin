@@ -165,11 +165,11 @@ impl OndinApp {
         if let Some(t) = self.push_cache.at(rev).tips.get(&(root, key(kind))) {
             return t.clone();
         }
-        let main = self.push_main_name(root);
         let actor = self.session.ids.actor();
-        let doc = &self.session.doc;
         let mut ids = ondin_core::IdSource::new(actor ^ 0x5157);
-        let ops = push::push(doc, kind, root, &mut ids);
+        let ops = push::push(&self.session.doc, kind, root, &mut ids);
+        let main = self.landed_name(root, &ops);
+        let doc = &self.session.doc;
         let out = push::predicted(doc, root, &ops, actor);
         let others = |n: usize| match n {
             1 => "1 other instance follows".to_string(),
@@ -227,6 +227,20 @@ impl OndinApp {
         push::home(doc, root)
             .map(|m| crate::private::layer(doc, m).into_owned())
             .unwrap_or_default()
+    }
+
+    /// The names of the mains the push `ops` from `root` writes into
+    /// ([`push::landed`]), joined; [`Self::push_main_name`] when it lands nowhere.
+    fn landed_name(&self, root: NodeId, ops: &[Operation]) -> String {
+        let doc = &self.session.doc;
+        let names: Vec<String> = push::landed(doc, root, ops)
+            .into_iter()
+            .map(|m| crate::private::layer(doc, m).into_owned())
+            .collect();
+        match names.is_empty() {
+            true => self.push_main_name(root),
+            false => names.join(" and "),
+        }
     }
 
     /// Why the instance at `root` cannot push, in the card's words, or `None`.
@@ -443,7 +457,7 @@ impl OndinApp {
                 .info("Nothing here differs from the main component");
             return;
         }
-        let main = self.push_main_name(root);
+        let main = self.landed_name(root, &ops);
         let before = self.session.doc.clone();
         self.session.name_step("Push to main", icon::PUSH_TO_MAIN);
         if !self.commit_edit(Transaction(ops.clone())) {

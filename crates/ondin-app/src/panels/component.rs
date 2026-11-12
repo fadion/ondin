@@ -7662,4 +7662,89 @@ mod tests {
             "Pushed “Badge” into Button · 1 other instance now has it · Ctrl+Z to undo"
         );
     }
+
+    /// A swap pushed from a swapped nested copy's Swap label toasts the main it
+    /// went into, Button, and counts Button's other instance, not Heart's.
+    /// flip: `commit_push` naming `push_main_name` → fails at the toast's
+    /// "into Icons / Heart".
+    #[test]
+    fn a_swap_pushed_from_a_nested_copy_names_the_outer_main() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xC5);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [star, heart, button] = [(); 3].map(|_| ids.mint());
+        let frame = |id, index, name: &str| Operation::CreateNode {
+            id,
+            parent: root,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(24.0, 24.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        doc.apply(&Transaction(vec![
+            frame(star, 0, "Icons / Star"),
+            frame(heart, 1, "Icons / Heart"),
+            frame(button, 2, "Button"),
+            Operation::SetComponent {
+                id: star,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: heart,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let mut place = |doc: &mut Document, main: NodeId, parent: NodeId| {
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            doc.apply(&tx).unwrap();
+            made[0]
+        };
+        let n = place(&mut doc, star, button);
+        doc.apply(&Transaction(vec![Operation::SetComponent {
+            id: button,
+            component: true,
+        }]))
+        .unwrap();
+        let b1 = place(&mut doc, button, root);
+        let _b2 = place(&mut doc, button, root);
+        app.session.adopt_document(doc, None);
+        let doc = &app.session.doc;
+        let r = doc.get(b1).unwrap().children()[0];
+        assert_eq!(
+            doc.get(r).unwrap().link(),
+            Some(n),
+            "the fixture: b1's copy"
+        );
+        let swap = ondin_core::swap::swap(doc, r, heart).unwrap();
+        assert!(app.session.commit(swap));
+        app.push_from_reset(
+            Transaction(vec![Operation::SetSwap { id: r, swap: None }]),
+            true,
+        );
+        assert_eq!(
+            app.session.doc.get(n).unwrap().link(),
+            Some(heart),
+            "the fixture: the swap landed"
+        );
+        assert_eq!(
+            app.session.status().text,
+            "Pushed 1 property into Button · 1 instance follows · Ctrl+Z to undo"
+        );
+    }
 }

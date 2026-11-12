@@ -140,6 +140,36 @@ fn inside(doc: &Document, root: NodeId) -> FxHashSet<NodeId> {
         .collect()
 }
 
+/// The mains the push `pushed` from the instance at `root` writes into: its home,
+/// then its slot's main for a swapped root, each only when an operation lands in
+/// it. A swap pushed from a swapped nested copy lands in the slot's main alone,
+/// not in the main the copy shows.
+pub fn landed(doc: &Document, root: NodeId, pushed: &[Operation]) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = Vec::new();
+    for main in [home(doc, root), slot_home(doc, root)]
+        .into_iter()
+        .flatten()
+    {
+        let within: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[main])
+            .into_iter()
+            .collect();
+        if !out.contains(&main) && pushed.iter().any(|op| lands_in(op, &within)) {
+            out.push(main);
+        }
+    }
+    out
+}
+
+/// Whether `op` writes into one of the nodes `within`: a layer inserted under
+/// one, one deleted, or a field overwritten on one.
+fn lands_in(op: &Operation, within: &FxHashSet<NodeId>) -> bool {
+    match op {
+        Operation::InsertSubtree { parent, .. } => within.contains(parent),
+        Operation::DeleteNode { id } => within.contains(id),
+        _ => op.overwrites().is_some_and(|i| within.contains(&i)),
+    }
+}
+
 /// The node a field of copy `c` is pushed into: the slot (its link) for a swapped
 /// copy's slot fields, else [`source_of`] — the split [`reset::overrides`] makes.
 fn target_of(doc: &Document, c: NodeId, op: &Operation) -> Option<NodeId> {
@@ -697,12 +727,14 @@ pub struct Outcome {
 }
 
 /// [`Outcome`] of the push `pushed` from the instance at `root`, read from the
-/// document before the commit and the one after it.
+/// document before the commit and the one after it, over the instances of the
+/// mains it [`landed`] in.
 pub fn outcome(before: &Document, after: &Document, root: NodeId, pushed: &[Operation]) -> Outcome {
-    let Some(main) = home(before, root) else {
+    let mains = landed(before, root, pushed);
+    if mains.is_empty() {
         return Outcome::default();
-    };
-    let within: FxHashSet<NodeId> = crate::build::subtree_nodes(before, &[main])
+    }
+    let within: FxHashSet<NodeId> = crate::build::subtree_nodes(before, &mains)
         .into_iter()
         .collect();
     // The whole instance the push came from, not only `root`: pushed from a
@@ -735,7 +767,7 @@ pub fn outcome(before: &Document, after: &Document, root: NodeId, pushed: &[Oper
     let others: Vec<NodeId> = component::instances_by_main(after)
         .into_values()
         .flatten()
-        .filter(|r| !ours.contains(r) && reaches_main(after, *r, main))
+        .filter(|r| !ours.contains(r) && mains.iter().any(|m| reaches_main(after, *r, *m)))
         .collect();
     let mut out = Outcome::default();
     for r in others {

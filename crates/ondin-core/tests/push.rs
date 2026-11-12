@@ -680,6 +680,22 @@ fn a_pushed_swap_relinks_the_mains_nested_instance() {
             .any(|op| matches!(op, Operation::SetLink { id, .. } if *id == n)),
         "the slot relinked: {from_r:?}"
     );
+    // Its outcome is Button's: the toast names it, and b2 follows.
+    // flip: `outcome` reading `home` (Heart) → fails at "b2 follows".
+    assert_eq!(
+        push::landed(&doc, r, &from_r),
+        vec![button],
+        "lands in Button"
+    );
+    let mut after = doc.clone();
+    let mut tx = Transaction(from_r.clone());
+    ondin_core::propagate::owed(&after, &mut tx, &mut ids);
+    after.apply(&tx).expect("the push from r commits");
+    assert_eq!(
+        push::outcome(&doc, &after, r, &from_r),
+        Outcome { follow: 1, kept: 0 },
+        "b2 follows"
+    );
 
     let mut tx = Transaction(push::push(&doc, Kind::Fields, b1, &mut ids));
     ondin_core::propagate::owed(&doc, &mut tx, &mut ids);

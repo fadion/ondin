@@ -305,8 +305,11 @@ on — an instance still equal to the main's old value takes the new one, one wi
   `push::layer_blocked` — `WrapsLinked`, a local group holding linked copies, which would carry the
   main's own children; `HoldsMain`, where `component::can_hold` refuses the layer under its parent's
   source (an instance of the main, or of one reaching it).
-- **Counted**: `push::outcome(before, after, root, ops)` counts the main's other instances that took
-  the push and those that kept their own (a removal: lost it, or kept it unlinked). The whole
+- **Counted**: `push::outcome(before, after, root, ops)` counts the other instances of the mains the
+  ops landed in (`push::landed`: the home, the slot's main, or both) that took the push and those
+  that kept their own (a removal: lost it, or kept it unlinked). The toast and a row's tooltip name
+  those mains too, so a swap pushed from a swapped nested copy names the main holding its slot, not
+  the one it shows. The whole
   outermost instance the push came from (`component::outermost_instance_root`) is excluded, so a push
   from a nested copy never counts its own instance as following. `push::predicted` runs `propagate::owed` on a scratch document, for a row's tooltip.
 

@@ -78,8 +78,11 @@ everything below.
   writes such a binding transparent before it stamps the chart fresh. A copy carries the description's variables (`variable::carried`); a paste
   rebinds them by the fill's rule and clears the stamp so settle remakes the parts
   (`variable::land`), and a copy leaving its document detaches them (`detached`). A kit's rebind
-  never meets a chart, which cannot sit in a main. *Bind other uses* and Colour review leave a
-  chart's parts out, as no edit but the regeneration may write them.
+  never meets a chart, which cannot sit in a main. *Bind other uses*, Colour review, Find
+  (so *Replace all*), Group colours' recolour and the multi-selection corner radius
+  (`build::writable_nodes`) leave a chart's parts out, as no edit but the regeneration may
+  write them. *Missing fonts* lists a chart frame under the family its description sets, and
+  *Replace* rewrites that family in the description.
 - **`nodes: Vec<NodeStyle>`** — a Sankey's node colours, keyed by node name, so a
   re-import or a reorder keeps them. A node with no style draws the palette's colour at its
   place in node order; editing or binding its swatch stores one (`chart::with_node_fill`). A

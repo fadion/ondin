@@ -16,7 +16,8 @@ pub type FamilyUses = Vec<(String, Vec<NodeId>)>;
 
 /// Every family the document's text layers draw with, each with the layers that
 /// name it: a layer's own family (or its bound variable's value in every mode)
-/// and its runs'. Sorted by name; a name is spelled as first met.
+/// and its runs', and a chart's family with the chart frame as its layer.
+/// Sorted by name; a name is spelled as first met.
 pub fn families_in_use(doc: &Document) -> FamilyUses {
     let mut by_key: BTreeMap<String, (String, Vec<NodeId>)> = BTreeMap::new();
     let mut note = |name: &str, id: NodeId| {
@@ -29,6 +30,12 @@ pub fn families_in_use(doc: &Document) -> FamilyUses {
     };
     for id in text_layers(doc) {
         let Some(node) = doc.get(id) else { continue };
+        if let Some(c) = node.chart() {
+            if !c.options.text.family.is_empty() {
+                note(&c.options.text.family, id);
+            }
+            continue;
+        }
         let NodeKind::Text { style, spans, .. } = node.kind() else {
             continue;
         };
@@ -61,6 +68,8 @@ pub fn families_in_use(doc: &Document) -> FamilyUses {
 /// - Where a style or a layer's defaults change family, its axis and feature
 ///   settings go with the old typeface; a run's stay.
 /// - Runs naming `from` are rewritten on every layer.
+/// - A chart setting `from` is rewritten in its description, and settle remakes
+///   its parts; the parts are never written.
 /// - A bound family's variable, and every variable its aliases reach, has every
 ///   cell holding `from` rewritten; a kit's variable is read-only and is left.
 ///
@@ -87,6 +96,17 @@ pub fn replace_family(doc: &Document, from: &str, to: &str) -> Transaction {
     let mut vars: Vec<VarId> = Vec::new();
     for id in text_layers(doc) {
         let Some(node) = doc.get(id) else { continue };
+        if let Some(c) = node.chart() {
+            if matches(&c.options.text.family) {
+                let mut c = c.clone();
+                c.options.text.family = to.to_string();
+                ops.push(Operation::SetChart {
+                    id,
+                    chart: Some(Box::new(c)),
+                });
+            }
+            continue;
+        }
         let NodeKind::Text { style, spans, .. } = node.kind() else {
             continue;
         };
@@ -183,7 +203,9 @@ fn replaced_spans(
     hit.then(|| CharSpans::from_parts(parts, style))
 }
 
-/// Every text layer on every page, in no particular order.
+/// Every text layer on every page, in no particular order, and every chart
+/// frame. A chart's parts are not listed: its family is its description's, and
+/// only its regeneration writes them.
 fn text_layers(doc: &Document) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack: Vec<NodeId> = doc.page_ids().collect();
@@ -192,6 +214,10 @@ fn text_layers(doc: &Document) -> Vec<NodeId> {
             continue;
         }
         let Some(node) = doc.get(id) else { continue };
+        if node.chart().is_some() {
+            out.push(id);
+            continue;
+        }
         if matches!(node.kind(), NodeKind::Text { .. }) {
             out.push(id);
         }

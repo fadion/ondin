@@ -1062,6 +1062,87 @@ fn colour_review_leaves_a_charts_parts_out() {
     );
 }
 
+/// Replace all, *Replace* font and a Group colours recolour over a page holding
+/// a chart write the other layers and leave the parts to the chart: a family the
+/// chart sets is rewritten in its description.
+/// flip: `find::find` searching under a chart frame → fails at "replace all";
+/// `families::text_layers` listing parts → fails at "the chart is the family's
+/// one layer";
+/// `build::recolor` walking `subtree_nodes` → fails at "recolour".
+#[test]
+fn page_wide_edits_leave_a_charts_parts_to_it() {
+    use ondin_core::find::{Query, Scope};
+    let (mut doc, chart) = unsettled(480.0, 280.0);
+    let mut c = doc.get(chart).unwrap().chart().unwrap().clone();
+    c.options.text.family = "Gone Sans".into();
+    doc.apply(&Transaction(vec![Operation::SetChart {
+        id: chart,
+        chart: Some(Box::new(c)),
+    }]))
+    .unwrap();
+    let mut res = ondin_core::Resolved::rebuild(&doc);
+    ondin_core::chart::settle_all(&mut doc, &mut res);
+    let page = doc.first_page();
+    let bar = part(&doc, chart, PartRole::Bar, 1, 0).unwrap();
+    let ink = match doc.get(bar).unwrap().paint().fills[0].brush.literal() {
+        Some(ondin_core::Brush::Solid(c)) => *c,
+        other => panic!("the fixture: a solid bar, not {other:?}"),
+    };
+    let mut ids = IdSource::new(0xC9);
+    let (note, swatch) = (ids.mint(), ids.mint());
+    let text = NodeKind::Text {
+        content: "Jan report".into(),
+        style: Box::default(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    doc.apply(&Transaction(vec![
+        create(note, page, text),
+        create(swatch, page, rect()),
+        Operation::SetFills {
+            id: swatch,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(ink).into(),
+                visible: true,
+            }]),
+        },
+    ]))
+    .unwrap();
+
+    let q = Query::new("Jan", "January", false, false, false, false).unwrap();
+    let hits = ondin_core::find::find(&doc, &Scope::Page(page), &q);
+    let tx = ondin_core::find::replace(&doc, &hits, &q, false).tx;
+    doc.apply(&tx).expect("replace all");
+    match doc.get(note).unwrap().kind() {
+        NodeKind::Text { content, .. } => assert_eq!(content, "January report"),
+        _ => unreachable!(),
+    }
+
+    let uses = ondin_core::families::families_in_use(&doc);
+    let gone = uses.iter().find(|(f, _)| f == "Gone Sans").expect("listed");
+    assert_eq!(gone.1, vec![chart], "the chart is the family's one layer");
+    let tx = ondin_core::families::replace_family(&doc, "Gone Sans", "Inter");
+    doc.apply(&tx).expect("replace font");
+    assert_eq!(
+        doc.get(chart).unwrap().chart().unwrap().options.text.family,
+        "Inter"
+    );
+
+    let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+    let tx = ondin_core::build::recolor(&doc, &[page], ink, red);
+    doc.apply(&tx).expect("recolour");
+    assert_eq!(
+        doc.get(swatch).unwrap().paint().fills[0].brush.literal(),
+        Some(&ondin_core::Brush::Solid(red))
+    );
+}
+
 /// Chart `id` settled once, its regeneration applied and asserted accepted.
 fn settle_checked(doc: &mut Document, id: NodeId, what: &str) {
     let res = ondin_core::Resolved::rebuild(doc);

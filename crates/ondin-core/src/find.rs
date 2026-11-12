@@ -155,6 +155,11 @@ pub fn find(doc: &Document, scope: &Scope, query: &Query) -> Vec<Hit> {
                     });
                 }
             }
+            // A chart's parts are its description drawn, which only its
+            // regeneration writes: not searched, so a replace never names one.
+            if n.chart().is_some() {
+                continue;
+            }
             // Popped last child first: the layers panel's order, top of the stack
             // first.
             for c in n.children() {

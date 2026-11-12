@@ -4002,6 +4002,16 @@ pub fn subtree_nodes(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     out
 }
 
+/// [`subtree_nodes`] without a chart's parts, which only its regeneration
+/// writes: the nodes a bulk edit over a selection may write, so one crossing a
+/// chart is not refused whole (`chart::guard`). A chart frame itself stays in.
+pub fn writable_nodes(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
+    subtree_nodes(doc, ids)
+        .into_iter()
+        .filter(|id| crate::chart::owner(doc, *id).is_none())
+        .collect()
+}
+
 /// One colour found inside a selection, the places that use it, and the layers
 /// they belong to.
 #[derive(Clone, Debug, PartialEq)]
@@ -4099,7 +4109,7 @@ fn census<K: PartialEq>(
         }
     };
     // Literal paints only: a bound paint's colour is its variable's.
-    for id in subtree_nodes(doc, ids) {
+    for id in writable_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         for (i, f) in node.paint().fills.iter().enumerate() {
             let Some(brush) = f.brush.literal() else {
@@ -4154,7 +4164,7 @@ pub fn paint_at(doc: &Document, at: PaintAt) -> Option<crate::BrushSource> {
 /// row disagree with its own edit.
 pub fn repaint(doc: &Document, ids: &[NodeId], from: &Brush, to: &Brush) -> Transaction {
     let mut ops = Vec::new();
-    for id in subtree_nodes(doc, ids) {
+    for id in writable_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let swap = |b: &crate::BrushSource| {
             if b.literal() == Some(from) {
@@ -4212,7 +4222,7 @@ pub fn recolor(doc: &Document, ids: &[NodeId], from: Color, to: Color) -> Transa
         return Transaction(Vec::new());
     }
     let mut ops = Vec::new();
-    for id in subtree_nodes(doc, ids) {
+    for id in writable_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let paint = node.paint();
 
@@ -7220,7 +7230,7 @@ fn multi_radii(doc: &Document, id: NodeId) -> Option<RoundedRectRadii> {
 /// Subtree rather than outermost, unlike opacity: a radius does not compose.
 pub fn set_corner_radius_all(doc: &Document, ids: &[NodeId], radius: f64) -> Transaction {
     Transaction(
-        subtree_nodes(doc, ids)
+        writable_nodes(doc, ids)
             .into_iter()
             // So an unedited field that loses focus pushes no undo step.
             .filter(|id| {
@@ -7239,7 +7249,7 @@ pub fn set_corner_radius_all(doc: &Document, ids: &[NodeId], radius: f64) -> Tra
 /// or `None` when they differ or none has a corner radius.
 pub fn shared_corner_radius(doc: &Document, ids: &[NodeId]) -> Option<f64> {
     let mut shared: Option<f64> = None;
-    for id in subtree_nodes(doc, ids) {
+    for id in writable_nodes(doc, ids) {
         let Some(corner_radii) = multi_radii(doc, id) else {
             continue;
         };
@@ -7256,7 +7266,7 @@ pub fn shared_corner_radius(doc: &Document, ids: &[NodeId]) -> Option<f64> {
 /// Whether any node in scope has a corner radius the multi-selection field
 /// writes ([`multi_radii`]), i.e. whether that control has anything to act on.
 pub fn any_cornered_in(doc: &Document, ids: &[NodeId]) -> bool {
-    subtree_nodes(doc, ids)
+    writable_nodes(doc, ids)
         .into_iter()
         .any(|id| multi_radii(doc, id).is_some())
 }

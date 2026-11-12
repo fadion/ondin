@@ -14,7 +14,8 @@
 //! and the resting values every layer has — an opacity of 100% and a zero
 //! radius, gap, padding, limit or effect number — which would list every
 //! layer in the document. A copy that draws the value because its main does is
-//! offered once, as the main's field, with the copies counted; a copy that
+//! offered once, as the main's field, with the copies counted (a swapped copy
+//! follows its swap but for its size and limits); a copy that
 //! overrides it is its own row, and so is one in modes where the main's `%`
 //! would draw it otherwise. A main is bound only with each such row, and is
 //! dead, with its reason, where a copy following it would change and is no row
@@ -219,6 +220,25 @@ fn on(key: FieldKey, id: NodeId) -> FieldKey {
     }
 }
 
+/// Whether `key` is a field a swapped copy keeps from its slot rather than its
+/// swap: its size, its size limits and its visibility, whose binds write
+/// `SetSizeVars`, `SetLayoutItem` and `SetVisibleVar` (`swap::is_slot_field`).
+fn slot_field(key: FieldKey) -> bool {
+    matches!(
+        key,
+        FieldKey::Size { .. } | FieldKey::Limit { .. } | FieldKey::Visible { .. }
+    )
+}
+
+/// The node copy `n` takes `key` from as propagation sends it: its link for a
+/// slot field, else its swap where it has one.
+fn copied_from(n: &ondin_core::Node, key: FieldKey) -> Option<NodeId> {
+    match slot_field(key) {
+        true => n.link(),
+        false => n.swap().or(n.link()),
+    }
+}
+
 /// The style a bind of `key` would detach: the one applied to the card the
 /// field sits in.
 fn style_over(n: &ondin_core::Node, key: FieldKey) -> Option<ondin_core::style::StyleId> {
@@ -402,18 +422,25 @@ impl OndinApp {
         let source = |k: FieldKey| {
             let alpha = found_at(k).flatten();
             doc.get(k.at())
-                .and_then(|n| n.link())
+                .and_then(|n| copied_from(n, k))
                 .map(|l| on(k, l))
                 .filter(|s| is_found(*s, alpha) && !dead(*s))
         };
-        // Each layer's copies, one link down: a main's binding reaches every
-        // copy that follows the field, found or not.
-        let mut copies: std::collections::HashMap<NodeId, Vec<NodeId>> = Default::default();
+        // Each layer's copies one step down, as propagation sends a field: a
+        // swapped copy takes its slot fields from its link and the rest from
+        // its swap. A main's binding reaches every copy that follows the
+        // field, found or not.
+        let mut copies: [std::collections::HashMap<NodeId, Vec<NodeId>>; 2] = Default::default();
         for &id in &ids {
-            if let Some(l) = doc.get(id).and_then(|n| n.link()) {
-                copies.entry(l).or_default().push(id);
+            let Some(n) = doc.get(id) else { continue };
+            if let Some(l) = n.link() {
+                copies[1].entry(l).or_default().push(id);
+            }
+            if let Some(s) = n.swap().or(n.link()) {
+                copies[0].entry(s).or_default().push(id);
             }
         }
+        let copies_of = |k: FieldKey, at: NodeId| copies[usize::from(slot_field(k))].get(&at);
         // The copies following `key` that binding it would change: a copy
         // that does not draw the variable at the main's `%` in its own modes.
         // `Err` when one is no row of its own, else those rows, which must be
@@ -423,7 +450,7 @@ impl OndinApp {
                 return Ok(Vec::new());
             };
             let alpha = found_at(key).flatten();
-            let mut stack = copies.get(&key.at()).cloned().unwrap_or_default();
+            let mut stack = copies_of(key, key.at()).cloned().unwrap_or_default();
             let mut seen = std::collections::HashSet::new();
             let mut rows = Vec::new();
             while let Some(c) = stack.pop() {
@@ -440,7 +467,7 @@ impl OndinApp {
                         false => return Err(()),
                     }
                 }
-                stack.extend(copies.get(&c).into_iter().flatten().copied());
+                stack.extend(copies_of(key, c).into_iter().flatten().copied());
             }
             Ok(rows)
         };
@@ -1135,6 +1162,122 @@ mod tests {
             ondin_core::Brush::Solid(RED),
             "the instance stays red"
         );
+    }
+
+    /// **A swapped copy follows its swap's fill**: Holder holds an instance n
+    /// of Star; Holder's instance h, in Dark, has its copy r of n swapped to M,
+    /// so r draws M's red. Binding M to `brand` would turn r blue, so M's row
+    /// is dead and the one-click bind leaves r red.
+    ///
+    /// flip: `other_uses`'s content copies keyed by the link alone (n, not M)
+    /// → fails at "dead, with its reason".
+    #[test]
+    fn a_main_whose_swapped_copy_would_change_is_not_bound() {
+        use ondin_core::variable::{Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let [m, star, holder] = [(); 3].map(|_| app.session.ids.mint());
+        let (light, dark) = (app.session.ids.mint_mode(), app.session.ids.mint_mode());
+        let var = app.session.ids.mint_var();
+        let add = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: Vec::new(),
+        };
+        let frame = |id, name: &str| Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let main = |id| Operation::SetComponent {
+            id,
+            component: true,
+        };
+        app.session
+            .try_commit(Transaction(vec![
+                add(light, "Light", 0),
+                add(dark, "Dark", 1),
+                Operation::AddVariable {
+                    var: Variable {
+                        id: var,
+                        name: "brand".into(),
+                        kind: VarKind::Color,
+                        cells: [(light, Cell::Color(RED)), (dark, Cell::Color(BLUE))].into(),
+                        scope: None,
+                        origin: None,
+                        forked: None,
+                        description: String::new(),
+                    },
+                },
+                frame(m, "M"),
+                fill(m, RED, 1.0),
+                main(m),
+                frame(star, "Star"),
+                main(star),
+                frame(holder, "Holder"),
+            ]))
+            .expect("the mains");
+        let place = |app: &mut OndinApp, main: NodeId, parent: NodeId| {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.commit_edit(tx));
+            made[0]
+        };
+        let n = place(&mut app, star, holder);
+        app.session
+            .try_commit(Transaction(vec![main(holder)]))
+            .expect("Holder a main");
+        let h = place(&mut app, holder, page);
+        app.session
+            .try_commit(Transaction(vec![Operation::SetModes {
+                id: h,
+                modes: vec![dark],
+            }]))
+            .expect("h in Dark");
+        let r = app.session.doc.get(h).unwrap().children()[0];
+        assert_eq!(
+            app.session.doc.get(r).unwrap().link(),
+            Some(n),
+            "the fixture: r"
+        );
+        let swap = ondin_core::swap::swap(&app.session.doc, r, m).expect("r swaps to M");
+        assert!(app.commit_edit(swap));
+        let red = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            let brush = &doc.get(r).unwrap().paint().fills[0].brush;
+            doc.resolve_brush(r, brush).into_owned() == ondin_core::Brush::Solid(RED)
+        };
+        assert!(red(&app), "the fixture: r draws M's red");
+        let uses = app.other_uses(var);
+        let [u] = &uses[..] else {
+            panic!("M's row alone: {uses:?}")
+        };
+        assert_eq!(u.key.at(), m);
+        assert!(u.why_not.is_some(), "dead, with its reason");
+        app.bind_ready_uses(var);
+        assert!(red(&app), "r stays red");
     }
 
     /// **A chart frame's padding is its regeneration's**: a chart's generated

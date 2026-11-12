@@ -1049,6 +1049,9 @@ impl RenderOverrides {
         let Some(base) = self.current_kind(doc, id) else {
             return;
         };
+        if self.place_stretched_root(doc, res, id, s, &base, queue) {
+            return;
+        }
         let contents = ondin_core::container::placed_by_contents(node.kind(), node.display())
             .then(|| {
                 let view = PreviewView { doc, ov: self, res };
@@ -1080,6 +1083,77 @@ impl RenderOverrides {
             self.entry(id).stretch = Some(inner);
             queue.extend(node.children().iter().copied());
         }
+    }
+
+    /// [`Self::place_stretched`] for a layout root, as `Resolved` places one: at
+    /// its share as its own pass sized it (`container::root_in_stretch`), its
+    /// items laid again at that share (`container::relaid_at_share`), and its
+    /// pinned children queued against the new box. `false` for any other layer.
+    fn place_stretched_root(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        id: NodeId,
+        s: &ondin_core::container::Stretch,
+        base: &NodeKind,
+        queue: &mut std::collections::VecDeque<NodeId>,
+    ) -> bool {
+        let Some(node) = doc.get(id) else {
+            return false;
+        };
+        let laid = {
+            let view = PreviewView { doc, ov: self, res };
+            if !ondin_core::container::is_layout_root(&view, id) {
+                return false;
+            }
+            let first = ondin_core::container::lay_out(&view, id);
+            let Some(own) = first.iter().find(|l| l.id == id).map(|l| l.size) else {
+                return false;
+            };
+            let Some(placed) =
+                ondin_core::container::root_in_stretch(&view, id, s, node.transform(), own)
+            else {
+                return false;
+            };
+            let relaid = ondin_core::container::relaid_at_share(&view, id, own, &placed);
+            // At its own size, its items are the first pass's.
+            let items = match relaid.is_empty() {
+                true => first.into_iter().filter(|l| l.id != id).collect(),
+                false => relaid,
+            };
+            let items: Vec<(NodeId, ondin_core::container::Placed)> = items
+                .into_iter()
+                .map(|l| {
+                    let p = ondin_core::container::item_placed(&view, l.id, l.slot, l.size)
+                        .unwrap_or(ondin_core::container::Placed {
+                            local: None,
+                            kind: None,
+                            frame: None,
+                        });
+                    (l.id, p)
+                })
+                .collect();
+            (placed, items)
+        };
+        let (placed, items) = laid;
+        if let Some(local) = placed.local {
+            self.entry(id).transform = Some(local);
+        }
+        let kind = placed.kind.unwrap_or_else(|| base.clone());
+        let now = self
+            .get(id)
+            .and_then(|o| o.kind.clone())
+            .or_else(|| res.used_kind(doc, id).cloned());
+        if now.as_ref() != Some(&kind) {
+            self.set_kind(doc, res, id, kind);
+        }
+        self.entry(id).frame = placed.frame;
+        self.mark_moved(doc, id);
+        for (item, p) in items {
+            self.apply_laid(doc, res, item, false, p);
+        }
+        queue.extend(node.children().iter().copied());
+        true
     }
 
     /// Re-derive the outline of every boolean above something this preview moves.

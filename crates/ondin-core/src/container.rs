@@ -2660,7 +2660,7 @@ pub struct Placed {
 }
 
 /// Approximately equal on the 1/64 grid layout results land on.
-pub(crate) fn near(a: f64, b: f64) -> bool {
+fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1.0 / 128.0
 }
 
@@ -2745,6 +2745,62 @@ pub fn root_sized(
     }
 }
 
+/// A layout root inside a group stretched by `stretch`: its share of the
+/// group's box, read from the `size` its own pass gave it, as every sibling
+/// keeps. A frame answers its resized kind; a group with a layout, whose box is
+/// the pass's at its origin, answers its share as its box. `None` for a root
+/// with no box.
+pub fn root_in_stretch(
+    view: &dyn LayoutView,
+    id: crate::NodeId,
+    stretch: &Stretch,
+    stored: Affine,
+    size: Size,
+) -> Option<Placed> {
+    let (kind, frame) = root_sized(view, id, size);
+    let own = kind.clone().or_else(|| view.kind(id))?;
+    let contents =
+        matches!(own, NodeKind::Group).then(|| Rect::from_origin_size(Point::ZERO, size));
+    let (local, stretched, inner) = place_in_stretch(stretch, stored, &own, contents)?;
+    Some(match inner {
+        Some(s) => Placed {
+            local: Some(local),
+            kind: None,
+            frame: Some(s.to.size()),
+        },
+        None => Placed {
+            local: Some(local),
+            kind: stretched.or(kind),
+            frame,
+        },
+    })
+}
+
+/// `root`'s items laid again at the size `placed` (its [`root_in_stretch`])
+/// draws it at, as the browser re-lays a container at its new size; empty where
+/// that is the `own` size its pass gave it. The root's own entry is left out:
+/// it keeps `own`, which its share is read from.
+pub fn relaid_at_share(
+    view: &dyn LayoutView,
+    root: crate::NodeId,
+    own: Size,
+    placed: &Placed,
+) -> Vec<Laid> {
+    let share = match &placed.kind {
+        Some(NodeKind::Artboard { size, .. }) => Some(*size),
+        _ => placed.frame,
+    };
+    match share {
+        Some(s) if !(near(s.width, own.width) && near(s.height, own.height)) => {
+            lay_out_at(view, root, Some(s))
+                .into_iter()
+                .filter(|l| l.id != root)
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// One node's result from [`lay_out`]: where its box's top-left lands in its
 /// parent's local space, and its size.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2815,11 +2871,7 @@ fn pinned_size(view: &dyn LayoutView, root: crate::NodeId, out: &[Laid]) -> Opti
 
 /// [`lay_out`]'s pass, with the root at `size` when given — a definite size on
 /// both axes, which is what an absolutely positioned box between two insets is.
-pub(crate) fn lay_out_at(
-    view: &dyn LayoutView,
-    root: crate::NodeId,
-    size: Option<Size>,
-) -> Vec<Laid> {
+fn lay_out_at(view: &dyn LayoutView, root: crate::NodeId, size: Option<Size>) -> Vec<Laid> {
     let mut tree = FlexTree::new(view);
     let Some(r) = tree.push(root) else {
         return Vec::new();

@@ -3364,6 +3364,109 @@ fn a_frame_in_a_pinned_group_replaces_its_pinned_children_in_a_preview() {
     assert_preview_matches_commit(&doc, &tx, "a frame in a pinned group");
 }
 
+/// Resizing a frame whose pinned group holds a laid-out frame, or a laid-out
+/// group, previews the laid-out one at its share and its items laid again at
+/// that share, as the commit draws them: frame 200 × 100 resized to 400, the
+/// group pinned 0% holding rect A on the left half and L on the right, L
+/// centring its 20-wide rect C (a group with 40 of padding to fill its half).
+/// flip: `place_stretched` placing a layout root as any other child → fails
+/// both cases: the frame's C keeps its committed slot, the group stays put.
+#[test]
+fn a_laid_out_root_in_a_pinned_group_previews_at_its_share() {
+    use ondin_core::container::{Display, Flex, JustifyContent};
+    for laid_group in [false, true] {
+        let mut ids = IdSource::new(3);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [outer, group, a, l, c] = [(); 5].map(|_| ids.mint());
+        let frame = |w: f64| NodeKind::Artboard {
+            size: Size::new(w, 100.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        };
+        let rect = |w: f64, h: f64| NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        };
+        let create = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let fill = |id| Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)).into(),
+                visible: true,
+            }]),
+        };
+        let all = Some(ondin_core::LengthPct::Percent(0.0));
+        let l_kind = match laid_group {
+            true => NodeKind::Group,
+            false => frame(100.0),
+        };
+        doc.apply(&Transaction(vec![
+            create(outer, root, frame(200.0), (0.0, 0.0)),
+            create(group, outer, NodeKind::Group, (0.0, 0.0)),
+            create(a, group, rect(100.0, 100.0), (0.0, 0.0)),
+            fill(a),
+            Operation::CreateNode {
+                id: l,
+                parent: group,
+                index: 1,
+                kind: l_kind,
+                transform: Some(Affine::translate((100.0, 0.0))),
+                name: None,
+            },
+            create(c, l, rect(20.0, 20.0), (0.0, 0.0)),
+            fill(c),
+            Operation::SetDisplay {
+                id: l,
+                display: Some(Display::Flex(Flex {
+                    justify_content: JustifyContent::Center,
+                    padding: [if laid_group { 40.0 } else { 0.0 }; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetInsets {
+                id: group,
+                insets: ondin_core::Insets {
+                    top: all,
+                    right: all,
+                    bottom: all,
+                    left: all,
+                    ..Default::default()
+                },
+            },
+        ]))
+        .unwrap();
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id: outer,
+            geometry: GeometryPatch::Size(Size::new(400.0, 100.0)),
+        }]);
+        let mut after = doc.clone();
+        after.apply(&tx).unwrap();
+        let res = Resolved::rebuild(&after);
+        assert_eq!(
+            res.world_bounds(c).map(|b| (b.x0, b.x1)),
+            Some((290.0, 310.0)),
+            "the fixture: the commit centres C in L's share"
+        );
+        assert_preview_matches_commit(
+            &doc,
+            &tx,
+            &format!(
+                "a laid-out {} in a pinned group",
+                if laid_group { "group" } else { "frame" }
+            ),
+        );
+    }
+}
+
 /// Setting, changing and clearing a layer's insets previews as its commit —
 /// the inspector's scrub over an inset field is this.
 ///

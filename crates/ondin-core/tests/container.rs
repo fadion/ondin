@@ -721,8 +721,8 @@ fn deleting_hiding_or_adding_in_a_pinned_group_moves_nothing_else() {
 /// 0% holding rect A on the left half and frame L, laying out its 20-wide rect
 /// C centred, on the right half. L is drawn at 200–400 and C at 290–310.
 /// flip: `used_geometry` placing a layout root by `root_used` alone → L stays
-/// at 100–200, failing at "its share"; `place_node` without its second pass
-/// at the share → C at 240–260, failing at "centred in its share".
+/// at 100–200, failing at "its share"; `place_node` without `relaid_at_share`
+/// → C at 240–260, failing at "centred in its share".
 #[test]
 fn a_laid_out_frame_in_a_stretched_group_keeps_its_share() {
     let mut s = Scene::new();
@@ -746,6 +746,54 @@ fn a_laid_out_frame_in_a_stretched_group_keeps_its_share() {
     assert_eq!(
         s.bounds(l),
         Rect::new(200.0, 0.0, 400.0, 100.0),
+        "its share"
+    );
+    assert_eq!(
+        (s.bounds(c).x0, s.bounds(c).x1),
+        (290.0, 310.0),
+        "centred in its share"
+    );
+}
+
+/// A group with a layout inside a stretched group keeps its share of the box,
+/// as a frame with one does, and its items are laid again at that share: frame
+/// 200 × 100 resized to 400, the group pinned 0% holding rect A on the left
+/// half and group L, hugging its 20-wide rect C centred with 40 of padding, on
+/// the right half. L's box is 200–400 and C is drawn at 290–310.
+/// flip: `container::root_in_stretch` without a group's box as its contents →
+/// L is placed as specified, C at 140, failing at "its share"; `place_node`
+/// without `relaid_at_share` → C at 240, failing at "centred in its share".
+#[test]
+fn a_laid_out_group_in_a_stretched_group_keeps_its_share() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(100.0, 100.0), (0.0, 0.0));
+    let l = s.add(g, NodeKind::Group, (100.0, 0.0));
+    let c = s.add(l, rect(20.0, 20.0), (0.0, 0.0));
+    s.commit(vec![Operation::SetDisplay {
+        id: l,
+        display: Some(ondin_core::container::Display::Flex(
+            ondin_core::container::Flex {
+                justify_content: ondin_core::container::JustifyContent::Center,
+                padding: [40.0; 4],
+                ..Default::default()
+            },
+        )),
+    }]);
+    assert_eq!(
+        s.bounds(c),
+        Rect::new(140.0, 40.0, 160.0, 60.0),
+        "the fixture: padded in L"
+    );
+    s.pin(g, all_pct(0.0));
+    s.resize(f, 400.0, 100.0);
+    assert_eq!(
+        (
+            s.res.used_local(&s.doc, l).map(|a| a.translation().x),
+            s.res.used_frame(l)
+        ),
+        (Some(200.0), Some(Size::new(200.0, 100.0))),
         "its share"
     );
     assert_eq!(

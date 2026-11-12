@@ -417,11 +417,11 @@ fn used_geometry(
                 ..Used::default()
             });
         }
-        if let Some((local, kind, frame)) = root_in_stretch(doc, used, node, l.size) {
+        if let Some(p) = root_in_stretch(view, node, l.size) {
             return Some(Used {
-                local: Some(local),
-                kind,
-                frame,
+                local: p.local,
+                kind: p.kind,
+                frame: p.frame,
                 ..Used::default()
             });
         }
@@ -528,28 +528,19 @@ fn root_used(
 }
 
 /// A layout root's placement inside a stretched group, from the `size` its own
-/// pass gave it: its share of the group's box, as every sibling keeps — its
-/// local transform, the kind it is drawn as, and a group root's box. `None`
-/// outside a stretched group.
+/// pass gave it ([`crate::container::root_in_stretch`]). `None` outside a
+/// stretched group.
 fn root_in_stretch(
-    doc: &Document,
-    used: &FxHashMap<NodeId, Used>,
+    view: &UsedView<'_>,
     node: &Node,
     size: kurbo::Size,
-) -> Option<(Affine, Option<NodeKind>, Option<kurbo::Size>)> {
+) -> Option<crate::container::Placed> {
     let stretch = node
         .parent()
-        .and_then(|p| used.get(&p))
+        .and_then(|p| view.used.get(&p))
         .and_then(|u| u.stretch)
         .filter(|s| !(s.is_identity() && s.from.origin() == s.to.origin()))?;
-    let (kind, frame) = crate::container::root_sized(&DocView(doc), node.id(), size);
-    let own = kind.clone().or_else(|| {
-        doc.resolved_kind(node.id())
-            .map(std::borrow::Cow::into_owned)
-    })?;
-    let (local, stretched, _) =
-        crate::container::place_in_stretch(&stretch, node.transform(), &own, None)?;
-    Some((local, stretched.or(kind), frame))
+    crate::container::root_in_stretch(view, node.id(), &stretch, node.transform(), size)
 }
 
 /// `id`'s used geometry, running its layout pass first when it roots one, so a
@@ -567,15 +558,10 @@ fn place_node(
         // again at that size, as the browser re-lays them; its own entry keeps
         // the size its pass gave it, which its share is taken from.
         if let (Some(own), Some(node)) = (laid.get(&id).map(|l| l.size), view.doc.get(id))
-            && let Some((_, Some(NodeKind::Artboard { size, .. }), _)) =
-                root_in_stretch(view.doc, view.used, node, own)
-            && !(crate::container::near(size.width, own.width)
-                && crate::container::near(size.height, own.height))
+            && let Some(placed) = root_in_stretch(view, node, own)
         {
-            for l in crate::container::lay_out_at(view, id, Some(size)) {
-                if l.id != id {
-                    laid.insert(l.id, l);
-                }
+            for l in crate::container::relaid_at_share(view, id, own, &placed) {
+                laid.insert(l.id, l);
             }
         }
     }

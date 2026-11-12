@@ -7,7 +7,7 @@
         <text data-name="Label · Jan" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jan</tspan></text>
       </g>
       <g data-name="Legend · Feb" transform="matrix(1 0 0 1 48.671875 0)">
-        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
       </g>
       <g data-name="Legend · Apr" transform="matrix(1 0 0 1 97.625 0)">
@@ -15,7 +15,7 @@
         <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
       </g>
       <g data-name="Legend · May" transform="matrix(1 0 0 1 145.78125 0)">
-        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#7a52c8"/>
         <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
       </g>
       <g data-name="Legend · Jun" transform="matrix(1 0 0 1 197.921875 0)">
@@ -27,9 +27,9 @@
       <g data-name="Pie" transform="matrix(1 0 0 1 113.259766 0)">
         <g data-name="Slices">
           <path data-name="Slice · Jan" d="M110.7402,0 C139.4958,0 167.1238,11.1853 187.7803,31.1901 L110.7402,110.7402 Z" fill="#3b6fe0"/>
-          <path data-name="Slice · Feb" d="M187.7803,31.1901 C215.5943,58.1264 227.3198,97.6337 218.704,135.3823 L110.7402,110.7402 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Feb" d="M187.7803,31.1901 C215.5943,58.1264 227.3198,97.6337 218.704,135.3823 L110.7402,110.7402 Z" fill="#e06c1e"/>
           <path data-name="Slice · Apr" d="M218.704,135.3823 C207.795,183.1775 166.759,218.1119 117.8354,221.2529 L110.7402,110.7402 Z" fill="#d94e7a"/>
-          <path data-name="Slice · May" d="M117.8354,221.2529 C90.3627,223.0167 63.218,214.4846 41.6948,197.3204 C20.1716,180.1563 5.8132,155.5907 1.4195,128.4144 L110.7402,110.7402 Z" fill="#8a63d2"/>
+          <path data-name="Slice · May" d="M117.8354,221.2529 C90.3627,223.0167 63.218,214.4846 41.6948,197.3204 C20.1716,180.1563 5.8132,155.5907 1.4195,128.4144 L110.7402,110.7402 Z" fill="#7a52c8"/>
           <path data-name="Slice · Jun" d="M1.4195,128.4144 C-3.7608,96.3722 5.3772,63.6705 26.4175,38.9553 C47.4579,14.2401 78.282,0 110.7402,0 L110.7402,110.7402 Z" fill="#c9a227"/>
         </g>
         <g data-name="Values">
@@ -48,9 +48,9 @@
       <g data-name="Pie" transform="matrix(1 0 0 1 70.148438 0)">
         <g data-name="Slices">
           <path data-name="Slice · Jun" d="M125.103,39.7421 C163.2386,40.2413 196.2844,66.2925 205.6724,103.2579 L173.0034,111.5547 C167.3706,89.3755 147.5432,73.7448 124.6618,73.4452 Z" fill="#c9a227"/>
-          <path data-name="Slice · May" d="M206.1874,105.4029 C213.6649,138.4489 200.623,172.7595 173.0826,192.4946 L153.4495,165.0968 C169.9738,153.2557 177.7989,132.6693 173.3124,112.8417 Z" fill="#8a63d2"/>
+          <path data-name="Slice · May" d="M206.1874,105.4029 C213.6649,138.4489 200.623,172.7595 173.0826,192.4946 L153.4495,165.0968 C169.9738,153.2557 177.7989,132.6693 173.3124,112.8417 Z" fill="#7a52c8"/>
           <path data-name="Slice · Apr" d="M171.2728,193.756 C145.6977,211.0879 112.6887,213.0345 85.2538,198.8288 L100.7523,168.8973 C117.2132,177.4207 137.0186,176.2527 152.3637,165.8536 Z" fill="#d94e7a"/>
-          <path data-name="Slice · Feb" d="M83.3083,197.7889 C60.3681,185.1383 44.6165,162.5379 40.6878,136.637 L74.0127,131.5822 C76.3699,147.1227 85.8209,160.683 99.585,168.2733 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Feb" d="M83.3083,197.7889 C60.3681,185.1383 44.6165,162.5379 40.6878,136.637 L74.0127,131.5822 C76.3699,147.1227 85.8209,160.683 99.585,168.2733 Z" fill="#e06c1e"/>
           <path data-name="Slice · Other" d="M40.3856,134.4518 C37.4115,110.6594 44.7142,86.7267 60.4646,68.6478 C76.2151,50.5688 98.9215,40.0559 122.897,39.7421 L123.3382,73.4452 C108.9529,73.6336 95.329,79.9413 85.8788,90.7887 C76.4285,101.636 72.0469,115.9956 73.8313,130.2711 Z" fill="#7a7a7a"/>
         </g>
         <g data-name="Values">
@@ -73,7 +73,7 @@
         <text data-name="Label · Jun" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jun</tspan></text>
       </g>
       <g data-name="Legend · May" transform="matrix(1 0 0 1 3.78125 20.515625)">
-        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#7a52c8"/>
         <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
       </g>
       <g data-name="Legend · Apr" transform="matrix(1 0 0 1 5.78125 41.046875)">
@@ -81,7 +81,7 @@
         <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
       </g>
       <g data-name="Legend · Feb" transform="matrix(1 0 0 1 5.375 61.5625)">
-        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
       </g>
       <g data-name="Legend · Other" transform="matrix(1 0 0 1 0 82.078125)">

@@ -2,34 +2,34 @@
   <defs>
     <linearGradient id="grad-721c0a194b88663a_3-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#3b6fe0"/>
-      <stop offset="1" stop-color="#f08c2e"/>
+      <stop offset="1" stop-color="#e06c1e"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_4-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#2ea88a"/>
-      <stop offset="1" stop-color="#f08c2e"/>
+      <stop offset="1" stop-color="#e06c1e"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_5-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="256.3682" y2="0">
       <stop offset="0" stop-color="#d94e7a"/>
-      <stop offset="1" stop-color="#f08c2e"/>
+      <stop offset="1" stop-color="#e06c1e"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_6-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#3b6fe0"/>
-      <stop offset="1" stop-color="#8a63d2"/>
+      <stop offset="1" stop-color="#7a52c8"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_7-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#2ea88a"/>
-      <stop offset="1" stop-color="#8a63d2"/>
+      <stop offset="1" stop-color="#7a52c8"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_8-fill-0" gradientUnits="userSpaceOnUse" x1="57.8203" y1="0" x2="466.916" y2="0">
       <stop offset="0" stop-color="#d94e7a"/>
-      <stop offset="1" stop-color="#8a63d2"/>
+      <stop offset="1" stop-color="#7a52c8"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_9-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
-      <stop offset="0" stop-color="#f08c2e"/>
+      <stop offset="0" stop-color="#e06c1e"/>
       <stop offset="1" stop-color="#c9a227"/>
     </linearGradient>
     <linearGradient id="grad-721c0a194b88663a_10-fill-0" gradientUnits="userSpaceOnUse" x1="268.3682" y1="0" x2="466.916" y2="0">
-      <stop offset="0" stop-color="#f08c2e"/>
+      <stop offset="0" stop-color="#e06c1e"/>
       <stop offset="1" stop-color="#4aa8d8"/>
     </linearGradient>
   </defs>
@@ -41,7 +41,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -100,11 +100,11 @@
           <path data-name="Revenue · Jun" transform="matrix(1 0 0 1 342.598218 21.318164)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,120.8029 C14.5521,120.8029 14.5521,120.8029 14.5521,120.8029 L0,120.8029 C0,120.8029 0,120.8029 0,120.8029 Z" fill="#3b6fe0"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 25.985909 88.825684)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,53.2954 C14.5521,53.2954 14.5521,53.2954 14.5521,53.2954 L0,53.2954 C0,53.2954 0,53.2954 0,53.2954 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 92.509834 85.272656)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,56.8484 C14.5521,56.8484 14.5521,56.8484 14.5521,56.8484 L0,56.8484 C0,56.8484 0,56.8484 0,56.8484 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 225.557686 78.166602)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,63.9545 C14.5521,63.9545 14.5521,63.9545 14.5521,63.9545 L0,63.9545 C0,63.9545 0,63.9545 0,63.9545 Z" fill="#f08c2e"/>
-          <path data-name="Costs · May" transform="matrix(1 0 0 1 292.081612 74.613574)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,67.5075 C14.5521,67.5075 14.5521,67.5075 14.5521,67.5075 L0,67.5075 C0,67.5075 0,67.5075 0,67.5075 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 358.605537 69.284033)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,72.8371 C14.5521,72.8371 14.5521,72.8371 14.5521,72.8371 L0,72.8371 C0,72.8371 0,72.8371 0,72.8371 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 25.985909 88.825684)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,53.2954 C14.5521,53.2954 14.5521,53.2954 14.5521,53.2954 L0,53.2954 C0,53.2954 0,53.2954 0,53.2954 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 92.509834 85.272656)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,56.8484 C14.5521,56.8484 14.5521,56.8484 14.5521,56.8484 L0,56.8484 C0,56.8484 0,56.8484 0,56.8484 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 225.557686 78.166602)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,63.9545 C14.5521,63.9545 14.5521,63.9545 14.5521,63.9545 L0,63.9545 C0,63.9545 0,63.9545 0,63.9545 Z" fill="#e06c1e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 292.081612 74.613574)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,67.5075 C14.5521,67.5075 14.5521,67.5075 14.5521,67.5075 L0,67.5075 C0,67.5075 0,67.5075 0,67.5075 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 358.605537 69.284033)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,72.8371 C14.5521,72.8371 14.5521,72.8371 14.5521,72.8371 L0,72.8371 C0,72.8371 0,72.8371 0,72.8371 Z" fill="#e06c1e"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Profit · Jan" transform="matrix(1 0 0 1 41.993228 120.80293)" d="M0,2 C0,0.8954 0.8954,0 2,0 L12.5521,0 C13.6567,0 14.5521,0.8954 14.5521,2 L14.5521,21.3182 C14.5521,21.3182 14.5521,21.3182 14.5521,21.3182 L0,21.3182 C0,21.3182 0,21.3182 0,21.3182 Z" fill="#2ea88a"/>
@@ -125,7 +125,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -184,11 +184,11 @@
           <path data-name="Revenue · Jun" transform="matrix(1 0 0 1 79.069238 152.48409)" d="M0,0 C0,0 0,0 0,0 L266.8354,0 C267.94,0 268.8354,0.8954 268.8354,2 L268.8354,4.4769 C268.8354,5.5814 267.94,6.4769 266.8354,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#3b6fe0"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 79.069238 11.565844)" d="M0,0 C0,0 0,0 0,0 L116.6039,0 C117.7084,0 118.6039,0.8954 118.6039,2 L118.6039,4.4769 C118.6039,5.5814 117.7084,6.4769 116.6039,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 79.069238 41.174405)" d="M0,0 C0,0 0,0 0,0 L124.5108,0 C125.6154,0 126.5108,0.8954 126.5108,2 L126.5108,4.4769 C126.5108,5.5814 125.6154,6.4769 124.5108,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 79.069238 100.391528)" d="M0,0 C0,0 0,0 0,0 L140.3246,0 C141.4292,0 142.3246,0.8954 142.3246,2 L142.3246,4.4769 C142.3246,5.5814 141.4292,6.4769 140.3246,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
-          <path data-name="Costs · May" transform="matrix(1 0 0 1 79.069238 130.000089)" d="M0,0 C0,0 0,0 0,0 L148.2316,0 C149.3361,0 150.2316,0.8954 150.2316,2 L150.2316,4.4769 C150.2316,5.5814 149.3361,6.4769 148.2316,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 79.069238 159.60865)" d="M0,0 C0,0 0,0 0,0 L160.0919,0 C161.1965,0 162.0919,0.8954 162.0919,2 L162.0919,4.4769 C162.0919,5.5814 161.1965,6.4769 160.0919,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#f08c2e"/>
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 79.069238 11.565844)" d="M0,0 C0,0 0,0 0,0 L116.6039,0 C117.7084,0 118.6039,0.8954 118.6039,2 L118.6039,4.4769 C118.6039,5.5814 117.7084,6.4769 116.6039,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 79.069238 41.174405)" d="M0,0 C0,0 0,0 0,0 L124.5108,0 C125.6154,0 126.5108,0.8954 126.5108,2 L126.5108,4.4769 C126.5108,5.5814 125.6154,6.4769 124.5108,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 79.069238 100.391528)" d="M0,0 C0,0 0,0 0,0 L140.3246,0 C141.4292,0 142.3246,0.8954 142.3246,2 L142.3246,4.4769 C142.3246,5.5814 141.4292,6.4769 140.3246,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#e06c1e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 79.069238 130.000089)" d="M0,0 C0,0 0,0 0,0 L148.2316,0 C149.3361,0 150.2316,0.8954 150.2316,2 L150.2316,4.4769 C150.2316,5.5814 149.3361,6.4769 148.2316,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 79.069238 159.60865)" d="M0,0 C0,0 0,0 0,0 L160.0919,0 C161.1965,0 162.0919,0.8954 162.0919,2 L162.0919,4.4769 C162.0919,5.5814 161.1965,6.4769 160.0919,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#e06c1e"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Profit · Jan" transform="matrix(1 0 0 1 79.069238 18.690404)" d="M0,0 C0,0 0,0 0,0 L45.4415,0 C46.5461,0 47.4415,0.8954 47.4415,2 L47.4415,4.4769 C47.4415,5.5814 46.5461,6.4769 45.4415,6.4769 L0,6.4769 C0,6.4769 0,6.4769 0,6.4769 Z" fill="#2ea88a"/>
@@ -209,7 +209,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -254,12 +254,12 @@
           <rect data-name="Revenue · Jun" transform="matrix(1 0 0 1 384.357829 20.260508)" x="0" y="0" width="8" height="8" fill="#3b6fe0"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 31.305257 97.085449)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 101.915771 93.042031)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 243.1368 84.955195)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
-          <path data-name="Costs · May" transform="matrix(1 0 0 1 313.747314 80.911777)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
-          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 384.357829 74.84665)" d="M4,0 L8,8 L0,8 Z" fill="#f08c2e"/>
+          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Costs · Jan" transform="matrix(1 0 0 1 31.305257 97.085449)" d="M4,0 L8,8 L0,8 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Feb" transform="matrix(1 0 0 1 101.915771 93.042031)" d="M4,0 L8,8 L0,8 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Apr" transform="matrix(1 0 0 1 243.1368 84.955195)" d="M4,0 L8,8 L0,8 Z" fill="#e06c1e"/>
+          <path data-name="Costs · May" transform="matrix(1 0 0 1 313.747314 80.911777)" d="M4,0 L8,8 L0,8 Z" fill="#e06c1e"/>
+          <path data-name="Costs · Jun" transform="matrix(1 0 0 1 384.357829 74.84665)" d="M4,0 L8,8 L0,8 Z" fill="#e06c1e"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Line · Profit" d="M35.3053,137.4762 L105.9158,129.3894 L176.5263,183.9755 L247.1368,121.3025 L317.7473,115.2374 L388.3578,107.1506" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -281,7 +281,7 @@
         <text data-name="Label · Team A" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Team A</tspan></text>
       </g>
       <g data-name="Legend · Team B" transform="matrix(1 0 0 1 70.828125 0)">
-        <rect data-name="Swatch · Team B" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Team B" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Team B" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Team B</tspan></text>
       </g>
     </g>
@@ -322,12 +322,12 @@
           <rect data-name="Team A · row 6" transform="matrix(1 0 0 1 403.435059 3.266055)" x="0" y="0" width="8" height="8" fill="#3b6fe0" opacity="0.8"/>
         </g>
         <g data-name="Series Team B">
-          <path data-name="Team B · row 1" transform="matrix(1 0 0 1 -4 159.48623)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="Team B · row 2" transform="matrix(1 0 0 1 97.858765 126.788984)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="Team B · row 3" transform="matrix(1 0 0 1 148.788147 115.889902)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="Team B · row 4" transform="matrix(1 0 0 1 250.646912 68.660547)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="Team B · row 5" transform="matrix(1 0 0 1 301.576294 61.394492)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="Team B · row 6" transform="matrix(1 0 0 1 403.435059 32.330273)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="Team B · row 1" transform="matrix(1 0 0 1 -4 159.48623)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="Team B · row 2" transform="matrix(1 0 0 1 97.858765 126.788984)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="Team B · row 3" transform="matrix(1 0 0 1 148.788147 115.889902)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="Team B · row 4" transform="matrix(1 0 0 1 250.646912 68.660547)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="Team B · row 5" transform="matrix(1 0 0 1 301.576294 61.394492)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="Team B · row 6" transform="matrix(1 0 0 1 403.435059 32.330273)" d="M4,0 L8,4 L4,8 L0,4 Z" fill="#e06c1e" opacity="0.8"/>
         </g>
       </g>
     </g>
@@ -340,7 +340,7 @@
         <text data-name="Label · Jan" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Jan</tspan></text>
       </g>
       <g data-name="Legend · Feb" transform="matrix(1 0 0 1 48.671875 0)">
-        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Feb" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Feb" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Feb</tspan></text>
       </g>
       <g data-name="Legend · Mar" transform="matrix(1 0 0 1 97.625 0)">
@@ -352,7 +352,7 @@
         <text data-name="Label · Apr" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Apr</tspan></text>
       </g>
       <g data-name="Legend · May" transform="matrix(1 0 0 1 195.875 0)">
-        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#8a63d2"/>
+        <rect data-name="Swatch · May" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#7a52c8"/>
         <text data-name="Label · May" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">May</tspan></text>
       </g>
       <g data-name="Legend · Jun" transform="matrix(1 0 0 1 248.015625 0)">
@@ -364,10 +364,10 @@
       <g data-name="Pie" transform="matrix(1 0 0 1 53.259766 0)">
         <g data-name="Slices">
           <path data-name="Slice · Jan" d="M96.3204,0.1717 C117.7187,1.4892 137.9662,10.3457 153.4589,25.1646 C155.0354,26.6724 155.0078,29.2175 153.3983,30.7582 L132.9582,50.3253 C131.3891,51.8274 128.8769,51.8189 127.1992,50.306 C118.4615,42.4268 107.4006,37.5887 95.6836,36.5209 C93.4338,36.3158 91.7223,34.4767 91.7602,32.305 L92.2541,4.0132 C92.2929,1.7854 94.1431,0.0376 96.3204,0.1717 Z" fill="#3b6fe0"/>
-          <path data-name="Slice · Feb" d="M161.0347,33.3598 C176.9287,52.8282 184.037,78.0322 180.6573,102.9363 C180.3639,105.098 178.2887,106.5716 176.0962,106.1751 L148.2516,101.14 C146.1142,100.7535 144.6444,98.716 144.8823,96.4695 C146.3535,82.578 142.4231,68.6419 133.9104,57.5661 C132.5337,55.7749 132.7224,53.2697 134.3429,51.8234 L155.4534,32.9815 C157.1157,31.4978 159.6551,31.67 161.0347,33.3598 Z" fill="#f08c2e"/>
+          <path data-name="Slice · Feb" d="M161.0347,33.3598 C176.9287,52.8282 184.037,78.0322 180.6573,102.9363 C180.3639,105.098 178.2887,106.5716 176.0962,106.1751 L148.2516,101.14 C146.1142,100.7535 144.6444,98.716 144.8823,96.4695 C146.3535,82.578 142.4231,68.6419 133.9104,57.5661 C132.5337,55.7749 132.7224,53.2697 134.3429,51.8234 L155.4534,32.9815 C157.1157,31.4978 159.6551,31.67 161.0347,33.3598 Z" fill="#e06c1e"/>
           <path data-name="Slice · Mar" d="M178.48,113.8823 C172.5438,136.3932 158.1737,155.769 138.3553,167.9841 C136.4982,169.1287 134.0426,168.4594 132.9581,166.513 L119.186,141.7947 C118.1288,139.8972 118.7713,137.4685 120.6588,136.2272 C131.4073,129.1584 139.3091,118.5039 142.9534,106.1663 C143.5934,103.9998 145.731,102.6799 147.8537,103.1408 L175.5055,109.1446 C177.6829,109.6173 179.0362,111.7729 178.48,113.8823 Z" fill="#2ea88a"/>
           <path data-name="Slice · Apr" d="M128.5128,173.2453 C101.1213,185.7905 69.2592,183.9114 43.5321,168.2337 C41.6692,167.0985 41.1508,164.6067 42.3927,162.7568 L58.1645,139.2638 C59.3752,137.4604 61.8309,136.9303 63.7937,138.0488 C78.5169,146.4385 96.3322,147.4891 111.9395,140.8881 C114.0201,140.0081 116.3965,140.8231 117.3869,142.7563 L130.288,167.9403 C131.3039,169.9233 130.4962,172.3369 128.5128,173.2453 Z" fill="#d94e7a"/>
-          <path data-name="Slice · May" d="M34.376,161.8524 C8.2768,141.1749 -4.4032,107.8164 1.371,75.0234 C1.7493,72.8748 3.8808,71.484 6.0561,71.9662 L33.6815,78.0906 C35.8021,78.5607 37.1907,80.6544 36.8644,82.8897 C34.1438,101.5246 41.2704,120.2731 55.6823,132.3957 C57.411,133.8499 57.7638,136.3373 56.4909,138.0974 L39.9088,161.0256 C38.6031,162.831 36.0859,163.2072 34.376,161.8524 Z" fill="#8a63d2"/>
+          <path data-name="Slice · May" d="M34.376,161.8524 C8.2768,141.1749 -4.4032,107.8164 1.371,75.0234 C1.7493,72.8748 3.8808,71.484 6.0561,71.9662 L33.6815,78.0906 C35.8021,78.5607 37.1907,80.6544 36.8644,82.8897 C34.1438,101.5246 41.2704,120.2731 55.6823,132.3957 C57.411,133.8499 57.7638,136.3373 56.4909,138.0974 L39.9088,161.0256 C38.6031,162.831 36.0859,163.2072 34.376,161.8524 Z" fill="#7a52c8"/>
           <path data-name="Slice · Jun" d="M3.9761,64.1712 C15.0338,28.0171 47.4235,2.4832 85.16,0.171 C87.3376,0.0376 89.1875,1.7855 89.2264,4.0132 L89.7202,32.305 C89.7582,34.4769 88.0464,36.3158 85.7968,36.5199 C64.3712,38.4636 46.0637,52.896 39.172,73.2759 C38.4484,75.4157 36.2607,76.6509 34.1577,76.107 L6.7629,69.0222 C4.6058,68.4644 3.338,66.2575 3.9761,64.1712 Z" fill="#c9a227"/>
         </g>
       </g>
@@ -389,13 +389,13 @@
       <g data-name="Nodes">
         <rect data-name="Node · Search" transform="matrix(1 0 0 1 45.820312 0)" x="0" y="0" width="12" height="145.8824" rx="2" fill="#3b6fe0"/>
         <text data-name="Label · Search" transform="matrix(1 0 0 1 0 65.681411)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Search</tspan></text>
-        <rect data-name="Node · Signup" transform="matrix(1 0 0 1 256.368164 100.71123)" x="0" y="0" width="12" height="160.4706" rx="2" fill="#f08c2e"/>
+        <rect data-name="Node · Signup" transform="matrix(1 0 0 1 256.368164 100.71123)" x="0" y="0" width="12" height="160.4706" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Signup" transform="matrix(1 0 0 1 210.870117 173.686758)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Signup</tspan></text>
         <rect data-name="Node · Social" transform="matrix(1 0 0 1 45.820312 155.882353)" x="0" y="0" width="12" height="65.6471" rx="2" fill="#2ea88a"/>
         <text data-name="Label · Social" transform="matrix(1 0 0 1 5.519531 181.446117)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Social</tspan></text>
         <rect data-name="Node · Direct" transform="matrix(1 0 0 1 45.820312 231.529412)" x="0" y="0" width="12" height="36.4706" rx="2" fill="#d94e7a"/>
         <text data-name="Label · Direct" transform="matrix(1 0 0 1 6.158203 242.50494)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Direct</tspan></text>
-        <rect data-name="Node · Bounce" transform="matrix(1 0 0 1 466.916016 0)" x="0" y="0" width="12" height="87.5294" rx="2" fill="#8a63d2"/>
+        <rect data-name="Node · Bounce" transform="matrix(1 0 0 1 466.916016 0)" x="0" y="0" width="12" height="87.5294" rx="2" fill="#7a52c8"/>
         <text data-name="Label · Bounce" transform="matrix(1 0 0 1 484.916016 36.50494)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Bounce</tspan></text>
         <rect data-name="Node · Trial" transform="matrix(1 0 0 1 466.916016 97.529412)" x="0" y="0" width="12" height="109.4118" rx="2" fill="#c9a227"/>
         <text data-name="Label · Trial" transform="matrix(1 0 0 1 484.916016 144.975528)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Trial</tspan></text>

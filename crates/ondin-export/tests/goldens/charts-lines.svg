@@ -7,7 +7,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -52,12 +52,12 @@
           <ellipse data-name="Revenue · Jun" transform="matrix(1 0 0 1 385.357829 21.260508)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Jan" transform="matrix(1 0 0 1 32.305257 98.085449)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Feb" transform="matrix(1 0 0 1 102.915771 94.042031)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Apr" transform="matrix(1 0 0 1 244.1368 85.955195)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · May" transform="matrix(1 0 0 1 314.747314 81.911777)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Jun" transform="matrix(1 0 0 1 385.357829 75.84665)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Jan" transform="matrix(1 0 0 1 32.305257 98.085449)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Feb" transform="matrix(1 0 0 1 102.915771 94.042031)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Apr" transform="matrix(1 0 0 1 244.1368 85.955195)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · May" transform="matrix(1 0 0 1 314.747314 81.911777)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Jun" transform="matrix(1 0 0 1 385.357829 75.84665)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Line · Profit" d="M35.3053,137.4762 L105.9158,129.3894 L176.5263,183.9755 L247.1368,121.3025 L317.7473,115.2374 L388.3578,107.1506" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -79,7 +79,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -124,12 +124,12 @@
           <ellipse data-name="Revenue · Jun" transform="matrix(1 0 0 1 385.357829 21.260508)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 C270.6736,87.6074 294.2105,86.5965 317.7473,84.9118 C341.2842,83.227 364.821,80.8684 388.3578,78.8467" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Jan" transform="matrix(1 0 0 1 32.305257 98.085449)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Feb" transform="matrix(1 0 0 1 102.915771 94.042031)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Apr" transform="matrix(1 0 0 1 244.1368 85.955195)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · May" transform="matrix(1 0 0 1 314.747314 81.911777)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <ellipse data-name="Costs · Jun" transform="matrix(1 0 0 1 385.357829 75.84665)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 C270.6736,87.6074 294.2105,86.5965 317.7473,84.9118 C341.2842,83.227 364.821,80.8684 388.3578,78.8467" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Jan" transform="matrix(1 0 0 1 32.305257 98.085449)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Feb" transform="matrix(1 0 0 1 102.915771 94.042031)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Apr" transform="matrix(1 0 0 1 244.1368 85.955195)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · May" transform="matrix(1 0 0 1 314.747314 81.911777)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <ellipse data-name="Costs · Jun" transform="matrix(1 0 0 1 385.357829 75.84665)" cx="3" cy="3" rx="3" ry="3" fill="#ffffff" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Line · Profit" d="M35.3053,137.4762 C58.8421,134.7806 82.3789,129.3894 105.9158,129.3894 C129.4526,129.3894 152.9894,183.9755 176.5263,183.9755 C200.0631,183.9755 223.6,127.2431 247.1368,121.3025 C270.6736,115.362 294.2105,116.4605 317.7473,115.2374 C341.2842,114.0144 364.821,109.8462 388.3578,107.1506" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -170,7 +170,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -205,7 +205,7 @@
           <path data-name="Line · Revenue" d="M21.9563,47.2394 L43.9125,47.2394 L43.9125,42.3526 L65.8688,42.3526 L87.825,42.3526 L87.825,44.796 L109.7813,44.796 L131.7375,44.796 L131.7375,35.8368 L153.6938,35.8368 L175.6501,35.8368 L175.6501,31.7644 L197.6063,31.7644 L219.5626,31.7644 L219.5626,26.0631 L241.5188,26.0631" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Line · Costs" d="M21.9563,57.0131 L43.9125,57.0131 L43.9125,55.3841 L65.8688,55.3841 L109.7813,55.3841 L109.7813,52.1262 L153.6938,52.1262 L175.6501,52.1262 L175.6501,50.4973 L197.6063,50.4973 L219.5626,50.4973 L219.5626,48.0539 L241.5188,48.0539" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Line · Costs" d="M21.9563,57.0131 L43.9125,57.0131 L43.9125,55.3841 L65.8688,55.3841 L109.7813,55.3841 L109.7813,52.1262 L153.6938,52.1262 L175.6501,52.1262 L175.6501,50.4973 L197.6063,50.4973 L219.5626,50.4973 L219.5626,48.0539 L241.5188,48.0539" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Line · Profit" d="M21.9563,71.6736 L43.9125,71.6736 L43.9125,68.4157 L65.8688,68.4157 L87.825,68.4157 L87.825,90.4065 L109.7813,90.4065 L131.7375,90.4065 L131.7375,65.1578 L153.6938,65.1578 L175.6501,65.1578 L175.6501,62.7144 L197.6063,62.7144 L219.5626,62.7144 L219.5626,59.4565 L241.5188,59.4565" fill="none" stroke="#2ea88a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -221,7 +221,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -261,8 +261,8 @@
           <path data-name="Line · Revenue" d="M35.3053,76.8249 L105.9158,64.6947 L176.5263,70.7598 L247.1368,48.521 L317.7473,38.4125 L388.3578,24.2605" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Area · Costs" d="M35.3053,101.0854 L105.9158,97.042 L105.9158,161.7367 L35.3053,161.7367 Z M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467 L388.3578,161.7367 L317.7473,161.7367 L247.1368,161.7367 Z" fill="#f08c2e" opacity="0.3"/>
-          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Costs" d="M35.3053,101.0854 L105.9158,97.042 L105.9158,161.7367 L35.3053,161.7367 Z M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467 L388.3578,161.7367 L317.7473,161.7367 L247.1368,161.7367 Z" fill="#e06c1e" opacity="0.3"/>
+          <path data-name="Line · Costs" d="M35.3053,101.0854 L105.9158,97.042 M247.1368,88.9552 L317.7473,84.9118 L388.3578,78.8467" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Area · Profit" d="M35.3053,137.4762 L105.9158,129.3894 L176.5263,183.9755 L247.1368,121.3025 L317.7473,115.2374 L388.3578,107.1506 L388.3578,161.7367 L317.7473,161.7367 L247.1368,161.7367 L176.5263,161.7367 L105.9158,161.7367 L35.3053,161.7367 Z" fill="#2ea88a" opacity="0.3"/>
@@ -279,7 +279,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -317,8 +317,8 @@
           <path data-name="Line · Revenue" d="M35.2896,109.1723 L105.8688,103.1072 L176.448,106.1397 L247.0271,95.0203 L317.6063,89.966 L388.1855,82.8901" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Area · Costs" d="M35.2896,78.8467 L105.8688,70.7598 L105.8688,103.1072 L35.2896,109.1723 Z M247.0271,58.6296 L317.6063,51.5536 L388.1855,41.445 L388.1855,82.8901 L317.6063,89.966 L247.0271,95.0203 Z" fill="#f08c2e" opacity="0.3"/>
-          <path data-name="Line · Costs" d="M35.2896,78.8467 L105.8688,70.7598 M247.0271,58.6296 L317.6063,51.5536 L388.1855,41.445" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Costs" d="M35.2896,78.8467 L105.8688,70.7598 L105.8688,103.1072 L35.2896,109.1723 Z M247.0271,58.6296 L317.6063,51.5536 L388.1855,41.445 L388.1855,82.8901 L317.6063,89.966 L247.0271,95.0203 Z" fill="#e06c1e" opacity="0.3"/>
+          <path data-name="Line · Costs" d="M35.2896,78.8467 L105.8688,70.7598 M247.0271,58.6296 L317.6063,51.5536 L388.1855,41.445" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Area · Profit" d="M35.2896,66.7164 L105.8688,54.5861 L176.448,162.7476 L247.0271,38.4125 L317.6063,28.3039 L388.1855,14.152 L388.1855,41.445 L317.6063,51.5536 L247.0271,58.6296 L176.448,151.6282 L105.8688,70.7598 L35.2896,78.8467 Z" fill="#2ea88a" opacity="0.3"/>
@@ -335,7 +335,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
       <g data-name="Legend · Profit" transform="matrix(1 0 0 1 137.4375 0)">
@@ -369,8 +369,8 @@
           <path data-name="Line · Revenue" d="M20.6488,30.5427 C34.4147,30.5427 48.1806,30.5427 61.9465,30.5427 C75.7124,30.5427 89.4783,11.9989 103.2442,11.9989 C117.0101,11.9989 130.776,30.5427 144.5419,30.5427 C158.3078,30.5427 172.0737,30.5427 185.8396,30.5427 C199.6055,30.5427 213.3714,30.5427 227.1373,30.5427" fill="none" stroke="#3b6fe0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Costs">
-          <path data-name="Area · Costs" d="M20.6488,8.7265 L61.9465,10.1809 L61.9465,30.5427 L20.6488,30.5427 Z M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273 L227.1373,30.5427 C213.3714,30.5427 199.6055,30.5427 185.8396,30.5427 C172.0737,30.5427 158.3078,30.5427 144.5419,30.5427 Z" fill="#f08c2e" opacity="0.3"/>
-          <path data-name="Line · Costs" d="M20.6488,8.7265 L61.9465,10.1809 M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273" fill="none" stroke="#f08c2e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <path data-name="Area · Costs" d="M20.6488,8.7265 L61.9465,10.1809 L61.9465,30.5427 L20.6488,30.5427 Z M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273 L227.1373,30.5427 C213.3714,30.5427 199.6055,30.5427 185.8396,30.5427 C172.0737,30.5427 158.3078,30.5427 144.5419,30.5427 Z" fill="#e06c1e" opacity="0.3"/>
+          <path data-name="Line · Costs" d="M20.6488,8.7265 L61.9465,10.1809 M144.5419,10.9081 C158.3078,11.1108 172.0737,11.3129 185.8396,11.5161 C199.6055,11.7193 213.3714,11.9235 227.1373,12.1273" fill="none" stroke="#e06c1e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         </g>
         <g data-name="Series Profit">
           <path data-name="Area · Profit" d="M20.6488,0 C34.4147,0 48.1806,0 61.9465,0 C75.7124,0 89.4783,73.0844 103.2442,73.0844 C117.0101,73.0844 130.776,0 144.5419,0 C158.3078,0 172.0737,0 185.8396,0 C199.6055,0 213.3714,0 227.1373,0 L227.1373,12.1273 C213.3714,11.9235 199.6055,11.7193 185.8396,11.5161 C172.0737,11.3129 158.3078,10.9081 144.5419,10.9081 C130.776,10.9081 117.0101,61.0854 103.2442,61.0854 C89.4783,61.0854 75.7124,11.6331 61.9465,10.1809 C48.1806,8.7287 34.4147,8.8072 20.6488,8.7265 Z" fill="#2ea88a" opacity="0.3"/>

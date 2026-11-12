@@ -342,8 +342,9 @@ it applies to; switching kind keeps the others' values.
   Everything else is left alone: data, palette, theme, text family, number formats, and an option no
   preset sets, so a user's bar gap survives a Style while the group gap (*Bold*) and the radius
   (*Soft*) follow it.
-- **Palette** — *Ondin* (eight colours; on a light ground its orange and mustard, the second and
-  sixth, all but merge under deuteranopia), *Cool*, *Warm*, *Mono* (one hue in steps), or *From
+- **Palette** — *Ondin* (eight colours, every two at least 7 apart (CIE76) under protanopia,
+  deuteranopia and tritanopia, on either theme: `vision.rs ·
+  the_ondin_chart_palette_survives_the_dichromacies`), *Cool*, *Warm*, *Mono* (one hue in steps), or *From
   variables*: a group of colour variables
   that may bind a fill (the name before the last `/`, else the collection's name; its variables
   in the table's order), bound to the series in order (a Sankey's nodes), round again past the
@@ -356,9 +357,7 @@ it applies to; switching kind keeps the others' values.
   the chart is drawn for, *Light* or *Dark*:
   - Each palette has dark colours (`chart::palette(p, dark)`), each its light twin at the same
     place lifted for a dark ground, so a series keeps its hue. Dark *Mono* runs brightest first,
-    so the first series still leads. Dark *Ondin* keeps every two colours at least 7 apart
-    (CIE76) under protanopia, deuteranopia and tritanopia
-    (`vision.rs · the_dark_ondin_chart_palette_survives_the_dichromacies`).
+    so the first series still leads.
   - The chrome starts at `chart::chrome(dark)`: ink, axes, gridlines and ground grey 0.35, 0.75,
     0.9 and white on light; 0.72, 0.38, 0.22 and `#18181B` on dark. The options' defaults read
     the light one.

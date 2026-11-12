@@ -85,14 +85,14 @@ pub fn palette(p: super::Palette, dark: bool) -> &'static [[u8; 3]] {
         return dark_palette(p);
     }
     match p {
-        // The orange and the mustard (second and sixth) all but merge under
-        // deuteranopia; the dark set keeps every pair apart.
+        // Every two at least 7 apart (CIE76) under the three dichromacies
+        // (`ondin-render`'s vision tests).
         super::Palette::Ondin => &[
             [0x3B, 0x6F, 0xE0],
-            [0xF0, 0x8C, 0x2E],
+            [0xE0, 0x6C, 0x1E],
             [0x2E, 0xA8, 0x8A],
             [0xD9, 0x4E, 0x7A],
-            [0x8A, 0x63, 0xD2],
+            [0x7A, 0x52, 0xC8],
             [0xC9, 0xA2, 0x27],
             [0x4A, 0xA8, 0xD8],
             [0x7A, 0x7A, 0x7A],
@@ -126,8 +126,7 @@ pub fn palette(p: super::Palette, dark: bool) -> &'static [[u8; 3]] {
 /// [`palette`]'s dark-ground colours.
 fn dark_palette(p: super::Palette) -> &'static [[u8; 3]] {
     match p {
-        // Every two at least 7 apart (CIE76) under the three dichromacies
-        // (`ondin-render`'s vision tests).
+        // Held apart as the light set is.
         super::Palette::Ondin => &[
             [0x6B, 0x95, 0xF0],
             [0xF0, 0x8C, 0x3C],

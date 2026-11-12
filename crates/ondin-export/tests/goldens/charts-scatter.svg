@@ -7,7 +7,7 @@
         <text data-name="Label · Revenue" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Revenue</tspan></text>
       </g>
       <g data-name="Legend · Costs" transform="matrix(1 0 0 1 77 0)">
-        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · Costs" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · Costs" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">Costs</tspan></text>
       </g>
     </g>
@@ -65,30 +65,30 @@
           <ellipse data-name="Revenue · row 24" transform="matrix(1 0 0 1 4.472939 75.655334)" cx="4" cy="4" rx="4" ry="4" fill="#3b6fe0" opacity="0.8"/>
         </g>
         <g data-name="Series Costs">
-          <ellipse data-name="Costs · row 1" transform="matrix(1 0 0 1 -4 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 2" transform="matrix(1 0 0 1 309.49876 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 3" transform="matrix(1 0 0 1 199.350547 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 4" transform="matrix(1 0 0 1 89.202334 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 5" transform="matrix(1 0 0 1 402.701094 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 6" transform="matrix(1 0 0 1 292.552881 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 7" transform="matrix(1 0 0 1 182.404668 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 8" transform="matrix(1 0 0 1 72.256455 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 9" transform="matrix(1 0 0 1 385.755215 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 10" transform="matrix(1 0 0 1 275.607002 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 11" transform="matrix(1 0 0 1 165.458789 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 12" transform="matrix(1 0 0 1 55.310576 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 13" transform="matrix(1 0 0 1 368.809336 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 14" transform="matrix(1 0 0 1 258.661123 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 15" transform="matrix(1 0 0 1 148.51291 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 16" transform="matrix(1 0 0 1 38.364697 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 17" transform="matrix(1 0 0 1 351.863457 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 18" transform="matrix(1 0 0 1 241.715244 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 19" transform="matrix(1 0 0 1 131.567031 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 20" transform="matrix(1 0 0 1 21.418818 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 21" transform="matrix(1 0 0 1 334.917578 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 22" transform="matrix(1 0 0 1 224.769365 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 23" transform="matrix(1 0 0 1 114.621152 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
-          <ellipse data-name="Costs · row 24" transform="matrix(1 0 0 1 4.472939 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#f08c2e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 1" transform="matrix(1 0 0 1 -4 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 2" transform="matrix(1 0 0 1 309.49876 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 3" transform="matrix(1 0 0 1 199.350547 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 4" transform="matrix(1 0 0 1 89.202334 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 5" transform="matrix(1 0 0 1 402.701094 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 6" transform="matrix(1 0 0 1 292.552881 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 7" transform="matrix(1 0 0 1 182.404668 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 8" transform="matrix(1 0 0 1 72.256455 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 9" transform="matrix(1 0 0 1 385.755215 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 10" transform="matrix(1 0 0 1 275.607002 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 11" transform="matrix(1 0 0 1 165.458789 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 12" transform="matrix(1 0 0 1 55.310576 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 13" transform="matrix(1 0 0 1 368.809336 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 14" transform="matrix(1 0 0 1 258.661123 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 15" transform="matrix(1 0 0 1 148.51291 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 16" transform="matrix(1 0 0 1 38.364697 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 17" transform="matrix(1 0 0 1 351.863457 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 18" transform="matrix(1 0 0 1 241.715244 123.367666)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 19" transform="matrix(1 0 0 1 131.567031 105.172285)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 20" transform="matrix(1 0 0 1 21.418818 86.976904)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 21" transform="matrix(1 0 0 1 334.917578 68.781523)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 22" transform="matrix(1 0 0 1 224.769365 177.953809)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 23" transform="matrix(1 0 0 1 114.621152 159.758428)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
+          <ellipse data-name="Costs · row 24" transform="matrix(1 0 0 1 4.472939 141.563047)" cx="4" cy="4" rx="4" ry="4" fill="#e06c1e" opacity="0.8"/>
         </g>
       </g>
     </g>
@@ -101,7 +101,7 @@
         <text data-name="Label · North" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">North</tspan></text>
       </g>
       <g data-name="Legend · South" transform="matrix(1 0 0 1 59.96875 0)">
-        <rect data-name="Swatch · South" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#f08c2e"/>
+        <rect data-name="Swatch · South" transform="matrix(1 0 0 1 0 2.265625)" x="0" y="0" width="10" height="10" rx="2" fill="#e06c1e"/>
         <text data-name="Label · South" transform="matrix(1 0 0 1 16 0)" x="0" y="11" xml:space="preserve" fill="#595959"><tspan font-family="Inter" font-size="12" font-weight="400">South</tspan></text>
       </g>
       <g data-name="Legend · East" transform="matrix(1 0 0 1 120.96875 0)">
@@ -151,14 +151,14 @@
           <path data-name="North · row 22" transform="matrix(1 0 0 1 223.343505 107.331718)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#3b6fe0" opacity="0.8"/>
         </g>
         <g data-name="Series South">
-          <path data-name="South · row 2" transform="matrix(1 0 0 1 305.999803 13.36326)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 5" transform="matrix(1 0 0 1 394.153863 34.597754)" d="M16.9558,0 L33.9116,16.9558 L16.9558,33.9116 L0,16.9558 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 8" transform="matrix(1 0 0 1 69.177372 136.646498)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 11" transform="matrix(1 0 0 1 156.088797 70.715726)" d="M15.2069,0 L30.4138,15.2069 L15.2069,30.4138 L0,15.2069 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 14" transform="matrix(1 0 0 1 245.50834 7.293071)" d="M20,0 L40,20 L20,40 L0,20 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 17" transform="matrix(1 0 0 1 346.49222 41.357386)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 20" transform="matrix(1 0 0 1 7.153859 129.04426)" d="M18.5405,0 L37.081,18.5405 L18.5405,37.081 L0,18.5405 Z" fill="#f08c2e" opacity="0.8"/>
-          <path data-name="South · row 23" transform="matrix(1 0 0 1 109.009745 78.057948)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#f08c2e" opacity="0.8"/>
+          <path data-name="South · row 2" transform="matrix(1 0 0 1 305.999803 13.36326)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 5" transform="matrix(1 0 0 1 394.153863 34.597754)" d="M16.9558,0 L33.9116,16.9558 L16.9558,33.9116 L0,16.9558 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 8" transform="matrix(1 0 0 1 69.177372 136.646498)" d="M7.9057,0 L15.8114,7.9057 L7.9057,15.8114 L0,7.9057 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 11" transform="matrix(1 0 0 1 156.088797 70.715726)" d="M15.2069,0 L30.4138,15.2069 L15.2069,30.4138 L0,15.2069 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 14" transform="matrix(1 0 0 1 245.50834 7.293071)" d="M20,0 L40,20 L20,40 L0,20 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 17" transform="matrix(1 0 0 1 346.49222 41.357386)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 20" transform="matrix(1 0 0 1 7.153859 129.04426)" d="M18.5405,0 L37.081,18.5405 L18.5405,37.081 L0,18.5405 Z" fill="#e06c1e" opacity="0.8"/>
+          <path data-name="South · row 23" transform="matrix(1 0 0 1 109.009745 78.057948)" d="M10.8972,0 L21.7945,10.8972 L10.8972,21.7945 L0,10.8972 Z" fill="#e06c1e" opacity="0.8"/>
         </g>
         <g data-name="Series East">
           <path data-name="East · row 3" transform="matrix(1 0 0 1 192.326087 70.672166)" d="M13.2288,0 L26.4575,13.2288 L13.2288,26.4575 L0,13.2288 Z" fill="#2ea88a" opacity="0.8"/>

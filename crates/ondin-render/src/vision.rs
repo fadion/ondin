@@ -1060,18 +1060,20 @@ mod tests {
         least
     }
 
-    /// The chart's dark *Ondin* palette keeps every two colours at least 7
-    /// apart (CIE76) under each dichromacy the simulation shows.
+    /// The chart's *Ondin* palette, light and dark, keeps every two colours at
+    /// least 7 apart (CIE76) under each dichromacy the simulation shows.
     #[test]
-    fn the_dark_ondin_chart_palette_survives_the_dichromacies() {
+    fn the_ondin_chart_palette_survives_the_dichromacies() {
         use ondin_core::chart::{Palette, palette};
-        for c in [
-            Condition::Protanopia,
-            Condition::Deuteranopia,
-            Condition::Tritanopia,
-        ] {
-            let d = closest_pair(palette(Palette::Ondin, true), c);
-            assert!(d >= 7.0, "{c:?}: two colours {d:.1} apart");
+        for dark in [false, true] {
+            for c in [
+                Condition::Protanopia,
+                Condition::Deuteranopia,
+                Condition::Tritanopia,
+            ] {
+                let d = closest_pair(palette(Palette::Ondin, dark), c);
+                assert!(d >= 7.0, "dark {dark}, {c:?}: two colours {d:.1} apart");
+            }
         }
     }
 }

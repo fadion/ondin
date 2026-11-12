@@ -24,10 +24,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// The scale cell of the export row (7pt pitch, 256pt card).
 ///
 /// A `ComboBox` spends 35pt beside its text and lays it out in `TextStyle::Button`,
-/// so `0.75x` wants 67 and `1024h` wants 71. A combo asked for less comes out wider
-/// than asked and squeezes its neighbours (`the_export_row_fits_the_card`). The
-/// format cell takes what is left.
-const SCALE_W: f32 = 74.0;
+/// so `0.75x` wants 67 and an icon row's `Windows` 88. A combo asked for less comes
+/// out wider than asked and squeezes its neighbours (`the_export_row_fits_the_card`),
+/// and a cell sized per row would set a mixed list's columns apart. The format cell
+/// takes what is left.
+const SCALE_W: f32 = 88.0;
 /// The height of everything on the row, and the side of its two square buttons.
 const CELL: f32 = 28.0;
 /// Between two controls side by side — the card gap, which the settings
@@ -481,6 +482,7 @@ impl OndinApp {
                 app.export_row_open = None;
                 app.export_prefix_text = None;
                 app.export_suffix_text = None;
+                app.export_custom_sizes = None;
                 changed = true;
             }
             if changed {
@@ -778,6 +780,14 @@ impl OndinApp {
             egui::vec2(ui.available_width(), CELL),
         ));
         let open = self.export_row_open == Some(index);
+        // The sizes this row held when *Custom* was picked, while that pick is its.
+        let custom = self
+            .export_custom_sizes
+            .as_ref()
+            .filter(|(sel, i, _)| {
+                spec.format.is_icon() && *i == index && sel == self.session.selection.ids()
+            })
+            .map(|(_, _, sizes)| sizes.clone());
         let mut head = None;
         // The row and its size line are one unit, further from the next unit than
         // its halves are from each other (`paint_unit`). `item_spacing` is zero and
@@ -795,17 +805,30 @@ impl OndinApp {
                     ui.spacing_mut().button_padding.y = 0.0;
                     let mut scale = spec.scale;
                     let live = spec.scale_applies();
-                    let combo = egui::ComboBox::from_id_salt(("export-scale", index))
+                    // `live` in the id: the vector note's one-line popup would
+                    // otherwise leave the list short, as egui popups never grow back.
+                    let combo = egui::ComboBox::from_id_salt(("export-scale", index, live))
                         .icon(ui::combo_chevron)
                         .width(SCALE_W)
                         .selected_text(ui::combo_text(&spec.scale.label()));
                     if spec.format.is_icon() {
                         // The row's "how big" cell holds the size set instead.
-                        if let Some(sizes) = icon_set_cell(ui, index, spec) {
-                            out.edited = Some(ExportSpec {
-                                sizes,
-                                ..spec.clone()
-                            });
+                        match icon_set_cell(ui, index, spec, custom.is_some()) {
+                            Some(SetPick::Sizes(sizes)) => {
+                                self.export_custom_sizes = None;
+                                out.edited = Some(ExportSpec {
+                                    sizes,
+                                    ..spec.clone()
+                                });
+                            }
+                            Some(SetPick::Custom) => {
+                                self.export_custom_sizes = Some((
+                                    self.session.selection.ids().to_vec(),
+                                    index,
+                                    spec.icon_sizes(),
+                                ));
+                            }
+                            None => {}
                         }
                     } else if live {
                         combo.show_ui(ui, |ui| {
@@ -871,6 +894,10 @@ impl OndinApp {
                         if format.is_icon() && spec.format.is_icon() {
                             next.sizes.clear();
                         }
+                        // A *Custom* pick was about the old format's sets.
+                        if custom.is_some() {
+                            self.export_custom_sizes = None;
+                        }
                         out.edited = Some(ExportSpec { format, ..next });
                     }
                 });
@@ -909,13 +936,20 @@ impl OndinApp {
             // The size the row will produce, on a line of its own: its width varies,
             // so it has no fixed cell. Blank, and the line absent, over a
             // multi-selection (`export_size_label`).
-            let size = self.export_size_label(spec, sizing);
+            // *Custom* just picked points at the settings, where the sizes are
+            // ticked, until one is.
+            let pointing = custom.as_ref() == Some(&spec.icon_sizes());
+            let size = match pointing {
+                true => CUSTOM_SIZES.to_string(),
+                false => self.export_size_label(spec, sizing),
+            };
             let lined = !size.is_empty();
             let folder = spec.each_variant
                 && sizing.is_some_and(|id| ondin_core::variant::is_set(&self.session.doc, id));
-            let glyph = match folder {
-                true => icon::FOLDER_SIMPLE,
-                false => icon::FRAME,
+            let glyph = match (pointing, folder) {
+                (true, _) => icon::SLIDERS_HORIZONTAL,
+                (false, true) => icon::FOLDER_SIMPLE,
+                (false, false) => icon::FRAME,
             };
             if lined {
                 ui.allocate_space(egui::vec2(0.0, ROW_LINE_GAP));
@@ -1327,9 +1361,9 @@ impl OndinApp {
         })
     }
 
-    /// An icon row's two switches, each with its caption under it: sizes drawn
-    /// from frames named for them, saying what it finds on the page, and a fit
-    /// per size. On `slices` both are disabled: a slice is drawn through its box,
+    /// An icon row's two switches: sizes drawn from frames named for them, with a
+    /// caption while on saying what it finds on the page, and a fit per size,
+    /// explained by its tooltip. On `slices` both are disabled: a slice is drawn through its box,
     /// as the page shows it, and `icon::entries` reads neither.
     fn icon_switches(
         &mut self,
@@ -1368,9 +1402,12 @@ impl OndinApp {
             if frames.clicked() && !slices {
                 edit(out, spec).size_frames = !spec.size_frames;
             }
+            // Only while the switch is on: what it finds means nothing off.
+            if !spec.size_frames || slices {
+                return;
+            }
             let doc = &self.session.doc;
             let text = match sizing.and_then(|id| Some((id, doc.get(id)?.name()))) {
-                _ if slices => SLICE_ICON.to_string(),
                 Some((id, name)) => {
                     let sizes = spec.icon_sizes();
                     let found = ondin_export::icon::size_frames(doc, id, &sizes);
@@ -1380,28 +1417,23 @@ impl OndinApp {
             };
             caption(ui, &text);
         });
-        ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
-            let fit = ui::toggle_row(
-                ui,
-                icon::PIXEL_FIT,
-                "Pixel-fit each size",
-                state(spec.pixel_fit),
-                size,
-            )
-            .on_hover_text(match slices {
-                true => SLICE_ICON,
-                false => "Text and turned layers are drawn as they are",
-            });
-            if fit.clicked() && !slices {
-                edit(out, spec).pixel_fit = !spec.pixel_fit;
+        let fit = ui::toggle_row(
+            ui,
+            icon::PIXEL_FIT,
+            "Pixel-fit each size",
+            state(spec.pixel_fit),
+            size,
+        )
+        .on_hover_text(match slices {
+            true => SLICE_ICON,
+            false => {
+                "Fit a copy of the art to each size's pixel grid before drawing it; the \
+                 document is not changed. Text and turned layers are drawn as they are"
             }
-            caption(
-                ui,
-                "Fits a copy of the art to each size's pixel grid before drawing it. \
-                 The document is not changed.",
-            );
         });
+        if fit.clicked() && !slices {
+            edit(out, spec).pixel_fit = !spec.pixel_fit;
+        }
     }
 
     /// The settings card's four SVG rows: *Colour*, *Strokes* and *viewBox* as
@@ -3502,33 +3534,48 @@ fn sizes_text(sizes: &[u32], unit: bool) -> String {
     }
 }
 
-/// An icon row's size cell: the format's named sets, each naming its sizes, and
-/// *Custom*, lit by itself when the ticks match no set and never picked. Answers
-/// the sizes of a set picked.
-fn icon_set_cell(ui: &mut egui::Ui, index: usize, spec: &ExportSpec) -> Option<Vec<u32>> {
-    let set = spec.icon_set();
+/// The size line of an icon row just set to *Custom*, beside the settings glyph.
+const CUSTOM_SIZES: &str = "Pick your own sizes in settings";
+
+/// What an icon row's size cell was set to.
+enum SetPick {
+    /// A named set: its sizes.
+    Sizes(Vec<u32>),
+    /// *Custom*: no size changes; the row points at its settings.
+    Custom,
+}
+
+/// An icon row's size cell: the format's named sets by name (the size line
+/// under the row lists the sizes), then *Custom*, lit when `custom` was picked or
+/// the ticks match no set. Its own id per format, since each format's list is
+/// its own length and an egui popup never grows back to a longer one.
+fn icon_set_cell(
+    ui: &mut egui::Ui,
+    index: usize,
+    spec: &ExportSpec,
+    custom: bool,
+) -> Option<SetPick> {
+    let set = spec.icon_set().filter(|_| !custom);
     let mut picked = None;
-    egui::ComboBox::from_id_salt(("export-scale", index))
+    egui::ComboBox::from_id_salt(("export-icon-set", index, spec.format.label()))
         .icon(ui::combo_chevron)
         .width(SCALE_W)
         .selected_text(ui::combo_text(set.map_or("Custom", IconSet::label)))
         .show_ui(ui, |ui| {
             ui::menu_rows(ui);
             for s in IconSet::of(spec.format) {
-                let note = sizes_text(s.sizes(), false);
-                let row = ui::MenuRow::new("", s.label())
-                    .note(&note)
-                    .selected(set == Some(*s));
+                let row = ui::MenuRow::new("", s.label()).selected(set == Some(*s));
                 if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
-                    picked = Some(s.sizes().to_vec());
+                    picked = Some(SetPick::Sizes(s.sizes().to_vec()));
                 }
             }
-            let custom = ui::MenuRow::new("", "Custom")
-                .note("in settings")
-                .selected(set.is_none())
-                .enabled(false);
-            ui::menu_row(ui, custom, ui::MENU_ROW_H)
-                .on_hover_text("Tick sizes in this row's settings");
+            let row = ui::MenuRow::new("", "Custom").selected(set.is_none());
+            if ui::menu_row(ui, row, ui::MENU_ROW_H)
+                .on_hover_text("Tick sizes in this row's settings")
+                .clicked()
+            {
+                picked = Some(SetPick::Custom);
+            }
         })
         .response
         .on_hover_text("The sizes this file holds");
@@ -3644,6 +3691,15 @@ mod tests {
             .map(|n| ExportScale::Times(*n))
             .chain([ExportScale::Width(512), ExportScale::Height(512)])
             .map(|s| text_w(&s.label(), ui::CONTROL_PT))
+            // An icon row's cell holds its set's name in the same box.
+            .chain(
+                [ExportFormat::Ico, ExportFormat::Icns]
+                    .iter()
+                    .flat_map(|f| IconSet::of(*f))
+                    .map(|s| s.label())
+                    .chain(["Custom"])
+                    .map(|l| text_w(l, ui::CONTROL_PT)),
+            )
             .fold(0.0_f32, f32::max);
         // The format cell's text is not in `TextStyle::Button`: `ui::glyph_and_text`
         // builds its own `LayoutJob` (15pt icon, 7pt lead, word at `proportional(12)`).

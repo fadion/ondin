@@ -849,6 +849,11 @@ pub struct OndinApp {
     /// The export spec whose settings block is showing. One at a time: two open blocks
     /// would push the export button off the panel.
     pub(crate) export_row_open: Option<usize>,
+    /// An icon row whose size cell was set to *Custom*: the selection, the row and
+    /// the sizes it held then. The pick changes no sizes, so it is view state; the
+    /// row reads *Custom* while the selection and row match, and points at its
+    /// settings until a size is ticked.
+    pub(crate) export_custom_sizes: Option<(Vec<NodeId>, usize, Vec<u32>)>,
     /// Whether the Export panel's own menu — presets, copy/paste, the folder rule — is showing.
     pub(crate) export_menu: bool,
     /// The export settings *Copy export settings* is holding; apart from
@@ -1939,6 +1944,7 @@ impl OndinApp {
             prefs,
             settings: None,
             export_row_open: None,
+            export_custom_sizes: None,
             export_menu: false,
             export_clipboard: None,
             export_preview: None,

@@ -742,13 +742,14 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
     let mut y = rect.top() + 6.0;
     let centre = |y: f32| y + LIST_LINE_H / 2.0;
     if brief.is_none() {
-        p.text(
-            egui::pos2(x0, centre(y)),
-            egui::Align2::LEFT_CENTER,
-            icon::CIRCLE_NOTCH,
-            theme::icon_font(12.0),
+        crate::ui::paint_spinner(
+            &p,
+            egui::pos2(x0 + 6.0, centre(y)),
+            12.0,
             color::accent_400(),
+            time,
         );
+        ui.ctx().request_repaint();
         p.text(
             egui::pos2(x0 + 18.0, centre(y)),
             egui::Align2::LEFT_CENTER,

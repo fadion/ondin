@@ -587,9 +587,11 @@ Inspector:
   (`push::writes_twice`) — the last write would win silently. Each frame
   clears a request no door took before any widget runs, so it cannot turn a later reset into a push.
 - Every one of those menus' push rows (marks, marked labels, ghost rows, a dropdown's reset rows,
-  `component::menu_reset_row`) is shown disabled with the kit or lock reason: the inspector sets the
-  frame's refusal (`ui::set_push_refusal`, from `menu::push_refused`) before drawing any card, and
-  `ui::reset_push_menu` reads it.
+  `component::menu_reset_row`) is shown disabled with its reason: *Select one instance to push* when
+  the selection spans instances as above (several layers of one instance do not), else the kit or
+  lock reason. The inspector sets the frame's refusal (`ui::set_push_refusal`, from
+  `selection_push_refusal`) before drawing any card, and `ui::reset_push_menu` reads it. Only a
+  push writing one field twice is left to be refused when picked, since it depends on the field.
 - A push is one undo step, *Push to main* (`icon::PUSH_TO_MAIN`), with no confirmation; its toast says
   what followed: *Pushed 3 fields into Card · 9 instances follow · 2 keep their own · Ctrl+Z to undo*,
   *Pushed “Badge” into Card · 11 other instances now have it*, *Deleted “Footer” from Card · 9

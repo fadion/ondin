@@ -7572,6 +7572,29 @@ mod tests {
         );
     }
 
+    /// The inspector dims the reset menus' *Push to main* for a selection of two
+    /// instances, which the push would refuse, and not for two layers of one.
+    /// flip: the inspector asking `push_refused` of a single selection only →
+    /// fails at "two instances".
+    #[test]
+    fn a_selection_of_two_instances_dims_the_menus_push() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let second = another_instance(&mut f);
+        let (i, ir) = (f.i, f.ir);
+        let refusal = |f: &mut F, ids: Vec<NodeId>| {
+            f.app.session.selection.set(ids);
+            frame(&mut f.app, &ctx, vec![]);
+            crate::ui::push_refusal(&ctx)
+        };
+        assert_eq!(
+            refusal(&mut f, vec![i, second]),
+            Some(super::super::push::PUSH_ONE),
+            "two instances"
+        );
+        assert_eq!(refusal(&mut f, vec![i, ir]), None, "one instance");
+    }
+
     /// A reset pushed as one property's (its label's row) toasts a property, not
     /// a field. Flip: `push_from_reset` ignoring `property` → fails at the toast.
     /// The flag's caller in `own_rows` is not driven here.

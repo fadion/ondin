@@ -119,6 +119,30 @@ pub(crate) fn toast(what: &PushWhat, main: &str, out: Outcome) -> String {
     parts.join(" · ")
 }
 
+/// Why a push spanning instances is refused.
+pub(crate) const PUSH_ONE: &str = "Select one instance to push";
+
+/// Whether a push from `layers` would span instances: one instance pushes,
+/// into one main, since two pushing one field into one node would leave
+/// whichever came last, silently. Several layers of one instance are one,
+/// unless two of its own instances of another main (local layers) push into
+/// that main's one node. Layers outside any instance are ignored.
+fn spans_instances(doc: &ondin_core::Document, layers: &[NodeId]) -> bool {
+    let distinct = |mut v: Vec<NodeId>| {
+        v.sort();
+        v.dedup();
+        v.len()
+    };
+    let roots = (layers.iter())
+        .filter_map(|c| ondin_core::component::outermost_instance_root(doc, *c))
+        .collect();
+    let homes = (layers.iter())
+        .filter_map(|c| ondin_core::component::instance_root(doc, *c))
+        .filter_map(|r| push::home(doc, r))
+        .collect();
+    distinct(roots) > 1 || distinct(homes) > 1
+}
+
 impl OndinApp {
     /// [`push::pushable`] at instance `root`, from the cache while the document is
     /// unchanged.
@@ -222,6 +246,20 @@ impl OndinApp {
         }
     }
 
+    /// Why the selection's reset menus cannot push (`ui::set_push_refusal`), or
+    /// `None` when they can: the selection spans instances ([`spans_instances`],
+    /// which `push_from_reset` refuses too), or its instance's main is a kit's or
+    /// locked.
+    pub(crate) fn selection_push_refusal(&self) -> Option<&'static str> {
+        let doc = &self.session.doc;
+        let ids = self.session.selection.ids();
+        if spans_instances(doc, ids) {
+            return Some(PUSH_ONE);
+        }
+        let root = (ids.iter()).find_map(|id| ondin_core::component::instance_root(doc, *id))?;
+        crate::menu::push_refused(doc, root)
+    }
+
     /// Why the local layer `layer` cannot be pushed, in the card's words, or
     /// `None` when it can.
     pub(crate) fn layer_push_refusal(&self, layer: NodeId) -> Option<String> {
@@ -260,7 +298,7 @@ impl OndinApp {
                 None
             }
             _ => {
-                self.session.info("Select one instance to push");
+                self.session.info(PUSH_ONE);
                 None
             }
         }
@@ -343,27 +381,9 @@ impl OndinApp {
     /// component property's (its label's row), so the toast counts a property.
     pub(crate) fn push_from_reset(&mut self, tx: Transaction, property: bool) {
         let doc = &self.session.doc;
-        // One instance pushes, into one main: two pushing one field into one
-        // node would leave whichever came last, silently. Several layers of one
-        // instance are one, unless two of its own instances of another main
-        // (local layers) push into that main's one node.
         let copies: Vec<NodeId> = tx.0.iter().filter_map(|op| op.overwrites()).collect();
-        let distinct = |mut v: Vec<NodeId>| {
-            v.sort();
-            v.dedup();
-            v.len()
-        };
-        let roots = copies
-            .iter()
-            .filter_map(|c| ondin_core::component::outermost_instance_root(doc, *c))
-            .collect();
-        let homes = copies
-            .iter()
-            .filter_map(|c| ondin_core::component::instance_root(doc, *c))
-            .filter_map(|r| push::home(doc, r))
-            .collect();
-        if distinct(roots) > 1 || distinct(homes) > 1 {
-            self.session.info("Select one instance to push");
+        if spans_instances(doc, &copies) {
+            self.session.info(PUSH_ONE);
             return;
         }
         let Some(root) =
@@ -379,7 +399,7 @@ impl OndinApp {
         }
         let ops = push::fields(doc, &tx.0, &mut self.session.ids);
         if tx.0.len() > 1 && push::writes_twice(&ops) {
-            self.session.info("Select one instance to push");
+            self.session.info(PUSH_ONE);
             return;
         }
         if property {

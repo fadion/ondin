@@ -131,6 +131,18 @@ fn with_variant(chart: &Chart, i: usize) -> Chart {
     next
 }
 
+/// What a chart coloured by name calls its named marks: the Series section's
+/// title and the undo step a mark's colour makes. `None` for a chart coloured
+/// by series.
+pub(crate) fn named_mark_noun(chart: &Chart) -> Option<(&'static str, &'static str)> {
+    match chart.kind {
+        ChartKind::Sankey => Some(("Nodes", "Node colour")),
+        ChartKind::Pie => Some(("Slices", "Slice colour")),
+        ChartKind::Scatter if chart.mapping.group.is_some() => Some(("Groups", "Group colour")),
+        _ => None,
+    }
+}
+
 /// The paint a chart slot holds, bound or not.
 pub(crate) fn fill_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core::BrushSource> {
     match colour {
@@ -418,12 +430,7 @@ impl OndinApp {
             });
             if !several {
                 // A chart coloured by name lists its named marks here.
-                let series = match chart.kind {
-                    ChartKind::Sankey => "Nodes",
-                    ChartKind::Pie => "Slices",
-                    ChartKind::Scatter if chart.mapping.group.is_some() => "Groups",
-                    _ => "Series",
-                };
+                let series = named_mark_noun(&chart).map_or("Series", |(plural, _)| plural);
                 app.chart_section(ui, "Chart series", series, |app, ui| {
                     app.chart_series_rows(ui, id, &chart);
                 });
@@ -3407,7 +3414,8 @@ mod tests {
     }
 
     /// A pie lists its slices, by category, where a series chart lists its
-    /// series, and a slice's colour row writes the colour the slice draws in.
+    /// series, and a slice's colour row writes the colour the slice draws in,
+    /// as a step named for a slice.
     /// flip: `chart_series_rows` listing a pie's columns → fails at "the slice's row".
     #[test]
     fn a_pie_lists_and_colours_its_slices() {
@@ -3428,7 +3436,10 @@ mod tests {
             PaintSlot::Chart(ChartColour::Node(0)),
             Brush::Solid(red),
         );
+        app.name_slot_step(id, PaintSlot::Chart(ChartColour::Node(0)));
         assert!(app.commit_edit(tx));
+        let step = app.session.history.done().last().unwrap();
+        assert_eq!(step.note.label, "Slice colour");
         let marks = chart::named_marks(&chart_at(&app, id)).unwrap();
         assert_eq!(
             marks[0].1,

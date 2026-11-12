@@ -8664,7 +8664,7 @@ impl OndinApp {
                                     let a = (pct / 100.0).clamp(0.0, 1.0);
                                     let tx = self
                                         .edit_paints_all(target, move |b| paint::with_alpha(b, a));
-                                    self.name_slot_step(slot);
+                                    self.name_slot_step(id, slot);
                                     self.edit_valve(&resp, tx);
                                     self.session.forget_step_name();
                                 }
@@ -8672,7 +8672,7 @@ impl OndinApp {
                             _ if bound_alpha.is_some() => {
                                 let a = (pct / 100.0).clamp(0.0, 1.0);
                                 let tx = self.rebind_alpha_tx(id, slot, a);
-                                self.name_slot_step(slot);
+                                self.name_slot_step(id, slot);
                                 self.edit_valve(&resp, tx);
                                 self.session.forget_step_name();
                             }
@@ -9354,7 +9354,7 @@ impl OndinApp {
                         index,
                         |_, _| lit.into(),
                     );
-                    self.name_slot_step(slot);
+                    self.name_slot_step(id, slot);
                     self.commit_edit(tx);
                     return;
                 }
@@ -9365,7 +9365,7 @@ impl OndinApp {
                             rgb.with_alpha(typed_alpha.unwrap_or_else(|| paint::alpha_of(b))),
                         )
                     });
-                    self.name_slot_step(slot);
+                    self.name_slot_step(id, slot);
                     self.commit_edit(tx);
                     return;
                 }
@@ -10848,7 +10848,7 @@ impl OndinApp {
         }
         // Cloned: the retarget below reads the brush after the commit.
         let tx = self.slot_transaction(id, slot, brush.clone());
-        self.name_slot_step(slot);
+        self.name_slot_step(id, slot);
         self.commit_edit(tx);
         // The grid preview buffer ends with the commit, as `edit_valve` drops it
         // for a drag.
@@ -10873,7 +10873,7 @@ impl OndinApp {
             return;
         }
         let tx = self.slot_transaction(id, slot, brush.clone());
-        self.name_slot_step(slot);
+        self.name_slot_step(id, slot);
         self.note_edit(None, &tx);
         self.session.commit_run(tx, verb);
         self.in_flight.grid_paint = None;
@@ -10927,7 +10927,7 @@ impl OndinApp {
             return resp.drag_stopped() || ui::defocus_commits(resp);
         }
         let tx = self.slot_transaction(id, slot, brush.clone());
-        self.name_slot_step(slot);
+        self.name_slot_step(id, slot);
         // Asked of the valve, not predicted from the response: a prediction would
         // retarget on every keystroke of a typed colour.
         let committing = self.edit_valve(resp, tx);
@@ -10942,8 +10942,9 @@ impl OndinApp {
     }
 
     /// Name the next step after the card `slot` belongs to, unless the door that got
-    /// here already named it.
-    pub(crate) fn name_slot_step(&mut self, slot: PaintSlot) {
+    /// here already named it. `id` is the slot's node: a chart's named mark is
+    /// called what that chart calls it (a node, a slice, a group).
+    pub(crate) fn name_slot_step(&mut self, id: NodeId, slot: PaintSlot) {
         if self.session.has_step_name() {
             return;
         }
@@ -10981,7 +10982,12 @@ impl OndinApp {
             PaintSlot::Chart(super::paint::ChartColour::Series(_)) => {
                 ("Series colour", icon::CHART)
             }
-            PaintSlot::Chart(super::paint::ChartColour::Node(_)) => ("Node colour", icon::CHART),
+            PaintSlot::Chart(super::paint::ChartColour::Node(_)) => {
+                let label = (self.session.chart_drawn(id))
+                    .and_then(super::chart::named_mark_noun)
+                    .map_or("Node colour", |(_, step)| step);
+                (label, icon::CHART)
+            }
             PaintSlot::Chart(super::paint::ChartColour::Ink) => ("Chart text colour", icon::CHART),
             PaintSlot::Chart(super::paint::ChartColour::Axis(_)) => {
                 ("Chart axis colour", icon::CHART)

@@ -133,7 +133,8 @@ everything below.
   follow the smaller side: `set_preview` generates a pie the preview resizes at the size drawn,
   every frame. Scrubbing an option field regenerates on every frame (`chart::preview`) the same
   way, into `RenderOverrides::replace_chart`, the new parts drawn as ghosts in place of the
-  frame's own, since a patch cannot add a tick or a bar. Nothing enters the document until
+  frame's own, since a patch cannot add a tick or a bar; their bound colours read in the modes
+  in force at the chart (`RenderOverrides::paint_owner`). Nothing enters the document until
   release (invariant 5).
 
 ### Laid out, not placed

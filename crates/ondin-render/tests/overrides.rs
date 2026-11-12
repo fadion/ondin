@@ -3268,6 +3268,102 @@ fn a_frame_resize_previews_a_pinned_groups_contents_as_its_commit() {
     assert_preview_matches_commit(&doc, &tx, "an icon resized");
 }
 
+/// Resizing a frame whose pinned group holds a frame previews that frame's own
+/// pinned child stretched with it, as the commit draws it.
+/// flip: `place_stretched` not queuing a re-sized frame's children → fails "a
+/// frame in a pinned group".
+#[test]
+fn a_frame_in_a_pinned_group_replaces_its_pinned_children_in_a_preview() {
+    let mut ids = IdSource::new(2);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [outer, group, inner, rect] = [(); 4].map(|_| ids.mint());
+    let frame = |w: f64| NodeKind::Artboard {
+        size: Size::new(w, 100.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
+    };
+    let all = Some(ondin_core::LengthPct::Percent(0.0));
+    let zero = Some(ondin_core::LengthPct::Px(0.0));
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: outer,
+            parent: root,
+            index: 0,
+            kind: frame(100.0),
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: group,
+            parent: outer,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: inner,
+            parent: group,
+            index: 0,
+            kind: frame(100.0),
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: rect,
+            parent: inner,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetInsets {
+            id: group,
+            insets: ondin_core::Insets {
+                top: all,
+                right: all,
+                bottom: all,
+                left: all,
+                ..Default::default()
+            },
+        },
+        Operation::SetInsets {
+            id: rect,
+            insets: ondin_core::Insets {
+                top: zero,
+                right: zero,
+                left: zero,
+                ..Default::default()
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(vec![Operation::SetGeometry {
+        id: outer,
+        geometry: GeometryPatch::Size(Size::new(200.0, 100.0)),
+    }]);
+    let mut after = doc.clone();
+    after.apply(&tx).unwrap();
+    let res = Resolved::rebuild(&after);
+    assert!(
+        res.ink_bounds(rect).is_some_and(|b| b.width() > 150.0),
+        "the fixture: the commit draws the rect stretched"
+    );
+    assert_preview_matches_commit(&doc, &tx, "a frame in a pinned group");
+}
+
 /// Setting, changing and clearing a layer's insets previews as its commit —
 /// the inspector's scrub over an inset field is this.
 ///
@@ -6133,6 +6229,123 @@ fn a_frame_dragged_across_a_breakpoint_previews_in_its_new_mode() {
     assert_preview_matches_commit(&doc, &resize(900.0), "dragged within Tablet");
 }
 
+/// **A padded frame with a width query, resized across its threshold, previews
+/// its contents in the mode its new content box picks** and its own fill in the
+/// mode around it, as the commit draws them: 400 wide with 20 of padding a side
+/// is Wide, 350 is Compact (310 inside), and 380 stays Wide.
+/// flip: the `SetGeometry` arm's query branch removed → fails "dragged under
+/// 320 inside". Starting its stack at the frame does not bite: the frame's own
+/// fields resolve outside its query whatever table they are redrawn with. Nor
+/// does the padding, which preview and commit both take off in
+/// `Document::query_width_in`.
+#[test]
+fn a_frame_resized_across_its_width_query_previews_its_contents_mode() {
+    use ondin_core::BrushSource;
+    use ondin_core::container::{Display, Flex};
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xBE);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (card, rect) = (ids.mint(), ids.mint());
+    let (wide, compact, ink) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+    let bound = |id| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: BrushSource::Bound {
+                var: ink,
+                alpha: 1.0,
+            },
+            visible: true,
+        }]),
+    };
+    let mut ops = Vec::new();
+    // Wide first, the default, which the frame's own fill reads.
+    for (index, (id, name)) in [(wide, "Wide"), (compact, "Compact")]
+        .into_iter()
+        .enumerate()
+    {
+        ops.push(Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        });
+    }
+    ops.extend([
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "ink".into(),
+                kind: VarKind::Color,
+                cells: [
+                    (wide, Cell::Color(Color::from_rgba8(60, 120, 240, 255))),
+                    (compact, Cell::Color(Color::from_rgba8(230, 70, 50, 255))),
+                ]
+                .into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::CreateNode {
+            id: card,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: rect,
+            parent: card,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(60.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        bound(card),
+        bound(rect),
+        Operation::SetDisplay {
+            id: card,
+            display: Some(Display::Flex(Flex {
+                padding: [10.0, 20.0, 10.0, 20.0],
+                ..Default::default()
+            })),
+        },
+        Operation::SetQueries {
+            id: card,
+            queries: vec![[(compact, 0.0), (wide, 320.0)].into()],
+        },
+    ]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let q = doc.get(card).unwrap().queries()[0].clone();
+    assert_eq!(
+        doc.query_pick(card, &q),
+        Some(wide),
+        "the fixture: Wide at 400"
+    );
+    let resize = |w: f64| {
+        Transaction(vec![Operation::SetGeometry {
+            id: card,
+            geometry: GeometryPatch::Size(Size::new(w, 100.0)),
+        }])
+    };
+    assert_preview_matches_commit(&doc, &resize(350.0), "dragged under 320 inside");
+    assert_preview_matches_commit(&doc, &resize(380.0), "dragged within Wide");
+}
+
 /// A flex child's bound min width, under a frame dragged across a breakpoint,
 /// lays out at the new mode's number in the preview, as the commit does.
 ///
@@ -6336,4 +6549,124 @@ fn a_bound_size_frame_dragged_across_a_breakpoint_draws_its_own_fill_anew() {
         }]),
     );
     assert_preview_matches_commit(&doc, &resize, "bound frame dragged under 768");
+}
+
+/// A previewed chart's parts read their bound colours in the modes in force at
+/// the chart, as the committed parts do: a chart in a frame pinned to Dark
+/// draws Dark's colour while an option is scrubbed.
+/// flip: `paint_ghost` resolving a part's paint at its own id → fails at the
+/// colour, Light's red drawn.
+#[test]
+fn a_previewed_charts_parts_read_their_charts_mode() {
+    use ondin_core::BrushSource;
+    use ondin_core::chart::{Generated, Part, PartKey, PartRole};
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xC4);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (light, dark, ink) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+    let (panel, chart) = (ids.mint(), ids.mint());
+    let (red, blue) = (
+        Color::from_rgba8(230, 70, 50, 255),
+        Color::from_rgba8(60, 120, 240, 255),
+    );
+    let frame = NodeKind::Artboard {
+        size: Size::new(200.0, 200.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
+    };
+    let mut ops = Vec::new();
+    for (index, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        ops.push(Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        });
+    }
+    ops.extend([
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "ink".into(),
+                kind: VarKind::Color,
+                cells: [(light, Cell::Color(red)), (dark, Cell::Color(blue))]
+                    .into_iter()
+                    .collect(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::CreateNode {
+            id: panel,
+            parent: root,
+            index: 0,
+            kind: frame.clone(),
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: chart,
+            parent: panel,
+            index: 0,
+            kind: frame,
+            transform: None,
+            name: None,
+        },
+        Operation::SetModes {
+            id: panel,
+            modes: vec![dark],
+        },
+    ]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let bar = Part {
+        key: PartKey {
+            role: PartRole::Bar,
+            series: 0,
+            index: 0,
+        },
+        parent: None,
+        name: "Bar".into(),
+        kind: NodeKind::Rect {
+            size: Size::new(20.0, 60.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Affine::translate((10.0, 10.0)),
+        fills: vec![Fill {
+            brush: BrushSource::Bound {
+                var: ink,
+                alpha: 1.0,
+            },
+            visible: true,
+        }],
+        strokes: vec![],
+        opacity: 1.0,
+        insets: Default::default(),
+        display: None,
+        item: Default::default(),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.replace_chart(
+        chart,
+        &Generated {
+            display: ondin_core::container::Display::Flex(Default::default()),
+            parts: vec![bar],
+            left_out: vec![],
+        },
+    );
+    let fills: Vec<Brush> = record(&doc, &res, &ov)
+        .into_iter()
+        .filter_map(|c| match c {
+            Call::Fill(_, path, brush, _) if path.contains("L20,0") => Some(brush),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fills, vec![Brush::Solid(blue)], "the colour");
 }

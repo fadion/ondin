@@ -2901,8 +2901,9 @@ fn paint_ghost<P: ScenePainter>(
     if !masking && !ghost.mask && ghost_too_large(ghost, world, base) {
         return;
     }
-    // Not in the document yet, so a bound paint reads in the default mode.
-    let paint = doc.resolved_paint(ghost.id, &ghost.paint);
+    // Not in the document yet, so a bound paint reads in the default mode, but
+    // for a previewed chart part, which reads in its chart's.
+    let paint = doc.resolved_paint(ov.paint_owner(ghost.id), &ghost.paint);
     // Snaps as the node it will become, or the shape twitches on release; the
     // chrome ghost takes the node arm's exemption.
     let shape_world = match snappable_box(&ghost.kind).filter(|_| !ov.unsnapped(ghost.id)) {

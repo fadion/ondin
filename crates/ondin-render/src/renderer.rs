@@ -220,6 +220,10 @@ pub struct RenderOverrides {
     /// commit ahead of the document, so `set_kind`'s "re-shape only when the text
     /// changed" guard can never fire for it. Cleared before the value is returned.
     prepared_text: Option<(NodeId, TextLayout)>,
+    /// The chart each of [`Self::replace_chart`]'s parts belongs to: a part's
+    /// id is in no document, so its bound paint reads in the modes in force at
+    /// its chart ([`Self::paint_owner`]).
+    chart_parts: FxHashMap<NodeId, NodeId>,
 }
 
 impl RenderOverrides {
@@ -431,13 +435,27 @@ impl RenderOverrides {
         }
         let taken = self.ghosts.iter().map(|g| last_seq(&g.node)).max();
         ids.skip_to(taken.map_or(1, |s| s + 1));
+        self.chart_parts.retain(|_, c| *c != chart);
+        fn own(n: &GhostNode, chart: NodeId, out: &mut FxHashMap<NodeId, NodeId>) {
+            out.insert(n.id, chart);
+            for c in &n.children {
+                own(c, chart, out);
+            }
+        }
         for (index, node) in under(parts, None, &mut ids).into_iter().enumerate() {
+            own(&node, chart, &mut self.chart_parts);
             self.ghosts.push(Ghost {
                 parent: chart,
                 index,
                 node,
             });
         }
+    }
+
+    /// The node whose modes a ghost's bound paint reads in: a previewed chart
+    /// part's chart, else the ghost itself (in no document, so the default mode).
+    pub(crate) fn paint_owner(&self, ghost: NodeId) -> NodeId {
+        self.chart_parts.get(&ghost).copied().unwrap_or(ghost)
     }
 
     /// Install (or clear) the mode's explanatory artwork — see [`Self::chrome`].
@@ -1048,7 +1066,13 @@ impl RenderOverrides {
             .get(id)
             .and_then(|o| o.kind.clone())
             .or_else(|| res.used_kind(doc, id).cloned());
-        if now.as_ref() != Some(&kind) {
+        let resized = now.as_ref() != Some(&kind);
+        // A frame this re-sized re-places its own pinned children, as `relayout`'s
+        // main path does.
+        if resized && matches!(kind, NodeKind::Artboard { .. }) {
+            queue.extend(node.children().iter().copied());
+        }
+        if resized {
             self.set_kind(doc, res, id, kind);
         }
         self.mark_moved(doc, id);

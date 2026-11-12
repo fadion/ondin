@@ -6082,6 +6082,42 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect, cell: f32) 
     }
 }
 
+/// [`paint_checkerboard`] with rounded corners: the same squares as one rect
+/// textured with a repeating 2×2 board, which egui rounds and antialiases
+/// itself. A square board under [`mask_corners`] leaves stray pixels along the
+/// curve, since the mask's mesh is not antialiased.
+pub fn paint_checkerboard_rounded(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    cell: f32,
+    radius: egui::CornerRadius,
+) {
+    let tex = checker_texture(painter.ctx());
+    let uv = egui::Rect::from_min_max(
+        egui::Pos2::ZERO,
+        egui::pos2(rect.width() / (2.0 * cell), rect.height() / (2.0 * cell)),
+    );
+    painter.add(
+        egui::epaint::RectShape::filled(rect, radius, egui::Color32::WHITE).with_texture(tex, uv),
+    );
+}
+
+/// The 2×2 board [`paint_checkerboard_rounded`] repeats, dark first as
+/// [`paint_checkerboard`] lays it, uploaded once per context.
+fn checker_texture(ctx: &egui::Context) -> egui::TextureId {
+    let key = egui::Id::new("checkerboard-texture");
+    // Two separate accessors: nesting them deadlocks.
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
+        return tex.id();
+    }
+    let (dark, light) = (egui::Color32::from_gray(0xd8), egui::Color32::WHITE);
+    let image = egui::ColorImage::new([2, 2], vec![dark, light, light, dark]);
+    let tex = ctx.load_texture("checkerboard", image, egui::TextureOptions::NEAREST_REPEAT);
+    let id = tex.id();
+    ctx.data_mut(|d| d.insert_temp(key, tex));
+    id
+}
+
 /// A colour chip painted straight onto `p`, in the Fill row's look ([`swatch`]):
 /// a rounded square with [`swatch_hairline`] round it, the checkerboard under a
 /// translucent colour only. For rows that draw their chip as paint; with no

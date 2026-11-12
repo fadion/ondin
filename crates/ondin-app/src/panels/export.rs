@@ -24,11 +24,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// The scale cell of the export row (7pt pitch, 256pt card).
 ///
 /// A `ComboBox` spends 35pt beside its text and lays it out in `TextStyle::Button`,
-/// so `0.75x` wants 67 and an icon row's `Windows` 88. A combo asked for less comes
-/// out wider than asked and squeezes its neighbours (`the_export_row_fits_the_card`),
-/// and a cell sized per row would set a mixed list's columns apart. The format cell
-/// takes what is left.
-const SCALE_W: f32 = 88.0;
+/// so `0.75x` wants 67 and `1024h` wants 71. A combo asked for less comes out wider
+/// than asked and squeezes its neighbours (`the_export_row_fits_the_card`). The
+/// format cell takes what is left.
+const SCALE_W: f32 = 74.0;
+/// An icon row's size-set cell: `Windows` wants 88, and a cell that fits only some
+/// set names would widen as the set changes. Wider than [`SCALE_W`] on icon rows
+/// alone: the format cell beside it is left too little for `WebP` at 88, while an
+/// icon row's own formats, ICO and ICNS, are short.
+const ICON_SET_W: f32 = 88.0;
 /// The height of everything on the row, and the side of its two square buttons.
 const CELL: f32 = 28.0;
 /// Between two controls side by side — the card gap, which the settings
@@ -3366,17 +3370,15 @@ fn preview_fit(pixels: (u32, u32), avail: f32) -> egui::Vec2 {
     egui::vec2(w * scale, h * scale)
 }
 
-/// The preview's ground, the card's width and `h` tall: a checkerboard with a
-/// control's corners and hairline, the corners masked to the card since a
-/// checkerboard is painted square. Answers it and a painter clipped to it.
+/// The preview's ground, the card's width and `h` tall: a rounded checkerboard
+/// (`ui::paint_checkerboard_rounded`) with a control's corners and hairline.
+/// Answers it and a painter clipped to it.
 fn preview_ground(ui: &mut egui::Ui, h: f32) -> (egui::Rect, egui::Painter) {
     let (ground, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::empty());
     let p = ui.painter().with_clip_rect(ground);
     let radius = egui::CornerRadius::same(ui::BUTTON_R);
-    ui::paint_checkerboard(&p, ground, 5.0);
-    ui::mask_corners(&p, ground, f32::from(ui::BUTTON_R), theme::color::card());
-    // After the mask, or it bites pieces out of the stroke.
+    ui::paint_checkerboard_rounded(&p, ground, 5.0, radius);
     p.rect_stroke(
         ground,
         radius,
@@ -3587,7 +3589,7 @@ fn icon_set_cell(
     let mut picked = None;
     egui::ComboBox::from_id_salt(("export-icon-set", index, spec.format.label()))
         .icon(ui::combo_chevron)
-        .width(SCALE_W)
+        .width(ICON_SET_W)
         .selected_text(ui::combo_text(set.map_or("Custom", IconSet::label)))
         .show_ui(ui, |ui| {
             ui::menu_rows(ui);
@@ -3719,16 +3721,20 @@ mod tests {
             .map(|n| ExportScale::Times(*n))
             .chain([ExportScale::Width(512), ExportScale::Height(512)])
             .map(|s| text_w(&s.label(), ui::CONTROL_PT))
-            // An icon row's cell holds its set's name in the same box.
-            .chain(
-                [ExportFormat::Ico, ExportFormat::Icns]
-                    .iter()
-                    .flat_map(|f| IconSet::of(*f))
-                    .map(|s| s.label())
-                    .chain(["Custom"])
-                    .map(|l| text_w(l, ui::CONTROL_PT)),
-            )
             .fold(0.0_f32, f32::max);
+        // An icon row's cell holds its set's name, or *Custom*, in its own width.
+        let widest_set = [ExportFormat::Ico, ExportFormat::Icns]
+            .iter()
+            .flat_map(|f| IconSet::of(*f))
+            .map(|s| s.label())
+            .chain(["Custom"])
+            .map(|l| text_w(l, ui::CONTROL_PT))
+            .fold(0.0_f32, f32::max);
+        assert!(
+            widest_set + overhead <= ICON_SET_W,
+            "the set cell is {ICON_SET_W} and wants {:.1}",
+            widest_set + overhead
+        );
         // The format cell's text is not in `TextStyle::Button`: `ui::glyph_and_text`
         // builds its own `LayoutJob` (15pt icon, 7pt lead, word at `proportional(12)`).
         let widest_format = ExportFormat::ALL
@@ -5281,6 +5287,45 @@ mod code_export_tests {
             settings_button_state(&read_on_slices(&inert, false), false),
             ui::FieldButton::Set
         );
+    }
+
+    /// The inspector stays its column's width with an export row of every format,
+    /// an ICO row on its widest set name and on *Custom*, the preview open: a cell
+    /// whose text outgrows it widens the whole column. Laid out for real, since a
+    /// sum of egui's spacings missed a point.
+    /// flip: `ICON_SET_W` as every row's first cell → fails on WebP.
+    #[test]
+    fn every_export_row_keeps_the_inspector_its_width() {
+        let width = |rows: Vec<ExportSpec>, custom: bool| {
+            let ctx = egui::Context::default();
+            let (mut app, frame) = svg_settings_app(&ctx);
+            app.export_row_open = None;
+            app.collapsed_panels.remove(PREVIEW);
+            assert!(app.session.commit(Transaction(vec![Operation::SetExports {
+                id: frame,
+                exports: ondin_core::keyed_by_position(rows.clone()),
+            }])));
+            if custom {
+                app.export_custom_sizes = Some((vec![frame], 0, rows[0].icon_sizes()));
+            }
+            for _ in 0..10 {
+                crate::repeat::tests::pass(&ctx, &mut app, Vec::new());
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("inspector")))
+                .expect("the inspector")
+                .width()
+        };
+        let column = width(Vec::new(), false);
+        let one = |f| ExportSpec::new(f, ExportScale::Times(1.0));
+        for f in ExportFormat::ALL {
+            assert_eq!(width(vec![one(f)], false), column, "{f:?}");
+        }
+        let windows = ExportSpec {
+            sizes: IconSet::Windows.sizes().to_vec(),
+            ..one(ExportFormat::Ico)
+        };
+        assert_eq!(width(vec![windows], false), column, "Windows");
+        assert_eq!(width(vec![one(ExportFormat::Ico)], true), column, "Custom");
     }
 
     /// An ICO row's settings card offers its sizes as chips and holds the pad on;

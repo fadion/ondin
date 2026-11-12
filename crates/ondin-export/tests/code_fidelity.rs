@@ -1007,6 +1007,92 @@ fn grid_areas_and_auto_fit_match_the_canvas() {
     holds("grid-areas", &doc, &res);
 }
 
+/// Areas only a file can carry — a keyword's name, a second area of one name,
+/// one overlapping another — are left out of the template, which stays a grid
+/// of rectangles a browser reads; their items name no area, and each is reported.
+/// flip: `Walk::place` checking the grid's own areas → fails at "no grid-area:
+/// auto"; `writable_areas` keeping overlaps → fails at "no grid-area for a
+/// dropped area".
+#[test]
+fn areas_only_a_file_carries_are_left_out_and_reported() {
+    use ondin_core::container::{AreaName, GridArea, parse_tracks};
+    let mut d = Doc::new();
+    let grid = d.frame(None, 0.0, 0.0, 200.0, 140.0, "Areas");
+    d.apply(vec![Operation::SetDisplay {
+        id: grid,
+        display: Some(Display::Grid(Grid {
+            columns: parse_tracks("60px 60px 60px").unwrap(),
+            rows: parse_tracks("60px 60px").unwrap(),
+            ..Default::default()
+        })),
+    }]);
+    let area = |name: &str, columns, rows| GridArea {
+        name: AreaName::new(name),
+        columns,
+        rows,
+    };
+    let Some(Display::Grid(g)) = d.doc.get(grid).unwrap().display().cloned() else {
+        panic!("a grid");
+    };
+    let areas = vec![
+        area("a", [1, 2], [1, 2]),
+        area("a", [3, 4], [1, 2]),
+        area("b", [2, 4], [2, 3]),
+        area("c", [3, 4], [2, 3]),
+        area("auto", [1, 2], [2, 3]),
+    ];
+    // As a file holds them: written past the operation's check.
+    d.doc
+        .apply_restoring(&Transaction(vec![Operation::SetDisplay {
+            id: grid,
+            display: Some(Display::Grid(Grid { areas, ..g })),
+        }]))
+        .expect("held as a file holds it");
+    for name in ["a", "b", "c", "auto"] {
+        let r = d.rect(grid, 0.0, 0.0, 20.0, 20.0, 0.0);
+        d.doc
+            .apply_restoring(&Transaction(vec![
+                Operation::SetName {
+                    id: r,
+                    name: name.to_uppercase(),
+                },
+                Operation::SetLayoutItem {
+                    id: r,
+                    item: LayoutItem {
+                        grid_area: Some(AreaName::new(name)),
+                        ..Default::default()
+                    },
+                },
+            ]))
+            .expect("held as a file holds it");
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[grid]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(
+        css.contains("grid-template-areas: \"a . .\" \". b b\";"),
+        "the template: {css}"
+    );
+    assert!(
+        !css.contains("grid-area: auto"),
+        "no grid-area: auto: {css}"
+    );
+    assert!(
+        !css.contains("grid-area: c"),
+        "no grid-area for a dropped area: {css}"
+    );
+    for name in ["C", "AUTO"] {
+        assert!(
+            export
+                .approximated
+                .iter()
+                .any(|a| a.contains(&format!("“{name}”")) && a.contains("grid area")),
+            "{name} reported: {:?}",
+            export.approximated
+        );
+    }
+}
+
 /// Layers holding an aspect ratio: a 2 : 1 rect stretched across a column, a
 /// 16 : 9 frame at half the column's width, and a 1 : 2 rect on W outside any
 /// layout — Chrome sizes each derived side from `aspect-ratio` as the canvas does.

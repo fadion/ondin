@@ -1850,17 +1850,25 @@ impl Walk<'_> {
                     // The area sets all four lines; the item's own are not drawn.
                     // A name the grid lacks is laid `auto` (`container::area_lines`),
                     // where a browser would read it as a named line past the grid,
-                    // so it is written only where the grid has the area.
-                    let has = node
+                    // so it is written only where the template has the area. One
+                    // the canvas lays but the template leaves out is reported.
+                    let areas = node
                         .parent()
                         .and_then(|p| self.doc.get(p))
                         .and_then(|p| match p.display() {
-                            Some(Display::Grid(g)) => g.area(area),
+                            Some(Display::Grid(g)) => Some(g.areas.clone()),
                             _ => None,
                         })
-                        .is_some();
-                    if has {
+                        .unwrap_or_default();
+                    if writable_areas(&areas).iter().any(|a| a.name == area) {
                         el.set("grid-area", area.to_string());
+                    } else if areas.iter().any(|a| a.name == area) {
+                        self.report.approximate(format!(
+                            "{} {}: its grid area “{area}” is one CSS cannot write \
+                             beside the grid's others, so it is placed automatically",
+                            kind_word(node),
+                            label(node)
+                        ));
                     }
                     if let Some(j) = item.justify_self {
                         el.set("justify-self", align_items(j));
@@ -2450,7 +2458,7 @@ impl Walk<'_> {
                     el.set(
                         "grid-template-areas",
                         container::areas_css(
-                            &g.areas,
+                            &writable_areas(&g.areas),
                             container::track_count(&g.columns),
                             container::track_count(&g.rows),
                         ),
@@ -3530,6 +3538,20 @@ fn stretched_axes(both: (bool, bool), insets: &container::Insets, kind: &NodeKin
         both.0 && can.0 && !(m.left || m.right),
         both.1 && can.1 && !(m.top || m.bottom),
     )
+}
+
+/// The grid areas `grid-template-areas` can write: each one the operation would
+/// take (`GridArea::is_valid`), but for a later one of a name already kept or
+/// sharing a cell with one, which only a file carries and which would make the
+/// template one a browser refuses or redraws (`container::areas_are_valid`).
+fn writable_areas(areas: &[container::GridArea]) -> Vec<container::GridArea> {
+    let mut out: Vec<container::GridArea> = Vec::new();
+    for a in areas.iter().filter(|a| a.is_valid()) {
+        if out.iter().all(|k| k.name != a.name && !k.overlaps(a)) {
+            out.push(*a);
+        }
+    }
+    out
 }
 
 /// The extent below which an axis is flat: nothing on it scales, as

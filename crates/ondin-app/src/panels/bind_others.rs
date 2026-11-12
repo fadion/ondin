@@ -1479,6 +1479,121 @@ mod tests {
         assert!(uses.is_empty(), "nothing offered: {uses:?}");
     }
 
+    /// `slot_field` names exactly the keys whose bind writes a field a swapped
+    /// copy keeps from its slot (`swap::is_slot_field`), over a fixture holding
+    /// every `FieldKey` variant.
+    /// flip: `slot_field` without `Limit` → fails at "slot_field agrees".
+    #[test]
+    fn slot_field_agrees_with_what_each_bind_writes() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let page = app.session.doc.first_page();
+        let [f, r, t] = [(); 3].map(|_| app.session.ids.mint());
+        let var = app.session.ids.mint_var();
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::CreateNode {
+                    id: f,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(200.0, 100.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetDisplay {
+                    id: f,
+                    display: Some(ondin_core::container::Display::Flex(Default::default())),
+                },
+                rect(r, f, "R"),
+                fill(r, RED, 1.0),
+                Operation::SetStrokes {
+                    id: r,
+                    strokes: keyed_by_position([Stroke {
+                        brush: BLUE.into(),
+                        width: 1.0,
+                        ..Stroke::default()
+                    }]),
+                },
+                Operation::SetEffects {
+                    id: r,
+                    effects: keyed_by_position([ondin_core::Effect::new(
+                        ondin_core::EffectKind::DropShadow(ondin_core::Shadow::default()),
+                    )]),
+                },
+                Operation::CreateNode {
+                    id: t,
+                    parent: f,
+                    index: 0,
+                    kind: NodeKind::Text {
+                        content: "Hello".into(),
+                        style: Default::default(),
+                        spans: Default::default(),
+                        para_spans: Default::default(),
+                        paragraph: Default::default(),
+                        block: Default::default(),
+                        sizing: ondin_core::TextSizing::Auto,
+                        on_path: None,
+                        on_path_flip: false,
+                        on_path_offset: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]))
+            .expect("the fixture");
+        let doc = &app.session.doc;
+        // Visibility is never offered and a rect's radius is its corners, so
+        // those two keys are added by hand.
+        let mut keys = vec![FieldKey::Visible { id: r }, FieldKey::Radius { id: r }];
+        for id in [f, r, t] {
+            keys.extend(keys_of(doc, doc.get(id).unwrap()));
+        }
+        // The compiler keeps this match whole; a new variant needs a place in
+        // the fixture and a bump of the count.
+        let variant = |k: &FieldKey| match k {
+            FieldKey::Paint { .. } => 0,
+            FieldKey::Radius { .. } => 1,
+            FieldKey::Corner { .. } => 2,
+            FieldKey::Spacing { .. } => 3,
+            FieldKey::Visible { .. } => 4,
+            FieldKey::Size { .. } => 5,
+            FieldKey::Content { .. } => 6,
+            FieldKey::Family { .. } => 7,
+            FieldKey::Type { .. } => 8,
+            FieldKey::Limit { .. } => 9,
+            FieldKey::Opacity { .. } => 10,
+            FieldKey::StrokeWidth { .. } => 11,
+            FieldKey::EffectNumber { .. } => 12,
+            FieldKey::Flow { .. } => 13,
+        };
+        // A key whose bind writes nothing, an *Auto* text's height, is never
+        // offered.
+        let binds: Vec<(FieldKey, Vec<Operation>)> = keys
+            .into_iter()
+            .map(|key| {
+                let bf = key.bound().expect("a layer's own field");
+                let ops = ondin_core::build::bind_field_ops(doc, &[key.at()], bf, Some(var)).0;
+                (key, ops)
+            })
+            .filter(|(_, ops)| !ops.is_empty())
+            .collect();
+        let seen: std::collections::BTreeSet<usize> =
+            binds.iter().map(|(k, _)| variant(k)).collect();
+        assert_eq!(seen, (0..14).collect(), "the fixture: every variant binds");
+        for (key, ops) in binds {
+            assert_eq!(
+                slot_field(key),
+                ops.iter().any(ondin_core::swap::is_slot_field),
+                "slot_field agrees for {key:?}: {ops:?}"
+            );
+        }
+    }
+
     /// **A chart frame's padding is its regeneration's**: a chart's generated
     /// layout offers no Spacing or Flow key.
     ///

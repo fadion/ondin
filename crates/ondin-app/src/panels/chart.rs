@@ -121,7 +121,7 @@ fn with_variant(chart: &Chart, i: usize) -> Chart {
 pub(crate) fn fill_of(chart: &Chart, colour: ChartColour) -> Option<ondin_core::BrushSource> {
     match colour {
         ChartColour::Series(col) => chart::series_fill(chart, col),
-        ChartColour::Node(i) => Some(chart::sankey_nodes(chart).into_iter().nth(i)?.1),
+        ChartColour::Node(i) => Some(chart::named_marks(chart)?.into_iter().nth(i)?.1),
         ChartColour::Ink => Some(chart.options.text.ink.clone()),
         ChartColour::Axis(value) => Some(axis_of(chart, value).colour.clone()),
         ChartColour::Grid(value) => Some(axis_of(chart, value).grid.colour.clone()),
@@ -185,10 +185,12 @@ pub(crate) fn with_fill(
 ) -> Chart {
     match colour {
         ChartColour::Series(col) => chart::with_series_fill(chart, col, fill),
-        ChartColour::Node(i) => match chart::sankey_nodes(chart).into_iter().nth(i) {
-            Some((name, _)) => chart::with_node_fill(chart, &name, fill),
-            None => chart.clone(),
-        },
+        ChartColour::Node(i) => {
+            match chart::named_marks(chart).and_then(|m| m.into_iter().nth(i)) {
+                Some((name, _)) => chart::with_node_fill(chart, &name, fill),
+                None => chart.clone(),
+            }
+        }
         ChartColour::Ink
         | ChartColour::Axis(_)
         | ChartColour::Grid(_)
@@ -401,10 +403,12 @@ impl OndinApp {
                 }
             });
             if !several {
-                let series = if chart.kind == ChartKind::Sankey {
-                    "Nodes"
-                } else {
-                    "Series"
+                // A chart coloured by name lists its named marks here.
+                let series = match chart.kind {
+                    ChartKind::Sankey => "Nodes",
+                    ChartKind::Pie => "Slices",
+                    ChartKind::Scatter if chart.mapping.group.is_some() => "Groups",
+                    _ => "Series",
                 };
                 app.chart_section(ui, "Chart series", series, |app, ui| {
                     app.chart_series_rows(ui, id, &chart);
@@ -1107,13 +1111,15 @@ impl OndinApp {
             _ => {}
         }
         let totals = chart::sankey_totals(chart);
-        let rows: Vec<(ChartColour, String, Option<bool>)> = match chart.kind {
-            ChartKind::Sankey => chart::sankey_nodes(chart)
+        // A Sankey's nodes, a pie's slices and a grouped scatter's groups are
+        // coloured by name (`chart::named_marks`), so those are the rows.
+        let rows: Vec<(ChartColour, String, Option<bool>)> = match chart::named_marks(chart) {
+            Some(marks) => marks
                 .into_iter()
                 .enumerate()
                 .map(|(i, (name, _))| (ChartColour::Node(i), name, None))
                 .collect(),
-            _ => chart
+            None => chart
                 .table
                 .columns
                 .iter()
@@ -3333,5 +3339,36 @@ mod tests {
             "no rows under it"
         );
         assert!(drawn(&out, "Step"), "an area's step curve");
+    }
+
+    /// A pie lists its slices, by category, where a series chart lists its
+    /// series, and a slice's colour row writes the colour the slice draws in.
+    /// flip: `chart_series_rows` listing a pie's columns → fails at "the slice's row".
+    #[test]
+    fn a_pie_lists_and_colours_its_slices() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = charted(&ctx, ChartKind::Pie);
+        app.collapsed_panels.remove("Chart series");
+        let marks = chart::named_marks(&chart_at(&app, id)).expect("named");
+        let first = marks[0].0.clone();
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            out = shapes(&ctx, &mut app);
+        }
+        assert!(drawn(&out, "SLICES"), "the section's name");
+        assert!(drawn(&out, &first), "the slice's row");
+        let red = ondin_core::peniko::Color::from_rgb8(255, 0, 0);
+        let tx = app.slot_transaction(
+            id,
+            PaintSlot::Chart(ChartColour::Node(0)),
+            Brush::Solid(red),
+        );
+        assert!(app.commit_edit(tx));
+        let marks = chart::named_marks(&chart_at(&app, id)).unwrap();
+        assert_eq!(
+            marks[0].1,
+            Brush::Solid(red).into(),
+            "the slice draws in it"
+        );
     }
 }

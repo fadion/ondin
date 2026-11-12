@@ -51,21 +51,18 @@ impl Picture {
 }
 
 /// The colours `chart` draws its first marks in, as [`COLOURS`] solid colours:
-/// series for most kinds, the palette's first slices for a pie, the first nodes
-/// for a Sankey; the palette fills whatever the chart has fewer of. Bound
+/// series for most kinds, the first named marks (`chart::named_marks`: a pie's
+/// slices, a Sankey's nodes, a grouped scatter's groups) for those coloured by
+/// name; the palette fills whatever the chart has fewer of. Bound
 /// brushes must be resolved first.
 pub(super) fn colours(chart: &Chart) -> [Color; COLOURS] {
     let solid = |b: &ondin_core::BrushSource| {
         b.literal()
             .and_then(|brush| super::paint::stops_of(brush).first().map(|(_, c)| *c))
     };
-    let own: Vec<Color> = match chart.kind {
-        ChartKind::Pie => Vec::new(),
-        ChartKind::Sankey => chart::sankey_nodes(chart)
-            .iter()
-            .filter_map(|(_, b)| solid(b))
-            .collect(),
-        _ => chart
+    let own: Vec<Color> = match chart::named_marks(chart) {
+        Some(marks) => marks.iter().filter_map(|(_, b)| solid(b)).collect(),
+        None => chart
             .mapping
             .series
             .iter()

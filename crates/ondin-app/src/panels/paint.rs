@@ -330,7 +330,8 @@ pub enum PaintSlot {
 pub enum ChartColour {
     /// A series, by its column.
     Series(ondin_core::chart::ColumnId),
-    /// A Sankey node, by its place in `chart::sankey_nodes`' order.
+    /// A mark coloured by name (a Sankey node, a pie's slice, a grouped
+    /// scatter's group), by its place in `chart::named_marks`' order.
     Node(usize),
     /// The chart's labels' ink.
     Ink,

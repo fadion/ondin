@@ -490,10 +490,12 @@ in `collapsed_panels` (Marks, Axes, Values, Legend and Text start folded, `chart
   line, area or scatter chart a `…` button between them opens the series' style menu: its line's
   dash (*Solid*, *Dashed*, *Dotted*; not a scatter) and its points' shape (a line's unshaped
   points are circles; a scatter's take the chart's shape), undo steps *Series dash* and *Series
-  point shape*. A Sankey shows *Nodes* here instead: one row per node name in
-  `chart::sankey_nodes`' order with its swatch and, right-aligned in the muted ink, its total
-  (`chart::sankey_totals`: the larger of what flows in and out) in the values' number format,
-  a bound node's capsule before it.
+  point shape*. A chart coloured by name lists its named marks here instead
+  (`chart::named_marks`, written through `chart::with_node_fill`): a Sankey's *Nodes*, a pie's
+  *Slices* (by category) and a grouped scatter's *Groups*, one row per name in the generator's
+  order with its swatch, and no eye. A node's row also shows, right-aligned in the muted ink,
+  its total (`chart::sankey_totals`: the larger of what flows in and out) in the values' number
+  format, a bound node's capsule before it.
   Picking a palette puts every series and node back on it (`chart::with_palette`).
 - **Marks**, **Axes**, **Values**, **Legend** — the options above for the kind, as
   `ui::value_field`, `ui::switch_row`, `ui::segmented` and dropdown rows, number fields two to a

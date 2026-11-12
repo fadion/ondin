@@ -841,3 +841,80 @@ fn a_chart_reports_its_description_and_its_parts_their_roles() {
     let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
     assert_eq!(snap, back);
 }
+
+/// A node's HTML element is its tag, and its address is written only while it
+/// is a Link: a text set back to a heading keeps its address in the model, and
+/// the snapshot leaves it out.
+/// flip: `node_snapshot` writing `href` whatever the element → fails at "the
+/// heading's address".
+#[test]
+fn an_element_is_its_tag_and_only_a_link_has_an_address() {
+    use ondin_core::element::HtmlElement;
+    use ondin_core::{Operation, Transaction};
+    let mut f = common::fixture();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetElement {
+                id: f.artboard,
+                element: Some(HtmlElement::Nav),
+            },
+            Operation::SetElement {
+                id: f.text,
+                element: Some(HtmlElement::Link),
+            },
+            Operation::SetHref {
+                id: f.text,
+                href: "/go".into(),
+            },
+        ]))
+        .unwrap();
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+    let node = |snap: &Snapshot, id| snap.nodes.iter().find(|n| n.id == wire(id)).cloned();
+    let snap = snapshot(&f.doc, &f.res);
+    let (board, text, rect) = (
+        node(&snap, f.artboard).unwrap(),
+        node(&snap, f.text).unwrap(),
+        node(&snap, f.rect).unwrap(),
+    );
+    assert_eq!(
+        (board.element.as_deref(), board.href.as_deref()),
+        (Some("nav"), None)
+    );
+    assert_eq!(
+        (text.element.as_deref(), text.href.as_deref()),
+        (Some("a"), Some("/go")),
+        "the link"
+    );
+    assert_eq!((rect.element, rect.href), (None, None), "no element");
+    let json = serde_json::to_value(&snap).unwrap();
+    let rect_json = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == wire(f.rect))
+        .unwrap();
+    assert!(
+        rect_json.get("element").is_none() && rect_json.get("href").is_none(),
+        "absent, not null: {rect_json}"
+    );
+
+    f.doc
+        .apply(&Transaction(vec![Operation::SetElement {
+            id: f.text,
+            element: Some(HtmlElement::H1),
+        }]))
+        .unwrap();
+    assert_eq!(
+        f.doc.get(f.text).unwrap().href(),
+        "/go",
+        "the fixture keeps it"
+    );
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+    let snap = snapshot(&f.doc, &f.res);
+    let text = node(&snap, f.text).unwrap();
+    assert_eq!(
+        (text.element.as_deref(), text.href.as_deref()),
+        (Some("h1"), None),
+        "the heading's address"
+    );
+}

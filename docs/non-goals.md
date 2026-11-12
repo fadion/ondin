@@ -120,6 +120,7 @@ multiplayer is one of its considerations.
 - **The code fidelity check in the app** — it needs an external browser and cannot check React or Vue; `ondin check code` stays the way to run it.
 - **Live interaction states in present mode** — hover and press on the canvas are prototyping; the states exist for code export.
 - **Compiling the React and Vue output in CI** (`tsc`, `@vue/compiler-sfc`) — a Node toolchain in CI for a syntax check; the fidelity tests draw the HTML and the component walk.
+- **One `<main>` across a page and the components it uses in React and Vue** — a component is one file for every page using it, so each file counts its own main; a page's main beside a use holding one writes two.
 
 ## Charts
 

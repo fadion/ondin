@@ -115,7 +115,7 @@ fn walk(from: f64, to: f64, step: f64) -> Vec<f64> {
 
 /// The decimals a step of `step` needs: judged against the step's own size, so
 /// a step of 1e-9 needs nine. A step finer than [`MAX_DECIMALS`] places is
-/// written with an exponent by [`format`].
+/// written with an exponent by [`format()`].
 pub fn decimals_of(step: f64) -> u8 {
     let mut d = 0u8;
     let mut s = step.abs();

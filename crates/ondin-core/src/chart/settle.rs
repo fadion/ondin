@@ -103,7 +103,7 @@ fn gone_bindings(doc: &Document, parts: &[(PartKey, NodeId)]) -> Vec<Operation> 
 }
 
 /// The actor chart `chart`'s new parts are minted under, past every id the
-/// document holds of it and past the chart's [`Chart::minted`], so a settle
+/// document holds of it and past the chart's [`super::Chart::minted`], so a settle
 /// needs no session's id source and a CLI export or a load regenerates as the
 /// app does. One actor per chart: a deleted chart's parts live on in its undo
 /// step, and only that chart, never present while they are away, mints under

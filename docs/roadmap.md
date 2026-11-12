@@ -8,13 +8,6 @@ true.
 
 ## Now
 
-- **Tangent and perpendicular point snaps** — two more kinds for `snap::point_target`, beside
-  anchor, intersection, midpoint, centre and on path, so a logo's line meets a circle exactly
-  instead of by eye. *Tangent*: the point on a curve where the line from the run's previous anchor
-  touches it. *Perpendicular*: the foot of that line on a segment. They need the previous anchor,
-  so they apply to the pen and a line's or a dragged point's other end, not to a first anchor.
-  Drawn by `canvas::draw_snap_target` with its ring and a pill, as the others are; place them in
-  the precedence order.
 - **ICO and ICNS export** — favicon and app-icon files without a trip to another tool. An ICO holds
   several PNG sizes in one file (16, 32, 48 by default; up to 256) and the `image` crate writes it;
   an ICNS holds the macOS ladder (16 to 1024). Each is an export format whose spec lists sizes

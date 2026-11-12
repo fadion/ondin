@@ -77,7 +77,14 @@ A pen anchor, a node-tool point or segment drag and a line's end are given point
 (`OndinApp::point_snapping`); a resize is not. A pen drawing into an edited path reads that path
 as its own: every subpath but the run in flight is a target (`pen_point`). With both axes free, `snap::point_target` first
 looks within the tolerance for, in this order, an **anchor**, an **intersection** of two segments,
-a segment's **midpoint**, a shape's **centre**, and the nearest point **on a path**. The first kind
+a **tangent**, a **perpendicular**, a segment's **midpoint**, a shape's **centre**, and the nearest
+point **on a path**. Tangent and perpendicular are drawn from `Outlines::from`, the anchors the
+dragged point is joined to: the pen run's last anchor (a Ctrl-moved anchor's neighbours), a line's
+other end, a node-tool anchor's neighbours that stay put. A tangent is where a line from one of
+them touches a curve (none on a straight segment); a perpendicular is that line's foot on a
+segment, curves included, kept only on the segment. Both are roots of a cross or dot product
+along the segment (`snap::roots_on`); one at the `from` anchor itself names no direction and is
+dropped. A first anchor and a segment drag have no `from`, so neither kind. The first kind
 in reach wins even over a nearer one of a later kind, and the point lands on it exactly, on both
 axes, never rounded to the grid, so a logo's tip meets cleanly. Crossings are exact for two lines
 and found by halving both segments' parameter ranges while their control boxes overlap otherwise
@@ -88,8 +95,9 @@ anchor that landed on geometry is not then pulled onto a mirror axis.
 
 What landed is drawn by `canvas::draw_snap_target`, the mirror's *On axis* mark too: a ring of
 `SNAP_RING_PX` in the measure red and a pill naming it — *Anchor*, *Intersection* (with a × in
-the ring, since there is no anchor there), *Midpoint*, *Centre*, *On path*. A point is too small
-for a line to say what it matched. The pen shows its mark on hover from before its first anchor.
+the ring, since there is no anchor there), *Tangent*, *Perpendicular*, *Midpoint*, *Centre*,
+*On path*. A point is too small for a line to say what it matched. The pen shows its mark on hover
+from before its first anchor; a dragged line end shows its mark too.
 
 ### Dragged guide (`snap_guide`)
 

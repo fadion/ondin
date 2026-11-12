@@ -1102,6 +1102,24 @@ pub(crate) fn draw_snap_target(painter: &egui::Painter, at: egui::Pos2, name: &s
         color::MEASURE,
     );
 }
+
+/// The anchors joined to `at` by a segment — the one before it and the one after,
+/// across the join of a closed subpath — that are not in `moving`: what a dragged
+/// anchor's tangent and perpendicular snaps are drawn from.
+fn joined_anchors(subpaths: &[PenSubpath], at: PointRef, moving: &[PointRef]) -> Vec<Point> {
+    let after = tools::segment_ends(subpaths, at).map(|(_, to)| to);
+    let sub = subpaths.get(at.0);
+    let n = sub.map_or(0, |s| s.anchors.len());
+    let before = match at.1.checked_sub(1) {
+        Some(a) => Some((at.0, a)),
+        None => sub.filter(|s| s.closed && n > 1).map(|_| (at.0, n - 1)),
+    };
+    let still = [before, after].into_iter().flatten();
+    let still = still.filter(|p| *p != at && !moving.contains(p));
+    let at_of = |p: PointRef| Some(subpaths.get(p.0)?.anchors.get(p.1)?.at);
+    still.filter_map(at_of).collect()
+}
+
 /// Side of a path anchor's marker in the node tool, in screen pt. Its corners
 /// sit just inside `PEN_PICK_PX`; raise that too, or they stop being grabbable.
 const POINT_PX: f32 = 9.0;
@@ -4625,14 +4643,36 @@ impl OndinApp {
         let target = if shift {
             self.axial_corner(anchor, world)
         } else {
-            snap::snap_point(
-                world,
-                (true, true),
-                &self.point_snapping(&[id], None, world),
-            )
-            .at
+            self.line_end_snap(id, anchor, world).at
         };
         tools::move_line_end(doc, res, id, which, target)
+    }
+
+    /// Where a dragged end of line `id` snaps, with `other` its other end: the
+    /// tangent and perpendicular snaps are drawn from there.
+    fn line_end_snap(&self, id: NodeId, other: Point, world: Point) -> snap::PointSnap {
+        let mut s = self.point_snapping(&[id], None, world);
+        if self.snap_shapes {
+            s.outlines.from.push(other);
+        }
+        snap::snap_point(world, (true, true), &s)
+    }
+
+    /// [`Self::line_end_snap`] for the overlay: what the drag of `which` end of
+    /// `id` to `world` landed on. Nothing while Shift constrains the angle.
+    fn line_end_marks(&self, id: NodeId, which: LineEnd, world: Point, shift: bool) -> snap::Marks {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let Some((start, end)) = tools::line_ends_world(doc, res, id) else {
+            return snap::Marks::default();
+        };
+        let other = match which {
+            LineEnd::Start => end,
+            LineEnd::End => start,
+        };
+        match shift {
+            true => snap::Marks::default(),
+            false => self.line_end_snap(id, other, world).into(),
+        }
     }
 
     /// The two keys a create drag reads in flight (`docs/shortcuts.md` §9):
@@ -5176,6 +5216,17 @@ impl OndinApp {
             let others = pen.anchors.iter().enumerate();
             let others = others.filter(|(i, _)| Some(*i) != except);
             s.outlines.anchors.extend(others.map(|(_, a)| a.at));
+            // Tangents and perpendiculars are drawn from the anchors the new one
+            // joins: the run's last, or a Ctrl-moved anchor's neighbours.
+            let joined = match except {
+                Some(i) => vec![i.checked_sub(1), Some(i + 1)],
+                None => vec![pen.anchors.len().checked_sub(1)],
+            };
+            let joined = joined
+                .into_iter()
+                .flatten()
+                .filter_map(|i| pen.anchors.get(i));
+            s.outlines.from.extend(joined.map(|a| a.at));
         }
         let snapped = snap::snap_point(world, (true, true), &s);
         // An anchor near a mirror axis lands on it, where the halves join, unless
@@ -5960,7 +6011,7 @@ impl OndinApp {
         match self.drag {
             Drag::Points { id, grab, anchor } => {
                 let base = self.anchor_position(id, anchor);
-                let (delta, _) = self.snapped_point(id, base, world - grab, shift);
+                let (delta, _) = self.snapped_point(id, base, Some(anchor), world - grab, shift);
                 let tx = self.points_tx(id, delta);
                 self.session.set_preview(&tx);
                 if released {
@@ -5987,7 +6038,7 @@ impl OndinApp {
                     true => raw,
                     false => {
                         let base = self.segment_position(id, at, t);
-                        self.snapped_point(id, base, raw, shift).0
+                        self.snapped_point(id, base, None, raw, shift).0
                     }
                 };
                 let tx = self.segment_tx(id, at, t, delta, ctrl);
@@ -6567,11 +6618,14 @@ impl OndinApp {
     /// aimed point `base` snaps, not the box round the set; Shift constrains as in
     /// [`Self::snapped_move`]. The path's box is left out of the targets since it
     /// moves with the points, but its anchors and segments that stay put are in
-    /// ([`Self::point_snapping`]).
+    /// ([`Self::point_snapping`]). When `grabbed` is the anchor at `base`, its
+    /// neighbours that stay put are what tangent and perpendicular snaps are drawn
+    /// from.
     fn snapped_point(
         &self,
         id: NodeId,
         base: Option<Point>,
+        grabbed: Option<PointRef>,
         raw: Vec2,
         shift: bool,
     ) -> (Vec2, snap::Marks) {
@@ -6586,7 +6640,13 @@ impl OndinApp {
         let want = base + delta;
         // A mirrored path's images move too.
         let moving = self.with_mirrored_points(id, &self.subject_points(id));
-        let s = self.point_snapping(&[id], Some((id, &moving)), want);
+        let mut s = self.point_snapping(&[id], Some((id, &moving)), want);
+        if self.snap_shapes
+            && let Some(at) = grabbed
+            && let Some((_, subpaths)) = self.edited_subpaths(id)
+        {
+            s.outlines.from = joined_anchors(&subpaths, at, &moving);
+        }
         let result = snap::snap_point(want, axes, &s);
         (delta + (result.at - want), result.into())
     }
@@ -10384,16 +10444,18 @@ impl OndinApp {
                 }
                 Drag::Points { id, grab, anchor } => {
                     let base = self.anchor_position(*id, *anchor);
-                    self.snapped_point(*id, base, world - *grab, shift).1
+                    self.snapped_point(*id, base, Some(*anchor), world - *grab, shift)
+                        .1
                 }
                 // A bend moves control points, which nothing snaps.
                 Drag::Segment { id, at, t, grab } if !ctrl => {
                     let base = self.segment_position(*id, *at, *t);
-                    self.snapped_point(*id, base, world - *grab, shift).1
+                    self.snapped_point(*id, base, None, world - *grab, shift).1
                 }
                 Drag::PointBox {
                     id, handle, grab, ..
                 } => self.snapped_point_box(*id, *handle, *grab, world).1.into(),
+                Drag::LineEnd { id, which } => self.line_end_marks(*id, *which, world, shift),
                 _ if pen_hover => self.pen_point(world, shift).1,
                 _ => snap::Marks::default(),
             };
@@ -27163,13 +27225,81 @@ mod point_snap_tests {
         let (mut app, id) = app_with_rect_and_path(&ctx);
         app.points.set_one(id, (0, 0));
         let base = Some(Point::new(200.0, 0.0));
-        let (delta, marks) = app.snapped_point(id, base, Vec2::new(100.6, 49.3), false);
+        let grabbed = Some((0, 0));
+        let (delta, marks) = app.snapped_point(id, base, grabbed, Vec2::new(100.6, 49.3), false);
         assert_eq!(Point::new(200.0, 0.0) + delta, Point::new(300.0, 50.0));
         assert_eq!(marks.point.map(|m| m.kind), Some(snap::PointKind::Midpoint));
 
         // Halfway along the segment the point drags: (250, 0) is its midpoint.
-        let (_, marks) = app.snapped_point(id, base, Vec2::new(50.4, 1.0), false);
+        let (_, marks) = app.snapped_point(id, base, grabbed, Vec2::new(50.4, 1.0), false);
         assert!(marks.point.is_none(), "not on its own moving segment");
+    }
+
+    /// The pen's next anchor lands on the foot of the line from the run's last
+    /// anchor to the rect's bottom edge; a Ctrl-moved anchor's feet are drawn from
+    /// its neighbours instead.
+    ///
+    /// flip: `pen_point_except` leaving `from` empty → fails at "from the last anchor".
+    #[test]
+    fn the_pen_lands_on_the_foot_of_a_perpendicular() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_rect_and_path(&ctx);
+        app.tool = Tool::Pen;
+        app.pen = Some(PenState {
+            parent: app.session.doc.first_page(),
+            parent_world: Affine::IDENTITY,
+            anchors: vec![
+                PenAnchor::corner(Point::new(30.0, 120.0)),
+                PenAnchor::corner(Point::new(500.0, 500.0)),
+            ],
+            shaping: false,
+            editing: None,
+        });
+        // From (500, 500) the foot on the edge would be (500, 60), off its end.
+        let (at, marks) = app.pen_point(Point::new(32.4, 61.7), false);
+        assert_eq!(marks.point.map(|m| m.kind), Some(snap::PointKind::OnPath));
+        assert!(at.distance(Point::new(32.4, 60.0)) < 1e-9, "{at:?}");
+
+        // Ctrl-moving the last anchor itself, the foot is drawn from (30, 120).
+        let (at, _) = app.pen_point_except(Point::new(32.4, 61.7), false, Some(1));
+        assert_eq!(
+            at,
+            Point::new(30.0, 60.0),
+            "from the moved anchor's neighbour"
+        );
+
+        app.pen.as_mut().unwrap().anchors.swap(0, 1);
+        let (at, marks) = app.pen_point(Point::new(32.4, 61.7), false);
+        let kind = marks.point.map(|m| m.kind);
+        assert_eq!(
+            kind,
+            Some(snap::PointKind::Perpendicular),
+            "from the last anchor"
+        );
+        assert_eq!(at, Point::new(30.0, 60.0));
+    }
+
+    /// A dragged anchor's joined anchors are its neighbours that stay put, across
+    /// the join of a closed subpath and not of an open one.
+    #[test]
+    fn a_dragged_anchor_is_joined_to_its_still_neighbours() {
+        let p = |x: f64| PenAnchor::corner(Point::new(x, 0.0));
+        let mut subs = vec![PenSubpath {
+            anchors: vec![p(0.0), p(1.0), p(2.0), p(3.0)],
+            closed: false,
+        }];
+        let xs = |subs: &[PenSubpath], at, moving: &[PointRef]| -> Vec<f64> {
+            joined_anchors(subs, at, moving)
+                .iter()
+                .map(|q| q.x)
+                .collect()
+        };
+        assert_eq!(xs(&subs, (0, 1), &[(0, 1)]), [0.0, 2.0]);
+        assert_eq!(xs(&subs, (0, 1), &[(0, 1), (0, 2)]), [0.0], "a moving one");
+        assert_eq!(xs(&subs, (0, 0), &[]), [1.0], "an open end");
+        subs[0].closed = true;
+        assert_eq!(xs(&subs, (0, 0), &[]), [3.0, 1.0], "across the join");
+        assert_eq!(xs(&subs, (0, 3), &[]), [2.0, 0.0]);
     }
 
     /// Shift steps a handle to an eighth of a turn on the canvas, its length the

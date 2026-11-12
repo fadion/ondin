@@ -17,7 +17,9 @@
 //! Pure geometry over `Resolved` bounds: no document mutation, no egui.
 
 use crate::measure::{self, Axis, Measure};
-use ondin_core::kurbo::{ParamCurve, ParamCurveNearest, PathSeg, Point, Rect, Vec2};
+use ondin_core::kurbo::{
+    ParamCurve, ParamCurveDeriv, ParamCurveNearest, PathSeg, Point, Rect, Vec2,
+};
 use ondin_core::{Document, NodeId, Resolved};
 
 /// How close (in screen pixels) an edge must come before it snaps.
@@ -98,6 +100,10 @@ pub struct Outlines {
     pub segments: Vec<PathSeg>,
     /// The centres of the shapes in view.
     pub centres: Vec<Point>,
+    /// The anchors the dragged point is joined to by a segment — the pen run's
+    /// previous anchor, a line's other end, a dragged anchor's neighbours — which
+    /// tangent and perpendicular snaps are drawn from. Empty for a first anchor.
+    pub from: Vec<Point>,
 }
 
 /// What a point snap landed on, in [`PointKind::label`]'s order of priority: a
@@ -106,6 +112,11 @@ pub struct Outlines {
 pub enum PointKind {
     Anchor,
     Intersection,
+    /// Where a line from one of [`Outlines::from`] touches a curve.
+    Tangent,
+    /// The foot of a line from one of [`Outlines::from`] that meets a segment at a
+    /// right angle.
+    Perpendicular,
     Midpoint,
     Centre,
     OnPath,
@@ -118,6 +129,8 @@ impl PointKind {
         match self {
             Self::Anchor => "Anchor",
             Self::Intersection => "Intersection",
+            Self::Tangent => "Tangent",
+            Self::Perpendicular => "Perpendicular",
             Self::Midpoint => "Midpoint",
             Self::Centre => "Centre",
             Self::OnPath => "On path",
@@ -656,7 +669,8 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
 
 /// The geometry within `tolerance` of `at` a dragged point lands on, the first
 /// [`PointKind`] in reach winning: an anchor, a crossing of two segments, a
-/// segment's midpoint, a shape's centre, and last the nearest point on a segment.
+/// tangent or perpendicular from [`Outlines::from`], a segment's midpoint, a
+/// shape's centre, and last the nearest point on a segment.
 pub fn point_target(at: Point, s: &Snapping, tolerance: f64) -> Option<PointMark> {
     let nearest = |points: &mut dyn Iterator<Item = Point>| {
         points
@@ -685,6 +699,21 @@ pub fn point_target(at: Point, s: &Snapping, tolerance: f64) -> Option<PointMark
     }
     if let Some(p) = nearest(&mut crossed.into_iter()) {
         return Some(mark(p, PointKind::Intersection));
+    }
+    let from = &s.outlines.from;
+    let mut touching = Vec::new();
+    let mut feet = Vec::new();
+    for seg in &near {
+        for f in from {
+            tangents(*seg, *f, &mut touching);
+            perpendiculars(*seg, *f, &mut feet);
+        }
+    }
+    if let Some(p) = nearest(&mut touching.into_iter()) {
+        return Some(mark(p, PointKind::Tangent));
+    }
+    if let Some(p) = nearest(&mut feet.into_iter()) {
+        return Some(mark(p, PointKind::Perpendicular));
     }
     if let Some(p) = nearest(&mut near.iter().map(|seg| seg.eval(0.5))) {
         return Some(mark(p, PointKind::Midpoint));
@@ -715,6 +744,83 @@ fn seg_bounds(seg: PathSeg) -> Rect {
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
 }
+
+/// The points on a curved `seg` where a line from `from` touches it: the roots of
+/// `(B(t) − from) × B′(t)`. A straight segment has none: a line from a point on
+/// its extension runs along it rather than touching it.
+fn tangents(seg: PathSeg, from: Point, out: &mut Vec<Point>) {
+    if !matches!(seg, PathSeg::Line(_)) {
+        roots_on(seg, from, |d, v| d.cross(v), out);
+    }
+}
+
+/// The feet on `seg` of the lines from `from` that meet it at a right angle: the
+/// roots of `(B(t) − from) · B′(t)`. A line's is its projection, solved exactly
+/// and kept only when it falls on the segment.
+fn perpendiculars(seg: PathSeg, from: Point, out: &mut Vec<Point>) {
+    let PathSeg::Line(l) = seg else {
+        roots_on(seg, from, |d, v| d.dot(v), out);
+        return;
+    };
+    let d = l.p1 - l.p0;
+    if d.hypot2() < ROOT_EPS * ROOT_EPS {
+        return;
+    }
+    let t = (from - l.p0).dot(d) / d.hypot2();
+    let p = l.eval(t);
+    if (0.0..=1.0).contains(&t) && p.distance(from) > ROOT_EPS {
+        out.push(p);
+    }
+}
+
+/// The points of `seg` where `f(B(t) − from, B′(t))` changes sign, found by
+/// sampling [`ROOT_SAMPLES`] spans and halving each that brackets one. A root at
+/// `from` itself or where the curve stalls names no direction and is dropped.
+fn roots_on(seg: PathSeg, from: Point, f: impl Fn(Vec2, Vec2) -> f64, out: &mut Vec<Point>) {
+    let deriv = |t: f64| match seg {
+        PathSeg::Line(l) => l.p1 - l.p0,
+        PathSeg::Quad(q) => q.deriv().eval(t).to_vec2(),
+        PathSeg::Cubic(c) => c.deriv().eval(t).to_vec2(),
+    };
+    let g = |t: f64| f(seg.eval(t) - from, deriv(t));
+    let mut keep = |t: f64| {
+        let p = seg.eval(t);
+        if p.distance(from) > ROOT_EPS && deriv(t).hypot() > ROOT_EPS {
+            out.push(p);
+        }
+    };
+    let (mut t0, mut g0) = (0.0, g(0.0));
+    if g0 == 0.0 {
+        keep(0.0);
+    }
+    for i in 1..=ROOT_SAMPLES {
+        let t1 = i as f64 / ROOT_SAMPLES as f64;
+        let g1 = g(t1);
+        if g1 == 0.0 {
+            keep(t1);
+        } else if g0 * g1 < 0.0 {
+            let (mut lo, mut hi, mut g_lo) = (t0, t1, g0);
+            for _ in 0..60 {
+                let mid = (lo + hi) / 2.0;
+                let g_mid = g(mid);
+                if g_mid * g_lo <= 0.0 {
+                    hi = mid;
+                } else {
+                    (lo, g_lo) = (mid, g_mid);
+                }
+            }
+            keep((lo + hi) / 2.0);
+        }
+        (t0, g0) = (t1, g1);
+    }
+}
+
+/// How many spans [`roots_on`] samples a segment in. A cubic's tangent and normal
+/// conditions are of degree five, so at most five roots, and two closer than a
+/// span apart would be a near-degenerate touch no pointer could tell apart.
+const ROOT_SAMPLES: usize = 64;
+/// Distances and speeds under this, in world units, count as zero for a root.
+const ROOT_EPS: f64 = 1e-9;
 
 /// Where two segments cross, appended to `out`. Two lines are solved exactly; a
 /// curve is halved alongside the other while their boxes overlap, down to a box
@@ -1759,6 +1865,7 @@ mod tests {
                     line((0.0, 100.3), (100.0, 0.3)),
                 ],
                 centres: vec![Point::new(30.0, 70.0)],
+                from: Vec::new(),
             },
             pixel: true,
             ..Snapping::none(1.0)
@@ -1832,6 +1939,93 @@ mod tests {
             (g.axis, g.at, g.from, g.to),
             (Axis::Vertical, 10.0, 10.0, 200.0)
         );
+    }
+
+    /// A circle of radius 50 about the origin, as kurbo's four cubics, which are
+    /// near enough round that a tangent lands within 0.1 of the true circle's.
+    /// Four, so no joint between them lies near a probe.
+    fn a_circle() -> Vec<PathSeg> {
+        use ondin_core::kurbo::{Circle, Shape};
+        Circle::new((0.0, 0.0), 50.0)
+            .to_path(0.1)
+            .segments()
+            .collect()
+    }
+
+    /// Drawn from (100, 0), a point near the circle lands where the line from there
+    /// touches it — (25, ±43.30), where the radius meets the line at a right angle
+    /// — and only with a `from`: a first anchor has no line to touch with.
+    ///
+    /// flip: `tangents` returning nothing → fails at the first kind assertion.
+    #[test]
+    fn a_point_lands_where_a_line_from_the_last_anchor_touches_a_curve() {
+        let from = Point::new(100.0, 0.0);
+        let mut s = Snapping {
+            outlines: Outlines {
+                segments: a_circle(),
+                from: vec![from],
+                ..Outlines::default()
+            },
+            ..Snapping::none(1.0)
+        };
+        let mark = point_target(Point::new(27.0, 41.0), &s, 6.0).expect("lands on the tangent");
+        assert_eq!(mark.kind, PointKind::Tangent);
+        let touch = mark.at;
+        assert!(touch.distance(Point::new(25.0, 43.301)) < 0.1, "{touch:?}");
+        // Against the cubics themselves, exact: the line runs along the curve there.
+        let (seg, t) = a_circle()
+            .into_iter()
+            .map(|seg| (seg, seg.nearest(touch, 1e-12)))
+            .min_by(|a, b| a.1.distance_sq.total_cmp(&b.1.distance_sq))
+            .map(|(seg, n)| (seg, n.t))
+            .unwrap();
+        let PathSeg::Cubic(c) = seg else { panic!() };
+        let along = c.deriv().eval(t).to_vec2().normalize();
+        assert!(along.cross((from - touch).normalize()).abs() < 1e-9);
+
+        s.outlines.from.clear();
+        let bare = point_target(Point::new(27.0, 41.0), &s, 6.0).map(|m| m.kind);
+        assert_eq!(bare, Some(PointKind::OnPath), "no tangent without a from");
+    }
+
+    /// Drawn from (30, 80), a point near the line along y = 0 lands on its foot at
+    /// (30, 0), over the nearer point on the path; a foot off the segment's ends is
+    /// no target, and a curve's foot is where the line meets its normal.
+    ///
+    /// flip: `point_target` asking for points on path before feet → fails at
+    /// "the foot beats the point on path".
+    #[test]
+    fn a_point_lands_on_the_foot_of_a_perpendicular() {
+        let mut s = Snapping {
+            outlines: Outlines {
+                segments: vec![line((0.0, 0.0), (100.0, 0.0))],
+                from: vec![Point::new(30.0, 80.0)],
+                ..Outlines::default()
+            },
+            ..Snapping::none(1.0)
+        };
+        let mark = point_target(Point::new(34.0, 1.0), &s, 6.0);
+        assert_eq!(
+            mark,
+            Some(PointMark {
+                at: Point::new(30.0, 0.0),
+                kind: PointKind::Perpendicular
+            }),
+            "the foot beats the point on path"
+        );
+
+        s.outlines.from = vec![Point::new(130.0, 80.0)];
+        let off = point_target(Point::new(98.0, 1.0), &s, 6.0).map(|m| m.kind);
+        assert_eq!(off, Some(PointKind::OnPath), "a foot past the end");
+
+        // From 100 out at 30°, the normal meets the circle 50 out at 30°.
+        let (cos, sin) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        s.outlines.segments = a_circle();
+        s.outlines.from = vec![Point::new(100.0 * cos, 100.0 * sin)];
+        let foot = point_target(Point::new(45.0, 27.0), &s, 6.0).expect("a foot");
+        assert_eq!(foot.kind, PointKind::Perpendicular);
+        let want = Point::new(50.0 * cos, 50.0 * sin);
+        assert!(foot.at.distance(want) < 0.05, "{:?}", foot.at);
     }
 
     /// A curve and a line cross where both are: every crossing found lies on both,

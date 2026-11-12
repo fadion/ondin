@@ -2743,9 +2743,9 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_insets",
-        doc: "Set a frame's padding",
+        doc: "Pin a layer to its frame's sides, as CSS insets and auto margins",
         params: &[
-            req("node", NODE, "the frame"),
+            req("node", NODE, "the layer"),
             req("insets", ParamKind::Model("Insets"), "the four sides"),
         ],
         run: |_, a| {

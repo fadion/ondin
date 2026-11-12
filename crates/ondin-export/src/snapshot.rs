@@ -40,7 +40,9 @@ use std::collections::BTreeMap;
 ///   maps onto, present while its amount is above zero.
 /// - **17** `NodeSnapshot::chart` on a chart frame and `NodeSnapshot::role` on
 ///   each of its parts.
-pub const SNAPSHOT_VERSION: u32 = 17;
+/// - **18** `NodeSnapshot::display`, `item` and `insets`, the layout a node
+///   gives its children and takes from its parent.
+pub const SNAPSHOT_VERSION: u32 = 18;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -147,6 +149,19 @@ pub struct NodeSnapshot {
     /// absent outside a chart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// How the node lays out its children, flex or grid, in the shape
+    /// `set_display` takes; absent when they are placed by their own
+    /// transforms. Bound gaps, padding and flow are reported as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<ondin_core::container::Display>,
+    /// The node's properties as a layout item, in the shape `set_layout_item`
+    /// takes; absent at the default. Bound limits are reported as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<ondin_core::container::LayoutItem>,
+    /// The node's insets and auto margins in its frame, in the shape
+    /// `set_insets` takes; absent when it is placed by its transform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub insets: Option<ondin_core::container::Insets>,
 }
 
 /// A chart's description as an agent reads it: what it draws, from which
@@ -543,7 +558,25 @@ fn node_snapshot(
             .and_then(|c| doc.get(c)?.chart()?.parts.iter().find(|(_, p)| *p == id))
             .and_then(|(k, _)| serde_json::to_value(k.role).ok())
             .and_then(|v| v.as_str().map(str::to_string)),
+        display: doc.resolved_display(id).map(std::borrow::Cow::into_owned),
+        item: Some(drawn_item(doc, node)).filter(|i| *i != Default::default()),
+        insets: Some(*node.insets()).filter(|i| !i.is_unset()),
     }
+}
+
+/// `node`'s layout item as authored, its bound limits read as drawn. Not
+/// `Document::resolved_item` whole: a frame with width queries is laid with its
+/// width at its padding, which an agent writing the item back would then keep.
+fn drawn_item(doc: &Document, node: &Node) -> ondin_core::container::LayoutItem {
+    let mut item = *node.item();
+    if item.limit_vars.iter().any(Option::is_some) {
+        let r = doc.resolved_item(node.id());
+        item.min_width = r.min_width;
+        item.min_height = r.min_height;
+        item.max_width = r.max_width;
+        item.max_height = r.max_height;
+    }
+    item
 }
 
 fn chart_summary(doc: &Document, id: NodeId, c: &ondin_core::chart::Chart) -> ChartSummary {

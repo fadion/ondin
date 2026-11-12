@@ -918,3 +918,95 @@ fn an_element_is_its_tag_and_only_a_link_has_an_address() {
         "the heading's address"
     );
 }
+
+/// The layout reads report a flex frame's gap as its variable draws it, an
+/// item's grow and a pinned layer's insets, each in the shape its write tool
+/// takes, and stay absent on a layer with none.
+/// flip: `display` read from `Node::display` → fails at the drawn gap.
+#[test]
+fn layout_reads_report_display_item_and_insets() {
+    use ondin_core::container::{Display, Flex, LayoutItem};
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    use ondin_core::{IdSource, Insets, LengthPct, Operation, Transaction};
+
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0x7777);
+    let (mode, gap) = (ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "A".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: gap,
+                    name: "gap".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(12.0))].into_iter().collect(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetDisplay {
+                id: f.artboard,
+                display: Some(Display::Flex(Flex {
+                    row_gap: 3.0,
+                    ..Flex::default()
+                })),
+            },
+            Operation::SetLayoutItem {
+                id: f.rect,
+                item: LayoutItem {
+                    grow: 1.0,
+                    ..LayoutItem::default()
+                },
+            },
+            Operation::SetInsets {
+                id: f.text,
+                insets: Insets {
+                    top: Some(LengthPct::Px(8.0)),
+                    ..Insets::default()
+                },
+            },
+        ]))
+        .expect("lay the frame out");
+    let bind = ondin_core::bind_spacing_ops(
+        &f.doc,
+        f.artboard,
+        [Some(gap), None, None, None, None, None],
+    );
+    f.doc
+        .apply(&Transaction(bind))
+        .expect("bind the column gap");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+
+    let snap = snapshot(&f.doc, &f.res);
+    let at = |id: ondin_core::NodeId| snap.nodes.iter().find(|n| n.id == wire(id)).unwrap();
+    match &at(f.artboard).display {
+        Some(Display::Flex(flex)) => {
+            assert_eq!(flex.column_gap, 12.0, "the bound gap as drawn");
+            assert_eq!(flex.row_gap, 3.0, "the literal gap kept");
+        }
+        other => panic!("the frame's flex layout, got {other:?}"),
+    }
+    assert_eq!(at(f.rect).item.map(|i| i.grow), Some(1.0));
+    assert_eq!(
+        at(f.text).insets.and_then(|i| i.top),
+        Some(LengthPct::Px(8.0))
+    );
+    let ellipse = snap.nodes.iter().find(|n| n.kind == "ellipse").unwrap();
+    assert!(
+        ellipse.display.is_none() && ellipse.item.is_none() && ellipse.insets.is_none(),
+        "absent on a layer with no layout"
+    );
+    let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
+    assert_eq!(back, snap, "the layout fields round-trip");
+}

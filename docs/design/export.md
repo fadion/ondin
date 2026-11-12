@@ -313,7 +313,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, ICO and ICNS, code export (HTML/CSS
 
 `snapshot(doc, res) -> Snapshot`, serde-serializable and **distinct from the save schema**. It describes every page: `Snapshot::pages` lists them in order (`id`, `name`, `ground` as `#rrggbb` through `Document::ground`, so a page with no colour of its own reports the default, `draft`, `mode` by id), each page's root is also a node of kind `Root`, and every node names its `page`. Node content: id, kind, name, page, local and world transform, world bounds, paint summary (gradients as kind and stops; images by content-hash id, framing mode, alpha, non-rest adjustments), full text style, children ids, artboard membership, and a `warnings` list (missing font families). A chart frame carries `chart` (`ChartSummary`: kind and variant as the Chart card names them, the table's header as `{ id, name, numeric }` and its row count but no cells, the mapping by column id in the form `set_chart` takes, each series column's name, visibility and own colour, and whether it is linked), and each node under it its `role` (`"Bar"`, `"TickLabel"`), the `PartRole` its chart keeps it by.
 
-- `snapshot_version` is currently **17**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
+- `snapshot_version` is currently **18**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
 
 | Version | Change |
 | --- | --- |
@@ -332,6 +332,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, ICO and ICNS, code export (HTML/CSS
 | 15 | The `"spiral"` and `"arc"` kinds, `Geometry::Spiral { width, height, turns }` and `Geometry::Arc { end_x, end_y, sweep }` |
 | 16 | `PaintSummary::Image::duotone`: the dark and light ends as `#rrggbb`, present while the duotone amount is above zero |
 | 17 | `NodeSnapshot::chart` on a chart frame and `NodeSnapshot::role` on each of its parts, both absent elsewhere |
+| 18 | `NodeSnapshot::display`, `item` and `insets` in the model's own shapes (what `set_display`, `set_layout_item` and `set_insets` take), absent at their defaults; bound gaps, padding, flow and limits as drawn. A document with a layout changes bytes |
 
 - `local_transform` and `geometry` are **used** values (§5.3 layout), not what the user set; `world_transform`/`world_bounds` come from `Resolved`. A local an agent computes from these and writes back is a used value saved as typed. Whether the snapshot also carries specified values is MCP-work's question.
 - `NodeSnapshot::pivot` is skipped when unset and reports the **resolved local point** (fraction resolved against `local_box`). It is the one derived field: a node with no measurable box falls to `Rect::ZERO`, so its fraction reports `[0, 0]`. Additive, no bump. `pivot` is not rounded.

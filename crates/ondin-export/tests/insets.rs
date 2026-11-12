@@ -240,19 +240,23 @@ fn a_pinned_document_rasterizes_to_the_same_png_as_its_baked_twin() {
     assert!(a == b, "the two rasters differ");
 }
 
+/// Every used value matches; `insets`, which reports the pins themselves, is the
+/// one field the twins differ in, and is checked to.
 #[test]
 fn a_pinned_document_snapshots_the_same_as_its_baked_twin() {
     let (doc, pinned) = pinned();
     let bake = baked(&doc, &pinned);
-    let a = serde_json::to_string(&ondin_export::snapshot::snapshot(
-        &doc,
-        &Resolved::rebuild(&doc),
-    ))
-    .unwrap();
-    let b = serde_json::to_string(&ondin_export::snapshot::snapshot(
-        &bake,
-        &Resolved::rebuild(&bake),
-    ))
-    .unwrap();
+    let unpinned = |d: &Document| {
+        let mut snap = ondin_export::snapshot::snapshot(d, &Resolved::rebuild(d));
+        let pins = snap
+            .nodes
+            .iter_mut()
+            .filter_map(|n| n.insets.take())
+            .count();
+        (serde_json::to_string(&snap).unwrap(), pins)
+    };
+    let (a, pins) = unpinned(&doc);
+    let (b, none) = unpinned(&bake);
+    assert_eq!((pins, none), (pinned.len(), 0), "the pins are reported");
     assert_eq!(a, b);
 }

@@ -49,8 +49,9 @@ pub(crate) struct ChartData {
     pub(crate) anchor: Cell,
     /// A cell being typed into, kept until committed or abandoned.
     edit: Option<Typing>,
-    /// A header being renamed: its column and text.
-    rename: Option<(usize, String)>,
+    /// A header being renamed: its column, by id so a column added or removed
+    /// from outside never moves it, and its text.
+    rename: Option<(ColumnId, String)>,
     /// The open header or row menu.
     menu: Option<Menu>,
     /// Ask for the keyboard on the next pass: the cell or header being typed
@@ -101,10 +102,23 @@ impl Typing {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// An open menu, held on what it was opened on so a table changed from outside
+/// never moves it onto another column or row: a header's column by id, a row
+/// by its place and its cells, closing once that place holds other cells.
+#[derive(Clone, Debug, PartialEq)]
 enum Menu {
-    Header(usize, egui::Pos2),
-    Row(usize, egui::Pos2),
+    Header(ColumnId, egui::Pos2),
+    Row(usize, Vec<String>, egui::Pos2),
+}
+
+impl Menu {
+    /// The column or row it acts on in `t`; `None` once that is gone or moved.
+    fn place(&self, t: &chart::Table) -> Option<usize> {
+        match self {
+            Menu::Header(id, _) => t.index_of(*id),
+            Menu::Row(r, cells, _) => (t.rows.get(*r) == Some(cells)).then_some(*r),
+        }
+    }
 }
 
 impl ChartData {
@@ -668,8 +682,8 @@ fn grid(
                 .color(theme::text::dim()),
         );
     }
-    // Keep the cursor, and a menu or rename's column or row, inside the table
-    // as it shrinks under an undo.
+    // Keep the cursor inside the table as it shrinks under an undo, and drop a
+    // menu or rename whose column or row is gone or moved.
     s.at = (
         s.at.0.min(fit_r.saturating_sub(1)),
         s.at.1.min(fit_c.saturating_sub(1)),
@@ -678,15 +692,13 @@ fn grid(
         s.anchor.0.min(fit_r.saturating_sub(1)),
         s.anchor.1.min(fit_c.saturating_sub(1)),
     );
-    if s.rename.as_ref().is_some_and(|(c, _)| *c >= nc) {
+    if s.rename
+        .as_ref()
+        .is_some_and(|(id, _)| t.index_of(*id).is_none())
+    {
         s.rename = None;
     }
-    let menu_fits = match s.menu {
-        Some(Menu::Header(c, _)) => c < nc,
-        Some(Menu::Row(r, _)) => r < nr,
-        None => true,
-    };
-    if !menu_fits {
+    if s.menu.as_ref().is_some_and(|m| m.place(t).is_none()) {
         s.menu = None;
     }
     // A table changed from outside (an undo, an import, an agent's edit) drops
@@ -769,8 +781,12 @@ fn grid(
                         s.anchor = s.at;
                     }
                 }
-                (None, Some(c)) if resp.secondary_clicked() => s.menu = Some(Menu::Header(c, p)),
-                (Some(r), None) if resp.secondary_clicked() => s.menu = Some(Menu::Row(r, p)),
+                (None, Some(c)) if resp.secondary_clicked() => {
+                    s.menu = Some(Menu::Header(t.columns[c].id, p));
+                }
+                (Some(r), None) if resp.secondary_clicked() => {
+                    s.menu = Some(Menu::Row(r, t.rows[r].clone(), p));
+                }
                 (None, Some(c)) => {
                     // A header click selects its column.
                     commit_edit_text(chart, s, linked, act);
@@ -797,7 +813,7 @@ fn grid(
                     s.focus = true;
                 }
                 (None, Some(c)) if !linked => {
-                    s.rename = Some((c, t.columns[c].name.clone()));
+                    s.rename = Some((t.columns[c].id, t.columns[c].name.clone()));
                     s.focus = true;
                 }
                 _ => {}
@@ -916,7 +932,7 @@ fn grid(
                     .intersect(p.clip_rect()),
             );
             // A header being renamed is its field, drawn below.
-            if s.rename.as_ref().is_some_and(|(r, _)| *r == c) {
+            if s.rename.as_ref().is_some_and(|(id, _)| *id == column.id) {
                 continue;
             }
             let tag = if numeric[c] { "#" } else { "Aa" };
@@ -1033,9 +1049,11 @@ fn grid(
         }
         // A header being renamed: a cell's ground under the cursor's edge.
         let mut lost = false;
-        if let Some((c, text)) = &mut s.rename {
+        if let Some((id, text)) = &mut s.rename
+            && let Some(c) = t.index_of(*id)
+        {
             let hr = egui::Rect::from_min_size(
-                egui::pos2(cell_rect(0, *c).left(), hy),
+                egui::pos2(cell_rect(0, c).left(), hy),
                 egui::vec2(COL_W, ROW_H),
             );
             let edge = egui::Stroke::new(1.5, color::accent());
@@ -1054,7 +1072,7 @@ fn grid(
         }
     });
 
-    if let Some(menu) = s.menu {
+    if let Some(menu) = s.menu.clone() {
         menus(ui, chart, s, menu, linked, act);
     }
 }
@@ -1268,17 +1286,27 @@ fn commit_edit_text(chart: &Chart, s: &mut ChartData, linked: bool, act: &mut Ve
         return;
     }
     *cell = text;
+    // A row menu open on this row holds the cells this write leaves there,
+    // or it would read its own row as moved and close.
+    if let Some(Menu::Row(at, cells, _)) = &mut s.menu
+        && *at == r
+    {
+        cells.clone_from(&next.rows[r]);
+    }
     act.push(Act::Table(next));
 }
 
-/// Write the header being renamed, if any: a name left empty or unchanged
-/// writes nothing.
+/// Write the header being renamed, if any, onto its column wherever it now
+/// sits: a name left empty or unchanged, or a column gone, writes nothing.
 fn commit_rename(t: &chart::Table, s: &mut ChartData, act: &mut Vec<Act>) {
-    let Some((c, name)) = s.rename.take() else {
+    let Some((id, name)) = s.rename.take() else {
         return;
     };
     let name: String = name.trim().chars().take(chart::MAX_CELL_CHARS).collect();
-    if name.is_empty() || t.columns.get(c).is_none_or(|col| col.name == name) {
+    let Some(c) = t.index_of(id) else {
+        return;
+    };
+    if name.is_empty() || t.columns[c].name == name {
         return;
     }
     let mut next = t.clone();
@@ -1296,8 +1324,19 @@ fn menus(
     act: &mut Vec<Act>,
 ) {
     let t = &chart.table;
+    // `grid` has closed a menu whose column or row moved; a row's cells may
+    // already be ahead of `t` by this frame's own typing, so only its bounds
+    // are checked here.
+    let place = match &menu {
+        Menu::Header(id, _) => t.index_of(*id),
+        Menu::Row(r, ..) => (*r < t.rows.len()).then_some(*r),
+    };
+    let Some(place) = place else {
+        s.menu = None;
+        return;
+    };
     let at = match menu {
-        Menu::Header(_, p) | Menu::Row(_, p) => p,
+        Menu::Header(_, p) | Menu::Row(_, _, p) => p,
     };
     // Kept on screen by the size it drew at last frame, its rows varying by menu.
     let area_id = egui::Id::new("chart-data-menu");
@@ -1330,8 +1369,8 @@ fn menus(
                 let full_rows = (t.rows.len() >= chart::MAX_ROWS)
                     .then(|| format!("At most {} rows", chart::MAX_ROWS));
                 match menu {
-                    Menu::Header(c, _) => {
-                        let id = t.columns[c].id;
+                    Menu::Header(id, _) => {
+                        let c = place;
                         let category = if chart.kind == ChartKind::Scatter {
                             "Use as X"
                         } else {
@@ -1339,7 +1378,7 @@ fn menus(
                         };
                         if row(ui, ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename"), None) {
                             commit_edit_text(chart, s, linked, act);
-                            s.rename = Some((c, t.columns[c].name.clone()));
+                            s.rename = Some((id, t.columns[c].name.clone()));
                             s.focus = true;
                             s.menu = None;
                         }
@@ -1420,7 +1459,8 @@ fn menus(
                             s.menu = None;
                         }
                     }
-                    Menu::Row(r, _) => {
+                    Menu::Row(..) => {
+                        let r = place;
                         for (label, at) in [("Insert row above", r), ("Insert row below", r + 1)] {
                             if row(ui, ui::MenuRow::new(icon::PLUS, label), full_rows.clone()) {
                                 let mut next = with_typed(t, s);
@@ -1702,14 +1742,14 @@ mod tests {
             pass(&ctx, app, vec![press(false)]);
             pass(&ctx, app, Vec::new());
         };
-        let menu = |app: &OndinApp| app.chart_data.as_ref().and_then(|d| d.menu);
+        let menu = |app: &OndinApp| app.chart_data.as_ref().and_then(|d| d.menu.clone());
         let header = egui::pos2(grid.left() + GUTTER + COL_W - 10.0, y);
         click(&mut app, header, egui::PointerButton::Primary);
         assert!(menu(&app).is_none(), "a click selects");
         assert_eq!(app.chart_data.as_ref().map(|d| d.anchor), Some((0, 0)));
         click(&mut app, header, egui::PointerButton::Secondary);
         assert!(
-            matches!(menu(&app), Some(Menu::Header(0, _))),
+            matches!(menu(&app), Some(Menu::Header(ColumnId(0), _))),
             "a right-click opens it"
         );
     }
@@ -1959,8 +1999,8 @@ mod tests {
     }
 
     /// A header menu open on a column an undo removes closes rather than
-    /// reading past the table.
-    /// flip: `grid` leaving `s.menu` alone as the table shrinks → fails by panicking in `menus`.
+    /// reading past the table. Two defences each hold it alone (`grid`'s drop
+    /// and `menus`' own `Menu::place` check), so no single flip bites.
     #[test]
     fn a_menu_on_a_column_undone_away_closes() {
         let ctx = egui::Context::default();
@@ -1973,7 +2013,8 @@ mod tests {
             cols + 1,
             "a column was added"
         );
-        app.chart_data.as_mut().unwrap().menu = Some(Menu::Header(cols, egui::pos2(400.0, 300.0)));
+        let added = table_of(&app, id).columns[cols].id;
+        app.chart_data.as_mut().unwrap().menu = Some(Menu::Header(added, egui::pos2(400.0, 300.0)));
         app.session.undo();
         assert_eq!(table_of(&app, id).columns.len(), cols, "the add was undone");
         for _ in 0..3 {
@@ -1997,7 +2038,7 @@ mod tests {
         let data = app.chart_data.as_mut().unwrap();
         (data.at, data.anchor, data.focus) = ((1, 0), (1, 0), false);
         data.edit = Typing::new(&t, (1, 0), "typed".into());
-        data.menu = Some(Menu::Row(1, egui::pos2(500.0, 400.0)));
+        data.menu = Some(Menu::Row(1, t.rows[1].clone(), egui::pos2(500.0, 400.0)));
         // A new area is laid out unseen on its first pass.
         pass(&ctx, &mut app, Vec::new());
         let at = text_pos(&ctx, &mut app, "Insert row above");
@@ -2034,6 +2075,140 @@ mod tests {
         );
     }
 
+    /// `id`'s table with a column put first and a row put on top, committed as
+    /// an agent's edit would be; returns the table before.
+    fn grown_from_outside(app: &mut OndinApp, id: NodeId) -> chart::Table {
+        let t = table_of(app, id);
+        let chart = app.session.doc.get(id).and_then(|n| n.chart()).cloned();
+        let mut moved = t.clone();
+        let fresh = t.columns.iter().map(|c| c.id.0 + 1).max().unwrap_or(0);
+        moved.columns.insert(
+            0,
+            chart::Column {
+                id: ColumnId(fresh),
+                name: "New".into(),
+            },
+        );
+        for r in &mut moved.rows {
+            r.insert(0, String::new());
+        }
+        moved
+            .rows
+            .insert(0, vec![String::new(); moved.columns.len()]);
+        app.commit_table(id, &chart.unwrap(), moved.clone());
+        assert_eq!(table_of(app, id), moved, "fixture: the outside edit landed");
+        t
+    }
+
+    /// A header menu still acts on its own column, and a row menu whose row
+    /// moved closes, after a table changed from outside put a column and a row
+    /// before them.
+    /// flip: `Menu::place` reading a header menu's column at the place it was
+    /// opened on → fails at "the right-clicked column went"; reading a row
+    /// menu's row without its cells → fails at "the row menu closed".
+    #[test]
+    fn a_menu_follows_its_column_through_an_outside_edit() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let t = table_of(&app, id);
+        let picked = t.columns[1].id;
+        assert_eq!(picked, ColumnId(1), "fixture: ids match places");
+        app.chart_data.as_mut().unwrap().menu =
+            Some(Menu::Header(picked, egui::pos2(500.0, 400.0)));
+        grown_from_outside(&mut app, id);
+        pass(&ctx, &mut app, Vec::new());
+        let at = text_pos(&ctx, &mut app, "Delete column");
+        click(&ctx, &mut app, at);
+        let ids: Vec<ColumnId> = table_of(&app, id).columns.iter().map(|c| c.id).collect();
+        assert_eq!(ids.len(), t.columns.len(), "one column went");
+        assert!(
+            !ids.contains(&picked),
+            "the right-clicked column went: {ids:?}"
+        );
+
+        let t = table_of(&app, id);
+        app.chart_data.as_mut().unwrap().menu =
+            Some(Menu::Row(1, t.rows[1].clone(), egui::pos2(500.0, 400.0)));
+        pass(&ctx, &mut app, Vec::new());
+        assert!(
+            app.chart_data.as_ref().is_some_and(|d| d.menu.is_some()),
+            "fixture: the row menu is open"
+        );
+        grown_from_outside(&mut app, id);
+        pass(&ctx, &mut app, Vec::new());
+        assert!(
+            app.chart_data.as_ref().is_some_and(|d| d.menu.is_none()),
+            "the row menu closed"
+        );
+    }
+
+    /// A right-click on the gutter of the row being typed into commits the
+    /// typing and leaves the row menu open on that row's new cells.
+    /// flip: `commit_edit_text` leaving an open row menu's cells alone, or
+    /// `menus` checking a row menu by `Menu::place` → fails at "the menu stays".
+    #[test]
+    fn a_row_menu_opened_on_the_typed_row_stays_open() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let t = table_of(&app, id);
+        let data = app.chart_data.as_mut().unwrap();
+        (data.at, data.anchor, data.focus) = ((1, 0), (1, 0), true);
+        data.edit = Typing::new(&t, (1, 0), "typed".into());
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new());
+        }
+        let grid = ctx
+            .read_response(egui::Id::new(GRID_ID))
+            .expect("the grid is drawn")
+            .rect;
+        let at = egui::pos2(grid.left() + GUTTER / 2.0, grid.top() + ROW_H * 2.5);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        pass(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        pass(&ctx, &mut app, vec![press(true)]);
+        pass(&ctx, &mut app, vec![press(false)]);
+        pass(&ctx, &mut app, Vec::new());
+        assert_eq!(table_of(&app, id).rows[1][0], "typed", "the typing landed");
+        let menu = app.chart_data.as_ref().and_then(|d| d.menu.clone());
+        assert!(
+            matches!(menu, Some(Menu::Row(1, ..))),
+            "the menu stays: {menu:?}"
+        );
+    }
+
+    /// A header being renamed writes its name onto its own column after a table
+    /// changed from outside put another column before it.
+    /// flip: `commit_rename` writing at the place the rename began → fails at
+    /// "its own column".
+    #[test]
+    fn a_rename_follows_its_column_through_an_outside_edit() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = opened(&ctx);
+        let picked = table_of(&app, id).columns[1].id;
+        let data = app.chart_data.as_mut().unwrap();
+        (data.rename, data.focus) = (Some((picked, "Income".into())), true);
+        pass(&ctx, &mut app, Vec::new());
+        grown_from_outside(&mut app, id);
+        pass(&ctx, &mut app, Vec::new());
+        assert!(
+            app.chart_data.as_ref().is_some_and(|d| d.rename.is_some()),
+            "fixture: still renaming"
+        );
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter)]);
+        pass(&ctx, &mut app, Vec::new());
+        let named: Vec<ColumnId> = table_of(&app, id)
+            .columns
+            .iter()
+            .filter(|c| c.name == "Income")
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(named, [picked], "its own column");
+    }
+
     /// `Escape` on an open header menu closes the menu and leaves the window.
     /// flip: `keys` answering `Escape` with *Close* while a menu is open →
     /// fails at "the window stays".
@@ -2041,7 +2216,8 @@ mod tests {
     fn escape_on_a_menu_closes_only_the_menu() {
         let ctx = egui::Context::default();
         let (mut app, _) = opened(&ctx);
-        app.chart_data.as_mut().unwrap().menu = Some(Menu::Header(0, egui::pos2(500.0, 400.0)));
+        app.chart_data.as_mut().unwrap().menu =
+            Some(Menu::Header(ColumnId(0), egui::pos2(500.0, 400.0)));
         pass(&ctx, &mut app, Vec::new());
         assert!(
             ctx.memory(|m| m.has_focus(egui::Id::new(GRID_ID))),

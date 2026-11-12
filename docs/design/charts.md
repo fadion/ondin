@@ -648,8 +648,11 @@ read, since they name this document's node ids.
   *Show as series* (ticked), *Insert column left* / *right*, *Sort ascending* / *descending*
   (numbers by value in a number column, empty cells last), *Delete column*, which leaves the
   mapping and the series styles with it. **Row menu** on the gutter: *Insert row above* /
-  *below*, *Delete row*. Both are placed by `ui::menu_place`; a menu or a rename whose column or
-  row an undo removes closes. An insert at the table's limit is disabled with *At most 64
+  *below*, *Delete row*. Both are placed by `ui::menu_place`. A header menu and a rename hold
+  their column by id, so a table changed from outside never moves them onto another column; a
+  row menu holds its row by place and cells (the window's own typing committed into the row
+  carried over), and closes once that place holds other cells. A
+  menu or rename whose column is gone closes. An insert at the table's limit is disabled with *At most 64
   columns* / *At most 10000 rows*, as the toolbar's adds are.
 - **While the import box is up** the window gives up the keyboard and is not drawn; it takes the
   keyboard back after.

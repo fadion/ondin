@@ -1219,6 +1219,15 @@ fn sweep_on(theme: Theme) {
         a.export_row_open = Some(0);
     });
     check("icon export settings", app, found);
+    // The size preview's head: the grounds, and pixels and the pin lit so their
+    // grounds paint.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        a.show_size_preview = true;
+        a.prefs.size_preview.pixels = true;
+        a.size_preview.pin_selection(a.session.selection.ids());
+    });
+    check("size preview", app, found);
     let mut app = with_a_text(&ctx);
     // A query with a match, so the list, its lit row and the footer are drawn.
     let found = opened(&ctx, &mut app, |_, a| {

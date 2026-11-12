@@ -58,6 +58,8 @@ pub struct ViewPrefs {
     pub layers: bool,
     pub history: bool,
     pub minimap: bool,
+    /// The size preview card, which takes the minimap's corner while it shows.
+    pub size_preview: bool,
     pub toolbar: bool,
     pub status: bool,
     pub snap_shapes: bool,
@@ -80,7 +82,8 @@ pub struct ViewPrefs {
 }
 
 impl Default for ViewPrefs {
-    /// Every switch on but the guide lock, History, the minimap and the lasso, and
+    /// Every switch on but the guide lock, History, the minimap, the size preview
+    /// and the lasso, and
     /// the rail's slots on their first members.
     fn default() -> Self {
         Self {
@@ -92,6 +95,7 @@ impl Default for ViewPrefs {
             layers: true,
             history: false,
             minimap: false,
+            size_preview: false,
             toolbar: true,
             status: true,
             snap_shapes: true,
@@ -128,6 +132,39 @@ impl Default for ContrastPrefs {
             level: "aa".into(),
             show_passing: true,
             non_text: false,
+        }
+    }
+}
+
+/// Which grounds the size preview draws its tiles on (`crate::size_preview`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SizeGround {
+    Light,
+    Dark,
+    /// Light above dark; one layer only, the card showing light for several.
+    #[default]
+    Both,
+}
+
+/// The size preview's sizes, grounds and pixel toggle, as last set. Its pin is
+/// view state and never stored; whether it shows is a View switch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SizePreviewPrefs {
+    /// The tile sizes, smallest first, from `size_preview::SIZE_CHOICES`.
+    pub sizes: Vec<u32>,
+    pub ground: SizeGround,
+    /// Each tile exactly N pixels, as a 1× screen gets it.
+    pub pixels: bool,
+}
+
+impl Default for SizePreviewPrefs {
+    /// 16, 20, 24, 32 and 48 on both grounds, at the display's own density.
+    fn default() -> Self {
+        Self {
+            sizes: vec![16, 20, 24, 32, 48],
+            ground: SizeGround::Both,
+            pixels: false,
         }
     }
 }
@@ -574,6 +611,8 @@ pub struct Prefs {
     pub recent_colours: Vec<[f32; 3]>,
     /// The contrast check's level and switches.
     pub contrast: ContrastPrefs,
+    /// The size preview's sizes, grounds and pixel toggle.
+    pub size_preview: SizePreviewPrefs,
     /// The vision simulation's condition and severities.
     pub vision: VisionPrefs,
     /// The batch rename box's last Find, template and numbering.
@@ -643,6 +682,7 @@ impl Default for Prefs {
             colour_format: "hex".into(),
             recent_colours: Vec::new(),
             contrast: ContrastPrefs::default(),
+            size_preview: SizePreviewPrefs::default(),
             vision: VisionPrefs::default(),
             batch_rename: BatchRenamePrefs::default(),
             clean_up: CleanUpPrefs::default(),

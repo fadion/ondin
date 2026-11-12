@@ -1115,6 +1115,11 @@ pub struct OndinApp {
     pub(crate) show_minimap: bool,
     /// The minimap's drag and remembered shape (`minimap.rs`).
     pub(crate) minimap: crate::minimap::Minimap,
+    /// *View ▸ Panels ▸ Size preview*: the size card in the minimap's corner, which
+    /// hides the minimap while it shows. Focus mode keeps it; present mode hides it.
+    pub(crate) show_size_preview: bool,
+    /// The size preview's pin, renders and textures (`size_preview.rs`).
+    pub(crate) size_preview: crate::size_preview::SizePreview,
     /// *Tools ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
     /// document opens with it off.
     pub(crate) contrast: Option<crate::contrast::Contrast>,
@@ -1873,6 +1878,8 @@ impl OndinApp {
             show_history: view.history,
             show_minimap: view.minimap,
             minimap: Default::default(),
+            show_size_preview: view.size_preview,
+            size_preview: Default::default(),
             contrast: None,
             vision: None,
             batch_rename: None,
@@ -2354,6 +2361,7 @@ impl OndinApp {
         // makes reaches this frame's render. Outside the `focus` guard: focus mode keeps
         // it.
         self.minimap_ui(&ctx);
+        self.size_preview_ui(&ctx);
         self.contrast_tick(&ctx);
 
         // The canvas takes the remaining area; the inspector and picker float over it.
@@ -8462,6 +8470,7 @@ impl OndinApp {
             ViewSwitch::Layers => "Layers",
             ViewSwitch::History => "History",
             ViewSwitch::Minimap => "Minimap",
+            ViewSwitch::SizePreview => "Size preview",
             ViewSwitch::Toolbar => "Toolbar",
             ViewSwitch::StatusMessages => "Messages",
             _ => sw.label(),
@@ -8519,6 +8528,7 @@ impl OndinApp {
             layers: self.show_layers,
             history: self.show_history,
             minimap: self.show_minimap,
+            size_preview: self.show_size_preview,
             toolbar: self.show_toolbar,
             status: self.show_status,
             snap_shapes: self.snap_shapes,
@@ -8551,6 +8561,7 @@ impl OndinApp {
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::History => self.show_history,
             ViewSwitch::Minimap => self.show_minimap,
+            ViewSwitch::SizePreview => self.show_size_preview,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
             ViewSwitch::Focus => self.focus,
@@ -8585,6 +8596,7 @@ impl OndinApp {
                 self.show_layers |= on;
             }
             ViewSwitch::Minimap => self.show_minimap = on,
+            ViewSwitch::SizePreview => self.show_size_preview = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {
                 self.show_status = on;

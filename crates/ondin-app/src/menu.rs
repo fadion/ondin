@@ -576,6 +576,7 @@ impl ViewState {
             ViewSwitch::Layers
             | ViewSwitch::History
             | ViewSwitch::Minimap
+            | ViewSwitch::SizePreview
             | ViewSwitch::Toolbar
             | ViewSwitch::StatusMessages
             | ViewSwitch::Focus
@@ -1029,6 +1030,7 @@ impl Item {
                     ViewSwitch::PixelPreview => icon::PIXEL_PREVIEW,
                     ViewSwitch::Lasso => icon::LASSO,
                     ViewSwitch::AlignVisual => icon::VISUAL_CENTRE,
+                    ViewSwitch::SizePreview => icon::SIZE_PREVIEW,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
@@ -7215,6 +7217,11 @@ mod accel_spelling_tests {
             (Item::ViewSwitch(ViewSwitch::Grid), "Ctrl+'", None),
             (Item::ViewSwitch(ViewSwitch::Layers), "Ctrl+Alt+\\", None),
             (Item::ViewSwitch(ViewSwitch::Minimap), "Ctrl+Shift+M", None),
+            (
+                Item::ViewSwitch(ViewSwitch::SizePreview),
+                "Ctrl+Shift+Y",
+                None,
+            ),
             (Item::ViewSwitch(ViewSwitch::Toolbar), "Ctrl+Shift+\\", None),
             (Item::ViewSwitch(ViewSwitch::Focus), "Ctrl+\\", None),
             (Item::ViewSwitch(ViewSwitch::SnapShapes), "Ctrl+U", None),

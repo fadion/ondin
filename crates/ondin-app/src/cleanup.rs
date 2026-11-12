@@ -27,8 +27,9 @@ const MAX_PIECES: f64 = 16.0;
 
 /// How long, in seconds, Simplify's accuracy may wait on its refit before the
 /// caption says *Fitting…*; until then it keeps the last count, so a fit of a few
-/// milliseconds never flashes.
-const FIT_PATIENCE: f64 = 0.25;
+/// milliseconds never flashes. The size preview waits as long before it fades its
+/// tiles and spins.
+pub(crate) const FIT_PATIENCE: f64 = 0.25;
 
 /// The card's numbers, kept while it is closed so it reopens on the last ones.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -143,9 +143,13 @@ fn text_bar(r: egui::Rect) -> (egui::Rect, f32) {
 const TEXT_BAR: f32 = 0.6;
 
 impl OndinApp {
-    /// How far right the status bar moves to clear the minimap card: nothing while
-    /// it is off.
+    /// How far right the status bar moves to clear the card in the corner: the size
+    /// preview while it shows, else the minimap, and nothing with both off.
     pub(crate) fn minimap_clearance(&self) -> f32 {
+        // The size preview holds the corner while it shows.
+        if let Some(beside) = self.size_preview_clearance() {
+            return beside;
+        }
         if self.show_minimap && self.canvas_rect.is_positive() {
             CARD_W + GAP
         } else {
@@ -157,7 +161,8 @@ impl OndinApp {
     /// last frame's when this runs before the canvas.
     pub(crate) fn minimap_ui(&mut self, ctx: &egui::Context) {
         let canvas = self.canvas_rect;
-        if !self.show_minimap || !canvas.is_positive() {
+        // Hidden, not switched off, while the size preview holds the corner.
+        if !self.show_minimap || self.show_size_preview || !canvas.is_positive() {
             self.minimap.drag = None;
             return;
         }

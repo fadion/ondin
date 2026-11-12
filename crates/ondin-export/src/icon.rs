@@ -144,7 +144,7 @@ pub fn encode(format: ExportFormat, entries: &[Entry]) -> Option<Vec<u8>> {
 }
 
 /// The square of `view`'s longer side, centred on it.
-fn square_of(view: Rect) -> Rect {
+pub fn square_of(view: Rect) -> Rect {
     let side = view.width().max(view.height()).max(1.0);
     Rect::from_center_size(view.center(), (side, side))
 }

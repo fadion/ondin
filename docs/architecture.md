@@ -55,7 +55,7 @@ Read the file for the exact wording before relying on one.
 | `app-snapping.md` | 9.4 | Snapping |
 | `app-rulers-guides.md` | 9.4 | Rulers and guides |
 | `app-autopan.md` | 9.4 | Auto-pan |
-| `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, the contrast check mode, the vision simulation, top-bar menus, the command palette, batch rename, clean up, fill with content, the assets browser and credits, find and replace in text, colour review, the shortcut cheatsheet, focus mode, the peek (`\` held), private mode, present mode |
+| `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, the size preview, the contrast check mode, the vision simulation, top-bar menus, the command palette, batch rename, clean up, fill with content, the assets browser and credits, find and replace in text, colour review, the shortcut cheatsheet, focus mode, the peek (`\` held), private mode, present mode |
 | `app-compare.md` | 9.4 | Compare with a version: the read-only mode, its marks, bar, Then/Swipe and changes card |
 | `app-image-editing.md` | 9.4 | Image fills and image editing |
 | `charts.md` | — | Charts: a frame carrying a chart description, its generated parts, the Chart card, the data window, import and the linked data file, flatten, and binding its colours to variables |

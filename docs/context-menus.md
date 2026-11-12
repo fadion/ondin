@@ -469,7 +469,7 @@ project dropdown, and the caret's list.
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
 - **Type controls in a text session** — the Type card is beside it.
-- **Show layers, Show history, Show minimap, Show toolbar, Focus mode, Private mode, Show messages** on the canvas menu —
+- **Show layers, Show history, Show minimap, Show size preview, Show toolbar, Focus mode, Private mode, Show messages** on the canvas menu —
   chrome-wide switches, in the top bar's View menu.
 - **Lasso select** on any menu — the marquee's shape is a tool setting, not a view; `Q`, the
   palette and the rail's Select slot carry it.

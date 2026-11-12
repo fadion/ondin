@@ -41,6 +41,7 @@ multiplayer is one of its considerations.
 - **Letter-case switches in batch rename** (*Title Case*, *UPPER*, …) — *Keep case* carries a match's case, and nothing else changes it.
 - **A grid's `baseline` alignment in the cards** (§15 D919).
 - **A polygonal (click-by-click) lasso, a contain-only lasso rule, or shape-testing for the box marquee** — the lasso touches shapes, the box keeps its bounds rule.
+- **On the size preview: an act on a tile's click, a ground colour of one's own, or a separate drawing per size** — the card shows the layer as it is, at fixed sizes on fixed grounds (`app-canvas-chrome.md`, *The size preview*).
 - **On a loose selection's spacing handles: bands over uneven gaps, a negative gap, a value typed on a band, or a Gap field in the Align card** — Distribute or Tidy up evens uneven gaps, after which the bands appear.
 
 ## Booleans and paths

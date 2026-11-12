@@ -348,6 +348,17 @@ pub mod color {
         text_a(23)
     }
 
+    /// The size preview's two grounds, fixed whatever the chrome's theme: white,
+    /// and the dark theme's canvas, so an icon is judged on the grounds it ships on.
+    pub fn light_ground() -> Color32 {
+        Color32::WHITE
+    }
+
+    /// See [`light_ground`].
+    pub fn dark_ground() -> Color32 {
+        DARK.canvas
+    }
+
     /// The editor's save dot, red while the document differs from its file
     /// (§15 D962). [`danger`]'s value under its own name: a dirty document is
     /// not a click that destroys something, and the two must be free to part.
@@ -1097,6 +1108,9 @@ pub mod icon {
     /// The Align card's visual-centre toggle, its palette row and its undo step:
     /// a weight on a stand, a triangle balanced over a post on its base.
     pub const VISUAL_CENTRE: &str = "\u{f067}";
+    /// The size preview, its View row and palette row: three squares growing on
+    /// one baseline.
+    pub const SIZE_PREVIEW: &str = "\u{f068}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the library's Trash already spends.
     pub const TRASH: &str = "\u{e4a6}";
@@ -1447,6 +1461,7 @@ pub mod icon {
         ("chart-sankey", CHART_SANKEY),
         ("table", TABLE),
         ("visual-centre", VISUAL_CENTRE),
+        ("size-preview", SIZE_PREVIEW),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
         ("grid-layout", GRID_LAYOUT),

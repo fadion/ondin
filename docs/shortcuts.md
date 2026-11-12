@@ -249,8 +249,9 @@ its selected points instead, as the Align card does (`OndinApp::dispatch`).
 | `Shift+R` | rulers | ✅ Figma |
 | `Ctrl+'` | show grid | ✅ Illustrator, Photoshop |
 | — | show layout grid | **unbound** (§15 D755) |
-| — | outline mode | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo, and `Ctrl+Shift+Y` stays unspent beside it |
+| — | outline mode | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo here, and `Ctrl+Shift+Y` is the size preview |
 | `Ctrl+Alt+Y` | pixel preview | ✅ Illustrator; Alt keeps it off `Ctrl+Y`, redo |
+| `Ctrl+Shift+Y` | size preview | ✅ beside pixel preview's `Ctrl+Alt+Y`; plain `Ctrl+Y` stays redo. `ctrl_shift_is_not_a_second_spelling_of_ctrl` |
 | `Ctrl+Shift+'` | snap to grid | ✅ Illustrator's `Ctrl+"` |
 | `Ctrl+U` | snap to shapes | ✅ Illustrator's Smart Guides |
 | `Ctrl+;` | show / hide guides | ✅ Illustrator |
@@ -655,10 +656,11 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   spelling silently (`Ctrl+Shift`+ `O`, `A`, `D`, `Y`, `−`, `0`, `1`, `2`); `Ctrl+Shift+D` was a
   document edit one modifier from `Shift+D`.
   `ctrl_shift_is_not_a_second_spelling_of_ctrl` asserts both directions for each.
-  - ⚠️ **Four Shift readings are load-bearing; do not sweep them up.** `Ctrl+Shift+=` is the primary
+  - ⚠️ **These Shift readings are load-bearing; do not sweep them up.** `Ctrl+Shift+=` is the primary
     `Ctrl` `+` (§3). `Ctrl+Shift+C`/`X` must still copy and cut: the centre-align they would
     collide with is the text session's. `Ctrl+Alt+Shift+V` must stay a property paste (Alt beats
     Shift, §7). `Ctrl+Shift+Z` is Redo's own row, not a second spelling of `Ctrl+Z`.
+    `Ctrl+Shift+Y` is the size preview's own row, never a second Redo.
   - 🚨 **The rule is kept twice: the dashboard is a second keymap** (§15 D712). `input::resolve`
     does not run there, so `search_field` once answered `Ctrl+Shift+K`, `Ctrl+Alt+K`,
     `Ctrl+Shift+P` and `Ctrl+Alt+P` with *search*, while `dashboard_keys` beside it spelled the rule
@@ -676,7 +678,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, pixel preview, focus, private
+  grid, layout grid, layers panel, history, minimap, size preview, toolbar, messages, outline mode, pixel preview, focus, private
   mode, the marquee's shape (lasso), align by visual centre and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows, labelled by one `label()` but for the View menu's
   short *Panels ▸* list, so a row and the state it drives stay in step while the chord is a second

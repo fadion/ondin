@@ -8,12 +8,6 @@ true.
 
 ## Now
 
-- **A multi-size preview** — a card that keeps the selected frame drawn at several fixed pixel
-  sizes at once (16, 20, 24, 32, 48 by default), at 1x and on a light and a dark ground, updating as
-  it is edited, so a small icon is judged at the sizes it ships at without zooming back and forth.
-  Reuses pixel preview's 1x raster path; renders on a worker, as the trace and offset cards do.
-  Settle its door (View menu, palette, a chord) and whether it can float beside the canvas while
-  the pen is in use.
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts
   stored inert, never run by the document (§15 D1100). Open in `vm.md` §13: the editor's UI, the
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run

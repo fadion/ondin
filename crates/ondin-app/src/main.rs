@@ -148,6 +148,7 @@ mod rulers;
 mod session;
 mod settings;
 mod shape_builder;
+mod size_preview;
 mod slice;
 mod snap;
 mod spacing;

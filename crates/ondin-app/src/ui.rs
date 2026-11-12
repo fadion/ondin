@@ -5481,6 +5481,19 @@ pub(crate) fn paint_glyph_centred(
     painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(rot));
 }
 
+/// The loading spinner: [`icon::CIRCLE_NOTCH`] turning about `center`, one turn a
+/// second at egui time `now`. The caller asks for the frames that turn it.
+pub fn paint_spinner(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    color: egui::Color32,
+    now: f64,
+) {
+    let angle = (now * std::f64::consts::TAU % std::f64::consts::TAU) as f32;
+    paint_glyph_centred(painter, icon::CIRCLE_NOTCH, center, size, color, angle);
+}
+
 /// The hairline round a [`segmented`] track, and the width the cells give up to it
 /// on every side; subtracted in one place and painted in another.
 const SEGMENT_BORDER: f32 = 1.0;

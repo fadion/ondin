@@ -174,6 +174,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         ViewSwitch::PixelPreview,
         ViewSwitch::Layers,
         ViewSwitch::Minimap,
+        ViewSwitch::SizePreview,
         ViewSwitch::Toolbar,
         ViewSwitch::Focus,
         ViewSwitch::Private,

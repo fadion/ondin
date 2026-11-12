@@ -1,7 +1,7 @@
 # Canvas chrome, the top bar's menus, the command palette, batch rename, clean up, fill with content, the assets browser, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the minimap, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
+pixel grid, the minimap, the size preview, the contrast check mode, the vision simulation, the top bar's View/Snap/Tools menus and Settings button,
 the command palette, the batch rename box, the clean up box, the fill with content box, the assets browser and credits, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, the peek, private mode and
 present mode.
 Part of §9.4.
@@ -73,7 +73,9 @@ marks the original that stays. Toggles live with the key.
   (the status bar's margin): a `ui::menu_frame` 220pt wide with 6pt padding. The map's height
   follows the page content's aspect, the card clamped to 90–160pt; an empty page keeps the last
   height. The floating status bar moves right by the card's width + 8pt
-  (`OndinApp::minimap_clearance`), so the two share the bottom line.
+  (`OndinApp::minimap_clearance`, which asks `size_preview_clearance` first), so the two share the
+  bottom line. While the size preview shows, the minimap is hidden, not switched off, and the corner
+  is the size preview's.
 - **What it draws**, the current page flat. The walk goes down through frames and groups while a
   container's shorter side is at least 6pt on the map (at most 8 levels), so detail follows what
   the map can show rather than a fixed depth — a page built of unfilled section groups shows their
@@ -101,6 +103,51 @@ marks the original that stays. Toggles live with the key.
 - **Placement in the frame.** `minimap_ui` runs before the canvas's `CentralPanel`, placed from last
   frame's `canvas_rect`, so a pan it makes reaches this frame's render. It is outside the `!focus`
   guard, so focus mode keeps it; present mode's early return hides it.
+
+## The size preview (`size_preview.rs`)
+
+The selected layers drawn at several fixed pixel sizes at once, redrawn as they are edited, so a
+small icon is judged at the sizes it ships at without zooming back and forth. *View ▸ Panels ▸ Size
+preview* (`ViewSwitch::SizePreview`, *Show size preview* in the palette and the cheatsheet,
+`Ctrl+Shift+Y`, `prefs.view.size_preview`, off by default). Not on the canvas menu, as the minimap.
+
+- **The card** takes the minimap's corner: an `Area` at `Order::Middle` placed as the minimap's, a
+  `ui::menu_frame` with 6pt padding, and the same status-bar clearance (`size_preview_clearance`, the card's width + 8pt).
+  `size_preview_ui` runs right after `minimap_ui`, so focus mode keeps it and present mode hides it.
+- **Subject:** the selection, outermost only (`build::in_document_order`, reversed so the top
+  layer comes first), one row per layer, five rows at most, past which a footer counts the rest (*Showing 5 of 8 layers*).
+  The head's pin (`PUSH_PIN`) holds the current layers instead of following the selection; a
+  deleted layer drops out of the pin, and the pin lets go when none is left. The pin is view state
+  and never saved.
+- **Tiles.** For each size N, the layer's box (`preview_world_bounds`, so a drag is followed) is
+  squared on its longer side (`ondin_export::icon::square_of`, the icon export's framing) and drawn
+  at N, centred in its column. A column is N + 28 wide, a ground strip the tallest size + 20. Several
+  rows add a name column. A caption row under the strips names each size; a size every row's layer
+  already is (its box's longer side is N units) wears an accent dot. The card's width depends only on
+  the sizes and the name column, floored at 244pt inside, so it never jumps while a layer is edited.
+- **Grounds**, fixed whatever the chrome's theme (`color::light_ground`, white; `color::dark_ground`,
+  the dark theme's canvas), so an icon is judged on the grounds it ships on. A frame's own fill
+  draws over either. *Both* stacks a light and a dark strip for one layer; with several it is
+  disabled (*One ground at a time for several layers*) and the card shows light.
+- **Pixels** (`PIXEL_PREVIEW` in the head). Off, a tile renders at the display's density, N × ppp,
+  drawn at N points. On, it renders exactly N pixels and is nearest-sampled, so a 2× display shows
+  the blocks a 1× screen gets; hovering a tile then rings it and opens a loupe beside the card: the
+  tile at ×10 on a checkerboard with a hairline between pixels.
+- **Head**, left to right: `icon::SIZE_PREVIEW`, the layer's name and `W × H` (or the layer count),
+  then the grounds as a `ui::segmented_tipped` of toolbar-height cells painted as colour chips (light,
+  dark, halved) rather than glyphs, since `SUN` already means Filters and the font has no moon; the
+  pixels toggle, the pin and ⋯. The ⋯ menu is a *Sizes* eyebrow over tick rows for 12, 16, 18, 20,
+  24, 28, 32, 40, 48 and 64; a seventh is refused (*Six sizes at most*) and the last cannot go
+  (*One size at least*). Sizes, ground and pixels are `prefs.size_preview` (`SizePreviewPrefs`:
+  16, 20, 24, 32, 48, both grounds, pixels off).
+- **Rendering** is on a worker (`job::Job`), one render at a time, the newest landed shown, through
+  `VelloCpuRenderer::render_subtrees_with` with the session's overrides minus the outline ink and
+  chrome ghost, so a drag or scrub shows. The `ImageStore` is handed to the worker and back, so a
+  picture decodes once. A hidden subject is drawn anyway, on a copy with it shown, so a frame can be
+  checked without its guide layers. Once a render has been owed for `cleanup::FIT_PATIENCE`, the
+  last tiles fade to half and `ui::paint_spinner` replaces the head glyph.
+- **Nothing selected:** the card keeps its place and says *Select layers to preview them at size*.
+- **None of it is an edit**: no history step, nothing in the file.
 
 ## The contrast check mode (`contrast.rs`)
 
@@ -285,8 +332,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
     `Action::Present`;
   - *Panels ▸* (`PANELS_ROW`, a `ui::submenu_check_row`), whose flyout
     (`OndinApp::panels_flyout`, a `ui::flyout`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
-    *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
-    stay together.
+    *Minimap*, *Size preview*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about
+    the layers pane stay together.
 
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
@@ -353,7 +400,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
-  *Show history*, *Show minimap*, *Lasso select*, outline view, pixel preview, align by visual centre and focus mode; a launch never opens in focus mode,
+  *Show history*, *Show minimap*, *Show size preview*, *Lasso select*, outline view, pixel preview, align by visual centre and focus mode; a launch never opens in focus mode,
   outline view, pixel preview or align by visual centre. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
   (`rail_slice`, `rail_pencil`; `tools.md`, *The tool rail*). Private mode is a preference of its own (`Prefs::private`), below.
 

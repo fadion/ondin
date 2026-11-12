@@ -381,8 +381,7 @@ pub enum ViewSwitch {
     LayoutGrid,
     /// Every outline as a hairline, nothing filled, clipped or masked
     /// (`RenderOverrides::set_outline`). Deliberately unbound: Figma's and
-    /// Illustrator's `Ctrl+Y` is redo here, and `Ctrl+Shift+Y` stays unspent
-    /// beside it (`ctrl_shift_is_not_a_second_spelling_of_ctrl`).
+    /// Illustrator's `Ctrl+Y` is redo here, and `Ctrl+Shift+Y` is the size preview.
     Outline,
     /// `Ctrl+Alt+Y` — Illustrator's. The canvas drawn at one pixel per unit and
     /// enlarged with hard pixel edges, so the anti-aliasing a viewer at 1x gets is
@@ -396,6 +395,10 @@ pub enum ViewSwitch {
     /// `Ctrl+Shift+M` — the minimap card at the canvas's bottom left
     /// (`minimap.rs`). Off by default.
     Minimap,
+    /// `Ctrl+Shift+Y`, beside pixel preview's `Ctrl+Alt+Y` — the size preview card,
+    /// which takes the minimap's corner while it shows (`size_preview.rs`). Off by
+    /// default.
+    SizePreview,
     /// `Ctrl+Shift+\`, which reaches egui as `Key::Pipe` (§0).
     Toolbar,
     /// The floating status bar at the canvas's bottom left, on by default.
@@ -444,6 +447,7 @@ impl ViewSwitch {
             Self::Layers => "Show layers",
             Self::History => "Show history",
             Self::Minimap => "Show minimap",
+            Self::SizePreview => "Show size preview",
             Self::Toolbar => "Show toolbar",
             Self::StatusMessages => "Show messages",
             Self::Focus => "Focus mode",
@@ -477,10 +481,11 @@ impl ViewSwitch {
     ];
 
     /// The panes behind the View menu's *Panels ▸* row.
-    pub const VIEW_PANELS: [Self; 5] = [
+    pub const VIEW_PANELS: [Self; 6] = [
         Self::Layers,
         Self::History,
         Self::Minimap,
+        Self::SizePreview,
         Self::Toolbar,
         Self::StatusMessages,
     ];
@@ -495,7 +500,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -506,6 +511,7 @@ impl ViewSwitch {
         Self::Layers,
         Self::History,
         Self::Minimap,
+        Self::SizePreview,
         Self::Toolbar,
         Self::StatusMessages,
         Self::Focus,
@@ -724,6 +730,7 @@ const BINDINGS: &[Binding] = {
         bind(CTRL_ALT, K::Backslash, A::ToggleView(ViewSwitch::Layers)),
         bind(CTRL_SHIFT, K::Backslash, A::ToggleView(ViewSwitch::Toolbar)),
         bind(CTRL_SHIFT, K::M, A::ToggleView(ViewSwitch::Minimap)),
+        bind(CTRL_SHIFT, K::Y, A::ToggleView(ViewSwitch::SizePreview)),
         bind(CTRL_SHIFT, K::N, A::ToggleView(ViewSwitch::Private)),
         bind(NONE, K::Q, A::ToggleView(ViewSwitch::Lasso)),
         // Paths, layer state and the selection's verbs.
@@ -2700,8 +2707,8 @@ mod tests {
 
     /// `Ctrl+Shift+…` is not a second spelling of `Ctrl+…`, with the exceptions
     /// beside the rule: `Ctrl+Shift+=` is zoom in (the logical key is `+`),
-    /// `Ctrl+Shift+Z` is Redo, and copy/cut under Shift and `Ctrl+Alt+Shift+V` are
-    /// pinned by their own tests.
+    /// `Ctrl+Shift+Z` is Redo, `Ctrl+Shift+Y` is the size preview, and copy/cut
+    /// under Shift and `Ctrl+Alt+Shift+V` are pinned by their own tests.
     #[test]
     fn ctrl_shift_is_not_a_second_spelling_of_ctrl() {
         let cmd = egui::Modifiers::COMMAND;
@@ -2715,7 +2722,6 @@ mod tests {
             (egui::Key::O, Action::Open),
             (egui::Key::A, Action::SelectAll),
             (egui::Key::D, Action::Duplicate),
-            (egui::Key::Y, Action::Redo),
             (egui::Key::Minus, Action::ZoomOut),
             (egui::Key::Num0, Action::ZoomReset),
             (egui::Key::Num1, Action::ZoomFit),
@@ -2756,6 +2762,17 @@ mod tests {
             actions(Mode::Normal, vec![key(egui::Key::Z, shift)], shift),
             vec![Action::Redo],
             "Ctrl+Shift+Z is Redo and only the Y half took the guard"
+        );
+
+        // Exception 3: `Ctrl+Shift+Y` is the size preview, beside pixel preview's
+        // `Ctrl+Alt+Y`, and never a second Redo.
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::Y, cmd)], cmd),
+            vec![Action::Redo]
+        );
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::Y, shift)], shift),
+            vec![Action::ToggleView(ViewSwitch::SizePreview)]
         );
     }
 }

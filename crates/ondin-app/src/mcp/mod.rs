@@ -1367,10 +1367,43 @@ const SET_PROPS: &[(&str, &str, bool, &str)] = &[
     ("transform", "set_transform", false, "transform"),
 ];
 
+/// The names agents write for what `set` takes otherwise: `x`, `y` for `at`,
+/// `width`, `height` for `size`, `corner_radius` for `geometry`, `fill` and
+/// `stroke` for one paint, and `rotation`, which no setter takes.
+const SET_ALIASES: [&str; 8] = [
+    "x",
+    "y",
+    "width",
+    "height",
+    "corner_radius",
+    "rotation",
+    "fill",
+    "stroke",
+];
+
+/// Guesses at a `set` property no spelling slip reaches, with the one each means.
+const SET_GUESSES: &[(&str, &str)] = &[
+    ("color", "fill"),
+    ("colour", "fill"),
+    ("background", "fill"),
+    ("border", "stroke"),
+    ("radius", "corner_radius"),
+    ("border_radius", "corner_radius"),
+    ("hidden", "visible"),
+    ("font", "text_style"),
+    ("font_size", "text_style"),
+    ("content", "text"),
+    ("characters", "text"),
+    ("angle", "rotation"),
+    ("position", "at"),
+    ("shadow", "effects"),
+];
+
 /// `set`: each property through its own setter, as a [`batch`] named `set`, so
 /// one call writes what a handful of setters would and lands as one undo step.
-/// `size` and `at` follow the rest, so a move lands where the new size leaves it;
-/// `at` is measured once they have landed ([`placed_at`]).
+/// `size`, `rotation` and `at` follow the rest in that order, each measured once
+/// the ones before have landed, so a move lands where the new size and turn
+/// leave the box ([`placed_at`]).
 fn set(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1384,24 +1417,49 @@ fn set(
     let Some(Value::Object(props)) = args.get("props") else {
         return Err("`props` is an object of properties".into());
     };
-    let known = || {
-        SET_PROPS
-            .iter()
-            .map(|p| p.0)
-            .chain(["size", "at"])
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    if let Some(k) = props.keys().find(|k| {
-        !SET_PROPS.iter().any(|p| p.0 == k.as_str()) && !["size", "at"].contains(&k.as_str())
-    }) {
-        return Err(format!("`set` sets no `{k}`; it sets {}", known()));
+    let known: Vec<&str> = SET_PROPS
+        .iter()
+        .map(|p| p.0)
+        .chain(["size", "at"])
+        .chain(SET_ALIASES)
+        .collect();
+    if let Some(k) = props.keys().find(|k| !known.contains(&k.as_str())) {
+        let near = nearest_name(k, &known)
+            .map(|n| format!(" Did you mean `{n}`?"))
+            .unwrap_or_default();
+        return Err(format!(
+            "`set` sets no `{k}`; it sets {}.{near}",
+            known.join(", ")
+        ));
     }
+    let canon = canonical(props)?;
+    if canon.contains_key("text") {
+        text_targets(s, &ids)?;
+    }
+    let size = sides(
+        props,
+        "size",
+        ["width", "height"],
+        "`size` is {width, height}",
+    )?;
+    let at = sides(
+        props,
+        "at",
+        ["x", "y"],
+        "`at` is [x, y], the left and top of the layer's box in its parent",
+    )?;
+    let rotation = match props.get("rotation") {
+        None => None,
+        Some(v) => Some(
+            v.as_f64()
+                .ok_or("`rotation` is the layer's angle in degrees, clockwise")?,
+        ),
+    };
     let wire: Vec<Value> = ids.iter().map(|id| json!(id.to_wire())).collect();
     let mut steps = Vec::new();
     let mut step = |tool: &str, args: Value| steps.push(json!({ "tool": tool, "args": args }));
     for (prop, verb, all, param) in SET_PROPS {
-        let Some(v) = props.get(*prop) else { continue };
+        let Some(v) = canon.get(*prop) else { continue };
         let with = |key: &str, layers: Value| {
             let mut m = Map::new();
             m.insert(key.into(), layers);
@@ -1416,23 +1474,6 @@ fn set(
             }
         }
     }
-    if let Some(size) = props.get("size") {
-        let (Some(w), Some(h)) = (size.get("width"), size.get("height")) else {
-            return Err("`size` is {width, height}".into());
-        };
-        for id in &wire {
-            step("set_size", json!({ "node": id, "width": w, "height": h }));
-        }
-    }
-    let at = match props.get("at") {
-        None => None,
-        Some(at) => Some(
-            at.as_array()
-                .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
-                .and_then(|a| <[f64; 2]>::try_from(a).ok())
-                .ok_or("`at` is [x, y], the left and top of the layer's box in its parent")?,
-        ),
-    };
     let batched = |steps: Vec<Value>| {
         let mut batched = json!({ "steps": steps });
         if let Some(base) = args.get("base_rev") {
@@ -1440,23 +1481,48 @@ fn set(
         }
         batched
     };
+    let base = match args.get("base_rev").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => Some(v.as_u64().ok_or("`base_rev` must be a `rev`")?),
+    };
     let depth = s.history.undo_depth();
-    if !steps.is_empty() {
-        batch(conn, s, client, &batched(steps))?;
-    }
-    // Measured after the rest landed, so the box is the one the new size left.
-    if let Some([x, y]) = at {
-        let placed = ids
-            .iter()
-            .map(|id| placed_at(s, *id, x, y))
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|steps| batch(conn, s, client, &batched(steps)));
-        if let Err(why) = placed {
-            if s.history.undo_depth() > depth {
-                s.take_back();
-            }
-            return Err(why);
+    let landed = (|| {
+        if !steps.is_empty() {
+            batch(conn, s, client, &batched(steps))?;
         }
+        // Each measured after the ones before landed: a side kept is the side
+        // the other properties left, and `at` places the box the size and turn left.
+        if let Some([w, h]) = size {
+            let steps = ids
+                .iter()
+                .map(|id| sized(s, *id, w, h))
+                .collect::<Result<Vec<_>, _>>()?;
+            batch(conn, s, client, &batched(steps))?;
+        }
+        if let Some(degrees) = rotation {
+            for id in &ids {
+                let Some(tx) = turned_to(s, *id, degrees) else {
+                    continue;
+                };
+                refuse_kit_vault(s, &json!({ "node": id.to_wire() }))?;
+                if let Some(base) = base {
+                    stale(conn, s, base, &tx)?;
+                }
+                commit(s, client, "set", tx)?;
+            }
+        }
+        if let Some([x, y]) = at {
+            let steps = ids
+                .iter()
+                .map(|id| placed_at(s, *id, x, y))
+                .collect::<Result<Vec<_>, _>>()?;
+            batch(conn, s, client, &batched(steps))?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(why) = landed {
+        while s.history.undo_depth() > depth && s.take_back() {}
+        return Err(why);
     }
     let made = s.history.undo_depth().saturating_sub(depth);
     if made > 1 {
@@ -1480,8 +1546,14 @@ fn set(
 /// The `set_transform` step that puts the left and top of `id`'s box at `x`, `y`
 /// in its parent's space, for every kind: the box it is drawn with (a group's is
 /// its children's), moved by the difference so it keeps its rotation and scale.
-/// A layer with no box is placed by its origin.
-fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, String> {
+/// A side not given stays where it is. A layer with no box is placed by its
+/// origin.
+fn placed_at(
+    s: &EditorSession,
+    id: NodeId,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<Value, String> {
     let n = s
         .doc
         .get(id)
@@ -1490,10 +1562,225 @@ fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, Str
     let corner = ondin_core::query::local_box(&s.doc, &s.resolved, id)
         .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
         .unwrap_or(local * ondin_core::kurbo::Point::ZERO);
+    let (x, y) = (x.unwrap_or(corner.x), y.unwrap_or(corner.y));
     let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
     Ok(json!({ "tool": "set_transform",
         "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
 }
+
+/// The `set_size` step that makes `id` `w` wide and `h` high, a side not given
+/// kept at its box's.
+fn sized(s: &EditorSession, id: NodeId, w: Option<f64>, h: Option<f64>) -> Result<Value, String> {
+    let now = match (w, h) {
+        (Some(_), Some(_)) => ondin_core::kurbo::Size::ZERO,
+        _ => ondin_core::query::local_box(&s.doc, &s.resolved, id)
+            .map(|b| b.size())
+            .ok_or_else(|| {
+                format!(
+                    "`{}` has no box to keep a side of: give `width` and `height`",
+                    id.to_wire()
+                )
+            })?,
+    };
+    Ok(json!({ "tool": "set_size", "args": { "node": id.to_wire(),
+        "width": w.unwrap_or(now.width), "height": h.unwrap_or(now.height) } }))
+}
+
+/// The edit that turns `id` to `degrees` clockwise on the page about its box's
+/// centre, keeping its scale, skew and mirror, as the Rotation field turns it;
+/// `None` when it stands so already.
+fn turned_to(s: &EditorSession, id: NodeId, degrees: f64) -> Option<ondin_core::Transaction> {
+    let world = s.resolved.world_transform(id)?;
+    let by = degrees.to_radians() - ondin_core::build::Basis::of(world).orientation.angle;
+    if by.abs() < 1e-9 {
+        return None;
+    }
+    let centre = ondin_core::query::local_box(&s.doc, &s.resolved, id)
+        .map_or(ondin_core::kurbo::Point::ZERO, |b| b.center());
+    let tx = ondin_core::edit::rotate_node(&s.doc, &s.resolved, id, world * centre, by);
+    (!tx.0.is_empty()).then_some(tx)
+}
+
+/// `set`'s pair `key` (`size` or `at`) as two sides, each `None` when not
+/// given: from the pair as an object or `[a, b]`, then from its sides' own
+/// names (`x`, `width`), which win. `None` when neither is written.
+fn sides(
+    props: &Map<String, Value>,
+    key: &str,
+    names: [&str; 2],
+    form: &str,
+) -> Result<Option<[Option<f64>; 2]>, String> {
+    let mut out = [None, None];
+    let number = |v: &Value| v.as_f64().ok_or_else(|| form.to_owned());
+    match props.get(key) {
+        None => {}
+        Some(Value::Array(a)) if a.len() == 2 => {
+            out = [Some(number(&a[0])?), Some(number(&a[1])?)];
+        }
+        Some(Value::Object(m)) if m.keys().all(|k| names.contains(&k.as_str())) => {
+            for (side, name) in out.iter_mut().zip(names) {
+                *side = m.get(name).map(number).transpose()?;
+            }
+        }
+        Some(_) => return Err(form.to_owned()),
+    }
+    for (side, name) in out.iter_mut().zip(names) {
+        if let Some(v) = props.get(name) {
+            *side = Some(v.as_f64().ok_or_else(|| format!("`{name}` is a number"))?);
+        }
+    }
+    Ok(match out {
+        [None, None] if props.contains_key(key) => {
+            return Err(format!("{form}; either side alone keeps the other"));
+        }
+        [None, None] => None,
+        sides => Some(sides),
+    })
+}
+
+/// `props` with `fill`, `stroke` and `corner_radius` written as what their
+/// setters take: `fills` and `strokes` lists, and a `geometry` patch.
+fn canonical(props: &Map<String, Value>) -> Result<Map<String, Value>, String> {
+    let mut canon = props.clone();
+    for (alias, prop) in [
+        ("fill", "fills"),
+        ("stroke", "strokes"),
+        ("corner_radius", "geometry"),
+    ] {
+        let Some(v) = canon.remove(alias) else {
+            continue;
+        };
+        if canon.contains_key(prop) {
+            return Err(format!("`{alias}` and `{prop}` set one thing: give one"));
+        }
+        let v = match (alias, v) {
+            ("corner_radius", Value::Number(n)) => json!({ "CornerRadius": n }),
+            ("corner_radius", Value::Array(r)) if r.len() == 4 => json!({ "CornerRadii": {
+                "top_left": r[0], "top_right": r[1], "bottom_right": r[2], "bottom_left": r[3] } }),
+            ("corner_radius", corners @ Value::Object(_)) => json!({ "CornerRadii": corners }),
+            ("corner_radius", _) => {
+                return Err(
+                    "`corner_radius` is a number, or four as [top_left, top_right, \
+                     bottom_right, bottom_left]"
+                        .into(),
+                );
+            }
+            (_, list @ Value::Array(_)) => list,
+            (_, one) => json!([one]),
+        };
+        canon.insert(prop.into(), v);
+    }
+    Ok(canon)
+}
+
+/// The name of `known` an unknown `set` property most likely meant: a guess
+/// [`SET_GUESSES`] lists, else the nearest within two edits once written in
+/// snake case.
+fn nearest_name<'a>(asked: &str, known: &[&'a str]) -> Option<&'a str> {
+    let mut snake = String::new();
+    for c in asked.chars() {
+        match c {
+            '-' | ' ' => snake.push('_'),
+            c if c.is_uppercase() => {
+                if !snake.is_empty() {
+                    snake.push('_');
+                }
+                snake.extend(c.to_lowercase());
+            }
+            c => snake.push(c),
+        }
+    }
+    let meant = SET_GUESSES
+        .iter()
+        .find(|(guess, _)| *guess == snake)
+        .map_or(snake.as_str(), |(_, meant)| meant);
+    known
+        .iter()
+        .map(|k| (edits(meant, k), *k))
+        .filter(|(d, _)| *d <= 2)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, k)| k)
+}
+
+/// The edit distance between `a` and `b`, in characters.
+fn edits(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(above + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// Refuse `set`'s `text` on a layer that is no text, saying where its text is
+/// set: an instance's through its properties, any layer's through the text
+/// layers inside it.
+fn text_targets(s: &EditorSession, ids: &[NodeId]) -> Result<(), String> {
+    for &id in ids {
+        let Some(n) = s.doc.get(id) else {
+            continue;
+        };
+        if matches!(n.kind(), ondin_core::NodeKind::Text { .. }) {
+            continue;
+        }
+        let mut texts = Vec::new();
+        let mut below: Vec<NodeId> = n.children().iter().rev().copied().collect();
+        while let Some(at) = below.pop() {
+            let Some(c) = s.doc.get(at) else { continue };
+            if matches!(c.kind(), ondin_core::NodeKind::Text { .. }) {
+                texts.push(format!("`{}` {}", at.to_wire(), c.name()));
+            }
+            below.extend(c.children().iter().rev());
+        }
+        let listed = match texts.len() {
+            0 => None,
+            n if n > TEXTS_LISTED => Some(format!(
+                "{}, and {} more",
+                texts[..TEXTS_LISTED].join(", "),
+                n - TEXTS_LISTED
+            )),
+            _ => Some(texts.join(", ")),
+        };
+        let id_wire = id.to_wire();
+        if ondin_core::component::instance_root(&s.doc, id) == Some(id) {
+            let props: Vec<String> = ondin_core::variant::instance_properties(&s.doc, id)
+                .iter()
+                .filter(|p| p.kind != ondin_core::variant::PropKind::Nested && !p.name.is_empty())
+                .map(|p| {
+                    let kind = format!("{:?}", p.kind).to_lowercase();
+                    format!("`{}` ({kind})", p.name)
+                })
+                .collect();
+            let props = match props.is_empty() {
+                true => "it has none".to_owned(),
+                false => format!("its properties: {}", props.join(", ")),
+            };
+            let inside = listed
+                .map(|l| format!(" or set a text layer inside it ({l})"))
+                .unwrap_or_default();
+            return Err(format!(
+                "`{id_wire}` is an instance; set its text with `set_instance_property` \
+                 ({props}){inside}"
+            ));
+        }
+        return Err(match listed {
+            Some(l) => format!("`{id_wire}` is no text layer; set a text layer inside it ({l})"),
+            None => format!("`{id_wire}` is no text layer and holds none"),
+        });
+    }
+    Ok(())
+}
+
+/// The most text layers a refusal of `set`'s `text` names.
+const TEXTS_LISTED: usize = 8;
 
 /// `describe_tools`: the full definition of each tool named in `names`, then of
 /// those whose name holds `query`, then of those whose description alone does,
@@ -2262,6 +2549,140 @@ mod tests {
             "the box's corner moved to [10, 20]"
         );
         assert_eq!(box_of(&docs), (10.0, 20.0).into());
+    }
+
+    /// `set` takes the names agents guess: one side of `at` or `size` keeps the
+    /// other, `corner_radius`, `fill` and `rotation` land as their setters would,
+    /// and an unknown name is answered with the one it most likely meant.
+    ///
+    /// flip: `placed_at` taking an absent side as 0 → fails at "y kept";
+    /// `turned_to` turning about the layer's origin → fails at "about its centre".
+    #[test]
+    fn set_takes_the_names_agents_guess() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Box");
+        let nid = NodeId::from_wire(&id).unwrap();
+        let mut set = |docs: &mut One, props: Value| {
+            call(
+                &mut engine,
+                docs,
+                1,
+                "set",
+                json!({ "nodes": [id], "props": props }),
+            )
+        };
+        ok(&set(
+            &mut docs,
+            json!({ "at": [10.0, 20.0], "size": { "width": 30.0, "height": 40.0 } }),
+        ));
+        ok(&set(&mut docs, json!({ "x": 50.0, "width": 60.0 })));
+        let bounds = |docs: &One| docs.session.resolved.world_bounds(nid).unwrap();
+        let r = bounds(&docs);
+        assert_eq!((r.x0, r.width()), (50.0, 60.0), "the sides given");
+        assert_eq!((r.y0, r.height()), (20.0, 40.0), "y kept, and the height");
+        ok(&set(&mut docs, json!({ "size": { "height": 10.0 } })));
+        assert_eq!(
+            (bounds(&docs).width(), bounds(&docs).height()),
+            (60.0, 10.0)
+        );
+
+        ok(&set(
+            &mut docs,
+            json!({ "corner_radius": 4.0, "fill": "#ff0000" }),
+        ));
+        let n = docs.session.doc.get(nid).unwrap();
+        let ondin_core::NodeKind::Rect { corner_radii, .. } = n.kind() else {
+            panic!("the fixture is a rect");
+        };
+        assert_eq!(corner_radii.top_left, 4.0);
+        assert_eq!(n.paint().fills.len(), 1, "one paint as a list");
+
+        let centre = bounds(&docs).center();
+        ok(&set(&mut docs, json!({ "rotation": 90.0 })));
+        let r = bounds(&docs);
+        assert!(
+            (r.width() - 10.0).abs() < 1e-6 && (r.height() - 60.0).abs() < 1e-6,
+            "a quarter turn: {r:?}"
+        );
+        let moved = r.center() - centre;
+        assert!(moved.hypot() < 1e-6, "about its centre: {moved:?}");
+        ok(&set(&mut docs, json!({ "rotation": 90.0 })));
+        assert!(
+            (bounds(&docs).width() - 10.0).abs() < 1e-6,
+            "the angle is set, not added"
+        );
+
+        for (guess, meant) in [("corner_radiu", "corner_radius"), ("colour", "fill")] {
+            let out = set(&mut docs, json!({ guess: 1.0 }));
+            let text = format!("{:?}", out.content);
+            assert!(out.is_error, "{guess} is refused");
+            assert!(text.contains(&format!("Did you mean `{meant}`")), "{text}");
+        }
+    }
+
+    /// `set`'s `text` on an instance names `set_instance_property` with the
+    /// instance's properties and the text layers inside it, before any setter runs.
+    /// On the way, `make_component` answers a group it made a main as `main`, not
+    /// `created`, and `define_property` answers the property by its name.
+    ///
+    /// flip: `set` without its `text_targets` check → fails at "names the tool",
+    /// as the setter's own refusal; `write` not filtering `created` → fails at
+    /// "not answered as created".
+    #[test]
+    fn set_text_on_an_instance_names_where_its_text_is() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "name": "Button", "kind": { "Group": null },
+            "children": [{ "name": "Label", "kind": { "Text": { "content": "Go",
+                "style": ondin_core::verbs::example("TextStyle").unwrap(), "sizing": "Auto" } } }] });
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let answer = ok(&made).clone();
+        let group = answer["created"][0].clone();
+        let label = answer["named"]["Button/Label"].clone();
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "make_component",
+            json!({ "nodes": [group] }),
+        );
+        let main = ok(&made)["main"].clone();
+        assert_eq!(main, group, "the group itself is made the main");
+        assert_eq!(
+            ok(&made)["created"],
+            json!([]),
+            "and is not answered as created"
+        );
+        let args = json!({ "node": label, "kind": "text", "name": "Caption" });
+        let defined = call(&mut engine, &mut docs, 1, "define_property", args);
+        assert_eq!(ok(&defined)["property"], "Caption", "named, not by id");
+        assert!(ok(&defined).get("made").is_none());
+        let args = json!({ "main": main, "parent": page, "x": 300, "y": 300 });
+        let made = call(&mut engine, &mut docs, 1, "create_instance", args);
+        let instance = ok(&made)["created"][0].clone();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [instance], "props": { "text": "Stop" } }),
+        );
+        let text = format!("{:?}", out.content);
+        assert!(out.is_error);
+        assert!(
+            text.contains("set_instance_property"),
+            "names the tool: {text}"
+        );
+        assert!(text.contains("`Caption` (text)"), "{text}");
+        assert!(text.contains("Label"), "the text layer inside: {text}");
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

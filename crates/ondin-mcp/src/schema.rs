@@ -391,7 +391,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "describe_tools",
-        doc: "The full definitions of tools, listed or not, by name or by a word in their name or description; run one that is not listed with `call`. Needs no current document.",
+        doc: "The full definitions of tools, listed or not, by name or by a word in their name or description, name matches first; run one that is not listed with `call`. A name that is no tool is answered in `not_found`. Needs no current document.",
         params: &[
             param("names", ParamKind::Model("[Name]"), false, "Tools by name."),
             param(
@@ -399,6 +399,12 @@ pub static TOOLS: &[Tool] = &[
                 ParamKind::Text,
                 false,
                 "A word to look for, ignoring case; at most 12 answered.",
+            ),
+            param(
+                "brief",
+                ParamKind::Bool,
+                false,
+                "Answer every match's name and description only.",
             ),
         ],
     },

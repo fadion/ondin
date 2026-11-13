@@ -1378,15 +1378,19 @@ fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, Str
         "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
 }
 
-/// `describe_tools`: the full definition of each tool named in `names`, or of
-/// those whose name or description holds `query`, at most [`DESCRIBED`].
+/// `describe_tools`: the full definition of each tool named in `names`, then of
+/// those whose name holds `query`, then of those whose description alone does,
+/// at most [`DESCRIBED`]; with `brief`, every match's name and description only.
+/// A name that is no tool is answered in `not_found`.
 fn describe_tools(args: &Value) -> Value {
     use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
-    let all = PHASE_1
+    let all: Vec<Value> = PHASE_1
         .iter()
         .chain(&PHASE_2)
         .chain(&PHASE_3)
-        .chain(&PHASE_4);
+        .chain(&PHASE_4)
+        .filter_map(|name| ondin_mcp::schema::definition(name))
+        .collect();
     let names: Vec<&str> = args
         .get("names")
         .and_then(Value::as_array)
@@ -1396,24 +1400,53 @@ fn describe_tools(args: &Value) -> Value {
         .get("query")
         .and_then(Value::as_str)
         .map(str::to_lowercase);
-    let matching: Vec<Value> = all
-        .filter_map(|name| ondin_mcp::schema::definition(name))
-        .filter(|d| {
-            let name = d["name"].as_str().unwrap_or_default();
-            names.contains(&name)
-                || query.as_ref().is_some_and(|q| {
-                    name.contains(q.as_str())
-                        || d["description"]
-                            .as_str()
-                            .is_some_and(|t| t.to_lowercase().contains(q.as_str()))
-                })
-        })
+    let brief = args.get("brief").and_then(Value::as_bool).unwrap_or(false);
+    // 0 named, 1 a name holding the query, 2 a description holding it.
+    let rank = |d: &Value| {
+        let name = d["name"].as_str().unwrap_or_default();
+        if names.contains(&name) {
+            return Some(0);
+        }
+        let q = query.as_deref()?;
+        if name.contains(q) {
+            return Some(1);
+        }
+        d["description"]
+            .as_str()
+            .is_some_and(|t| t.to_lowercase().contains(q))
+            .then_some(2)
+    };
+    let mut matching: Vec<(u8, &Value)> =
+        all.iter().filter_map(|d| rank(d).map(|r| (r, d))).collect();
+    matching.sort_by_key(|(r, _)| *r);
+    let not_found: Vec<&str> = names
+        .iter()
+        .filter(|n| !all.iter().any(|d| d["name"] == **n))
+        .copied()
         .collect();
-    let more = matching.len().saturating_sub(DESCRIBED);
-    json!({ "tools": matching.into_iter().take(DESCRIBED).collect::<Vec<_>>(), "more": more })
+    let (tools, more): (Vec<Value>, usize) = if brief {
+        let tools = matching
+            .iter()
+            .map(|(_, d)| json!({ "name": d["name"], "description": d["description"] }))
+            .collect();
+        (tools, 0)
+    } else {
+        let more = matching.len().saturating_sub(DESCRIBED);
+        let tools = matching
+            .into_iter()
+            .take(DESCRIBED)
+            .map(|(_, d)| d.clone())
+            .collect();
+        (tools, more)
+    };
+    let mut answer = json!({ "tools": tools, "more": more });
+    if !not_found.is_empty() {
+        answer["not_found"] = json!(not_found);
+    }
+    answer
 }
 
-/// The most definitions one `describe_tools` answers.
+/// The most full definitions one `describe_tools` answers.
 const DESCRIBED: usize = 12;
 
 /// One step of [`batch`]: its answer and how many undo steps it committed.
@@ -2066,6 +2099,46 @@ mod tests {
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"set_point"), "{names:?}");
         assert!(tools.iter().all(|t| t["inputSchema"].is_object()));
+    }
+
+    /// `describe_tools` answers the tools whose name holds the query before those
+    /// whose description alone does, answers names and descriptions only when
+    /// `brief`, and names what it did not find.
+    ///
+    /// flip: `describe_tools` not sorting by rank → fails at the first tool's name,
+    /// as `get_tree` leads.
+    #[test]
+    fn describe_tools_ranks_name_matches_first() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let found = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "query": "style" }),
+        );
+        let tools = ok(&found)["tools"].as_array().unwrap().clone();
+        let named: Vec<bool> = tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().contains("style"))
+            .collect();
+        assert!(named[0], "{tools:?}");
+        assert!(
+            named.windows(2).all(|w| w[0] || !w[1]),
+            "name matches first: {named:?}"
+        );
+        let found = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "query": "style", "brief": true, "names": ["no_such_tool"] }),
+        );
+        let answer = ok(&found);
+        let tools = answer["tools"].as_array().unwrap();
+        assert!(tools.iter().any(|t| t["name"] == "add_style"), "{tools:?}");
+        assert!(tools.iter().all(|t| t.get("inputSchema").is_none()));
+        assert_eq!(answer["not_found"], json!(["no_such_tool"]), "not found");
     }
 
     /// A subtree names its page and frame once, on the root: a layer below keeps

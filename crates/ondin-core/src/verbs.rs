@@ -836,6 +836,20 @@ fn existing_layers(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError
     Ok(ids)
 }
 
+/// The layers the `nodes` argument names, refused when none of them reaches a
+/// layer that takes paint (`build::paint_targets`): an empty group, or slices,
+/// would otherwise answer as done with nothing painted.
+fn painted(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
+    let ids = existing_layers(ctx, a)?;
+    match build::paint_targets(ctx.doc, &ids).is_empty() {
+        true => Err(a.invalid(
+            "nodes",
+            "none of them takes paint: a group passes paint to the shapes inside it, and holds none",
+        )),
+        false => Ok(ids),
+    }
+}
+
 /// The text layers the `nodes` argument names; any other layer is refused.
 fn texts(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
     let ids = existing_layers(ctx, a)?;
@@ -3472,7 +3486,11 @@ pub static VERBS: &[Verb] = &[
         doc: "Set the address a layer written as a link (`a`) goes to; empty clears it",
         params: &[
             req("node", NODE, "the layer, its element `a`"),
-            req("href", TEXT, "an https:// address, a /path or a #id"),
+            req(
+                "href",
+                TEXT,
+                "an https:// or http:// address, a mailto: or tel: link, a /path or a #id",
+            ),
         ],
         run: |ctx, a| {
             let id = a.layer(ctx.doc, "node")?;
@@ -3586,15 +3604,15 @@ pub static VERBS: &[Verb] = &[
                 .map(Done::edit)
                 .ok_or_else(|| {
                     let why = match n.kind() {
-                        NodeKind::Group => "A group always fits its content",
+                        NodeKind::Group => "a group always fits its content",
                         NodeKind::Artboard { .. } if n.display().is_some() => {
-                            "A frame with a layout sizes itself: set W and H to fit-content"
+                            "a frame with a layout sizes itself: give its width and height fit-content with `set_layout_item`"
                         }
                         NodeKind::Artboard { .. } if n.children().is_empty() => {
-                            "Nothing inside to fit to"
+                            "nothing inside to fit to"
                         }
-                        NodeKind::Artboard { .. } => "Already fits its content",
-                        _ => "Only a frame fits its content",
+                        NodeKind::Artboard { .. } => "already fits its content",
+                        _ => "only a frame fits its content",
                     };
                     a.invalid("node", why)
                 })
@@ -3879,7 +3897,7 @@ pub static VERBS: &[Verb] = &[
             req("fills", ParamKind::Model("[Fill]"), "the fills"),
         ],
         run: |ctx, a| {
-            let ids = existing_layers(ctx, a)?;
+            let ids = painted(ctx, a)?;
             let fills = a.model::<Vec<Fill>>("fills")?;
             Ok(Done::edit(match build::shared_fills(ctx.doc, &ids) {
                 build::PaintShown::List(anchor) => {
@@ -3898,7 +3916,7 @@ pub static VERBS: &[Verb] = &[
             req("strokes", ParamKind::Model("[Stroke]"), "the strokes"),
         ],
         run: |ctx, a| {
-            let ids = existing_layers(ctx, a)?;
+            let ids = painted(ctx, a)?;
             let strokes = a.model::<Vec<Stroke>>("strokes")?;
             Ok(Done::edit(match build::shared_strokes(ctx.doc, &ids) {
                 build::PaintShown::List(anchor) => {
@@ -4029,9 +4047,12 @@ pub static VERBS: &[Verb] = &[
         run: |ctx, a| {
             let exports = a.model::<Vec<ExportSpec>>("exports")?;
             let mut ops = Vec::new();
+            // One id for a row past any layer's end, shared across the layers, as
+            // the Export card gives a row added over a selection.
+            let mut fresh = PastTheEnd::default();
             for id in existing_layers(ctx, a)? {
                 let own = node(ctx, id)?.exports().to_vec();
-                let exports = rekeyed(ctx, &own, exports.clone());
+                let exports = rekey_by_position(&own, exports.clone(), &mut fresh, ctx.ids);
                 ops.push(Operation::SetExports { id, exports });
             }
             Ok(Done::ops(ops))

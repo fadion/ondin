@@ -4496,10 +4496,14 @@ fn merge_colours_into_a_bound_colour_binds_the_raw_paints() {
 /// `set_fills` over several layers writes as the Fill card writes a selection:
 /// layers sharing a list keep their own item ids for its rows and share one id
 /// for a row added, a group's shapes take it, and differing lists are replaced
-/// position by position. The text setters take text layers only.
+/// position by position; an empty group, which takes no paint, is refused.
+/// `set_exports` shares one id for a row added over a selection. The text setters
+/// take text layers only.
 ///
 /// flip: `set_fills` writing the anchor's ids onto every layer rather than
-/// `retarget_fills_all` → fails at "b keeps its own id".
+/// `retarget_fills_all` → fails at "b keeps its own id"; `set_fills` without
+/// `painted` → fails at "an empty group takes no paint"; `set_exports` with a
+/// `PastTheEnd` per layer → fails at "one id for the added row".
 #[test]
 fn set_fills_writes_a_selection_as_the_inspector_does() {
     let (mut doc, mut ids, page) = blank();
@@ -4567,6 +4571,30 @@ fn set_fills_writes_a_selection_as_the_inspector_does() {
         assert_eq!(f.len(), 1, "a group's shape takes it too");
         assert_eq!(f[0].id, own, "the first row keeps each layer's id");
     }
+
+    let empty = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "kind": "Group" } }),
+    )[0];
+    let args = json!({ "nodes": [empty.to_wire()], "fills": fills(&[solid(Color::WHITE)]) });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_fills", args),
+        "nodes",
+        "an empty group takes no paint"
+    );
+
+    // A row added over a selection shares one id, as the Export card adds it.
+    let spec = verbs::example("[ExportSpec]").unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_exports",
+        json!({ "nodes": [a.to_wire(), b.to_wire()], "exports": spec }),
+    );
+    let export_id = |id: NodeId| doc.get(id).unwrap().exports()[0].id;
+    assert_eq!(export_id(a), export_id(b), "one id for the added row");
 
     let args = json!({ "nodes": [b.to_wire()], "style": serde_json::to_value(ondin_core::TextStyle::default()).unwrap() });
     assert_eq!(
@@ -4897,7 +4925,7 @@ fn containers_convert_and_fit_their_content() {
         json!({ "node": card.to_wire() }),
     );
     assert!(
-        matches!(&again, Err(VerbError::Invalid { why, .. }) if why.contains("Already fits")),
+        matches!(&again, Err(VerbError::Invalid { why, .. }) if why.contains("already fits")),
         "already fits: {again:?}"
     );
 }

@@ -743,7 +743,7 @@ fn within_budget(text: &str, what: &str, instead: &str) -> Result<(), String> {
 
 /// What a read past the budget points to.
 const NARROWER: &str =
-    "reach the part you need with `find_nodes` or `list_children`, then `get_node` on it";
+    "reach the part you need with `find_nodes` or `get_outline`, then `get_node` on it";
 
 /// The most `export_png`'s `max` is taken at: a raster held in the person's
 /// window, where an unbounded one could exhaust its memory and lose every tab.
@@ -766,7 +766,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             let id = required(args, "id")?;
             if is_page(s, id) {
                 return Err(format!(
-                    "`{}` is a page: `list_children` names its layers, each a tree",
+                    "`{}` is a page: `get_outline` names its layers, each a tree",
                     id.to_wire()
                 ));
             }
@@ -1236,6 +1236,22 @@ fn write(
     }
     if let Some(px) = pixels {
         answer["pixel_size"] = json!(px);
+    }
+    // A move keeps where the layer is drawn, so its place in the new parent is
+    // new to the caller, and the next write that places it needs it.
+    if verb.name == "reparent"
+        && let Ok(Some(id)) = node(&args, "node")
+        && let Some(parent) = s.doc.get(id).and_then(|n| n.parent())
+        && let (Some(b), Some(o)) = (
+            reads::bounds_box(s, id).as_array().cloned(),
+            reads::origin(&s.resolved, parent).as_array().cloned(),
+        )
+    {
+        let less = |i: usize| {
+            let v = b[i].as_f64().unwrap_or_default() - o[i].as_f64().unwrap_or_default();
+            (v * 10.0).round() / 10.0
+        };
+        answer = json!({ "at": [less(0), less(1)] });
     }
     Ok(Answer::Json(answer))
 }
@@ -2243,6 +2259,41 @@ mod tests {
         assert_eq!(docs.session.doc.get(id).unwrap().name(), "Header");
         assert_eq!(docs.committed, 1);
         assert_eq!(docs.session.history.undo_depth(), 1);
+    }
+
+    /// `reparent` answers where the moved layer now sits in its new parent,
+    /// its box's left and top there, since the move kept it where it was drawn.
+    ///
+    /// flip: the `reparent` arm of `write` reading the box against the old
+    /// parent → fails at `[50, 70]`, answering `[150, 170]`.
+    #[test]
+    fn reparent_answers_the_place_in_the_new_parent() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let mut insert = |kind: Value, x: f64, y: f64| {
+            let args = json!({ "parent": page, "tree": { "kind": kind }, "x": x, "y": y });
+            let out = call(&mut engine, &mut docs, 1, "insert_subtree", args);
+            ok(&out)["created"][0].as_str().unwrap().to_owned()
+        };
+        let frame = insert(
+            json!({ "Artboard": { "size": { "width": 200, "height": 200 } } }),
+            100.0,
+            100.0,
+        );
+        let dot = insert(
+            json!({ "Rect": { "size": { "width": 10, "height": 10 } } }),
+            150.0,
+            170.0,
+        );
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "reparent",
+            json!({ "node": dot, "parent": frame }),
+        );
+        assert_eq!(ok(&out)["at"], json!([50.0, 70.0]), "{:?}", out.structured);
     }
 
     /// Every listed tool that is not a verb reaches a handler: called with the

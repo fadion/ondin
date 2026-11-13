@@ -2034,7 +2034,7 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "reparent",
-        doc: "Move a layer into another parent, keeping where it is drawn",
+        doc: "Move a layer into another parent, keeping where it is drawn; answers `at`, its place there",
         params: &[
             req("node", NODE, "the layer to move"),
             req("parent", NODE, "its new parent"),

@@ -826,6 +826,30 @@ const PROP_NAME_TAKEN: &str = "a property needs a name no other property of the 
 /// What a variant verb says for a value name that is empty or taken.
 const VALUE_NAME_TAKEN: &str = "a value needs a name no other value of the property has";
 
+/// The layers the `nodes` argument names, each checked to exist: a bulk paint
+/// write drops a missing id, which would otherwise answer as done.
+fn existing_layers(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
+    let ids = a.layers(ctx.doc, "nodes")?;
+    for id in &ids {
+        node(ctx, *id)?;
+    }
+    Ok(ids)
+}
+
+/// The text layers the `nodes` argument names; any other layer is refused.
+fn texts(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
+    let ids = existing_layers(ctx, a)?;
+    match ids.iter().find(|id| {
+        !matches!(
+            ctx.doc.get(**id).map(|n| n.kind()),
+            Some(NodeKind::Text { .. })
+        )
+    }) {
+        Some(id) => Err(a.invalid("nodes", format!("`{}` is not a text layer", id.to_wire()))),
+        None => Ok(ids),
+    }
+}
+
 /// The component set the `node` argument names: the set, or one of its variants.
 fn set_arg(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<NodeId, VerbError> {
     let id = a.layer(ctx.doc, "node")?;
@@ -3317,20 +3341,21 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_clip",
-        doc: "Clip a frame's contents to its box, or not",
-        params: &[req("node", NODE, "the frame"), req("clip", BOOL, "clipped")],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetClip {
-                id: a.node("node")?,
-                clip: a.bool("clip").unwrap_or(true),
-            }]))
+        doc: "Clip frames' contents to their boxes, or not",
+        params: &[
+            req("nodes", NODES, "the frames"),
+            req("clip", BOOL, "clipped"),
+        ],
+        run: |ctx, a| {
+            let clip = a.bool("clip").unwrap_or(true);
+            each(ctx.doc, a, |id| Operation::SetClip { id, clip })
         },
     },
     Verb {
         name: "set_mask",
-        doc: "Use a layer as a mask for the layers above it in its parent, or stop",
+        doc: "Use layers as masks for the layers above each in its parent, or stop",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("mask", BOOL, "a mask"),
             opt(
                 "mode",
@@ -3339,20 +3364,25 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let id = a.node("node")?;
             let mask = a.bool("mask").unwrap_or(true);
-            let mut ops = vec![Operation::SetMask { id, mask }];
-            if let Some(word) = a.choice("mode") {
-                if !mask {
-                    return Err(a.invalid("mode", "only a mask has a mode"));
-                }
-                let mode = MASK_MODES
-                    .iter()
-                    .position(|w| *w == word)
-                    .map_or(crate::node::MaskMode::Shape, |i| {
-                        crate::node::MaskMode::ALL[i]
-                    });
-                if node(ctx, id)?.mask_mode() != mode {
+            let mode = match a.choice("mode") {
+                Some(_) if !mask => return Err(a.invalid("mode", "only a mask has a mode")),
+                Some(word) => Some(
+                    MASK_MODES
+                        .iter()
+                        .position(|w| *w == word)
+                        .map_or(crate::node::MaskMode::Shape, |i| {
+                            crate::node::MaskMode::ALL[i]
+                        }),
+                ),
+                None => None,
+            };
+            let mut ops = Vec::new();
+            for id in a.layers(ctx.doc, "nodes")? {
+                ops.push(Operation::SetMask { id, mask });
+                if let Some(mode) = mode
+                    && node(ctx, id)?.mask_mode() != mode
+                {
                     ops.push(Operation::SetMaskMode { id, mode });
                 }
             }
@@ -3649,18 +3679,32 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_text_style",
-        doc: "Set a text layer's character style, and optionally its runs",
+        doc: "Set text layers' character style, and optionally one text's runs",
         params: &[
-            req("node", NODE, "the text layer"),
+            req("nodes", NODES, "the text layers"),
             req("style", ParamKind::Model("TextStyle"), "the style"),
-            opt("spans", ParamKind::Model("CharSpans"), "the runs over it"),
+            opt(
+                "spans",
+                ParamKind::Model("CharSpans"),
+                "the runs over it, counted in one text's characters",
+            ),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetTextStyle {
-                id: a.node("node")?,
-                style: a.model::<TextStyle>("style")?,
-                spans: a.model_opt::<CharSpans>("spans")?,
-            }]))
+        run: |ctx, a| {
+            let ids = texts(ctx, a)?;
+            let style = a.model::<TextStyle>("style")?;
+            let spans = a.model_opt::<CharSpans>("spans")?;
+            if spans.is_some() && ids.len() > 1 {
+                return Err(a.invalid("spans", "runs are counted in one text's characters"));
+            }
+            Ok(Done::ops(
+                ids.into_iter()
+                    .map(|id| Operation::SetTextStyle {
+                        id,
+                        style: style.clone(),
+                        spans: spans.clone(),
+                    })
+                    .collect(),
+            ))
         },
     },
     Verb {
@@ -3679,31 +3723,43 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_paragraph_style",
-        doc: "Set a text layer's paragraph style",
+        doc: "Set text layers' paragraph style",
         params: &[
-            req("node", NODE, "the text layer"),
+            req("nodes", NODES, "the text layers"),
             req("paragraph", ParamKind::Model("ParagraphStyle"), "the style"),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetParagraphStyle {
-                id: a.node("node")?,
-                paragraph: a.model::<ParagraphStyle>("paragraph")?,
-                spans: None,
-            }]))
+        run: |ctx, a| {
+            let paragraph = a.model::<ParagraphStyle>("paragraph")?;
+            Ok(Done::ops(
+                texts(ctx, a)?
+                    .into_iter()
+                    .map(|id| Operation::SetParagraphStyle {
+                        id,
+                        paragraph: paragraph.clone(),
+                        spans: None,
+                    })
+                    .collect(),
+            ))
         },
     },
     Verb {
         name: "set_block_style",
-        doc: "Set a text layer's block style: its box, overflow and vertical alignment",
+        doc: "Set text layers' block style: the box, overflow and vertical alignment",
         params: &[
-            req("node", NODE, "the text layer"),
+            req("nodes", NODES, "the text layers"),
             req("block", ParamKind::Model("BlockStyle"), "the style"),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetBlockStyle {
-                id: a.node("node")?,
-                block: a.model::<BlockStyle>("block")?,
-            }]))
+        run: |ctx, a| {
+            let block = a.model::<BlockStyle>("block")?;
+            Ok(Done::ops(
+                texts(ctx, a)?
+                    .into_iter()
+                    .map(|id| Operation::SetBlockStyle {
+                        id,
+                        block,
+                    })
+                    .collect(),
+            ))
         },
     },
     Verb {
@@ -3773,47 +3829,57 @@ pub static VERBS: &[Verb] = &[
     // --- paint --------------------------------------------------------------
     Verb {
         name: "set_fills",
-        doc: "Replace a layer's fills, bottom first",
+        doc: "Replace layers' fills, bottom first, as the Fill card writes a selection: a group's reach its shapes",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("fills", ParamKind::Model("[Fill]"), "the fills"),
         ],
         run: |ctx, a| {
-            let id = a.node("node")?;
+            let ids = existing_layers(ctx, a)?;
             let fills = a.model::<Vec<Fill>>("fills")?;
-            let own = node(ctx, id)?.paint().fills.clone();
-            let fills = rekeyed(ctx, &own, fills);
-            Ok(Done::ops(vec![Operation::SetFills { id, fills }]))
+            Ok(Done::edit(match build::shared_fills(ctx.doc, &ids) {
+                build::PaintShown::List(anchor) => {
+                    let edited = rekeyed(ctx, &anchor, fills);
+                    build::retarget_fills_all(ctx.doc, &ids, &anchor, &edited, ctx.ids)
+                }
+                build::PaintShown::Mixed => build::set_fills_all(ctx.doc, &ids, &fills, ctx.ids),
+            }))
         },
     },
     Verb {
         name: "set_strokes",
-        doc: "Replace a layer's strokes, bottom first",
+        doc: "Replace layers' strokes, bottom first, as the Stroke card writes a selection: a group's reach its shapes",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("strokes", ParamKind::Model("[Stroke]"), "the strokes"),
         ],
         run: |ctx, a| {
-            let id = a.node("node")?;
+            let ids = existing_layers(ctx, a)?;
             let strokes = a.model::<Vec<Stroke>>("strokes")?;
-            let own = node(ctx, id)?.paint().strokes.clone();
-            let strokes = rekeyed(ctx, &own, strokes);
-            Ok(Done::ops(vec![Operation::SetStrokes { id, strokes }]))
+            Ok(Done::edit(match build::shared_strokes(ctx.doc, &ids) {
+                build::PaintShown::List(anchor) => {
+                    let edited = rekeyed(ctx, &anchor, strokes);
+                    build::retarget_strokes_all(ctx.doc, &ids, &anchor, &edited, ctx.ids)
+                }
+                build::PaintShown::Mixed => {
+                    build::set_strokes_all(ctx.doc, &ids, &strokes, ctx.ids)
+                }
+            }))
         },
     },
     Verb {
         name: "set_effects",
-        doc: "Replace a layer's effects: shadows and blurs, in order",
+        doc: "Replace layers' effects, shadows and blurs in order, on the outermost of them",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("effects", ParamKind::Model("[Effect]"), "the effects"),
         ],
         run: |ctx, a| {
-            let id = a.node("node")?;
+            let ids = existing_layers(ctx, a)?;
             let effects = a.model::<Vec<Effect>>("effects")?;
-            let own = node(ctx, id)?.effects().to_vec();
-            let effects = rekeyed(ctx, &own, effects);
-            Ok(Done::ops(vec![Operation::SetEffects { id, effects }]))
+            Ok(Done::edit(build::set_effects_all(
+                ctx.doc, &ids, &effects, ctx.ids,
+            )))
         },
     },
     Verb {
@@ -3911,17 +3977,20 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_exports",
-        doc: "Replace a layer's export settings",
+        doc: "Replace layers' export settings",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("exports", ParamKind::Model("[ExportSpec]"), "the settings"),
         ],
         run: |ctx, a| {
-            let id = a.layer(ctx.doc, "node")?;
             let exports = a.model::<Vec<ExportSpec>>("exports")?;
-            let own = node(ctx, id)?.exports().to_vec();
-            let exports = rekeyed(ctx, &own, exports);
-            Ok(Done::ops(vec![Operation::SetExports { id, exports }]))
+            let mut ops = Vec::new();
+            for id in existing_layers(ctx, a)? {
+                let own = node(ctx, id)?.exports().to_vec();
+                let exports = rekeyed(ctx, &own, exports.clone());
+                ops.push(Operation::SetExports { id, exports });
+            }
+            Ok(Done::ops(ops))
         },
     },
     Verb {
@@ -4238,52 +4307,49 @@ pub static VERBS: &[Verb] = &[
     // --- layout -------------------------------------------------------------
     Verb {
         name: "set_display",
-        doc: "Make a frame lay out its children as flex or grid, or stop",
+        doc: "Make frames lay out their children as flex or grid, or stop",
         params: &[
-            req("node", NODE, "the frame"),
+            req("nodes", NODES, "the frames"),
             opt(
                 "display",
                 ParamKind::Model("Display"),
                 "the layout; absent turns it off",
             ),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetDisplay {
-                id: a.node("node")?,
-                display: a.model_opt::<Display>("display")?,
-            }]))
+        run: |ctx, a| {
+            let display = a.model_opt::<Display>("display")?;
+            each(ctx.doc, a, |id| Operation::SetDisplay {
+                id,
+                display: display.clone(),
+            })
         },
     },
     Verb {
         name: "set_layout_item",
-        doc: "Set how a layer sizes and places itself in its parent's layout",
+        doc: "Set how layers size and place themselves in their parents' layouts",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req(
                 "item",
                 ParamKind::Model("LayoutItem"),
-                "its item properties",
+                "their item properties",
             ),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetLayoutItem {
-                id: a.node("node")?,
-                item: a.model::<LayoutItem>("item")?,
-            }]))
+        run: |ctx, a| {
+            let item = a.model::<LayoutItem>("item")?;
+            each(ctx.doc, a, |id| Operation::SetLayoutItem { id, item })
         },
     },
     Verb {
         name: "set_insets",
-        doc: "Pin a layer to its frame's sides, as CSS insets and auto margins",
+        doc: "Pin layers to their frames' sides, as CSS insets and auto margins",
         params: &[
-            req("node", NODE, "the layer"),
+            req("nodes", NODES, "the layers"),
             req("insets", ParamKind::Model("Insets"), "the four sides"),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetInsets {
-                id: a.node("node")?,
-                insets: a.model::<Insets>("insets")?,
-            }]))
+        run: |ctx, a| {
+            let insets = a.model::<Insets>("insets")?;
+            each(ctx.doc, a, |id| Operation::SetInsets { id, insets })
         },
     },
     // --- charts -------------------------------------------------------------

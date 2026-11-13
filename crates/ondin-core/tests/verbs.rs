@@ -213,7 +213,7 @@ fn a_run_of_verbs_edits_the_document() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": a.to_wire(), "fills": [serde_json::to_value(&red).unwrap()] }),
+        json!({ "nodes": [a.to_wire()], "fills": [serde_json::to_value(&red).unwrap()] }),
     );
     assert_eq!(doc.get(a).unwrap().paint().fills.len(), 1);
 
@@ -337,7 +337,7 @@ fn a_fill_list_written_whole_keeps_its_ids_by_position() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": a.to_wire(), "fills": fills }),
+        json!({ "nodes": [a.to_wire()], "fills": fills }),
     );
     let again: Vec<_> = doc
         .get(a)
@@ -1158,7 +1158,7 @@ fn components_are_made_placed_swapped_and_detached() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": inner.to_wire(), "fills": red }),
+        json!({ "nodes": [inner.to_wire()], "fills": red }),
     );
     let copy = doc.get(inst).unwrap().children()[0];
     assert_eq!(
@@ -1267,7 +1267,7 @@ fn a_script_keeps_instances_in_step_with_their_mains() {
         { "verb": "create_node", "args": { "parent": "@f", "kind": rect(10.0, 10.0) }, "as": "r" },
         { "verb": "make_component", "args": { "nodes": ["@f"] } },
         { "verb": "create_instance", "args": { "main": "@f", "parent": "@page" }, "as": "i" },
-        { "verb": "set_fills", "args": { "node": "@r", "fills": red } },
+        { "verb": "set_fills", "args": { "nodes": ["@r"], "fills": red } },
     ]);
     let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
         .unwrap_or_else(|e| panic!("{e}"));
@@ -1800,7 +1800,7 @@ fn bind_variable_binds_and_detaches_fields() {
         { "verb": "add_variable", "args": { "kind": "color", "name": "red", "value": red }, "as": "c" },
         { "verb": "add_variable", "args": { "kind": "number", "name": "r", "value": eight }, "as": "n" },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
-        { "verb": "set_fills", "args": { "node": "@x", "fills": fill } },
+        { "verb": "set_fills", "args": { "nodes": ["@x"], "fills": fill } },
         { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "fill": 0 }, "variable": "@c" } },
         { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": "radius", "variable": "@n" } },
     ]);
@@ -2370,7 +2370,7 @@ fn reset_overrides_puts_an_instance_back() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": copy.to_wire(), "fills": red }),
+        json!({ "nodes": [copy.to_wire()], "fills": red }),
     );
     assert_eq!(
         doc.get(copy).unwrap().paint().fills.len(),
@@ -2438,7 +2438,7 @@ fn reset_overrides_resets_only_its_scope() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": copies[0].to_wire(), "fills": red }),
+        json!({ "nodes": [copies[0].to_wire()], "fills": red }),
     );
     run(
         &mut doc,
@@ -2924,13 +2924,13 @@ fn fix_contrast_gives_a_failing_layer_the_nearest_passing_colour() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": pale.to_wire(), "fills": fill(Color::from_rgb8(0xcc, 0xcc, 0xcc)) }),
+        json!({ "nodes": [pale.to_wire()], "fills": fill(Color::from_rgb8(0xcc, 0xcc, 0xcc)) }),
     );
     run(
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": dark.to_wire(), "fills": fill(Color::BLACK) }),
+        json!({ "nodes": [dark.to_wire()], "fills": fill(Color::BLACK) }),
     );
 
     let mut probe = OnWhite { needs: 3.0 };
@@ -2992,9 +2992,9 @@ fn fix_contrast_binds_a_variable_and_refuses_what_it_cannot_fix() {
         { "verb": "add_variable", "args": { "kind": "color", "name": "ink", "value": black }, "as": "ink" },
         { "verb": "add_variable", "args": { "kind": "number", "name": "two", "value": two }, "as": "two" },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0), "name": "Pale" }, "as": "p" },
-        { "verb": "set_fills", "args": { "node": "@p", "fills": pale } },
+        { "verb": "set_fills", "args": { "nodes": ["@p"], "fills": pale } },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(10.0, 10.0), "name": "Sky" }, "as": "g" },
-        { "verb": "set_fills", "args": { "node": "@g", "fills": gradient } },
+        { "verb": "set_fills", "args": { "nodes": ["@g"], "fills": gradient } },
     ]);
     let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
         .unwrap_or_else(|e| panic!("{e}"));
@@ -3082,7 +3082,7 @@ fn add_image_answers_an_id_a_fill_can_show() {
     let script = json!([
         { "verb": "add_image", "args": { "bytes": png }, "as": "logo" },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "r" },
-        { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
+        { "verb": "set_fills", "args": { "nodes": ["@r"], "fills": [fill] } },
     ]);
     let made = verbs::run_script(
         &mut doc,
@@ -3192,7 +3192,7 @@ fn replace_image_keeps_the_framing() {
         { "verb": "add_image", "args": { "bytes": first }, "as": "a" },
         { "verb": "add_image", "args": { "bytes": second }, "as": "b" },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "r" },
-        { "verb": "set_fills", "args": { "node": "@r", "fills": [fill] } },
+        { "verb": "set_fills", "args": { "nodes": ["@r"], "fills": [fill] } },
         { "verb": "replace_image", "args": { "node": "@r", "image": "@b" } },
     ]);
     let made = verbs::run_script(
@@ -3351,7 +3351,7 @@ fn layer_verbs_refuse_a_page_and_a_page_name_is_trimmed() {
         json!({ "verb": "set_visible", "args": { "nodes": [p], "visible": false } }),
         json!({ "verb": "set_locked", "args": { "nodes": [p], "locked": true } }),
         json!({ "verb": "set_blend", "args": { "nodes": [p], "blend": "Multiply" } }),
-        json!({ "verb": "set_exports", "args": { "node": p, "exports": [] } }),
+        json!({ "verb": "set_exports", "args": { "nodes": [p], "exports": [] } }),
         json!({ "verb": "set_name", "args": { "node": p, "name": "  " } }),
         json!({ "verb": "add_page", "args": { "name": "" } }),
     ];
@@ -3872,7 +3872,10 @@ fn a_part_edited_by_a_verb_is_refused_at_the_commit() {
         .find(|(k, _)| k.role == ondin_core::chart::PartRole::Bar)
         .unwrap();
     for (verb, args) in [
-        ("set_fills", json!({ "node": bar.to_wire(), "fills": [] })),
+        (
+            "set_fills",
+            json!({ "nodes": [bar.to_wire()], "fills": [] }),
+        ),
         ("set_name", json!({ "node": bar.to_wire(), "name": "Mine" })),
         ("delete_node", json!({ "nodes": [bar.to_wire()] })),
     ] {
@@ -3961,7 +3964,7 @@ fn frame_and_the_outlines_rebuild_layers() {
         &mut doc,
         &mut ids,
         "set_strokes",
-        json!({ "node": b.to_wire(), "strokes": strokes }),
+        json!({ "nodes": [b.to_wire()], "strokes": strokes }),
     );
     let made = run(
         &mut doc,
@@ -4129,7 +4132,7 @@ fn push_to_main_writes_an_override_into_the_main() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": copy.to_wire(), "fills": red }),
+        json!({ "nodes": [copy.to_wire()], "fills": red }),
     );
     assert!(
         doc.get(inner).unwrap().paint().fills.is_empty(),
@@ -4332,13 +4335,13 @@ fn merge_colours_repaints_near_identical_colours() {
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": a.to_wire(), "fills": fill(0x1f, 0x3a, 0x5f) }),
+        json!({ "nodes": [a.to_wire()], "fills": fill(0x1f, 0x3a, 0x5f) }),
     );
     run(
         &mut doc,
         &mut ids,
         "set_fills",
-        json!({ "node": b.to_wire(), "fills": fill(0x20, 0x3b, 0x5e) }),
+        json!({ "nodes": [b.to_wire()], "fills": fill(0x20, 0x3b, 0x5e) }),
     );
     let (into, other) = ("#1f3a5fff", "#203b5e");
     assert_eq!(
@@ -4394,10 +4397,10 @@ fn merge_colours_into_a_bound_colour_binds_the_raw_paints() {
     let script = json!([
         { "verb": "add_variable", "args": { "kind": "color", "name": "brand/blue", "value": blue }, "as": "c" },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
-        { "verb": "set_fills", "args": { "node": "@x", "fills": fill(0x33, 0x66, 0xcc) } },
+        { "verb": "set_fills", "args": { "nodes": ["@x"], "fills": fill(0x33, 0x66, 0xcc) } },
         { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "fill": 0 }, "variable": "@c" } },
         { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "y" },
-        { "verb": "set_fills", "args": { "node": "@y", "fills": fill(0x34, 0x67, 0xcb) } },
+        { "verb": "set_fills", "args": { "nodes": ["@y"], "fills": fill(0x34, 0x67, 0xcb) } },
         { "verb": "merge_colours", "args": { "colours": ["#3467cbff"], "into": "#3366ccff" } },
     ]);
     let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
@@ -4406,6 +4409,88 @@ fn merge_colours_into_a_bound_colour_binds_the_raw_paints() {
     assert!(
         doc.get(y).unwrap().paint().fills[0].brush.var().is_some(),
         "the raw paint is bound to the variable"
+    );
+}
+
+/// `set_fills` over several layers writes as the Fill card writes a selection:
+/// layers sharing a list keep their own item ids for its rows and share one id
+/// for a row added, a group's shapes take it, and differing lists are replaced
+/// position by position. The text setters take text layers only.
+///
+/// flip: `set_fills` writing the anchor's ids onto every layer rather than
+/// `retarget_fills_all` → fails at "b keeps its own id".
+#[test]
+fn set_fills_writes_a_selection_as_the_inspector_does() {
+    let (mut doc, mut ids, page) = blank();
+    let solid = |c: Color| Fill {
+        brush: Brush::Solid(c).into(),
+        visible: true,
+    };
+    let fills = |list: &[Fill]| serde_json::to_value(list).unwrap();
+    let make = |doc: &mut Document, ids: &mut IdSource| {
+        run(
+            doc,
+            ids,
+            "create_node",
+            json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+        )[0]
+    };
+    let (a, b) = (make(&mut doc, &mut ids), make(&mut doc, &mut ids));
+    for id in [a, b] {
+        run(
+            &mut doc,
+            &mut ids,
+            "set_fills",
+            json!({ "nodes": [id.to_wire()], "fills": fills(&[solid(Color::WHITE)]) }),
+        );
+    }
+    let item_ids = |doc: &Document, id: NodeId| -> Vec<_> {
+        doc.get(id)
+            .unwrap()
+            .paint()
+            .fills
+            .iter()
+            .map(|f| f.id)
+            .collect()
+    };
+    let (was_a, was_b) = (item_ids(&doc, a), item_ids(&doc, b));
+    assert_ne!(was_a, was_b, "fills added apart have ids of their own");
+    let two = fills(&[solid(Color::BLACK), solid(Color::WHITE)]);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": [a.to_wire(), b.to_wire()], "fills": two }),
+    );
+    let (now_a, now_b) = (item_ids(&doc, a), item_ids(&doc, b));
+    assert_eq!(now_a[0], was_a[0], "a keeps its own id");
+    assert_eq!(now_b[0], was_b[0], "b keeps its own id");
+    assert_eq!(now_a[1], now_b[1], "the added row shares one id");
+    assert_eq!(doc.get(b).unwrap().paint().fills.len(), 2);
+
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [a.to_wire()] }),
+    )[0];
+    let red = fills(&[solid(Color::from_rgb8(200, 0, 0))]);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": [g.to_wire(), b.to_wire()], "fills": red }),
+    );
+    for (id, own) in [(a, now_a[0]), (b, now_b[0])] {
+        let f = &doc.get(id).unwrap().paint().fills;
+        assert_eq!(f.len(), 1, "a group's shape takes it too");
+        assert_eq!(f[0].id, own, "the first row keeps each layer's id");
+    }
+
+    let args = json!({ "nodes": [b.to_wire()], "style": serde_json::to_value(ondin_core::TextStyle::default()).unwrap() });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_text_style", args),
+        "nodes"
     );
 }
 
@@ -4426,12 +4511,12 @@ fn set_mask_sets_the_mode_of_a_mask() {
         &mut doc,
         &mut ids,
         "set_mask",
-        json!({ "node": r.to_wire(), "mask": true, "mode": "alpha" }),
+        json!({ "nodes": [r.to_wire()], "mask": true, "mode": "alpha" }),
     );
     let n = doc.get(r).unwrap();
     assert!(n.mask());
     assert_eq!(n.mask_mode(), ondin_core::MaskMode::Alpha, "alpha");
-    let args = json!({ "node": r.to_wire(), "mask": false, "mode": "shape" });
+    let args = json!({ "nodes": [r.to_wire()], "mask": false, "mode": "shape" });
     assert_eq!(refused_param(&doc, &mut ids, "set_mask", args), "mode");
 }
 

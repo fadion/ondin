@@ -661,7 +661,7 @@ fn a_text_with_content_or_a_binding_is_not_empty() {
         { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "bound" },
         { "verb": "bind_variable", "args": { "nodes": ["@bound"], "field": "content", "variable": "@v" } },
         { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "bare" },
-        { "verb": "set_fills", "args": { "node": "@bare", "fills": [] } },
+        { "verb": "set_fills", "args": { "nodes": ["@bare"], "fills": [] } },
         { "verb": "create_text", "args": { "parent": frame, "text": "Hello" }, "as": "dark" },
         { "verb": "create_text", "args": { "parent": frame, "text": "Gone" }, "as": "empty" },
     ]));

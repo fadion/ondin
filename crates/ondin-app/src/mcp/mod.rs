@@ -1441,7 +1441,7 @@ mod tests {
             &mut docs,
             1,
             "set_exports",
-            json!({ "node": id, "exports": exports }),
+            json!({ "nodes": [id], "exports": exports }),
         ));
         let out = call(&mut engine, &mut docs, 1, "run_exports", json!({}));
         let listed = ok(&out)["files"].as_array().unwrap().clone();
@@ -1643,7 +1643,7 @@ mod tests {
                 &mut docs,
                 1,
                 "set_fills",
-                json!({ "node": id, "fills": fills }),
+                json!({ "nodes": [id], "fills": fills }),
             ));
         }
         let red = solid(255, 0, 0);
@@ -1652,7 +1652,7 @@ mod tests {
             &mut docs,
             1,
             "set_fills",
-            json!({ "node": ids[2], "fills": red }),
+            json!({ "nodes": [ids[2]], "fills": red }),
         );
         ok(&set);
         let out = call(
@@ -1730,7 +1730,7 @@ mod tests {
                 &mut docs,
                 1,
                 "set_fills",
-                json!({ "node": id, "fills": solid(r, 0x33, 0x66) }),
+                json!({ "nodes": [id], "fills": solid(r, 0x33, 0x66) }),
             ));
         }
         let out = call(&mut engine, &mut docs, 1, "review_colours", json!({}));

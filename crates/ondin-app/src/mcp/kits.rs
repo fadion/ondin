@@ -611,7 +611,12 @@ mod tests {
         )["created"][0]
             .clone();
         let fills = ondin_core::verbs::example("[Fill]").unwrap();
-        ok(e, d, "set_fills", json!({ "node": rect, "fills": fills }));
+        ok(
+            e,
+            d,
+            "set_fills",
+            json!({ "nodes": [rect], "fills": fills }),
+        );
         ok(
             e,
             d,

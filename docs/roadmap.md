@@ -23,9 +23,7 @@ true.
   specified beside used values (§15 D868), and an instance's overrides and property values.
   The reads also lose what the whole-list writes need back: hidden fills, gradient and image
   framing, a stroke's align, dash, cap and join, a text's runs, and export specs. Tools owed:
-  comparing a version, and several verbs as one undo step. Setters that take one `node`
-  (`set_fills`, `set_strokes`, `set_text_style`, …) should take `nodes` as the inspector writes a
-  selection.
+  comparing a version, and several verbs as one undo step.
   The proxy's loop (`mcp/proxy.rs` `run`) is wired to stdin and stdout, so its test covers only
   `rewrite`: make it take a reader, a writer and a connect function, and pin the handover from
   `serve` to the window, the restore before the first call, and a lost answer never re-sent.

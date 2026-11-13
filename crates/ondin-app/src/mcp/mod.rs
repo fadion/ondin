@@ -1160,7 +1160,7 @@ fn named_paths<'a>(
     }
 }
 
-/// `batch`: each step's verb committed in turn, each reading what the last left,
+/// `batch`: each step's verb or `set` committed in turn, each reading what the last left,
 /// then joined into one undo step named `batch`. A refused step takes back the
 /// steps before it, so the batch lands whole or not at all. A step names what an
 /// earlier one made as `"@label"`, the label that step gave in `as`, as
@@ -1402,9 +1402,9 @@ fn batch_step(
         .get("tool")
         .and_then(Value::as_str)
         .ok_or("a step names its `tool`")?;
-    if ondin_core::verbs::find(tool).is_none() {
+    if tool != "set" && ondin_core::verbs::find(tool).is_none() {
         return Err(format!(
-            "a batch runs the write tools that are verbs, and `{tool}` is none"
+            "a batch runs `set` and the write tools that are verbs, and `{tool}` is neither"
         ));
     }
     let mut args = step.get("args").cloned().unwrap_or_else(|| json!({}));
@@ -1413,7 +1413,11 @@ fn batch_step(
         map.insert("base_rev".into(), base.clone());
     }
     let depth = s.history.undo_depth();
-    let Answer::Json(answer) = write(conn, s, client, tool, &args)? else {
+    let ran = match tool {
+        "set" => set(conn, s, client, &args)?,
+        _ => write(conn, s, client, tool, &args)?,
+    };
+    let Answer::Json(answer) = ran else {
         return Err("a write answers JSON".into());
     };
     Ok((answer, s.history.undo_depth().saturating_sub(depth)))
@@ -2506,6 +2510,55 @@ mod tests {
         assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
         assert_eq!(s.history.undo_depth(), 1);
         assert_eq!(s.history.redo_depth(), 0, "and nothing to redo");
+    }
+
+    /// A batch step can be `set`, naming an earlier step's layer by its label, and
+    /// the batch is still one step; a `set` refused there takes back the steps
+    /// before it.
+    ///
+    /// flip: `batch_step` refusing a tool that is no verb, as it did `set` → fails
+    /// at the first batch's `ok`.
+    #[test]
+    fn a_batch_runs_set_as_a_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let make = json!({ "tool": "create_node", "as": "card",
+            "args": { "parent": page, "kind": kind, "name": "Card" } });
+        let set = json!({ "tool": "set",
+            "args": { "nodes": ["@card"], "props": { "name": "Hero", "opacity": 0.5 } } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, set] }),
+        );
+        let card = ok(&out)["steps"][0]["created"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let s = &docs.session;
+        let n = s.doc.get(NodeId::from_wire(&card).unwrap()).unwrap();
+        assert_eq!((n.name(), n.opacity()), ("Hero", 0.5));
+        assert_eq!(s.history.undo_depth(), 1, "one step");
+        assert_eq!(s.history.done().last().unwrap().note.label, "batch");
+
+        let layers = docs.session.doc.len();
+        let bad = json!({ "tool": "set",
+            "args": { "nodes": ["@card"], "props": { "name": "X", "colour": "#fff" } } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, bad] }),
+        );
+        assert!(out.is_error);
+        let s = &docs.session;
+        assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
+        assert_eq!(s.history.undo_depth(), 1);
     }
 
     /// An instance reads back the property values it is set to and each copy the

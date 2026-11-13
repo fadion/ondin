@@ -5306,6 +5306,52 @@ fn like_takes_another_layers_text_style_and_paint() {
     );
 }
 
+/// A text that gives its own fills does not take its `like`'s style colour, which
+/// would draw over them; one that gives none takes it.
+///
+/// flip: `expand_like` copying the style's `color` whatever the layer gives →
+/// fails at "its own fills are its colour".
+#[test]
+fn like_leaves_the_style_colour_to_a_text_with_its_own_fills() {
+    let (mut doc, mut ids, page) = blank();
+    let src = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "kind": { "Text": { "content": "On dark",
+            "sizing": "Auto", "style": { "font_size": 16.0, "color": "#ffffff" } } } } }),
+    )[0];
+    let text = |fills: Option<Value>| {
+        let mut t = json!({ "like": src.to_wire(),
+            "kind": { "Text": { "content": "Copy", "sizing": "Auto" } } });
+        if let Some(f) = fills {
+            t["fills"] = f;
+        }
+        json!({ "parent": page.to_wire(), "tree": t })
+    };
+    let own = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        text(Some(json!(["#12352a"]))),
+    )[0];
+    let read = verbs::tree(&doc, own).unwrap();
+    let style = &read["kind"]["Text"]["style"];
+    assert_eq!(style["font_size"], json!(16.0), "the like still reached it");
+    assert!(
+        style.get("color").is_none(),
+        "its own fills are its colour: {read}"
+    );
+    assert_eq!(read["fills"], json!(["#12352a"]));
+    let bare = run(&mut doc, &mut ids, "insert_subtree", text(None))[0];
+    let read = verbs::tree(&doc, bare).unwrap();
+    assert_eq!(
+        read["kind"]["Text"]["style"]["color"],
+        json!("#ffffff"),
+        "{read}"
+    );
+}
+
 /// `set_mask` sets a mask's mode with it, and refuses a mode for a layer that
 /// stops being one.
 ///

@@ -229,7 +229,9 @@ it created. A verb never commits; its caller does, as every edit is committed.
   a parent link; the verb mints them and emits `CreateNode` then the `Set*` ops per layer, in one
   transaction, so every op's own check applies. Unknown fields are refused. A layer may name
   another in `like` to take its paint and text style where it gives none, expanded before the
-  tree is read, since only the verb sees the document.
+  tree is read, since only the verb sees the document. A text that gives its own fills does not
+  take the style's `color`, which would draw over them. A child outside a flex or grid parent is
+  placed by its `transform`; a tree child written with `at`, `x` or `y` is refused with that form.
 - **Model parameters read short forms** (`verbs::loose`): hex colours and paints and text styles
   without their default fields, and what `get_node` and CSS write (lengths in `px`/`em`, flat
   effects, a path as SVG data; `mcp.md` §8.4), expand into the model's serde shapes before

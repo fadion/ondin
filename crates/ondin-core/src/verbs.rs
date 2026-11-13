@@ -706,6 +706,12 @@ fn explain(model: &str, v: &Value, miss: &Miss) -> String {
             .and_then(Value::as_str)
             .map(str::to_owned),
     };
+    if model == "Tree" && matches!(named.as_deref(), Some("at" | "x" | "y" | "position")) {
+        return format!(
+            "{said}; a tree places a child by `transform`, as [1, 0, 0, 1, x, y], \
+             and the root by `insert_subtree`'s `x` and `y`"
+        );
+    }
     if miss.unknown_field {
         let above = &miss.steps[..miss.steps.len().saturating_sub(1)];
         // The nearest field holding a model of its own reads that model's example,
@@ -1831,7 +1837,7 @@ pub static VERBS: &[Verb] = &[
             req(
                 "tree",
                 ParamKind::Model("Tree"),
-                "the root layer, its properties and its `children`, bottom first; a layer's `like` names one whose paint and text style it takes where it gives none",
+                "the root layer, its properties and its `children`, bottom first; a child is placed by `transform` [1, 0, 0, 1, x, y]; a layer's `like` names one whose paint and text style it takes where it gives none",
             ),
             opt(
                 "index",
@@ -5698,12 +5704,15 @@ pub fn shorten(v: &mut Value) {
 
 /// Fill in a tree's `like`s: a layer with `"like": "<id>"` takes that layer's
 /// fills, strokes, effects, opacity and blend where it gives none, and a text
-/// its text style field by field and its paragraph. Recurses into `children`.
+/// its text style field by field and its paragraph. A text that gives its own
+/// fills does not take the style's `color`, which would draw over them.
+/// Recurses into `children`.
 fn expand_like(doc: &Document, v: &mut Value) -> Result<(), String> {
     let Value::Object(map) = v else {
         return Ok(());
     };
     if let Some(like) = map.remove("like") {
+        let own_fills = map.contains_key("fills");
         let id = like
             .as_str()
             .and_then(NodeId::from_wire)
@@ -5725,6 +5734,9 @@ fn expand_like(doc: &Document, v: &mut Value) -> Result<(), String> {
                     .or_insert_with(|| Value::Object(Map::new()));
                 if let Value::Object(style) = style {
                     for (k, val) in src_style {
+                        if own_fills && k == "color" {
+                            continue;
+                        }
                         style.entry(k.clone()).or_insert_with(|| val.clone());
                     }
                 }

@@ -139,6 +139,26 @@ fn a_kind_without_its_fields_is_shown_its_form() {
     assert!(flat.contains("one key naming the variant"), "{flat}");
 }
 
+/// A tree child written with `at` is refused with the `transform` that places it.
+///
+/// flip: `explain` without its tree-placement arm → fails at "the placing form".
+#[test]
+fn a_tree_child_placed_with_at_is_shown_transform() {
+    let (doc, mut ids, page) = blank();
+    let rect = json!({ "Rect": { "size": { "width": 1, "height": 1 } } });
+    let why = why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "kind": rect,
+            "children": [{ "at": [4, 4], "kind": rect }] } }),
+    );
+    assert!(
+        why.contains("[1, 0, 0, 1, x, y]"),
+        "the placing form: {why}"
+    );
+}
+
 /// A parameter a client sent as JSON text is read as the JSON.
 #[test]
 fn a_model_parameter_sent_as_json_text_is_read() {

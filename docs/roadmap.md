@@ -23,9 +23,8 @@ true.
   specified beside used values (§15 D868), and an instance's overrides and property values.
   The reads also lose what the whole-list writes need back: hidden fills, gradient and image
   framing, a stroke's align, dash, cap and join, a text's runs, and export specs. Tools owed,
-  each over a transaction core already builds: variant and property management (rename, remove,
-  values, defaults, interaction states), collections and width queries, descriptions and doc
-  links, a layer's HTML element and link, `set_mask`'s mode, frame ↔ group and fit to content,
+  each over a transaction core already builds: collections and width queries, descriptions and
+  doc links, a layer's HTML element and link, `set_mask`'s mode, frame ↔ group and fit to content,
   replacing a font, the person's page and viewport, a picture's pixel size, comparing a version,
   and several verbs as one undo step. Setters that take one `node` (`set_fills`, `set_strokes`,
   `set_text_style`, …) should take `nodes` as the inspector writes a selection.

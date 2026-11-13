@@ -110,7 +110,7 @@ pub const PHASE_2: [&str; 70] = [
 /// binding and not the literal beside it, and removing a variable, mode or style
 /// still in use is refused at the commit. `create_instance`, `add_variable`,
 /// `add_mode` and `add_style` return the new ids.
-pub const PHASE_3: [&str; 26] = [
+pub const PHASE_3: [&str; 38] = [
     "make_component",
     "duplicate_as_component",
     "create_instance",
@@ -118,8 +118,20 @@ pub const PHASE_3: [&str; 26] = [
     "swap_instance",
     "combine_as_variants",
     "add_variant",
+    "set_variant_value",
+    "add_variant_property",
+    "rename_variant_property",
+    "delete_variant_property",
+    "add_variant_value",
+    "rename_variant_value",
+    "move_variant_value",
+    "delete_variant_value",
+    "tie_state",
     "switch_variant",
     "define_property",
+    "edit_property",
+    "delete_property",
+    "show_nested_properties",
     "set_instance_property",
     "reset_overrides",
     "push_to_main",

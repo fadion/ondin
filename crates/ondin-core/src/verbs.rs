@@ -427,6 +427,11 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "BoundField" => reads::<build::BoundField>(v),
         "Color" => reads::<peniko::Color>(v),
         "[Hex]" => reads::<Vec<String>>(v),
+        // A list of node ids that may be empty, where `Nodes` may not.
+        "[Node]" => match v {
+            Value::Array(list) => list.iter().try_for_each(|v| wire(v).map(|_| ())),
+            _ => Err("expected a list of node ids".into()),
+        },
         "PropValue" => match v {
             Value::Bool(_) | Value::String(_) => Ok(()),
             _ => Err("expected true, false or a string".into()),
@@ -529,6 +534,7 @@ pub fn example(model: &str) -> Option<Value> {
         "BoundField" => json(&build::BoundField::Fill(0)),
         "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
         "[Hex]" => serde_json::json!(["#203b5eff", "#1e395fff"]),
+        "[Node]" => serde_json::json!(["7e5b:12", "7e5b:40"]),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
@@ -603,6 +609,9 @@ const RESETS: &[&str] = &["all", "fields", "children", "order"];
 const PUSHES: &[&str] = &["all", "properties", "fields", "layers", "order", "removals"];
 const LEVELS: &[&str] = &["aa", "aaa", "apca"];
 const PROP_KINDS: &[&str] = &["boolean", "text", "swap"];
+/// The browser states a variant value can be tied to, as `variant::Interaction`
+/// writes them.
+const STATES: &[&str] = &["hover", "focus-visible", "active", "disabled"];
 const STYLE_SLOTS: &[&str] = &["fills", "strokes", "effects", "text", "layout"];
 
 /// The style slot a [`STYLE_SLOTS`] word names.
@@ -738,6 +747,93 @@ fn collection_arg(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Option<CollectionId>, V
         }
         c => Ok(c),
     }
+}
+
+/// What a variant verb says for a property name that is empty or taken.
+const PROP_NAME_TAKEN: &str = "a property needs a name no other property of the set or main has";
+/// What a variant verb says for a value name that is empty or taken.
+const VALUE_NAME_TAKEN: &str = "a value needs a name no other value of the property has";
+
+/// The component set the `node` argument names: the set, or one of its variants.
+fn set_arg(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<NodeId, VerbError> {
+    let id = a.layer(ctx.doc, "node")?;
+    node(ctx, id)?;
+    match crate::variant::is_set(ctx.doc, id) {
+        true => Ok(id),
+        false => crate::variant::set_of(ctx.doc, id)
+            .ok_or_else(|| a.invalid("node", "neither a component set nor a variant")),
+    }
+}
+
+/// The variant property of `set` the `property` argument names, and its place.
+fn variant_prop<'d>(
+    ctx: &Ctx<'d>,
+    a: &Args<'_>,
+    set: NodeId,
+) -> Result<(usize, &'d crate::variant::VariantProp), VerbError> {
+    let vs = node(ctx, set)?
+        .set()
+        .ok_or_else(|| a.invalid("node", "not in a component set"))?;
+    let name = a.text("property").unwrap_or_default();
+    vs.props
+        .iter()
+        .enumerate()
+        .find(|(_, p)| p.name == name)
+        .ok_or_else(|| {
+            let names: Vec<&str> = vs.props.iter().map(|p| p.name.as_str()).collect();
+            a.invalid(
+                "property",
+                format!("the set's properties are {}", names.join(", ")),
+            )
+        })
+}
+
+/// The place of the value of `p` the `value` argument names.
+fn variant_value(a: &Args<'_>, p: &crate::variant::VariantProp) -> Result<usize, VerbError> {
+    let name = a.text("value").unwrap_or_default();
+    p.values.iter().position(|v| v == name).ok_or_else(|| {
+        a.invalid(
+            "value",
+            format!("{}'s values are {}", p.name, p.values.join(", ")),
+        )
+    })
+}
+
+/// The owner of the component property the `property` argument names — the
+/// main or set the `node` argument names, or a variant's set — and the property.
+/// A showing of nested properties is nameless, and never named here.
+fn component_prop(
+    ctx: &Ctx<'_>,
+    a: &Args<'_>,
+) -> Result<(NodeId, Keyed<crate::variant::Property>), VerbError> {
+    let id = a.layer(ctx.doc, "node")?;
+    node(ctx, id)?;
+    let owner = crate::variant::owner_of_main(ctx.doc, id)
+        .ok_or_else(|| a.invalid("node", "neither a main component nor a component set"))?;
+    let props = node(ctx, owner)?.props();
+    let name = a.text("property").unwrap_or_default();
+    let named = |p: &&Keyed<crate::variant::Property>| {
+        p.kind != crate::variant::PropKind::Nested && !p.name.is_empty()
+    };
+    props
+        .iter()
+        .filter(named)
+        .find(|p| p.name == name)
+        .map(|p| (owner, p.clone()))
+        .ok_or_else(|| {
+            let names: Vec<&str> = props
+                .iter()
+                .filter(named)
+                .map(|p| p.name.as_str())
+                .collect();
+            a.invalid(
+                "property",
+                match names.as_slice() {
+                    [] => "it has no component properties".to_owned(),
+                    _ => format!("its properties are {}", names.join(", ")),
+                },
+            )
+        })
 }
 
 /// What `make_component` says for a rule it refused by.
@@ -1840,6 +1936,336 @@ pub static VERBS: &[Verb] = &[
             let (tx, new) = variant::add_variant(ctx.doc, ctx.res, ctx.ids, set, from)
                 .ok_or(VerbError::Nothing("this set has no variant to copy"))?;
             Ok(Done::made(tx, vec![new]))
+        },
+    },
+    Verb {
+        name: "set_variant_value",
+        doc: "Set one of a variant's values, as the variant card's dropdowns do; a combination another variant holds shows as a clash",
+        params: &[
+            req("node", NODE, "the variant, a main in a set"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "one of the property's values"),
+        ],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            let set = crate::variant::set_of(ctx.doc, id)
+                .ok_or_else(|| a.invalid("node", "not a variant of a component set"))?;
+            let (prop, p) = variant_prop(ctx, a, set)?;
+            let value = &p.values[variant_value(a, p)?];
+            let mut values = node(ctx, id)?.variant().to_vec();
+            if values.get(prop) == Some(value) {
+                return Ok(Done::default());
+            }
+            if let Some(v) = values.get_mut(prop) {
+                v.clone_from(value);
+            }
+            crate::variant::set_values(ctx.doc, id, values)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing(
+                    "the variant's values do not fit its set",
+                ))
+        },
+    },
+    Verb {
+        name: "rename_variant_property",
+        doc: "Rename a component set's variant property",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            req("name", TEXT, "its new name"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, _) = variant_prop(ctx, a, set)?;
+            let name = a.text("name").unwrap_or_default();
+            crate::variant::rename_property(ctx.doc, set, prop, name)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("name", PROP_NAME_TAKEN))
+        },
+    },
+    Verb {
+        name: "rename_variant_value",
+        doc: "Rename a value of a variant property, in the set and in every variant holding it",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "the value, by name"),
+            req("name", TEXT, "its new name"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, p) = variant_prop(ctx, a, set)?;
+            let value = variant_value(a, p)?;
+            let name = a.text("name").unwrap_or_default();
+            crate::variant::rename_value(ctx.doc, set, prop, value, name)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("name", VALUE_NAME_TAKEN))
+        },
+    },
+    Verb {
+        name: "add_variant_property",
+        doc: "Add a variant property to a component set, every variant taking its one value",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            opt(
+                "name",
+                TEXT,
+                "its name; the first free `Property N` unless given",
+            ),
+            opt("value", TEXT, "its one value; `Default` unless given"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let vs = node(ctx, set)?.set().cloned().unwrap_or_default();
+            let name = match a.text("name") {
+                Some(n) => n.to_owned(),
+                None => crate::variant::next_property_name(&vs),
+            };
+            let value = a.text("value").unwrap_or("Default");
+            if value.trim().is_empty() {
+                return Err(a.invalid("value", "a value needs a name"));
+            }
+            crate::variant::add_property(ctx.doc, set, &name, value)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("name", PROP_NAME_TAKEN))
+        },
+    },
+    Verb {
+        name: "add_variant_value",
+        doc: "Add a value to a variant property, last",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            opt(
+                "value",
+                TEXT,
+                "its name; the first free `Value N` unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, _) = variant_prop(ctx, a, set)?;
+            let value = match a.text("value") {
+                Some(v) => v.to_owned(),
+                None => {
+                    let vs = node(ctx, set)?.set().cloned().unwrap_or_default();
+                    crate::variant::next_value_name(&vs, prop)
+                }
+            };
+            crate::variant::add_value(ctx.doc, set, prop, &value)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("value", VALUE_NAME_TAKEN))
+        },
+    },
+    Verb {
+        name: "delete_variant_property",
+        doc: "Delete a variant property from a component set and from every variant",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, _) = variant_prop(ctx, a, set)?;
+            crate::variant::delete_property(ctx.doc, set, prop)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("a set needs at least one property"))
+        },
+    },
+    Verb {
+        name: "move_variant_value",
+        doc: "Move a value of a variant property to another place in its list",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "the value, by name"),
+            req("index", INDEX, "its new place, counted from 0"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, p) = variant_prop(ctx, a, set)?;
+            let from = variant_value(a, p)?;
+            let to = a.index("index").unwrap_or(0);
+            if to >= p.values.len() {
+                let why = format!(
+                    "the property has {}",
+                    plural(p.values.len(), "value", "values")
+                );
+                return Err(a.invalid("index", why));
+            }
+            if to == from {
+                return Ok(Done::default());
+            }
+            crate::variant::move_value(ctx.doc, set, prop, from, to)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("that value cannot move there"))
+        },
+    },
+    Verb {
+        name: "delete_variant_value",
+        doc: "Delete a value of a variant property, and the variants holding it; their instances detach",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "the value, by name"),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, p) = variant_prop(ctx, a, set)?;
+            let value = variant_value(a, p)?;
+            let gone = crate::variant::using_value(ctx.doc, set, prop, value).len();
+            let tx = crate::variant::delete_value(ctx.doc, set, prop, value)
+                .ok_or(VerbError::Nothing("a property needs at least one value"))?;
+            let done = Done::edit(tx);
+            Ok(match gone {
+                0 => done,
+                n => done.saying(format!("deleted {}", plural(n, "variant", "variants"))),
+            })
+        },
+    },
+    Verb {
+        name: "tie_state",
+        doc: "Tie a value of a variant property to a browser state, making it the set's interaction state, or untie it",
+        params: &[
+            req("node", NODE, "the set, or one of its variants"),
+            req("property", TEXT, "the variant property, by name"),
+            req("value", TEXT, "the value, by name"),
+            opt(
+                "state",
+                ParamKind::Choice(STATES),
+                "the state it stands for; absent unties it",
+            ),
+        ],
+        run: |ctx, a| {
+            let set = set_arg(ctx, a)?;
+            let (prop, p) = variant_prop(ctx, a, set)?;
+            let value = variant_value(a, p)?;
+            let state = a
+                .choice("state")
+                .map(|w| serde_json::from_value(Value::from(w)))
+                .transpose()
+                .map_err(|e| a.invalid("state", e))?;
+            if p.state_of(&p.values[value]) == state {
+                return Ok(Done::default());
+            }
+            if state.is_some()
+                && let Some(why) = crate::variant::why_not_tie(ctx.doc, set, prop, value)
+            {
+                return Err(a.invalid("value", why));
+            }
+            crate::variant::tie_state(ctx.doc, set, prop, value, state)
+                .map(Done::edit)
+                .ok_or_else(|| a.invalid("state", "another value is tied to that state"))
+        },
+    },
+    Verb {
+        name: "show_nested_properties",
+        doc: "Show a nested instance's own properties on every instance of the main holding it, or stop",
+        params: &[
+            req("node", NODE, "the instance nested inside a main"),
+            req("shown", BOOL, "whether its properties show"),
+        ],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            let nested = node(ctx, id)?
+                .link()
+                .and_then(|l| ctx.doc.get(l))
+                .is_some_and(|l| l.component());
+            if !nested || crate::variant::owner_above(ctx.doc, id).is_none() {
+                return Err(a.invalid("node", "not an instance nested inside a main"));
+            }
+            let on = a.bool("shown").unwrap_or(true);
+            Ok(crate::variant::set_shown(ctx.doc, ctx.ids, id, on)
+                .map(Done::edit)
+                .unwrap_or_default())
+        },
+    },
+    Verb {
+        name: "edit_property",
+        doc: "Rename a component property, or change a swap property's filter and preferred mains",
+        params: &[
+            req("node", NODE, "the main or set owning it, or a variant"),
+            req("property", TEXT, "the property, by name"),
+            opt("name", TEXT, "its new name"),
+            opt(
+                "filter",
+                TEXT,
+                "a swap property's filter: the start of the names of the mains its picker offers; empty offers every main",
+            ),
+            opt(
+                "preferred",
+                ParamKind::Model("[Node]"),
+                "a swap property's preferred mains, offered first, in order",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::variant::{PropKind, Property};
+            let (owner, p) = component_prop(ctx, a)?;
+            let name = match a.text("name").map(str::trim) {
+                Some(n) => {
+                    let o = node(ctx, owner)?;
+                    let taken = o.props().iter().any(|q| q.id != p.id && q.name == n)
+                        || o.set().is_some_and(|s| s.props.iter().any(|v| v.name == n));
+                    if n.is_empty() || taken {
+                        return Err(a.invalid("name", PROP_NAME_TAKEN));
+                    }
+                    n.to_owned()
+                }
+                None => p.name.clone(),
+            };
+            let swap = |param: &'static str| match p.kind {
+                PropKind::Swap => Ok(()),
+                _ => Err(a.invalid(param, "only a swap property has one")),
+            };
+            let filter = match a.text("filter") {
+                Some(f) => {
+                    swap("filter")?;
+                    f.trim().to_owned()
+                }
+                None => p.filter.clone(),
+            };
+            let preferred = match a.model_opt::<Vec<String>>("preferred")? {
+                Some(list) => {
+                    swap("preferred")?;
+                    let mut mains = Vec::new();
+                    for s in &list {
+                        let m = NodeId::from_wire(s)
+                            .filter(|m| ctx.doc.get(*m).is_some_and(|n| n.component()))
+                            .ok_or_else(|| {
+                                a.invalid("preferred", format!("`{s}` is not a main component"))
+                            })?;
+                        mains.push(m);
+                    }
+                    mains
+                }
+                None => p.preferred.clone(),
+            };
+            let next = Property {
+                name,
+                filter,
+                preferred,
+                ..p.value.clone()
+            };
+            if next == p.value {
+                return Ok(Done::default());
+            }
+            crate::variant::edit_property(ctx.doc, owner, p.id, |_| Some(next))
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("that property is gone"))
+        },
+    },
+    Verb {
+        name: "delete_property",
+        doc: "Delete a component property; the layers bound to it keep their values",
+        params: &[
+            req("node", NODE, "the main or set owning it, or a variant"),
+            req("property", TEXT, "the property, by name"),
+        ],
+        run: |ctx, a| {
+            let (owner, p) = component_prop(ctx, a)?;
+            crate::variant::edit_property(ctx.doc, owner, p.id, |_| None)
+                .map(Done::edit)
+                .ok_or(VerbError::Nothing("that property is gone"))
         },
     },
     Verb {

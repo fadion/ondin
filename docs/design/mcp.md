@@ -66,8 +66,13 @@ Phase 2 — write (1:1 with operations/composites):
 
 Phase 3 — components, variables and styles (through the verbs, never the raw ops):
 `make_component(id)`, `duplicate_as_component(id)`, `create_instance(main, parent, x?, y?)`, `detach_instance(id)`,
-`swap_instance(id, main)`, `combine_as_variants(ids)`, `add_variant(id)`, `switch_variant(id, property, value)`,
-`define_property(node, kind, property?, name?)`, `set_instance_property(id, property, value)`,
+`swap_instance(id, main)`, `combine_as_variants(ids)`, `add_variant(id)`, `set_variant_value(node, property, value)`,
+`add_variant_property(node, name?, value?)`, `rename_variant_property(node, property, name)`, `delete_variant_property(node, property)`,
+`add_variant_value(node, property, value?)`, `rename_variant_value(node, property, value, name)`,
+`move_variant_value(node, property, value, index)`, `delete_variant_value(node, property, value)`,
+`tie_state(node, property, value, state?)`, `switch_variant(id, property, value)`,
+`define_property(node, kind, property?, name?)`, `edit_property(node, property, name?, filter?, preferred?)`,
+`delete_property(node, property)`, `show_nested_properties(node, shown)`, `set_instance_property(id, property, value)`,
 `reset_overrides(nodes, scope)`, `push_to_main(node, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's

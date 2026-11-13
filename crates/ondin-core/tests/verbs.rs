@@ -2253,6 +2253,343 @@ fn variants_are_combined_and_switched() {
     assert_eq!(ondin_core::component::main_of(&doc, inst), Some(want));
 }
 
+/// A set combined from `Size=Small` and `Size=Large`: the set, then the two variants.
+fn size_set(doc: &mut Document, ids: &mut IdSource, page: NodeId) -> (NodeId, NodeId, NodeId) {
+    let (small, _) = main_component(doc, ids, page, "Size=Small", 60.0);
+    let (large, _) = main_component(doc, ids, page, "Size=Large", 120.0);
+    let set = run(
+        doc,
+        ids,
+        "combine_as_variants",
+        json!({ "nodes": [small.to_wire(), large.to_wire()] }),
+    )[0];
+    assert_eq!(
+        variant_props(doc, set),
+        [("Size".into(), vec!["Small".into(), "Large".into()])]
+    );
+    (set, small, large)
+}
+
+/// `set`'s variant properties, each its name and values.
+fn variant_props(doc: &Document, set: NodeId) -> Vec<(String, Vec<String>)> {
+    doc.get(set)
+        .and_then(|s| s.set())
+        .map(|s| {
+            s.props
+                .iter()
+                .map(|p| (p.name.clone(), p.values.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A set's variant properties are added, renamed and deleted, a variant naming its
+/// set as the set does, and a taken name or the last property refused.
+///
+/// flip: `add_variant_property` passing its name as the value → fails at the set's
+/// new property and its one value.
+#[test]
+fn variant_properties_are_added_renamed_and_deleted() {
+    let (mut doc, mut ids, page) = blank();
+    let (set, small, large) = size_set(&mut doc, &mut ids, page);
+    run(
+        &mut doc,
+        &mut ids,
+        "add_variant_property",
+        json!({ "node": small.to_wire(), "name": "State" }),
+    );
+    assert_eq!(
+        variant_props(&doc, set)[1],
+        ("State".into(), vec!["Default".into()])
+    );
+    for v in [small, large] {
+        assert_eq!(
+            doc.get(v).unwrap().variant()[1],
+            "Default",
+            "every variant takes the new property's value"
+        );
+    }
+    run(
+        &mut doc,
+        &mut ids,
+        "rename_variant_property",
+        json!({ "node": set.to_wire(), "property": "Size", "name": "Scale" }),
+    );
+    assert_eq!(variant_props(&doc, set)[0].0, "Scale");
+    for (name, param) in [("State", "name"), ("", "name")] {
+        let args = json!({ "node": set.to_wire(), "property": "Scale", "name": name });
+        assert_eq!(
+            refused_param(&doc, &mut ids, "rename_variant_property", args),
+            param
+        );
+    }
+    let args = json!({ "node": set.to_wire(), "property": "Size", "name": "X" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "rename_variant_property", args),
+        "property",
+        "a property is named as it is now"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "delete_variant_property",
+        json!({ "node": set.to_wire(), "property": "State" }),
+    );
+    assert_eq!(variant_props(&doc, set).len(), 1);
+    assert_eq!(
+        doc.get(small).unwrap().variant(),
+        ["Small"],
+        "variants drop it too"
+    );
+    let last = answer(
+        &doc,
+        &mut ids,
+        "delete_variant_property",
+        json!({ "node": set.to_wire(), "property": "Scale" }),
+    );
+    assert!(
+        matches!(last, Err(VerbError::Nothing(_))),
+        "the last stays: {last:?}"
+    );
+    let plain = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(10.0, 10.0) }),
+    )[0];
+    let args = json!({ "node": plain.to_wire(), "name": "X" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "add_variant_property", args),
+        "node"
+    );
+}
+
+/// A property's values are added, moved, renamed in every variant holding them,
+/// set on a variant, and deleted with the variants holding them, which it says.
+///
+/// flip: `delete_variant_value` dropping its `saying` → fails at "says what went";
+/// `move_variant_value` ignoring `index` (moving to 0) → fails at "Value 2 moves
+/// to the middle".
+#[test]
+fn variant_values_are_added_moved_renamed_set_and_deleted() {
+    let (mut doc, mut ids, page) = blank();
+    let (set, small, large) = size_set(&mut doc, &mut ids, page);
+    let on = |extra: Value| {
+        let mut args = json!({ "node": set.to_wire(), "property": "Size" });
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        args
+    };
+    run(&mut doc, &mut ids, "add_variant_value", on(json!({})));
+    let values = |doc: &Document| variant_props(doc, set)[0].1.clone();
+    assert_eq!(values(&doc), ["Small", "Large", "Value 2"]);
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "add_variant_value",
+            on(json!({ "value": "Small" }))
+        ),
+        "value"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "move_variant_value",
+        on(json!({ "value": "Value 2", "index": 1 })),
+    );
+    assert_eq!(
+        values(&doc),
+        ["Small", "Value 2", "Large"],
+        "Value 2 moves to the middle"
+    );
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "move_variant_value",
+            on(json!({ "value": "Small", "index": 3 }))
+        ),
+        "index"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "rename_variant_value",
+        on(json!({ "value": "Small", "name": "Tiny" })),
+    );
+    assert_eq!(values(&doc)[0], "Tiny");
+    assert_eq!(
+        doc.get(small).unwrap().variant(),
+        ["Tiny"],
+        "its variant follows"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_variant_value",
+        json!({ "node": small.to_wire(), "property": "Size", "value": "Value 2" }),
+    );
+    assert_eq!(doc.get(small).unwrap().variant(), ["Value 2"]);
+    let args = json!({ "node": set.to_wire(), "property": "Size", "value": "Tiny" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_variant_value", args),
+        "node",
+        "a set has no values of its own"
+    );
+    let unused = answer(
+        &doc,
+        &mut ids,
+        "delete_variant_value",
+        on(json!({ "value": "Tiny" })),
+    )
+    .unwrap();
+    assert_eq!(
+        unused.said, None,
+        "a value no variant holds takes none with it"
+    );
+    let used = answer(
+        &doc,
+        &mut ids,
+        "delete_variant_value",
+        on(json!({ "value": "Large" })),
+    )
+    .unwrap();
+    assert_eq!(
+        used.said.as_deref(),
+        Some("deleted 1 variant"),
+        "says what went"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "delete_variant_value",
+        on(json!({ "value": "Large" })),
+    );
+    assert!(
+        doc.get(large).is_none(),
+        "the variant holding it goes with it"
+    );
+    assert_eq!(values(&doc), ["Tiny", "Value 2"]);
+}
+
+/// A value tied to a state makes its property the interaction state; rest's value
+/// is refused with why, and untying the last makes the property plain again.
+///
+/// flip: `tie_state` skipping `why_not_tie` → fails at "rest is refused", the core
+/// refusing it under `state` without the reason.
+#[test]
+fn tie_state_ties_and_unties_a_value() {
+    let (mut doc, mut ids, page) = blank();
+    let (set, ..) = size_set(&mut doc, &mut ids, page);
+    let rest = ondin_core::variant::rest_value(&doc, set, 0).expect("a default variant");
+    let other = if rest == "Small" { "Large" } else { "Small" };
+    let tie = |value: &str, state: Value| json!({ "node": set.to_wire(), "property": "Size", "value": value, "state": state });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "tie_state", tie(&rest, json!("hover"))),
+        "value",
+        "rest is refused"
+    );
+    run(&mut doc, &mut ids, "tie_state", tie(other, json!("hover")));
+    let states = |doc: &Document| doc.get(set).unwrap().set().unwrap().props[0].states.clone();
+    assert_eq!(
+        states(&doc).get(other),
+        Some(&ondin_core::variant::Interaction::Hover)
+    );
+    run(&mut doc, &mut ids, "tie_state", tie(other, Value::Null));
+    assert!(
+        states(&doc).is_empty(),
+        "untied, the property is plain again"
+    );
+}
+
+/// A component property is renamed and deleted by name on its main; a filter is
+/// refused on one that is not a swap.
+///
+/// flip: `edit_property` keeping the old name → fails at "renamed".
+#[test]
+fn component_properties_are_renamed_and_deleted() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, rect_in) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": rect_in.to_wire(), "kind": "boolean", "name": "Show box" }),
+    );
+    let names = |doc: &Document| -> Vec<String> {
+        doc.get(card)
+            .unwrap()
+            .props()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect()
+    };
+    run(
+        &mut doc,
+        &mut ids,
+        "edit_property",
+        json!({ "node": card.to_wire(), "property": "Show box", "name": "Box" }),
+    );
+    assert_eq!(names(&doc), ["Box"], "renamed");
+    let args = json!({ "node": card.to_wire(), "property": "Box", "filter": "Icon" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "edit_property", args),
+        "filter"
+    );
+    let args = json!({ "node": rect_in.to_wire(), "property": "Box" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "delete_property", args),
+        "node",
+        "a layer inside the main owns none"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "delete_property",
+        json!({ "node": card.to_wire(), "property": "Box" }),
+    );
+    assert!(names(&doc).is_empty());
+}
+
+/// A nested instance's properties are shown on the main holding it, and stop;
+/// a layer that is no nested instance is refused.
+///
+/// flip: `show_nested_properties` always passing `true` → fails at "shown no more".
+#[test]
+fn show_nested_properties_shows_and_hides_a_slot() {
+    let (mut doc, mut ids, page) = blank();
+    let (icon, _) = main_component(&mut doc, &mut ids, page, "Icon", 20.0);
+    let (button, rect_in) = main_component(&mut doc, &mut ids, page, "Button", 120.0);
+    let slot = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": icon.to_wire(), "parent": button.to_wire() }),
+    )[0];
+    let shown = |doc: &Document| ondin_core::variant::slot_is_shown(doc, slot);
+    run(
+        &mut doc,
+        &mut ids,
+        "show_nested_properties",
+        json!({ "node": slot.to_wire(), "shown": true }),
+    );
+    assert!(shown(&doc));
+    run(
+        &mut doc,
+        &mut ids,
+        "show_nested_properties",
+        json!({ "node": slot.to_wire(), "shown": false }),
+    );
+    assert!(!shown(&doc), "shown no more");
+    let args = json!({ "node": rect_in.to_wire(), "shown": true });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "show_nested_properties", args),
+        "node"
+    );
+}
+
 /// A probe that answers one finding for every layer asked with a solid first
 /// fill: its colour on white, held to `needs`. Any other literal paint is skipped
 /// as a gradient; a layer with no fill or a bound one is not considered.

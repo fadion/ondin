@@ -72,7 +72,9 @@ impl OndinApp {
                     let _ = reply.send(host.engine.handle(self, call));
                     answered = true;
                 }
-                Request::Closed(conn) => host.engine.closed(conn),
+                Request::Closed(conn) => {
+                    host.engine.closed(conn);
+                }
             }
         }
         self.mcp = Some(host);
@@ -143,18 +145,17 @@ impl Documents for OndinApp {
         }
     }
 
-    fn committed(&mut self, path: &Path) {
+    fn committed(&mut self, path: &Path) -> Result<(), String> {
         let behind = self
             .tab_of_path(path)
             .is_some_and(|id| self.tabs.active != Some(id));
-        if behind && let Err(e) = self.write_behind(path) {
-            log::warn!(target: "ondin", "mcp: {e}");
+        if behind {
+            return self.write_behind(path);
         }
         // A family an agent named loads as one the person picked does; a tab
         // behind loads its families when it comes to the front.
-        if !behind {
-            self.ensure_document_fonts();
-        }
+        self.ensure_document_fonts();
+        Ok(())
     }
 
     fn fonts(&mut self) -> Vec<String> {
@@ -209,6 +210,15 @@ impl OndinApp {
         let Some(Body::Parked(p)) = self.tabs.get_mut(id).map(|t| &mut t.body) else {
             return Err(format!("{} is not loaded", path.display()));
         };
+        // A change made outside since the tab was read is not overwritten: the
+        // tab keeps the edit unsaved and asks the person when it comes to the front.
+        if p.session.disk.as_mut().is_some_and(|s| s.check(path)) {
+            p.session.clash = crate::session::Clash::Ask;
+            return Err(format!(
+                "{} changed on disk since Ondin read it; the person decides which to keep",
+                path.display()
+            ));
+        }
         let digest = crate::library::store::write_document_digest(path, &p.session.doc)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         p.session.disk = crate::library::disk::Stamp::of(path, digest);

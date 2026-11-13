@@ -243,9 +243,13 @@ fn peer_is_this_user(stream: &std::os::unix::net::UnixStream) -> bool {
 
 /// Connect to the endpoint at `addr`. Every pipe instance is busy for a moment
 /// after a client takes one, until the host makes the next, so that is retried.
+/// A pipe served by another user's process is refused: a dead host's name is
+/// predictable, and whoever took it would read the agent's calls.
 #[cfg(windows)]
 pub(crate) fn connect(addr: &Path) -> std::io::Result<Stream> {
+    use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
     let started = std::time::Instant::now();
     let pipe = loop {
         match std::fs::OpenOptions::new()
@@ -262,6 +266,16 @@ pub(crate) fn connect(addr: &Path) -> std::io::Result<Stream> {
             other => break other?,
         }
     };
+    let mut pid = 0u32;
+    // SAFETY: `pipe` is an open pipe handle for the whole call, `pid` writable.
+    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as _, &mut pid) } == 0
+        || !crate::one_window::same_user(pid)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the pipe is not served by this user's Ondin",
+        ));
+    }
     let read = pipe.try_clone()?;
     Ok((Box::new(read), Box::new(pipe)))
 }

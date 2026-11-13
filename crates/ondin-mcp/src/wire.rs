@@ -115,9 +115,13 @@ fn answer(line: &str, client: &mut Peer, handler: &mut impl Handler) -> Option<V
         Ok(v) => v,
         Err(e) => return Some(failure(Value::Null, -32700, &format!("not JSON: {e}"))),
     };
+    // A batch, which this protocol no longer has, or no message at all: JSON-RPC
+    // answers either with one error, so the client is not left waiting.
+    if !message.is_object() {
+        return Some(failure(Value::Null, -32600, "expected a request object"));
+    }
     let Some(method) = message.get("method").and_then(Value::as_str) else {
-        // A response to nothing this server asked, or a batch, which this
-        // protocol no longer has.
+        // A response to nothing this server asked.
         let id = message.get("id").cloned()?;
         return Some(failure(id, -32600, "expected a request object"));
     };
@@ -292,6 +296,23 @@ mod tests {
         );
         assert_eq!(replies[1]["error"]["code"], -32700);
         assert_eq!(replies[2]["error"]["code"], -32601);
+    }
+
+    /// A batch and a bare value each get one Invalid Request with a null id,
+    /// rather than no answer.
+    ///
+    /// flip: `answer` without its object check → fails at the reply count.
+    #[test]
+    fn a_batch_is_answered_with_one_error() {
+        let replies = run(concat!(
+            r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#,
+            "\n3\n",
+        ));
+        assert_eq!(replies.len(), 2);
+        for r in &replies {
+            assert_eq!(r["error"]["code"], -32600);
+            assert_eq!(r["id"], Value::Null);
+        }
     }
 
     /// An image answer travels as base64 with its media type.

@@ -23,6 +23,9 @@ const FIRST_WAIT: Duration = Duration::from_secs(60);
 /// How often it looks for a window to hand over to.
 const WINDOW_EVERY: Duration = Duration::from_secs(2);
 
+/// How long, after its last answer, it waits before handing over to a window.
+const FLUSH_WAIT: Duration = Duration::from_secs(1);
+
 /// How long it outlives its last connection while it remembers a keyed client:
 /// a harness that starts a process per turn reconnects at the next turn, and
 /// finds its document and revisions where it left them.
@@ -75,6 +78,17 @@ impl Documents for Headless {
     fn open(&mut self, wanted: &str) -> Result<PathBuf, String> {
         let open: Vec<PathBuf> = self.open.keys().cloned().collect();
         let path = super::resolve(wanted, &open, self.library.as_deref())?;
+        // The open document's own spelling for the same file (a case difference on
+        // Windows, a `..`), so one file never gets two sessions writing over each
+        // other.
+        if !self.open.contains_key(&path)
+            && let Ok(want) = std::fs::canonicalize(&path)
+            && let Some(same) = open
+                .iter()
+                .find(|p| std::fs::canonicalize(p).is_ok_and(|p| p == want))
+        {
+            return Ok(same.clone());
+        }
         if !self.open.contains_key(&path) {
             let bytes =
                 std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -92,11 +106,9 @@ impl Documents for Headless {
         self.open.get_mut(path)
     }
 
-    fn committed(&mut self, path: &Path) {
+    fn committed(&mut self, path: &Path) -> Result<(), String> {
         self.load_fonts(path);
-        if let Err(e) = self.save(path) {
-            log::warn!(target: "ondin", "serve: {e}");
-        }
+        self.save(path)
     }
 
     fn library(&mut self) -> Option<&Library> {
@@ -147,6 +159,8 @@ pub(crate) fn run() -> Result<(), String> {
     let mut served = false;
     // When the last connection closed, while none is open.
     let mut idle: Option<Instant> = None;
+    let mut answered: Option<Instant> = None;
+    let mut window = false;
     loop {
         match from.recv_timeout(Duration::from_millis(500)) {
             Ok(Request::Call(call)) => {
@@ -154,13 +168,18 @@ pub(crate) fn run() -> Result<(), String> {
                 idle = None;
                 let reply = call.reply.clone();
                 let _ = reply.send(engine.handle(&mut docs, call));
+                answered = Some(Instant::now());
             }
+            // A connection that never called, such as a liveness probe from
+            // `endpoint::hosts` (this process's own among them), is no client
+            // leaving: counting it ended `serve` before its first call.
             Ok(Request::Closed(conn)) => {
-                engine.closed(conn);
-                let used: Vec<PathBuf> = engine.in_use().map(Path::to_path_buf).collect();
-                docs.open.retain(|p, _| used.contains(p));
-                if !engine.has_connections() {
-                    idle = Some(Instant::now());
+                if engine.closed(conn) {
+                    let used: Vec<PathBuf> = engine.in_use().map(Path::to_path_buf).collect();
+                    docs.open.retain(|p, _| used.contains(p));
+                    if !engine.has_connections() {
+                        idle = Some(Instant::now());
+                    }
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -177,11 +196,16 @@ pub(crate) fn run() -> Result<(), String> {
         if !engine.has_connections() && done {
             return Ok(());
         }
-        if looked.elapsed() > WINDOW_EVERY {
+        if !window && looked.elapsed() > WINDOW_EVERY {
             looked = Instant::now();
-            if endpoint::hosts().iter().any(|h| h.host == Host::Window) {
-                return Ok(());
-            }
+            window = endpoint::hosts().iter().any(|h| h.host == Host::Window);
+        }
+        // A window takes over, but not before the last answer has had time to
+        // reach its connection: ending the process drops an unwritten reply.
+        if window
+            && (!engine.has_connections() || answered.is_none_or(|a| a.elapsed() > FLUSH_WAIT))
+        {
+            return Ok(());
         }
     }
 }

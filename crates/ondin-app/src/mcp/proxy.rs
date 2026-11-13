@@ -27,19 +27,35 @@ struct Link {
     restored: bool,
 }
 
+/// How an exchange broke: before the host could have read the line, or after,
+/// when it may have acted on it.
+enum Broke {
+    Unsent(std::io::Error),
+    Unanswered(std::io::Error),
+}
+
+impl Broke {
+    fn error(self) -> std::io::Error {
+        match self {
+            Self::Unsent(e) | Self::Unanswered(e) => e,
+        }
+    }
+}
+
 impl Link {
     /// Send `line` and, when it asks for one, read the reply.
-    fn exchange(&mut self, line: &str, reply: bool) -> std::io::Result<Option<String>> {
-        writeln!(self.write, "{line}")?;
-        self.write.flush()?;
+    fn exchange(&mut self, line: &str, reply: bool) -> Result<Option<String>, Broke> {
+        writeln!(self.write, "{line}").map_err(Broke::Unsent)?;
+        self.write.flush().map_err(Broke::Unsent)?;
         if !reply {
             return Ok(None);
         }
         let mut answer = String::new();
-        if self.read.read_line(&mut answer)? == 0 {
-            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        match self.read.read_line(&mut answer) {
+            Ok(0) => Err(Broke::Unanswered(std::io::ErrorKind::UnexpectedEof.into())),
+            Ok(_) => Ok(Some(answer.trim_end().to_owned())),
+            Err(e) => Err(Broke::Unanswered(e)),
         }
-        Ok(Some(answer.trim_end().to_owned()))
     }
 }
 
@@ -69,7 +85,11 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         let method = message
             .as_ref()
             .and_then(|m| m.get("method")?.as_str().map(str::to_owned));
-        let reply = message.as_ref().is_none_or(|m| m.get("id").is_some());
+        // As the host's `wire::answer` decides: anything but an object without
+        // an `id` is answered.
+        let reply = message
+            .as_ref()
+            .is_none_or(|m| !m.is_object() || m.get("id").is_some());
         match method.as_deref() {
             Some("initialize") => kept.initialize = Some(line.clone()),
             Some("notifications/initialized") => kept.initialized = Some(line.clone()),
@@ -81,31 +101,57 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         {
             link = None;
         }
-        let mut answer = None;
+        let call = method.as_deref() == Some("tools/call");
+        let mut answer = Err("lost the Ondin endpoint".to_owned());
         for _ in 0..2 {
-            if link.is_none() {
-                link = Some(connect(&kept, method.as_deref())?);
-            }
-            if method.as_deref() == Some("tools/call")
-                && let Some(l) = link.as_mut()
-                && restore(l, &kept).is_err()
-            {
+            let l = match link.as_mut() {
+                Some(l) => l,
+                None => match connect(&kept, method.as_deref()) {
+                    Ok(l) => link.insert(l),
+                    Err(why) => {
+                        answer = Err(why);
+                        break;
+                    }
+                },
+            };
+            if call && restore(l, &kept).is_err() {
                 link = None;
                 continue;
             }
-            match link.as_mut().map(|l| l.exchange(&line, reply)) {
-                Some(Ok(a)) => {
-                    answer = a;
+            match l.exchange(&line, reply) {
+                Ok(a) => {
+                    answer = Ok(a);
                     break;
                 }
-                _ => link = None,
+                Err(broke) => {
+                    link = None;
+                    // A tool call the host may have run is not sent again: a
+                    // write would apply twice.
+                    if call && let Broke::Unanswered(e) = broke {
+                        answer = Err(format!(
+                            "the link to Ondin broke before it answered ({e}); the call \
+                             may have applied, so read the document before trying again"
+                        ));
+                        break;
+                    }
+                    answer = Err(format!("lost the Ondin endpoint: {}", broke.error()));
+                }
             }
         }
-        let Some(answer) = answer else {
-            if reply {
-                return Err("ondin mcp-proxy: lost the Ondin endpoint".into());
-            }
-            continue;
+        // A failure is the request's answer, not the proxy's end: the next
+        // request connects again.
+        let answer = match answer {
+            Ok(Some(a)) => a,
+            Ok(None) => continue,
+            Err(why) => match message.as_ref().and_then(|m| m.get("id")) {
+                Some(id) if reply => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32603, "message": format!("ondin mcp-proxy: {why}") },
+                })
+                .to_string(),
+                _ => continue,
+            },
         };
         if is_tool_call(&message, "use_document")
             && let Ok(v) = serde_json::from_str::<Value>(&answer)
@@ -193,7 +239,8 @@ fn restore(link: &mut Link, kept: &Remembered) -> std::io::Result<()> {
                 "arguments": { "document": doc, "restore": true },
             },
         });
-        link.exchange(&call.to_string(), true)?;
+        link.exchange(&call.to_string(), true)
+            .map_err(Broke::error)?;
     }
     link.restored = true;
     Ok(())
@@ -224,8 +271,8 @@ fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
         Some(h) => h,
         None => start_serve()?,
     };
-    let (read, write) = endpoint::connect(&host.endpoint)
-        .map_err(|e| format!("ondin mcp-proxy: cannot reach Ondin: {e}"))?;
+    let (read, write) =
+        endpoint::connect(&host.endpoint).map_err(|e| format!("cannot reach Ondin: {e}"))?;
     let mut link = Link {
         host,
         read: BufReader::new(read),
@@ -235,7 +282,7 @@ fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
     if now == Some("initialize") {
         return Ok(link);
     }
-    let fail = |e: std::io::Error| format!("ondin mcp-proxy: {e}");
+    let fail = |e: Broke| format!("lost the Ondin endpoint: {}", e.error());
     if let Some(init) = &kept.initialize {
         link.exchange(init, true).map_err(fail)?;
     }
@@ -263,7 +310,7 @@ fn start_serve() -> Result<Found, String> {
     }
     let child = command
         .spawn()
-        .map_err(|e| format!("ondin mcp-proxy: cannot start ondin serve: {e}"))?;
+        .map_err(|e| format!("cannot start ondin serve: {e}"))?;
     let pid = child.id();
     let started = Instant::now();
     while started.elapsed() < START_WAIT {
@@ -275,7 +322,7 @@ fn start_serve() -> Result<Found, String> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Err("ondin mcp-proxy: ondin serve did not start listening".into())
+    Err("ondin serve did not start listening".into())
 }
 
 #[cfg(test)]

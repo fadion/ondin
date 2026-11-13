@@ -32,8 +32,9 @@ pub(crate) trait Documents {
     fn open(&mut self, wanted: &str) -> Result<PathBuf, String>;
     /// The open document at `path`.
     fn session(&mut self, path: &Path) -> Option<&mut EditorSession>;
-    /// The document at `path` changed through a tool: `serve` writes it.
-    fn committed(&mut self, path: &Path);
+    /// The document at `path` changed through a tool: `serve` writes it, as the
+    /// window does a tab behind. An error is why the edit is not on disk.
+    fn committed(&mut self, path: &Path) -> Result<(), String>;
     /// The library as it now stands on disk, or `None` with no base folder.
     fn library(&mut self) -> Option<&Library>;
     /// The open document at `path` and the library together, for a kit tool
@@ -223,9 +224,11 @@ fn snapshot_of(s: &EditorSession) -> ondin_export::Snapshot {
 
 impl Engine {
     /// Forget a connection that closed, and its state unless a key holds it.
-    pub(crate) fn closed(&mut self, conn: Conn) {
-        self.live.remove(&conn);
+    /// Answers whether it had called: a connection that only looked whether the
+    /// endpoint answers, as `endpoint::hosts` does, is no client leaving.
+    pub(crate) fn closed(&mut self, conn: Conn) -> bool {
         self.clients.remove(&Who::Conn(conn));
+        self.live.remove(&conn)
     }
 
     /// The documents some client is using, for a host deciding what it may close.
@@ -385,7 +388,15 @@ impl Engine {
             {
                 map.insert("layers".into(), own);
             }
-            docs.committed(&path);
+            if let Err(why) = docs.committed(&path) {
+                let line = format!("The edit is made but not written to the file: {why}");
+                match output.structured.as_mut() {
+                    Some(Value::Object(map)) => {
+                        map.insert("unsaved".into(), json!(line));
+                    }
+                    _ => output.content.push(Content::Text(line)),
+                }
+            }
         }
         stamp(&mut output, after, changed);
         output
@@ -878,8 +889,9 @@ mod tests {
         fn session(&mut self, path: &Path) -> Option<&mut EditorSession> {
             (path == self.path).then_some(&mut self.session)
         }
-        fn committed(&mut self, _: &Path) {
+        fn committed(&mut self, _: &Path) -> Result<(), String> {
             self.committed += 1;
+            Ok(())
         }
         fn library(&mut self) -> Option<&Library> {
             None
@@ -958,6 +970,20 @@ mod tests {
         assert_eq!(docs.session.doc.get(id).unwrap().name(), "Header");
         assert_eq!(docs.committed, 1);
         assert_eq!(docs.session.history.undo_depth(), 1);
+    }
+
+    /// A connection that never called closing is no client leaving, which
+    /// `serve` would otherwise end on; one that called is.
+    ///
+    /// flip: `Engine::closed` answering `true` always → fails at the probe.
+    #[test]
+    fn a_probe_closing_is_no_client_leaving() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        assert!(!engine.closed(2), "a probe never called");
+        assert!(engine.has_connections());
+        assert!(engine.closed(1), "a client that called left");
+        assert!(!engine.has_connections());
     }
 
     /// Another connection's edit is reported as `changed` on this one's next

@@ -2689,10 +2689,10 @@ pub static VERBS: &[Verb] = &[
         doc: "Set what a variable holds in one mode: a value, or an alias of another variable",
         params: &[
             req("variable", ParamKind::Id("variable"), "the variable"),
-            req(
+            opt(
                 "mode",
                 ParamKind::Id("mode"),
-                "the mode, of the variable's collection",
+                "the mode, of the variable's collection; its only one when it has one",
             ),
             req(
                 "value",
@@ -2701,7 +2701,18 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let (id, mode): (VarId, ModeId) = (own_variable(ctx, a)?, a.id("mode")?);
+            let id = own_variable(ctx, a)?;
+            let only = || match ctx.doc.variables().collection_of(id).map(|c| &c.modes[..]) {
+                Some([m]) => Ok(m.id),
+                _ => Err(a.invalid(
+                    "mode",
+                    "the variable's collection has more than one mode: name one",
+                )),
+            };
+            let mode: ModeId = match a.id_opt("mode")? {
+                Some(mode) => mode,
+                None => only()?,
+            };
             crate::variable::set_cell_ops(ctx.doc.variables(), id, mode, a.model("value")?)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("value", why))

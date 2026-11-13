@@ -1587,6 +1587,47 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// `set_variable_value` without a `mode` sets the only mode of the variable's
+/// collection, and is refused once the collection has two.
+///
+/// flip: `set_variable_value` taking the first mode whatever the count → fails at
+/// "two modes need a name".
+#[test]
+fn a_variable_value_takes_the_only_mode_unnamed() {
+    let (mut doc, mut ids, _) = blank();
+    let blue = serde_json::to_value(ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255))).unwrap();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_variable", "args": { "kind": "color", "name": "brand" }, "as": "v" },
+            { "verb": "set_variable_value", "args": { "variable": "@v", "value": blue } },
+        ]),
+    );
+    let var: ondin_core::VarId = serde_json::from_value(json!(made[0][0])).unwrap();
+    let table = doc.variables();
+    let modes = &table.collection_of(var).unwrap().modes;
+    assert_eq!(modes.len(), 1, "the fixture has one mode");
+    assert_eq!(
+        table.get(var).unwrap().cells.get(&modes[0].id),
+        Some(&ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255)))
+    );
+    script(
+        &mut doc,
+        &mut ids,
+        json!([{ "verb": "add_mode", "args": {} }]),
+    );
+    let two = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Lent::default(),
+        &json!([{ "verb": "set_variable_value", "args": { "variable": made[0][0], "value": blue } }]),
+    )
+    .expect_err("two modes need a name")
+    .why;
+    assert!(two.contains("more than one mode"), "{two}");
+}
+
 /// `script` run on `doc`, panicking on a refusal; answers what each step made.
 fn script(doc: &mut Document, ids: &mut IdSource, steps: Value) -> Vec<Vec<String>> {
     verbs::run_script(doc, ids, Lent::default(), &steps).unwrap_or_else(|e| panic!("{e}"))

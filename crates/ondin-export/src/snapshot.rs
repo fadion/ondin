@@ -56,7 +56,8 @@ use std::collections::BTreeMap;
 ///   `local_transform`, `mask_mode` off a mask; lengths in geometry, strokes,
 ///   effects and `pivot` are at four places.
 /// - **24** `world_bounds` is `[x, y, w, h]`, not its two corners.
-pub const SNAPSHOT_VERSION: u32 = 24;
+/// - **25** `Geometry::Text` gained `letter_spacing`, absent at none.
+pub const SNAPSHOT_VERSION: u32 = 25;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -464,6 +465,9 @@ pub enum Geometry {
         /// `auto` (the font's own line height), `N%` of the font size, or `Npx`;
         /// a string because a bare number could report only one of the three modes.
         line_height: String,
+        /// The space added between letters, as `"Npx"` or `"Nem"`; absent at none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        letter_spacing: Option<String>,
         /// The glyphs' own ink as `#rrggbbaa`; absent when they take the layer's
         /// fills.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1294,6 +1298,11 @@ fn geometry(kind: &NodeKind) -> Geometry {
                 None => "auto".to_string(),
                 Some(ondin_core::Length::Em(m)) => format!("{}%", round4(m * 100.0)),
                 Some(ondin_core::Length::Px(v)) => format!("{}px", round4(v)),
+            },
+            letter_spacing: match style.letter_spacing {
+                l if l.is_default_zero() => None,
+                ondin_core::Length::Em(m) => Some(format!("{}em", round4(m))),
+                ondin_core::Length::Px(v) => Some(format!("{}px", round4(v))),
             },
             color: style.color.map(hex8),
             sizing: match sizing {

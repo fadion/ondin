@@ -161,12 +161,14 @@ fn text_snapshot_carries_the_full_style() {
     match &text.geometry {
         ondin_export::snapshot::Geometry::Text {
             line_height,
+            letter_spacing,
             paragraph,
             sizing,
             ..
         } => {
             // The fixture's is `Length::Em(1.2)`.
             assert_eq!(line_height, "120%");
+            assert_eq!(letter_spacing, &None, "absent at none");
             assert_eq!(paragraph.align, ondin_core::TextAlign::Start);
             assert_eq!(sizing, &ondin_export::snapshot::TextSizingSummary::Auto);
         }
@@ -181,8 +183,20 @@ fn text_snapshot_carries_the_full_style() {
         align: ondin_core::TextAlign::Center,
         ..Default::default()
     };
+    let style = match f.doc.get(node).expect("the text").kind() {
+        ondin_core::NodeKind::Text { style, .. } => ondin_core::TextStyle {
+            letter_spacing: ondin_core::Length::Px(-1.4),
+            ..(**style).clone()
+        },
+        other => panic!("expected a text, got {other:?}"),
+    };
     f.doc
         .apply(&Transaction(vec![
+            Operation::SetTextStyle {
+                id: node,
+                style,
+                spans: None,
+            },
             Operation::SetParagraphStyle {
                 id: node,
                 paragraph,
@@ -206,8 +220,16 @@ fn text_snapshot_carries_the_full_style() {
         .expect("still there");
     match &text.geometry {
         ondin_export::snapshot::Geometry::Text {
-            paragraph, sizing, ..
+            paragraph,
+            sizing,
+            letter_spacing,
+            ..
         } => {
+            assert_eq!(
+                letter_spacing.as_deref(),
+                Some("-1.4px"),
+                "tracking set is reported, as `get_tree` writes it"
+            );
             assert_eq!(
                 paragraph.align,
                 ondin_core::TextAlign::Center,

@@ -62,7 +62,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_tree",
-        doc: "A layer and the layers inside it in the shape `insert_subtree` takes and the setters write: the kind with a text's runs, every fill and stroke with the hidden ones and their framing, align, dash, cap and join, effects and exports. Read this before writing a whole list back with `set_fills`, `set_strokes`, `set_effects`, `set_exports` or `set_text_style`; the snapshot keeps only what is drawn. A binding inside a fill, stroke, effect or layout item travels with it; a bound size, corner, text, gap, padding, flow, visibility or opacity is written as its drawn value, unbound. A tree does not carry styles, modes, width queries, the pivot, the element and link, or component state, so inserting one makes a plain copy, not an instance.",
+        doc: "A layer and the layers inside it in the shape `insert_subtree` takes and the setters write: the kind with a text's runs, every fill and stroke with the hidden ones and their framing, align, `dashes`, cap and join, effects and exports. Read this before writing a whole list back with `set_fills`, `set_strokes`, `set_effects`, `set_exports` or `set_text_style`; the snapshot keeps only what is drawn. A binding inside a fill, stroke, effect or layout item travels with it; a bound size, corner, text, gap, padding, flow, visibility or opacity is written as its drawn value, unbound. It leaves out styles, modes, width queries, the pivot, the element, link and component state: inserting it makes a plain copy.",
         params: &[param("id", ParamKind::Node, true, "The layer.")],
     },
     Tool {
@@ -75,7 +75,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_outline",
-        doc: "A page's or layer's layers a few levels down as one table: `columns` names each row's fields (id, name, kind, own world box x, y, w, h to 0.1 less its stroke, depth), `rows` are in paint order, parent first, `more` counts rows past `limit`, `selected` the selected layers under it. `origin` is the layer's (0, 0) in world space: a child's position in it is its world box less `origin`. A layer `id` is its own first row, at depth 0. Shows where a page's sections sit before `get_node`.",
+        doc: "A page's or layer's layers a few levels down as one table: `columns` names each row's fields (id, name, kind, own world box x, y, w, h to 0.1 less its stroke, depth), `rows` are in paint order, parent first, `selected` the selected layers under it. `origin` is the layer's (0, 0) in world space: a child's position in it is its world box less `origin`.",
         params: &[
             param(
                 "id",

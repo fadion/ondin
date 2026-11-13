@@ -599,9 +599,10 @@ fn a_model_argument_is_refused_with_its_path() {
         json!({ "parent": page.to_wire(), "tree": typo }),
     );
     assert!(
-        why.starts_with("at `display.Flex.gapp`: no such field; fields there include")
-            && why.contains("`gap`"),
-        "a field it does not have, with the ones there are: {why}"
+        why.starts_with("at `display.Flex.gapp`: no such field; the fields there are")
+            && why.contains("`gap`")
+            && why.contains("`wrap`"),
+        "a field it does not have, with every one there is: {why}"
     );
     let text = json!({ "Text": { "content": "Hi", "sizing": { "AutoHeight": { "w": 1 } } } });
     let bad =
@@ -616,6 +617,46 @@ fn a_model_argument_is_refused_with_its_path() {
         why.starts_with("at `children[1].kind.Text.sizing"),
         "the path of the refused value: {why}"
     );
+}
+
+/// A field a stroke or a paragraph has no place for is refused with every
+/// field it has, which no example shows whole, and a tree's corners point to
+/// its `kind`.
+///
+/// flip: `model_fields` answering `None` for a stroke → fails at "a stroke's
+/// `dashes`", whose example leaves them out.
+#[test]
+fn an_unknown_field_is_refused_with_every_field_there_is() {
+    let (doc, mut ids, page) = blank();
+    let dashed = json!({ "kind": rect(10.0, 10.0),
+        "strokes": [{ "brush": "#000000", "width": 2, "dash": [4, 4] }] });
+    let why = refused_why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": dashed }),
+    );
+    assert!(
+        why.contains("the fields there are") && why.contains("`dashes`"),
+        "a stroke's `dashes`: {why}"
+    );
+    let spaced = json!({ "kind": { "Text": { "content": "Hi", "sizing": "Auto",
+        "paragraph": { "paragraph_spacing": "8px" } } } });
+    let why = refused_why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": spaced }),
+    );
+    assert!(why.contains("`spacing`"), "a paragraph's `spacing`: {why}");
+    let rounded = json!({ "kind": frame(10.0, 10.0), "corner_radius": 8 });
+    let why = refused_why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": rounded }),
+    );
+    assert!(why.contains("part of its `kind`"), "{why}");
 }
 
 /// `insert_subtree` takes the forms `get_node` and CSS write: lengths as `"22px"`,
@@ -5349,6 +5390,54 @@ fn like_leaves_the_style_colour_to_a_text_with_its_own_fills() {
         read["kind"]["Text"]["style"]["color"],
         json!("#ffffff"),
         "{read}"
+    );
+}
+
+/// `like` refuses a sample with nothing to give, naming what it is: a text
+/// that names a group, and a shape that names a group with no paint. A filled
+/// shape gives a text nothing either, since it has no text style.
+///
+/// flip: `expand_like` without its text check → fails at "a group gives a text
+/// nothing", refused for its paint instead of for being no text.
+#[test]
+fn like_refuses_a_sample_with_nothing_to_give() {
+    let (mut doc, mut ids, page) = blank();
+    let filled = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "kind": rect(10.0, 10.0), "fills": ["#ff7a1a"] } }),
+    )[0];
+    let group = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [filled.to_wire()] }),
+    )[0];
+    let text = |like: NodeId| {
+        json!({ "parent": page.to_wire(), "tree": { "like": like.to_wire(),
+            "kind": { "Text": { "content": "Hi", "sizing": "Auto" } } } })
+    };
+    let mut why = |args: Value| match answer(&doc, &mut ids, "insert_subtree", args) {
+        Err(VerbError::Invalid { why, .. }) => why,
+        other => panic!("{other:?}"),
+    };
+    let said = why(text(group));
+    assert!(
+        said.contains("is a group, not a text"),
+        "a group gives a text nothing: {said}"
+    );
+    assert!(why(text(filled)).contains("is a rectangle, not a text"));
+    let said = why(
+        json!({ "parent": page.to_wire(), "tree": { "like": group.to_wire(),
+        "kind": rect(10.0, 10.0) } }),
+    );
+    assert!(said.contains("no fill, stroke or effect"), "{said}");
+    run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "like": filled.to_wire(), "kind": rect(5.0, 5.0) } }),
     );
 }
 

@@ -712,26 +712,43 @@ fn explain(model: &str, v: &Value, miss: &Miss) -> String {
              and the root by `insert_subtree`'s `x` and `y`"
         );
     }
+    if model == "Tree"
+        && (miss.why.starts_with("unknown field `corner_radius`")
+            || miss.why.starts_with("unknown field `corner_radii`"))
+    {
+        return format!(
+            "{said}; a tree's corners are part of its `kind`, as \
+             `{{\"Artboard\": {{\"size\": {{\"width\": 320, \"height\": 200}}, \"corner_radii\": 20}}}}`"
+        );
+    }
     if miss.unknown_field {
         let above = &miss.steps[..miss.steps.len().saturating_sub(1)];
-        // The nearest field holding a model of its own reads that model's example,
-        // which shows its fields filled in.
-        let nested = above.iter().enumerate().rev().find_map(|(i, s)| match s {
-            Some(Step::Key(k)) => field_model(k).map(|m| (m, &above[i + 1..])),
+        // The nearest field holding a model of its own answers for the place.
+        let from = above.iter().enumerate().rev().find_map(|(i, s)| match s {
+            Some(Step::Key(k)) => field_model(k).map(|m| (m, i + 1)),
             _ => None,
         });
-        let (model, above) = nested.unwrap_or((model, above));
-        let fields = example(model)
-            .and_then(|e| walk_ref(&e, above).cloned())
+        let (model, from) = from.unwrap_or((model, 0));
+        let below = &above[from..];
+        // The model's example shows some fields filled in, in the short forms
+        // (`gap` for `row_gap` and `column_gap`); the type's own list adds the rest.
+        let mut fields = example(model)
+            .and_then(|e| walk_ref(&e, below).cloned())
             .and_then(|e| match e {
                 Value::Object(map) => Some(map.keys().cloned().collect::<Vec<_>>()),
                 _ => None,
-            });
-        return match fields {
-            Some(f) if !f.is_empty() => {
-                format!("{said}; fields there include `{}`", f.join("`, `"))
+            })
+            .unwrap_or_default();
+        let whole = model_fields(model, below, walk_ref(v, &above[..from]));
+        for f in whole.unwrap_or_default() {
+            if !fields.iter().any(|k| k == f) {
+                fields.push((*f).to_owned());
             }
-            _ => said,
+        }
+        return match (fields.is_empty(), whole.is_some()) {
+            (true, _) => said,
+            (false, true) => format!("{said}; the fields there are `{}`", fields.join("`, `")),
+            (false, false) => format!("{said}; fields there include `{}`", fields.join("`, `")),
         };
     }
     let without_fields = [
@@ -755,9 +772,85 @@ fn explain(model: &str, v: &Value, miss: &Miss) -> String {
     }
 }
 
+/// Every field serde reads at `below` inside a value of `model`, whose value
+/// is `at`: the whole list, where an example shows only some. `None` where the
+/// place is not a struct of the model's own.
+fn model_fields(
+    model: &str,
+    below: &[Option<Step>],
+    at: Option<&Value>,
+) -> Option<&'static [&'static str]> {
+    use crate::container::{Flex, Grid};
+    match (model, below) {
+        ("[Stroke]", [Some(Step::Index(_))]) => struct_fields::<Stroke>(),
+        ("[Fill]", [Some(Step::Index(_))]) => struct_fields::<Fill>(),
+        ("[Effect]", [Some(Step::Index(_))]) => struct_fields::<Effect>(),
+        ("ParagraphStyle", []) => struct_fields::<ParagraphStyle>(),
+        ("TextStyle", []) => struct_fields::<TextStyle>(),
+        ("BlockStyle", []) => struct_fields::<BlockStyle>(),
+        ("LayoutItem", []) => struct_fields::<crate::container::LayoutItem>(),
+        ("Insets", []) => struct_fields::<Insets>(),
+        ("Display", [_]) => match at.and_then(Value::as_object).map(|m| m.keys().next()) {
+            Some(Some(k)) if k == "Flex" => struct_fields::<Flex>(),
+            Some(Some(k)) if k == "Grid" => struct_fields::<Grid>(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The field names a derived `Deserialize` reads `T` by, which serde hands to
+/// `deserialize_struct`; `None` for a type read any other way.
+fn struct_fields<T: serde::de::DeserializeOwned>() -> Option<&'static [&'static str]> {
+    use serde::de::{Deserializer, Visitor};
+    use std::cell::Cell;
+
+    /// A deserializer that only notes the fields it is asked for, then stops.
+    struct Capture(Cell<Option<&'static [&'static str]>>);
+    #[derive(Debug)]
+    struct Stop;
+    impl std::fmt::Display for Stop {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("stop")
+        }
+    }
+    impl std::error::Error for Stop {}
+    impl serde::de::Error for Stop {
+        fn custom<M: std::fmt::Display>(_: M) -> Self {
+            Stop
+        }
+    }
+    impl<'de> Deserializer<'de> for &Capture {
+        type Error = Stop;
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Stop> {
+            Err(Stop)
+        }
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            _: &'static str,
+            fields: &'static [&'static str],
+            _: V,
+        ) -> Result<V::Value, Stop> {
+            self.0.set(Some(fields));
+            Err(Stop)
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map enum identifier ignored_any
+        }
+    }
+    let capture = Capture(Cell::new(None));
+    let _ = T::deserialize(&capture);
+    capture.0.get()
+}
+
 /// The model a field of that name holds, wherever it sits.
 fn field_model(key: &str) -> Option<&'static str> {
     Some(match key {
+        "fills" => "[Fill]",
+        "strokes" => "[Stroke]",
+        "effects" => "[Effect]",
         "display" => "Display",
         "item" => "LayoutItem",
         "style" | "text_style" => "TextStyle",
@@ -944,7 +1037,8 @@ pub fn example(model: &str) -> Option<Value> {
             "align_self": "Center",
         }),
         "NodeKind" => json(&rect),
-        "ParagraphStyle" => json(&ParagraphStyle::default()),
+        // Filled in, since a default one writes as `{}`.
+        "ParagraphStyle" => serde_json::json!({ "align": "Center", "spacing": "12px" }),
         "Pivot" => json(&Pivot::Normalized(Vec2::new(0.5, 0.5))),
         "TextStyle" => serde_json::json!({
             "font_family": "Inter",
@@ -1831,13 +1925,13 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "insert_subtree",
-        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy a layer's shape from `get_tree`; take a layer's look with `like`",
+        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy a layer's shape from `get_tree`",
         params: &[
             req("parent", NODE, "the frame, group or page to create it in"),
             req(
                 "tree",
                 ParamKind::Model("Tree"),
-                "the root layer, its properties and its `children`, bottom first; a child is placed by `transform` [1, 0, 0, 1, x, y]; a layer's `like` names one whose paint and text style it takes where it gives none",
+                "the root layer, its properties and its `children`, bottom first; a child is placed by `transform` [1, 0, 0, 1, x, y]; a layer's `like` names one whose fills, strokes, effects, opacity and blend it takes where it gives none, a text also a text's style and paragraph",
             ),
             opt(
                 "index",
@@ -5706,8 +5800,11 @@ pub fn shorten(v: &mut Value) {
 /// fills, strokes, effects, opacity and blend where it gives none, and a text
 /// its text style field by field and its paragraph. A text that gives its own
 /// fills does not take the style's `color`, which would draw over them.
-/// Recurses into `children`.
+/// Refused when the sample has nothing to give: a text naming a layer that is
+/// not one, or any layer naming one with no paint, which would otherwise draw
+/// in the defaults without a word. Recurses into `children`.
 fn expand_like(doc: &Document, v: &mut Value) -> Result<(), String> {
+    const LOOK: [&str; 5] = ["fills", "strokes", "effects", "opacity", "blend"];
     let Value::Object(map) = v else {
         return Ok(());
     };
@@ -5720,7 +5817,28 @@ fn expand_like(doc: &Document, v: &mut Value) -> Result<(), String> {
         let Some(Value::Object(src)) = full_tree(doc, id) else {
             return Err(format!("`like`: no layer `{}`", id.to_wire()));
         };
-        for k in ["fills", "strokes", "effects", "opacity", "blend"] {
+        let src_is_text = src.get("kind").and_then(|k| k.get("Text")).is_some();
+        let is_text = map.get("kind").and_then(|k| k.get("Text")).is_some();
+        let what = || {
+            doc.get(id)
+                .map_or("layer", |n| n.kind().default_name())
+                .to_lowercase()
+        };
+        if is_text && !src_is_text {
+            return Err(format!(
+                "`like`: `{}` is a {}, not a text, so it has no text style to give; name a text",
+                id.to_wire(),
+                what()
+            ));
+        }
+        if !src_is_text && !LOOK.iter().any(|k| src.contains_key(*k)) {
+            return Err(format!(
+                "`like`: `{}` is a {} with no fill, stroke or effect to give",
+                id.to_wire(),
+                what()
+            ));
+        }
+        for k in LOOK {
             if let Some(val) = src.get(k) {
                 map.entry(k).or_insert_with(|| val.clone());
             }

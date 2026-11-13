@@ -1,0 +1,27 @@
+[package]
+name = "ondin-ai"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The agent-harness layer (`docs/ai.md`): finding a coding agent's program,
+# sealing it, spawning it and decoding its stream. No rendering or UI
+# dependency, and no async runtime: children are driven on std threads.
+[dependencies]
+serde_json.workspace = true
+# Claude Code takes an attached image as a base64 content block; the version
+# `ondin-core` and `ondin-mcp` already use.
+base64 = "0.22.1"
+
+# Process start times, parent pids and process groups, for the leftover sweep,
+# `Session::owns_process` and killing a harness's whole tree.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+# The Job Object a harness runs in (`Session::owns_process`, and its tree ended
+# with the session) and process start times. `Win32_System_Diagnostics_ToolHelp`
+# finds a child's first thread, to resume it once it is in the job; the rest are
+# already on the workspace entry.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_ToolHelp"] }

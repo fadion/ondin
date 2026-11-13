@@ -1279,7 +1279,9 @@ fn named_paths<'a>(
 /// then joined into one undo step named `batch`. A refused step takes back the
 /// steps before it, so the batch lands whole or not at all. A step names what an
 /// earlier one made as `"@label"`, the label that step gave in `as`, as
-/// `ondin script` does; `base_rev` holds for every step.
+/// `ondin script` does, and a layer an `insert_subtree` step named by
+/// `"@label/Path"`, its path of names below the root; `base_rev` holds for every
+/// step.
 fn batch(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1321,6 +1323,22 @@ fn batch(
                 .map(str::to_owned);
             if let Some(first) = first {
                 labels.insert(label.to_owned(), first);
+            }
+            // `insert_subtree`'s layers by `label/Path`, the path below the root.
+            let root = step["args"]["tree"]["name"].as_str();
+            for (path, id) in answer
+                .get("named")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                let below = match root {
+                    Some(root) => path.strip_prefix(root).and_then(|p| p.strip_prefix('/')),
+                    None => Some(path.as_str()),
+                };
+                if let (Some(below), Some(id)) = (below, id.as_str()) {
+                    labels.insert(format!("{label}/{below}"), id.to_owned());
+                }
             }
         }
         answers.push(answer);
@@ -2683,6 +2701,39 @@ mod tests {
         );
         assert!(text.contains("`Caption` (text)"), "{text}");
         assert!(text.contains("Label"), "the text layer inside: {text}");
+    }
+
+    /// A batch step names a layer an earlier `insert_subtree` step made by
+    /// `@label/Path`, its path of names below the root.
+    ///
+    /// flip: `batch` not labelling `named` → fails at the batch's `ok`, as no
+    /// earlier step is called `card/Title`.
+    #[test]
+    fn a_batch_names_a_subtrees_layer_by_its_path() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let tree = json!({ "name": "Card", "kind": { "Group": null }, "children": [
+            { "name": "Title", "kind": kind },
+        ]});
+        let insert = json!({ "tool": "insert_subtree", "as": "card",
+            "args": { "parent": page, "tree": tree } });
+        let rename = json!({ "tool": "set_name",
+            "args": { "node": "@card/Title", "name": "Heading" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [insert, rename] }),
+        );
+        let title = ok(&out)["steps"][0]["named"]["Card/Title"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let n = docs.session.doc.get(NodeId::from_wire(&title).unwrap());
+        assert_eq!(n.unwrap().name(), "Heading");
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

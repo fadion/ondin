@@ -363,7 +363,7 @@ pub static TOOLS: &[Tool] = &[
                 "steps",
                 ParamKind::Model("Steps"),
                 true,
-                "The steps in order, each {\"tool\": <a write tool>, \"args\": {…}, \"as\": <label>}. A later step's argument \"@<label>\" stands for the first thing the step labelled so made; a text starting with @ is written @@.",
+                "The steps in order, each {\"tool\": <a write tool>, \"args\": {…}, \"as\": <label>}. In a later step's argument, \"@<label>\" stands for what that step made first, and \"@<label>/<Path>\" for an `insert_subtree` layer by its path below the root; write a text starting with @ as @@.",
             ),
             BASE_REV,
         ],

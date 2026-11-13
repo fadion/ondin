@@ -48,7 +48,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_node",
-        doc: "One layer's snapshot, and with `subtree` every layer under it.",
+        doc: "One layer's snapshot, and with `subtree` every layer under it. Its `world_bounds` take in the stroke.",
         params: &[
             param("id", ParamKind::Node, true, "The layer."),
             param(
@@ -75,7 +75,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_outline",
-        doc: "A page's or layer's layers a few levels down in one compact table: `columns` names each row's fields (id, name, kind, world x, y, w, h to 0.1, depth), `rows` are in paint order with a parent before its children, `more` counts the rows left out past `limit`, and `selected` lists the selected layers under it. A layer `id` is its own first row, at depth 0. Read this to see where the sections of a page sit before reading one with `get_node`.",
+        doc: "A page's or layer's layers a few levels down in one compact table: `columns` names each row's fields (id, name, kind, the layer's own box as world x, y, w, h to 0.1 with its stroke left out, depth), `rows` are in paint order with a parent before its children, `more` counts the rows left out past `limit`, and `selected` lists the selected layers under it. A layer `id` is its own first row, at depth 0. Read this to see where the sections of a page sit before reading one with `get_node`.",
         params: &[
             param(
                 "id",
@@ -99,7 +99,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "find_nodes",
-        doc: "Layers whose name or text contains `query`, ignoring case: id, name, kind, the names of their ancestors, `box` (world [x, y, w, h] to 0.1) and `selected: true` on one that is selected or holds a selected layer.",
+        doc: "Layers whose name or text contains `query`, ignoring case: id, name, kind, the names of their ancestors, `box` (the layer's own box, world [x, y, w, h] to 0.1, its stroke left out) and `selected: true` on one that is selected or holds a selected layer.",
         params: &[
             param("query", ParamKind::Text, true, "What to look for."),
             param("page", ParamKind::Node, false, "Only this page."),
@@ -140,7 +140,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_bounds",
-        doc: "A layer's world bounds as [x, y, width, height].",
+        doc: "A layer's world bounds as [x, y, width, height], its stroke taken in.",
         params: &[param("id", ParamKind::Node, true, "The layer.")],
     },
     Tool {

@@ -229,9 +229,16 @@ fn tenth(v: f64) -> Value {
     }
 }
 
-/// A layer's world bounds as `[x, y, w, h]` to 0.1; null for one without.
+/// A layer's own box in world space as `[x, y, w, h]` to 0.1, its stroke left
+/// out, as the inspector's W and H read it: the outline and the find place
+/// layers, and a stroke's ink would put a 64 square at 67. Null for a layer
+/// without one.
 pub(super) fn bounds_box(s: &EditorSession, id: NodeId) -> Value {
-    match s.resolved.world_bounds(id) {
+    let own = ondin_core::local_box(&s.doc, &s.resolved, id).and_then(|b| {
+        let world = s.resolved.world_transform(id)?;
+        Some(ondin_core::geometry::transform_rect(world, b))
+    });
+    match own.or_else(|| s.resolved.world_bounds(id)) {
         Some(r) => json!([
             tenth(r.x0),
             tenth(r.y0),

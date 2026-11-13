@@ -2427,6 +2427,46 @@ mod tests {
         assert_eq!(ok(&one)["selected"], json!([]));
     }
 
+    /// `get_outline` and `find_nodes` give a stroked layer's own box, where
+    /// `get_node`'s `world_bounds` take in the stroke.
+    ///
+    /// flip: `reads::bounds_box` answering the world bounds → fails at the
+    /// outline's row.
+    #[test]
+    fn the_outline_boxes_a_layer_without_its_stroke() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect_at(&mut engine, &mut docs, "Stroked", 10.0, 10.0);
+        let strokes = ondin_core::keyed_by_position([ondin_core::Stroke {
+            width: 3.0,
+            ..Default::default()
+        }]);
+        let nid = NodeId::from_wire(&id).unwrap();
+        let tx =
+            ondin_core::Transaction(vec![ondin_core::Operation::SetStrokes { id: nid, strokes }]);
+        docs.session.try_commit(tx).unwrap();
+        let node = call(&mut engine, &mut docs, 1, "get_node", json!({ "id": id }));
+        let inked = &ok(&node)["nodes"][0]["world_bounds"];
+        assert!(
+            inked[2].as_f64() > Some(130.0),
+            "the stroke is drawn: {inked}"
+        );
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "get_outline",
+            json!({ "id": id }),
+        );
+        assert_eq!(
+            ok(&out)["rows"],
+            json!([[id, "Stroked", "rect", 10, 10, 120, 80, 0]])
+        );
+        let args = json!({ "query": "stroked" });
+        let found = call(&mut engine, &mut docs, 1, "find_nodes", args);
+        assert_eq!(ok(&found)["nodes"][0]["box"], json!([10, 10, 120, 80]));
+    }
+
     /// `find_nodes` tells two layers of one name apart by their boxes, and marks
     /// the one selected and the group holding it.
     ///

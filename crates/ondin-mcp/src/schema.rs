@@ -312,6 +312,24 @@ pub static TOOLS: &[Tool] = &[
         )],
     },
     Tool {
+        name: "check_layout",
+        doc: "Placement mistakes, each with its layers, a code and a line, from boxes already laid out (no render): `text_cut` (content cut at its box or line limit), `text_overflow` (lines outside a fixed box), `clipped` and `outside_clip` (partly or wholly outside the frame that clips it), `layout_overflow` (a flex or grid child running past its frame), `zero_size`, and `text_overlap` (two unrotated texts sharing more than a sliver). A layer reported as clipped or overflowing answers for those inside it.",
+        params: &[
+            param(
+                "ids",
+                ParamKind::Nodes,
+                false,
+                "Only the layers in and under these; else a page.",
+            ),
+            param(
+                "page",
+                ParamKind::Node,
+                false,
+                "The page when no `ids`; the person's page when absent.",
+            ),
+        ],
+    },
+    Tool {
         name: "undo",
         doc: "Undo the last step in the document's history when you made it; refused, naming it, when the person or another client did.",
         params: &[],

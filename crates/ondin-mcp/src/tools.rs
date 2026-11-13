@@ -3,7 +3,7 @@
 
 /// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
 /// reordering shows as a diff.
-pub const PHASE_1: [&str; 23] = [
+pub const PHASE_1: [&str; 24] = [
     "use_document",
     "get_document",
     "get_node",
@@ -28,6 +28,7 @@ pub const PHASE_1: [&str; 23] = [
     "check_contrast",
     "review_colours",
     "design_context",
+    "check_layout",
 ];
 
 /// Phase 2 — write, 1:1 with operations/composites (§8.4).

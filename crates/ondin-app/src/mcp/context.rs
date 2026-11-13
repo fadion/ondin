@@ -1,22 +1,24 @@
 //! The reads an agent takes before adding to a page (§8.4, Phase 1):
-//! `design_context`, what the layers under a frame or page already use.
+//! `design_context`, what the layers under a frame or page already use, and
+//! `check_layout`, the placement mistakes a render would otherwise show.
 
-use super::{Answer, node};
+use super::{Answer, node, nodes};
 use crate::session::EditorSession;
 use ondin_core::kurbo::{Point, Rect};
 use ondin_core::peniko::Color;
 use ondin_core::typography::{CharAttr, Length};
-use ondin_core::{Brush, Document, NodeId, NodeKind, Resolved};
+use ondin_core::{Brush, Document, NodeId, NodeKind, Resolved, TextSizing};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 /// The tools this module answers.
-pub(super) const TOOLS: [&str; 1] = ["design_context"];
+pub(super) const TOOLS: [&str; 2] = ["design_context", "check_layout"];
 
 /// Answer `tool` on `s`.
 pub(super) fn run(s: &EditorSession, tool: &str, args: &Value) -> Result<Answer, String> {
     match tool {
         "design_context" => design_context(s, args).map(Answer::Json),
+        "check_layout" => check_layout(s, args).map(Answer::Json),
         tool => Err(format!("no tool `{tool}`")),
     }
 }
@@ -31,6 +33,9 @@ const SECTIONS: usize = 40;
 /// How far an edge may pass the box that holds it, in world units, before it
 /// counts: a hairline stroke centred on a frame's edge is not a defect.
 const SLACK: f64 = 1.0;
+
+/// The most issues `check_layout` lists.
+const ISSUES: usize = 100;
 
 /// `v` at two decimal places, the precision every number here is written at.
 fn r2(v: f64) -> f64 {
@@ -501,12 +506,228 @@ fn sections_and_column(doc: &Document, res: &Resolved, root: NodeId) -> (Vec<Val
     (sections, column)
 }
 
+/// One finding of `check_layout`.
+fn issue(code: &str, ids: &[NodeId], message: String) -> Value {
+    json!({
+        "code": code,
+        "ids": ids.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
+        "message": message,
+    })
+}
+
+/// Whether `inner` passes `outer` on any side by more than [`SLACK`].
+fn passes(inner: Rect, outer: Rect) -> bool {
+    inner.x0 < outer.x0 - SLACK
+        || inner.y0 < outer.y0 - SLACK
+        || inner.x1 > outer.x1 + SLACK
+        || inner.y1 > outer.y1 + SLACK
+}
+
+/// What a walk of `check_layout` carries down to a layer.
+#[derive(Clone, Copy)]
+struct Above {
+    /// The nearest frame that clips, and its box.
+    clip: Option<(NodeId, Rect)>,
+    /// The parent's box when it lays its children out with flex or grid.
+    layout: Option<(NodeId, Rect)>,
+    /// Whether an ancestor was reported as clipped or overflowing, which
+    /// answers for everything inside it.
+    reported: bool,
+}
+
+/// `check_layout`: placement lints over the shown layers of a page or of the
+/// layers under `ids`. Each is a box comparison of what the session already
+/// laid out, so none needs a render; see the tool's line for the list.
+fn check_layout(s: &EditorSession, args: &Value) -> Result<Value, String> {
+    let doc = &s.doc;
+    let res = &s.resolved;
+    let roots = match nodes(args, "ids")? {
+        Some(ids) => {
+            if let Some(gone) = ids.iter().find(|i| doc.get(**i).is_none()) {
+                return Err(format!("no layer `{}`", gone.to_wire()));
+            }
+            ondin_core::build::outermost(doc, &ids)
+        }
+        None => vec![super::page_of(s, node(args, "page")?)?],
+    };
+    let mut issues = Vec::new();
+    let mut texts: Vec<(NodeId, Rect)> = Vec::new();
+    let mut checked = 0;
+    for root in roots {
+        if !doc.shown_through(root) {
+            continue;
+        }
+        let mut above = Above {
+            clip: None,
+            layout: None,
+            reported: false,
+        };
+        // The clip and layout a root inside a page sits in.
+        let parent = doc.get(root).and_then(|n| n.parent());
+        if let Some(p) = parent
+            && doc.get(p).is_some_and(|n| n.display().is_some())
+        {
+            above.layout = frame_box(doc, res, p).map(|b| (p, b));
+        }
+        let mut up = parent;
+        while let Some(a) = up {
+            let Some(an) = doc.get(a) else { break };
+            if an.kind().clips_children() && an.clip() {
+                above.clip = frame_box(doc, res, a).map(|b| (a, b));
+                break;
+            }
+            up = an.parent();
+        }
+        walk(doc, res, root, above, &mut issues, &mut texts, &mut checked);
+    }
+    // Two texts overlap when their boxes share more than a sliver: over 2
+    // units across and a quarter of the shorter one's height.
+    for (i, (a, ab)) in texts.iter().enumerate() {
+        for (b, bb) in &texts[i + 1..] {
+            let x = ab.intersect(*bb);
+            if x.width() > 2.0 && x.height() > 0.25 * ab.height().min(bb.height()) {
+                issues.push(issue(
+                    "text_overlap",
+                    &[*a, *b],
+                    format!(
+                        "Two texts overlap by {} × {}.",
+                        r2(x.width()),
+                        r2(x.height())
+                    ),
+                ));
+            }
+        }
+    }
+    let more = issues.len().saturating_sub(ISSUES);
+    issues.truncate(ISSUES);
+    let mut answer = json!({ "issues": issues, "checked": checked });
+    if more > 0 {
+        answer["more"] = json!(more);
+    }
+    Ok(answer)
+}
+
+/// Check `id` and the shown layers under it, given what lies above it.
+fn walk(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+    above: Above,
+    issues: &mut Vec<Value>,
+    texts: &mut Vec<(NodeId, Rect)>,
+    checked: &mut usize,
+) {
+    let Some(n) = doc.get(id) else { return };
+    let page = doc.is_page(id);
+    if !page && (!doc.shown(id) || n.mask()) {
+        return;
+    }
+    let kind = res.used_kind(doc, id).unwrap_or(n.kind());
+    let bounds = res.world_bounds(id);
+    let mut reported = above.reported;
+    if !page && !matches!(kind, NodeKind::Slice { .. }) {
+        *checked += 1;
+        let one = |code: &str, message: String| issue(code, &[id], message);
+        if let Some(size) = match kind {
+            NodeKind::Text { .. } => res.text_layout(id).map(|l| l.size),
+            NodeKind::Line { .. } | NodeKind::Arc { .. } | NodeKind::Spiral { .. } => None,
+            k => k.box_size(),
+        } && (size.width <= 0.01 || size.height <= 0.01)
+        {
+            issues.push(one(
+                "zero_size",
+                format!(
+                    "It is {} × {}: nothing of it shows.",
+                    r2(size.width),
+                    r2(size.height)
+                ),
+            ));
+            // A box with no area intersects nothing: the clip lint would call it
+            // outside too.
+            reported = true;
+        }
+        let in_flow = !n.insets().is_authored();
+        if let (Some((p, pb)), Some(b)) = (above.layout, bounds)
+            && in_flow
+            && passes(b, pb)
+        {
+            issues.push(issue(
+                "layout_overflow",
+                &[id, p],
+                "It runs past the box of the flex or grid frame that lays it out.".into(),
+            ));
+            reported = true;
+        } else if let (Some((c, cb)), Some(b), false) = (above.clip, bounds, reported) {
+            if b.intersect(cb).area() <= 0.0 {
+                issues.push(issue(
+                    "outside_clip",
+                    &[id, c],
+                    "It lies wholly outside the frame that clips it: none of it shows.".into(),
+                ));
+                reported = true;
+            } else if passes(b, cb) {
+                issues.push(issue(
+                    "clipped",
+                    &[id, c],
+                    "Part of it lies outside the frame that clips it and is cut off.".into(),
+                ));
+                reported = true;
+            }
+        }
+        if let NodeKind::Text { sizing, .. } = kind
+            && let Some(l) = res.text_layout(id)
+        {
+            if l.truncated {
+                issues.push(one(
+                    "text_cut",
+                    "Its content does not fit: lines past its box or line limit are cut.".into(),
+                ));
+            } else if let TextSizing::Fixed(s) = sizing
+                && l.warp.is_none()
+                && let (Some(first), Some(last)) = (l.baselines.first(), l.baselines.last())
+                && (*last > s.height + SLACK || *first < -SLACK)
+            {
+                issues.push(one(
+                    "text_overflow",
+                    format!(
+                        "Its lines run outside its fixed {} × {} box.",
+                        r2(s.width),
+                        r2(s.height)
+                    ),
+                ));
+            }
+            if let Some(b) = bounds
+                && res
+                    .world_transform(id)
+                    .is_some_and(|w| w.as_coeffs()[1].abs() < 1e-9 && w.as_coeffs()[2].abs() < 1e-9)
+            {
+                texts.push((id, b));
+            }
+        }
+    }
+    let below = Above {
+        clip: match kind.clips_children() && n.clip() {
+            true => frame_box(doc, res, id).map(|b| (id, b)).or(above.clip),
+            false => above.clip,
+        },
+        layout: n
+            .display()
+            .and_then(|_| frame_box(doc, res, id))
+            .map(|b| (id, b)),
+        reported,
+    };
+    for &c in n.children() {
+        walk(doc, res, c, below, issues, texts, checked);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ondin_core::container::{Display, Flex, LayoutItem};
     use ondin_core::effect::{Effect, EffectKind, Shadow};
     use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
-    use ondin_core::{BlockStyle, Fill, TextSizing, TextStyle};
+    use ondin_core::{BlockStyle, Fill, TextOverflow, TextStyle};
 
     fn fill(r: u8, g: u8, b: u8) -> Value {
         json!([Fill {
@@ -700,5 +921,69 @@ mod tests {
         );
         let one = design_context(&s, &json!({ "id": made[2].to_wire() }));
         assert!(one.is_err(), "a text layer is refused");
+    }
+
+    /// `check_layout` finds each lint once on a card built to show it, and
+    /// nothing on the layers placed well.
+    ///
+    /// flip: `walk` without its `truncated` check → fails at the codes, which
+    /// lose `text_cut`.
+    #[test]
+    fn check_layout_finds_each_lint() {
+        let long = "A sentence far too long for a box one line high and a hundred wide.";
+        let clip = BlockStyle {
+            overflow: TextOverflow::Clip,
+            ..BlockStyle::default()
+        };
+        let fixed = TextSizing::Fixed(Size::new(100.0, 20.0));
+        let item = LayoutItem {
+            shrink: 0.0,
+            ..LayoutItem::default()
+        };
+        let (s, made) = with(json!({
+            "kind": frame(300.0, 300.0), "name": "Card", "clip": true,
+            "children": [
+                { "kind": text(long, 16.0, 400, fixed, BlockStyle::default()), "name": "Hangs", "transform": at(10.0, 10.0) },
+                { "kind": text(long, 16.0, 400, fixed, clip), "name": "Cut", "transform": at(150.0, 10.0) },
+                { "kind": rect(100.0, 50.0, 0.0), "name": "Half", "transform": at(250.0, 120.0) },
+                { "kind": rect(50.0, 50.0, 0.0), "name": "Gone", "transform": at(400.0, 10.0) },
+                { "kind": rect(50.0, 0.0, 0.0), "name": "Flat", "transform": at(10.0, 280.0) },
+                { "kind": text("Overlap one", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "A", "transform": at(10.0, 200.0) },
+                { "kind": text("Overlap two", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "B", "transform": at(20.0, 204.0) },
+                {
+                    "kind": frame(100.0, 40.0), "name": "Row", "transform": at(10.0, 120.0),
+                    "display": Display::Flex(Flex::default()),
+                    "children": [{ "kind": rect(200.0, 20.0, 0.0), "name": "Wide", "item": item }],
+                },
+                { "kind": rect(40.0, 40.0, 4.0), "name": "Fine", "transform": at(150.0, 240.0) },
+            ],
+        }));
+        let name = |id: &Value| {
+            let id = NodeId::from_wire(id.as_str().unwrap()).unwrap();
+            s.doc.get(id).unwrap().name().to_owned()
+        };
+        let out = check_layout(&s, &json!({})).unwrap();
+        let mut found: Vec<(String, String)> = out["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| (i["code"].as_str().unwrap().to_owned(), name(&i["ids"][0])))
+            .collect();
+        found.sort();
+        let want = [
+            ("clipped", "Half"),
+            ("layout_overflow", "Wide"),
+            ("outside_clip", "Gone"),
+            ("text_cut", "Cut"),
+            ("text_overflow", "Hangs"),
+            ("text_overlap", "A"),
+            ("zero_size", "Flat"),
+        ]
+        .map(|(c, n)| (c.to_owned(), n.to_owned()));
+        assert_eq!(found, want, "{out}");
+        assert_eq!(out["checked"], json!(made.len()));
+        let narrowed =
+            check_layout(&s, &json!({ "ids": [made.last().unwrap().to_wire()] })).unwrap();
+        assert_eq!(narrowed["issues"], json!([]), "{narrowed}");
     }
 }

@@ -4839,10 +4839,12 @@ fn containers_convert_and_fit_their_content() {
     );
 }
 
-/// `replace_font` rewrites a layer's family, and refuses a family nothing sets.
+/// `replace_font` rewrites a layer's family, and refuses a family nothing sets
+/// and a family replaced by itself, which would drop its axis settings.
 ///
 /// flip: `replace_font` swapping `from` and `to` → fails at the first call, refused
-/// as nothing is set in the new family yet.
+/// as nothing is set in the new family yet; without its same-family check → fails
+/// at "a family is not replaced by itself".
 #[test]
 fn replace_font_rewrites_a_family_everywhere() {
     let (mut doc, mut ids, page) = blank();
@@ -4871,4 +4873,10 @@ fn replace_font_rewrites_a_family_everywhere() {
         json!({ "from": "Nowhere Sans", "to": "Test Serif" }),
     );
     assert!(matches!(gone, Err(VerbError::Nothing(_))), "{gone:?}");
+    let args = json!({ "from": "test serif", "to": "Test Serif" });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "replace_font", args),
+        "to",
+        "a family is not replaced by itself"
+    );
 }

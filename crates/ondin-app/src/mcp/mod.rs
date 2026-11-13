@@ -348,6 +348,23 @@ impl Engine {
             "get_view" => docs.canvas(&path),
             _ => None,
         };
+        // Core cannot see the host's fonts: a family nobody can set text in would
+        // draw every replaced layer in a fallback. Written in the host's spelling.
+        let mut call = call;
+        if call.tool == "replace_font"
+            && let Some(to) = call.args.get("to").and_then(Value::as_str)
+        {
+            let to = to.trim().to_owned();
+            let key = to.to_lowercase();
+            match docs.fonts().into_iter().find(|f| f.to_lowercase() == key) {
+                Some(family) => call.args["to"] = json!(family),
+                None => {
+                    return Output::error(format!(
+                        "`to`: no family called {to} can be set here; `list_fonts` names those that can"
+                    ));
+                }
+            }
+        }
         let Some(session) = docs.session(&path) else {
             conn.document = None;
             conn.shown.clear();
@@ -1288,6 +1305,32 @@ mod tests {
         ok(&call(&mut engine, &mut docs, 1, "insert_subtree", args));
         let read = call(&mut engine, &mut docs, 1, "get_tree", json!({ "id": page }));
         assert!(read.is_error, "a page is refused");
+    }
+
+    /// `replace_font` takes a family the host can set, in the host's spelling,
+    /// and refuses one it cannot.
+    ///
+    /// flip: `handle` without its family check → fails at "a family the host
+    /// lacks is refused".
+    #[test]
+    fn replace_font_takes_only_a_family_the_host_can_set() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.page.to_wire();
+        let args = json!({ "parent": page, "text": "Hi" });
+        let made = call(&mut engine, &mut docs, 1, "create_text", args);
+        let t = NodeId::from_wire(ok(&made)["created"][0].as_str().unwrap()).unwrap();
+        let family = |d: &One| match d.session.doc.get(t).unwrap().kind() {
+            ondin_core::NodeKind::Text { style, .. } => style.font_family.clone(),
+            _ => unreachable!(),
+        };
+        let from = family(&docs);
+        let args = json!({ "from": from, "to": "Nowhere Sans" });
+        let out = call(&mut engine, &mut docs, 1, "replace_font", args);
+        assert!(out.is_error, "a family the host lacks is refused");
+        let args = json!({ "from": from, "to": "lora" });
+        ok(&call(&mut engine, &mut docs, 1, "replace_font", args));
+        assert_eq!(family(&docs), "Lora", "in the host's spelling");
     }
 
     /// `add_image` answers the picture's own size beside its id.

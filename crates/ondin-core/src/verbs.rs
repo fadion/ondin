@@ -3591,7 +3591,11 @@ pub static VERBS: &[Verb] = &[
         doc: "Replace a font family everywhere the document sets it: layers, runs, text styles, charts and string variables",
         params: &[
             req("from", TEXT, "the family replaced, in any case"),
-            req("to", TEXT, "the family set instead"),
+            req(
+                "to",
+                TEXT,
+                "the family set instead, a name `list_fonts` answers",
+            ),
         ],
         run: |ctx, a| {
             let (from, to) = (
@@ -3600,6 +3604,11 @@ pub static VERBS: &[Verb] = &[
             );
             if to.is_empty() {
                 return Err(a.invalid("to", "a family needs a name"));
+            }
+            // A replacement within one family would still drop every match's
+            // axis and feature settings, which go with the old typeface.
+            if from.to_lowercase() == to.to_lowercase() {
+                return Err(a.invalid("to", "it is the family replaced"));
             }
             let tx = crate::families::replace_family(ctx.doc, from, to);
             if tx.0.is_empty() {

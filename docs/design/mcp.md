@@ -51,12 +51,13 @@ Phase 1 — read/export (ship first):
 
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `import_svg(parent, svg, x?, y?, name?)`, `delete_node`,
-`reparent`, `reorder`, `arrange(ids, move)`, `group(nodes)`, `frame(nodes)`, `ungroup(id)`, `boolean(nodes, op)`, `flatten(ids)`,
+`reparent`, `reorder`, `arrange(ids, move)`, `group(nodes)`, `frame(nodes)`, `ungroup(id)`, `convert_container(node)`, `boolean(nodes, op)`, `flatten(ids)`,
 `outline_shape(id)`, `outline_stroke(id)`, `outline_text(id)`, `divide(ids)`, `blend_shapes(ids, steps?, paint?, reverse?)`,
 `duplicate(nodes, dx?, dy?)`, `join_paths(id, other)`, `repeat(ids, count, angle?, turn?)`, `align(ids, edge)`,
 `distribute(ids, axis)`, `tidy_up(ids)`, `slice(ids)`, `set_transform`, `set_pivot`, `set_geometry`,
-`set_size(id, width, height)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
-`set_locked`, `set_opacity`, `set_blend(nodes, blend)`, `set_clip`, `set_mask(node, mask)`, `set_text`, `replace_text(find, replace, ids?, …)`, `set_text_style`,
+`set_size(id, width, height)`, `fit_to_content(node)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
+`set_locked`, `set_opacity`, `set_blend(nodes, blend)`, `set_clip`, `set_mask(node, mask, mode?)`, `set_element(node, element?)`,
+`set_link(node, href)`, `set_text`, `replace_text(find, replace, ids?, …)`, `replace_font(from, to)`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
 `set_effects`, `merge_colours(colours, into, nodes?)`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
@@ -72,7 +73,8 @@ Phase 3 — components, variables and styles (through the verbs, never the raw o
 `move_variant_value(node, property, value, index)`, `delete_variant_value(node, property, value)`,
 `tie_state(node, property, value, state?)`, `switch_variant(id, property, value)`,
 `define_property(node, kind, property?, name?)`, `edit_property(node, property, name?, filter?, preferred?)`,
-`delete_property(node, property)`, `show_nested_properties(node, shown)`, `set_instance_property(id, property, value)`,
+`delete_property(node, property)`, `show_nested_properties(node, shown)`, `set_description(text, node? | style? | variable?)`,
+`set_doc_link(node, url)`, `set_instance_property(id, property, value)`,
 `reset_overrides(nodes, scope)`, `push_to_main(node, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's
@@ -99,7 +101,7 @@ Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp
   layer's defaults with that attribute's runs dropped, as the type panel writes it.
 - A page is named by its root node's id: `create_node`'s and `insert_subtree`'s parent may be one,
   and `set_name` renames one.
-- `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode`, `add_collection`, `duplicate_collection` and `add_style`.
+- `create_node`, `insert_subtree`, `duplicate`, `convert_container`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode`, `add_collection`, `duplicate_collection` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
 - `set_blend(nodes, blend)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.

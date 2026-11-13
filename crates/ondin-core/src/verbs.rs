@@ -611,6 +611,13 @@ const RESETS: &[&str] = &["all", "fields", "children", "order"];
 const PUSHES: &[&str] = &["all", "properties", "fields", "layers", "order", "removals"];
 const LEVELS: &[&str] = &["aa", "aaa", "apca"];
 const PROP_KINDS: &[&str] = &["boolean", "text", "swap"];
+/// The mask modes by the word a verb takes, in [`crate::node::MaskMode::ALL`]'s order.
+const MASK_MODES: &[&str] = &["shape", "alpha", "luminance"];
+/// The HTML elements by the tag a verb takes them as.
+const ELEMENTS: &[&str] = &[
+    "main", "section", "article", "aside", "header", "footer", "nav", "ul", "button", "a", "h1",
+    "h2", "h3", "h4", "h5", "h6",
+];
 /// The browser states a variant value can be tied to, as `variant::Interaction`
 /// writes them.
 const STATES: &[&str] = &["hover", "focus-visible", "active", "disabled"];
@@ -780,6 +787,37 @@ fn collection_name(
     match taken {
         true => Err(a.invalid("name", format!("{name} already exists"))),
         false => Ok(name.to_owned()),
+    }
+}
+
+/// Why layer `id`'s element and link are not its own to set, as the identity
+/// card's Element row dims: a layer inside an instance takes its main's, and a
+/// shape takes none.
+fn element_refusal(ctx: &Ctx<'_>, a: &Args<'_>, id: NodeId) -> Result<(), VerbError> {
+    let n = node(ctx, id)?;
+    let main = n
+        .link()
+        .and_then(|_| crate::component::instance_root(ctx.doc, id))
+        .and_then(|r| crate::component::main_of(ctx.doc, r))
+        .and_then(|m| ctx.doc.get(m));
+    if let Some(m) = main {
+        let why = format!("set on the main component, “{}”", m.name());
+        return Err(a.invalid("node", why));
+    }
+    match crate::element::kind_refusal(n.kind()) {
+        Some(why) => Err(a.invalid("node", why)),
+        None => Ok(()),
+    }
+}
+
+/// The main component or set the `node` argument names, which alone carry a
+/// description and a documentation link of their own.
+fn component_owner(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<NodeId, VerbError> {
+    let id = a.layer(ctx.doc, "node")?;
+    let n = node(ctx, id)?;
+    match n.component() || n.set().is_some() {
+        true => Ok(id),
+        false => Err(a.invalid("node", "neither a main component nor a component set")),
     }
 }
 
@@ -3291,12 +3329,231 @@ pub static VERBS: &[Verb] = &[
     Verb {
         name: "set_mask",
         doc: "Use a layer as a mask for the layers above it in its parent, or stop",
-        params: &[req("node", NODE, "the layer"), req("mask", BOOL, "a mask")],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetMask {
-                id: a.node("node")?,
-                mask: a.bool("mask").unwrap_or(true),
+        params: &[
+            req("node", NODE, "the layer"),
+            req("mask", BOOL, "a mask"),
+            opt(
+                "mode",
+                ParamKind::Choice(MASK_MODES),
+                "what of the mask decides what survives: its outline (`shape`), its alpha, or its brightness (`luminance`); kept unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let id = a.node("node")?;
+            let mask = a.bool("mask").unwrap_or(true);
+            let mut ops = vec![Operation::SetMask { id, mask }];
+            if let Some(word) = a.choice("mode") {
+                if !mask {
+                    return Err(a.invalid("mode", "only a mask has a mode"));
+                }
+                let mode = MASK_MODES
+                    .iter()
+                    .position(|w| *w == word)
+                    .map_or(crate::node::MaskMode::Shape, |i| {
+                        crate::node::MaskMode::ALL[i]
+                    });
+                if node(ctx, id)?.mask_mode() != mode {
+                    ops.push(Operation::SetMaskMode { id, mode });
+                }
+            }
+            Ok(Done::ops(ops))
+        },
+    },
+    Verb {
+        name: "set_element",
+        doc: "Set the HTML element a code export writes a frame, group or text as, or Automatic; a variant writes every variant of its set",
+        params: &[
+            req("node", NODE, "the frame, group or text"),
+            opt(
+                "element",
+                ParamKind::Choice(ELEMENTS),
+                "its tag; absent for Automatic",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::element::{self, HtmlElement};
+            let id = a.layer(ctx.doc, "node")?;
+            let n = node(ctx, id)?;
+            element_refusal(ctx, a, id)?;
+            let element = match a.choice("element") {
+                None => None,
+                Some(tag) => {
+                    let offered = element::offered(n.kind()).unwrap_or(&[]);
+                    let e = offered
+                        .iter()
+                        .copied()
+                        .find(|e| e.tag() == tag)
+                        .ok_or_else(|| {
+                            let tags: Vec<&str> = offered.iter().map(|e| e.tag()).collect();
+                            a.invalid("element", format!("it takes {}", tags.join(", ")))
+                        })?;
+                    if let Some(why) = element::targets(ctx.doc, id)
+                        .iter()
+                        .find_map(|t| element::refusal(ctx.doc, *t, e))
+                    {
+                        return Err(a.invalid("element", why));
+                    }
+                    Some::<HtmlElement>(e)
+                }
+            };
+            Ok(Done::ops(element::set_ops(ctx.doc, id, element)))
+        },
+    },
+    Verb {
+        name: "set_link",
+        doc: "Set the address a layer written as a link (`a`) goes to; empty clears it",
+        params: &[
+            req("node", NODE, "the layer, its element `a`"),
+            req("href", TEXT, "an https:// address, a /path or a #id"),
+        ],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            if node(ctx, id)?.element() != Some(crate::element::HtmlElement::Link) {
+                return Err(a.invalid(
+                    "node",
+                    "only a layer written as a link takes an address: set its element to `a` first",
+                ));
+            }
+            element_refusal(ctx, a, id)?;
+            let href = a.text("href").unwrap_or_default().trim();
+            if !crate::element::is_href(href) {
+                return Err(a.invalid("href", "not an address a link can take"));
+            }
+            if node(ctx, id)?.href() == href {
+                return Ok(Done::default());
+            }
+            Ok(Done::ops(vec![Operation::SetHref {
+                id,
+                href: href.to_owned(),
             }]))
+        },
+    },
+    Verb {
+        name: "set_description",
+        doc: "Set the description of a main component or set, a style or a variable; empty clears it",
+        params: &[
+            opt("node", NODE, "a main component or set"),
+            opt("style", ParamKind::Id("style"), "a style"),
+            opt("variable", ParamKind::Id("variable"), "a variable"),
+            req("text", TEXT, "the description"),
+        ],
+        run: |ctx, a| {
+            use crate::op::Described;
+            let of = match (a.get("node"), a.get("style"), a.get("variable")) {
+                (Some(_), None, None) => Described::Node(component_owner(ctx, a)?),
+                (None, Some(_), None) => Described::Style(own_style(ctx, a)?.id),
+                (None, None, Some(_)) => Described::Variable(own_variable(ctx, a)?),
+                _ => {
+                    return Err(a.invalid("node", "give one of `node`, `style` and `variable`"));
+                }
+            };
+            let text = a.text("text").unwrap_or_default().trim().to_owned();
+            let now = match of {
+                Described::Node(id) => node(ctx, id)?.description(),
+                Described::Style(id) => ctx
+                    .doc
+                    .styles()
+                    .get(id)
+                    .map_or("", |s| s.description.as_str()),
+                Described::Variable(id) => ctx
+                    .doc
+                    .variables()
+                    .get(id)
+                    .map_or("", |v| v.description.as_str()),
+            };
+            if now == text {
+                return Ok(Done::default());
+            }
+            Ok(Done::ops(vec![Operation::SetDescription { of, text }]))
+        },
+    },
+    Verb {
+        name: "set_doc_link",
+        doc: "Set the documentation address of a main component or set; empty clears it",
+        params: &[
+            req("node", NODE, "the main component or set"),
+            req(
+                "url",
+                TEXT,
+                "an http or https address; a bare host takes https://",
+            ),
+        ],
+        run: |ctx, a| {
+            let id = component_owner(ctx, a)?;
+            let url = crate::node::web_link(a.text("url").unwrap_or_default())
+                .map_err(|why| a.invalid("url", why))?;
+            if node(ctx, id)?.doc_link() == url {
+                return Ok(Done::default());
+            }
+            Ok(Done::ops(vec![Operation::SetDocLink { id, url }]))
+        },
+    },
+    Verb {
+        name: "convert_container",
+        doc: "Turn a group into a frame of its own box, or a frame into a group keeping its look; answers what it became",
+        params: &[req("node", NODE, "the group or frame")],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            if !matches!(
+                node(ctx, id)?.kind(),
+                NodeKind::Group | NodeKind::Artboard { .. }
+            ) {
+                return Err(a.invalid("node", "neither a group nor a frame"));
+            }
+            if let Some(why) = build::convert_container_refusal(ctx.doc, id) {
+                return Err(a.invalid("node", why));
+            }
+            let (tx, new) = build::convert_container(ctx.doc, ctx.res, ctx.ids, id)?;
+            Ok(Done::made(tx, vec![new]))
+        },
+    },
+    Verb {
+        name: "fit_to_content",
+        doc: "Resize a frame without a layout to the box of what is inside it, everything inside staying where it is drawn",
+        params: &[req("node", NODE, "the frame")],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            let n = node(ctx, id)?;
+            build::fit_frame(ctx.doc, ctx.res, id)
+                .map(Done::edit)
+                .ok_or_else(|| {
+                    let why = match n.kind() {
+                        NodeKind::Group => "A group always fits its content",
+                        NodeKind::Artboard { .. } if n.display().is_some() => {
+                            "A frame with a layout sizes itself: set W and H to fit-content"
+                        }
+                        NodeKind::Artboard { .. } if n.children().is_empty() => {
+                            "Nothing inside to fit to"
+                        }
+                        NodeKind::Artboard { .. } => "Already fits its content",
+                        _ => "Only a frame fits its content",
+                    };
+                    a.invalid("node", why)
+                })
+        },
+    },
+    Verb {
+        name: "replace_font",
+        doc: "Replace a font family everywhere the document sets it: layers, runs, text styles, charts and string variables",
+        params: &[
+            req("from", TEXT, "the family replaced, in any case"),
+            req("to", TEXT, "the family set instead"),
+        ],
+        run: |ctx, a| {
+            let (from, to) = (
+                a.text("from").unwrap_or_default().trim(),
+                a.text("to").unwrap_or_default().trim(),
+            );
+            if to.is_empty() {
+                return Err(a.invalid("to", "a family needs a name"));
+            }
+            let tx = crate::families::replace_family(ctx.doc, from, to);
+            if tx.0.is_empty() {
+                return Err(VerbError::Nothing(
+                    "nothing of the document's own sets that family: no layer, run, text style, chart or variable, though a kit's may",
+                ));
+            }
+            Ok(Done::edit(tx))
         },
     },
     // --- text ---------------------------------------------------------------

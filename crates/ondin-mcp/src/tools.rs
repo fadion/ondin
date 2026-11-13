@@ -30,7 +30,7 @@ pub const PHASE_1: [&str; 20] = [
 ///
 /// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
 /// ids: the handler minted them, so it knows them.
-pub const PHASE_2: [&str; 70] = [
+pub const PHASE_2: [&str; 75] = [
     "create_node",
     "create_text",
     "insert_subtree",
@@ -42,6 +42,7 @@ pub const PHASE_2: [&str; 70] = [
     "group",
     "frame",
     "ungroup",
+    "convert_container",
     "boolean",
     "flatten",
     "outline_shape",
@@ -60,6 +61,7 @@ pub const PHASE_2: [&str; 70] = [
     "set_pivot",
     "set_geometry",
     "set_size",
+    "fit_to_content",
     "pixel_fit",
     "set_name",
     "set_visible",
@@ -68,8 +70,11 @@ pub const PHASE_2: [&str; 70] = [
     "set_blend",
     "set_clip",
     "set_mask",
+    "set_element",
+    "set_link",
     "set_text",
     "replace_text",
+    "replace_font",
     "set_text_style",
     "set_text_spans",
     "set_paragraph_style",
@@ -111,7 +116,7 @@ pub const PHASE_2: [&str; 70] = [
 /// still in use is refused at the commit. `create_instance`, `add_variable`,
 /// `add_mode`, `add_collection`, `duplicate_collection` and `add_style` return
 /// the new ids.
-pub const PHASE_3: [&str; 47] = [
+pub const PHASE_3: [&str; 49] = [
     "make_component",
     "duplicate_as_component",
     "create_instance",
@@ -133,6 +138,8 @@ pub const PHASE_3: [&str; 47] = [
     "edit_property",
     "delete_property",
     "show_nested_properties",
+    "set_description",
+    "set_doc_link",
     "set_instance_property",
     "reset_overrides",
     "push_to_main",

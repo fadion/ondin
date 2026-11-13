@@ -4408,3 +4408,279 @@ fn merge_colours_into_a_bound_colour_binds_the_raw_paints() {
         "the raw paint is bound to the variable"
     );
 }
+
+/// `set_mask` sets a mask's mode with it, and refuses a mode for a layer that
+/// stops being one.
+///
+/// flip: `set_mask` dropping its `SetMaskMode` → fails at "alpha".
+#[test]
+fn set_mask_sets_the_mode_of_a_mask() {
+    let (mut doc, mut ids, page) = blank();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_mask",
+        json!({ "node": r.to_wire(), "mask": true, "mode": "alpha" }),
+    );
+    let n = doc.get(r).unwrap();
+    assert!(n.mask());
+    assert_eq!(n.mask_mode(), ondin_core::MaskMode::Alpha, "alpha");
+    let args = json!({ "node": r.to_wire(), "mask": false, "mode": "shape" });
+    assert_eq!(refused_param(&doc, &mut ids, "set_mask", args), "mode");
+}
+
+/// A frame is written as an element its kind offers and, as a link, takes an
+/// address; a shape, an element a text takes, a link address on a layer that is
+/// no link and an address a link cannot take are refused.
+///
+/// flip: `set_link` without its element check → fails at "no link yet".
+#[test]
+fn set_element_and_set_link_write_what_code_export_reads() {
+    let (mut doc, mut ids, page) = blank();
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(100.0, 40.0) }),
+    )[0];
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_element",
+        json!({ "node": f.to_wire(), "element": "nav" }),
+    );
+    assert_eq!(
+        doc.get(f).unwrap().element(),
+        Some(ondin_core::element::HtmlElement::Nav)
+    );
+    for (node, element, param) in [(f, "h1", "element"), (r, "nav", "node")] {
+        let args = json!({ "node": node.to_wire(), "element": element });
+        assert_eq!(refused_param(&doc, &mut ids, "set_element", args), param);
+    }
+    let link = |href: &str| json!({ "node": f.to_wire(), "href": href });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_link", link("/about")),
+        "node",
+        "no link yet"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_element",
+        json!({ "node": f.to_wire(), "element": "a" }),
+    );
+    run(&mut doc, &mut ids, "set_link", link(" /about "));
+    assert_eq!(doc.get(f).unwrap().href(), "/about");
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_link", link("javascript:alert(1)")),
+        "href"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_element",
+        json!({ "node": f.to_wire() }),
+    );
+    assert_eq!(doc.get(f).unwrap().element(), None, "back to Automatic");
+}
+
+/// A main takes a description and a documentation link, a bare host made an
+/// https address; a style takes a description; a plain frame, two subjects and a
+/// file address are refused.
+///
+/// flip: `set_doc_link` writing the address as typed → fails at the commit, which
+/// refuses a link not in `web_link`'s form.
+#[test]
+fn descriptions_and_doc_links_are_set() {
+    let (mut doc, mut ids, page) = blank();
+    let (card, inside) = main_component(&mut doc, &mut ids, page, "Card", 100.0);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_description",
+        json!({ "node": card.to_wire(), "text": " A card. " }),
+    );
+    assert_eq!(doc.get(card).unwrap().description(), "A card.");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_doc_link",
+        json!({ "node": card.to_wire(), "url": "example.com/card" }),
+    );
+    assert_eq!(
+        doc.get(card).unwrap().doc_link(),
+        "https://example.com/card"
+    );
+    let fills = serde_json::to_value(vec![Fill {
+        brush: Brush::Solid(Color::WHITE).into(),
+        visible: true,
+    }])
+    .unwrap();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_style", "args": { "value": { "fills": fills } }, "as": "s" },
+            { "verb": "set_description", "args": { "style": "@s", "text": "Paper" } },
+        ]),
+    );
+    let style: ondin_core::style::StyleId = serde_json::from_value(json!(made[0][0])).unwrap();
+    assert_eq!(doc.styles().get(style).unwrap().description, "Paper");
+    for (args, param, verb) in [
+        (
+            json!({ "node": inside.to_wire(), "text": "x" }),
+            "node",
+            "set_description",
+        ),
+        (
+            json!({ "node": card.to_wire(), "style": made[0][0], "text": "x" }),
+            "node",
+            "set_description",
+        ),
+        (
+            json!({ "node": card.to_wire(), "url": "file:///x" }),
+            "url",
+            "set_doc_link",
+        ),
+    ] {
+        assert_eq!(refused_param(&doc, &mut ids, verb, args), param, "{verb}");
+    }
+}
+
+/// A group becomes a frame and back, each answering what it became; an empty
+/// frame is refused. A frame fits its content once, then says it already fits.
+///
+/// flip: `fit_to_content` answering nothing to do where `fit_frame` declines →
+/// fails at "already fits".
+#[test]
+fn containers_convert_and_fit_their_content() {
+    let (mut doc, mut ids, page) = blank();
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({
+            "parent": page.to_wire(),
+            "kind": rect(10.0, 10.0),
+            "transform": Affine::translate((20.0, 30.0)),
+        }),
+    )[0];
+    let g = run(
+        &mut doc,
+        &mut ids,
+        "group",
+        json!({ "nodes": [r.to_wire()] }),
+    )[0];
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "convert_container",
+        json!({ "node": g.to_wire() }),
+    )[0];
+    assert!(matches!(
+        doc.get(f).unwrap().kind(),
+        NodeKind::Artboard { .. }
+    ));
+    assert_eq!(doc.get(r).unwrap().parent(), Some(f), "its layers move in");
+    let back = run(
+        &mut doc,
+        &mut ids,
+        "convert_container",
+        json!({ "node": f.to_wire() }),
+    )[0];
+    assert!(matches!(doc.get(back).unwrap().kind(), NodeKind::Group));
+    let empty = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(50.0, 50.0) }),
+    )[0];
+    let args = json!({ "node": empty.to_wire() });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "convert_container", args),
+        "node"
+    );
+
+    let card = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(300.0, 200.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({
+            "parent": card.to_wire(),
+            "kind": rect(40.0, 24.0),
+            "transform": Affine::translate((16.0, 16.0)),
+        }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "fit_to_content",
+        json!({ "node": card.to_wire() }),
+    );
+    let NodeKind::Artboard { size, .. } = doc.get(card).unwrap().kind() else {
+        unreachable!()
+    };
+    assert_eq!((size.width, size.height), (40.0, 24.0));
+    let again = answer(
+        &doc,
+        &mut ids,
+        "fit_to_content",
+        json!({ "node": card.to_wire() }),
+    );
+    assert!(
+        matches!(&again, Err(VerbError::Invalid { why, .. }) if why.contains("Already fits")),
+        "already fits: {again:?}"
+    );
+}
+
+/// `replace_font` rewrites a layer's family, and refuses a family nothing sets.
+///
+/// flip: `replace_font` swapping `from` and `to` → fails at the first call, refused
+/// as nothing is set in the new family yet.
+#[test]
+fn replace_font_rewrites_a_family_everywhere() {
+    let (mut doc, mut ids, page) = blank();
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": page.to_wire(), "text": "Hi" }),
+    )[0];
+    let family = |doc: &Document| match doc.get(t).unwrap().kind() {
+        NodeKind::Text { style, .. } => style.font_family.clone(),
+        _ => unreachable!(),
+    };
+    let from = family(&doc);
+    run(
+        &mut doc,
+        &mut ids,
+        "replace_font",
+        json!({ "from": from.to_uppercase(), "to": "Test Serif" }),
+    );
+    assert_eq!(family(&doc), "Test Serif");
+    let gone = answer(
+        &doc,
+        &mut ids,
+        "replace_font",
+        json!({ "from": "Nowhere Sans", "to": "Test Serif" }),
+    );
+    assert!(matches!(gone, Err(VerbError::Nothing(_))), "{gone:?}");
+}

@@ -122,8 +122,16 @@ struct Shown {
 #[derive(Clone, PartialEq)]
 struct Layer {
     name: String,
+    /// `None` on a page's root.
+    parent: Option<String>,
     hash: u64,
 }
+
+/// The most layers one list of a `changed` report names. One deletion of a
+/// frame lists every layer in it, which buried the answer it rode on; past
+/// this, the report counts the rest and names the top-level layers they sit
+/// in, which an agent reads again.
+const CHANGED_LISTED: usize = 20;
 
 /// One client's state: its current document and what it was last shown.
 #[derive(Default)]
@@ -171,18 +179,72 @@ impl Delta {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }
 
-    /// Each id with the name it has (or, removed, had).
+    /// Each id with the name it has (or, removed, had), at most [`CHANGED_LISTED`] a
+    /// list. Past that, `left_out` counts the rest of each list and names, in
+    /// `in`, the top-level layers holding them (at most [`CHANGED_LISTED`] too).
     fn to_json(&self, now: &HashMap<String, Layer>, then: &HashMap<String, Layer>) -> Value {
+        let name = |l: &Layer| json!(l.name);
         let named = |ids: &[String], from: &HashMap<String, Layer>| -> Vec<Value> {
             ids.iter()
-                .map(|id| json!({ "id": id, "name": from.get(id).map_or("", |l| l.name.as_str()) }))
+                .take(CHANGED_LISTED)
+                .map(|id| json!({ "id": id, "name": from.get(id).map_or(json!(""), name) }))
                 .collect()
         };
-        json!({
+        let mut report = json!({
             "added": named(&self.added, now),
             "changed": named(&self.changed, now),
             "removed": named(&self.removed, then),
-        })
+        });
+        let past = |ids: &[String]| ids.len().saturating_sub(CHANGED_LISTED);
+        if [&self.added, &self.changed, &self.removed]
+            .iter()
+            .all(|ids| past(ids) == 0)
+        {
+            return report;
+        }
+        let mut sections: Vec<String> = Vec::new();
+        let left = [
+            (&self.added, now),
+            (&self.changed, now),
+            (&self.removed, then),
+        ];
+        for (ids, from) in left {
+            for id in ids.iter().skip(CHANGED_LISTED) {
+                if let Some(top) = top_level(id, from)
+                    && !sections.contains(&top)
+                {
+                    sections.push(top);
+                }
+            }
+        }
+        sections.sort();
+        let sections: Vec<Value> = sections
+            .iter()
+            .take(CHANGED_LISTED)
+            .map(|id| {
+                let layer = now.get(id).or_else(|| then.get(id));
+                json!({ "id": id, "name": layer.map_or(json!(""), name) })
+            })
+            .collect();
+        report["left_out"] = json!({
+            "added": past(&self.added),
+            "changed": past(&self.changed),
+            "removed": past(&self.removed),
+            "in": sections,
+        });
+        report
+    }
+}
+
+/// The layer of `from` that holds `id` (or is it) directly under a page.
+fn top_level(id: &str, from: &HashMap<String, Layer>) -> Option<String> {
+    let mut at = id;
+    loop {
+        let parent = from.get(at)?.parent.as_deref()?;
+        if from.get(parent)?.parent.is_none() {
+            return Some(at.to_owned());
+        }
+        at = parent;
     }
 }
 
@@ -219,6 +281,7 @@ fn layers(snapshot: &ondin_export::Snapshot) -> HashMap<String, Layer> {
                 n.id.clone(),
                 Layer {
                     name: n.name.clone(),
+                    parent: n.parent.clone(),
                     hash: h.finish(),
                 },
             )
@@ -394,6 +457,7 @@ impl Engine {
         // undos included, reported before the call runs.
         let before = session.revision();
         let changed = catch_up(conn, session);
+        let mark = session.mark();
         let answer = if kits::is_kit_tool(&call.tool) {
             kits::run(docs, &path, &call)
         } else if actions::TOOLS.contains(&call.tool.as_str()) {
@@ -406,6 +470,13 @@ impl Engine {
         let Some(session) = docs.session(&path) else {
             return Output::error(format!("{} closed during the call", path.display()));
         };
+        // A refused `batch` or `set` takes back the steps it made, and leaves the
+        // revision where it was, so no client sees a change that is not there.
+        // Only these two: they change the document through the history alone,
+        // which is what `rewind` checks.
+        if answer.is_err() && matches!(call.tool.as_str(), "batch" | "set") {
+            session.rewind(&mark);
+        }
         let after = session.revision();
         let mut output = match answer {
             Ok(Answer::Json(v)) => Output::json(v),
@@ -958,12 +1029,12 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             Ok(Answer::Image(png))
         }
         "undo" => {
-            own_step(s.history.done().next_back(), &call.client, "undo")?;
-            json(json!({ "undone": s.undo() }))
+            let step = own_step(s.history.done().next_back(), &call.client, "undo")?;
+            json(json!({ "undone": s.undo().then_some(step).flatten() }))
         }
         "redo" => {
-            own_step(s.history.undone().next(), &call.client, "redo")?;
-            json(json!({ "redone": s.redo() }))
+            let step = own_step(s.history.undone().next(), &call.client, "redo")?;
+            json(json!({ "redone": s.redo().then_some(step).flatten() }))
         }
         "run_exports" => reads::run_exports(s, nodes(args, "ids")?),
         "export_code" => reads::export_code(s, args, nodes(args, "ids")?),
@@ -981,16 +1052,20 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
 /// Refuse an agent's `undo` or `redo` of a step it did not make: the history is
 /// the person's too, and one agent call must not take back their work or another
 /// client's. A step is this client's when it came over MCP under its name.
+/// Answers the step's name as the History panel lists it, `None` at the end of
+/// the history.
 fn own_step(
     step: Option<ondin_core::StepView<'_>>,
     client: &str,
     verb: &str,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let Some(step) = step else {
-        return Ok(());
+        return Ok(None);
     };
     match &step.note.origin {
-        ondin_core::Origin::Mcp { client: c, .. } if c == client => Ok(()),
+        ondin_core::Origin::Mcp { client: c, .. } if c == client => {
+            Ok(Some(step.note.label.clone()))
+        }
         ondin_core::Origin::Mcp { client: c, .. } => Err(format!(
             "The step to {verb} is `{}`, made by {c}, not by you: nothing was changed",
             step.note.label
@@ -1920,6 +1995,66 @@ mod tests {
         assert!(ok(&again).get("changed").is_none(), "reported twice");
     }
 
+    /// The person deleting a frame of many layers is reported with each list cut
+    /// at `CHANGED_LISTED`, the rest counted, and the frame named as where they were; a
+    /// sibling frame's layers do not read as changed.
+    ///
+    /// flip: `Delta::to_json` naming every id → fails at the cut list's length.
+    #[test]
+    fn a_large_change_is_cut_and_names_its_sections() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page();
+        let frame = docs.session.doc.get(page).unwrap().children()[0];
+        let args = json!({ "nodes": [frame.to_wire()] });
+        let out = call(&mut engine, &mut docs, 1, "duplicate", args);
+        let copy = ok(&out)["created"][0].as_str().unwrap().to_owned();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let kind: ondin_core::NodeKind = serde_json::from_value(kind).unwrap();
+        let ops = (0..CHANGED_LISTED + 5)
+            .map(|i| ondin_core::Operation::CreateNode {
+                id: docs.session.ids.mint(),
+                parent: frame,
+                index: i,
+                kind: kind.clone(),
+                transform: None,
+                name: None,
+            })
+            .collect();
+        docs.session
+            .try_commit(ondin_core::Transaction(ops))
+            .unwrap();
+        ok(&call(&mut engine, &mut docs, 1, "get_selection", json!({})));
+        let held = 1 + docs.session.doc.get(frame).unwrap().children().len();
+        assert!(
+            held > CHANGED_LISTED + 5,
+            "the frame holds more than a list names"
+        );
+        let tx = ondin_core::Transaction(vec![ondin_core::Operation::DeleteNode { id: frame }]);
+        docs.session.try_commit(tx).unwrap();
+        let view = call(&mut engine, &mut docs, 1, "get_view", json!({}));
+        let changed = &ok(&view)["changed"];
+        assert_eq!(
+            changed["removed"].as_array().map(Vec::len),
+            Some(CHANGED_LISTED)
+        );
+        assert_eq!(
+            changed["left_out"]["removed"],
+            held - CHANGED_LISTED,
+            "{changed}"
+        );
+        assert_eq!(changed["left_out"]["in"][0]["id"], json!(frame.to_wire()));
+        let page = json!([{ "id": page.to_wire(), "name": "Page 1" }]);
+        assert_eq!(
+            changed["changed"], page,
+            "only the page's children: {changed}"
+        );
+        assert!(
+            !changed.to_string().contains(&copy),
+            "the sibling is unchanged"
+        );
+    }
+
     /// A write whose layer changed after its `base_rev` is refused naming it; one
     /// at the current revision applies.
     ///
@@ -2201,6 +2336,38 @@ mod tests {
         assert_eq!(docs.session.history.undo_depth(), 0, "its own is undone");
     }
 
+    /// `undo` and `redo` answer the name of the step they moved, as the history
+    /// lists it, and `undone: null` at the end of the history.
+    ///
+    /// flip: `own_step` answering `None` for the client's own step → fails at
+    /// the undo's name.
+    #[test]
+    fn undo_and_redo_name_the_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Chip");
+        let args = json!({ "node": id, "name": "Pill" });
+        ok(&call(&mut engine, &mut docs, 1, "set_name", args));
+        let label = docs
+            .session
+            .history
+            .done()
+            .next_back()
+            .unwrap()
+            .note
+            .label
+            .clone();
+        assert!(!label.is_empty());
+        let undo = call(&mut engine, &mut docs, 1, "undo", json!({}));
+        assert_eq!(ok(&undo)["undone"], json!(label), "the undo's name");
+        let redo = call(&mut engine, &mut docs, 1, "redo", json!({}));
+        assert_eq!(ok(&redo)["redone"], json!(label));
+        ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
+        ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
+        let none = call(&mut engine, &mut docs, 1, "undo", json!({}));
+        assert_eq!(ok(&none)["undone"], Value::Null);
+    }
+
     /// `insert_subtree` answers each named layer by its path of names, an unnamed
     /// layer between them taking its id but no entry, and `created` holds the root
     /// and the unnamed layers, so each id is said once.
@@ -2427,6 +2594,46 @@ mod tests {
             json!([[top, "Header", "rect", 0, 0, 120, 80, 0]])
         );
         assert_eq!(ok(&one)["selected"], json!([]));
+    }
+
+    /// `get_outline` and `find_nodes` give a stroked layer's own box, where
+    /// `get_node`'s `world_bounds` take in the stroke.
+    ///
+    /// flip: `reads::bounds_box` answering the world bounds → fails at the
+    /// outline's row.
+    #[test]
+    fn the_outline_boxes_a_layer_without_its_stroke() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect_at(&mut engine, &mut docs, "Stroked", 10.0, 10.0);
+        let strokes = ondin_core::keyed_by_position([ondin_core::Stroke {
+            width: 3.0,
+            ..Default::default()
+        }]);
+        let nid = NodeId::from_wire(&id).unwrap();
+        let tx =
+            ondin_core::Transaction(vec![ondin_core::Operation::SetStrokes { id: nid, strokes }]);
+        docs.session.try_commit(tx).unwrap();
+        let node = call(&mut engine, &mut docs, 1, "get_node", json!({ "id": id }));
+        let inked = &ok(&node)["nodes"][0]["world_bounds"];
+        assert!(
+            inked[2].as_f64() > Some(130.0),
+            "the stroke is drawn: {inked}"
+        );
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "get_outline",
+            json!({ "id": id }),
+        );
+        assert_eq!(
+            ok(&out)["rows"],
+            json!([[id, "Stroked", "rect", 10, 10, 120, 80, 0]])
+        );
+        let args = json!({ "query": "stroked" });
+        let found = call(&mut engine, &mut docs, 1, "find_nodes", args);
+        assert_eq!(ok(&found)["nodes"][0]["box"], json!([10, 10, 120, 80]));
     }
 
     /// `find_nodes` tells two layers of one name apart by their boxes, and marks
@@ -2726,6 +2933,46 @@ mod tests {
         assert_eq!(s.history.undo_depth(), 1);
     }
 
+    /// A refused `batch` or `set` that took back the steps it made leaves `rev`
+    /// where it was, for the caller and for another client, with no `changed`.
+    ///
+    /// flip: `handle` without its `rewind` → fails at "the batch's rev".
+    #[test]
+    fn a_refused_write_leaves_rev_where_it_was() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let id = rect(&mut engine, &mut docs, 1, "Card");
+        let look = |e: &mut Engine, d: &mut One, conn| {
+            let out = call(e, d, conn, "get_selection", json!({}));
+            ok(&out).clone()
+        };
+        let seen = look(&mut engine, &mut docs, 2);
+        let rev = look(&mut engine, &mut docs, 1)["rev"].clone();
+        let renamed = json!({ "tool": "set_name", "args": { "node": id, "name": "Hero" } });
+        let bad = json!({ "tool": "set_name", "args": { "node": "@nobody", "name": "X" } });
+        let args = json!({ "steps": [renamed, bad] });
+        let out = call(&mut engine, &mut docs, 1, "batch", args);
+        assert!(out.is_error, "the fixture's batch is refused");
+        assert_eq!(docs.session.history.undo_depth(), 1, "after a step it made");
+        assert_eq!(json!(docs.session.revision()), rev, "the batch's rev");
+        let props = json!({ "name": "Hero", "opacity": "loud" });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [id], "props": props }),
+        );
+        assert!(out.is_error, "the fixture's set is refused");
+        assert_eq!(json!(docs.session.revision()), rev, "the set's rev");
+        let mine = look(&mut engine, &mut docs, 1);
+        assert_eq!((&mine["rev"], mine.get("changed")), (&rev, None));
+        let theirs = look(&mut engine, &mut docs, 2);
+        assert_eq!(theirs["rev"], seen["rev"]);
+        assert!(theirs.get("changed").is_none(), "{theirs}");
+    }
+
     /// An instance reads back the property values it is set to and each copy the
     /// fields it overrides, in the words `set_instance_property` and
     /// `reset_overrides` take.
@@ -2927,7 +3174,10 @@ mod tests {
     }
 
     /// `check_contrast` measures a text layer on the page and says whether it
-    /// passes.
+    /// passes, listing a passing one only when asked for `all`.
+    ///
+    /// flip: `check_contrast` keeping every finding without `all` → fails at "a
+    /// pass is not listed".
     #[test]
     fn check_contrast_measures_text() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2941,6 +3191,15 @@ mod tests {
             json!({ "parent": page, "text": "Hello" }),
         ));
         let out = call(&mut engine, &mut docs, 1, "check_contrast", json!({}));
+        let quiet = ok(&out);
+        assert_eq!(
+            quiet["findings"],
+            json!([]),
+            "a pass is not listed: {quiet}"
+        );
+        assert!(quiet["measured"].as_u64() > Some(0), "but counted: {quiet}");
+        let args = json!({ "all": true });
+        let out = call(&mut engine, &mut docs, 1, "check_contrast", args);
         let report = ok(&out);
         let findings = report["findings"].as_array().unwrap();
         assert!(

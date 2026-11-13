@@ -545,6 +545,45 @@ fn a_layer_in_an_auto_layout_keeps_its_place_while_measured() {
     }
 }
 
+/// Type over the edges of another text is read against the two sides of each
+/// edge: orange on an off-white ground, over dark green type, scores as orange
+/// on off-white (about 2.4 : 1), not 1 : 1 against an edge's blend as bright
+/// as itself.
+///
+/// flip: `measure` scoring each core against its own backdrop pixel → fails at
+/// the orange text's score.
+#[test]
+fn type_over_another_text_s_edges_reads_both_sides() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (dark, orange) = (d.ids.mint(), d.ids.mint());
+    d.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: d.frame,
+                fills: solid(0xfa, 0xfb, 0xf6),
+            },
+            Operation::DeleteNode { id: d.text },
+            text_op(dark, d.frame, 0, (20.0, 20.0), 40.0),
+            Operation::SetFills {
+                id: dark,
+                fills: solid(0x12, 0x35, 0x2a),
+            },
+            text_op(orange, d.frame, 1, (30.0, 30.0), 40.0),
+            Operation::SetFills {
+                id: orange,
+                fills: solid(0xff, 0x7a, 0x1a),
+            },
+        ]))
+        .unwrap();
+    let r = check(&d.doc, d.page, Level::Aa);
+    let f = r
+        .findings
+        .iter()
+        .find(|f| f.id == orange)
+        .expect("measured");
+    assert!((2.3..2.7).contains(&f.ratio), "{f:?}");
+}
+
 /// Ink the colour of its backdrop is measured, at 1 : 1, not left out as a
 /// layer that draws nothing.
 ///

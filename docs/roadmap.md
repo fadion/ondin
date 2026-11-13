@@ -29,6 +29,9 @@ true.
   replacing a font, the person's page and viewport, a picture's pixel size, comparing a version,
   and several verbs as one undo step. Setters that take one `node` (`set_fills`, `set_strokes`,
   `set_text_style`, …) should take `nodes` as the inspector writes a selection.
+  The proxy's loop (`mcp/proxy.rs` `run`) is wired to stdin and stdout, so its test covers only
+  `rewrite`: make it take a reader, a writer and a connect function, and pin the handover from
+  `serve` to the window, the restore before the first call, and a lost answer never re-sent.
 
 ## Later · Platform and dependencies
 

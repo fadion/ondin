@@ -127,7 +127,8 @@ harness (flags, a sandbox mode, a rules file in the run folder), and each is cho
 closed**: a harness whose restricting config cannot be written is refused, not started open. The
 seal is graded — *Sealed* where built-in tools are off, *Restricted* where a sandbox or rules file
 holds them — and the panel's head and Settings say which, naming the mechanism, including where a
-harness cannot keep the person's own MCP servers away.
+harness cannot keep the person's own MCP servers away, and, at *Restricted* outside Windows, that
+the access level is a rail rather than a boundary (*Access levels*).
 
 Never passed, whatever a harness offers: any skip-permissions, auto-approve, allow-all or yolo
 flag. A headless harness cannot ask the person mid-turn, so its allow-list is exactly the tools
@@ -155,6 +156,25 @@ not listed and refused: an agent that sees a tool plans around it.
 - **Edit** — Look, plus the write tools of Phases 2 and 3. Each call commits as its own undo step
   marked as the assistant's (`Origin::Mcp`), so the History section shows which steps the agent
   made. Kits and the library (Phase 4) stay out of the assistant at every level.
+
+**The host holds the level, not the harness.** The endpoint serves any process running as the
+person, and a harness with a shell can start `ondin mcp-proxy` itself or open the pipe or socket
+directly. `ONDIN_AGENT_CHILD` does not stop it: the harness's own MCP server is that proxy. So the
+level is enforced by the window, which starts the harness and knows each chat's client key and
+level without any file:
+
+- **By key.** A call carrying a chat's key gets that chat's tool list, and a tool above its level
+  is refused even though it was never listed. This holds a harness that ignores its own
+  allow-list.
+- **By process.** On Windows the harness starts inside a Job Object, which every process it starts
+  joins however it is launched. The endpoint checks a connecting process with `IsProcessInJob`
+  and gives it that chat's level whatever key it sends, or none. Elsewhere a process can leave its
+  harness's tree (`setsid`, a double fork), so the check walks the parent chain and is best
+  effort.
+
+At the *Sealed* grade the agent has no shell, so it cannot reach the endpoint any other way. At
+*Restricted*, *Look* and *Propose* are only as strong as the sandbox outside Windows: a safety rail
+against an eager model, not a boundary against a hostile one. The seal's sentence says so.
 
 ### Context sent with a turn
 

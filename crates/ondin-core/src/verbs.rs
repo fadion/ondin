@@ -3754,10 +3754,7 @@ pub static VERBS: &[Verb] = &[
             Ok(Done::ops(
                 texts(ctx, a)?
                     .into_iter()
-                    .map(|id| Operation::SetBlockStyle {
-                        id,
-                        block,
-                    })
+                    .map(|id| Operation::SetBlockStyle { id, block })
                     .collect(),
             ))
         },
@@ -4618,6 +4615,8 @@ pub struct Tree {
     pub blend: Option<String>,
     pub clip: Option<bool>,
     pub mask: Option<bool>,
+    /// A [`MASK_MODES`] word.
+    pub mask_mode: Option<String>,
     pub fills: Option<Vec<Fill>>,
     pub strokes: Option<Vec<Stroke>>,
     pub effects: Option<Vec<Effect>>,
@@ -4682,6 +4681,16 @@ fn tree_ops(
     if let Some(mask) = tree.mask {
         ops.push(Operation::SetMask { id, mask });
     }
+    if let Some(word) = &tree.mask_mode {
+        let at = MASK_MODES.iter().position(|w| w == word).ok_or_else(|| {
+            a.invalid(
+                "tree",
+                format!("a mask mode is one of {}", MASK_MODES.join(", ")),
+            )
+        })?;
+        let mode = crate::node::MaskMode::ALL[at];
+        ops.push(Operation::SetMaskMode { id, mode });
+    }
     if let Some(fills) = &tree.fills {
         let fills = rekeyed(ctx, &[], fills.clone());
         done.tx.0.push(Operation::SetFills { id, fills });
@@ -4715,6 +4724,83 @@ fn tree_ops(
         tree_ops(ctx, a, child, id, i, done)?;
     }
     Ok(())
+}
+
+/// Layer `id` and the layers inside it as a [`Tree`], the shape `insert_subtree`
+/// takes and the setters write: its stored kind with a text's runs, every fill and
+/// stroke with the hidden ones, framing, align, dash, cap and join, its effects and
+/// exports, each field present only where it differs from a new layer's. Item ids
+/// are left out, as a caller never writes one. `None` for no such layer.
+pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
+    fn values<T: serde::Serialize>(list: &[Keyed<T>]) -> Value {
+        serde_json::to_value(list.iter().map(|k| &k.value).collect::<Vec<_>>()).unwrap_or_default()
+    }
+    let n = doc.get(id)?;
+    let mut out = Map::new();
+    let mut put = |k: &str, v: Value| {
+        out.insert(k.to_owned(), v);
+    };
+    put("kind", serde_json::to_value(n.kind()).unwrap_or_default());
+    put("name", Value::from(n.name()));
+    if n.transform() != Affine::IDENTITY {
+        put(
+            "transform",
+            serde_json::to_value(n.transform()).unwrap_or_default(),
+        );
+    }
+    if !n.visible() {
+        put("visible", Value::Bool(false));
+    }
+    if n.locked() {
+        put("locked", Value::Bool(true));
+    }
+    if n.opacity() != 1.0 {
+        put("opacity", Value::from(n.opacity()));
+    }
+    if n.blend() != BlendMode::default_for(n.kind()) {
+        put("blend", Value::from(n.blend().label()));
+    }
+    if n.clip() {
+        put("clip", Value::Bool(true));
+    }
+    if n.mask() {
+        put("mask", Value::Bool(true));
+        let at = crate::node::MaskMode::ALL
+            .iter()
+            .position(|m| *m == n.mask_mode())
+            .unwrap_or(0);
+        put("mask_mode", Value::from(MASK_MODES[at]));
+    }
+    let paint = n.paint();
+    if !paint.fills.is_empty() {
+        put("fills", values(&paint.fills));
+    }
+    if !paint.strokes.is_empty() {
+        put("strokes", values(&paint.strokes));
+    }
+    if !n.effects().is_empty() {
+        put("effects", values(n.effects()));
+    }
+    if !n.exports().is_empty() {
+        put("exports", values(n.exports()));
+    }
+    if let Some(d) = n.display() {
+        put("display", serde_json::to_value(d).unwrap_or_default());
+    }
+    if *n.item() != LayoutItem::default() {
+        put("item", serde_json::to_value(n.item()).unwrap_or_default());
+    }
+    if *n.insets() != Insets::default() {
+        put(
+            "insets",
+            serde_json::to_value(n.insets()).unwrap_or_default(),
+        );
+    }
+    let children: Vec<Value> = n.children().iter().filter_map(|c| tree(doc, *c)).collect();
+    if !children.is_empty() {
+        put("children", Value::Array(children));
+    }
+    Some(Value::Object(out))
 }
 
 /// The blend mode a [`BLENDS`] label names; Normal for none.

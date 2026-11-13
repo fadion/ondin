@@ -4494,6 +4494,83 @@ fn set_fills_writes_a_selection_as_the_inspector_does() {
     );
 }
 
+/// `verbs::tree` reads a layer back in `insert_subtree`'s shape with what the
+/// snapshot leaves out — a hidden fill, the strokes, effects and exports whole, a
+/// text's runs, a mask's mode — so inserting what it read makes a copy that reads
+/// back the same.
+///
+/// flip: `tree` keeping visible fills only → fails at "the hidden fill is read".
+#[test]
+fn tree_reads_a_layer_back_as_insert_subtree_takes_it() {
+    use ondin_core::typography::CharAttr;
+    let (mut doc, mut ids, page) = blank();
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(200.0, 100.0), "name": "Card" }),
+    )[0];
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_text",
+        json!({ "parent": f.to_wire(), "text": "Hello world" }),
+    )[0];
+    let bold = serde_json::to_value(vec![CharAttr::Weight(700)]).unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "style_text",
+        json!({ "node": t.to_wire(), "attrs": bold, "start": 0, "end": 5 }),
+    );
+    let fills = serde_json::to_value(vec![
+        Fill {
+            brush: Brush::Solid(Color::WHITE).into(),
+            visible: true,
+        },
+        Fill {
+            brush: Brush::Solid(Color::BLACK).into(),
+            visible: false,
+        },
+    ])
+    .unwrap();
+    let steps = json!([
+        { "verb": "set_fills", "args": { "nodes": [f.to_wire()], "fills": fills } },
+        { "verb": "set_strokes", "args": { "nodes": [f.to_wire()], "strokes": verbs::example("[Stroke]").unwrap() } },
+        { "verb": "set_effects", "args": { "nodes": [f.to_wire()], "effects": verbs::example("[Effect]").unwrap() } },
+        { "verb": "set_exports", "args": { "nodes": [f.to_wire()], "exports": verbs::example("[ExportSpec]").unwrap() } },
+        { "verb": "create_node", "args": { "parent": f.to_wire(), "kind": rect(10.0, 10.0) }, "as": "m" },
+        { "verb": "set_mask", "args": { "nodes": ["@m"], "mask": true, "mode": "luminance" } },
+    ]);
+    script(&mut doc, &mut ids, steps);
+    let read = verbs::tree(&doc, f).expect("a layer");
+    assert_eq!(
+        read["fills"].as_array().map(Vec::len),
+        Some(2),
+        "the hidden fill is read"
+    );
+    assert!(read["children"][0]["kind"]["Text"].is_object(), "{read}");
+    let copy = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": read }),
+    )[0];
+    assert_eq!(
+        verbs::tree(&doc, copy),
+        Some(read),
+        "the copy reads back the same"
+    );
+    let NodeKind::Text { spans, .. } = doc
+        .get(doc.get(copy).unwrap().children()[0])
+        .unwrap()
+        .kind()
+    else {
+        unreachable!()
+    };
+    assert!(!spans.as_slice().is_empty(), "the runs came across");
+}
+
 /// `set_mask` sets a mask's mode with it, and refuses a mode for a layer that
 /// stops being one.
 ///

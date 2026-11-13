@@ -619,6 +619,24 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             within_budget(&whole.to_string(), "The whole document", NARROWER)?;
             json(whole)
         }
+        "get_tree" => {
+            let id = required(args, "id")?;
+            if is_page(s, id) {
+                return Err(format!(
+                    "`{}` is a page: `list_children` names its layers, each a tree",
+                    id.to_wire()
+                ));
+            }
+            let tree = ondin_core::verbs::tree(&s.doc, id)
+                .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?;
+            let answer = json!({ "tree": tree });
+            within_budget(
+                &answer.to_string(),
+                "This tree",
+                "read the layers inside it one `get_tree` at a time",
+            )?;
+            json(answer)
+        }
         "get_node" => {
             let id = required(args, "id")?;
             if s.doc.get(id).is_none() {
@@ -1251,6 +1269,25 @@ mod tests {
             json!({ "x": 10, "y": 10 }),
         );
         assert_eq!(ok(&hit)["ids"], json!([rect]), "on the person's page");
+    }
+
+    /// `get_tree` answers a layer in `insert_subtree`'s shape, which inserts back,
+    /// and refuses a page.
+    ///
+    /// flip: `get_tree` without its page refusal → fails at "a page is refused".
+    #[test]
+    fn get_tree_answers_what_insert_subtree_takes() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Chip");
+        let out = call(&mut engine, &mut docs, 1, "get_tree", json!({ "id": id }));
+        let tree = ok(&out)["tree"].clone();
+        assert_eq!(tree["name"], json!("Chip"));
+        let page = docs.session.page.to_wire();
+        let args = json!({ "parent": page, "tree": tree });
+        ok(&call(&mut engine, &mut docs, 1, "insert_subtree", args));
+        let read = call(&mut engine, &mut docs, 1, "get_tree", json!({ "id": page }));
+        assert!(read.is_error, "a page is refused");
     }
 
     /// `add_image` answers the picture's own size beside its id.

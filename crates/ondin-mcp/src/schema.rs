@@ -61,6 +61,11 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "get_tree",
+        doc: "A layer and the layers inside it in the shape `insert_subtree` takes and the setters write: the stored kind with a text's runs, every fill and stroke with the hidden ones and their framing, align, dash, cap and join, effects and exports. Read this before writing a whole list back with `set_fills`, `set_strokes`, `set_effects`, `set_exports` or `set_text_style`; the snapshot keeps only what is drawn.",
+        params: &[param("id", ParamKind::Node, true, "The layer.")],
+    },
+    Tool {
         name: "list_children",
         doc: "A layer's or page's children in order, front last: id, name and kind. With no `id`, the pages.",
         params: &[

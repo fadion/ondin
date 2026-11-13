@@ -571,6 +571,25 @@ fn page_of(s: &EditorSession, id: Option<NodeId>) -> Result<NodeId, String> {
     }
 }
 
+/// `export_png`'s `region`, `[x, y, w, h]` in page coordinates; `None` when
+/// absent. One with no area is refused: it has nothing to draw.
+fn region(args: &Value) -> Result<Option<ondin_core::kurbo::Rect>, String> {
+    let Some(v) = args.get("region").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let n: Vec<f64> = v
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    match n[..] {
+        [x, y, w, h] if w > 0.0 && h > 0.0 => {
+            Ok(Some(ondin_core::kurbo::Rect::new(x, y, x + w, y + h)))
+        }
+        [_, _, _, _] => Err("`region` needs a width and a height above zero".into()),
+        _ => Err("`region` is [x, y, w, h]".into()),
+    }
+}
+
 /// What the person sees of the document: the page they are on, the camera's
 /// centre and zoom, and, while it is the tab in front (`canvas`), the world
 /// rectangle the canvas shows.
@@ -718,6 +737,24 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                 .collect();
             json(json!({ "children": children }))
         }
+        "get_outline" => {
+            let root = match node(args, "id")? {
+                Some(id) if s.doc.get(id).is_none() => {
+                    return Err(format!("no layer `{}`", id.to_wire()));
+                }
+                Some(id) => id,
+                None => s.page,
+            };
+            let depth = index(args, "depth").unwrap_or(2);
+            let limit = index(args, "limit").unwrap_or(200) as usize;
+            let answer = reads::outline(s, root, depth, limit);
+            within_budget(
+                &answer.to_string(),
+                "This outline",
+                "pass a smaller `depth` or `limit`, or outline one layer with `id`",
+            )?;
+            json(answer)
+        }
         "find_nodes" => {
             let query = args
                 .get("query")
@@ -754,7 +791,18 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                     up = p.parent.as_deref();
                 }
                 path.reverse();
-                found.push(json!({ "id": n.id, "name": n.name, "kind": n.kind, "path": path }));
+                let mut entry = json!({ "id": n.id, "name": n.name, "kind": n.kind, "path": path });
+                if let Some(id) = NodeId::from_wire(&n.id) {
+                    entry["box"] = reads::bounds_box(s, id);
+                    if s.selection
+                        .ids()
+                        .iter()
+                        .any(|sel| reads::within(&s.doc, *sel, id))
+                    {
+                        entry["selected"] = json!(true);
+                    }
+                }
+                found.push(entry);
             }
             json(json!({ "nodes": found, "more": more }))
         }
@@ -835,6 +883,24 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                 ));
             }
             let max = max.max(16) as f64;
+            if let Some(region) = region(args)? {
+                if let Some(id) = id.filter(|id| !is_page(s, *id)) {
+                    return Err(format!(
+                        "`{}` is a layer: `region` is a rectangle of a page, so pass the page \
+                         or no `id`; or export the layer alone without `region`",
+                        id.to_wire()
+                    ));
+                }
+                let page = page_of(s, id)?;
+                let scale = (max / region.width().max(region.height())).min(2.0);
+                let vp = ondin_export::png::viewport_at(region, scale);
+                return Ok(Answer::Image(ondin_export::png::png(
+                    &s.doc,
+                    &s.resolved,
+                    &vp,
+                    page,
+                )));
+            }
             let png = match id {
                 Some(id) if !is_page(s, id) => {
                     let r = s
@@ -1732,6 +1798,211 @@ mod tests {
             json!({ "since": rev }),
         );
         assert_eq!(ok(&read)["unchanged"], true);
+    }
+
+    /// A 120 × 80 rectangle named `name` at (`x`, `y`) on the first page,
+    /// answering its id.
+    fn rect_at(engine: &mut Engine, docs: &mut One, name: &str, x: f64, y: f64) -> String {
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let args = json!({
+            "parent": page, "kind": kind, "name": name,
+            "transform": [1.0, 0.0, 0.0, 1.0, x, y],
+        });
+        let out = call(engine, docs, 1, "create_node", args);
+        ok(&out)["created"][0].as_str().unwrap().to_owned()
+    }
+
+    /// Two rectangles named alike, one grouped with a third: `Header` at the
+    /// origin, then `Section` holding `Header` at (200, 50.04) and `Body`, on
+    /// a page cleared of a new document's sample frame.
+    fn two_headers(engine: &mut Engine, docs: &mut One) -> [String; 4] {
+        open(engine, docs, 1);
+        let sample: Vec<String> = docs
+            .session
+            .doc
+            .get(docs.session.doc.first_page())
+            .unwrap()
+            .children()
+            .iter()
+            .map(|c| c.to_wire())
+            .collect();
+        ok(&call(
+            engine,
+            docs,
+            1,
+            "delete_node",
+            json!({ "nodes": sample }),
+        ));
+        let top = rect_at(engine, docs, "Header", 0.0, 0.0);
+        let inner = rect_at(engine, docs, "Header", 200.0, 50.04);
+        let body = rect_at(engine, docs, "Body", 400.0, 0.0);
+        let out = call(engine, docs, 1, "group", json!({ "nodes": [inner, body] }));
+        let group = ok(&out)["created"][0].as_str().unwrap().to_owned();
+        ok(&call(
+            engine,
+            docs,
+            1,
+            "set_name",
+            json!({ "node": group, "name": "Section" }),
+        ));
+        [top, group, inner, body]
+    }
+
+    /// `get_outline` answers a page's layers as rows in paint order, a parent
+    /// before its children, with world boxes to 0.1, cut at `depth` and `limit`
+    /// with the rest counted, and the selection under its root.
+    ///
+    /// flip: `reads::outline` pushing children unreversed → fails at the row order.
+    #[test]
+    fn get_outline_maps_a_page_in_one_table() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let [top, group, inner, body] = two_headers(&mut engine, &mut docs);
+        assert_eq!(
+            docs.session
+                .doc
+                .get(docs.session.page)
+                .unwrap()
+                .children()
+                .len(),
+            2,
+            "the fixture's page holds the top header and the section"
+        );
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_selection",
+            json!({ "ids": [body] }),
+        ));
+        let out = call(&mut engine, &mut docs, 1, "get_outline", json!({}));
+        let a = ok(&out);
+        assert_eq!(
+            a["columns"],
+            json!(["id", "name", "kind", "x", "y", "w", "h", "depth"])
+        );
+        let rows = a["rows"].as_array().unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r[0].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [&top, &group, &inner, &body],
+            "paint order, parent first"
+        );
+        assert_eq!(
+            rows[2],
+            json!([inner, "Header", "rect", 200, 50, 120, 80, 2])
+        );
+        assert_eq!(rows[1][7], 1);
+        assert_eq!(a["more"], 0);
+        assert_eq!(a["selected"], json!([body]));
+
+        let shallow = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "get_outline",
+            json!({ "depth": 1, "limit": 1 }),
+        );
+        assert_eq!(ok(&shallow)["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            ok(&shallow)["more"],
+            1,
+            "the section, its children past depth"
+        );
+
+        let one = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "get_outline",
+            json!({ "id": top }),
+        );
+        assert_eq!(
+            ok(&one)["rows"],
+            json!([[top, "Header", "rect", 0, 0, 120, 80, 0]])
+        );
+        assert_eq!(ok(&one)["selected"], json!([]));
+    }
+
+    /// `find_nodes` tells two layers of one name apart by their boxes, and marks
+    /// the one selected and the group holding it.
+    ///
+    /// flip: `find_nodes` asking whether a match lies under the selection rather
+    /// than holds it → fails at "the section holds the selection".
+    #[test]
+    fn find_nodes_gives_boxes_and_the_selection() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let [top, group, inner, _] = two_headers(&mut engine, &mut docs);
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_selection",
+            json!({ "ids": [inner] }),
+        ));
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "find_nodes",
+            json!({ "query": "e" }),
+        );
+        let found = ok(&out)["nodes"].as_array().unwrap().clone();
+        let by = |id: &str| found.iter().find(|n| n["id"] == id).unwrap().clone();
+        assert_eq!(by(&top)["box"], json!([0, 0, 120, 80]));
+        assert!(by(&top).get("selected").is_none());
+        assert_eq!(by(&inner)["box"], json!([200, 50, 120, 80]));
+        assert_eq!(by(&inner)["selected"], true);
+        assert_eq!(
+            by(&group)["selected"],
+            true,
+            "the section holds the selection"
+        );
+    }
+
+    /// `export_png`'s `region` draws that rectangle of the page, up to 2×, and
+    /// refuses a layer `id` and a rectangle with no area.
+    ///
+    /// flip: the region's scale capped at 1× as a page's is → fails at the size.
+    #[test]
+    fn export_png_draws_a_region_of_the_page() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let [top, ..] = two_headers(&mut engine, &mut docs);
+        // The example's solid fill alone; its image fill has no picture here.
+        let fills = json!([ondin_core::verbs::example("[Fill]").unwrap()[0]]);
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_fills",
+            json!({ "nodes": [top], "fills": fills }),
+        ));
+        let page = docs.session.page.to_wire();
+        let mut look = |args: Value| {
+            let out = call(&mut engine, &mut docs, 1, "export_png", args);
+            assert!(!out.is_error, "{:?}", out.content);
+            match &out.content[0] {
+                Content::Image { bytes, .. } => image::load_from_memory(bytes).unwrap().to_rgba8(),
+                other => panic!("not an image: {other:?}"),
+            }
+        };
+        let on = look(json!({ "region": [10, 10, 100, 50], "max": 400 }));
+        assert_eq!(on.dimensions(), (200, 100));
+        assert_eq!(
+            on.get_pixel(100, 50).0,
+            [0x33, 0x66, 0xcc, 0xff],
+            "the header"
+        );
+        let off = look(json!({ "id": page, "region": [1000, 1000, 100, 50] }));
+        assert_ne!(off.get_pixel(100, 50).0, [0x33, 0x66, 0xcc, 0xff]);
+
+        for refused in [
+            json!({ "id": top, "region": [0, 0, 10, 10] }),
+            json!({ "region": [0, 0, 0, 10] }),
+        ] {
+            let out = call(&mut engine, &mut docs, 1, "export_png", refused.clone());
+            assert!(out.is_error, "{refused} is refused");
+        }
     }
 
     /// `run_exports` refuses a document with no settings, then renders a layer's

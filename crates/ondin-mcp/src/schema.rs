@@ -74,8 +74,32 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "get_outline",
+        doc: "A page's or layer's layers a few levels down in one compact table: `columns` names each row's fields (id, name, kind, world x, y, w, h to 0.1, depth), `rows` are in paint order with a parent before its children, `more` counts the rows left out past `limit`, and `selected` lists the selected layers under it. A layer `id` is its own first row, at depth 0. Read this to see where the sections of a page sit before reading one with `get_node`.",
+        params: &[
+            param(
+                "id",
+                ParamKind::Node,
+                false,
+                "A layer or page; the person's page when absent.",
+            ),
+            param(
+                "depth",
+                ParamKind::Index,
+                false,
+                "How many levels below `id`; 2 when absent.",
+            ),
+            param(
+                "limit",
+                ParamKind::Index,
+                false,
+                "At most this many rows; 200 when absent.",
+            ),
+        ],
+    },
+    Tool {
         name: "find_nodes",
-        doc: "Layers whose name or text contains `query`, ignoring case: id, name, kind and the names of their ancestors.",
+        doc: "Layers whose name or text contains `query`, ignoring case: id, name, kind, the names of their ancestors, `box` (world [x, y, w, h] to 0.1) and `selected: true` on one that is selected or holds a selected layer.",
         params: &[
             param("query", ParamKind::Text, true, "What to look for."),
             param("page", ParamKind::Node, false, "Only this page."),
@@ -141,19 +165,25 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "export_png",
-        doc: "A page or a layer as a PNG image: how it really looks. Export, look and correct.",
+        doc: "A page, a layer or a region of a page as a PNG image: how it really looks. Export, look and correct.",
         params: &[
             param(
                 "id",
                 ParamKind::Node,
                 false,
-                "A layer or page; the person's page when absent.",
+                "A layer or page; the person's page when absent. With `region`, a page.",
+            ),
+            param(
+                "region",
+                ParamKind::Model("Region"),
+                false,
+                "[x, y, w, h] in page coordinates: draw only that rectangle of the page, everything in it, to look closer at one part.",
             ),
             param(
                 "max",
                 ParamKind::Index,
                 false,
-                "The longest side in pixels at most, up to 4096; 1600 when absent. A page is never drawn above 1×, a layer above 2×.",
+                "The longest side in pixels at most, up to 4096; 1600 when absent. A page is never drawn above 1×, a layer or a region above 2×.",
             ),
         ],
     },

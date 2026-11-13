@@ -493,6 +493,13 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "Steps" => Err("expected a list of steps, each an object".into()),
         "Version" if v.is_u64() || v.is_string() => Ok(()),
         "Version" => Err("expected a version's `at` or its name".into()),
+        "Region"
+            if v.as_array()
+                .is_some_and(|r| r.len() == 4 && r.iter().all(Value::is_number)) =>
+        {
+            Ok(())
+        }
+        "Region" => Err("expected [x, y, w, h]".into()),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }

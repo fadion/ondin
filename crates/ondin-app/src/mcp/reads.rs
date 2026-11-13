@@ -1,6 +1,7 @@
 //! The reads that list what a document defines and render what it exports:
-//! `run_exports`, `export_code`, `list_components`, `list_variables` and
-//! `list_styles` (§8.4). Files come back with their names and are never written.
+//! `get_outline`, `run_exports`, `export_code`, `list_components`,
+//! `list_variables` and `list_styles` (§8.4). Files come back with their names
+//! and are never written.
 
 use super::Answer;
 use crate::session::EditorSession;
@@ -215,4 +216,95 @@ pub(super) fn styles(doc: &Document) -> Value {
         })
         .collect();
     json!({ "styles": styles })
+}
+
+/// A coordinate to 0.1, written as a whole number when it is one: the outline
+/// and the find answer many of them, and `120` reads as `120.0` does.
+fn tenth(v: f64) -> Value {
+    let r = (v * 10.0).round() / 10.0;
+    match r {
+        r if !r.is_finite() || r == 0.0 => json!(0),
+        r if r.fract() == 0.0 && r.abs() < 1e15 => json!(r as i64),
+        r => json!(r),
+    }
+}
+
+/// A layer's world bounds as `[x, y, w, h]` to 0.1; null for one without.
+pub(super) fn bounds_box(s: &EditorSession, id: NodeId) -> Value {
+    match s.resolved.world_bounds(id) {
+        Some(r) => json!([
+            tenth(r.x0),
+            tenth(r.y0),
+            tenth(r.width()),
+            tenth(r.height())
+        ]),
+        None => Value::Null,
+    }
+}
+
+/// Whether `id` is `root` or lies under it.
+pub(super) fn within(doc: &Document, id: NodeId, root: NodeId) -> bool {
+    let mut at = Some(id);
+    while let Some(n) = at {
+        if n == root {
+            return true;
+        }
+        at = doc.get(n).and_then(|n| n.parent());
+    }
+    false
+}
+
+/// `get_outline`: the layers under `root` down to `depth` levels, one row each
+/// in paint order with a parent before its children, bounds to 0.1. A layer
+/// `root` is its own first row at depth 0; a page is not a row. Rows past `limit`
+/// are counted in `more`, and `selected` lists the selected layers under `root`
+/// at any depth, so a selection below the outline still shows.
+pub(super) fn outline(s: &EditorSession, root: NodeId, depth: u64, limit: usize) -> Value {
+    let mut stack: Vec<(NodeId, u64)> = match s.doc.page_ids().any(|p| p == root) {
+        true => s
+            .doc
+            .get(root)
+            .map(|p| p.children().iter().rev().map(|c| (*c, 1)).collect())
+            .unwrap_or_default(),
+        false => vec![(root, 0)],
+    };
+    let mut rows = Vec::new();
+    let mut more = 0;
+    while let Some((id, d)) = stack.pop() {
+        let Some(n) = s.doc.get(id) else { continue };
+        if d > depth {
+            continue;
+        }
+        if rows.len() < limit {
+            let mut row = vec![
+                json!(id.to_wire()),
+                json!(n.name()),
+                json!(ondin_export::snapshot::kind_name(n.kind())),
+            ];
+            match bounds_box(s, id) {
+                Value::Array(b) => row.extend(b),
+                _ => row.extend([Value::Null, Value::Null, Value::Null, Value::Null]),
+            }
+            row.push(json!(d));
+            rows.push(Value::Array(row));
+        } else {
+            more += 1;
+        }
+        if d < depth {
+            stack.extend(n.children().iter().rev().map(|c| (*c, d + 1)));
+        }
+    }
+    let selected: Vec<String> = s
+        .selection
+        .ids()
+        .iter()
+        .filter(|id| within(&s.doc, **id, root))
+        .map(|id| id.to_wire())
+        .collect();
+    json!({
+        "columns": ["id", "name", "kind", "x", "y", "w", "h", "depth"],
+        "rows": rows,
+        "more": more,
+        "selected": selected,
+    })
 }

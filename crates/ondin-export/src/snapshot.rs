@@ -1164,7 +1164,8 @@ fn radii4(r: &RoundedRectRadii) -> RoundedRectRadii {
     )
 }
 
-fn kind_name(kind: &NodeKind) -> &'static str {
+/// A node's `kind` as the snapshot writes it.
+pub fn kind_name(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Root => "root",
         NodeKind::Artboard { .. } => "artboard",

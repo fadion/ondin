@@ -2651,7 +2651,7 @@ mod tests {
         let node = call(&mut engine, &mut docs, 1, "get_node", json!({ "id": id }));
         let inked = &ok(&node)["nodes"][0]["world_bounds"];
         assert!(
-            inked[2].as_f64() > Some(130.0),
+            inked[2].as_f64() > Some(120.0),
             "the stroke is drawn: {inked}"
         );
         let out = call(

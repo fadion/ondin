@@ -55,7 +55,8 @@ use std::collections::BTreeMap;
 ///   `local_transform` among them), `world_transform` where it equals
 ///   `local_transform`, `mask_mode` off a mask; lengths in geometry, strokes,
 ///   effects and `pivot` are at four places.
-pub const SNAPSHOT_VERSION: u32 = 23;
+/// - **24** `world_bounds` is `[x, y, w, h]`, not its two corners.
+pub const SNAPSHOT_VERSION: u32 = 24;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -118,7 +119,8 @@ pub struct NodeSnapshot {
     /// equal `local_transform`; [`NodeSnapshot::world`] reads either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_transform: Option<[f64; 6]>,
-    /// World-space, stroke-expanded bounds `[min_x, min_y, max_x, max_y]`, if any.
+    /// World-space, stroke-expanded bounds `[x, y, w, h]`, if any: the shape
+    /// every other box the MCP reads answer has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_bounds: Option<[f64; 4]>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
@@ -791,7 +793,7 @@ fn node_snapshot(
         world_transform: (world_transform != local_transform).then_some(world_transform),
         world_bounds: res
             .world_bounds(id)
-            .map(|b| [b.min_x(), b.min_y(), b.max_x(), b.max_y()].map(round4)),
+            .map(|b| [b.min_x(), b.min_y(), b.width(), b.height()].map(round4)),
         // As drawn: a bound visibility and opacity are resolved.
         visible: doc.shown(id),
         locked: node.locked(),

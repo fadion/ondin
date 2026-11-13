@@ -6,7 +6,9 @@
 //! it keeps its place in any layout), and twice with its ink painted white and
 //! then black. Where the two inks differ most are the glyphs' cores, whatever
 //! the backdrop's colour. At each core, the colour the layer's ink draws there is
-//! measured against the backdrop pixel, and the worst sample is the layer's
+//! measured against the darkest and the lightest backdrop pixel within
+//! [`EDGE`] of it, so another layer's antialiased edge is read as its two
+//! sides rather than the blend between them, and the worst sample is the layer's
 //! score. So a gradient, a picture or another layer behind the type is measured
 //! where the glyphs sit, and ink the colour of its backdrop scores 1 : 1.
 //!
@@ -68,6 +70,13 @@ pub struct Report {
 /// How many device pixels per world unit the boxes are drawn at: two, so a
 /// small glyph has a core of fully covered pixels to sample.
 const SCALE: f64 = 2.0;
+/// How many pixels around a sample its backdrop's darkest and lightest are
+/// looked for in: an antialiased edge at [`SCALE`] spans one or two.
+const EDGE: usize = 2;
+/// How far apart, in luminance, the neighbours of an antialiased edge pixel
+/// are at least: a gradient or a photograph's grain moves less from one pixel
+/// to the next.
+const EDGE_RANGE: f64 = 0.1;
 /// The largest box drawn, in pixels; a larger one is drawn at a lower scale.
 const MAX_PIXELS: f64 = 4_000_000.0;
 
@@ -563,6 +572,42 @@ fn measure(
     if most < 1e-3 {
         return Ok(None);
     }
+    // The backdrop near each pixel at its darkest and lightest, among the pixels
+    // that are no antialiased edge. A core over another layer's edge is read
+    // against the two sides of it, not the blend between them: type crossing a
+    // dark glyph on a light ground always meets some pixel of the blend as
+    // bright as itself, and scored 1 : 1 there.
+    let backdrop: Vec<[f64; 3]> = (0..without.len() / 4).map(|i| at(&without, i)).collect();
+    let lum: Vec<f64> = backdrop.iter().map(|c| luminance(*c)).collect();
+    let (w, h) = (vp.pixel_size.0 as usize, vp.pixel_size.1 as usize);
+    let around = |i: usize, r: usize| {
+        let (x, y) = (i % w, i / w);
+        (y.saturating_sub(r)..(y + r + 1).min(h)).flat_map(move |ny| {
+            (x.saturating_sub(r)..(x + r + 1).min(w)).map(move |nx| ny * w + nx)
+        })
+    };
+    // An edge pixel lies well inside the range of its neighbours; a flat one,
+    // a gradient's included, is near their darkest or lightest or among alike.
+    let edge: Vec<bool> = (0..lum.len())
+        .map(|i| {
+            let (lo, hi) = around(i, 1).fold((f64::MAX, f64::MIN), |(lo, hi), j| {
+                (lo.min(lum[j]), hi.max(lum[j]))
+            });
+            hi - lo > EDGE_RANGE && lum[i] - lo > EDGE_RANGE / 4.0 && hi - lum[i] > EDGE_RANGE / 4.0
+        })
+        .collect();
+    let sides = |i: usize| -> [usize; 2] {
+        let mut flat = around(i, EDGE).filter(|j| !edge[*j]);
+        let Some(first) = flat.next() else {
+            return [i, i];
+        };
+        flat.fold([first, first], |[dark, light], j| {
+            [
+                if lum[j] < lum[dark] { j } else { dark },
+                if lum[j] > lum[light] { j } else { light },
+            ]
+        })
+    };
     // Each colour's worst sample.
     let mut worst: Vec<Option<Measured>> = colours.iter().map(|_| None).collect();
     for (i, &k) in share.iter().enumerate() {
@@ -594,24 +639,27 @@ fn measure(
         };
         // The pixel as if fully covered: an opaque ink `c` draws `base + most · c`.
         let cover = k / most;
-        let base: [f64; 3] = std::array::from_fn(|j| bg[j] + (b[j] - bg[j]) / cover);
-        let under = if most < 0.999 {
-            base.map(|v| (v / (1.0 - most)).clamp(0.0, 1.0))
-        } else {
-            bg
-        };
-        let to_colour = |c: [f64; 3]| Color::new([c[0] as f32, c[1] as f32, c[2] as f32, 1.0]);
-        let (under, backdrop) = (to_colour(under), to_colour(bg));
-        let score = level.score(drawn(ink, most, rgb(under), rgb(backdrop)), rgb(backdrop));
         let slot = colours.iter().position(|c| *c == ink).unwrap_or(0);
-        if worst[slot].as_ref().is_none_or(|w| score < w.score) {
-            worst[slot] = Some(Measured {
-                score,
-                ink,
-                opacity: most,
-                under,
-                backdrop,
-            });
+        for side in sides(i) {
+            let side = backdrop[side];
+            let base: [f64; 3] = std::array::from_fn(|j| side[j] + (b[j] - bg[j]) / cover);
+            let under = if most < 0.999 {
+                base.map(|v| (v / (1.0 - most)).clamp(0.0, 1.0))
+            } else {
+                side
+            };
+            let to_colour = |c: [f64; 3]| Color::new([c[0] as f32, c[1] as f32, c[2] as f32, 1.0]);
+            let (under, backdrop) = (to_colour(under), to_colour(side));
+            let score = level.score(drawn(ink, most, rgb(under), rgb(backdrop)), rgb(backdrop));
+            if worst[slot].as_ref().is_none_or(|w| score < w.score) {
+                worst[slot] = Some(Measured {
+                    score,
+                    ink,
+                    opacity: most,
+                    under,
+                    backdrop,
+                });
+            }
         }
     }
     // Every run of text must be legible; a mark needs only one part that stands

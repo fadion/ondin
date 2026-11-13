@@ -148,8 +148,9 @@ not listed and refused: an agent that sees a tool plans around it.
   calls (`ondin_core::verbs`), which Ondin checks as `verbs::call` checks any call and returns
   the result to the agent. The agent then shows the proposal in its reply, and Ondin draws it as
   a card: what it changes, in the verbs' own words, and **Apply**, which commits it as one
-  transaction and one undo step named after the proposal. Nothing changes until the person
-  applies it. A proposal records the revision it was made at: when a layer it writes has changed
+  transaction and one undo step named after the proposal, marked as the assistant's
+  (`Origin::Mcp`) so History wears the sparkle on it: the person applies it, but the agent wrote
+  it. Nothing changes until the person applies it. A proposal records the revision it was made at: when a layer it writes has changed
   since, the card says so in place of *Apply* (*Price changed after this was proposed*) with *Ask
   again*, which asks for a fresh proposal with that layer attached. Applied, the card offers
   *Undo* while its step is the last.
@@ -210,19 +211,21 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 
 The person attaches layers to the next question:
 
-- *Ask the assistant* on a layer's context menu and on the canvas selection's, in its own group
-  above *Delete*; the ask button on the selection; and dragging rows from the layers tree onto
-  the panel, whose composer lights the accent while a drop would land. Each attaches the layer
-  as a **chip** above the composer, opens the panel and focuses the composer.
+- **Two doors attach, and only two**: *Ask the assistant* on a layer's context menu and on the
+  canvas selection's, in a group of its own at the menu's end, after *State*
+  (`context-menus.md` §3), as the one row that leaves the document; and the ask button on the
+  selection. Each attaches the selection as a **chip** above the composer, opens the panel and
+  focuses the composer. The rail button, the palette row and `Ctrl+Shift+A` open the panel and
+  attach nothing.
 - **The ask button** is a small `icon::SPARKLE` button above the selection's top-right corner,
   its right edge on the selection's and its bottom 8 clear of it, one for the whole selection and
   the same size at every zoom. Where there is no room above it sits inside the corner, and it
   stays left of the inspector's cards. Once the selection is attached it is lit and a click only
   opens the panel. It hides while the selection is dragged, resized or rotated, during a marquee,
-  while text or a path is edited, in Present and Private mode, and while the assistant is *Off*,
-  so a person who never turns the assistant on never sees it. *View ▸ Show ask assistant* (the
-  canvas group, per machine, on by default; the palette has the same words) hides it; the context
-  menu's row stays.
+  while text or a path is edited, in Present mode, in private mode (§6), and while the assistant
+  is *Off*, so a person who never turns the assistant on never sees it. *View ▸ Show ask
+  assistant* (the canvas group, per machine, on by default; the palette has the same words) hides
+  it; the context menu's row stays.
 - **A chip is a reference, not a copy**: the layer's id, name, kind and size go with the
   question, and the agent reads the rest through the tools (its subtree, its bounds). For a
   harness whose input takes images, an attached layer also goes with a 1× render, sparing the
@@ -262,20 +265,32 @@ it has to be placed, ends up over the layers being asked about, and is one more 
 
 - **The door** is the rail button, wearing `icon::SPARKLE`, History's mark for a step made over
   MCP: the same concept, an agent acting. (`CHAT` stays unused; a speech bubble reads as comments,
-  a non-goal.) Its tooltip is *Assistant (Ctrl+Shift+A)*. The palette's *Assistant* row, the
-  context menu's *Ask the assistant* and the ask button (§4) open it too.
-- **It is a `ui::rail_popup`, taller than its siblings.** Its bottom-left is theirs, 8 right of
-  the rail and level with its button's bottom; its top stops 8 below the canvas's top, so it is
-  the canvas height less 16, never under the siblings' 460. It is 400 wide, and its right edge
-  drags between 360 and 640, the only rail panel with a drag edge, since tables and code need the
-  room; the width is kept per machine. The height has no handle.
+  a non-goal.) Its tooltip is *Assistant (Ctrl+Shift+A)*. The palette's *Assistant* row and the
+  chord open it too and attach nothing; the context menu's *Ask the assistant* and the ask button
+  (§4) open it with the selection attached.
+- **It is a `ui::rail_popup`, taller than its siblings.** Its bottom-left is theirs
+  (`OndinApp::rail_popup_anchor`), 8 right of the rail and level with its button's bottom; its
+  top stops 8 below the canvas's top, so it is as tall as the room above its button less 8. The
+  siblings stop at 460 and it does not; on a short canvas it shrinks as they do, to a floor that
+  still holds the head, one line of thread and the composer. With the toolbar hidden it opens
+  from the anchor's fallback, 8 in from the canvas's bottom-left, and so stands the canvas height
+  less 16. It is 400 wide, and its right edge drags between 360 and 640, the only rail panel with
+  a drag edge, since tables and code need the room; the width is kept per machine. The height has
+  no handle.
 - **It shares the place**: opening a sibling closes it, and opening it closes them. Closing keeps
   the thread, the draft and a running turn. While a turn runs out of sight the button wears an
   accent ring; a reply that arrived unseen wears an accent dot until the panel opens; the tooltip
   says which (*Assistant · reply waiting*).
 - **The canvas stays live** behind it. `Escape` closes it, as it closes its siblings. Only *Stop*
-  stops a turn: a panel switch, a page switch or `Escape` never does; a document switch and a
-  settings restart do, each with a note.
+  stops a turn: a panel switch, a page switch or `Escape` never does; a document switch, a
+  settings restart and private mode do, each with a note.
+- **Private mode turns the assistant off** while it is on. The panel closes and a running turn
+  stops; the rail button, the palette row and the context menu's row are disabled with *Not
+  available in private mode*; `Ctrl+Shift+A` answers on the status line as private mode's other
+  refusals do; the ask button and the attached layers' marks are not drawn. Nothing is sent to
+  the agent. The thread and its chips are kept and come back when private mode is turned off. The
+  thread shows the names private mode masks, in chips, tool rows and the agent's own prose, and no
+  mask reaches the prose.
 - **The head**: the harness's label, the seal's grade beside a lock (*Sealed*, *Restricted*), then
   the Access dropdown and *New chat* (a plus).
 - **The thread:** the person's turns right-aligned and shrink-wrapped; the agent's full width,
@@ -314,6 +329,9 @@ it has to be placed, ends up over the layers being asked about, and is one more 
   the `.ondin` file: a chat is the person's, not the work's. At most 100 messages; tool results
   are saved as *(result not saved)*, and a turn still streaming is not saved. *New chat* starts
   over; a list of threads has no room in the panel.
+- **Glyphs:** *Stop* on the send button and *Regenerate* need glyphs the font lacks, drawn to the
+  *Drawing rules* (`app-chrome.md`). The failure note wears `WARNING`; the composer's disabled
+  reasons wear none.
 
 ## 7. Logging and privacy
 
@@ -337,3 +355,6 @@ it has to be placed, ends up over the layers being asked about, and is one more 
 ## 9. Open questions
 
 1. **`/ai`'s look in the bar** (`vm.md` §13, question 7).
+2. **What *New chat* costs.** With one thread per document, a click on the head's plus loses the
+   old thread for good: whether it asks first or keeps the last thread to bring back, and whether
+   it, or an Access switch, stops a running turn or waits for it.

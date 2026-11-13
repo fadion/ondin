@@ -136,7 +136,6 @@ pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
         el.each_mut(&mut |e| e.text_class = None);
         el.style
             .retain(|(p, _)| !matches!(*p, "position" | "left" | "top"));
-        collapse_solids(&mut el);
         if !out.is_empty() {
             out.push('\n');
         }
@@ -156,39 +155,6 @@ pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
         }
     }
     out
-}
-
-/// [`lone_solid`] over every declaration in `el`'s subtree.
-fn collapse_solids(el: &mut dom::Element) {
-    for (_, value) in &mut el.style {
-        *value = lone_solid(value).to_string();
-    }
-    for child in &mut el.children {
-        if let dom::Child::Element(e) = child {
-            collapse_solids(e);
-        }
-    }
-}
-
-/// A background of one solid layer as its colour: the walk writes a solid as a
-/// one-colour gradient so it can stack, which a pasted rule does not need. Split
-/// at the middle, not the first comma: a colour can hold one (`color-mix(…)`).
-fn lone_solid(value: &str) -> &str {
-    let Some(inner) = value
-        .strip_prefix("linear-gradient(")
-        .and_then(|v| v.strip_suffix(')'))
-    else {
-        return value;
-    };
-    let half = inner.len().saturating_sub(2) / 2;
-    match (
-        inner.get(..half),
-        inner.get(half..half + 2),
-        inner.get(half + 2..),
-    ) {
-        (Some(a), Some(", "), Some(b)) if a == b && !a.is_empty() => a,
-        _ => value,
-    }
 }
 
 /// One file of a code export, at its path inside the export's folder.
@@ -647,21 +613,5 @@ mod tests {
         assert!(rest.contains(".badge {"), "the child's rule: {css}");
         assert!(rest.contains("left: 10px;"), "{css}");
         assert!(rest.contains("background: #0000ff;"), "{css}");
-    }
-
-    /// The collapse takes a colour holding commas whole and leaves a real
-    /// two-colour ramp alone.
-    ///
-    /// flip: `lone_solid` splitting at the first `", "` → fails at the
-    /// `color-mix` case.
-    #[test]
-    fn a_lone_solid_collapses_whatever_its_colour_holds() {
-        let mix = "color-mix(in srgb, var(--c) 50%, transparent)";
-        assert_eq!(lone_solid(&format!("linear-gradient({mix}, {mix})")), mix);
-        assert_eq!(lone_solid("linear-gradient(#fff, #fff)"), "#fff");
-        let ramp = "linear-gradient(#fff, #000)";
-        assert_eq!(lone_solid(ramp), ramp);
-        let two = "linear-gradient(#fff, #fff), linear-gradient(#000, #000)";
-        assert_eq!(lone_solid(two), two, "two stacked layers stay as written");
     }
 }

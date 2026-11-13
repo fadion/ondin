@@ -360,6 +360,31 @@ fn shapes_match_the_canvas() {
     holds("shapes", &doc, &res);
 }
 
+/// One solid fill is written as its colour; a stack keeps each solid as a
+/// one-colour gradient, which is what lets it sit over or under another layer.
+///
+/// flip: `paint` writing a lone layer through the stack's arm → fails at "a
+/// lone solid".
+#[test]
+fn a_lone_solid_fill_is_its_colour() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 120.0, 80.0, "Board");
+    let a = d.rect(f, 10.0, 10.0, 40.0, 40.0, 0.0);
+    d.fill(a, solid(255, 255, 255, 255));
+    let b = d.rect(f, 60.0, 10.0, 40.0, 40.0, 0.0);
+    d.fills(b, vec![solid(20, 160, 90, 255), solid(255, 255, 255, 128)]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains("background: #ffffff;"), "a lone solid: {css}");
+    assert!(
+        css.contains(
+            "background: linear-gradient(#ffffff80, #ffffff80), linear-gradient(#14a05a, #14a05a);"
+        ),
+        "a stack of two: {css}"
+    );
+}
+
 /// `fidelity::check`, the command's door, finds nothing on a page that matches —
 /// white type on a blue fill included, which Chrome draws heavier — names the
 /// layers of one a stray rule moved, and names the type by its ink when a rule

@@ -2225,17 +2225,16 @@ impl Walk<'_> {
         let stored = node.paint();
         let mut pixelated = false;
         let mut pictured = false;
-        let layers: Vec<String> = paint
+        // Each layer with whether it is a lone colour, which only a stack needs
+        // written as a one-colour gradient.
+        let layers: Vec<(String, bool)> = paint
             .fills
             .iter()
             .zip(&stored.fills)
             .filter(|(f, _)| f.visible)
             .rev()
             .filter_map(|(f, s)| match &s.brush {
-                BrushSource::Bound { var, alpha } => {
-                    let c = self.tokens.color(*var, *alpha);
-                    Some(format!("linear-gradient({c}, {c})"))
-                }
+                BrushSource::Bound { var, alpha } => Some((self.tokens.color(*var, *alpha), true)),
                 BrushSource::Literal(Brush::Image(img)) => {
                     let layer = image::layer(self.doc, img, size).ok()?;
                     if !self.assets.iter().any(|(p, _)| *p == layer.path)
@@ -2245,13 +2244,25 @@ impl Walk<'_> {
                     }
                     pixelated |= layer.pixelated;
                     pictured = true;
-                    Some(layer.css)
+                    Some((layer.css, false))
                 }
-                BrushSource::Literal(_) => css::background_layer(f.brush.drawn(), size),
+                BrushSource::Literal(_) => match f.brush.drawn() {
+                    Brush::Solid(c) => Some((css::color(*c, 1.0), true)),
+                    drawn => css::background_layer(drawn, size).map(|l| (l, false)),
+                },
             })
             .collect();
-        if !layers.is_empty() {
-            el.set("background", layers.join(", "));
+        if let [(only, _)] = layers.as_slice() {
+            el.set("background", only.clone());
+        } else if !layers.is_empty() {
+            let stack: Vec<String> = layers
+                .into_iter()
+                .map(|(l, solid)| match solid {
+                    true => format!("linear-gradient({l}, {l})"),
+                    false => l,
+                })
+                .collect();
+            el.set("background", stack.join(", "));
         }
         if pixelated {
             el.set("image-rendering", "pixelated");

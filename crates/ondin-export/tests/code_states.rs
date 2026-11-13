@@ -622,9 +622,7 @@ fn a_state_pairs_by_the_key_rest_recorded() {
     let out = Target::React.export(&doc, &res, &[inst]);
     let css = file(&out, "components/Chip.module.css");
     assert!(
-        css.contains(
-            "[data-state=\"Hover\"] .bg {\n  background: linear-gradient(#005ac8, #005ac8);\n}"
-        ),
+        css.contains("[data-state=\"Hover\"] .bg {\n  background: #005ac8;\n}"),
         "a recolour: {css}"
     );
 }

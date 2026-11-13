@@ -76,7 +76,9 @@ Phase 3 — components, variables and styles (through the verbs, never the raw o
 `reset_overrides(nodes, scope)`, `push_to_main(node, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's
-other collections' modes kept),
+other collections' modes kept), `move_mode(mode, index)`, `add_collection(name?)`, `rename_collection(collection, name)`,
+`duplicate_collection(collection, name?)`, `delete_collection(collection)`, `set_by_width(collection, on)`,
+`set_breakpoint(mode, width)`, `set_width_query(node, on, collection?)`, `set_scope(variable, scope?)`,
 `bind_variable(nodes, field, variable?)`, `add_style(slot, name, value)`, `remove_style(id)`,
 `rename_style(id, name)`, `set_style_value(id, value)`, `apply_style(id, slot, style?)`.
 
@@ -97,7 +99,7 @@ Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp
   layer's defaults with that attribute's runs dropped, as the type panel writes it.
 - A page is named by its root node's id: `create_node`'s and `insert_subtree`'s parent may be one,
   and `set_name` renames one.
-- `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
+- `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode`, `add_collection`, `duplicate_collection` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
 - `set_blend(nodes, blend)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.

@@ -109,8 +109,9 @@ pub const PHASE_2: [&str; 70] = [
 /// Verbs, because the ops alone are refused or wrong: a `Set*Vars` op writes the
 /// binding and not the literal beside it, and removing a variable, mode or style
 /// still in use is refused at the commit. `create_instance`, `add_variable`,
-/// `add_mode` and `add_style` return the new ids.
-pub const PHASE_3: [&str; 38] = [
+/// `add_mode`, `add_collection`, `duplicate_collection` and `add_style` return
+/// the new ids.
+pub const PHASE_3: [&str; 47] = [
     "make_component",
     "duplicate_as_component",
     "create_instance",
@@ -143,6 +144,15 @@ pub const PHASE_3: [&str; 38] = [
     "remove_mode",
     "rename_mode",
     "set_frame_mode",
+    "move_mode",
+    "add_collection",
+    "rename_collection",
+    "duplicate_collection",
+    "delete_collection",
+    "set_by_width",
+    "set_breakpoint",
+    "set_width_query",
+    "set_scope",
     "bind_variable",
     "add_style",
     "remove_style",

@@ -1352,6 +1352,251 @@ fn variables_and_modes_are_added_set_and_removed() {
     assert!(doc.get(page).is_some());
 }
 
+/// `script` run on `doc`, panicking on a refusal; answers what each step made.
+fn script(doc: &mut Document, ids: &mut IdSource, steps: Value) -> Vec<Vec<String>> {
+    verbs::run_script(doc, ids, Lent::default(), &steps).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Why the one step `step` is refused on `doc`.
+fn refused_step(doc: &mut Document, ids: &mut IdSource, step: Value) -> String {
+    verbs::run_script(doc, ids, Lent::default(), &json!([step]))
+        .expect_err("refused")
+        .why
+}
+
+/// Collections are added, renamed, copied with their variables and deleted; a
+/// taken name and the last collection are refused.
+///
+/// flip: `duplicate_collection` answering no id → fails at "answers the copy".
+/// `delete_collection` without its emptiness check is no flip: the core answers
+/// no ops for the last collection, which the verb then says.
+#[test]
+fn collections_are_added_renamed_copied_and_deleted() {
+    let (mut doc, mut ids, _) = blank();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_collection", "args": { "name": "Theme" }, "as": "c" },
+            { "verb": "rename_collection", "args": { "collection": "@c", "name": "Brand" } },
+            { "verb": "add_variable", "args": { "kind": "number", "name": "gap", "collection": "@c" } },
+            { "verb": "duplicate_collection", "args": { "collection": "@c" } },
+        ]),
+    );
+    let names = |doc: &Document| -> Vec<String> {
+        doc.variables()
+            .collections()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
+    };
+    let first = names(&doc)[0].clone();
+    assert_eq!(names(&doc)[1..], ["Brand", "Brand copy"]);
+    let copy = made[3].first().expect("answers the copy").clone();
+    let copy: ondin_core::variable::CollectionId = serde_json::from_value(json!(copy)).unwrap();
+    assert_eq!(
+        doc.variables().of_collection(copy).count(),
+        1,
+        "the copy holds a copy of the variable"
+    );
+    let taken = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "add_collection", "args": { "name": first } }),
+    );
+    assert!(taken.contains("already exists"), "{taken}");
+    let all: Vec<String> = doc
+        .variables()
+        .collections()
+        .iter()
+        .map(|c| c.id.0.to_wire())
+        .collect();
+    for c in &all[1..] {
+        script(
+            &mut doc,
+            &mut ids,
+            json!([{ "verb": "delete_collection", "args": { "collection": c } }]),
+        );
+    }
+    assert_eq!(names(&doc), [first]);
+    let last = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "delete_collection", "args": { "collection": all[0] } }),
+    );
+    assert!(last.contains("last collection"), "{last}");
+}
+
+/// A mode moves in its collection; picked by width, the modes take widths, a
+/// mode's breakpoint is set, and a move is refused, since widths order them.
+///
+/// flip: `move_mode` skipping its by-width refusal → fails at the by-width move,
+/// which the core answers with no ops rather than refusing.
+#[test]
+fn modes_move_and_take_breakpoints_by_width() {
+    let (mut doc, mut ids, _) = blank();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_collection", "args": { "name": "Screens" }, "as": "c" },
+            { "verb": "add_mode", "args": { "name": "Tablet", "collection": "@c" }, "as": "t" },
+            { "verb": "add_mode", "args": { "name": "Desktop", "collection": "@c" }, "as": "d" },
+            { "verb": "move_mode", "args": { "mode": "@d", "index": 1 } },
+        ]),
+    );
+    let c: ondin_core::variable::CollectionId = serde_json::from_value(json!(made[0][0])).unwrap();
+    let modes = |doc: &Document| -> Vec<String> {
+        doc.variables()
+            .collection(c)
+            .unwrap()
+            .modes
+            .iter()
+            .map(|m| m.name.clone())
+            .collect()
+    };
+    assert_eq!(modes(&doc)[1..], ["Desktop", "Tablet"]);
+    let (tablet, desktop) = (made[1][0].clone(), made[2][0].clone());
+    let index = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "move_mode", "args": { "mode": tablet, "index": 3 } }),
+    );
+    assert!(index.contains("3 modes"), "{index}");
+    script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "set_by_width", "args": { "collection": made[0][0], "on": true } },
+            { "verb": "set_breakpoint", "args": { "mode": desktop, "width": 900 } },
+        ]),
+    );
+    let col = doc.variables().collection(c).unwrap();
+    assert!(col.by_width());
+    let d: ondin_core::ModeId = serde_json::from_value(json!(desktop)).unwrap();
+    assert_eq!(col.breakpoints.as_ref().unwrap()[&d], 900.0);
+    let first = col.modes[0].id.0.to_wire();
+    let moved = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "move_mode", "args": { "mode": tablet, "index": 0 } }),
+    );
+    assert!(moved.contains("by width"), "refused by width: {moved}");
+    let fixed = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "set_breakpoint", "args": { "mode": first, "width": 10 } }),
+    );
+    assert!(fixed.contains("width"), "{fixed}");
+}
+
+/// A frame picks a collection's mode by its own width and stops; a rectangle is
+/// refused with why.
+///
+/// flip: `set_width_query` passing `true` to `query_ops` always → fails at "stops".
+#[test]
+fn set_width_query_lets_a_frame_pick_by_its_width() {
+    let (mut doc, mut ids, page) = blank();
+    let f = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(300.0, 200.0) }),
+    )[0];
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    let args = json!({ "node": f.to_wire(), "on": true });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_width_query", args),
+        "collection",
+        "no modes are nothing to pick between"
+    );
+    run(&mut doc, &mut ids, "add_mode", json!({ "name": "Narrow" }));
+    run(&mut doc, &mut ids, "add_mode", json!({ "name": "Wide" }));
+    assert_eq!(doc.variables().first_collection().modes.len(), 2);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_width_query",
+        json!({ "node": f.to_wire(), "on": true }),
+    );
+    assert_eq!(doc.get(f).unwrap().queries().len(), 1);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_width_query",
+        json!({ "node": f.to_wire(), "on": false }),
+    );
+    assert!(doc.get(f).unwrap().queries().is_empty(), "stops");
+    let args = json!({ "node": r.to_wire(), "on": true });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_width_query", args),
+        "node"
+    );
+}
+
+/// A variable's scope narrows to fields of its kind, detaching a user it leaves
+/// and saying so, and widens again; a field of another kind is refused.
+///
+/// flip: `set_scope` ignoring `scope` (always every field) → fails at the scope.
+#[test]
+fn set_scope_narrows_a_variable_and_detaches_its_users() {
+    let (mut doc, mut ids, _) = blank();
+    let eight = serde_json::to_value(ondin_core::Cell::Number(8.0)).unwrap();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_variable", "args": { "kind": "number", "name": "r", "value": eight }, "as": "n" },
+            { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
+            { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": "radius", "variable": "@n" } },
+        ]),
+    );
+    let var: ondin_core::VarId = serde_json::from_value(json!(made[0][0])).unwrap();
+    let set = answer(
+        &doc,
+        &mut ids,
+        "set_scope",
+        json!({ "variable": made[0][0], "scope": ["spacing"] }),
+    )
+    .unwrap();
+    assert_eq!(set.said.as_deref(), Some("1 layer was detached"));
+    run(
+        &mut doc,
+        &mut ids,
+        "set_scope",
+        json!({ "variable": made[0][0], "scope": ["spacing"] }),
+    );
+    let scope = |doc: &Document| doc.variables().get(var).unwrap().scope;
+    assert_eq!(
+        scope(&doc),
+        Some(ondin_core::variable::Scope::of([
+            ondin_core::variable::Field::Spacing
+        ]))
+    );
+    let x = NodeId::from_wire(&made[1][0]).unwrap();
+    assert!(
+        doc.get(x)
+            .unwrap()
+            .corner_vars()
+            .iter()
+            .all(Option::is_none)
+    );
+    let args = json!({ "variable": made[0][0], "scope": ["fill"] });
+    assert_eq!(refused_param(&doc, &mut ids, "set_scope", args), "scope");
+    run(
+        &mut doc,
+        &mut ids,
+        "set_scope",
+        json!({ "variable": made[0][0] }),
+    );
+    assert_eq!(scope(&doc), None);
+}
+
 /// A document holding a kit's number variable `kit/radius` in the kit's mode
 /// `Light`; answers the variable and the mode.
 fn kit_variable(doc: &mut Document, ids: &mut IdSource) -> (ondin_core::VarId, ondin_core::ModeId) {

@@ -427,6 +427,7 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "BoundField" => reads::<build::BoundField>(v),
         "Color" => reads::<peniko::Color>(v),
         "[Hex]" => reads::<Vec<String>>(v),
+        "Scope" => reads::<Vec<String>>(v),
         // A list of node ids that may be empty, where `Nodes` may not.
         "[Node]" => match v {
             Value::Array(list) => list.iter().try_for_each(|v| wire(v).map(|_| ())),
@@ -535,6 +536,7 @@ pub fn example(model: &str) -> Option<Value> {
         "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
         "[Hex]" => serde_json::json!(["#203b5eff", "#1e395fff"]),
         "[Node]" => serde_json::json!(["7e5b:12", "7e5b:40"]),
+        "Scope" => serde_json::json!(["corner", "spacing"]),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![
             ParaAttr::Spacing(Length::Px(12.0)),
@@ -746,6 +748,38 @@ fn collection_arg(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Option<CollectionId>, V
             Err(a.invalid("collection", "no collection has that id"))
         }
         c => Ok(c),
+    }
+}
+
+/// The collection the required `collection` argument names.
+fn collection_req(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<CollectionId, VerbError> {
+    collection_arg(ctx, a)?.ok_or(VerbError::Missing {
+        verb: a.verb.name,
+        param: "collection",
+    })
+}
+
+/// `name` trimmed as a collection's, refused when empty or another collection
+/// than `own` has it.
+fn collection_name(
+    ctx: &Ctx<'_>,
+    a: &Args<'_>,
+    name: &str,
+    own: Option<CollectionId>,
+) -> Result<String, VerbError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(a.invalid("name", "a collection needs a name"));
+    }
+    let taken = ctx
+        .doc
+        .variables()
+        .collections()
+        .iter()
+        .any(|c| Some(c.id) != own && c.name == name);
+    match taken {
+        true => Err(a.invalid("name", format!("{name} already exists"))),
+        false => Ok(name.to_owned()),
     }
 }
 
@@ -2477,6 +2511,294 @@ pub static VERBS: &[Verb] = &[
             crate::variable::frame_mode_ops(ctx.doc, a.node("node")?, c, mode)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("node", why))
+        },
+    },
+    Verb {
+        name: "move_mode",
+        doc: "Move a mode to another place in its collection; the first is the default every unset frame reads",
+        params: &[
+            req("mode", ParamKind::Id("mode"), "the mode"),
+            req("index", INDEX, "its new place, counted from 0"),
+        ],
+        run: |ctx, a| {
+            let mode = own_mode(ctx, a)?;
+            let t = ctx.doc.variables();
+            let col = t
+                .collection_of_mode(mode)
+                .ok_or_else(|| a.invalid("mode", "no mode has that id"))?;
+            if col.by_width() {
+                return Err(a.invalid(
+                    "mode",
+                    "a collection picked by width orders its modes by their widths",
+                ));
+            }
+            let to = a.index("index").unwrap_or(0);
+            if to >= col.modes.len() {
+                let why = format!(
+                    "the collection has {}",
+                    plural(col.modes.len(), "mode", "modes")
+                );
+                return Err(a.invalid("index", why));
+            }
+            Ok(Done::ops(crate::variable::move_mode_ops(ctx.doc, mode, to)))
+        },
+    },
+    Verb {
+        name: "add_collection",
+        doc: "Add a variable collection with one mode, last in the list; answers its id",
+        params: &[opt(
+            "name",
+            TEXT,
+            "its name; the first free `Collection N` unless given",
+        )],
+        run: |ctx, a| {
+            let t = ctx.doc.variables();
+            let taken: Vec<&str> = t.collections().iter().map(|c| c.name.as_str()).collect();
+            let name = match a.text("name") {
+                Some(n) => collection_name(ctx, a, n, None)?,
+                None => crate::variable::numbered_name(&taken, "Collection", taken.len() + 1),
+            };
+            let (id, mode) = (ctx.ids.mint_collection(), ctx.ids.mint_mode());
+            let ops = crate::variable::new_collection_ops(id, mode, &name, taken.len());
+            Ok(Done::making(ops, id.0.to_wire()))
+        },
+    },
+    Verb {
+        name: "rename_collection",
+        doc: "Rename a variable collection",
+        params: &[
+            req("collection", ParamKind::Id("collection"), "the collection"),
+            req("name", TEXT, "its new name, unique among the collections"),
+        ],
+        run: |ctx, a| {
+            let c = collection_req(ctx, a)?;
+            let name = collection_name(ctx, a, a.text("name").unwrap_or_default(), Some(c))?;
+            if ctx
+                .doc
+                .variables()
+                .collection(c)
+                .is_some_and(|col| col.name == name)
+            {
+                return Ok(Done::default());
+            }
+            Ok(Done::ops(vec![Operation::SetCollectionName {
+                id: c,
+                name,
+            }]))
+        },
+    },
+    Verb {
+        name: "duplicate_collection",
+        doc: "Copy a variable collection after itself, its modes and variables under new ids, aliases within it pointing at the copies; answers the copy's id",
+        params: &[
+            req("collection", ParamKind::Id("collection"), "the collection"),
+            opt(
+                "name",
+                TEXT,
+                "the copy's name; `<name> copy`, numbered if taken, unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let c = collection_req(ctx, a)?;
+            let t = ctx.doc.variables();
+            let name = match a.text("name") {
+                Some(n) => collection_name(ctx, a, n, None)?,
+                None => {
+                    let taken: Vec<&str> =
+                        t.collections().iter().map(|c| c.name.as_str()).collect();
+                    let stem = format!("{} copy", t.collection(c).map_or("", |c| c.name.as_str()));
+                    match taken.contains(&stem.as_str()) {
+                        true => crate::variable::numbered_name(&taken, &stem, 2),
+                        false => stem,
+                    }
+                }
+            };
+            let ops = crate::variable::duplicate_collection_ops(ctx.doc, c, &name, ctx.ids);
+            let made = ops.iter().find_map(|op| match op {
+                Operation::AddCollection { collection, .. } => Some(collection.id.0.to_wire()),
+                _ => None,
+            });
+            Ok(match made {
+                Some(id) => Done::making(ops, id),
+                None => Done::ops(ops),
+            })
+        },
+    },
+    Verb {
+        name: "delete_collection",
+        doc: "Delete a variable collection and its variables; their users keep the values they drew, and frames set to its modes inherit",
+        params: &[req(
+            "collection",
+            ParamKind::Id("collection"),
+            "the collection",
+        )],
+        run: |ctx, a| {
+            let c = collection_req(ctx, a)?;
+            let ops = crate::variable::remove_collection_ops(ctx.doc, c);
+            if ops.is_empty() {
+                return Err(VerbError::Nothing("the last collection cannot go"));
+            }
+            let (_, layers, _) = crate::variable::collection_reach(ctx.doc, c);
+            let done = Done::ops(ops);
+            Ok(match layers {
+                0 => done,
+                n => done.saying(format!(
+                    "{} {} their values",
+                    plural(n, "layer", "layers"),
+                    if n == 1 { "keeps" } else { "keep" }
+                )),
+            })
+        },
+    },
+    Verb {
+        name: "set_by_width",
+        doc: "Pick a collection's mode by the width of the frame a layer sits in, or stop; one collection at most",
+        params: &[
+            req("collection", ParamKind::Id("collection"), "the collection"),
+            req("on", BOOL, "whether its modes are picked by width"),
+        ],
+        run: |ctx, a| {
+            let c = collection_req(ctx, a)?;
+            let ops = crate::variable::by_width_ops(ctx.doc, c, a.bool("on").unwrap_or(true))
+                .map_err(|why| a.invalid("collection", why))?;
+            let pinned = ops
+                .iter()
+                .filter(|op| matches!(op, Operation::SetModes { .. }))
+                .count();
+            let done = Done::ops(ops);
+            Ok(match pinned {
+                0 => done,
+                n => done.saying(format!(
+                    "{} {} the mode {} drew",
+                    plural(n, "frame", "frames"),
+                    if n == 1 { "keeps" } else { "keep" },
+                    if n == 1 { "it" } else { "they" }
+                )),
+            })
+        },
+    },
+    Verb {
+        name: "set_breakpoint",
+        doc: "Set the minimum width a mode of a collection picked by width starts at",
+        params: &[
+            req(
+                "mode",
+                ParamKind::Id("mode"),
+                "the mode, not its collection's first",
+            ),
+            req("width", ParamKind::Number, "its minimum width in px"),
+        ],
+        run: |ctx, a| {
+            let mode = own_mode(ctx, a)?;
+            crate::variable::breakpoint_ops(ctx.doc, mode, a.number("width").unwrap_or(0.0))
+                .map(Done::ops)
+                .map_err(|why| a.invalid("width", why))
+        },
+    },
+    Verb {
+        name: "set_width_query",
+        doc: "Let a frame's contents pick a collection's mode by the frame's own width, or stop",
+        params: &[
+            req("node", NODE, "the frame, its width set from outside"),
+            req("on", BOOL, "whether it picks by its width"),
+            opt(
+                "collection",
+                ParamKind::Id("collection"),
+                "the collection; the first unless given",
+            ),
+        ],
+        run: |ctx, a| {
+            let id = a.layer(ctx.doc, "node")?;
+            node(ctx, id)?;
+            let c = collection_arg(ctx, a)?.unwrap_or(ctx.doc.variables().first_collection().id);
+            let on = a.bool("on").unwrap_or(true);
+            if on && let Some(why) = crate::variable::why_no_query(ctx.doc, id) {
+                return Err(a.invalid("node", why));
+            }
+            let modes = ctx
+                .doc
+                .variables()
+                .collection(c)
+                .map_or(0, |c| c.modes.len());
+            if on && modes < 2 {
+                return Err(a.invalid(
+                    "collection",
+                    "a width picks between two modes or more, and the collection has fewer",
+                ));
+            }
+            crate::variable::query_ops(ctx.doc, id, crate::variable::ModeOwner::Collection(c), on)
+                .map(Done::ops)
+                .map_err(|why| a.invalid("node", why))
+        },
+    },
+    Verb {
+        name: "set_scope",
+        doc: "Narrow the fields a variable may bind, or let it bind every field of its kind; fields it leaves detach to what they drew",
+        params: &[
+            req("variable", ParamKind::Id("variable"), "the variable"),
+            opt(
+                "scope",
+                ParamKind::Model("Scope"),
+                "the fields, by name, of the variable's kind; absent for every field",
+            ),
+        ],
+        run: |ctx, a| {
+            use crate::variable::{Field, Scope};
+            let id = own_variable(ctx, a)?;
+            let t = ctx.doc.variables();
+            let kind = t.get(id).map(|v| v.kind);
+            let scope = match a.model_opt::<Vec<String>>("scope")? {
+                None => None,
+                Some(words) => {
+                    let mut fields = Vec::new();
+                    for w in &words {
+                        let f = Field::from_wire(w)
+                            .filter(|f| Some(f.kind()) == kind)
+                            .ok_or_else(|| {
+                                let ok: Vec<&str> = kind
+                                    .into_iter()
+                                    .flat_map(Field::of_kind)
+                                    .map(Field::wire)
+                                    .collect();
+                                a.invalid("scope", format!("`{w}` is not one of {}", ok.join(", ")))
+                            })?;
+                        fields.push(f);
+                    }
+                    if fields.is_empty() {
+                        return Err(a.invalid(
+                            "scope",
+                            "a scope names a field at least; leave it out for every field",
+                        ));
+                    }
+                    Some(Scope::of(fields))
+                }
+            };
+            if let Some(held) = crate::variable::scope_held_by(ctx.doc, id, scope) {
+                let name = |v| t.get(v).map_or("", |v| v.name.as_str());
+                return Err(a.invalid(
+                    "scope",
+                    format!(
+                        "{} reads {} from another collection, so its words cannot change",
+                        name(held),
+                        name(id)
+                    ),
+                ));
+            }
+            let dropped = crate::variable::users_by_field(ctx.doc, id)
+                .into_iter()
+                .filter(|(f, _)| crate::variable::scope_drops(scope, *f))
+                .flat_map(|(_, ids)| ids)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let done = Done::ops(crate::variable::scope_ops(ctx.doc, id, scope));
+            Ok(match dropped {
+                0 => done,
+                n => done.saying(format!(
+                    "{} {} detached",
+                    plural(n, "layer", "layers"),
+                    if n == 1 { "was" } else { "were" }
+                )),
+            })
         },
     },
     Verb {

@@ -16,14 +16,17 @@ Documents live in a running Ondin process, the window or a headless `serve`, so 
 
 ### 8.1a Wire
 
-JSON-RPC 2.0, one message per line, on std threads with `serde_json`; no SDK and no async runtime. The methods are `initialize` (one pinned protocol version, negotiated), `ping`, `tools/list`, `tools/call` and the `initialized` and `cancelled` notifications. Each tool's input schema is generated from its verb's `Param`s, with `verbs::example` showing a model parameter's shape. No resources, prompts or server-sent notifications: see *Revisions* below.
+JSON-RPC 2.0, one message per line, on std threads with `serde_json`; no SDK and no async runtime. The methods are `initialize` (the client's protocol revision when it is one of `wire::PROTOCOL_VERSIONS`, else the newest), `ping`, `tools/list`, `tools/call` and the `initialized` and `cancelled` notifications. A batch or a line that is no object gets one Invalid Request with a null id, so a client never waits on a line the server dropped. Each tool's input schema is generated from its verb's `Param`s, with `verbs::example` showing a model parameter's shape. No resources, prompts or server-sent notifications: see *Revisions* below.
 
 ### 8.2 Headless mode
 
 `ondin serve` hosts documents with no window: core, history, CPU renderer and the MCP endpoint. Same op queue, same tools, so an agent can build, edit and export on a machine with no display, or edit a file nobody has open. This follows from the headless-core invariant and is a first-class v1 deliverable.
 
 - `serve` writes each commit to its file: there is no person to save later, and a window with the same file open as a clean tab follows it (`library.md`, *the file is watched*).
-- `serve` exits when a window takes the window lock, and after its last connection closes, or 15 minutes after while it remembers a keyed client (*Revisions*), whose harness may start a process per turn; the proxy moves its connection to the window.
+- `serve` exits after its last client's connection closes, or 15 minutes after while it remembers a keyed client (*Revisions*), whose harness may start a process per turn. A connection counts once it has called a tool: the proxy's and `serve`'s own checks that an endpoint answers connect and close without one, and must not end it.
+- It hands over when a window lists its endpoint: once no client is connected, or a second after its last answer, so that answer reaches its connection first. The proxy moves to the window at its next request. A tool call whose answer was lost is not sent again, since it may have applied; the proxy answers it with an error saying so.
+- A commit `serve` cannot write to its file, like one to a window's tab behind, is answered with `unsaved` and the reason. A tab behind whose file changed outside since it was read is not overwritten: it keeps the edit and asks the person, as *Changed on disk* does.
+- `serve` finds a document already open under another spelling of its path, so one file never has two sessions writing over each other.
 
 ### 8.3 Concurrency model
 
@@ -37,40 +40,40 @@ JSON-RPC 2.0, one message per line, on std threads with `serde_json`; no SDK and
 
 Phase 1 — read/export (ship first):
 `use_document(document)`, `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `find_nodes(query)`, `find_like(id, by)`, `hit_test(x,y)`,
-`get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`,
+`get_bounds(id) -> [x, y, width, height]`, `get_selection() -> {ids}`, `export_svg(id?)`, `export_png(id?, max?)`,
 `run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
 `list_styles() -> StyleTable`, `export_tokens()`, `list_fonts(query?)`, `check_contrast(ids?, page?, level?, non_text?)`,
 `review_colours(ids?, threshold?)`.
 
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `import_svg(parent, svg, x?, y?, name?)`, `delete_node`,
-`reparent`, `reorder`, `arrange(ids, move)`, `group(ids)`, `frame(ids)`, `ungroup(id)`, `boolean(ids, op)`, `flatten(ids)`,
+`reparent`, `reorder`, `arrange(ids, move)`, `group(nodes)`, `frame(nodes)`, `ungroup(id)`, `boolean(nodes, op)`, `flatten(ids)`,
 `outline_shape(id)`, `outline_stroke(id)`, `outline_text(id)`, `divide(ids)`, `blend_shapes(ids, steps?, paint?, reverse?)`,
-`duplicate(id)`, `join_paths(id, other)`, `repeat(ids, count, angle?, turn?)`, `align(ids, edge)`,
+`duplicate(nodes, dx?, dy?)`, `join_paths(id, other)`, `repeat(ids, count, angle?, turn?)`, `align(ids, edge)`,
 `distribute(ids, axis)`, `tidy_up(ids)`, `slice(ids)`, `set_transform`, `set_pivot`, `set_geometry`,
 `set_size(id, width, height)`, `pixel_fit(ids)`, `set_name`, `set_visible`,
-`set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `replace_text(find, replace, ids?, …)`, `set_text_style`,
+`set_locked`, `set_opacity`, `set_blend(nodes, blend)`, `set_clip`, `set_mask(node, mask)`, `set_text`, `replace_text(find, replace, ids?, …)`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `style_text(id, attrs, start?, end?)`,
 `style_paragraphs(id, attrs, start?, end?)`, `set_fills`, `set_strokes`,
-`set_effects`, `merge_colours(colours, into, ids?)`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
+`set_effects`, `merge_colours(colours, into, nodes?)`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display`, `set_layout_item`, `set_insets`,
 `insert_chart(parent, kind, table?, mapping?, x?, y?, width?, height?)`, `set_chart(id, kind?, mapping?, options?)`, `set_chart_data(id, table)`, `flatten_chart(ids)`,
 `set_exports`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
 `move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`.
 
 Phase 3 — components, variables and styles (through the verbs, never the raw ops):
-`make_component(id)`, `duplicate_as_component(id)`, `create_instance(main, parent, at)`, `detach_instance(id)`,
+`make_component(id)`, `duplicate_as_component(id)`, `create_instance(main, parent, x?, y?)`, `detach_instance(id)`,
 `swap_instance(id, main)`, `combine_as_variants(ids)`, `add_variant(id)`, `switch_variant(id, property, value)`,
-`define_property(main, field)`, `set_instance_property(id, property, value)`,
-`reset_overrides(id, scope)`, `push_to_main(id, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
+`define_property(node, kind, property?, name?)`, `set_instance_property(id, property, value)`,
+`reset_overrides(nodes, scope)`, `push_to_main(node, scope?)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
 `rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name, collection?)`,
 `remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?, collection?)` (one pick, the frame's
 other collections' modes kept),
-`bind_variable(id, field, variable?)`, `add_style(slot, name, value)`, `remove_style(id)`,
+`bind_variable(nodes, field, variable?)`, `add_style(slot, name, value)`, `remove_style(id)`,
 `rename_style(id, name)`, `set_style_value(id, value)`, `apply_style(id, slot, style?)`.
 
 Phase 4 — kits and the library (the app's own actions, some outside undo):
 `list_documents()`, `create_document(name, project?) -> Path`, `list_kits()`, `get_kit(kit)`,
-`insert_from_kit(kit, main, parent, at)`, `list_kit_updates()`, `accept_kit_updates(kit?)`,
+`insert_from_kit(kit, main, parent, x?, y?)`, `list_kit_updates()`, `accept_kit_updates(kit?)`,
 `make_local(ids)`, `map_kit_modes(kit, mapping)`, `make_kit()`, `publish_kit(note)`,
 `stop_sharing_kit()`, `import_tokens(tokens, collection?, removals?)`, `list_versions()`, `save_version(name?)`.
 
@@ -87,23 +90,26 @@ Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp
   and `set_name` renames one.
 - `create_node`, `insert_subtree`, `duplicate`, `add_page` and `duplicate_page` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
-- `set_blend(ids, mode)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
+- `set_blend(nodes, blend)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - A chart is edited through its four verbs, which write `SetChart`; its parts regenerate after the commit (`chart::settle`), and any other tool writing a part is refused by `chart::guard` (*Part of a chart — edit the chart, or flatten it first*). `insert_chart` makes a 480 × 280 frame on the kind's sample table, or on the table given with its mapping read off the column types (`chart::Mapping::guess`) unless one is given; `set_chart`'s `mapping` and `options` are JSON merge patches over the chart's own; `set_chart_data` keeps the mapping and series colours of each column whose name survives (`Chart::with_table`) and drops the linked file; `flatten_chart` is `chart::flatten_ops` for each chart (*Flatten*, `charts.md`). The snapshot's `chart` names the column ids they take.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.
-- `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct. Its longest side is capped by default, and an argument raises the cap.
+- `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct. Its longest side is capped at 1600 by default; `max` raises the cap to at most 4096, since the raster is held in the person's window. A page is never drawn above 1×, a layer above 2×.
 - `find_nodes(query)` is how an agent reaches "the home header" without reading the whole document: layers whose name or text contains the query, each with its id, name, kind and the names of its ancestors. A request about one part of a page is a find and a subtree read, not a snapshot. `find_like(id, by)` reaches the rest of a kind from one: *Select same* (fill, stroke, font, effect, `app::shares`), *Select matching layers* (`matching::matching_layers`) and a main's or set's instances, over every page.
 - A write answers `created` and `made`, and `said` when its verb has something to say the document does not show: how many matches `replace_text` wrote and how many it left alone, what `import_svg` left out, how many places `merge_colours` changed.
 - Each structure verb refuses where its menu row dims, in that row's words: `frame` where `build::can_frame` refuses, `outline_stroke` without a visible stroke, `divide` without an overlap, `blend_shapes` with `blend::Refusal::says`, `push_to_main` into a kit's or a locked main.
-- Colours travel as `#rrggbbaa` between the reads and `merge_colours`: `review_colours` writes them, `merge_colours` takes them back.
+- Colours travel as `#rrggbbaa` between the reads and `merge_colours`: `review_colours` writes them, `merge_colours` takes them back. An `into` a variable carries binds the raw paints to that variable, as Colour review's default target does.
+- A verb refuses a kit's vendored component (`Document::in_vault`), which a kit instance's `component.main` names: the person can never select one, and an edit there would change every instance until the kit's next update undid it. Reading one is fine, and `create_instance` and `swap_instance` may name it as `main`.
+- `set_selection` takes layers of the page the person is on, never the page itself, and does not switch the page: a selection never spans pages (`Selection::retain_existing`), and the agent does not move the person's view.
+- Writes name layers `node` and `nodes`, as their verbs do; the reads, `set_selection` and `make_local` name them `id` and `ids`. The phase lists above give the main parameters, not every one; `tools/list` is the full signature.
 
 #### Revisions
 
 The person and the agent edit one live document, so an agent's earlier read goes stale without its knowing. Each document has a revision that every commit advances, the agent's or the person's, undo and redo included.
 
 - Revisions come from one counter per process, seeded with the launch time in microseconds, so a `rev` from another process (a `serve` before the window took over, the app before a restart) never matches one here and reads as unknown: `since` answers in full and `base_rev` is refused.
-- Every tool result carries `rev`. The host remembers, per client, the revision it last showed; when the document moved since, the result also carries `changed`: the layers added, changed and removed since then, by id and name, read from the history's commits.
+- Every tool result carries `rev`. The host remembers, per client, the revision it last showed; when the document moved since, the result also carries `changed`: the layers added, changed and removed since then, by id and name, found by comparing each layer's snapshot entry, so a layer a reflow moved is reported beside the one edited.
 - `get_document`, `get_node` and `list_children` take `since: rev` and answer `unchanged`, or only the layers changed and removed since. Nothing is withheld unless the agent passes `since`: a harness may have summarised its earlier read away.
-- A write takes `base_rev`. If a layer it writes changed after that revision the write is refused and the refusal lists them; without `base_rev` it applies.
+- A registry verb takes `base_rev`. If a layer it writes changed after that revision the write is refused and the refusal lists them; without `base_rev` it applies. The client's own writes since count as changes, so a second write off one read passes the first write's `rev`. The kit tools and `import_tokens` take none.
 - **A client** is the key `ondin mcp-proxy --client <key>` (or `ONDIN_MCP_CLIENT`) puts in `initialize`'s `_meta` under `io.github.fadion.ondin/client`, else the connection. A keyed client's document and revisions outlive its connection, so a harness that starts a process per turn finds them on its next connection, with `changed` reporting what the person did in between; the host keeps the 32 most recently used keys. `use_document` of the document a client already uses keeps its history and answers `changed`; the proxy's own restore after a reconnect passes `restore` and answers none, leaving it for the agent's next call. "Never told of its own write" holds per client.
 
 Server-sent notifications would be the protocol's own channel for this, but harnesses do not put them in front of the model mid-turn; a tool result always reaches it.

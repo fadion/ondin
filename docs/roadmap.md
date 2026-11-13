@@ -21,6 +21,14 @@ true.
   every phase's tools are built. The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980),
   specified beside used values (§15 D868), and an instance's overrides and property values.
+  The reads also lose what the whole-list writes need back: hidden fills, gradient and image
+  framing, a stroke's align, dash, cap and join, a text's runs, and export specs. Tools owed,
+  each over a transaction core already builds: variant and property management (rename, remove,
+  values, defaults, interaction states), collections and width queries, descriptions and doc
+  links, a layer's HTML element and link, `set_mask`'s mode, frame ↔ group and fit to content,
+  replacing a font, the person's page and viewport, a picture's pixel size, comparing a version,
+  and several verbs as one undo step. Setters that take one `node` (`set_fills`, `set_strokes`,
+  `set_text_style`, …) should take `nodes` as the inspector writes a selection.
 
 ## Later · Platform and dependencies
 

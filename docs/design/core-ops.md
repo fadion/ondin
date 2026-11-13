@@ -225,7 +225,14 @@ it created. A verb never commits; its caller does, as every edit is committed.
   same forms (visibility, lock, opacity, blend, clip, mask, fills, strokes, effects, exports,
   display, padding, layout item), and its `children`, bottom first. A caller never writes an id or
   a parent link; the verb mints them and emits `CreateNode` then the `Set*` ops per layer, in one
-  transaction, so every op's own check applies. Unknown fields are refused.
+  transaction, so every op's own check applies. Unknown fields are refused. A layer may name
+  another in `like` to take its paint and text style where it gives none, expanded before the
+  tree is read, since only the verb sees the document.
+- **Model parameters read short forms** (`verbs::loose`): hex colours and paints and text styles
+  without their default fields expand into the model's serde shapes before `check_model` and
+  `Args::model` read them, by the field's key, so the model types keep one serde form. `tighten`
+  is its inverse for `verbs::tree` and the examples, written only where `loosen` gives back the
+  same value (a hex colour must read back to the same `f32`s through peniko's own conversion).
 - **`style_text` and `style_paragraphs` take a range in characters** and write as the app does:
   the whole text through `build::char_defaults`/`para_defaults` (the type panel's write: new
   defaults, that attribute's runs dropped), a shorter range through `build::char_runs`/`para_runs`

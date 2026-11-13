@@ -15,9 +15,6 @@ colours took about ten reads; the one `insert_subtree` was 13 KB of output, most
 colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
 budget test, and the set is checked by re-running the same agent task on the old and new build.
 
-- **Hex colours and default fields in writes** — `verbs::Args::model`, `verbs::tree`. A colour is
-  `"#rrggbb"` or `"#rrggbbaa"`; a fill or stroke takes only what differs from a new one's; a fill
-  may be a bare colour. `get_tree` answers hex where it round-trips exactly.
 - **Lean snapshot** — `ondin_export::snapshot`. `get_node` leaves out fields at their defaults and
   what repeats its parent's.
 - **Named results** — `mcp::write`. `insert_subtree` answers each named layer's path with its id.
@@ -27,7 +24,6 @@ budget test, and the set is checked by re-running the same agent task on the old
   shadows, the content column and its sections' boxes, each with a layer that uses it.
 - **Outline read** — one row per layer (id, name, kind, box, depth), with a depth limit;
   `find_nodes` gives each match's box and whether it holds the selection.
-- **`like` in trees** — a layer takes another's text style or paint by id instead of restating it.
 - **Layout check and region renders** — overlaps, overflowing or clipped text and layers off their
   frame, before any image; `export_png` takes a region.
 - **Core tool set** — a default list of the tools nearly every task uses, a generic `set` patch in

@@ -4902,6 +4902,158 @@ fn tree_reads_a_layer_back_as_insert_subtree_takes_it() {
     assert!(!spans.as_slice().is_empty(), "the runs came across");
 }
 
+/// The full JSON of a solid colour, as the model writes it.
+fn solid(c: Color) -> Value {
+    serde_json::to_value(Brush::Solid(c)).unwrap()
+}
+
+/// A tree written in the short forms (hex colours, a bare-colour fill, a stroke
+/// and a text style without their default fields) makes the layers its full form
+/// makes.
+///
+/// flip: `loosen` leaving a bare-colour fill as it is → fails at the short tree's
+/// `insert_subtree` panic.
+#[test]
+fn short_forms_make_what_full_forms_make() {
+    let (mut doc, mut ids, page) = blank();
+    let shadow = |color: Value| {
+        json!([{ "visible": true, "kind": { "type": "drop_shadow", "color": color,
+            "offset": { "x": 0.0, "y": 4.0 }, "blur": 8.0, "spread": 0.0 } }])
+    };
+    let short = json!({
+        "kind": rect(40.0, 20.0),
+        "name": "Box",
+        "fills": ["#12352a"],
+        "strokes": [{ "brush": "#ff7a1a80", "width": 2.0 }],
+        "effects": shadow(json!("#00000033")),
+        "children": [{ "kind": { "Text": { "content": "Hi", "sizing": "Auto",
+            "style": { "font_size": 20.0, "color": "#fff" } } } }],
+    });
+    let c = |r: u8, g: u8, b: u8, a: u8| Color::from_rgba8(r, g, b, a);
+    let full = json!({
+        "kind": rect(40.0, 20.0),
+        "name": "Box",
+        "fills": [{ "brush": solid(c(0x12, 0x35, 0x2a, 255)), "visible": true }],
+        "strokes": [{ "brush": solid(c(0xff, 0x7a, 0x1a, 0x80)), "width": 2.0, "visible": true,
+            "join": "Miter", "cap": "Butt", "dashes": [], "dash_offset": 0.0 }],
+        "effects": shadow(serde_json::to_value(c(0, 0, 0, 0x33)).unwrap()),
+        "children": [{ "kind": { "Text": { "content": "Hi", "sizing": "Auto",
+            "style": { "font_family": "Inter", "font_size": 20.0, "weight": 400, "italic": false,
+                "color": serde_json::to_value(c(255, 255, 255, 255)).unwrap() } } } }],
+    });
+    let insert = |doc: &mut Document, ids: &mut IdSource, tree: &Value| {
+        run(
+            doc,
+            ids,
+            "insert_subtree",
+            json!({ "parent": page.to_wire(), "tree": tree }),
+        )[0]
+    };
+    let a = insert(&mut doc, &mut ids, &short);
+    let b = insert(&mut doc, &mut ids, &full);
+    let read = verbs::tree(&doc, a).unwrap();
+    assert_eq!(
+        Some(&read),
+        verbs::tree(&doc, b).as_ref(),
+        "the same layers"
+    );
+    assert_eq!(read["fills"], json!(["#12352a"]), "read back short: {read}");
+    assert_eq!(
+        read["strokes"],
+        json!([{ "brush": "#ff7a1a80", "width": 2.0, "align": "Center", "miter_limit": 4.0 }]),
+        "{read}"
+    );
+}
+
+/// `tree` writes a colour as hex only where hex reads back to the same value; a
+/// colour between two bytes keeps its components.
+///
+/// flip: `exact_hex` rounding without the read-back check → fails at "kept".
+#[test]
+fn tree_writes_hex_only_where_it_reads_back_exactly() {
+    let (mut doc, mut ids, page) = blank();
+    let between = Color::new([0.123_456_7, 0.5, 0.25, 1.0]);
+    let fills = |c: Color| {
+        serde_json::to_value(vec![Fill {
+            brush: Brush::Solid(c).into(),
+            visible: true,
+        }])
+        .unwrap()
+    };
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_fills",
+        json!({ "nodes": [r.to_wire()], "fills": fills(between) }),
+    );
+    let read = verbs::tree(&doc, r).unwrap();
+    assert!(
+        read["fills"][0]["brush"]["Solid"]["components"].is_array(),
+        "kept: {read}"
+    );
+    let copy = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": read }),
+    )[0];
+    assert_eq!(
+        verbs::tree(&doc, copy),
+        Some(read),
+        "and reads back the same"
+    );
+}
+
+/// `like` gives a layer another's text style field by field, under what it
+/// writes itself, and its fills.
+///
+/// flip: `expand_like` skipping the text style → fails at "the size comes from
+/// the like".
+#[test]
+fn like_takes_another_layers_text_style_and_paint() {
+    let (mut doc, mut ids, page) = blank();
+    let src = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "fills": ["#12352a"],
+            "kind": { "Text": { "content": "Title", "sizing": "Auto",
+            "style": { "font_size": 48.0, "weight": 800, "letter_spacing": { "Px": -1.4 } } } } } }),
+    )[0];
+    let copy = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": { "like": src.to_wire(),
+            "kind": { "Text": { "content": "Another", "sizing": "Auto",
+            "style": { "weight": 600 } } } } }),
+    )[0];
+    let read = verbs::tree(&doc, copy).unwrap();
+    let style = &read["kind"]["Text"]["style"];
+    assert_eq!(
+        style["font_size"],
+        json!(48.0),
+        "the size comes from the like"
+    );
+    assert_eq!(style["weight"], json!(600), "its own weight wins");
+    assert_eq!(style["letter_spacing"], json!({ "Px": -1.4 }), "{read}");
+    assert_eq!(read["fills"], json!(["#12352a"]), "and the fills");
+    assert!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "insert_subtree",
+            json!({ "parent": page.to_wire(), "tree": { "like": "zz", "kind": rect(1.0, 1.0) } }),
+        ) == "tree"
+    );
+}
+
 /// `set_mask` sets a mask's mode with it, and refuses a mode for a layer that
 /// stops being one.
 ///

@@ -28,6 +28,8 @@ use crate::variable::{Cell, CollectionId, ModeId, VarId, VarKind};
 use kurbo::Affine;
 use serde_json::{Map, Value};
 
+mod loose;
+
 /// What a parameter takes, for checking an argument before a verb runs and for
 /// describing the verb to a caller (an MCP schema, Command Mode's completion).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +198,32 @@ pub struct Args<'a> {
     map: &'a Map<String, Value>,
 }
 
+/// Parameter `p`'s value `v` with its short forms expanded, as it is read; a tree's
+/// `like`s left out, since only the verb can see the layers they name. A design
+/// tokens file is read as written: its `$value`s are its own grammar.
+fn loosened<'v>(p: &Param, v: &'v Value) -> std::borrow::Cow<'v, Value> {
+    match p.kind {
+        ParamKind::Model("DtcgFile") => std::borrow::Cow::Borrowed(v),
+        ParamKind::Model(model) => {
+            let mut v = v.clone();
+            if model == "Tree" {
+                fn unlike(v: &mut Value) {
+                    if let Value::Object(map) = v {
+                        map.remove("like");
+                        if let Some(Value::Array(children)) = map.get_mut("children") {
+                            children.iter_mut().for_each(unlike);
+                        }
+                    }
+                }
+                unlike(&mut v);
+            }
+            loose::loosen(model_key(model, p.name), &mut v);
+            std::borrow::Cow::Owned(v)
+        }
+        _ => std::borrow::Cow::Borrowed(v),
+    }
+}
+
 /// `value` checked against the parameters of the tool called `name`: an object
 /// holding every required one, no other, each of its kind. MCP's own tools, which
 /// are not verbs, are checked by it too.
@@ -227,7 +255,7 @@ pub fn check_args<'a>(
                 });
             }
             None | Some(Value::Null) => {}
-            Some(v) => check_kind(p.kind, v).map_err(|why| VerbError::Invalid {
+            Some(v) => check_kind(p.kind, &loosened(p, v)).map_err(|why| VerbError::Invalid {
                 verb: name,
                 param: p.name,
                 why,
@@ -322,7 +350,8 @@ impl<'a> Args<'a> {
         self.text(name)
     }
 
-    /// The `Model` parameter `name`, deserialized.
+    /// The `Model` parameter `name`, deserialized from its short forms (hex
+    /// colours, paints without their default fields) as well as its own shape.
     pub fn model<T: serde::de::DeserializeOwned>(
         &self,
         name: &'static str,
@@ -331,7 +360,11 @@ impl<'a> Args<'a> {
             verb: self.verb.name,
             param: name,
         })?;
-        serde_json::from_value(v.clone()).map_err(|e| self.invalid(name, e))
+        let v = match self.verb.params.iter().find(|p| p.name == name) {
+            Some(p) => loosened(p, v).into_owned(),
+            None => v.clone(),
+        };
+        serde_json::from_value(v).map_err(|e| self.invalid(name, e))
     }
 
     /// The `Id` parameter `name`, as the id type it names.
@@ -402,12 +435,17 @@ fn check_kind(kind: ParamKind, v: &Value) -> Result<(), String> {
     }
 }
 
-/// Whether `v` reads as the model type `model` names (a [`ParamKind::Model`]'s
-/// name), or why not.
+/// Whether `v`, in its own shape or the short forms, reads as the model type
+/// `model` names (a [`ParamKind::Model`]'s name), or why not.
 pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
     fn reads<T: serde::de::DeserializeOwned>(v: &Value) -> Result<(), String> {
         T::deserialize(v).map(|_| ()).map_err(|e| e.to_string())
     }
+    let mut loose = v.clone();
+    if model != "DtcgFile" {
+        loose::loosen(model_key(model, ""), &mut loose);
+    }
+    let v = &loose;
     match model {
         "Affine" => reads::<Affine>(v),
         "BlockStyle" => reads::<BlockStyle>(v),
@@ -582,6 +620,22 @@ pub fn example(model: &str) -> Option<Value> {
         }),
         _ => return None,
     })
+    .map(|mut v| {
+        // Shown in the short forms, which are the ones worth writing.
+        loose::tighten(model_key(model, ""), &mut v);
+        v
+    })
+}
+
+/// The field name the short forms read a model's value under: its own kind's for
+/// a colour or paint list, whatever its parameter is called, else the parameter's.
+fn model_key<'a>(model: &str, param: &'a str) -> &'a str {
+    match model {
+        "Color" => "color",
+        "[Fill]" => "fills",
+        "[Stroke]" => "strokes",
+        _ => param,
+    }
 }
 
 /// `n` with the noun that counts it: "1 match", "3 matches".
@@ -1261,7 +1315,7 @@ pub static VERBS: &[Verb] = &[
             req(
                 "tree",
                 ParamKind::Model("Tree"),
-                "the root layer, its properties and its `children`, bottom first",
+                "the root layer, its properties and its `children`, bottom first; a layer's `like` names one whose paint and text style it takes where it gives none",
             ),
             opt(
                 "index",
@@ -1273,7 +1327,13 @@ pub static VERBS: &[Verb] = &[
             let parent = a.node("parent")?;
             let count = node(ctx, parent)?.children().len();
             let index = a.index("index").unwrap_or(count).min(count);
-            let tree = a.model::<Tree>("tree")?;
+            let mut raw = a.get("tree").cloned().ok_or(VerbError::Missing {
+                verb: a.verb.name,
+                param: "tree",
+            })?;
+            expand_like(ctx.doc, &mut raw).map_err(|why| a.invalid("tree", why))?;
+            loose::loosen("tree", &mut raw);
+            let tree: Tree = serde_json::from_value(raw).map_err(|e| a.invalid("tree", e))?;
             let mut done = Done::default();
             tree_ops(ctx, a, &tree, parent, index, &mut done)?;
             Ok(done)
@@ -4963,8 +5023,9 @@ fn tree_ops(
 /// item carries travels in it; any other bound field (size, corners, text, gaps,
 /// padding, flow, visibility, opacity) is written as drawn, unbound. Only what
 /// `Tree` holds is read: no styles, modes, width queries, pivot, element, link or
-/// component state. `None` for no such layer.
-pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
+/// component state. `None` for no such layer. Every value in its full shape;
+/// [`tree`] writes the short forms.
+fn full_tree(doc: &Document, id: NodeId) -> Option<Value> {
     fn values<T: serde::Serialize>(list: &[Keyed<T>]) -> Value {
         serde_json::to_value(list.iter().map(|k| &k.value).collect::<Vec<_>>()).unwrap_or_default()
     }
@@ -5037,11 +5098,69 @@ pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
             serde_json::to_value(n.insets()).unwrap_or_default(),
         );
     }
-    let children: Vec<Value> = n.children().iter().filter_map(|c| tree(doc, *c)).collect();
+    let children: Vec<Value> = n
+        .children()
+        .iter()
+        .filter_map(|c| full_tree(doc, *c))
+        .collect();
     if !children.is_empty() {
         put("children", Value::Array(children));
     }
     Some(Value::Object(out))
+}
+
+/// [`full_tree`] in the short forms `insert_subtree` reads back to the same
+/// tree: hex colours where they are exact, paints without their default fields.
+pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
+    let mut v = full_tree(doc, id)?;
+    loose::tighten("tree", &mut v);
+    Some(v)
+}
+
+/// Fill in a tree's `like`s: a layer with `"like": "<id>"` takes that layer's
+/// fills, strokes, effects, opacity and blend where it gives none, and a text
+/// its text style field by field and its paragraph. Recurses into `children`.
+fn expand_like(doc: &Document, v: &mut Value) -> Result<(), String> {
+    let Value::Object(map) = v else {
+        return Ok(());
+    };
+    if let Some(like) = map.remove("like") {
+        let id = like
+            .as_str()
+            .and_then(NodeId::from_wire)
+            .ok_or_else(|| format!("`like`: {like} is not a layer id"))?;
+        let Some(Value::Object(src)) = full_tree(doc, id) else {
+            return Err(format!("`like`: no layer `{}`", id.to_wire()));
+        };
+        for k in ["fills", "strokes", "effects", "opacity", "blend"] {
+            if let Some(val) = src.get(k) {
+                map.entry(k).or_insert_with(|| val.clone());
+            }
+        }
+        let src_text = src.get("kind").and_then(|k| k.get("Text"));
+        let text = map.get_mut("kind").and_then(|k| k.get_mut("Text"));
+        if let (Some(Value::Object(from)), Some(Value::Object(to))) = (src_text, text) {
+            if let Some(Value::Object(src_style)) = from.get("style") {
+                let style = to
+                    .entry("style")
+                    .or_insert_with(|| Value::Object(Map::new()));
+                if let Value::Object(style) = style {
+                    for (k, val) in src_style {
+                        style.entry(k.clone()).or_insert_with(|| val.clone());
+                    }
+                }
+            }
+            if let Some(p) = from.get("paragraph") {
+                to.entry("paragraph").or_insert_with(|| p.clone());
+            }
+        }
+    }
+    if let Some(Value::Array(children)) = map.get_mut("children") {
+        for child in children {
+            expand_like(doc, child)?;
+        }
+    }
+    Ok(())
 }
 
 /// The blend mode a [`BLENDS`] label names; Normal for none.

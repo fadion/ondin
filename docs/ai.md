@@ -43,6 +43,7 @@ counts as the parent. Each has a key (persisted), a label (*Claude Code*), a pro
 | GitHub Copilot | `copilot` | one process per turn, prompt on stdin | `--resume=<id>` | kill |
 | Cursor | `cursor-agent` | one process per turn, prompt on stdin | `--resume <id>` | kill |
 | Gemini CLI | `gemini` | one process per turn, prompt on stdin | `--resume <id>` | kill |
+| DeepSeek Harness | `dsh` | one process per turn, prompt on stdin | `--session-id <id>` | kill |
 
 - **Behaviour is asked as a capability, never by identity**: persistent or per-turn, resume,
   interrupt, prompt on stdin, system prompt in the first turn, effort levels, how it is sealed.
@@ -50,7 +51,15 @@ counts as the parent. Each has a key (persisted), a label (*Claude Code*), a pro
   default.
 - **Every harness streams JSON lines**: stream-json for Claude, Antigravity, Cursor and Gemini,
   the `--json` / `--format json` forms for the rest. No protocol that has not been measured against
-  a real binary is driven; Gemini CLI's row is still to be measured.
+  a real binary is driven; Gemini CLI's row is still to be measured. DeepSeek Harness's `--json`
+  sends a step at a time rather than text deltas.
+- **DeepSeek Harness takes almost nothing as a flag.** Its headless profile has no model or
+  effort flag, so a `--patch` overlay written into the session's own `DSH_HOME` carries the
+  model, the effort, the seal (every built-in tool row disabled by id), the sign-in and Ondin's
+  server. The overlay is checked with `--dump-config` before every turn, and a row left live
+  refuses the turn. The sign-in is the person's: their dsh account, read from their own
+  credentials file by path and never copied, or a `DEEPSEEK_API_KEY` already in their
+  environment, which Ondin passes through and never stores.
 - **Gemini CLI signs in with Google once.** Running `gemini` in a terminal and choosing *Sign in
   with Google* caches the credentials, and its headless runs reuse them, on the person's own
   account and quota. No API key is involved, so it fits the thesis. A headless run with nothing

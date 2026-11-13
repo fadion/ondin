@@ -532,10 +532,7 @@ fn check_call(call: &Call) -> Result<(), String> {
         return Ok(());
     }
     let Some(tool) = ondin_mcp::schema::tool(&call.tool) else {
-        return Err(format!(
-            "No tool is called `{}`; `tools/list` names them.",
-            call.tool
-        ));
+        return Err(no_such_tool(&call.tool));
     };
     let mut args = call.args.clone();
     // An empty selection clears it, where a layer list elsewhere needs one.
@@ -1805,14 +1802,7 @@ const TEXTS_LISTED: usize = 8;
 /// at most [`DESCRIBED`]; with `brief`, every match's name and description only.
 /// A name that is no tool is answered in `not_found`.
 fn describe_tools(args: &Value) -> Value {
-    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
-    let all: Vec<Value> = PHASE_1
-        .iter()
-        .chain(&PHASE_2)
-        .chain(&PHASE_3)
-        .chain(&PHASE_4)
-        .filter_map(|name| ondin_mcp::schema::definition(name))
-        .collect();
+    let all = every_definition();
     let names: Vec<&str> = args
         .get("names")
         .and_then(Value::as_array)
@@ -1870,6 +1860,68 @@ fn describe_tools(args: &Value) -> Value {
     }
     answer
 }
+
+/// Every tool's `tools/list` entry, listed or not.
+fn every_definition() -> Vec<Value> {
+    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
+    PHASE_1
+        .iter()
+        .chain(&PHASE_2)
+        .chain(&PHASE_3)
+        .chain(&PHASE_4)
+        .filter_map(|name| ondin_mcp::schema::definition(name))
+        .collect()
+}
+
+/// Why `name` is refused as no tool, with the nearest tools by `describe_tools`'
+/// search run on each of its words: a word in a tool's name counts twice one in
+/// its description. `tools/list` names only the core set, so pointing there
+/// alone does not find the rest.
+fn no_such_tool(name: &str) -> String {
+    let words: Vec<String> = name
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 1)
+        .map(str::to_owned)
+        .collect();
+    let mut scored: Vec<(usize, String, String)> = every_definition()
+        .iter()
+        .filter_map(|d| {
+            let tool = d["name"].as_str()?;
+            let about = d["description"].as_str().unwrap_or_default();
+            let lower = about.to_lowercase();
+            let score: usize = words
+                .iter()
+                .map(
+                    |w| match (tool.contains(w.as_str()), lower.contains(w.as_str())) {
+                        (true, _) => 2,
+                        (false, true) => 1,
+                        _ => 0,
+                    },
+                )
+                .sum();
+            (score > 0).then(|| (score, tool.to_owned(), gist(about)))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+    let nearest: Vec<String> = scored
+        .iter()
+        .take(NEAREST)
+        .map(|(_, tool, about)| format!("`{tool}`: {about}"))
+        .collect();
+    match nearest.is_empty() {
+        true => format!(
+            "No tool is called `{name}`; `describe_tools` with a `query` finds one by a word."
+        ),
+        false => format!(
+            "No tool is called `{name}`. Nearest: {} `describe_tools` with a `query` finds others.",
+            nearest.join(" ")
+        ),
+    }
+}
+
+/// How many tools an unknown name's refusal suggests.
+const NEAREST: usize = 3;
 
 /// The longest `gist` a brief `describe_tools` gives, in characters.
 const GIST: usize = 120;
@@ -2734,6 +2786,27 @@ mod tests {
             .to_owned();
         let n = docs.session.doc.get(NodeId::from_wire(&title).unwrap());
         assert_eq!(n.unwrap().name(), "Heading");
+    }
+
+    /// `call` of a tool that does not exist suggests the nearest by the words of
+    /// its name, and points at `describe_tools`.
+    ///
+    /// flip: `no_such_tool` scoring a description's word as nothing → fails at
+    /// `set_geometry`, which only its description reaches.
+    #[test]
+    fn an_unknown_tool_suggests_the_nearest() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "call",
+            json!({ "tool": "set_corner_radius", "args": {} }),
+        );
+        assert!(out.is_error);
+        let text = format!("{:?}", out.content);
+        assert!(text.contains("`set_geometry`"), "{text}");
+        assert!(text.contains("describe_tools"), "{text}");
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

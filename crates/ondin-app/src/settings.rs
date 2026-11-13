@@ -111,6 +111,8 @@ pub(crate) struct Settings {
     /// keychain once its read lands (`OndinApp::asset_keys`); written to it by
     /// *Save changes*, a cleared field forgetting the key.
     keys: std::collections::BTreeMap<String, String>,
+    /// Settings ▸ Assistant; the panel's width is not the form's.
+    assistant: crate::assistant::AssistantPrefs,
 }
 
 impl Settings {
@@ -130,6 +132,7 @@ impl Settings {
             photo_services: prefs.assets.photo_services.clone(),
             photo_size: prefs.assets.photo_size.clone(),
             keys: Default::default(),
+            assistant: prefs.assistant.clone(),
         }
     }
 
@@ -171,6 +174,9 @@ impl Settings {
         prefs.assets.icon_sets.clone_from(&self.icon_sets);
         prefs.assets.photo_services.clone_from(&self.photo_services);
         prefs.assets.photo_size.clone_from(&self.photo_size);
+        let width = prefs.assistant.width;
+        prefs.assistant.clone_from(&self.assistant);
+        prefs.assistant.width = width;
         web_fonts_changed
     }
 }
@@ -381,6 +387,10 @@ impl OndinApp {
                     // After Web fonts: both are the app's reach to the network.
                     section(ui, "Assets");
                     self.asset_rows(ui, &mut draft);
+
+                    // --- assistant ---------------------------------------------
+                    section(ui, "Assistant");
+                    self.assistant_rows(ui, &mut draft.assistant);
                     ui::keep_focus_in_view(ui);
                 });
             let measured = body.content_size.y;
@@ -411,12 +421,14 @@ impl OndinApp {
                 self.in_flight.settings_scrub = None;
             }
             Some(Decision::Save) => {
+                let before = self.prefs.assistant.clone();
                 if draft.apply(&mut self.prefs) {
                     self.fonts.set_web_fonts(self.prefs.web_fonts, ctx);
                 }
                 self.write_asset_keys(ctx, &draft.keys);
                 self.ensure_default_font();
                 self.prefs.save();
+                self.assistant_settings_saved(&before);
                 self.settings = None;
                 self.in_flight.settings_scrub = None;
             }
@@ -1349,6 +1361,185 @@ pub(crate) fn section(ui: &mut egui::Ui, label: &str) {
     ui.add_space(SECTION_AIR);
 }
 
+impl OndinApp {
+    /// The *Assistant* section: the agent, its program, model and effort, the
+    /// default access, and instructions added to every system prompt. With
+    /// *Off*, the rows below the agent are disabled with that reason.
+    fn assistant_rows(&mut self, ui: &mut egui::Ui, a: &mut crate::assistant::AssistantPrefs) {
+        use crate::assistant::{Level, ai::Harness};
+        caption(
+            ui,
+            "A coding agent you already use and are signed in to, started with only \
+             Ondin's tools. Ondin holds no key and no model.",
+        );
+        ui.add_space(ROW_GAP);
+        let picked = a.harness();
+        let mut next = picked;
+        labelled_row(ui, "Agent", |ui| {
+            ui.spacing_mut().button_padding.y = 0.0;
+            egui::ComboBox::from_id_salt("settings-assistant-agent")
+                .icon(ui::combo_chevron)
+                .width(PREF_CONTROL_W)
+                .selected_text(ui::combo_text(picked.map_or("Off", |h| h.label())))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    ui.selectable_value(&mut next, None, "Off");
+                    for h in Harness::ALL {
+                        ui.selectable_value(&mut next, Some(h), h.label());
+                    }
+                });
+        });
+        if next != picked {
+            // Each harness's last values come back within the session.
+            let mem = &mut self.assistant.remembered;
+            if let Some(old) = picked {
+                mem.insert(
+                    old.key().to_owned(),
+                    (a.program.clone(), a.model.clone(), a.effort.clone()),
+                );
+            }
+            a.agent = next.map_or(String::new(), |h| h.key().to_owned());
+            let back = next.and_then(|h| mem.get(h.key()).cloned());
+            match (next, back) {
+                (Some(_), Some((program, model, effort))) => {
+                    a.program = program;
+                    a.model = model;
+                    a.effort = effort;
+                }
+                (Some(h), None) => {
+                    a.program.clear();
+                    a.model.clear();
+                    a.effort = match picked {
+                        Some(old) => h.nearest_effort(&a.effort, old),
+                        None => String::new(),
+                    };
+                }
+                (None, _) => {}
+            }
+        }
+        let on = next;
+        // The seal of what was found for the saved choice.
+        if let Some(h) = on
+            && h.key() == self.prefs.assistant.agent
+            && a.program == self.prefs.assistant.program
+            && let Some(found) = self.assistant.found()
+        {
+            caption(ui, &found.seal_sentence);
+        }
+        // The rows below stay in view, disabled with the reason.
+        if on.is_none() {
+            caption(
+                ui,
+                "Off: nothing is started and nothing is sent. Choose an agent to set the rows below.",
+            );
+        }
+        ui.add_space(ROW_GAP);
+        ui.add_enabled_ui(on.is_some(), |ui| {
+            let hint = on.map_or(String::new(), |h| format!("{} on PATH", h.program()));
+            labelled_row(ui, "Program", |ui| {
+                ui::text_field(
+                    ui,
+                    egui::vec2(PREF_CONTROL_W, FIELD_H),
+                    &mut a.program,
+                    &hint,
+                )
+                .on_hover_text("Leave empty to find it automatically")
+            });
+            if a.program.trim().is_empty()
+                && let Some(found) = self
+                    .assistant
+                    .found()
+                    .filter(|_| on.is_some_and(|h| h.key() == self.prefs.assistant.agent))
+            {
+                caption(ui, &format!("Found {}", found.path.display()));
+            }
+            ui.add_space(ROW_GAP);
+            labelled_row(ui, "Model", |ui| {
+                ui::text_field(
+                    ui,
+                    egui::vec2(PREF_CONTROL_W, FIELD_H),
+                    &mut a.model,
+                    "Its default",
+                )
+            });
+            let chips = on.map_or(&[][..], |h| h.model_suggestions());
+            if !chips.is_empty() {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                    for m in chips {
+                        let w = ui::label_button_noted_w(ui.ctx(), m, "").max(40.0);
+                        let state = match a.model == *m {
+                            true => ui::FieldButton::On,
+                            false => ui::FieldButton::Off,
+                        };
+                        if ui::label_button(ui, m, egui::vec2(w, ui::BADGE_FIELD_H), state)
+                            .clicked()
+                        {
+                            a.model = (*m).to_owned();
+                        }
+                    }
+                });
+            }
+            let levels = on.map_or(&[][..], |h| h.effort_levels());
+            if !levels.is_empty() {
+                ui.add_space(ROW_GAP);
+                labelled_row(ui, "Effort", |ui| {
+                    ui.spacing_mut().button_padding.y = 0.0;
+                    let shown = match a.effort.is_empty() {
+                        true => "Default",
+                        false => a.effort.as_str(),
+                    };
+                    let mut effort = a.effort.clone();
+                    egui::ComboBox::from_id_salt("settings-assistant-effort")
+                        .icon(ui::combo_chevron)
+                        .width(PREF_CONTROL_W)
+                        .selected_text(ui::combo_text(shown))
+                        .show_ui(ui, |ui| {
+                            ui::menu_rows(ui);
+                            ui.selectable_value(&mut effort, String::new(), "Default");
+                            for l in levels {
+                                ui.selectable_value(&mut effort, (*l).to_owned(), *l);
+                            }
+                        });
+                    a.effort = effort;
+                });
+            }
+            ui.add_space(ROW_GAP);
+            let level = a.level();
+            labelled_row(ui, "Access", |ui| {
+                let at = Level::ALL.iter().position(|l| *l == level).unwrap_or(1);
+                let picked = ui::segmented(
+                    ui,
+                    PREF_CONTROL_W,
+                    ui::SEGMENT_CELL_H,
+                    3,
+                    at,
+                    |p, i, r, on| {
+                        ui::segment_label(p, r, Level::ALL[i].label(), on);
+                    },
+                );
+                if let Some(i) = picked {
+                    a.access = Level::ALL[i].key().to_owned();
+                }
+            });
+            caption(
+                ui,
+                "Look reads. Propose also drafts edits you apply. Edit makes them, each an \
+                 undo step. This is the default for a new chat; the panel's head changes it.",
+            );
+            ui.add_space(ROW_GAP);
+            sub_heading(ui, "Instructions");
+            ui.add_space(4.0);
+            ui::text_area(
+                ui,
+                &mut a.instructions,
+                ui::TextArea::new("Added to every question, after Ondin's own", 3),
+            );
+        });
+    }
+}
+
 /// A row's label on the left and its controls on the right, laid as
 /// *Default font*'s row is: `controls` adds them right to left, first at the edge.
 fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut egui::Ui) -> R) -> R {
@@ -2041,6 +2232,7 @@ mod tests {
                 photo_services: Vec::new(),
                 photo_size: "regular".into(),
                 keys: Default::default(),
+                assistant: Default::default(),
             },
             "the form opens showing what is saved"
         );
@@ -2069,6 +2261,15 @@ mod tests {
             photo_size: "full".into(),
             // Keys go to the keychain, not the preferences.
             keys: Default::default(),
+            assistant: crate::assistant::AssistantPrefs {
+                agent: "codex".into(),
+                program: "C:/bin/codex.exe".into(),
+                model: "gpt-5".into(),
+                effort: "high".into(),
+                access: "edit".into(),
+                instructions: "Be brief.".into(),
+                ..Default::default()
+            },
         };
         assert!(edited != opened, "the fixture has to be a real edit");
         assert!(

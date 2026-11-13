@@ -93,11 +93,14 @@ pub enum Group {
     Panels,
     /// The page verbs (`crate::pages`): the page menu's last row, and the palette's.
     Pages,
+    /// *Ask the assistant*, a layer menu's last group: the one row that leaves
+    /// the document.
+    Assistant,
 }
 
 impl Group {
     /// The canonical order, and the order [`fn@build`] emits in.
-    const ORDER: [Group; 17] = [
+    const ORDER: [Group; 18] = [
         Group::Head,
         Group::Clipboard,
         Group::Properties,
@@ -115,6 +118,7 @@ impl Group {
         Group::Text,
         Group::Panels,
         Group::Pages,
+        Group::Assistant,
     ];
 
     /// The name the palette shows beside a row, so two similar labels can be told
@@ -136,6 +140,7 @@ impl Group {
             Group::Text => "Text",
             Group::Panels => "Panels",
             Group::Pages => "Pages",
+            Group::Assistant => "Assistant",
         }
     }
 }
@@ -470,6 +475,8 @@ pub enum Item {
     TidyUp,
     InsertPicker,
     AssetsBrowser,
+    Assistant,
+    AskAssistant,
     Credits,
     VariablesBrowser,
     ImportTokens,
@@ -586,7 +593,8 @@ impl ViewState {
             | ViewSwitch::SnapBaselines
             | ViewSwitch::Lasso
             | ViewSwitch::Private
-            | ViewSwitch::AlignVisual => None,
+            | ViewSwitch::AlignVisual
+            | ViewSwitch::AskAssistant => None,
         }
     }
 }
@@ -732,6 +740,7 @@ impl Item {
         Item::SetSmooth(true),
         Item::ReverseSubpaths,
         Item::Join,
+        Item::AskAssistant,
     ];
 
     /// The row's spec. Its accelerator is the table's (`input::accel`) when the
@@ -1031,6 +1040,7 @@ impl Item {
                     ViewSwitch::Lasso => icon::LASSO,
                     ViewSwitch::AlignVisual => icon::VISUAL_CENTRE,
                     ViewSwitch::SizePreview => icon::SIZE_PREVIEW,
+                    ViewSwitch::AskAssistant => icon::SPARKLE,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
@@ -1203,6 +1213,8 @@ impl Item {
             Item::TidyUp => s("Tidy up", icon::TIDY_UP, None, Group::Transform),
             Item::InsertPicker => s("Insert", icon::HEXAGON, None, Group::Kits),
             Item::AssetsBrowser => s("Assets…", icon::ASSETS, None, Group::Kits),
+            Item::Assistant => s("Assistant", icon::SPARKLE, None, Group::Panels),
+            Item::AskAssistant => s("Ask the assistant", icon::SPARKLE, None, Group::Assistant),
             Item::Credits => s("Credits…", icon::QUOTES, None, Group::File),
             Item::VariablesBrowser => s("Styles and variables", icon::SWATCHES, None, Group::Kits),
             Item::ImportTokens => s("Import tokens…", icon::IMPORT, None, Group::Kits),
@@ -1357,6 +1369,7 @@ impl Item {
             Item::CreateComponent => &["main", "symbol"],
             Item::InsertPicker => &["component", "kit"],
             Item::AssetsBrowser => &["icons", "photos", "stock", "images", "unsplash"],
+            Item::Assistant | Item::AskAssistant => &["ai", "agent", "chat", "claude", "codex"],
             Item::Credits => &["attribution", "licence", "license", "photographer"],
             Item::VariablesBrowser => &["tokens", "colours", "colors"],
             Item::ImportTokens | Item::ExportTokens => {
@@ -1496,6 +1509,8 @@ impl Item {
             Item::TidyUp => Action::TidyUp,
             Item::InsertPicker => Action::InsertPicker,
             Item::AssetsBrowser => Action::AssetsBrowser,
+            Item::Assistant => Action::Assistant,
+            Item::AskAssistant => Action::AskAssistant,
             Item::Credits => Action::Credits,
             Item::VariablesBrowser => Action::VariablesBrowser,
             Item::ImportTokens => Action::ImportTokens,
@@ -1669,6 +1684,8 @@ pub struct Context<'a> {
     /// *Focus mode* row (the top bar's View menu does), so `ViewState::get` must
     /// not answer for it.
     pub focus: bool,
+    /// Whether the assistant is on: an agent is picked in Settings.
+    pub assistant_on: bool,
     /// Whether a segment (rather than only anchors) is part of the point
     /// selection — what separates §6.5's two Delete rows.
     pub segment_selected: bool,
@@ -2455,6 +2472,17 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // Omitted at default (§3's exception), not dim.
     if st.pivot_moved && one {
         rows.push(Row::new(Item::ResetOrigin).dim_if(locked, why));
+    }
+
+    // --- assistant -----------------------------------------------------------
+    // Last, in a group of its own: the one row that leaves the document. Omitted
+    // while the assistant is off, as its ask button is, so someone who never turns
+    // it on never sees either.
+    if cx.assistant_on {
+        rows.push(
+            Row::new(Item::AskAssistant)
+                .dim_if(crate::private::on(), "Not available in private mode"),
+        );
     }
 
     rows
@@ -3257,6 +3285,7 @@ impl OndinApp {
                 pixel_preview: self.view_switch(ViewSwitch::PixelPreview),
             },
             focus: self.focus,
+            assistant_on: self.prefs.assistant.harness().is_some(),
             segment_selected: self
                 .edited_path()
                 .is_some_and(|id| self.points.segments(id).next().is_some()),
@@ -3832,6 +3861,8 @@ impl OndinApp {
             | Item::TidyUp
             | Item::InsertPicker
             | Item::AssetsBrowser
+            | Item::Assistant
+            | Item::AskAssistant
             | Item::Credits
             | Item::VariablesBrowser
             | Item::ImportTokens
@@ -3965,6 +3996,7 @@ mod tests {
             selection,
             can_paste: false,
             can_replace: false,
+            assistant_on: false,
             kinds,
             state: LayerState::default(),
             any_guides: false,
@@ -4397,6 +4429,13 @@ mod tests {
                 .collect()
         };
         assert_eq!(state(&one), ["Hide", "Lock", "Rename"]);
+        // With the assistant on, its row is the menu's last group, alone.
+        let (sel, kinds) = ([id(1)], [Kind::Shape]);
+        let mut on = open(target, &sel, &kinds);
+        on.assistant_on = true;
+        let with = build(&on);
+        assert_eq!(state(&with), ["Ask the assistant"]);
+        assert_eq!(state(&with[..with.len() - 1]), ["Hide", "Lock", "Rename"]);
         let two = build(&open(target, &[id(1), id(2)], &[Kind::Shape, Kind::Shape]));
         assert_eq!(state(&two), ["Hide", "Lock", "Batch rename…"]);
 
@@ -4842,10 +4881,17 @@ mod tests {
                 })
                 .collect()
         };
+        // The ask button sits on the selection, not in the artwork: a menu over
+        // the canvas does not offer to hide it.
         let expected: Vec<ViewSwitch> = ViewSwitch::VIEW_CANVAS
             .into_iter()
             .chain(ViewSwitch::VIEW_MODES)
-            .filter(|sw| !matches!(sw, ViewSwitch::Focus | ViewSwitch::Private))
+            .filter(|sw| {
+                !matches!(
+                    sw,
+                    ViewSwitch::Focus | ViewSwitch::Private | ViewSwitch::AskAssistant
+                )
+            })
             .collect();
 
         let cx = open(Target::Canvas, &[], &[]);

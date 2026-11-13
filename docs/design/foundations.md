@@ -84,6 +84,7 @@ ondin/
    ├─ ondin-render/          # ScenePainter + Vello GPU impl + vello_cpu impl
    ├─ ondin-export/          # SVG, PDF, PNG, JPEG, WebP, JSON snapshot; code export (HTML/CSS, React, Vue); export plan and zip
    ├─ ondin-mcp/             # MCP server: socket listener, tool dispatch, stdio proxy
+   ├─ ondin-ai/              # the assistant's agent harnesses: find, seal, spawn, decode
    └─ ondin-app/             # `ondin` binary: GUI shell, tools, panels, `serve`/`export` subcommands
 ```
 
@@ -94,7 +95,8 @@ ondin-core   ← (no internal deps)
 ondin-render ← ondin-core
 ondin-export ← ondin-core, ondin-render
 ondin-mcp    ← ondin-core
-ondin-app    ← ondin-core, ondin-render, ondin-export, ondin-mcp
+ondin-ai     ← (no internal deps)
+ondin-app    ← ondin-core, ondin-render, ondin-export, ondin-mcp, ondin-ai
 ```
 
 - `ondin-export` needs `ondin-render` because the SVG writer calls `ondin_render::effects` (`filter_matrix`, `any_ink`) so there is one implementation of the effect arithmetic (§6.4), and PNG/JPEG use the CPU renderer plus `image` (JPEG encoder) and `zip`. Consequence: an SVG-only build still pulls in `ondin-render`, `vello`, `vello_cpu` and `wgpu`. Moving those two helpers into core would make SVG core-only but would separate the colour-matrix order from the shaders it specifies; this was declined (§15 D783).
@@ -152,7 +154,7 @@ A modal, keyboard-driven workflow where an operator navigates the node tree and 
 - **Command line over the document.** An embedded bar evaluates property expressions into transactions: `.width = parent.width - 20`, `.x += 15`, `sk.x = .x + 5`. One command = one transaction = one undo step.
 - **Leap labels** (vimium/easymotion style). A shortcut overlays short home-row hint labels on nodes in view; typing a label selects the node. Labels double as CLI handles (`sk.width` addresses the node labelled `SK` without selecting it). Drawn as transient overlays via `RenderOverrides`; the candidate set is topmost hit-testable nodes (same policy as `hit_test`), not every ancestor. Each labelled node is outlined on its bounds, outset 3px, while the labels show: a group or frame dashed with a dark label, any other node solid with the yellow label, so a group is told from the layer inside it by lightness, not hue. The first typed letter keeps outlines only on the nodes it still matches and fades the rest. Outlines never take the selection's colour; each line is two inks, dark inside and light outside, so it reads on any artwork.
 - **Structural navigation.** `hjkl`/arrows move child / parent / next / previous sibling. Structural (children order = z-order), not spatial; leap labels are the spatial instrument.
-- **`/ai`.** The same bar accepts natural-language delegation, as a door into the assistant (`docs/ai.md`): a configured agent harness that reads through the same Snapshot (including `get_selection`) and writes through the same operations as any MCP client, so its edits are ordinary transactions and `undo` works. Ondin embeds no model. `/ai` is built after the assistant.
+- **`/ai`.** The same bar accepts natural-language delegation, as a door into the assistant (`assistant.md`; `/ai` itself in `docs/ai.md`): a configured agent harness that reads through the same Snapshot (including `get_selection`) and writes through the same operations as any MCP client, so its edits are ordinary transactions and `undo` works. Ondin embeds no model. `/ai` waits on the bar; the assistant is built.
 
 ### Decisions made
 

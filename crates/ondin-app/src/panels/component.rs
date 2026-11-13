@@ -785,40 +785,13 @@ impl OndinApp {
             false => "Add a description",
         };
         ui.add_space(DESC_GAP);
-        // One line sits in a text field's height; more lines grow the field. The
-        // padding is the edit's, so the whole field takes the press.
-        let font = egui::FontId::proportional(FIELD_PT);
-        let pad = ui::edit_frame(
-            ui,
-            &font,
-            ui::CONTROL_H - ui::FIELD_BORDER_H,
-            ui::FIELD_PAD_X,
-        );
+        // One line sits in a text field's height; more lines grow the field.
         let edit_id = ui.id().with(("description", id));
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
-        )]
-        let framed = ui::field_frame()
-            .inner_margin(egui::Margin::ZERO)
-            .show(ui, |ui| {
-                ui.add_enabled_ui(!private, |ui| {
-                    pad.add(
-                        ui,
-                        f32::INFINITY,
-                        egui::TextEdit::multiline(&mut text)
-                            .id(edit_id)
-                            .desired_rows(1)
-                            .font(font)
-                            .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
-                    )
-                })
-                .inner
-            });
-        let resp = framed.inner;
-        if resp.has_focus() {
-            ui::typing_edge(ui, framed.response.rect);
-        }
+        let mut area = ui::TextArea::new(hint, 1);
+        area.id = Some(edit_id);
+        let resp = ui
+            .add_enabled_ui(!private, |ui| ui::text_area(ui, &mut text, area))
+            .inner;
         if let Some(typed) = ui::Draft::follow(&mut self.desc_edit, &resp, id, &text) {
             let text = typed.trim().to_string();
             if text != saved {
@@ -1927,8 +1900,6 @@ const NAME_PT: f32 = ui::HEAD_PT;
 /// A description note's text size, and the air above it on a card.
 const DESC_PT: f32 = ui::SMALL_PT;
 const DESC_GAP: f32 = 2.0;
-/// The description and link fields' text size, every control's.
-const FIELD_PT: f32 = ui::CONTROL_PT;
 /// The side of the buttons on a heading and in the link field.
 const LINK_H: f32 = 22.0;
 

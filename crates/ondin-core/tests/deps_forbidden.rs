@@ -73,6 +73,9 @@ const RULES: &[(&str, &[&str])] = &[
     // between core and the app and could quietly acquire chrome.
     ("ondin-render", NO_UI),
     ("ondin-export", NO_UI),
+    // The harness layer drives child processes and parses their streams; no
+    // rendering or UI belongs in it.
+    ("ondin-ai", HEADLESS),
 ];
 
 /// What `ondin-core` may declare: §3's permitted list, which must stay set-equal

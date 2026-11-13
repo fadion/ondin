@@ -371,10 +371,6 @@ impl Engine {
     }
 
     /// The proposal called `id`, while it is among the last [`PROPOSALS`].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the assistant panel's card reads it")
-    )]
     pub(crate) fn proposal(&self, id: u64) -> Option<&propose::Proposal> {
         self.proposals.iter().find(|p| p.id == id)
     }

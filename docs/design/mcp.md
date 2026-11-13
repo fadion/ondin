@@ -105,6 +105,11 @@ Selection is app state, not document state (§9.3), but deliberately part of the
 
 Which of this is built: the wire, the proxy, `serve`, the window as a host (`mcp::window`), and every tool of every phase; `tools/list` offers them all (`ondin_mcp::schema`).
 
+#### The assistant's tool and grants
+
+- **`propose_edit(title, calls)`** sits outside the phases, in `ondin_mcp::tools::ASSISTANT`, and is marked read-only: it checks a list of Phase 2 and 3 verb calls on a copy of the document and records the proposal for the person to apply, and the document never moves (`assistant.md`, *Proposals*). The window keeps the last 64 proposals in memory.
+- **Grants.** The window grants each assistant session a level (`mcp::access::Grants`) by its client key and by the processes the session owns. The endpoint reads the connecting process at accept (`GetNamedPipeClientProcessId` on Windows, `SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS, none on other Unixes) and puts it on `Forward::pid`, so every `Call` carries it as `Call::pid`. A call a grant covers, by process first and then by key, acts under the session's key, gets that level's tool list, is refused a tool above it (by name, through `call`, or as a `batch` step) and is written to the agent log; any other call is an ordinary client's.
+
 #### Conventions
 
 - `style_text` and `style_paragraphs` are how an agent styles part of a text: a range counted in

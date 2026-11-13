@@ -68,6 +68,9 @@ pub struct ViewPrefs {
     pub snap_baselines: bool,
     /// The marquee's shape: a lasso when on, a box when off.
     pub lasso: bool,
+    /// The ask-the-assistant button over the selection (*View ▸ Show ask
+    /// assistant*).
+    pub ask_assistant: bool,
     /// The tool rail's frame slot shows the slice tool, last picked there.
     pub rail_slice: bool,
     /// The tool rail's line slot shows this of Line, Spiral and Arc, last picked
@@ -103,6 +106,7 @@ impl Default for ViewPrefs {
             snap_grid: true,
             snap_baselines: true,
             lasso: false,
+            ask_assistant: true,
             rail_slice: false,
             rail_line: crate::rail::Member::Line,
             rail_pencil: false,
@@ -624,6 +628,8 @@ pub struct Prefs {
     /// The assets browser's providers, switched on in Settings, and the panel's
     /// last choices.
     pub assets: AssetPrefs,
+    /// Settings ▸ Assistant, and the panel's width.
+    pub assistant: crate::assistant::AssistantPrefs,
     /// Colour review's threshold (`crate::colour_review`), kept across documents:
     /// how near counts as near is a habit, not a fact about one file.
     pub colour_review: ondin_core::color_review::Threshold,
@@ -688,6 +694,7 @@ impl Default for Prefs {
             clean_up: CleanUpPrefs::default(),
             fill_content: FillContentPrefs::default(),
             assets: AssetPrefs::default(),
+            assistant: Default::default(),
             colour_review: Default::default(),
         }
     }

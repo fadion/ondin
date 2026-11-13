@@ -62,10 +62,6 @@ pub(crate) fn start(ctx: &egui::Context) -> Option<WindowHost> {
     })
 }
 
-#[expect(
-    dead_code,
-    reason = "the assistant panel grants levels and shows proposals"
-)]
 impl WindowHost {
     /// The levels granted to the assistant's chats; a grant made here holds for
     /// the next call and the next `tools/list`.

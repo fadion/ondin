@@ -626,6 +626,15 @@ impl OndinApp {
                 (!self.has_credits()).then_some(crate::panels::credit::NOTHING_OWED),
             ),
         );
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::Assistant,
+                self.prefs
+                    .private
+                    .then_some("Not available in private mode"),
+            ),
+        );
         for item in [
             Item::InsertPicker,
             Item::AssetsBrowser,

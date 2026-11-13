@@ -82,6 +82,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 3 | Structure | Group · Frame · Slice · component rows · Ungroup · mask · even-odd · Boolean ▸ · Flatten · conversions · Pixel-fit · Join paths · Warp… · Align ▸ · Arrange ▸ · Move to page ▸ |
 | 4 | State | Hide/Show · Lock/Unlock · Rename *or* Batch rename… · Reset origin |
 | 5 | View | the canvas menu's view switches (§6.1, §6.3 only) |
+| 6 | Assistant | *Ask the assistant* (`menu::Group::Assistant`), a layer menu's last group, alone: the one row that leaves the document. Omitted while the assistant is *Off*, as its ask button is hidden; dims *"Not available in private mode"*. It attaches the selection and opens the assistant (`design/assistant.md` §4) |
 
 A layer menu emits no row in the registry's Properties, Order, Transform, Navigate or Export groups:
 those verbs sit in its submenus, the inspector or the palette, where the groups still name them. The
@@ -95,7 +96,7 @@ function, not bucketed by `build`.
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 21 rows in three groups, text 24, a boolean 24, railed text 26, a main
+- **Length**, with the assistant *Off* (on, its row adds one group of one): a primitive is 21 rows in three groups, text 24, a boolean 24, railed text 26, a main
   frame 19, an instance frame 20; the long end is a bound text child on a rail at 28
   (`a_primitives_menu_is_twenty_one_rows_in_three_groups`, `the_menus_the_two_ends_do_not_count`).
   The ceiling is "needs neither a scrollbar nor a large monitor", which is why the alternate
@@ -334,7 +335,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Pixel preview ✓ | `Ctrl+Alt+Y` | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
-canvas and mode switches less *Focus mode* and *Private mode*. Every View
+canvas and mode switches less *Focus mode*, *Private mode* and *Show ask assistant*. Every View
 row is live in focus mode, which hides none of what they switch.
 
 ### 6.2 Layers panel background
@@ -469,7 +470,7 @@ project dropdown, and the caret's list.
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
 - **Type controls in a text session** — the Type card is beside it.
-- **Show layers, Show history, Show minimap, Show size preview, Show toolbar, Focus mode, Private mode, Show messages** on the canvas menu —
+- **Show layers, Show history, Show minimap, Show size preview, Show toolbar, Focus mode, Private mode, Show messages, Show ask assistant** on the canvas menu —
   chrome-wide switches, in the top bar's View menu.
 - **Lasso select** on any menu — the marquee's shape is a tool setting, not a view; `Q`, the
   palette and the rail's Select slot carry it.

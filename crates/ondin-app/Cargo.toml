@@ -33,6 +33,7 @@ ondin-core = { path = "../ondin-core" }
 ondin-render = { path = "../ondin-render" }
 ondin-export = { path = "../ondin-export" }
 ondin-mcp = { path = "../ondin-mcp" }
+ondin-ai = { path = "../ondin-ai" }
 # eframe (default features) brings egui + egui-wgpu + winit at matching versions.
 # `persistence` is for the window's size, position and maximized state alone
 # (`main::run_gui`): eframe clamps a restored position to the monitors present.

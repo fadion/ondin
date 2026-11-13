@@ -332,7 +332,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   for Tools, the label and any chord, then 8pt).
 - **View** reads in three groups between separators, so each kind of row is found in one place:
   - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,
-    *Show grid*, *Show layout grid*;
+    *Show grid*, *Show layout grid*, *Show ask assistant* (the assistant's ask button over the
+    selection, `assistant.md` §4);
   - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Pixel preview*, *Private mode*, *Focus mode*, then *Present
     mode* — a verb, not a switch: a check row that never ticks, which closes the menu and dispatches
     `Action::Present`;
@@ -421,7 +422,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   `app-rulers-guides.md`, `prefs::CanvasPrefs`), *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
   its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a, and *Check spelling*), the web-font switch and
-  cache row, then **Assets** (*Assets browser*, below). `Ctrl+,` opens it (and only opens:
+  cache row, then **Assets** (*Assets browser*, below), then **Assistant** (`assistant.md` §5). `Ctrl+,` opens it (and only opens:
   `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
 - The sections scroll between the title and the footer once the card would be taller than the
   window, with no bar. The scroll area takes the sections' height as last measured, capped by the
@@ -951,9 +952,9 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   or a fetch that was replaced — with the key only when that address is Unsplash's API, over
   https. A fetch replaced by another click or a document switch stops before its next download.
 - **The panel** (`panel.rs`) is a `ui::rail_popup` 340 wide, bottom-aligned with its rail button
-  (`icon::ASSETS`, the top of the rail's foot: *Assets*, *Styles and variables*, *Insert
-  components*). It is one of three panels in that place, with the insert picker and the styles
-  browser, each beside its own button; opening one closes the others. Doors: the rail button and *Assets…* in the
+  (`icon::ASSETS`, under the assistant's at the rail's foot: *Assistant*, *Assets*, *Styles and
+  variables*, *Insert components*). It is one of four panels in that place, with the assistant, the
+  insert picker and the styles browser, each beside its own button; opening one closes the others. Doors: the rail button and *Assets…* in the
   palette; no chord. `Escape` closes it, on the insert picker's rung. *Icons* · *Photos* on
   `ui::segmented`, then `ui::search_box`, which takes the keyboard on opening.
   - *Icons*: a set dropdown (*All sets* or one) with the set's variant dropdown (a long label cut,

@@ -292,6 +292,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::Present,
                 Item::Settings,
                 Item::Palette,
+                Item::Assistant,
                 Item::Cheatsheet,
             ],
         ),

@@ -927,6 +927,11 @@ pub struct OndinApp {
     pub(crate) asset_panel: Option<crate::assets::panel::Panel>,
     /// The rail's assets button as last drawn, which the panel hangs beside.
     pub(crate) asset_button: egui::Rect,
+    /// The assistant: its thread, its session and its panel
+    /// (`docs/design/assistant.md`).
+    pub(crate) assistant: crate::assistant::Assistant,
+    /// The rail's assistant button as last drawn, which the panel hangs beside.
+    pub(crate) assistant_button: egui::Rect,
     /// The photo services' keys as the keychain holds them, once read this
     /// session (`OndinApp::read_asset_keys`); what Settings' key fields start from.
     pub(crate) asset_keys: Option<std::collections::BTreeMap<String, String>>,
@@ -1126,6 +1131,8 @@ pub struct OndinApp {
     /// *View ▸ Panels ▸ Size preview*: the size card in the minimap's corner, which
     /// hides the minimap while it shows. Focus mode keeps it; present mode hides it.
     pub(crate) show_size_preview: bool,
+    /// *View ▸ Show ask assistant*: the ask button over the selection.
+    pub(crate) show_ask: bool,
     /// The size preview's pin, renders and textures (`size_preview.rs`).
     pub(crate) size_preview: crate::size_preview::SizePreview,
     /// *Tools ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
@@ -1614,6 +1621,7 @@ impl OndinApp {
         app.updater = crate::update::Updater::start(&cc.egui_ctx);
         app.spell = crate::spell::Speller::system(&cc.egui_ctx);
         app.mcp = crate::mcp::window::start(&cc.egui_ctx);
+        crate::assistant::at_launch(&app.prefs.assistant);
         app.open_at_launch(open.as_deref());
         app
     }
@@ -1814,6 +1822,8 @@ impl OndinApp {
             credits_open: false,
             asset_panel: None,
             asset_button: egui::Rect::NOTHING,
+            assistant: Default::default(),
+            assistant_button: egui::Rect::NOTHING,
             asset_keys: None,
             asset_keys_job: None,
             bound_fonts_at: None,
@@ -1889,6 +1899,7 @@ impl OndinApp {
             show_minimap: view.minimap,
             minimap: Default::default(),
             show_size_preview: view.size_preview,
+            show_ask: view.ask_assistant,
             size_preview: Default::default(),
             contrast: None,
             vision: None,
@@ -2415,6 +2426,8 @@ impl OndinApp {
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
             self.assets_ui(&ctx);
+            self.assistant_ui(&ctx);
+            self.assistant_canvas_ui(&ctx);
             self.var_browser_ui(&ctx);
             self.field_menu_ui(&ctx);
             self.var_complete_ui(&ctx);
@@ -2447,6 +2460,8 @@ impl OndinApp {
         self.credits_ui(&ctx);
         // Unguarded: a photo asked for before focus mode lands in it.
         self.assets_pass(&ctx);
+        // Unguarded: a turn keeps running in focus mode.
+        self.assistant_pass(&ctx);
         self.repeat_ui(&ctx);
         self.blend_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
@@ -2640,6 +2655,8 @@ impl OndinApp {
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
             Action::AssetsBrowser => self.toggle_assets(),
+            Action::Assistant => self.toggle_assistant(),
+            Action::AskAssistant => self.ask_assistant(),
             Action::Credits if self.has_credits() => self.credits_open = true,
             Action::Credits => {}
             Action::VariablesBrowser => self.toggle_var_browser(),
@@ -3201,7 +3218,10 @@ impl OndinApp {
         } else if self.disarm_dropper() {
             // Above the picker it may be picking for.
         } else if self.picker.take().is_some() {
-        } else if self.kit_picker.take().is_some() || self.asset_panel.take().is_some() {
+        } else if self.kit_picker.take().is_some()
+            || self.asset_panel.take().is_some()
+            || std::mem::take(&mut self.assistant.open)
+        {
             // A rung of its own so one press closes one thing.
         } else if let Some(b) = self.var_browser.as_mut() {
             // A cell being typed into or an open menu goes first, the browser next press.
@@ -4418,7 +4438,7 @@ impl OndinApp {
 
     /// The selection's union — what `Action::ZoomSelection` fits. `None` with an
     /// empty selection, with no fallback to [`Self::document_bounds`].
-    fn selection_bounds(&self) -> Option<Rect> {
+    pub(crate) fn selection_bounds(&self) -> Option<Rect> {
         self.session
             .selection
             .ids()
@@ -8550,6 +8570,7 @@ impl OndinApp {
             snap_grid: self.snap_grid,
             snap_baselines: self.snap_baselines,
             lasso: self.lasso,
+            ask_assistant: self.show_ask,
             rail_slice: self.rail.slice,
             rail_line: self.rail.line,
             rail_pencil: self.rail.pencil,
@@ -8576,6 +8597,7 @@ impl OndinApp {
             ViewSwitch::History => self.show_history,
             ViewSwitch::Minimap => self.show_minimap,
             ViewSwitch::SizePreview => self.show_size_preview,
+            ViewSwitch::AskAssistant => self.show_ask,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
             ViewSwitch::Focus => self.focus,
@@ -8611,6 +8633,7 @@ impl OndinApp {
             }
             ViewSwitch::Minimap => self.show_minimap = on,
             ViewSwitch::SizePreview => self.show_size_preview = on,
+            ViewSwitch::AskAssistant => self.show_ask = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {
                 self.show_status = on;
@@ -8992,6 +9015,18 @@ impl OndinApp {
                     self.asset_button = resp.rect;
                     if resp.clicked() {
                         self.toggle_assets();
+                    }
+                    // The assistant's, at the top of the foot: the tallest panel,
+                    // whose top then sits nearest the canvas's top.
+                    let open = self.assistant.open;
+                    let usable = !self.prefs.private;
+                    let tip = self.assistant_tip();
+                    let resp =
+                        icon_button(ui, icon::SPARKLE, 30.0, 20.0, open, usable).on_hover_text(tip);
+                    self.assistant_button = resp.rect;
+                    self.paint_assistant_marks(ui, resp.rect);
+                    if usable && resp.clicked() {
+                        self.toggle_assistant();
                     }
                 });
             });

@@ -1187,8 +1187,13 @@ pub mod icon {
     /// *Rename*, wherever a name is edited — a layer, a page, a variable, a style,
     /// a version, batch rename — and its step: a text cursor.
     pub const CURSOR_TEXT: &str = "\u{e7d8}";
-    /// A History row's mark for a step made over MCP.
+    /// An agent acting: a History row's mark for a step made over MCP, and the
+    /// assistant everywhere it shows.
     pub const SPARKLE: &str = "\u{e6a2}";
+    /// *Stop* a running turn: the assistant's send button while it runs.
+    pub const STOP: &str = "\u{e46c}";
+    /// *Regenerate*: ask the last question again.
+    pub const ARROW_CLOCKWISE: &str = "\u{e036}";
     /// Every icon this module names, paired with its name in
     /// `assets/icons/glyphs.json` (lower-kebab).
     ///
@@ -1486,6 +1491,8 @@ pub mod icon {
         ("paint-bucket", PAINT_BUCKET),
         ("cursor-text", CURSOR_TEXT),
         ("sparkle", SPARKLE),
+        ("stop", STOP),
+        ("arrow-clockwise", ARROW_CLOCKWISE),
     ];
 }
 

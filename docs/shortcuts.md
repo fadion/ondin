@@ -323,6 +323,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
 | `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, a `BINDINGS` row read in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
 | `Ctrl+/` | **command palette** | ✅ Figma's quick actions, alias; Shift up, so it never reads as `Ctrl+Shift+/` |
+| `Ctrl+Shift+A` | **the assistant** | ✅ `Action::Assistant`: opens or closes the assistant's panel and attaches nothing, as its rail button and the palette's *Assistant* do (`design/assistant.md` §6). In private mode the status line says it is not available. Not plain `Shift+A`, which adds flex layout (§11). The cheatsheet lists it under File |
 | `Ctrl+Shift+/` · ⌃⇧/ on macOS | **shortcut cheatsheet** | ✅ `Key::Questionmark` too (§0). Editor (both modes) and library (`dashboard_keys`); the chord again closes it, read in `cheatsheet_ui` because `resolve` does not run under a modal |
 
 ⚠️ `Ctrl+K` (palette) and `Ctrl+Shift+K` (place image) are adjacent and unrelated; a stray Shift

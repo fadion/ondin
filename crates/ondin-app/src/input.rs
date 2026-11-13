@@ -186,6 +186,12 @@ pub enum Action {
     /// Open or close the assets browser: the rail's button and the palette's
     /// *Assets…*, unbound.
     AssetsBrowser,
+    /// Open or close the assistant's panel, attaching nothing (`Ctrl+Shift+A`,
+    /// the rail's sparkle and the palette's *Assistant*).
+    Assistant,
+    /// Attach the selection to the assistant's next question and open it: the
+    /// context menu's *Ask the assistant*.
+    AskAssistant,
     /// *Credits…*: the document's credits card, from the Document menu and the
     /// palette.
     Credits,
@@ -430,6 +436,9 @@ pub enum ViewSwitch {
     /// palette beside the card's head. Unbound and on no menu: *Align centres*
     /// keeps its chord and follows the toggle. Never saved.
     AlignVisual,
+    /// The assistant's ask button over the selection (`crate::assistant::canvas`),
+    /// on by default and unbound; it shows only while the assistant is on.
+    AskAssistant,
 }
 
 impl ViewSwitch {
@@ -458,18 +467,21 @@ impl ViewSwitch {
             Self::Lasso => "Lasso select",
             Self::Private => "Private mode",
             Self::AlignVisual => "Align by visual centre",
+            Self::AskAssistant => "Show ask assistant",
         }
     }
 
     /// The View menu's first group, what the canvas draws, in the order Illustrator's
     /// View menu reads it: rulers, the guides pulled out of them, then the grid
-    /// beside the layout grid so the two read against each other.
-    pub const VIEW_CANVAS: [Self; 5] = [
+    /// beside the layout grid so the two read against each other; the
+    /// assistant's ask button last.
+    pub const VIEW_CANVAS: [Self; 6] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
+        Self::AskAssistant,
     ];
 
     /// The View menu's modes, which *Present mode* follows as a verb.
@@ -500,7 +512,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -522,6 +534,7 @@ impl ViewSwitch {
         Self::Lasso,
         Self::Private,
         Self::AlignVisual,
+        Self::AskAssistant,
     ];
 
     /// The Snap menu's rows.
@@ -691,6 +704,7 @@ const BINDINGS: &[Binding] = {
         bind(CTRL, K::G, A::Group),
         bind(CTRL_SHIFT, K::G, A::Ungroup),
         bind(CTRL_SHIFT, K::K, A::PlaceImage),
+        bind(CTRL_SHIFT, K::A, A::Assistant),
         bind(CTRL_ALT, K::M, A::Mask),
         bind(CTRL_ALT, K::K, A::CreateComponent),
         bind(CTRL_ALT, K::B, A::DetachInstance),
@@ -2707,7 +2721,8 @@ mod tests {
 
     /// `Ctrl+Shift+…` is not a second spelling of `Ctrl+…`, with the exceptions
     /// beside the rule: `Ctrl+Shift+=` is zoom in (the logical key is `+`),
-    /// `Ctrl+Shift+Z` is Redo, `Ctrl+Shift+Y` is the size preview, and copy/cut
+    /// `Ctrl+Shift+Z` is Redo, `Ctrl+Shift+Y` is the size preview, `Ctrl+Shift+A`
+    /// opens the assistant, and copy/cut
     /// under Shift and `Ctrl+Alt+Shift+V` are pinned by their own tests.
     #[test]
     fn ctrl_shift_is_not_a_second_spelling_of_ctrl() {
@@ -2720,7 +2735,6 @@ mod tests {
         // Each answers under `Ctrl` and nothing under `Ctrl+Shift`.
         for (k, want) in [
             (egui::Key::O, Action::Open),
-            (egui::Key::A, Action::SelectAll),
             (egui::Key::D, Action::Duplicate),
             (egui::Key::Minus, Action::ZoomOut),
             (egui::Key::Num0, Action::ZoomReset),

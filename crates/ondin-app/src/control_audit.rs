@@ -1203,6 +1203,27 @@ fn sweep_on(theme: Theme) {
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |c, a| a.toggle_settings(c));
     check("settings", app, found);
+    // The assistant's panel: its head's Access dropdown, and a reply's options.
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        use crate::assistant::thread::{Msg, Part};
+        a.assistant.msgs = vec![
+            Msg::Person {
+                text: "Which way?".into(),
+                chips: Vec::new(),
+            },
+            Msg::Agent {
+                speaker: "Claude".into(),
+                harness: "claude".into(),
+                parts: vec![Part::Text(
+                    "Which?\n```options\nAlign both\nCentre both\nMove it above\n```".into(),
+                )],
+                stats: None,
+            },
+        ];
+        a.open_assistant();
+    });
+    check("assistant", app, found);
     // An ICO row's card: the Sizes chips, the held pad and the icon switches.
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |_, a| {

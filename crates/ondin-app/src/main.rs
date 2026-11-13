@@ -82,6 +82,7 @@
 mod again;
 mod app;
 mod assets;
+mod assistant;
 mod atomic;
 mod batch_rename;
 mod blend;
@@ -1037,7 +1038,17 @@ fn main() {
     // Counted by any other Ondin's updater before it applies — the GUI and a
     // headless export alike, since the updater stops both.
     instances::register();
-    let result = match parse(&args) {
+    let parsed = parse(&args);
+    // An assistant's harness runs marked; its MCP server is `mcp-proxy`, which may
+    // start `serve`, and nothing else is its to run. A speed bump, not a boundary:
+    // the host's grants hold the level.
+    if std::env::var_os(ondin_ai::AGENT_CHILD_ENV).is_some()
+        && !matches!(parsed, Ok(Command::McpProxy { .. } | Command::Serve))
+    {
+        eprintln!("ondin: refused inside an assistant's agent; only `mcp-proxy` runs there");
+        std::process::exit(2);
+    }
+    let result = match parsed {
         Ok(Command::Gui { open }) => match one_window::claim(open.as_deref()) {
             one_window::Claim::Window => {
                 run_gui(open).map_err(|e| format!("ondin gui failed: {e}"))

@@ -3,10 +3,6 @@
 //! The calls are checked by running them on a copy of the document, so the
 //! person's document, its revision and their redo stay as they were; applying
 //! runs them again on the document as it is then, as one undo step.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the assistant panel's card applies proposals")
-)]
 
 use super::{Connection, write};
 use crate::session::EditorSession;

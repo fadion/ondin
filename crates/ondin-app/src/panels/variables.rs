@@ -389,6 +389,7 @@ impl OndinApp {
             None => {
                 self.kit_picker = None;
                 self.asset_panel = None;
+                self.assistant.open = false;
                 // Loaded at the open, not on the first frame, so nothing done
                 // before that frame is overwritten by the load (§15 D1054).
                 let root = collapsed_key(&self.session.doc);

@@ -462,6 +462,7 @@ impl OndinApp {
             None => {
                 self.kit_picker = None;
                 self.var_browser = None;
+                self.assistant.open = false;
                 // Whether a keyed service has its key, for the panel's empty state.
                 let ctx = self.egui_ctx.clone();
                 let on = self.prefs.assets.photo_services.clone();

@@ -5,7 +5,7 @@ version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# The agent-harness layer (`docs/ai.md`): finding a coding agent's program,
+# The agent-harness layer (`docs/design/assistant.md`): finding a coding agent's program,
 # sealing it, spawning it and decoding its stream. No rendering or UI
 # dependency, and no async runtime: children are driven on std threads.
 [dependencies]

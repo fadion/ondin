@@ -1,4 +1,4 @@
-//! The assistant's agent harnesses (`docs/ai.md` §2–§4): finding a coding
+//! The assistant's agent harnesses (`docs/design/assistant.md` §2–§4): finding a coding
 //! agent's program, sealing it so it can use Ondin's MCP tools and nothing
 //! else, driving its headless mode, and decoding its stream into [`Event`]s.
 //!

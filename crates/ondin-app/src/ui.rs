@@ -2282,6 +2282,166 @@ pub fn text_field_glyph(
     })
 }
 
+/// What a [`text_area`] holds besides its text.
+pub struct TextArea<'a> {
+    pub hint: &'a str,
+    /// The lines it shows while short; more lines grow it.
+    pub rows: usize,
+    /// The edit's own id, for a caller that moves focus to it.
+    pub id: Option<egui::Id>,
+    /// `Shift+Enter` breaks the line and a bare `Enter` is left for the caller
+    /// (a composer's send); otherwise `Enter` breaks the line.
+    pub enter_sends: bool,
+    /// No ground of its own: the caller's [`field_frame`] holds it with other
+    /// rows (a composer's chips and footer).
+    pub bare: bool,
+}
+
+impl<'a> TextArea<'a> {
+    /// A field of `rows` lines showing `hint` while empty.
+    pub fn new(hint: &'a str, rows: usize) -> Self {
+        Self {
+            hint,
+            rows,
+            id: None,
+            enter_sends: false,
+            bare: false,
+        }
+    }
+}
+
+/// A multi-line text field at the control type size: the field ground, the
+/// typing edge, and an edit that grows with its lines. A component's
+/// description, the assistant's composer and its Instructions are this.
+pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> egui::Response {
+    let font = egui::FontId::proportional(CONTROL_PT);
+    let pad = edit_frame(ui, &font, CONTROL_H - FIELD_BORDER_H, FIELD_PAD_X);
+    let mut edit = egui::TextEdit::multiline(text)
+        .desired_rows(area.rows)
+        .font(font)
+        .hint_text(egui::RichText::new(area.hint).size(CONTROL_PT));
+    if let Some(id) = area.id {
+        edit = edit.id(id);
+    }
+    if area.enter_sends {
+        edit = edit.return_key(Some(egui::KeyboardShortcut::new(
+            egui::Modifiers::SHIFT,
+            egui::Key::Enter,
+        )));
+    }
+    if area.bare {
+        let edit = edit.frame(pad.frame).desired_width(ui.available_width());
+        return ui.add(edit);
+    }
+    let framed = field_frame()
+        .inner_margin(egui::Margin::ZERO)
+        .show(ui, |ui| pad.add(ui, f32::INFINITY, edit));
+    let resp = framed.inner;
+    if resp.has_focus() {
+        typing_edge(ui, framed.response.rect);
+    }
+    resp
+}
+
+/// A [`layer_chip`]'s height.
+pub const CHIP_H: f32 = 20.0;
+
+/// What a [`layer_chip`] shows.
+#[derive(Default)]
+pub struct LayerChip<'a> {
+    pub name: &'a str,
+    /// The chip's number, which its layer's canvas mark carries too.
+    pub number: Option<usize>,
+    /// The layer is gone: struck through, faint, not sent.
+    pub gone: bool,
+    /// Offers a × that removes it.
+    pub removable: bool,
+    /// Lit: its layer is outlined on the canvas.
+    pub lit: bool,
+}
+
+/// What a [`layer_chip`] was asked.
+pub struct LayerChipOut {
+    pub resp: egui::Response,
+    pub removed: bool,
+}
+
+/// A layer named in the assistant: an attached layer above the composer or in a
+/// question, or an id in a reply. The accent wash, [`CHIP_H`] tall, the frame
+/// glyph, the name, its number when it has one, and a × when removable.
+pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
+    const PAD: f32 = 6.0;
+    const GAP: f32 = 4.0;
+    const X_W: f32 = 12.0;
+    let pt = SMALL_PT - 0.5;
+    let font = egui::FontId::proportional(pt);
+    let label = match chip.number {
+        Some(n) => format!("{n} · {}", chip.name),
+        None => chip.name.to_owned(),
+    };
+    let (ground, ink) = match chip.gone {
+        true => (color::field(), theme::text::faint()),
+        false => (color::accent_a(46), color::accent_100()),
+    };
+    let galley = ui.painter().layout_no_wrap(label, font, ink);
+    let glyph_w = SMALL_PT;
+    let x_w = if chip.removable { GAP + X_W } else { 0.0 };
+    let w = PAD + glyph_w + GAP + galley.size().x + x_w + PAD;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, CHIP_H), egui::Sense::click());
+    let p = ui.painter();
+    p.rect_filled(rect, 4.0, ground);
+    if chip.lit || (resp.hovered() && !chip.gone) {
+        p.rect_stroke(
+            rect,
+            4.0,
+            egui::Stroke::new(1.0, color::accent_300()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    p.text(
+        egui::pos2(rect.left() + PAD + glyph_w / 2.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::FRAME,
+        theme::icon_font(SMALL_PT),
+        ink,
+    );
+    let text_at = egui::pos2(
+        rect.left() + PAD + glyph_w + GAP,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    let text_w = galley.size().x;
+    p.galley(text_at, galley, ink);
+    if chip.gone {
+        let y = rect.center().y;
+        p.hline(
+            text_at.x..=text_at.x + text_w,
+            y,
+            egui::Stroke::new(1.0, ink),
+        );
+    }
+    let mut removed = false;
+    if chip.removable {
+        let xr = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - PAD - X_W / 2.0, rect.center().y),
+            egui::vec2(X_W, X_W),
+        );
+        let xresp = ui.interact(xr, resp.id.with("x"), egui::Sense::click());
+        let x_ink = match xresp.hovered() {
+            true => color::text(),
+            false => color::accent_300(),
+        };
+        ui.painter().text(
+            xr.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::X,
+            theme::icon_font(CAPTION_PT),
+            x_ink,
+        );
+        removed = xresp.on_hover_text("Remove").clicked();
+    }
+    LayerChipOut { resp, removed }
+}
+
 /// The hairline a field wears while what was typed in it is refused, in place
 /// of its own and of [`typing_edge`]; the typed text takes the same colour and
 /// the reason sits under the field ([`field_refusal`]). The documentation link

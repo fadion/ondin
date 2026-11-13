@@ -6,10 +6,6 @@
 //! connection from a process some chat owns gets that chat's level and key
 //! whatever key it sends, so an agent cannot shed its level by starting its own
 //! proxy.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the assistant panel grants and labels levels")
-)]
 
 use ondin_mcp::queue::Call;
 use ondin_mcp::tools::{ASSISTANT, CORE, PHASE_1, PHASE_2, PHASE_3};

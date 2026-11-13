@@ -138,6 +138,15 @@ multiplayer is one of its considerations.
 - **Saved user presets** — duplicate a styled chart and replace its data.
 - **Refreshing a linked file without a click** — an opened document's link can name any file on the machine (`charts.md`, *Import and the linked file*).
 
+## The assistant
+
+- **An embedded model, or a provider API key held by Ondin** — the harness holds the model, the account and the billing (`design/assistant.md` §1).
+- **An approval prompt inside a turn** — a headless harness cannot pause for one; the access level is the approval.
+- **The agent's own tools** (shell, files, web) inside the assistant.
+- **Kits and the library through the assistant** — Phase 4 is never a chat's.
+- **A chat saved in the document** — a chat is the person's, not the work's.
+- **Gemini CLI as a harness** — Google withdrew its OAuth sign-in for individuals in favour of Antigravity, which is driven.
+
 ## Tests and goldens
 
 - **`f32_pipeline` for `OptimizeQuality`, and keeping strokes out of the PNG fixture** (§15 D304).

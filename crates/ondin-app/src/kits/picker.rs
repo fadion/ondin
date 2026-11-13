@@ -397,6 +397,7 @@ impl OndinApp {
                 // The variables browser and the assets browser share the place.
                 self.var_browser = None;
                 self.asset_panel = None;
+                self.assistant.open = false;
                 // A rescan reads each file's first 4 KB, so a kit published since
                 // the last one — in this window or synced in — is seen at once
                 // rather than when the dashboard next looks (`kits::index`).

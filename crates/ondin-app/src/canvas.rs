@@ -10349,6 +10349,7 @@ impl OndinApp {
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
         self.draw_slices(ui, painter, rect, ppp, resp);
         self.draw_panel_hover(painter, rect, ppp);
+        self.draw_assistant_marks(painter, rect, ppp);
 
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);
         self.draw_flex_landing(ui, painter, rect, ppp, resp);

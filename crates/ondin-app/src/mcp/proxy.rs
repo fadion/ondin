@@ -76,12 +76,34 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         ..Remembered::default()
     };
     let mut link: Option<Link> = None;
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|e| e.to_string())?;
+    let mut input = stdin.lock();
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        if input
+            .read_until(b'\n', &mut bytes)
+            .map_err(|e| e.to_string())?
+            == 0
+        {
+            return Ok(());
+        }
+        // A line that is not UTF-8 is answered here, as the host would, rather
+        // than ending the agent's MCP server.
+        let Ok(line) = std::str::from_utf8(&bytes) else {
+            let error = json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": { "code": -32700, "message": "not UTF-8" },
+            });
+            writeln!(stdout, "{error}").map_err(|e| e.to_string())?;
+            stdout.flush().map_err(|e| e.to_string())?;
+            continue;
+        };
+        let line = line.trim_end_matches(['\r', '\n']);
         if line.trim().is_empty() {
             continue;
         }
-        let (line, message) = rewrite(&line, client.as_deref());
+        let (line, message) = rewrite(line, client.as_deref());
         let method = message
             .as_ref()
             .and_then(|m| m.get("method")?.as_str().map(str::to_owned));
@@ -165,7 +187,6 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         writeln!(stdout, "{answer}").map_err(|e| e.to_string())?;
         stdout.flush().map_err(|e| e.to_string())?;
     }
-    Ok(())
 }
 
 fn is_tool_call(message: &Option<Value>, tool: &str) -> bool {

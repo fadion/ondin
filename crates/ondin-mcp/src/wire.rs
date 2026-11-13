@@ -8,9 +8,19 @@
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
-/// The protocol revisions this server speaks, newest first. A client asking for
-/// one of them gets it; any other gets the newest.
-pub const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+/// The protocol revisions this server speaks, newest first. `2025-03-26` is left
+/// out: it requires accepting batches, which this server answers with an error.
+pub const PROTOCOL_VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2024-11-05"];
+
+/// The revision to answer a client asking for `asked`: the newest not newer
+/// than it, which a client knows; the newest when it asks for none or for one
+/// older than all of them.
+pub fn negotiate(asked: Option<&str>) -> &'static str {
+    asked
+        .and_then(|a| PROTOCOL_VERSIONS.iter().find(|v| **v <= a))
+        .copied()
+        .unwrap_or(PROTOCOL_VERSIONS[0])
+}
 
 /// The text `initialize` hands the client for its model: how to pick a document.
 pub const INSTRUCTIONS: &str = "Ondin edits design documents. Call `use_document` with the \
@@ -91,22 +101,28 @@ pub trait Handler {
 
 /// Answer requests read from `read` on `write` until the reader ends.
 pub fn serve(
-    read: impl BufRead,
+    mut read: impl BufRead,
     mut write: impl Write,
     handler: &mut impl Handler,
 ) -> std::io::Result<()> {
     let mut client = Peer::default();
-    for line in read.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        if read.read_until(b'\n', &mut bytes)? == 0 {
+            return Ok(());
         }
-        if let Some(reply) = answer(&line, &mut client, handler) {
+        // A line that is not UTF-8 is a parse error, not the connection's end.
+        let reply = match std::str::from_utf8(&bytes) {
+            Ok(line) if line.trim().is_empty() => continue,
+            Ok(line) => answer(line, &mut client, handler),
+            Err(_) => Some(failure(Value::Null, -32700, "not UTF-8")),
+        };
+        if let Some(reply) = reply {
             writeln!(write, "{reply}")?;
             write.flush()?;
         }
     }
-    Ok(())
 }
 
 /// The reply to one line, `None` for a notification.
@@ -138,10 +154,7 @@ fn answer(line: &str, client: &mut Peer, handler: &mut impl Handler) -> Option<V
                 .and_then(Value::as_str)
                 .filter(|k| !k.trim().is_empty())
                 .map(str::to_owned);
-            let asked = params.get("protocolVersion").and_then(Value::as_str);
-            let version = asked
-                .filter(|v| PROTOCOL_VERSIONS.contains(v))
-                .unwrap_or(PROTOCOL_VERSIONS[0]);
+            let version = negotiate(params.get("protocolVersion").and_then(Value::as_str));
             json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },
@@ -296,6 +309,43 @@ mod tests {
         );
         assert_eq!(replies[1]["error"]["code"], -32700);
         assert_eq!(replies[2]["error"]["code"], -32601);
+    }
+
+    /// A client gets the newest revision not newer than the one it asked for,
+    /// so never one it cannot know; the newest when it asks for none.
+    ///
+    /// flip: `negotiate` answering the newest for any unlisted revision → fails
+    /// at the between-revisions case.
+    #[test]
+    fn the_answered_revision_is_never_newer_than_the_asked() {
+        assert_eq!(negotiate(Some("2025-06-18")), "2025-06-18");
+        assert_eq!(
+            negotiate(Some("2025-03-26")),
+            "2024-11-05",
+            "between revisions"
+        );
+        assert_eq!(negotiate(Some("2099-01-01")), PROTOCOL_VERSIONS[0]);
+        assert_eq!(negotiate(None), PROTOCOL_VERSIONS[0]);
+    }
+
+    /// A line that is not UTF-8 gets a parse error and the connection goes on.
+    ///
+    /// flip: `serve` ending at an undecodable line → fails at the reply count.
+    #[test]
+    fn a_line_that_is_not_utf8_is_answered_and_the_session_goes_on() {
+        let mut input = b"\xff\xfe\n".to_vec();
+        input.extend_from_slice(br#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#);
+        input.push(b'\n');
+        let mut out = Vec::new();
+        serve(input.as_slice(), &mut out, &mut Echo).unwrap();
+        let replies: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0]["error"]["code"], -32700);
+        assert_eq!(replies[1]["id"], 2);
     }
 
     /// A batch and a bare value each get one Invalid Request with a null id,

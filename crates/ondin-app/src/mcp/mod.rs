@@ -21,7 +21,7 @@ use crate::session::EditorSession;
 use ondin_core::NodeId;
 use ondin_mcp::queue::{Call, Conn};
 use ondin_mcp::wire::{Content, Output};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -861,8 +861,14 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             };
             Ok(Answer::Image(png))
         }
-        "undo" => json(json!({ "undone": s.undo() })),
-        "redo" => json(json!({ "redone": s.redo() })),
+        "undo" => {
+            own_step(s.history.done().next_back(), &call.client, "undo")?;
+            json(json!({ "undone": s.undo() }))
+        }
+        "redo" => {
+            own_step(s.history.undone().next(), &call.client, "redo")?;
+            json(json!({ "redone": s.redo() }))
+        }
         "run_exports" => reads::run_exports(s, nodes(args, "ids")?),
         "export_code" => reads::export_code(s, args, nodes(args, "ids")?),
         "list_components" => json(reads::components(&s.doc)),
@@ -871,6 +877,30 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         tool if inspect::TOOLS.contains(&tool) => inspect::run(s, tool, args),
         "batch" => batch(conn, s, &call.client, args),
         tool => write(conn, s, &call.client, tool, args),
+    }
+}
+
+/// Refuse an agent's `undo` or `redo` of a step it did not make: the history is
+/// the person's too, and one agent call must not take back their work or another
+/// client's. A step is this client's when it came over MCP under its name.
+fn own_step(
+    step: Option<ondin_core::StepView<'_>>,
+    client: &str,
+    verb: &str,
+) -> Result<(), String> {
+    let Some(step) = step else {
+        return Ok(());
+    };
+    match &step.note.origin {
+        ondin_core::Origin::Mcp { client: c, .. } if c == client => Ok(()),
+        ondin_core::Origin::Mcp { client: c, .. } => Err(format!(
+            "The step to {verb} is `{}`, made by {c}, not by you: nothing was changed",
+            step.note.label
+        )),
+        ondin_core::Origin::User => Err(format!(
+            "The step to {verb} is the person's `{}`: nothing was changed. Ask them, or reverse your own edit with a write",
+            step.note.label
+        )),
     }
 }
 
@@ -972,10 +1002,52 @@ fn write(
     if let Some(said) = done.said {
         answer["said"] = json!(said);
     }
+    if verb.name == "insert_subtree"
+        && let Some(tree) = args.get("tree")
+    {
+        let mut named = Map::new();
+        named_paths(tree, "", &mut done.created.iter(), &mut named);
+        answer["named"] = Value::Object(named);
+    }
     if let Some(px) = pixels {
         answer["pixel_size"] = json!(px);
     }
     Ok(Answer::Json(answer))
+}
+
+/// Each layer of `tree` the caller named, by the `/`-joined names of it and its
+/// named ancestors, with the id `created` minted for it: `insert_subtree` mints
+/// in the tree's order, each layer before its children.
+fn named_paths<'a>(
+    tree: &Value,
+    above: &str,
+    created: &mut impl Iterator<Item = &'a NodeId>,
+    named: &mut Map<String, Value>,
+) {
+    let Some(id) = created.next() else {
+        return;
+    };
+    let path = match tree.get("name").and_then(Value::as_str) {
+        Some(name) => {
+            let path = match above {
+                "" => name.to_owned(),
+                _ => format!("{above}/{name}"),
+            };
+            named
+                .entry(path.clone())
+                .or_insert_with(|| json!(id.to_wire()));
+            path
+        }
+        None => above.to_owned(),
+    };
+    for child in tree
+        .get("children")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        named_paths(child, &path, created, named);
+    }
 }
 
 /// `batch`: each step's verb committed in turn, each reading what the last left,
@@ -1544,6 +1616,62 @@ mod tests {
             "set_name",
             rename("Mine", &now),
         ));
+    }
+
+    /// An agent's `undo` takes back its own step, and is refused over the person's
+    /// step or another client's, changing nothing.
+    ///
+    /// flip: `own_step` answering `Ok(())` always → fails at "the person's step is
+    /// refused".
+    #[test]
+    fn undo_takes_back_only_the_callers_own_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = NodeId::from_wire(&rect(&mut engine, &mut docs, 1, "Mine")).unwrap();
+        let rename = ondin_core::Transaction(vec![ondin_core::Operation::SetName {
+            id,
+            name: "Theirs".into(),
+        }]);
+        docs.session.try_commit(rename).unwrap();
+        let out = call(&mut engine, &mut docs, 1, "undo", json!({}));
+        assert!(out.is_error, "the person's step is refused");
+        assert_eq!(docs.session.history.undo_depth(), 2, "nothing changed");
+        docs.session.undo();
+        let (reply, _answer) = sync_channel(1);
+        let mut other = Call::new(1, None, "undo", json!({}), reply);
+        other.client = "other".into();
+        assert!(engine.handle(&mut docs, other).is_error, "another client's");
+        ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
+        assert_eq!(docs.session.history.undo_depth(), 0, "its own is undone");
+    }
+
+    /// `insert_subtree` answers each named layer by its path of names, an unnamed
+    /// layer between them taking its id but no entry.
+    ///
+    /// flip: `named_paths` taking an id only for a named layer → fails at
+    /// "Hero/Title".
+    #[test]
+    fn insert_subtree_answers_each_named_layer_by_path() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let tree = json!({ "name": "Hero", "kind": { "Group": null }, "children": [
+            { "kind": kind },
+            { "name": "Title", "kind": kind },
+        ]});
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let answer = ok(&out);
+        let created = &answer["created"];
+        assert_eq!(answer["named"]["Hero"], created[0], "{answer}");
+        assert_eq!(answer["named"]["Hero/Title"], created[2], "{answer}");
+        assert_eq!(answer["named"].as_object().map(Map::len), Some(2));
     }
 
     /// Two writes off one read apply: the client's own first write is no change

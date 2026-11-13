@@ -17,9 +17,6 @@ budget test, and the set is checked by re-running the same agent task on the old
 
 - **Lean snapshot** — `ondin_export::snapshot`. `get_node` leaves out fields at their defaults and
   what repeats its parent's.
-- **Named results** — `mcp::write`. `insert_subtree` answers each named layer's path with its id.
-- **Undo guards its caller** — `mcp::run`'s `undo`/`redo`. An agent's undo takes back only its
-  own step; one under the person's edit is refused, naming it.
 - **Design context** — a read of what a frame already uses: text styles, colours, radii,
   shadows, the content column and its sections' boxes, each with a layer that uses it.
 - **Outline read** — one row per layer (id, name, kind, box, depth), with a depth limit;

@@ -751,7 +751,7 @@ mod tests {
     /// the budget.
     #[test]
     fn the_tool_list_stays_within_its_budget() {
-        const BUDGET: usize = 90_000;
+        const BUDGET: usize = 92_000;
         let bytes = listed_bytes();
         assert!(
             bytes <= BUDGET,

@@ -1105,6 +1105,18 @@ fn write(
     {
         let mut named = Map::new();
         named_paths(tree, "", &mut done.created.iter(), &mut named);
+        // Each id once: `created` keeps the root, which a batch label names,
+        // and the layers no name reaches.
+        let ids: std::collections::HashSet<&Value> = named.values().collect();
+        let created: Vec<Value> = done
+            .created
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (i, json!(id.to_wire())))
+            .filter(|(i, id)| *i == 0 || !ids.contains(id))
+            .map(|(_, id)| id)
+            .collect();
+        answer["created"] = json!(created);
         answer["named"] = Value::Object(named);
     }
     if let Some(px) = pixels {
@@ -2021,10 +2033,11 @@ mod tests {
     }
 
     /// `insert_subtree` answers each named layer by its path of names, an unnamed
-    /// layer between them taking its id but no entry.
+    /// layer between them taking its id but no entry, and `created` holds the root
+    /// and the unnamed layers, so each id is said once.
     ///
-    /// flip: `named_paths` taking an id only for a named layer → fails at
-    /// "Hero/Title".
+    /// flip: `named_paths` taking an id only for a named layer → fails at the
+    /// title's name.
     #[test]
     fn insert_subtree_answers_each_named_layer_by_path() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2042,11 +2055,25 @@ mod tests {
             "insert_subtree",
             json!({ "parent": page, "tree": tree }),
         );
-        let answer = ok(&out);
+        let answer = ok(&out).clone();
         let created = &answer["created"];
         assert_eq!(answer["named"]["Hero"], created[0], "{answer}");
-        assert_eq!(answer["named"]["Hero/Title"], created[2], "{answer}");
         assert_eq!(answer["named"].as_object().map(Map::len), Some(2));
+        let title = answer["named"]["Hero/Title"].as_str().unwrap();
+        let title = NodeId::from_wire(title).unwrap();
+        assert_eq!(docs.session.doc.get(title).unwrap().name(), "Title");
+        assert_eq!(
+            created.as_array().map(Vec::len),
+            Some(2),
+            "the root and the unnamed layer: {answer}"
+        );
+        assert!(
+            !created
+                .as_array()
+                .unwrap()
+                .contains(&json!(title.to_wire())),
+            "each id once"
+        );
     }
 
     /// Two writes off one read apply: the client's own first write is no change

@@ -724,6 +724,16 @@ pub(crate) fn varies(doc: &Document, var: VarId) -> bool {
     doc.variables().every_value(var).len() > 1
 }
 
+/// Whether number variable `var` reads at most `limit` in every mode, through
+/// any alias — `false` for one with no value or a value of another kind.
+pub(crate) fn at_most(doc: &Document, var: VarId, limit: f64) -> bool {
+    let values = doc.variables().every_value(var);
+    !values.is_empty()
+        && values
+            .iter()
+            .all(|v| matches!(v, variable::Value::Number(n) if *n <= limit))
+}
+
 /// String variable `var`'s values, each with the modes of its collection that
 /// hold it, in mode order — `None` for a kit's variable or one with an alias,
 /// whose value another collection's mode can decide.

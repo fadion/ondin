@@ -2193,11 +2193,15 @@ impl Walk<'_> {
             px(half)
         };
         if rounded {
+            // A bound corner needs no floor: CSS clamps a negative radius to 0
+            // as the model floors it. Nor a cap, when no value it takes in any
+            // mode passes half of a box no variable sizes.
             let all: Vec<String> = r
                 .iter()
                 .zip(bound)
                 .map(|(r, var)| match var {
-                    Some(v) => format!("min({}, {half_css})", self.tokens.px_floored(v)),
+                    Some(v) if !sized && tokens::at_most(self.doc, v, half) => self.tokens.px(v),
+                    Some(v) => format!("min({}, {half_css})", self.tokens.px(v)),
                     None if sized && *r > 0.0 => format!("min({}, {half_css})", px(*r)),
                     None => px(r.clamp(0.0, half)),
                 })

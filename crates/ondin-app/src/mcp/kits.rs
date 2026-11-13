@@ -217,23 +217,20 @@ fn insert(s: &mut EditorSession, lib: &Library, call: &Call) -> Result<Answer, S
         return Err(format!("no layer `{}`", parent.to_wire()));
     }
     let number = |name| args.get(name).and_then(Value::as_f64);
-    let centre = match (number("x"), number("y")) {
-        (None, None) => None,
-        (x, y) => {
-            let into = s
-                .resolved
-                .world_transform(parent)
-                .unwrap_or(ondin_core::kurbo::Affine::IDENTITY);
-            Some(into * ondin_core::kurbo::Point::new(x.unwrap_or(0.0), y.unwrap_or(0.0)))
-        }
-    };
+    let (x, y) = (number("x"), number("y"));
     let source = Source::Kit {
         id: k.id.clone(),
         version,
         published,
         top: main,
     };
-    let (tx, instance) = build_placement(&s.doc, &mut s.ids, &source, parent, centre, None)?;
+    let (mut tx, instance) = build_placement(&s.doc, &mut s.ids, &source, parent, None, None)?;
+    // Placed by its box's left and top, as `create_instance` places.
+    if (x, y) != (None, None)
+        && let Some(op) = ondin_core::build::cornered_at(&s.doc, &tx, instance, x, y)
+    {
+        tx.0.push(op);
+    }
     commit(s, &call.client, &call.tool, tx)?;
     Ok(Answer::Json(json!({ "created": [instance.to_wire()] })))
 }
@@ -574,6 +571,7 @@ mod tests {
         atlas: PathBuf,
         consumer: PathBuf,
         kit: String,
+        main: Value,
         instance: String,
         night: String,
     }
@@ -653,6 +651,7 @@ mod tests {
             atlas,
             consumer,
             kit,
+            main,
             instance,
             night,
         }
@@ -715,6 +714,33 @@ mod tests {
                 .is_some_and(|k| !k.is_shared())
         );
         assert_eq!(ok(e, d, "list_kits", json!({}))["kits"], json!([]));
+    }
+
+    /// `insert_from_kit`'s `x` and `y` put the instance box's left and top there,
+    /// as `create_instance`'s do.
+    ///
+    /// flip: `insert` leaving out the `cornered_at` move → fails at "the box's
+    /// corner".
+    #[test]
+    fn insert_from_kit_places_the_box_by_its_corner() {
+        let mut f = fixture("corner");
+        let (e, d) = (&mut f.engine, &mut f.docs);
+        let page =
+            ok(e, d, "use_document", json!({ "document": f.consumer }))["pages"][0]["id"].clone();
+        let placed = ok(
+            e,
+            d,
+            "insert_from_kit",
+            json!({ "kit": "Atlas", "main": f.main, "parent": page, "x": 300, "y": 200 }),
+        )["created"][0]
+            .clone();
+        let node = ok(e, d, "get_node", json!({ "id": placed }));
+        let bounds = &node["nodes"][0]["world_bounds"];
+        assert_eq!(
+            (bounds[0].as_f64(), bounds[1].as_f64()),
+            (Some(300.0), Some(200.0)),
+            "the box's corner: {bounds}"
+        );
     }
 
     /// `make_local` takes an instance to its kit component and reveals that as a

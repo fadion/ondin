@@ -15,6 +15,31 @@ colours took about ten reads; the one `insert_subtree` was 13 KB of output, most
 colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
 budget test, and the set is checked by re-running the same agent task on the old and new build.
 
+A live hero run on the core set took twice as long as before it, nearly all of it six whole trees
+`insert_subtree` refused one mistake at a time; a pass over every core tool found the rest below.
+
+- **Model arguments say what is wrong, and where** — `verbs::Args::model`: a refused model names
+  its path (`children[1].kind.Text.sizing`), and a field the model does not have is refused, not
+  dropped (`Flex { gap }` laid out with no gap).
+- **What a read says, a write takes** — `verbs/loose.rs`: lengths as `"56px"` / `"1.2em"`, sizing
+  as `get_node` writes it, an effect flat with `visible` left out, corners left out or as one
+  number, padding as one number, a path as SVG path data (and `get_tree` answering it so), a
+  partial `TextStyle` in `set_text_style` and `set`, a corner by name in `bind_variable`, and every
+  colour as hex once it is within a rounding of one.
+- **Results stay small** — the `changed` report caps its list and names the top-level layers past
+  the cap (`get_view` listed 600 after a frame was deleted); a refused write leaves `rev` where it
+  was; `undo` and `redo` name the step; `check_contrast` lists failures unless asked for all.
+- **One way to place and patch** — `set` runs inside `batch`; `at` places a group's box as it
+  places a layer's; `create_instance` takes the box's left and top as `create_text` does;
+  `set_variable_value` takes the only mode when there is one.
+- **Finding the tool** — the core set gains `create_node`, `make_component`, `define_property`,
+  `add_style` and `add_variable`; `describe_tools` ranks name matches first, can answer names only,
+  and says which names it did not find; `insert_subtree` points to `get_tree`, `like` and
+  `create_node`, `set` to `style_text`.
+- **Readings that are wrong** — `check_contrast` measures a text against its own ink (orange on
+  off-white scored 1 : 1); `get_outline`'s boxes count stroke ink; `export_code` writes a solid fill
+  as a one-stop gradient and a bound corner as nested `min`/`max`; a kit variable can keep a cell
+  for a mode its collection does not list.
 - **Short ids per client** — `n36` for `48c991654e6b8e81:36`, mapped per client key, surviving the
   proxy's reconnect.
 - **Revert one step** — with the assistant (`ai.md`): undo an agent's own step under later edits

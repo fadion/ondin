@@ -2752,6 +2752,17 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let mode = own_mode(ctx, a)?;
+            let by_width = ctx
+                .doc
+                .variables()
+                .collection_of_mode(mode)
+                .is_some_and(|c| c.by_width());
+            if !by_width {
+                return Err(a.invalid(
+                    "mode",
+                    "its collection is not picked by width: `set_by_width` first",
+                ));
+            }
             crate::variable::breakpoint_ops(ctx.doc, mode, a.number("width").unwrap_or(0.0))
                 .map(Done::ops)
                 .map_err(|why| a.invalid("width", why))
@@ -2759,9 +2770,13 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "set_width_query",
-        doc: "Let a frame's contents pick a collection's mode by the frame's own width, or stop",
+        doc: "Let a main's contents pick a collection's mode by the main's own width, or stop",
         params: &[
-            req("node", NODE, "the frame, its width set from outside"),
+            req(
+                "node",
+                NODE,
+                "the main component, a frame whose width is set from outside; or a frame that has a width query and is no instance, to stop",
+            ),
             req("on", BOOL, "whether it picks by its width"),
             opt(
                 "collection",
@@ -2771,7 +2786,16 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let id = a.layer(ctx.doc, "node")?;
-            node(ctx, id)?;
+            let n = node(ctx, id)?;
+            // As the mode rows offer *By width*: a main, or a frame holding a
+            // query of its own that follows no main, so a detached copy can let
+            // its main's go.
+            if !(n.component() || (n.link().is_none() && !n.queries().is_empty())) {
+                return Err(a.invalid(
+                    "node",
+                    "only a main component picks modes by its own width: make it a component first",
+                ));
+            }
             let c = collection_arg(ctx, a)?.unwrap_or(ctx.doc.variables().first_collection().id);
             let on = a.bool("on").unwrap_or(true);
             if on && let Some(why) = crate::variable::why_no_query(ctx.doc, id) {

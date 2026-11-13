@@ -1431,7 +1431,8 @@ fn collections_are_added_renamed_copied_and_deleted() {
 /// mode's breakpoint is set, and a move is refused, since widths order them.
 ///
 /// flip: `move_mode` skipping its by-width refusal → fails at the by-width move,
-/// which the core answers with no ops rather than refusing.
+/// which the core answers with no ops rather than refusing; `set_breakpoint`
+/// skipping its by-width check → fails at "not picked by width yet" the same way.
 #[test]
 fn modes_move_and_take_breakpoints_by_width() {
     let (mut doc, mut ids, _) = blank();
@@ -1463,6 +1464,15 @@ fn modes_move_and_take_breakpoints_by_width() {
         json!({ "verb": "move_mode", "args": { "mode": tablet, "index": 3 } }),
     );
     assert!(index.contains("3 modes"), "{index}");
+    let early = refused_step(
+        &mut doc,
+        &mut ids,
+        json!({ "verb": "set_breakpoint", "args": { "mode": desktop, "width": 900 } }),
+    );
+    assert!(
+        early.contains("set_by_width"),
+        "not picked by width yet: {early}"
+    );
     script(
         &mut doc,
         &mut ids,
@@ -1490,14 +1500,16 @@ fn modes_move_and_take_breakpoints_by_width() {
     assert!(fixed.contains("width"), "{fixed}");
 }
 
-/// A frame picks a collection's mode by its own width and stops; a rectangle is
-/// refused with why.
+/// A main picks a collection's mode by its own width and stops; a plain frame
+/// and a rectangle are refused, as the mode rows offer *By width* on a main only.
 ///
-/// flip: `set_width_query` passing `true` to `query_ops` always → fails at "stops".
+/// flip: `set_width_query` passing `true` to `query_ops` always → fails at
+/// "stops"; without its main check → fails at "a plain frame is refused".
 #[test]
-fn set_width_query_lets_a_frame_pick_by_its_width() {
+fn set_width_query_lets_a_main_pick_by_its_width() {
     let (mut doc, mut ids, page) = blank();
-    let f = run(
+    let (f, _) = main_component(&mut doc, &mut ids, page, "Card", 300.0);
+    let plain = run(
         &mut doc,
         &mut ids,
         "create_node",
@@ -1532,6 +1544,12 @@ fn set_width_query_lets_a_frame_pick_by_its_width() {
         json!({ "node": f.to_wire(), "on": false }),
     );
     assert!(doc.get(f).unwrap().queries().is_empty(), "stops");
+    let args = json!({ "node": plain.to_wire(), "on": true });
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_width_query", args),
+        "node",
+        "a plain frame is refused"
+    );
     let args = json!({ "node": r.to_wire(), "on": true });
     assert_eq!(
         refused_param(&doc, &mut ids, "set_width_query", args),

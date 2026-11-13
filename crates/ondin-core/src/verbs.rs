@@ -453,6 +453,8 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "DtcgFile" => Err("expected the tokens file, as text or as an object".into()),
         "Steps" if v.as_array().is_some_and(|s| s.iter().all(Value::is_object)) => Ok(()),
         "Steps" => Err("expected a list of steps, each an object".into()),
+        "Version" if v.is_u64() || v.is_string() => Ok(()),
+        "Version" => Err("expected a version's `at` or its name".into()),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }

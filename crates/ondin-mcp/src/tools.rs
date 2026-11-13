@@ -178,7 +178,7 @@ pub const PHASE_3: [&str; 49] = [
 /// `insert_from_kit` returns the new instance's id and `create_document` the new
 /// file's path. `save_version` pins a file, outside history too; `import_tokens`
 /// is one undo step.
-pub const PHASE_4: [&str; 15] = [
+pub const PHASE_4: [&str; 16] = [
     "list_documents",
     "create_document",
     "list_kits",
@@ -193,6 +193,7 @@ pub const PHASE_4: [&str; 15] = [
     "stop_sharing_kit",
     "import_tokens",
     "list_versions",
+    "compare_version",
     "save_version",
 ];
 

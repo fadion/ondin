@@ -456,6 +456,16 @@ pub static TOOLS: &[Tool] = &[
         params: &[],
     },
     Tool {
+        name: "compare_version",
+        doc: "What changed between a kept version and the document now: the pages and layers added, removed and changed, each value before and after, and the variables, modes and styles. Documents in the library only.",
+        params: &[param(
+            "version",
+            ParamKind::Model("Version"),
+            true,
+            "The version, by its `at` or its name as `list_versions` gives them.",
+        )],
+    },
+    Tool {
         name: "save_version",
         doc: "Save the document and keep it as a version the person can return to from Version history, before a large change or when asked. `undo` does not revert it.",
         params: &[param(
@@ -509,12 +519,13 @@ pub enum Class {
 }
 
 /// The library and host reads past Phase 1, every tool of which reads.
-const LATER_READS: [&str; 5] = [
+const LATER_READS: [&str; 6] = [
     "list_documents",
     "list_kits",
     "get_kit",
     "list_kit_updates",
     "list_versions",
+    "compare_version",
 ];
 
 /// The tools whose effect `undo` does not revert (`docs/design/mcp.md`, *Outside

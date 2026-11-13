@@ -2350,7 +2350,7 @@ pub const CHIP_H: f32 = 20.0;
 #[derive(Default)]
 pub struct LayerChip<'a> {
     pub name: &'a str,
-    /// The chip's number, which its layer's canvas mark carries too.
+    /// The chip's number, which its layer's lit ask button carries too.
     pub number: Option<usize>,
     /// The layer is gone: struck through, faint, not sent.
     pub gone: bool,

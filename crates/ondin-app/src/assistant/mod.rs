@@ -491,7 +491,8 @@ impl OndinApp {
             .collect()
     }
 
-    /// Whether every selected layer is attached already: the ask button is lit.
+    /// Whether every selected layer is attached already: the selection's ask
+    /// button gives way to its layers' lit ones.
     pub(crate) fn selection_attached(&self) -> bool {
         let ids = self.session.selection.ids();
         !ids.is_empty()
@@ -1136,7 +1137,7 @@ mod tests {
             app.asset_panel.is_none(),
             "the assets panel shares its place"
         );
-        assert!(app.selection_attached(), "the ask button is lit");
+        assert!(app.selection_attached(), "the ask buttons are lit");
         app.toggle_assets();
         assert!(!app.assistant.open, "opening a sibling closes it");
     }

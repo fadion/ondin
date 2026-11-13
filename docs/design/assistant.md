@@ -243,18 +243,23 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
 - **The ask button** is a small `icon::SPARKLE` button above the selection's top-right corner, its
   right edge on the selection's and its bottom 8 clear of it, one for the whole selection and the
   same size at every zoom. Where there is no room above it sits inside the corner, and it stays left
-  of the inspector's cards. Once the selection is attached it is lit and a click only opens the
-  panel. It hides while the selection is dragged, resized or rotated, while text or a path is
-  edited, in Present, focus and private mode, and while the assistant is *Off*. *View ▸ Show ask
-  assistant* (`ViewSwitch::AskAssistant`, last of the View menu's canvas group; per machine, on by
-  default) hides it; the context menu's row stays. The canvas context menu's view rows leave it out.
+  of the inspector's cards. *View ▸ Show ask assistant* (`ViewSwitch::AskAssistant`, last of the
+  View menu's canvas group; per machine, on by default) hides it; the context menu's row stays. The
+  canvas context menu's view rows leave it out.
+- **An attached layer has its own ask button, lit**, in the same place over that layer, carrying the
+  sparkle and its chip's number, whatever *Show ask assistant* says. It shows while the panel is
+  open or the layer is selected, on its own page; the selection's button gives way to it once every
+  selected layer is attached. A click on it detaches the layer: the button is a toggle.
+- **The ask buttons hide** while the selection is dragged, resized or rotated, while text or a path
+  is edited, in Present, focus and private mode, and while the assistant is *Off*. They pass the
+  wheel and a pinch to the canvas beneath, as its other overlays do.
 - **A chip is a reference, not a copy** (`ui::layer_chip`): the layer's id, name, kind and size go
   with the question, and the agent reads the rest through the tools. For a harness that takes
   images, an attached layer also goes with a 1× render. A chip's × removes it; a chip whose layer
   is deleted shows struck through and is not sent.
-- **While the panel is open, an attached layer wears a mark on the canvas**: a dashed accent
-  outline 5 outside it, with a tab carrying the sparkle and its chip's number. A closed panel
-  leaves no ink. Hovering a chip outlines its layer; clicking one selects it and zooms to it.
+- **While the panel is open, an attached layer wears a dashed accent outline** 5 outside it; its
+  number is on its lit ask button. A closed panel leaves no outline. Hovering a chip outlines its
+  layer; clicking one selects it and zooms to it.
 - **The agent's reply can name layers.** A layer id in a reply renders as the same chip.
 
 ## 5. Settings
@@ -300,7 +305,7 @@ layers being asked about, and is one more kind of surface.
   private mode end the session, each with a note.
 - **Private mode turns the assistant off** while it is on. The panel closes and the session ends;
   the rail button and the context menu's row are disabled with *Not available in private mode*;
-  `Ctrl+Shift+A` answers on the status line; the ask button and the marks are not drawn. The thread
+  `Ctrl+Shift+A` answers on the status line; the ask buttons and the outlines are not drawn. The thread
   and its chips are kept.
 - **The head**: the harness's label, the seal's grade beside a lock, then the Access dropdown and
   *New chat* (a plus). *New chat* clears the thread at once, without asking, and ends a running

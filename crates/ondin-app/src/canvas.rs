@@ -8944,24 +8944,28 @@ impl OndinApp {
         // A touch pinch pans with its fingers and zooms around their centre, asked
         // of where the fingers are rather than of hover, which egui withholds
         // while the first finger's cancelled press is held.
+        // The canvas's own overlay areas (origin fields, *Done* pill, the ask
+        // buttons) must not swallow the wheel; every other overlay keeps it.
+        let own_overlay = |under: Option<egui::LayerId>| {
+            let Some(under) = under else {
+                return false;
+            };
+            let single = match *self.session.selection.ids() {
+                [id] => under == origin_fields_layer(id) || under == crop_exit_layer(id),
+                _ => false,
+            };
+            single || self.is_ask_layer(ui.ctx(), under)
+        };
         let touch = ui.input(|i| i.multi_touch()).filter(|t| {
-            rect.contains(t.center_pos) && ui.ctx().layer_id_at(t.center_pos) == Some(resp.layer_id)
+            let under = ui.ctx().layer_id_at(t.center_pos);
+            rect.contains(t.center_pos) && (under == Some(resp.layer_id) || own_overlay(under))
         });
-        // The canvas's own overlay areas (origin fields, *Done* pill) must not
-        // swallow the wheel; every other overlay keeps it.
         let Some(hover) = touch
             .map(|t| t.center_pos)
             .or_else(|| resp.hover_pos())
             .or_else(|| {
                 let p = ui.ctx().pointer_hover_pos()?;
-                let [id] = *self.session.selection.ids() else {
-                    return None;
-                };
-                let under = ui.ctx().layer_id_at(p);
-                (rect.contains(p)
-                    && (under == Some(origin_fields_layer(id))
-                        || under == Some(crop_exit_layer(id))))
-                .then_some(p)
+                (rect.contains(p) && own_overlay(ui.ctx().layer_id_at(p))).then_some(p)
             })
         else {
             return;

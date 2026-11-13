@@ -1131,7 +1131,8 @@ pub struct OndinApp {
     /// *View ▸ Panels ▸ Size preview*: the size card in the minimap's corner, which
     /// hides the minimap while it shows. Focus mode keeps it; present mode hides it.
     pub(crate) show_size_preview: bool,
-    /// *View ▸ Show ask assistant*: the ask button over the selection.
+    /// *View ▸ Show ask assistant*: the ask button over the selection. An
+    /// attached layer's lit button shows either way.
     pub(crate) show_ask: bool,
     /// The size preview's pin, renders and textures (`size_preview.rs`).
     pub(crate) size_preview: crate::size_preview::SizePreview,

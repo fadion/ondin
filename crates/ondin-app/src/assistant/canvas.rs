@@ -1,5 +1,6 @@
-//! The assistant on the canvas: the ask button over the selection, and while
-//! the panel is open a mark on each attached layer.
+//! The assistant on the canvas: the ask buttons over the selection and over
+//! each attached layer, and while the panel is open a dashed outline on each
+//! attached layer.
 
 use crate::app::OndinApp;
 use crate::preview::Drag;
@@ -7,14 +8,37 @@ use crate::theme::{self, color, icon};
 use ondin_core::NodeId;
 use ondin_core::kurbo::{Point, Rect};
 
-/// The ask button's side, the same at every zoom.
+/// The ask button's height, and its width without a number; the same at every
+/// zoom.
 pub(crate) const ASK: f32 = 26.0;
-/// Clear air between the button and the selection's top edge.
+/// Clear air between the button and its layer's top edge.
 const ASK_GAP: f32 = 8.0;
-/// How far outside its layer an attached layer's mark runs.
+/// How far outside its layer an attached layer's outline runs.
 const MARK_OUT: f32 = 5.0;
-/// The mark's tab.
-const TAB_H: f32 = 18.0;
+/// A lit button's inset either side of its sparkle and number.
+const ASK_PAD: f32 = 7.0;
+/// Between a lit button's sparkle and its number.
+const ASK_NUM_GAP: f32 = 4.0;
+/// The sparkle's size on the button.
+const ASK_GLYPH_PT: f32 = 14.0;
+
+/// One ask button: where it sits and what a click does.
+pub(crate) struct AskButton {
+    pub(crate) place: egui::Rect,
+    /// The attached layer it stands for and its chip's number; `None` for the
+    /// unattached selection's.
+    pub(crate) attached: Option<(String, usize)>,
+}
+
+impl AskButton {
+    /// The button's area, whose layer the canvas hands the wheel back from.
+    pub(crate) fn area_id(&self) -> egui::Id {
+        match &self.attached {
+            Some((wire, _)) => egui::Id::new(("assistant-ask", wire.as_str())),
+            None => egui::Id::new("assistant-ask"),
+        }
+    }
+}
 
 impl OndinApp {
     /// A world rect on screen.
@@ -24,15 +48,13 @@ impl OndinApp {
         egui::Rect::from_two_pos(a, b)
     }
 
-    /// Whether the ask button shows: a selection, the assistant on, and nothing
-    /// the button would get in the way of.
-    fn ask_shows(&self, ctx: &egui::Context) -> bool {
-        self.show_ask
-            && self.prefs.assistant.harness().is_some()
+    /// Whether ask buttons may show at all: the assistant on, and nothing the
+    /// buttons would get in the way of.
+    fn ask_live(&self, ctx: &egui::Context) -> bool {
+        self.prefs.assistant.harness().is_some()
             && !self.prefs.private
             && self.presenting.is_none()
             && !self.focus
-            && !self.session.selection.is_empty()
             && self.text.is_none()
             && self.edited_path().is_none()
             && matches!(self.drag, Drag::None)
@@ -40,93 +62,186 @@ impl OndinApp {
             && !self.session.has_gesture_preview()
     }
 
-    /// The ask button's place for selection bounds `sel` on screen: its right
-    /// edge on the selection's, its bottom [`ASK_GAP`] above it; inside the
-    /// corner where there is no room above; left of the inspector's cards.
-    fn ask_button_place(&self, sel: egui::Rect, screen: egui::Rect) -> egui::Rect {
+    /// An ask button `w` wide for layer bounds `sel` on screen: its right edge
+    /// on the layer's, its bottom [`ASK_GAP`] above it; inside the corner where
+    /// there is no room above; left of the inspector's cards.
+    fn ask_button_place(&self, sel: egui::Rect, screen: egui::Rect, w: f32) -> egui::Rect {
         let column = Self::inspector_column(screen);
         let right = sel.right().min(column.left() - ASK_GAP);
         let mut top = sel.top() - ASK_GAP - ASK;
         if top < self.canvas_rect.top() + ASK_GAP {
             top = sel.top() + ASK_GAP;
         }
-        egui::Rect::from_min_size(egui::pos2(right - ASK, top), egui::vec2(ASK, ASK))
+        egui::Rect::from_min_size(egui::pos2(right - w, top), egui::vec2(w, ASK))
     }
 
-    /// The ask button and the attached layers' marks.
-    pub(crate) fn assistant_canvas_ui(&mut self, ctx: &egui::Context) {
+    /// A lit button's width, carrying number `n`.
+    fn ask_lit_w(ctx: &egui::Context, n: usize) -> f32 {
+        let num = ctx.fonts_mut(|f| {
+            f.layout_no_wrap(
+                n.to_string(),
+                egui::FontId::proportional(crate::ui::SMALL_PT),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+        });
+        ASK_PAD + ASK_GLYPH_PT + ASK_NUM_GAP + num + ASK_PAD
+    }
+
+    /// The ask buttons this frame. Each attached layer on this page has a lit
+    /// one carrying its chip's number while the panel is open or the layer is
+    /// selected, whatever *Show ask assistant* says. The selection has an unlit
+    /// one while that switch is on and some selected layer is not attached; a
+    /// lit button it would cover gives way.
+    pub(crate) fn ask_buttons(&self, ctx: &egui::Context) -> Vec<AskButton> {
+        let mut out = Vec::new();
+        if !self.ask_live(ctx) {
+            return out;
+        }
         let ppp = ctx.pixels_per_point();
-        if !self.ask_shows(ctx) {
-            return;
-        }
-        let Some(bounds) = self.selection_bounds() else {
-            return;
-        };
-        let sel = self.screen_rect(bounds, ppp);
         let screen = ctx.input(|i| i.content_rect());
-        let place = self.ask_button_place(sel, screen);
-        if !self.canvas_rect.contains_rect(place) {
-            return;
+        let unlit = (self.show_ask && !self.selection_attached())
+            .then(|| self.selection_bounds())
+            .flatten()
+            .map(|b| self.ask_button_place(self.screen_rect(b, ppp), screen, ASK))
+            .filter(|p| self.canvas_rect.contains_rect(*p));
+        for (n, c) in self.assistant.chips.iter().enumerate() {
+            let Some(id) = NodeId::from_wire(&c.id) else {
+                continue;
+            };
+            if !(self.assistant.open || self.session.selection.contains(id))
+                || self.session.doc.page_of(id) != Some(self.session.page)
+            {
+                continue;
+            }
+            let Some(b) = self.session.preview_world_bounds(id) else {
+                continue;
+            };
+            let w = Self::ask_lit_w(ctx, n + 1);
+            let place = self.ask_button_place(self.screen_rect(b, ppp), screen, w);
+            if !self.canvas_rect.contains_rect(place) || unlit.is_some_and(|u| u.intersects(place))
+            {
+                continue;
+            }
+            out.push(AskButton {
+                place,
+                attached: Some((c.id.clone(), n + 1)),
+            });
         }
-        let lit = self.selection_attached();
-        let resp = egui::Area::new(egui::Id::new("assistant-ask"))
-            .order(egui::Order::Middle)
-            .fixed_pos(place.min)
-            .show(ctx, |ui| {
-                let (r, resp) = ui.allocate_exact_size(place.size(), egui::Sense::click());
-                let p = ui.painter();
-                let (ground, ink) = match (lit, resp.hovered()) {
-                    (true, _) => (color::accent_600(), color::on_accent()),
-                    (false, true) => (color::raised(), color::text()),
-                    (false, false) => (color::card(), theme::text::strong()),
-                };
-                let shadow = egui::epaint::Shadow {
-                    offset: [0, 4],
-                    blur: 12,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(90),
-                };
-                p.add(shadow.as_shape(r, 6.0));
-                p.rect_filled(r, 6.0, ground);
-                if !lit {
-                    p.rect_stroke(
-                        r,
-                        6.0,
-                        egui::Stroke::new(1.0, color::card_border()),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                p.text(
-                    r.center(),
-                    egui::Align2::CENTER_CENTER,
-                    icon::SPARKLE,
-                    theme::icon_font(14.0),
-                    ink,
-                );
-                resp.on_hover_text(match lit {
-                    true => "Attached · open the assistant",
-                    false => "Ask the assistant",
+        if let Some(place) = unlit {
+            out.push(AskButton {
+                place,
+                attached: None,
+            });
+        }
+        out
+    }
+
+    /// Whether `layer` is an ask button's, which hands the wheel to the canvas.
+    pub(crate) fn is_ask_layer(&self, ctx: &egui::Context, layer: egui::LayerId) -> bool {
+        layer.order == egui::Order::Middle
+            && self
+                .ask_buttons(ctx)
+                .iter()
+                .any(|b| b.area_id() == layer.id)
+    }
+
+    /// A click on an ask button: the selection's attaches it and opens the
+    /// panel; a lit one's detaches its layer, a toggle.
+    pub(crate) fn ask_button_clicked(&mut self, attached: Option<String>) {
+        match attached {
+            Some(wire) => self.assistant.chips.retain(|c| c.id != wire),
+            None => self.ask_assistant(),
+        }
+    }
+
+    /// Draw the ask buttons.
+    pub(crate) fn assistant_canvas_ui(&mut self, ctx: &egui::Context) {
+        let mut clicked = None;
+        for b in self.ask_buttons(ctx) {
+            let lit = b.attached.is_some();
+            let resp = egui::Area::new(b.area_id())
+                .order(egui::Order::Middle)
+                .fixed_pos(b.place.min)
+                .show(ctx, |ui| {
+                    let (r, resp) = ui.allocate_exact_size(b.place.size(), egui::Sense::click());
+                    let p = ui.painter();
+                    let (ground, ink) = match (lit, resp.hovered()) {
+                        (true, false) => (color::accent_600(), color::on_accent()),
+                        (true, true) => (color::accent(), color::on_accent()),
+                        (false, true) => (color::raised(), color::text()),
+                        (false, false) => (color::card(), theme::text::strong()),
+                    };
+                    let shadow = egui::epaint::Shadow {
+                        offset: [0, 4],
+                        blur: 12,
+                        spread: 0,
+                        color: egui::Color32::from_black_alpha(90),
+                    };
+                    p.add(shadow.as_shape(r, 6.0));
+                    p.rect_filled(r, 6.0, ground);
+                    let glyph = theme::icon_font(ASK_GLYPH_PT);
+                    match &b.attached {
+                        None => {
+                            p.rect_stroke(
+                                r,
+                                6.0,
+                                egui::Stroke::new(1.0, color::card_border()),
+                                egui::StrokeKind::Inside,
+                            );
+                            p.text(
+                                r.center(),
+                                egui::Align2::CENTER_CENTER,
+                                icon::SPARKLE,
+                                glyph,
+                                ink,
+                            );
+                        }
+                        Some((_, n)) => {
+                            let x = r.left() + ASK_PAD;
+                            p.text(
+                                egui::pos2(x + ASK_GLYPH_PT / 2.0, r.center().y),
+                                egui::Align2::CENTER_CENTER,
+                                icon::SPARKLE,
+                                glyph,
+                                ink,
+                            );
+                            p.text(
+                                egui::pos2(x + ASK_GLYPH_PT + ASK_NUM_GAP, r.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                n.to_string(),
+                                egui::FontId::proportional(crate::ui::SMALL_PT),
+                                ink,
+                            );
+                        }
+                    }
+                    resp.on_hover_text(match lit {
+                        true => "Detach from the assistant",
+                        false => "Ask the assistant",
+                    })
                 })
-            })
-            .inner;
-        if resp.clicked() {
-            match lit {
-                true => self.open_assistant(),
-                false => self.ask_assistant(),
+                .inner;
+            if resp.clicked() {
+                clicked = Some(b.attached.map(|(wire, _)| wire));
             }
         }
+        if let Some(attached) = clicked {
+            self.ask_button_clicked(attached);
+        }
     }
 
-    /// A dashed accent outline [`MARK_OUT`] outside each attached layer, with a
-    /// tab carrying the sparkle and its chip's number; the layer a chip under
-    /// the pointer names is outlined solid.
+    /// A dashed accent outline [`MARK_OUT`] outside each attached layer; the
+    /// layer a chip under the pointer names is outlined solid.
     pub(crate) fn draw_assistant_marks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if !self.assistant.open || self.prefs.private {
             return;
         }
         let p = painter.with_clip_rect(rect);
-        for (n, c) in self.assistant.chips.iter().enumerate() {
-            let Some(id) = NodeId::from_wire(&c.id) else {
+        for c in &self.assistant.chips {
+            let Some(id) = NodeId::from_wire(&c.id)
+                .filter(|id| self.session.doc.page_of(*id) == Some(self.session.page))
+            else {
                 continue;
             };
             let Some(r) = self.session.preview_world_bounds(id) else {
@@ -142,37 +257,6 @@ impl OndinApp {
             ] {
                 p.extend(egui::Shape::dashed_line(&side, stroke, 5.0, 3.0));
             }
-            let label = format!("{}", n + 1);
-            let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
-            let galley = p.layout_no_wrap(label, font, color::on_accent());
-            let w = 5.0 + 11.0 + 3.0 + galley.size().x + 5.0;
-            let tab = egui::Rect::from_min_size(
-                egui::pos2(r.right() - w, r.top() - TAB_H),
-                egui::vec2(w, TAB_H),
-            );
-            p.rect_filled(
-                tab,
-                egui::CornerRadius {
-                    nw: 4,
-                    ne: 4,
-                    sw: 0,
-                    se: 0,
-                },
-                color::accent_600(),
-            );
-            p.text(
-                egui::pos2(tab.left() + 5.0 + 5.5, tab.center().y),
-                egui::Align2::CENTER_CENTER,
-                icon::SPARKLE,
-                theme::icon_font(11.0),
-                color::on_accent(),
-            );
-            let gh = galley.size().y;
-            p.galley(
-                egui::pos2(tab.left() + 5.0 + 11.0 + 3.0, tab.center().y - gh / 2.0),
-                galley,
-                color::on_accent(),
-            );
         }
         if let Some(wire) = &self.assistant.hovered
             && let Some(id) = NodeId::from_wire(wire)
@@ -186,5 +270,74 @@ impl OndinApp {
                 egui::StrokeKind::Outside,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ask buttons for `app` in a 2000×1400 window.
+    fn buttons(ctx: &egui::Context, app: &OndinApp) -> Vec<(Option<usize>, egui::Rect)> {
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(2000.0, 1400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    out = app
+                        .ask_buttons(ui.ctx())
+                        .into_iter()
+                        .map(|b| (b.attached.map(|(_, n)| n), b.place))
+                        .collect();
+                },
+            );
+        }
+        out
+    }
+
+    /// An attached layer has one ask button, lit and numbered, which shows with
+    /// *Show ask assistant* off and detaches the layer when clicked.
+    /// flip: `ask_buttons` keeping the selection's button once it is attached →
+    /// fails at the single lit button.
+    #[test]
+    fn an_attached_layer_has_one_lit_button_that_detaches_it() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let id = crate::palette::tests::add_rect(&mut app);
+        app.session.selection.set_one(id);
+        app.prefs.assistant.agent = "claude".into();
+        app.canvas_rect =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(1600.0, 1200.0));
+        app.canvas_px = (1600, 1200);
+        assert!(
+            app.ask_live(&ctx),
+            "nothing in the fixture hides the buttons"
+        );
+        let shown = buttons(&ctx, &app);
+        assert_eq!(shown.len(), 1, "the selection's button: {shown:?}");
+        assert_eq!(shown[0].0, None, "unlit before it is attached");
+
+        app.ask_button_clicked(None);
+        assert_eq!(app.assistant.chips.len(), 1, "a click attaches");
+        app.show_ask = false;
+        let shown = buttons(&ctx, &app);
+        assert_eq!(
+            shown.iter().map(|b| b.0).collect::<Vec<_>>(),
+            vec![Some(1)],
+            "one button, lit with the chip's number, despite the switch"
+        );
+
+        app.ask_button_clicked(Some(id.to_wire()));
+        assert!(
+            app.assistant.chips.is_empty(),
+            "a lit button's click detaches"
+        );
+        assert!(buttons(&ctx, &app).is_empty(), "the switch is off");
     }
 }

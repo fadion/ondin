@@ -46,7 +46,11 @@ use std::collections::BTreeMap;
 ///   `fill_indices`; `StrokeSummary::id` and `index`, `EffectSummary::id`.
 /// - **20** `PaintSummary::Image` gained `pixel_size`, the picture's own width
 ///   and height.
-pub const SNAPSHOT_VERSION: u32 = 20;
+/// - **21** `fills` became `FillSummary` (`id`, `index`, `paint`) and
+///   `fill_indices` went; `Geometry::Text` traded `align` and `styled_runs` for
+///   `color`, `paragraph`, `block`, `runs` and `paragraphs`; `NodeSnapshot::specified`;
+///   `ComponentSummary::properties` and `overrides`; a missing family in a run warns.
+pub const SNAPSHOT_VERSION: u32 = 21;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -131,7 +135,8 @@ pub struct NodeSnapshot {
     pub pivot: Option<[f64; 2]>,
     /// Kind-specific geometry (size, endpoints, text content, …).
     pub geometry: Geometry,
-    pub fills: Vec<PaintSummary>,
+    /// The fills, visible entries only, bottom first.
+    pub fills: Vec<FillSummary>,
     pub strokes: Vec<StrokeSummary>,
     /// The effect stack (§5.3a), visible entries only, in compositing order — the
     /// same filter `fills` and `strokes` apply. Absent when empty.
@@ -181,11 +186,10 @@ pub struct NodeSnapshot {
     /// The layer's part in a component, absent outside one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<ComponentSummary>,
-    /// Each entry of `fills`' index in the layer's whole list, which
-    /// `bind_variable` counts fills by; absent when no fill is hidden, as each
-    /// entry's index is then its position.
+    /// The transform and geometry as authored, where layout draws the node
+    /// otherwise; absent where it is drawn as authored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fill_indices: Option<Vec<usize>>,
+    pub specified: Option<Specified>,
 }
 
 /// One bound field and the variable it reads.
@@ -212,6 +216,27 @@ pub struct ComponentSummary {
     /// A variant's value per property of its set, by property name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variant: BTreeMap<String, String>,
+    /// An instance's component properties with the values it is set to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<PropertySummary>,
+    /// The fields an instance or copy holds otherwise than the layer it is
+    /// linked to, each of which `reset_overrides` puts back (`"fills"`,
+    /// `"text"`, `"geometry.size"`, `"swap"`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<String>,
+}
+
+/// One of an instance's component properties.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropertySummary {
+    pub name: String,
+    /// `"boolean"`, `"text"` or `"swap"`.
+    pub kind: String,
+    /// The value as `set_instance_property` takes it: `true` or `false`, a
+    /// text, or the id of the main a swap shows.
+    pub value: serde_json::Value,
+    /// Whether the instance sets it otherwise than its main.
+    pub overridden: bool,
 }
 
 /// A chart's description as an agent reads it: what it draws, from which
@@ -293,8 +318,13 @@ pub struct EffectSummary {
     pub hue: Option<f64>,
 }
 
+/// A node's kind-specific geometry, as drawn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "built once per read and serialized at once; boxing Text would only move its size"
+)]
 pub enum Geometry {
     None,
     Rect {
@@ -365,13 +395,28 @@ pub enum Geometry {
         /// `auto` (the font's own line height), `N%` of the font size, or `Npx`;
         /// a string because a bare number could report only one of the three modes.
         line_height: String,
-        /// `start` | `end` | `left` | `center` | `right` | `justify`.
-        align: String,
+        /// The glyphs' own ink as `#rrggbbaa`; absent when they take the layer's
+        /// fills.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
         /// `auto` when the box grows both ways, else the width it wraps at.
         sizing: TextSizingSummary,
-        /// How many character-attribute overrides the node carries; `0` for
-        /// uniform text.
-        styled_runs: usize,
+        /// Every paragraph's defaults, as `set_paragraph_style` takes them: align,
+        /// spacing, indents, wrapping, direction, list marker and level, each
+        /// absent at its default.
+        #[serde(default, skip_serializing_if = "is_default")]
+        paragraph: ondin_core::ParagraphStyle,
+        /// The box's vertical alignment, trim, overflow and line limit, as
+        /// `set_block_style` takes them; absent at the defaults.
+        #[serde(default, skip_serializing_if = "is_default")]
+        block: ondin_core::BlockStyle,
+        /// The character runs over the defaults, as `style_text` takes them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        runs: Vec<TextRun<ondin_core::CharAttr>>,
+        /// The paragraphs that override the defaults, a list item's marker and
+        /// level among them, as `style_paragraphs` takes them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        paragraphs: Vec<TextRun<ondin_core::ParaAttr>>,
     },
     /// A frame. It has no background here: its ground is an ordinary entry in
     /// `NodeSnapshot::fills`.
@@ -393,6 +438,19 @@ pub enum Geometry {
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+/// Attributes over a range of a text counted in characters, `end` exclusive: the
+/// arguments `style_text` and `style_paragraphs` take to write them back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextRun<A> {
+    pub start: usize,
+    pub end: usize,
+    pub attrs: Vec<A>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -451,6 +509,30 @@ pub struct GradientStopSummary {
     pub alpha: f32,
 }
 
+/// One visible fill.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FillSummary {
+    /// The fill's item id, which follows it through reorders and ties an
+    /// instance's fill to its main's.
+    pub id: ondin_core::ItemId,
+    /// Its index in the layer's whole list, which `bind_variable` names a fill's
+    /// colour by; hidden fills are counted and not listed.
+    pub index: usize,
+    pub paint: PaintSummary,
+}
+
+/// A node's authored values where layout draws it otherwise: CSS's specified
+/// beside the used values the rest of the entry reports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Specified {
+    /// The transform as stored, where layout placed the node elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_transform: Option<[f64; 6]>,
+    /// The geometry as stored, where layout drew it at another size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Geometry>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrokeSummary {
     /// The stroke's item id, which `bind_variable` names a stroke's width by.
@@ -495,23 +577,35 @@ pub fn snapshot(doc: &Document, res: &Resolved) -> Snapshot {
     }
 }
 
-/// One warning per text node whose family is not registered. Derived from the
-/// already-built node list so the order is deterministic too.
+/// One warning per text node and family it sets, its default's or a run's, that
+/// is not registered. Derived from the already-built node list so the order is
+/// deterministic too.
 fn collect_warnings(nodes: &[NodeSnapshot]) -> Vec<Warning> {
-    nodes
-        .iter()
-        .filter_map(|n| match &n.geometry {
-            Geometry::Text { font_family, .. }
-                if !ondin_core::text::is_family_available(font_family) =>
-            {
-                Some(Warning::MissingFont {
-                    node: n.id.clone(),
-                    family: font_family.clone(),
-                })
-            }
+    let mut out = Vec::new();
+    for n in nodes {
+        let Geometry::Text {
+            font_family, runs, ..
+        } = &n.geometry
+        else {
+            continue;
+        };
+        let run_families = runs.iter().flat_map(|r| &r.attrs).filter_map(|a| match a {
+            ondin_core::CharAttr::Family(f) => Some(f),
             _ => None,
-        })
-        .collect()
+        });
+        let mut seen: Vec<&String> = Vec::new();
+        for family in std::iter::once(font_family).chain(run_families) {
+            if seen.contains(&family) || ondin_core::text::is_family_available(family) {
+                continue;
+            }
+            seen.push(family);
+            out.push(Warning::MissingFont {
+                node: n.id.clone(),
+                family: family.clone(),
+            });
+        }
+    }
+    out
 }
 
 fn collect(
@@ -587,9 +681,14 @@ fn node_snapshot(
             .paint()
             .fills
             .iter()
-            .filter(|f: &&ondin_core::Keyed<Fill>| f.visible)
+            .enumerate()
+            .filter(|(_, f): &(usize, &ondin_core::Keyed<Fill>)| f.visible)
             // The resolved value, not the binding: a reader sees what is drawn.
-            .map(|f| paint_summary(doc, &doc.resolve_brush(id, &f.brush)))
+            .map(|(index, f)| FillSummary {
+                id: f.id,
+                index,
+                paint: paint_summary(doc, &doc.resolve_brush(id, &f.brush)),
+            })
             .collect(),
         strokes: node
             .paint()
@@ -629,12 +728,32 @@ fn node_snapshot(
         styles: Some(node.styles()).filter(|s| *s != Default::default()),
         modes: node.modes().iter().map(|m| m.0.to_wire()).collect(),
         component: component_summary(doc, node),
-        fill_indices: {
-            let fills = &node.paint().fills;
-            let shown: Vec<usize> = (0..fills.len()).filter(|i| fills[*i].visible).collect();
-            (shown.len() != fills.len()).then_some(shown)
-        },
+        specified: specified(doc, res, node),
     }
+}
+
+/// What `node`'s authored transform and geometry say where layout drew it
+/// otherwise, or `None` where it is drawn as authored. A bound field is read as
+/// drawn, since its stored literal is a placeholder.
+fn specified(doc: &Document, res: &Resolved, node: &Node) -> Option<Specified> {
+    let id = node.id();
+    let local = node.transform().as_coeffs().map(round4);
+    let local_transform =
+        (local != res.used_local_of(node).as_coeffs().map(round4)).then_some(local);
+    let mut kind = doc
+        .resolved_kind(id)
+        .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned);
+    if let Some(radii) = kind.corner_radii().and_then(|r| doc.resolve_corners(id, r)) {
+        kind.set_corner_radii(radii);
+    }
+    let used = res.used_kind_of(node);
+    let authored = (kind != *used)
+        .then(|| geometry(&kind))
+        .filter(|g| *g != geometry(used));
+    (local_transform.is_some() || authored.is_some()).then_some(Specified {
+        local_transform,
+        geometry: authored,
+    })
 }
 
 /// Every field of `node` bound to a variable, in `bind_variable`'s terms.
@@ -720,6 +839,75 @@ fn component_summary(doc: &Document, node: &Node) -> Option<ComponentSummary> {
                 .collect(),
             _ => BTreeMap::new(),
         },
+        properties: match instance {
+            true => properties(doc, id),
+            false => Vec::new(),
+        },
+        overrides: ondin_core::reset::overrides(doc, id)
+            .iter()
+            .filter_map(|o| override_field(&o.reset))
+            .collect(),
+    })
+}
+
+/// The component properties the instance rooted at `root` offers, with its values.
+fn properties(doc: &Document, root: NodeId) -> Vec<PropertySummary> {
+    use ondin_core::variant::{PropKind, PropValue};
+    ondin_core::variant::instance_properties(doc, root)
+        .iter()
+        .filter_map(|p| {
+            let kind = match p.kind {
+                PropKind::Boolean => "boolean",
+                PropKind::Text => "text",
+                PropKind::Swap => "swap",
+                PropKind::Nested => return None,
+            };
+            let (value, overridden) = ondin_core::variant::property_state(doc, root, p)?;
+            Some(PropertySummary {
+                name: p.name.clone(),
+                kind: kind.to_string(),
+                value: match value {
+                    PropValue::Boolean(b) => serde_json::Value::Bool(b),
+                    PropValue::Text(t) => serde_json::Value::String(t),
+                    PropValue::Swap(main) => serde_json::Value::String(main.to_wire()),
+                },
+                overridden,
+            })
+        })
+        .collect()
+}
+
+/// The field a reset operation writes, in snake case: `SetFills` is `"fills"`,
+/// a geometry patch `"geometry."` and its own (`"geometry.size"`).
+fn override_field(op: &ondin_core::Operation) -> Option<String> {
+    fn snake(name: &str) -> String {
+        let mut out = String::new();
+        for (i, c) in name.chars().enumerate() {
+            if c.is_ascii_uppercase() {
+                if i > 0 {
+                    out.push('_');
+                }
+                out.push(c.to_ascii_lowercase());
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+    let v = serde_json::to_value(op).ok()?;
+    let (variant, body) = v.as_object()?.iter().next()?;
+    let field = snake(variant.strip_prefix("Set").unwrap_or(variant));
+    let patch = body
+        .get("geometry")
+        .and_then(|g| match g {
+            serde_json::Value::Object(m) => m.keys().next().cloned(),
+            serde_json::Value::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .map(|p| snake(&p));
+    Some(match patch {
+        Some(p) => format!("{field}.{p}"),
+        None => field,
     })
 }
 
@@ -942,7 +1130,9 @@ fn geometry(kind: &NodeKind) -> Geometry {
             content,
             style,
             spans,
+            para_spans,
             paragraph,
+            block,
             sizing,
             ..
         } => Geometry::Text {
@@ -956,15 +1146,7 @@ fn geometry(kind: &NodeKind) -> Geometry {
                 Some(ondin_core::Length::Em(m)) => format!("{}%", m * 100.0),
                 Some(ondin_core::Length::Px(v)) => format!("{v}px"),
             },
-            align: match paragraph.align {
-                ondin_core::TextAlign::Start => "start",
-                ondin_core::TextAlign::End => "end",
-                ondin_core::TextAlign::Left => "left",
-                ondin_core::TextAlign::Center => "center",
-                ondin_core::TextAlign::Right => "right",
-                ondin_core::TextAlign::Justify => "justify",
-            }
-            .to_string(),
+            color: style.color.map(hex8),
             sizing: match sizing {
                 ondin_core::TextSizing::Auto => TextSizingSummary::Auto,
                 ondin_core::TextSizing::AutoHeight(w) => {
@@ -975,9 +1157,44 @@ fn geometry(kind: &NodeKind) -> Geometry {
                     height: s.height,
                 },
             },
-            styled_runs: spans.as_slice().len(),
+            paragraph: paragraph.clone(),
+            block: *block,
+            runs: text_runs(content, spans.as_slice()),
+            paragraphs: text_runs(content, para_spans.as_slice()),
         },
     }
+}
+
+/// `spans`, counted in bytes of `content`, as runs counted in characters, the
+/// spans over one range gathered into one run, in order of where they start.
+fn text_runs<A: Clone>(content: &str, spans: &[ondin_core::Span<A>]) -> Vec<TextRun<A>> {
+    // Counted, not sliced: a bound text draws other content than its spans index.
+    let char_at = |byte: usize| {
+        content
+            .char_indices()
+            .take_while(|(b, _)| *b < byte)
+            .count()
+    };
+    let mut runs: Vec<TextRun<A>> = Vec::new();
+    for s in spans {
+        let (start, end) = (char_at(s.start), char_at(s.end));
+        match runs.iter_mut().find(|r| r.start == start && r.end == end) {
+            Some(r) => r.attrs.push(s.attr.clone()),
+            None => runs.push(TextRun {
+                start,
+                end,
+                attrs: vec![s.attr.clone()],
+            }),
+        }
+    }
+    runs.sort_by_key(|r| (r.start, r.end));
+    runs
+}
+
+/// `c` as `#rrggbbaa`, the spelling `review_colours` and `merge_colours` use.
+fn hex8(c: ondin_core::peniko::Color) -> String {
+    let rgba = c.to_rgba8();
+    format!("#{:02x}{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b, rgba.a)
 }
 
 fn hex(c: ondin_core::peniko::Color) -> (String, f32) {

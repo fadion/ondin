@@ -1624,6 +1624,68 @@ mod tests {
         );
     }
 
+    /// An instance reads back the property values it is set to and each copy the
+    /// fields it overrides, in the words `set_instance_property` and
+    /// `reset_overrides` take.
+    ///
+    /// flip: `component_summary` reading `overrides` off the instance root alone →
+    /// fails at "the copy's opacity".
+    #[test]
+    fn an_instance_reads_back_its_properties_and_overrides() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Dot");
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "make_component",
+            json!({ "nodes": [id] }),
+        );
+        let main = ok(&made)["created"][0].clone();
+        let args = json!({ "node": id, "kind": "boolean", "name": "Shown" });
+        ok(&call(&mut engine, &mut docs, 1, "define_property", args));
+        let page = docs.session.doc.first_page().to_wire();
+        let args = json!({ "main": main, "parent": page, "x": 500, "y": 500 });
+        let made = call(&mut engine, &mut docs, 1, "create_instance", args);
+        let instance = ok(&made)["created"][0].clone();
+        let args = json!({ "node": instance, "property": "Shown", "value": false });
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set_instance_property",
+            args,
+        ));
+
+        let read = |engine: &mut Engine, docs: &mut One, id: &Value| {
+            let out = call(engine, docs, 1, "get_node", json!({ "id": id }));
+            ok(&out)["nodes"][0].clone()
+        };
+        let root = read(&mut engine, &mut docs, &instance);
+        let props = &root["component"]["properties"];
+        assert_eq!(props[0]["name"], "Shown", "{root}");
+        assert_eq!(props[0]["kind"], "boolean");
+        assert_eq!(props[0]["value"], false);
+        assert_eq!(props[0]["overridden"], true);
+
+        let copy = root["children"][0].clone();
+        let args = json!({ "nodes": [copy], "opacity": 0.5 });
+        ok(&call(&mut engine, &mut docs, 1, "set_opacity", args));
+        let node = read(&mut engine, &mut docs, &copy);
+        let overrides = node["component"]["overrides"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            overrides.contains(&json!("opacity")),
+            "the copy's opacity: {overrides:?}"
+        );
+        assert!(overrides.contains(&json!("visible")), "{overrides:?}");
+        let main_node = read(&mut engine, &mut docs, &main);
+        assert!(main_node["component"].get("overrides").is_none());
+    }
+
     /// `outline_text` turns a text the session laid out into a path, through the
     /// engine as an agent calls it.
     #[test]

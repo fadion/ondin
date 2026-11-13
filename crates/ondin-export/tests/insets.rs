@@ -240,8 +240,9 @@ fn a_pinned_document_rasterizes_to_the_same_png_as_its_baked_twin() {
     assert!(a == b, "the two rasters differ");
 }
 
-/// Every used value matches; `insets`, which reports the pins themselves, is the
-/// one field the twins differ in, and is checked to.
+/// Every used value matches; `insets`, which reports the pins themselves, and
+/// `specified`, the authored values they moved, are the fields the twins differ
+/// in, and are checked too.
 #[test]
 fn a_pinned_document_snapshots_the_same_as_its_baked_twin() {
     let (doc, pinned) = pinned();
@@ -253,10 +254,17 @@ fn a_pinned_document_snapshots_the_same_as_its_baked_twin() {
             .iter_mut()
             .filter_map(|n| n.insets.take())
             .count();
-        (serde_json::to_string(&snap).unwrap(), pins)
+        let moved = snap
+            .nodes
+            .iter_mut()
+            .filter_map(|n| n.specified.take())
+            .count();
+        (serde_json::to_string(&snap).unwrap(), pins, moved)
     };
-    let (a, pins) = unpinned(&doc);
-    let (b, none) = unpinned(&bake);
+    let (a, pins, moved) = unpinned(&doc);
+    let (b, none, still) = unpinned(&bake);
     assert_eq!((pins, none), (pinned.len(), 0), "the pins are reported");
+    assert!(moved > 0, "what the pins moved is reported as authored");
+    assert_eq!(still, 0, "a baked layer is drawn as authored");
     assert_eq!(a, b);
 }

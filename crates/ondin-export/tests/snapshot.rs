@@ -43,7 +43,9 @@ fn rect_snapshot_has_world_data_and_paint() {
     ));
     // Fill summarized as a solid hex color.
     assert_eq!(rect.fills.len(), 1);
-    assert!(matches!(&rect.fills[0], PaintSummary::Solid { color, .. } if color == "#3c78dc"));
+    assert!(
+        matches!(&rect.fills[0].paint, PaintSummary::Solid { color, .. } if color == "#3c78dc")
+    );
     assert_eq!(rect.strokes.len(), 1);
     // World transform = artboard(10,10)+rect(20,20) translation => e=30, f=30.
     assert_eq!(rect.world_transform[4], 30.0);
@@ -75,38 +77,11 @@ fn wire(id: ondin_core::NodeId) -> String {
     id.to_wire()
 }
 
-/// The three text-style fields an agent needs, asserted as **values**.
-///
-/// An agent asked to "centre that heading" needs to know what the alignment and
-/// box already are; the earlier snapshot omitted all three.
-///
-/// ⚠️ **This test could not fail until §15 D480.** Two of its three assertions
-/// checked the projection's output against the projection's own
-/// **codomain** — `line_height` is one of `"auto"` / `…%` / `…px` because the
-/// `match` producing it has exactly those three arms, and `align` is one of six
-/// strings because its `match` is exhaustive over `TextAlign` — and the third,
-/// `sizing`, was discarded with `let _`. Replacing the whole `align` arm with
-/// `"start".to_string()` and the whole `sizing` arm with `TextSizingSummary::Auto`
-/// left `cargo test --workspace` green. **An MCP client reading a constant
-/// `"start"` for every text node is the exact failure this test was written
-/// against.** It is *"asserted a consequence the wrong implementation also
-/// produces"* in its purest form, the consequence being that the value
-/// type-checks.
-///
-/// ⚠️ **The default-valued fixture is the other half, and asserting its values
-/// alone would not have closed it.** `common::fixture`'s text is
-/// `TextAlign::Start` and `TextSizing::Auto` — the two values a constant
-/// projection would return anyway — so a second, **non-default** node is what
-/// separates a projection from a constant. It is applied here rather than in the
-/// shared fixture on purpose: that fixture feeds the byte-compared JSON golden
-/// (§15 D304), and churning the golden to close a test-quality gap spends a lot
-/// to prove a little.
-///
-/// ⚠️ **Flip-check, run: `align`'s `match` replaced by `"start".to_string()` and
-/// `sizing`'s by `TextSizingSummary::Auto`**, the constant projection itself.
-/// Fails on the non-default `align` assertion — the predicted site — and on the
-/// `sizing` assertion behind it. The default-valued half stays green under that
-/// flip, which is exactly why it cannot be the whole test.
+/// A text's line height, alignment and box, asserted as values on a default node
+/// and on a centred, fixed-box one, since the fixture's defaults are what a
+/// constant projection would answer.
+/// flip: `paragraph` written as `ParagraphStyle::default()` → fails at the
+/// non-default `paragraph.align`.
 #[test]
 fn text_snapshot_carries_the_full_style() {
     use ondin_core::{GeometryPatch, Operation, Resolved, TextSizing, Transaction};
@@ -122,15 +97,13 @@ fn text_snapshot_carries_the_full_style() {
     match &text.geometry {
         ondin_export::snapshot::Geometry::Text {
             line_height,
-            align,
+            paragraph,
             sizing,
             ..
         } => {
-            // A string, because the model's three line-height modes are
-            // genuinely different things and a bare number could only report one
-            // of them. The fixture's is `Length::Em(1.2)`.
+            // The fixture's is `Length::Em(1.2)`.
             assert_eq!(line_height, "120%");
-            assert_eq!(align, "start");
+            assert_eq!(paragraph.align, ondin_core::TextAlign::Start);
             assert_eq!(sizing, &ondin_export::snapshot::TextSizingSummary::Auto);
         }
         other => panic!("expected text geometry, got {other:?}"),
@@ -168,9 +141,12 @@ fn text_snapshot_carries_the_full_style() {
         .find(|n| n.kind == "text")
         .expect("still there");
     match &text.geometry {
-        ondin_export::snapshot::Geometry::Text { align, sizing, .. } => {
+        ondin_export::snapshot::Geometry::Text {
+            paragraph, sizing, ..
+        } => {
             assert_eq!(
-                align, "center",
+                paragraph.align,
+                ondin_core::TextAlign::Center,
                 "a centred paragraph must report centred — a constant `start` \
                  tells an agent the heading is already left-aligned"
             );
@@ -217,7 +193,7 @@ fn gradients_are_described_not_just_flagged() {
         .iter()
         .find(|n| n.id == f.rect.to_wire())
         .expect("rect present");
-    match &rect.fills[0] {
+    match &rect.fills[0].paint {
         PaintSummary::Gradient {
             kind,
             opacity,
@@ -731,7 +707,7 @@ fn a_bound_field_reports_its_drawn_value() {
     let node = |id| snap.nodes.iter().find(|n| n.id == wire(id)).unwrap();
     let rect = node(f.rect);
     assert!(
-        matches!(&rect.fills[0], PaintSummary::Solid { color, .. } if color == "#0000ff"),
+        matches!(&rect.fills[0].paint, PaintSummary::Solid { color, .. } if color == "#0000ff"),
         "B's blue: {:?}",
         rect.fills[0]
     );
@@ -1141,8 +1117,8 @@ fn bindings_styles_modes_and_component_links_are_reported() {
     );
     assert_eq!(rect.opacity, 0.5, "and its drawn value");
     assert_eq!(
-        rect.fill_indices.as_deref(),
-        Some(&[1][..]),
+        rect.fills.iter().map(|f| f.index).collect::<Vec<_>>(),
+        vec![1],
         "the shown fill sits above a hidden one"
     );
     assert_eq!(rect.strokes[0].index, 0);
@@ -1162,4 +1138,146 @@ fn bindings_styles_modes_and_component_links_are_reported() {
     assert_eq!(at(f.text).styles.map(|s| s.fills), Some(Some(style)));
     let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
     assert_eq!(back, snap, "the new fields round-trip");
+}
+
+/// A layer its insets stretch reports its authored transform and size beside the
+/// used ones; a layer drawn as authored reports none.
+/// flip: `specified` comparing the used geometry with itself → fails at the
+/// authored width.
+#[test]
+fn a_stretched_layer_reports_its_specified_values() {
+    use ondin_core::{Insets, LengthPct, Operation, Transaction};
+    use ondin_export::snapshot::Specified;
+    let mut f = common::fixture();
+    let stored = match f.doc.get(f.rect).unwrap().kind() {
+        ondin_core::NodeKind::Rect { size, .. } => size.width,
+        other => panic!("the fixture's rect is a {other:?}"),
+    };
+    let frame = match f.doc.get(f.artboard).unwrap().kind() {
+        ondin_core::NodeKind::Artboard { size, .. } => size.width,
+        other => panic!("the fixture's artboard is a {other:?}"),
+    };
+    assert_ne!(stored, frame - 20.0, "the stretch must change the width");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetInsets {
+            id: f.rect,
+            insets: Insets {
+                left: Some(LengthPct::Px(10.0)),
+                right: Some(LengthPct::Px(10.0)),
+                ..Default::default()
+            },
+        }]))
+        .expect("pin both edges");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+
+    let snap = snapshot(&f.doc, &f.res);
+    let at = |id: ondin_core::NodeId| snap.nodes.iter().find(|n| n.id == id.to_wire()).unwrap();
+    let rect = at(f.rect);
+    assert!(
+        matches!(rect.geometry, Geometry::Rect { width, .. } if width == frame - 20.0),
+        "used: {:?}",
+        rect.geometry
+    );
+    let Some(Specified {
+        geometry: Some(Geometry::Rect { width, .. }),
+        ..
+    }) = &rect.specified
+    else {
+        panic!("the authored width: {:?}", rect.specified);
+    };
+    assert_eq!(*width, stored);
+    assert_eq!(at(f.text).specified, None, "drawn as authored");
+}
+
+/// A text's runs and per-paragraph overrides read back in characters, as
+/// `style_text` and `style_paragraphs` take them: a coloured run past a
+/// two-byte character, a list item's marker and level, the block style, the
+/// glyphs' own colour, and a run's missing family as a warning.
+/// flip: `text_runs` counting bytes instead of characters → fails at the run's
+/// range.
+#[test]
+fn a_texts_runs_paragraphs_and_block_read_back() {
+    use ondin_core::{
+        BlockStyle, CharAttr, CharSpans, ListMarker, Operation, ParaAttr, ParaSpans,
+        ParagraphStyle, TextStyle, Transaction, peniko::Color,
+    };
+    use ondin_export::snapshot::{TextRun, Warning};
+    let mut f = common::fixture();
+    // `é` is two bytes, so "Two" is bytes 6..9 and characters 5..8.
+    let content = "Caf\u{e9}\nTwo";
+    let style = TextStyle {
+        color: Some(Color::from_rgba8(0x11, 0x22, 0x33, 0xff)),
+        ..TextStyle::default()
+    };
+    let red = Color::from_rgb8(0xff, 0, 0);
+    let mut spans = CharSpans::default();
+    spans.set(6..9, CharAttr::Color(Some(red)), &style);
+    spans.set(6..9, CharAttr::Family("Nowhere Sans".into()), &style);
+    let paragraph = ParagraphStyle::default();
+    let mut para_spans = ParaSpans::default();
+    para_spans.set(
+        6..9,
+        ParaAttr::Marker(Some(ListMarker::Decimal)),
+        &paragraph,
+    );
+    para_spans.set(6..9, ParaAttr::Level(1), &paragraph);
+    let block = BlockStyle {
+        max_lines: 3,
+        ..BlockStyle::default()
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetText {
+                id: f.text,
+                content: content.into(),
+                spans: CharSpans::default(),
+                para_spans,
+            },
+            Operation::SetTextStyle {
+                id: f.text,
+                style: style.clone(),
+                spans: Some(spans),
+            },
+            Operation::SetBlockStyle { id: f.text, block },
+        ]))
+        .expect("style the text");
+    f.res = ondin_core::Resolved::rebuild(&f.doc);
+
+    let snap = snapshot(&f.doc, &f.res);
+    let id = f.text.to_wire();
+    let text = snap.nodes.iter().find(|n| n.id == id).unwrap();
+    let Geometry::Text {
+        color,
+        block: read_block,
+        runs,
+        paragraphs,
+        ..
+    } = &text.geometry
+    else {
+        panic!("expected text geometry, got {:?}", text.geometry);
+    };
+    assert_eq!(color.as_deref(), Some("#112233ff"));
+    assert_eq!(read_block.max_lines, 3);
+    assert_eq!(runs.len(), 1, "one range, both attributes: {runs:?}");
+    assert_eq!((runs[0].start, runs[0].end), (5, 8));
+    assert!(runs[0].attrs.contains(&CharAttr::Color(Some(red))));
+    assert_eq!(
+        paragraphs,
+        &vec![TextRun {
+            start: 5,
+            end: 8,
+            attrs: vec![
+                ParaAttr::Marker(Some(ListMarker::Decimal)),
+                ParaAttr::Level(1)
+            ],
+        }]
+    );
+    assert!(
+        snap.warnings.contains(&Warning::MissingFont {
+            node: id.clone(),
+            family: "Nowhere Sans".into(),
+        }),
+        "{:?}",
+        snap.warnings
+    );
 }

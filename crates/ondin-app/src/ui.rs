@@ -2334,9 +2334,34 @@ pub const TEXT_AREA_MAX_ROWS: usize = 15;
 pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> egui::Response {
     let font = egui::FontId::proportional(CONTROL_PT);
     let pad = edit_frame(ui, &font, CONTROL_H - FIELD_BORDER_H, FIELD_PAD_X);
+    // egui sizes `desired_rows` by the font's row height but lays each line at
+    // whole pixels, a little taller, so the field grew as its last row filled.
+    // The rows' box is measured off a laid-out line instead.
+    let line = ui
+        .fonts_mut(|f| f.layout_no_wrap("x".into(), font.clone(), egui::Color32::PLACEHOLDER))
+        .size()
+        .y;
+    let frame = match area.bare {
+        true => egui::Frame::NONE,
+        false => pad.frame,
+    };
+    let inset = frame.inner_margin.sum().y;
+    // A framed field is never shorter than a control, and one row of it
+    // centres its line as a text field does; more rows write from the top.
+    let floor = match area.bare {
+        true => 0.0,
+        false => pad.h,
+    };
+    let rows_h = (area.rows as f32 * line + inset).max(floor);
+    let valign = match area.rows {
+        0 | 1 => egui::Align::Center,
+        _ => egui::Align::Min,
+    };
     let mut edit = egui::TextEdit::multiline(text)
-        .desired_rows(area.rows)
+        .desired_rows(1)
         .font(font)
+        .frame(frame)
+        .vertical_align(valign)
         .hint_text(egui::RichText::new(area.hint).size(CONTROL_PT));
     if let Some(id) = area.id {
         edit = edit.id(id);
@@ -2349,29 +2374,25 @@ pub fn text_area(ui: &mut egui::Ui, text: &mut String, area: TextArea<'_>) -> eg
     }
     // Past `max_rows` the edit scrolls inside its ground; egui keeps the caret
     // in view.
-    let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(CONTROL_PT)));
-    let inset = match area.bare {
-        true => 0.0,
-        false => pad.frame.inner_margin.sum().y,
-    };
     let scroller = egui::ScrollArea::vertical()
         .id_salt(area.id.unwrap_or_else(|| ui.next_auto_id()).with("rows"))
-        .max_height(area.max_rows as f32 * row_h + inset)
+        .max_height(area.max_rows as f32 * line + inset)
         .auto_shrink([false, true])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    // Stretched over its rows' box, so a click anywhere in the box lands in
+    // it; longer text grows it past the box.
+    let rows = |ui: &mut egui::Ui| {
+        let size = egui::vec2(ui.available_width(), rows_h);
+        let stretch = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+        ui.allocate_ui_with_layout(size, stretch, |ui| ui.add(edit.desired_width(size.x)))
+            .inner
+    };
     if area.bare {
-        let edit = edit
-            .frame(egui::Frame::NONE)
-            .desired_width(ui.available_width());
-        return scroller.show(ui, |ui| ui.add(edit)).inner;
+        return scroller.show(ui, rows).inner;
     }
     let framed = field_frame()
         .inner_margin(egui::Margin::ZERO)
-        .show(ui, |ui| {
-            scroller
-                .show(ui, |ui| pad.add(ui, f32::INFINITY, edit))
-                .inner
-        });
+        .show(ui, |ui| scroller.show(ui, rows).inner);
     let resp = framed.inner;
     if resp.has_focus() {
         typing_edge(ui, framed.response.rect);
@@ -12208,7 +12229,7 @@ mod split_button_tests {
             h
         };
         assert!(height(6) > height(3), "it grows with its lines");
-        let row = ctx.fonts_mut(|f| f.row_height(&egui::FontId::proportional(CONTROL_PT)));
+        let row = laid_line(&ctx);
         let cap = TEXT_AREA_MAX_ROWS as f32 * row;
         let long = height(40);
         assert!(
@@ -12216,5 +12237,59 @@ mod split_button_tests {
             "40 lines stop at {TEXT_AREA_MAX_ROWS} rows: {long} vs {cap}"
         );
         assert!(long > cap - row, "and fill them: {long} vs {cap}");
+    }
+
+    /// A laid-out line's height at the control size, as `text_area` measures it.
+    fn laid_line(ctx: &egui::Context) -> f32 {
+        let font = egui::FontId::proportional(CONTROL_PT);
+        ctx.fonts_mut(|f| f.layout_no_wrap("x".into(), font, egui::Color32::PLACEHOLDER))
+            .size()
+            .y
+    }
+
+    /// A framed `text_area` of three rows keeps its height until a fourth line,
+    /// and writes its first line at the top of the field, not its middle.
+    /// flip: `text_area` sizing its rows by the font's row height → fails at
+    /// "three lines fit"; its edit centred vertically → fails at "at the top".
+    #[test]
+    fn a_framed_text_area_holds_its_rows_with_its_text_on_top() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let probe = |lines: usize| {
+            let mut text = vec!["line"; lines].join("\n");
+            let (mut h, mut field_top, mut ink_top) = (0.0, 0.0, f32::INFINITY);
+            for _ in 0..3 {
+                let out = ctx.run_ui(Default::default(), |ui| {
+                    let mut area = TextArea::new("hint", 3);
+                    area.id = Some(egui::Id::new(("framed", lines)));
+                    let top = ui.cursor().top();
+                    field_top = text_area(ui, &mut text, area).rect.top();
+                    h = ui.cursor().top() - top;
+                });
+                ink_top = out
+                    .shapes
+                    .iter()
+                    .filter_map(|c| match &c.shape {
+                        egui::Shape::Text(t) => Some(t.pos.y),
+                        _ => None,
+                    })
+                    .fold(f32::INFINITY, f32::min);
+            }
+            (h, ink_top - field_top)
+        };
+        let (empty, _) = probe(0);
+        let (one, one_ink) = probe(1);
+        let (three, _) = probe(3);
+        let (four, _) = probe(4);
+        assert_eq!(empty, one, "the hint and a line are one height");
+        assert_eq!(
+            one, three,
+            "three lines fit its three rows: {one} vs {three}"
+        );
+        assert!(four > three, "a fourth grows it: {four} vs {three}");
+        assert!(
+            one_ink < laid_line(&ctx),
+            "one line sits at the top of three rows: {one_ink} below the edit's top"
+        );
     }
 }

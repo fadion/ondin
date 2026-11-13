@@ -396,6 +396,24 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "propose_edit",
+        doc: "Propose an edit as a list of registry verb calls, the write tools' names and arguments; nothing changes until the person applies it, as one undo step named `title`. Each call is checked as the write tool checks it, in turn, each seeing what the last made. Answers `proposal`, its id, and `changes`, one line per call; or the first refusal",
+        params: &[
+            param(
+                "title",
+                ParamKind::Text,
+                true,
+                "A short name for the edit, which the person's undo step takes.",
+            ),
+            param(
+                "calls",
+                ParamKind::Model("Steps"),
+                true,
+                "The calls in order, each {\"verb\": <a write tool>, \"args\": {…}}.",
+            ),
+        ],
+    },
+    Tool {
         name: "describe_tools",
         doc: "The full definitions of tools, listed or not, by name or by a word in their name or description, name matches first; run one that is not listed with `call`. A name that is no tool is answered in `not_found`. Needs no current document.",
         params: &[
@@ -646,7 +664,11 @@ const OUTSIDE_UNDO: [&str; 5] = [
 
 /// The class of the tool called `name`.
 pub fn class(name: &str) -> Class {
-    if crate::tools::PHASE_1.contains(&name) || LATER_READS.contains(&name) {
+    // A proposal is recorded, not applied: the document does not move.
+    if crate::tools::PHASE_1.contains(&name)
+        || LATER_READS.contains(&name)
+        || crate::tools::ASSISTANT.contains(&name)
+    {
         Class::Read
     } else if OUTSIDE_UNDO.contains(&name) {
         Class::OutsideUndo
@@ -732,6 +754,28 @@ mod tests {
             .chain(&PHASE_4)
         {
             assert!(definition(name).is_some(), "`{name}` has no definition");
+        }
+    }
+
+    /// Every assistant tool has a definition, is no verb and no phase's tool, and
+    /// is marked read-only: a proposal does not move the document.
+    ///
+    /// flip: `class` without its `ASSISTANT` arm → fails at "read-only".
+    #[test]
+    fn an_assistant_tool_is_defined_and_reads() {
+        for name in crate::tools::ASSISTANT {
+            let d = definition(name).unwrap_or_else(|| panic!("`{name}` has no definition"));
+            assert!(verbs::find(name).is_none(), "`{name}` is a verb");
+            assert!(
+                !PHASE_1
+                    .iter()
+                    .chain(&PHASE_2)
+                    .chain(&PHASE_3)
+                    .chain(&PHASE_4)
+                    .any(|t| *t == name),
+                "`{name}` is a phase's tool"
+            );
+            assert_eq!(d["annotations"]["readOnlyHint"], true, "read-only");
         }
     }
 

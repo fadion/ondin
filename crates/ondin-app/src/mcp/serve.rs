@@ -184,7 +184,7 @@ pub(crate) fn run() -> Result<(), String> {
         None => return Ok(()),
     };
     let (to, from) = queue::queue();
-    let _endpoint = endpoint::listen(Host::Serve, to)
+    let _endpoint = endpoint::listen(Host::Serve, to, None)
         .map_err(|e| format!("ondin serve: cannot listen: {e}"))?;
     let prefs = crate::prefs::Prefs::load();
     let mut docs = Headless::new(crate::library::root(prefs.base_folder.as_deref()));

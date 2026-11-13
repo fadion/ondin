@@ -1,7 +1,7 @@
 //! A host's MCP endpoint (§8.1): a local socket admitting only this user, one
 //! thread per connection, and a discovery file the proxy finds it by.
 
-use ondin_mcp::queue::{Conn, Forward, Request};
+use ondin_mcp::queue::{Conn, Forward, Lists, Request};
 use ondin_mcp::wire;
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read, Write};
@@ -68,13 +68,18 @@ impl Drop for Endpoint {
     }
 }
 
-/// Listen for this process as `host`, sending every call to `to`.
-pub(crate) fn listen(host: Host, to: Sender<Request>) -> std::io::Result<Endpoint> {
+/// Listen for this process as `host`, sending every call to `to`; `lists`, when
+/// given, answers a granted peer's `tools/list`.
+pub(crate) fn listen(
+    host: Host,
+    to: Sender<Request>,
+    lists: Option<Lists>,
+) -> std::io::Result<Endpoint> {
     let dir = run_dir().ok_or_else(|| std::io::Error::other("no folder for the endpoint"))?;
     make_private_dir(&dir)?;
     let pid = std::process::id();
     let endpoint = address(&dir, pid);
-    serve_at(&endpoint, to)?;
+    serve_at(&endpoint, Accepted { to, lists })?;
     let file = dir.join(format!("{pid}.json"));
     let socket = cfg!(not(windows)).then(|| endpoint.clone());
     let found = Found {
@@ -121,17 +126,32 @@ pub(crate) type Stream = (Box<dyn Read + Send>, Box<dyn Write + Send>);
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-/// Answer one accepted connection on its own thread.
-fn spawn_connection(read: Box<dyn Read + Send>, write: Box<dyn Write + Send>, to: Sender<Request>) {
+/// What every accepted connection is handed: where its calls go and the host's
+/// own lists.
+#[derive(Clone)]
+struct Accepted {
+    to: Sender<Request>,
+    lists: Option<Lists>,
+}
+
+/// Answer one accepted connection from process `pid` on its own thread.
+fn spawn_connection(
+    read: Box<dyn Read + Send>,
+    write: Box<dyn Write + Send>,
+    pid: Option<u32>,
+    with: Accepted,
+) {
     let conn: Conn = NEXT.fetch_add(1, Ordering::Relaxed);
     let _ = std::thread::Builder::new()
         .name(format!("mcp-{conn}"))
         .spawn(move || {
             let mut handler = Forward {
                 conn,
-                to,
+                to: with.to,
+                pid,
                 tools: tools(false),
                 all_tools: tools(true),
+                lists: with.lists,
                 wait: ondin_mcp::queue::TAKE_WAIT,
             };
             let _ = wire::serve(BufReader::new(read), write, &mut handler);
@@ -169,7 +189,7 @@ fn address(dir: &Path, pid: u32) -> PathBuf {
 /// clients, its default DACL lets only this user write, and a client that runs
 /// as anyone else is dropped.
 #[cfg(windows)]
-fn serve_at(addr: &Path, to: Sender<Request>) -> std::io::Result<()> {
+fn serve_at(addr: &Path, with: Accepted) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     let name: Vec<u16> = addr.as_os_str().encode_wide().chain([0]).collect();
     let first = crate::one_window::pipe_instance(&name, true)?;
@@ -179,10 +199,10 @@ fn serve_at(addr: &Path, to: Sender<Request>) -> std::io::Result<()> {
             let mut next = Some(first);
             while let Some(pipe) = next.take() {
                 if let Ok(pipe) = crate::one_window::connected(pipe)
-                    && client_is_this_user(&pipe)
+                    && let Some(pid) = this_users_client(&pipe)
                     && let Ok(read) = pipe.try_clone()
                 {
-                    spawn_connection(Box::new(read), Box::new(pipe), to.clone());
+                    spawn_connection(Box::new(read), Box::new(pipe), Some(pid), with.clone());
                 }
                 match crate::one_window::pipe_instance(&name, false) {
                     Ok(pipe) => next = Some(pipe),
@@ -193,18 +213,19 @@ fn serve_at(addr: &Path, to: Sender<Request>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The connected client's process when it runs as this user, else `None`.
 #[cfg(windows)]
-fn client_is_this_user(pipe: &std::fs::File) -> bool {
+fn this_users_client(pipe: &std::fs::File) -> Option<u32> {
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
     let mut pid = 0u32;
     // SAFETY: `pipe` is a connected pipe handle for the whole call, `pid` writable.
     let ok = unsafe { GetNamedPipeClientProcessId(pipe.as_raw_handle() as _, &mut pid) } != 0;
-    ok && crate::one_window::same_user(pid)
+    (ok && crate::one_window::same_user(pid)).then_some(pid)
 }
 
 #[cfg(not(windows))]
-fn serve_at(addr: &Path, to: Sender<Request>) -> std::io::Result<()> {
+fn serve_at(addr: &Path, with: Accepted) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let _ = std::fs::remove_file(addr);
     let listener = std::os::unix::net::UnixListener::bind(addr)?;
@@ -216,12 +237,64 @@ fn serve_at(addr: &Path, to: Sender<Request>) -> std::io::Result<()> {
                 if !peer_is_this_user(&stream) {
                     continue;
                 }
+                let pid = peer_pid(&stream);
                 if let Ok(read) = stream.try_clone() {
-                    spawn_connection(Box::new(read), Box::new(stream), to.clone());
+                    spawn_connection(Box::new(read), Box::new(stream), pid, with.clone());
                 }
             }
         })?;
     Ok(())
+}
+
+/// The connected peer's process, from `SO_PEERCRED`.
+#[cfg(target_os = "linux")]
+fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd as _;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: u32::MAX,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred` and `len` are writable and sized for `SO_PEERCRED`.
+    let ok = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &mut len,
+        )
+    } == 0;
+    (ok && cred.pid > 0).then_some(cred.pid as u32)
+}
+
+/// The connected peer's process, from `LOCAL_PEERPID`. The two values are
+/// macOS's `<sys/un.h>`, written here so no `libc` version decides the build.
+#[cfg(target_os = "macos")]
+fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd as _;
+    const SOL_LOCAL: libc::c_int = 0;
+    const LOCAL_PEERPID: libc::c_int = 0x002;
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: `pid` and `len` are writable and sized for `LOCAL_PEERPID`.
+    let ok = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            SOL_LOCAL,
+            LOCAL_PEERPID,
+            (&raw mut pid).cast(),
+            &mut len,
+        )
+    } == 0;
+    (ok && pid > 0).then_some(pid as u32)
+}
+
+/// No peer process on the other Unixes: only a key grants a level there.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn peer_pid(_: &std::os::unix::net::UnixStream) -> Option<u32> {
+    None
 }
 
 #[cfg(target_os = "linux")]

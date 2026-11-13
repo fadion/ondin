@@ -204,6 +204,11 @@ pub const PHASE_4: [&str; 16] = [
     "save_version",
 ];
 
+/// The assistant's own tools, outside the phases: listed only to a chat the
+/// window granted a level that includes them. `propose_edit` checks a list of
+/// verb calls and records it for the person to apply; the document never moves.
+pub const ASSISTANT: [&str; 1] = ["propose_edit"];
+
 /// The tools `tools/list` names by default (§8.4, *Core*): what nearly every
 /// task uses. Every other tool still answers by name, through `call`, or listed
 /// with `ondin mcp-proxy --tools all`; a short list is read on every turn.

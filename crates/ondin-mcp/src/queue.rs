@@ -32,6 +32,9 @@ pub struct Call {
     /// The key it gave there; the host keeps a keyed client's state across its
     /// connections, an unkeyed one's for this connection.
     pub key: Option<String>,
+    /// The connecting process, as the endpoint read it at accept; `None` where
+    /// the platform does not say.
+    pub pid: Option<u32>,
     pub tool: String,
     pub args: Value,
     pub reply: SyncSender<Output>,
@@ -53,6 +56,7 @@ impl Call {
             conn,
             client: "test".to_owned(),
             key,
+            pid: None,
             tool: tool.to_owned(),
             args,
             reply,
@@ -81,20 +85,36 @@ pub fn queue() -> (Sender<Request>, Receiver<Request>) {
     channel()
 }
 
+/// The host's own list for a peer, by the key it gave and the process it is:
+/// `None` to list the defaults. The host's grants decide it, so a connection
+/// reads them afresh at every `tools/list`.
+pub type Lists = Arc<dyn Fn(Option<&str>, Option<u32>) -> Option<Vec<Value>> + Send + Sync>;
+
 /// A connection's [`Handler`]: forwards each call to the owning thread and waits.
 pub struct Forward {
     pub conn: Conn,
     pub to: Sender<Request>,
+    /// The connecting process, which every call carries.
+    pub pid: Option<u32>,
     /// The tool definitions this host lists by default: the core set.
     pub tools: Vec<Value>,
     /// The definitions it lists to a peer that asked for every tool.
     pub all_tools: Vec<Value>,
+    /// Asked before the defaults.
+    pub lists: Option<Lists>,
     /// How long a call waits to be taken: [`TAKE_WAIT`].
     pub wait: Duration,
 }
 
 impl Handler for Forward {
     fn tools(&self, peer: &Peer) -> Vec<Value> {
+        if let Some(listed) = self
+            .lists
+            .as_ref()
+            .and_then(|lists| lists(peer.key.as_deref(), self.pid))
+        {
+            return listed;
+        }
         match peer.all_tools {
             true => self.all_tools.clone(),
             false => self.tools.clone(),
@@ -108,6 +128,7 @@ impl Handler for Forward {
             conn: self.conn,
             client: peer.name.clone(),
             key: peer.key.clone(),
+            pid: self.pid,
             tool: name.to_owned(),
             args,
             reply,
@@ -174,8 +195,10 @@ mod tests {
         let mut f = Forward {
             conn: 7,
             to,
+            pid: None,
             tools: Vec::new(),
             all_tools: Vec::new(),
+            lists: None,
             wait: TAKE_WAIT,
         };
         let peer = Peer {
@@ -199,8 +222,10 @@ mod tests {
         let mut f = Forward {
             conn: 1,
             to,
+            pid: None,
             tools: Vec::new(),
             all_tools: Vec::new(),
+            lists: None,
             wait: Duration::from_millis(20),
         };
         let out = f.call(&Peer::default(), "set_name", json!({}));
@@ -209,5 +234,43 @@ mod tests {
             panic!("the call was queued");
         };
         assert!(!late.take(), "too late to run");
+    }
+
+    /// `tools/list` asks the host's `lists` with the peer's key and the
+    /// connection's process before the defaults, and every call carries that
+    /// process.
+    ///
+    /// flip: `Forward::tools` passing `None` for the process → fails at the
+    /// first `assert_eq!`, listing the defaults.
+    #[test]
+    fn the_hosts_list_and_the_process_reach_the_host() {
+        let (to, from) = queue();
+        let lists: Lists = Arc::new(|key, pid| match (key, pid) {
+            (_, Some(42)) => Some(vec![json!("by process")]),
+            (Some("chat"), _) => Some(vec![json!("by key")]),
+            _ => None,
+        });
+        let mut f = Forward {
+            conn: 1,
+            to,
+            pid: Some(42),
+            tools: vec![json!("core")],
+            all_tools: Vec::new(),
+            lists: Some(lists),
+            wait: Duration::from_millis(20),
+        };
+        assert_eq!(f.tools(&Peer::default()), [json!("by process")]);
+        f.pid = Some(7);
+        let keyed = Peer {
+            key: Some("chat".into()),
+            ..Peer::default()
+        };
+        assert_eq!(f.tools(&keyed), [json!("by key")]);
+        assert_eq!(f.tools(&Peer::default()), [json!("core")]);
+        let _ = f.call(&Peer::default(), "get_node", json!({}));
+        let Ok(Request::Call(c)) = from.try_recv() else {
+            panic!("the call was queued");
+        };
+        assert_eq!(c.pid, Some(7));
     }
 }

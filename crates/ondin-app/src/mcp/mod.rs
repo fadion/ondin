@@ -6,11 +6,14 @@
 //! the host through [`Documents`]. Writes go through `EditorSession::try_commit`,
 //! the door the app's own edits use.
 
+pub(crate) mod access;
 mod actions;
+mod agent_log;
 mod context;
 pub(crate) mod endpoint;
 mod inspect;
 mod kits;
+pub(crate) mod propose;
 pub(crate) mod proxy;
 mod reads;
 pub(crate) mod serve;
@@ -163,6 +166,10 @@ enum Who {
 /// turn with the same key.
 const CLIENTS: usize = 32;
 
+/// How many proposals a host keeps for the person to apply; the oldest goes
+/// first.
+const PROPOSALS: usize = 64;
+
 /// The tool handlers and every client's state.
 #[derive(Default)]
 pub(crate) struct Engine {
@@ -170,6 +177,14 @@ pub(crate) struct Engine {
     /// The connections open now, which `serve` waits on.
     live: std::collections::HashSet<Conn>,
     tick: u64,
+    /// The levels the window granted its chats.
+    grants: access::Grants,
+    /// What the chats proposed, newest last.
+    proposals: VecDeque<propose::Proposal>,
+    /// The last proposal's id.
+    proposed: u64,
+    /// Where a granted chat's calls are written.
+    log: agent_log::Log,
 }
 
 /// What changed between two looks at a document.
@@ -350,8 +365,49 @@ impl Engine {
         client
     }
 
-    /// Answer one call.
-    pub(crate) fn handle(&mut self, docs: &mut impl Documents, call: Call) -> Output {
+    /// The levels granted to the window's chats, shared with its endpoint.
+    pub(crate) fn grants(&self) -> access::Grants {
+        self.grants.clone()
+    }
+
+    /// The proposal called `id`, while it is among the last [`PROPOSALS`].
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the assistant panel's card reads it")
+    )]
+    pub(crate) fn proposal(&self, id: u64) -> Option<&propose::Proposal> {
+        self.proposals.iter().find(|p| p.id == id)
+    }
+
+    /// Answer one call. A chat granted a level, by its key or by the process
+    /// calling, acts under the chat's key, is refused a tool above its level,
+    /// and has the call written to the agent log.
+    pub(crate) fn handle(&mut self, docs: &mut impl Documents, mut call: Call) -> Output {
+        let Some((key, level)) = self.grants.resolve(call.key.as_deref(), call.pid) else {
+            return self.answer(docs, call);
+        };
+        call.key = Some(key.clone());
+        let tool = match call.tool.as_str() {
+            "call" => call.args.get("tool").and_then(Value::as_str),
+            tool => Some(tool),
+        }
+        .unwrap_or("call")
+        .to_owned();
+        let out = match access::refused(level, &call) {
+            Some(why) => Output::error(why),
+            None => self.answer(docs, call),
+        };
+        let document = self
+            .clients
+            .get(&Who::Key(key.clone()))
+            .and_then(|c| c.document.clone());
+        self.log
+            .write(&tool, document.as_deref(), &key, !out.is_error);
+        out
+    }
+
+    /// Answer one call that its level allows.
+    fn answer(&mut self, docs: &mut impl Documents, call: Call) -> Output {
         // `call` is the named tool's call itself, so it is checked and answered
         // as that tool, listed or not.
         let mut call = call;
@@ -369,6 +425,7 @@ impl Engine {
         if let Err(why) = check_call(&call) {
             return Output::error(why);
         }
+        let next = self.proposed + 1;
         let conn = self.client(&call);
         if call.tool == "use_document" {
             let Some(wanted) = call.args.get("document").and_then(Value::as_str) else {
@@ -464,7 +521,21 @@ impl Engine {
         let before = session.revision();
         let changed = catch_up(conn, session);
         let mark = session.mark();
-        let answer = if kits::is_kit_tool(&call.tool) {
+        let mut proposed = None;
+        let answer = if call.tool == "propose_edit" {
+            let title = call.args["title"].as_str().unwrap_or_default();
+            propose::calls(&call.args)
+                .and_then(|calls| propose::check(session, &call.client, title, calls))
+                .map(|mut p| {
+                    p.id = next;
+                    p.key.clone_from(&call.key);
+                    p.document.clone_from(&path);
+                    let answer = json!({ "proposal": p.id, "changes": p.changes });
+                    proposed = Some(p);
+                    Answer::Json(answer)
+                })
+                .map_err(|why| format!("{why}. Nothing was proposed."))
+        } else if kits::is_kit_tool(&call.tool) {
             kits::run(docs, &path, &call)
         } else if actions::TOOLS.contains(&call.tool.as_str()) {
             actions::run(docs, &path, &call)
@@ -523,6 +594,13 @@ impl Engine {
             }
         }
         stamp(&mut output, after, changed);
+        if let Some(p) = proposed {
+            self.proposed = p.id;
+            self.proposals.push_back(p);
+            if self.proposals.len() > PROPOSALS {
+                self.proposals.pop_front();
+            }
+        }
         output
     }
 }
@@ -2156,14 +2234,14 @@ mod tests {
     use std::sync::mpsc::sync_channel;
 
     /// One open document at `/a.ondin`.
-    struct One {
-        path: PathBuf,
-        session: EditorSession,
+    pub(in crate::mcp) struct One {
+        pub(in crate::mcp) path: PathBuf,
+        pub(in crate::mcp) session: EditorSession,
         committed: usize,
     }
 
     impl One {
-        fn new() -> Self {
+        pub(in crate::mcp) fn new() -> Self {
             Self {
                 path: PathBuf::from("/a.ondin"),
                 session: EditorSession::new(),
@@ -2204,12 +2282,18 @@ mod tests {
         }
     }
 
-    fn call(engine: &mut Engine, docs: &mut One, conn: Conn, tool: &str, args: Value) -> Output {
+    pub(in crate::mcp) fn call(
+        engine: &mut Engine,
+        docs: &mut One,
+        conn: Conn,
+        tool: &str,
+        args: Value,
+    ) -> Output {
         keyed(engine, docs, conn, None, tool, args)
     }
 
     /// [`call`] from a client that gave `key`.
-    fn keyed(
+    pub(in crate::mcp) fn keyed(
         engine: &mut Engine,
         docs: &mut One,
         conn: Conn,
@@ -2224,12 +2308,12 @@ mod tests {
         )
     }
 
-    fn ok(out: &Output) -> &Value {
+    pub(in crate::mcp) fn ok(out: &Output) -> &Value {
         assert!(!out.is_error, "{:?}", out.content);
         out.structured.as_ref().unwrap()
     }
 
-    fn open(engine: &mut Engine, docs: &mut One, conn: Conn) {
+    pub(in crate::mcp) fn open(engine: &mut Engine, docs: &mut One, conn: Conn) {
         ok(&call(
             engine,
             docs,
@@ -2240,7 +2324,12 @@ mod tests {
     }
 
     /// Make a rectangle on the first page through the engine, answering its id.
-    fn rect(engine: &mut Engine, docs: &mut One, conn: Conn, name: &str) -> String {
+    pub(in crate::mcp) fn rect(
+        engine: &mut Engine,
+        docs: &mut One,
+        conn: Conn,
+        name: &str,
+    ) -> String {
         let page = docs.session.doc.first_page().to_wire();
         let kind = ondin_core::verbs::example("NodeKind").unwrap();
         let args = json!({ "parent": page, "kind": kind, "name": name });

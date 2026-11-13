@@ -6,7 +6,9 @@
 //! the autosave, as the person's own edits do; one to a tab behind is written at
 //! once, since a tab behind is kept clean.
 
+use super::access::Grants;
 use super::endpoint::{self, Endpoint, Host};
+use super::propose::Proposal;
 use super::{Documents, Engine};
 use crate::app::OndinApp;
 use crate::library::state::Library;
@@ -28,7 +30,9 @@ pub(crate) struct WindowHost {
 /// endpoint cannot be made: the window works without it.
 pub(crate) fn start(ctx: &egui::Context) -> Option<WindowHost> {
     let (to, from) = queue::queue();
-    let endpoint = match endpoint::listen(Host::Window, to) {
+    let engine = Engine::default();
+    let lists = engine.grants().lists();
+    let endpoint = match endpoint::listen(Host::Window, to, Some(lists)) {
         Ok(e) => e,
         Err(e) => {
             log::warn!(target: "ondin", "mcp: no endpoint: {e}");
@@ -53,9 +57,26 @@ pub(crate) fn start(ctx: &egui::Context) -> Option<WindowHost> {
     }
     Some(WindowHost {
         calls,
-        engine: Engine::default(),
+        engine,
         _endpoint: endpoint,
     })
+}
+
+#[expect(
+    dead_code,
+    reason = "the assistant panel grants levels and shows proposals"
+)]
+impl WindowHost {
+    /// The levels granted to the assistant's chats; a grant made here holds for
+    /// the next call and the next `tools/list`.
+    pub(crate) fn grants(&self) -> Grants {
+        self.engine.grants()
+    }
+
+    /// The proposal called `id`, while the host keeps it.
+    pub(crate) fn proposal(&self, id: u64) -> Option<&Proposal> {
+        self.engine.proposal(id)
+    }
 }
 
 impl OndinApp {

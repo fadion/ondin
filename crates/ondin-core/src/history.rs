@@ -223,6 +223,37 @@ impl History {
         self.run = None;
     }
 
+    /// Join the top `n` steps into one, which undoes them all at once, the latest
+    /// first, and keeps the oldest's note. For edits committed one by one, each
+    /// reading the last, that the person asked for as one. Answers whether there
+    /// were `n` steps to join.
+    pub fn join_last(&mut self, n: usize) -> bool {
+        if n == 0 || n > self.undo.len() {
+            return false;
+        }
+        let joined = self.undo.split_off(self.undo.len() - n);
+        let mut steps = joined.into_iter();
+        let Some(mut first) = steps.next() else {
+            return false;
+        };
+        for later in steps {
+            // Each inverse was taken against the state after its own step, so the
+            // latest goes first.
+            let mut tx = later.tx.0;
+            tx.append(&mut first.tx.0);
+            first.tx.0 = tx;
+        }
+        self.undo.push(first);
+        self.run = None;
+        true
+    }
+
+    /// Drop every undone step, as a new commit does: for a caller that took back
+    /// its own steps and must not leave them for a redo.
+    pub fn clear_redo(&mut self) {
+        self.redo.clear();
+    }
+
     /// Undo the most recent transaction, returning its `DirtySet` (or `None` if
     /// there was nothing to undo). The inverse is pushed to the redo stack. A step
     /// that fails to apply stays where it was: `apply` changed nothing, and
@@ -416,6 +447,23 @@ mod tests {
 
     fn x_of(doc: &Document, id: NodeId) -> f64 {
         doc.get(id).unwrap().transform().translation().x
+    }
+
+    /// Joined steps undo as one, the latest first, and redo as one: a layer made
+    /// and then moved goes and comes back moved.
+    /// flip: `join_last` putting the oldest inverse first → fails at the undo,
+    /// which deletes the layer before moving it back.
+    #[test]
+    fn joined_steps_undo_and_redo_as_one() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        history.commit(&mut doc, move_to(rect, 5.0)).unwrap();
+        assert!(history.join_last(2));
+        assert!(!history.join_last(2), "one step is left");
+        assert_eq!(history.undo_depth(), 1);
+        history.undo(&mut doc).unwrap();
+        assert!(doc.get(rect).is_none(), "made and moved, both undone");
+        history.redo(&mut doc).unwrap();
+        assert_eq!(x_of(&doc, rect), 5.0);
     }
 
     /// A run of overwrites is one undo step, and undoing it lands where the run

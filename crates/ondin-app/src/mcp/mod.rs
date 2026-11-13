@@ -869,6 +869,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         "list_variables" => json(reads::variables(&s.doc)),
         "list_styles" => json(reads::styles(&s.doc)),
         tool if inspect::TOOLS.contains(&tool) => inspect::run(s, tool, args),
+        "batch" => batch(conn, s, &call.client, args),
         tool => write(conn, s, &call.client, tool, args),
     }
 }
@@ -975,6 +976,106 @@ fn write(
         answer["pixel_size"] = json!(px);
     }
     Ok(Answer::Json(answer))
+}
+
+/// `batch`: each step's verb committed in turn, each reading what the last left,
+/// then joined into one undo step named `batch`. A refused step takes back the
+/// steps before it, so the batch lands whole or not at all. A step names what an
+/// earlier one made as `"@label"`, the label that step gave in `as`, as
+/// `ondin script` does; `base_rev` holds for every step.
+fn batch(
+    conn: &Connection,
+    s: &mut EditorSession,
+    client: &str,
+    args: &Value,
+) -> Result<Answer, String> {
+    let Some(Value::Array(steps)) = args.get("steps") else {
+        return Err("`steps` is a list of `{ tool, args, as }`".into());
+    };
+    if steps.is_empty() {
+        return Err("`steps` is empty".into());
+    }
+    let base = args.get("base_rev").filter(|v| !v.is_null()).cloned();
+    let mut labels = HashMap::new();
+    let mut answers = Vec::new();
+    let mut made = 0;
+    for (i, step) in steps.iter().enumerate() {
+        let tool = step.get("tool").and_then(Value::as_str).unwrap_or("?");
+        let ran = batch_step(conn, s, client, step, &labels, base.as_ref());
+        let (answer, pushed) = match ran {
+            Ok(done) => done,
+            Err(why) => {
+                for _ in 0..made {
+                    s.take_back();
+                }
+                return Err(format!(
+                    "step {} (`{tool}`): {why}. Nothing was changed.",
+                    i + 1
+                ));
+            }
+        };
+        made += pushed;
+        if let Some(label) = step.get("as").and_then(Value::as_str) {
+            let first = answer["created"]
+                .get(0)
+                .or_else(|| answer.get("made"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(first) = first {
+                labels.insert(label.to_owned(), first);
+            }
+        }
+        answers.push(answer);
+    }
+    if made > 1 {
+        s.history.join_last(made);
+    }
+    if made > 0
+        && let Some(note) = s.history.current_note_mut()
+    {
+        note.label = "batch".into();
+        note.origin = ondin_core::Origin::Mcp {
+            client: client.to_owned(),
+            tool: "batch".into(),
+        };
+    }
+    Ok(Answer::Json(json!({ "steps": answers })))
+}
+
+/// One step of [`batch`]: its answer and how many undo steps it committed.
+fn batch_step(
+    conn: &Connection,
+    s: &mut EditorSession,
+    client: &str,
+    step: &Value,
+    labels: &HashMap<String, String>,
+    base: Option<&Value>,
+) -> Result<(Value, usize), String> {
+    if let Some(extra) = step.as_object().and_then(|m| {
+        m.keys()
+            .find(|k| !["tool", "args", "as"].contains(&k.as_str()))
+    }) {
+        return Err(format!("a step takes no `{extra}`"));
+    }
+    let tool = step
+        .get("tool")
+        .and_then(Value::as_str)
+        .ok_or("a step names its `tool`")?;
+    if ondin_core::verbs::find(tool).is_none() {
+        return Err(format!(
+            "a batch runs the write tools that are verbs, and `{tool}` is none"
+        ));
+    }
+    let mut args = step.get("args").cloned().unwrap_or_else(|| json!({}));
+    ondin_core::verbs::substitute(&mut args, labels)?;
+    if let (Some(base), Some(map)) = (base, args.as_object_mut()) {
+        map.insert("base_rev".into(), base.clone());
+    }
+    let depth = s.history.undo_depth();
+    let Answer::Json(answer) = write(conn, s, client, tool, &args)? else {
+        return Err("a write answers JSON".into());
+    };
+    Ok((answer, s.history.undo_depth().saturating_sub(depth)))
 }
 
 /// Refuse a verb that would edit a kit's vendored component, which a kit
@@ -1622,6 +1723,54 @@ mod tests {
             "a plain main's properties are listed: {}",
             listed[0]
         );
+    }
+
+    /// A batch lands as one undo step named `batch`, a later step naming what an
+    /// earlier one made by its label; a refused step leaves the document, the undo
+    /// stack and the redo stack as they were.
+    ///
+    /// flip: `batch` not taking back the steps before a refusal → fails at
+    /// "nothing of a refused batch stays".
+    #[test]
+    fn a_batch_is_one_step_and_lands_whole_or_not_at_all() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let make = json!({ "tool": "create_node", "as": "card",
+            "args": { "parent": page, "kind": kind, "name": "Card" } });
+        let name = json!({ "tool": "set_name", "args": { "node": "@card", "name": "Hero" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, name] }),
+        );
+        let card = ok(&out)["steps"][0]["created"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let id = NodeId::from_wire(&card).unwrap();
+        let s = &docs.session;
+        assert_eq!(s.doc.get(id).unwrap().name(), "Hero");
+        assert_eq!(s.history.undo_depth(), 1, "one step");
+        assert_eq!(s.history.done().last().unwrap().note.label, "batch");
+
+        let layers = docs.session.doc.len();
+        let bad = json!({ "tool": "set_name", "args": { "node": "@nobody", "name": "X" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, bad] }),
+        );
+        assert!(out.is_error);
+        let s = &docs.session;
+        assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
+        assert_eq!(s.history.undo_depth(), 1);
+        assert_eq!(s.history.redo_depth(), 0, "and nothing to redo");
     }
 
     /// An instance reads back the property values it is set to and each copy the

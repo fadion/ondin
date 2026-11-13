@@ -1920,6 +1920,17 @@ impl EditorSession {
         }
     }
 
+    /// Undo the step on top with nothing said and no page followed, and leave no
+    /// redo behind: for an agent's batch taking back the steps it made before
+    /// one failed. Answers whether a step was taken back.
+    pub fn take_back(&mut self) -> bool {
+        let taken = matches!(self.step_quietly(true), Ok(Some(_)));
+        if taken {
+            self.history.clear_redo();
+        }
+        taken
+    }
+
     /// One undo (`back`) or redo with nothing said and no page followed. Answers
     /// the step's subjects and the pages they were on before it, for
     /// [`Self::follow_step`]; `Ok(None)` at the end of the history.

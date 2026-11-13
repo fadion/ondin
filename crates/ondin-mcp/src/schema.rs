@@ -292,6 +292,19 @@ pub static TOOLS: &[Tool] = &[
         )],
     },
     Tool {
+        name: "batch",
+        doc: "Run several write tools in turn as one undo step, each seeing what the last made; if one is refused, none applies. Answers each step's answer.",
+        params: &[
+            param(
+                "steps",
+                ParamKind::Model("Steps"),
+                true,
+                "The steps in order, each {\"tool\": <a write tool>, \"args\": {…}, \"as\": <label>}. A later step's argument \"@<label>\" stands for the first thing the step labelled so made; a text starting with @ is written @@.",
+            ),
+            BASE_REV,
+        ],
+    },
+    Tool {
         name: "list_documents",
         doc: "Every document in the person's library: path, name, project and whether it is a kit. Needs no current document.",
         params: &[],

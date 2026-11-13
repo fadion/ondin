@@ -32,7 +32,7 @@ pub const PHASE_1: [&str; 22] = [
 ///
 /// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
 /// ids: the handler minted them, so it knows them.
-pub const PHASE_2: [&str; 75] = [
+pub const PHASE_2: [&str; 76] = [
     "create_node",
     "create_text",
     "insert_subtree",
@@ -108,6 +108,7 @@ pub const PHASE_2: [&str; 75] = [
     "undo",
     "redo",
     "set_selection",
+    "batch",
 ];
 
 /// Phase 3 — components, variables and styles, through the verbs rather than
@@ -271,11 +272,11 @@ mod tests {
         }
     }
 
-    /// Phase 2 tools that act on the session, not the document: no verb answers them.
-    const SESSION: [&str; 3] = ["undo", "redo", "set_selection"];
+    /// Phase 2 tools no verb answers: the session's, and `batch`, which runs verbs.
+    const SESSION: [&str; 4] = ["undo", "redo", "set_selection", "batch"];
 
     /// Every Phase 2 tool is a verb of `ondin_core::verbs` under the same name or a
-    /// session tool, never both.
+    /// host's tool, never both.
     ///
     /// flip: renaming the registry's `set_fills` → fails at "neither a verb".
     #[test]

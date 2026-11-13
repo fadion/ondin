@@ -451,6 +451,8 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "KitModeMap" => Err("expected an object of mode ids".into()),
         "DtcgFile" if v.is_object() || v.is_string() => Ok(()),
         "DtcgFile" => Err("expected the tokens file, as text or as an object".into()),
+        "Steps" if v.as_array().is_some_and(|s| s.iter().all(Value::is_object)) => Ok(()),
+        "Steps" => Err("expected a list of steps, each an object".into()),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }
@@ -4974,7 +4976,10 @@ pub fn run_script(
 
 /// Every `"@label"` string in `v` replaced by what its label stands for, and a
 /// string starting `@@` by itself less one `@`.
-fn substitute(v: &mut Value, labels: &rustc_hash::FxHashMap<String, String>) -> Result<(), String> {
+pub fn substitute<S: std::hash::BuildHasher>(
+    v: &mut Value,
+    labels: &std::collections::HashMap<String, String, S>,
+) -> Result<(), String> {
     match v {
         // `@@` escapes a literal `@`.
         Value::String(s) if s.starts_with("@@") => {

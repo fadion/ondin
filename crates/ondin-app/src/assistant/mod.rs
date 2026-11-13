@@ -212,6 +212,9 @@ pub(crate) struct Assistant {
     live: Option<Live>,
     running: Option<Running>,
     lookup: Option<Lookup>,
+    /// Settings' own lookup, for the agent and path not yet saved, so its
+    /// hint answers the moment either changes without moving the panel's.
+    settings_lookup: Option<Lookup>,
     /// The harness said it is not signed in, until a turn succeeds.
     signed_out: Option<ai::Harness>,
     /// A reply arrived while the panel was shut.
@@ -394,45 +397,66 @@ impl OndinApp {
     /// thread; `None` while the probe runs.
     fn assistant_lookup(&mut self, h: ai::Harness) -> Option<Result<ai::Found, ai::NotFound>> {
         let over = self.prefs.assistant.program_path();
-        let stale = match &self.assistant.lookup {
-            Some(Lookup::Pending(lh, lo, _)) | Some(Lookup::Done(lh, lo, _)) => {
-                *lh != h || *lo != over
-            }
-            None => true,
-        };
-        if stale {
-            let (tx, rx) = std::sync::mpsc::channel();
-            let ctx = self.egui_ctx.clone();
-            let o = over.clone();
-            let spawned = std::thread::Builder::new()
-                .name("assistant-find".into())
-                .spawn(move || {
-                    let _ = tx.send(ai::find(h, o.as_deref()));
-                    ctx.request_repaint();
-                });
-            if spawned.is_err() {
-                return Some(ai::find(h, over.as_deref()));
-            }
-            self.assistant.lookup = Some(Lookup::Pending(h, over, rx));
-        }
-        if let Some(Lookup::Pending(lh, lo, rx)) = &self.assistant.lookup {
-            match rx.try_recv() {
-                Ok(found) => {
-                    self.assistant.lookup = Some(Lookup::Done(*lh, lo.clone(), found));
-                }
-                Err(TryRecvError::Empty) => return None,
-                Err(TryRecvError::Disconnected) => {
-                    self.assistant.lookup = None;
-                    return None;
-                }
-            }
-        }
-        match &self.assistant.lookup {
-            Some(Lookup::Done(_, _, r)) => Some(r.clone()),
-            _ => None,
-        }
+        poll_lookup(&mut self.assistant.lookup, &self.egui_ctx, h, over)
     }
 
+    /// The program Settings' unsaved `h` and `over` name, looked up off the
+    /// UI thread; `None` while the probe runs.
+    pub(crate) fn assistant_settings_lookup(
+        &mut self,
+        h: ai::Harness,
+        over: Option<PathBuf>,
+    ) -> Option<Result<ai::Found, ai::NotFound>> {
+        poll_lookup(&mut self.assistant.settings_lookup, &self.egui_ctx, h, over)
+    }
+}
+
+/// The lookup in `slot` for `h` and `over`, started afresh when either
+/// differs from the one it holds; `None` while its probe runs.
+fn poll_lookup(
+    slot: &mut Option<Lookup>,
+    ctx: &egui::Context,
+    h: ai::Harness,
+    over: Option<PathBuf>,
+) -> Option<Result<ai::Found, ai::NotFound>> {
+    let stale = match &*slot {
+        Some(Lookup::Pending(lh, lo, _)) | Some(Lookup::Done(lh, lo, _)) => *lh != h || *lo != over,
+        None => true,
+    };
+    if stale {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        let o = over.clone();
+        let spawned = std::thread::Builder::new()
+            .name("assistant-find".into())
+            .spawn(move || {
+                let _ = tx.send(ai::find(h, o.as_deref()));
+                ctx.request_repaint();
+            });
+        if spawned.is_err() {
+            return Some(ai::find(h, over.as_deref()));
+        }
+        *slot = Some(Lookup::Pending(h, over, rx));
+    }
+    if let Some(Lookup::Pending(lh, lo, rx)) = &*slot {
+        match rx.try_recv() {
+            Ok(found) => {
+                *slot = Some(Lookup::Done(*lh, lo.clone(), found));
+            }
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => {
+                *slot = None;
+                return None;
+            }
+        }
+    }
+    match &*slot {
+        Some(Lookup::Done(_, _, r)) => Some(r.clone()),
+        _ => None,
+    }
+}
+
+impl OndinApp {
     /// Open or close the panel. Opening closes its siblings, which share its
     /// place; closing keeps the thread, the draft and a running turn.
     pub(crate) fn toggle_assistant(&mut self) {

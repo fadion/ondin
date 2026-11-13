@@ -1418,12 +1418,9 @@ impl OndinApp {
             }
         }
         let on = next;
-        // The seal of what was found for the saved choice.
-        if let Some(h) = on
-            && h.key() == self.prefs.assistant.agent
-            && a.program == self.prefs.assistant.program
-            && let Some(found) = self.assistant.found()
-        {
+        // What the choice on screen finds, saved or not; `None` while it looks.
+        let lookup = on.and_then(|h| self.assistant_settings_lookup(h, a.program_path()));
+        if let Some(Ok(found)) = &lookup {
             caption(ui, &found.seal_sentence);
         }
         // The rows below stay in view, disabled with the reason.
@@ -1436,7 +1433,8 @@ impl OndinApp {
         ui.add_space(ROW_GAP);
         ui.add_enabled_ui(on.is_some(), |ui| {
             let hint = on.map_or(String::new(), |h| format!("{} on PATH", h.program()));
-            labelled_row(ui, "Program", |ui| {
+            let looking = on.is_some() && lookup.is_none();
+            labelled_row_busy(ui, "Path", looking, |ui| {
                 ui::text_field(
                     ui,
                     egui::vec2(PREF_CONTROL_W, FIELD_H),
@@ -1445,13 +1443,21 @@ impl OndinApp {
                 )
                 .on_hover_text("Leave empty to find it automatically")
             });
-            if a.program.trim().is_empty()
-                && let Some(found) = self
-                    .assistant
-                    .found()
-                    .filter(|_| on.is_some_and(|h| h.key() == self.prefs.assistant.agent))
-            {
-                caption(ui, &format!("Found {}", found.path.display()));
+            match &lookup {
+                Some(Ok(found)) => caption_in(
+                    ui,
+                    &format!("Found {}", found.path.display()),
+                    theme::color::accent_300(),
+                ),
+                Some(Err(_)) => caption_in(
+                    ui,
+                    &match a.program_path() {
+                        Some(p) => format!("Not found: {}", p.display()),
+                        None => format!("{} was not found", on.map_or("", |h| h.program())),
+                    },
+                    theme::color::error(),
+                ),
+                None => {}
             }
             ui.add_space(ROW_GAP);
             labelled_row(ui, "Model", |ui| {
@@ -1509,12 +1515,14 @@ impl OndinApp {
             let level = a.level();
             labelled_row(ui, "Access", |ui| {
                 let at = Level::ALL.iter().position(|l| *l == level).unwrap_or(1);
-                let picked = ui::segmented(
+                let picked = ui::segmented_tipped(
                     ui,
                     PREF_CONTROL_W,
                     ui::SEGMENT_CELL_H,
                     3,
                     at,
+                    |_| true,
+                    |i| crate::assistant::panel::level_tip(Level::ALL[i]),
                     |p, i, r, on| {
                         ui::segment_label(p, r, Level::ALL[i].label(), on);
                     },
@@ -1523,19 +1531,13 @@ impl OndinApp {
                     a.access = Level::ALL[i].key().to_owned();
                 }
             });
-            caption(
-                ui,
-                "Look reads. Propose also drafts edits you apply. Edit makes them, each an \
-                 undo step. This is the default for a new chat; the panel's head changes it.",
-            );
             ui.add_space(ROW_GAP);
             sub_heading(ui, "Instructions");
             ui.add_space(4.0);
-            ui::text_area(
-                ui,
-                &mut a.instructions,
-                ui::TextArea::new("Added to every question, after Ondin's own", 3),
-            );
+            // Held at its rows, scrolling past them: the modal keeps its size.
+            let mut area = ui::TextArea::new("Added to every question, after Ondin's own", 3);
+            area.max_rows = 3;
+            ui::text_area(ui, &mut a.instructions, area);
         });
     }
 }
@@ -1543,6 +1545,16 @@ impl OndinApp {
 /// A row's label on the left and its controls on the right, laid as
 /// *Default font*'s row is: `controls` adds them right to left, first at the edge.
 fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    labelled_row_busy(ui, label, false, controls)
+}
+
+/// [`labelled_row`] with the loading spinner after the label while `busy`.
+fn labelled_row_busy<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    busy: bool,
+    controls: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = COL_GAP;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1554,6 +1566,21 @@ fn labelled_row<R>(ui: &mut egui::Ui, label: &str, controls: impl FnOnce(&mut eg
                         .size(LABEL_PT)
                         .color(ui::switch_row_ink(ui.is_enabled())),
                 );
+                if busy {
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui::SMALL_PT, ui::SMALL_PT),
+                        egui::Sense::hover(),
+                    );
+                    let now = ui.input(|i| i.time);
+                    ui::paint_spinner(
+                        ui.painter(),
+                        rect.center(),
+                        ui::SMALL_PT,
+                        theme::text::faint(),
+                        now,
+                    );
+                    ui.ctx().request_repaint();
+                }
             });
             out
         })
@@ -1615,12 +1642,14 @@ fn toggle_key(on: &mut Vec<String>, key: &str) {
 ///
 /// Closer than [`ROW_GAP`], because a caption belongs to the row above it.
 pub(crate) fn caption(ui: &mut egui::Ui, text: &str) {
+    caption_in(ui, text, theme::text::faint());
+}
+
+/// A [`caption`] in `ink`: the lit ink for an answer found, the error's for
+/// one that was not.
+fn caption_in(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
     ui.add_space(3.0);
-    ui.label(
-        egui::RichText::new(text)
-            .size(CAPTION_PT)
-            .color(theme::text::faint()),
-    );
+    ui.label(egui::RichText::new(text).size(CAPTION_PT).color(ink));
 }
 
 /// One of the two nudge distances: a [`ui::value_field`] with the word inside it

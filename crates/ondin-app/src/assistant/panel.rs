@@ -573,7 +573,7 @@ impl OndinApp {
                     );
                     let fix = match why {
                         Why::Off => Some("Open settings"),
-                        Why::NotFound(..) => Some("Set the program"),
+                        Why::NotFound(..) => Some("Set the path"),
                         _ => None,
                     };
                     if let Some(word) = fix
@@ -898,8 +898,8 @@ impl OndinApp {
     }
 }
 
-/// What each level lets the agent do, for its menu row.
-fn level_tip(l: Level) -> &'static str {
+/// What each level lets the agent do, for its menu row and Settings' cell.
+pub(crate) fn level_tip(l: Level) -> &'static str {
     match l {
         Level::Look => "Read and export the document",
         Level::Propose => "Read, and propose edits you apply",

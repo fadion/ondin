@@ -272,15 +272,19 @@ of it is a secret.
 
 - **Agent** — a dropdown, *Off* first. A new install starts off. An unknown saved key loads as off
   and is kept until the person picks.
-- **Program** — the path, empty for found automatically, showing what was found.
+- **Path** — the program's path, empty for found automatically. Settings looks it up for the agent
+  and path on screen, saved or not, with its own lookup beside the panel's: a spinner after the
+  label while it looks, then *Found …* in the accent ink or *Not found* in the error's.
 - **Model** — free text with the harness's suggestions as chips.
 - **Effort** — the harness's own levels; hidden where it has none.
-- **Access** — *Look*, *Propose*, *Edit*: the default for a new chat.
-- **Instructions** — free text added to every system prompt (`ui::text_area`).
-- The seal's sentence (§4) under the Agent row.
+- **Access** — *Look*, *Propose*, *Edit*: the default for a new chat. Each cell's tooltip says
+  what the level lets the agent do, in the panel's level menu's words.
+- **Instructions** — free text added to every system prompt (`ui::text_area`), held at its three
+  rows and scrolling past them, so the modal keeps its size.
+- The seal's sentence (§4) under the Agent row, for the choice on screen.
 
 With *Off*, a caption says *Off: nothing is started and nothing is sent…* and the rows below Agent
-are disabled. Switching agent clears Program and Model and moves Effort to the nearest level the
+are disabled. Switching agent clears Path and Model and moves Effort to the nearest level the
 new harness has, ties downward; each harness's last values come back within the session. A saved
 change ends the session only when it changes what the agent was started with.
 
@@ -337,7 +341,7 @@ layers being asked about, and is one more kind of surface.
 - **When it cannot send**, the composer is replaced by the reason, and off wins over every other:
   the assistant is off (*Open settings*); private mode; the document is unsaved (*Save the document
   to ask about it.*); not signed in, saying to run the program once in a terminal; the program not
-  found, naming what was looked for and where (*Set the program*); the program not sealable.
+  found, naming what was looked for and where (*Set the path*); the program not sealable.
 - **The app's own words** (a refused spawn, a stopped turn, a replay withheld) are notes beside a
   turn, never message text, so they are never sent back to the model.
 - **One conversation per document**, kept per machine in `<machine data>/chats/<document id>.json`

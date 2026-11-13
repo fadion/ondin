@@ -1487,19 +1487,19 @@ impl OndinApp {
                 labelled_row(ui, "Effort", |ui| {
                     ui.spacing_mut().button_padding.y = 0.0;
                     let shown = match a.effort.is_empty() {
-                        true => "Default",
-                        false => a.effort.as_str(),
+                        true => "Default".to_owned(),
+                        false => effort_label(&a.effort),
                     };
                     let mut effort = a.effort.clone();
                     egui::ComboBox::from_id_salt("settings-assistant-effort")
                         .icon(ui::combo_chevron)
                         .width(PREF_CONTROL_W)
-                        .selected_text(ui::combo_text(shown))
+                        .selected_text(ui::combo_text(&shown))
                         .show_ui(ui, |ui| {
                             ui::menu_rows(ui);
                             ui.selectable_value(&mut effort, String::new(), "Default");
                             for l in levels {
-                                ui.selectable_value(&mut effort, (*l).to_owned(), *l);
+                                ui.selectable_value(&mut effort, (*l).to_owned(), effort_label(l));
                             }
                         });
                     a.effort = effort;
@@ -1578,6 +1578,17 @@ fn stored_keys() -> std::collections::BTreeMap<String, String> {
         .filter(|s| s.key_label.is_some())
         .filter_map(|s| crate::keychain::read_account(&s.account()).map(|k| (s.key.to_string(), k)))
         .collect()
+}
+
+/// An effort level in the app's sentence case, the harness's word kept
+/// otherwise: `xhigh` reads *Extra high*.
+fn effort_label(word: &str) -> String {
+    if word == "xhigh" {
+        return "Extra high".into();
+    }
+    let mut c = word.chars();
+    c.next()
+        .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
 }
 
 /// A group's name inside a section (*Icon sets*, *Photos*): a row's label size,

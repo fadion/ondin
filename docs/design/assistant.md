@@ -282,12 +282,12 @@ change ends the session only when it changes what the agent was started with.
 A panel at the rail's foot rather than a floating window, which has to be placed, ends up over the
 layers being asked about, and is one more kind of surface.
 
-- **The door** is the rail button at the top of the foot, wearing `icon::SPARKLE`, History's mark
+- **The door** is the rail's last button, under *Insert components*, wearing `icon::SPARKLE`, History's mark
   for a step made over MCP: the same concept, an agent acting. (`CHAT` stays unused: a speech
   bubble reads as comments, a non-goal.) Its tooltip is *Assistant (Ctrl+Shift+A)*. The palette's
   *Assistant* row and the chord open it too.
 - **It is a `ui::rail_popup`, taller than its siblings.** Its bottom-left is theirs
-  (`OndinApp::rail_popup_anchor`); its top stops 8 below the canvas's top, down to a floor that
+  (`OndinApp::rail_popup_anchor`); its top stops 50 below the canvas's top, leaving the top of the page in view, down to a floor that
   still holds the head, one line of thread and the composer. It is 400 wide, and its right edge
   drags between 360 and 640, the only rail panel with a drag edge, since tables and code need the
   room; the width is kept per machine.

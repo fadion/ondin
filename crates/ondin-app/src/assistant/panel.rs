@@ -1,5 +1,5 @@
 //! The assistant's panel: a `ui::rail_popup` at the rail's foot, as tall as the
-//! room above its button less 8, with a drag edge on its right. Head, thread,
+//! room above its button less [`TOP_AIR`], with a drag edge on its right. Head, thread,
 //! composer. Drawn into a list of acts that run once the drawing is done.
 
 use super::markdown::{self, Act as MdAct};
@@ -23,6 +23,9 @@ const BUBBLE_SHARE: f32 = 0.82;
 const EDGE_GRAB: f32 = 6.0;
 /// The send button.
 const SEND_W: f32 = 26.0;
+/// Clear air between the panel's top and the canvas's: room to see what is
+/// being asked about.
+const TOP_AIR: f32 = 50.0;
 
 /// What the panel asked for this frame.
 enum Act {
@@ -87,7 +90,7 @@ impl OndinApp {
         if !anchor.is_finite() {
             return;
         }
-        let height = (anchor.y - self.canvas_rect.top() - 8.0).max(FLOOR_H);
+        let height = (anchor.y - self.canvas_rect.top() - TOP_AIR).max(FLOOR_H);
         let width = self.prefs.assistant.width.clamp(MIN_W, MAX_W);
         let blocked = self.assistant_blocked();
         let level = self.assistant_level();

@@ -8990,8 +8990,20 @@ impl OndinApp {
                         }
                     }
                 });
-                // The insert picker's toggle at the rail's foot.
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    // The assistant's, last on the rail: its panel is the tallest,
+                    // and the foot leaves the rail's height to the tools.
+                    let open = self.assistant.open;
+                    let usable = !self.prefs.private;
+                    let tip = self.assistant_tip();
+                    let resp =
+                        icon_button(ui, icon::SPARKLE, 30.0, 20.0, open, usable).on_hover_text(tip);
+                    self.assistant_button = resp.rect;
+                    self.paint_assistant_marks(ui, resp.rect);
+                    if usable && resp.clicked() {
+                        self.toggle_assistant();
+                    }
+                    // The insert picker's toggle, directly above it.
                     let open = self.kit_picker.is_some();
                     let resp = icon_button(ui, icon::HEXAGON, 30.0, 20.0, open, true)
                         .on_hover_text(crate::input::keys("Insert components (Shift+I)"));
@@ -9007,7 +9019,7 @@ impl OndinApp {
                     if resp.clicked() {
                         self.toggle_var_browser();
                     }
-                    // The assets browser's, at the top of the three; it shares the
+                    // The assets browser's, at the top of the foot; it shares the
                     // picker's place.
                     let open = self.asset_panel.is_some();
                     let resp = icon_button(ui, icon::ASSETS, 30.0, 20.0, open, true)
@@ -9015,18 +9027,6 @@ impl OndinApp {
                     self.asset_button = resp.rect;
                     if resp.clicked() {
                         self.toggle_assets();
-                    }
-                    // The assistant's, at the top of the foot: the tallest panel,
-                    // whose top then sits nearest the canvas's top.
-                    let open = self.assistant.open;
-                    let usable = !self.prefs.private;
-                    let tip = self.assistant_tip();
-                    let resp =
-                        icon_button(ui, icon::SPARKLE, 30.0, 20.0, open, usable).on_hover_text(tip);
-                    self.assistant_button = resp.rect;
-                    self.paint_assistant_marks(ui, resp.rect);
-                    if usable && resp.clicked() {
-                        self.toggle_assistant();
                     }
                 });
             });

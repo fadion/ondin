@@ -952,8 +952,8 @@ Open-source icons and stock photos, inserted with their credit (`Node::credit`, 
   or a fetch that was replaced — with the key only when that address is Unsplash's API, over
   https. A fetch replaced by another click or a document switch stops before its next download.
 - **The panel** (`panel.rs`) is a `ui::rail_popup` 340 wide, bottom-aligned with its rail button
-  (`icon::ASSETS`, under the assistant's at the rail's foot: *Assistant*, *Assets*, *Styles and
-  variables*, *Insert components*). It is one of four panels in that place, with the assistant, the
+  (`icon::ASSETS`, at the top of the rail's foot: *Assets*, *Styles and variables*, *Insert
+  components*, *Assistant*). It is one of four panels in that place, with the assistant, the
   insert picker and the styles browser, each beside its own button; opening one closes the others. Doors: the rail button and *Assets…* in the
   palette; no chord. `Escape` closes it, on the insert picker's rung. *Icons* · *Photos* on
   `ui::segmented`, then `ui::search_box`, which takes the keyboard on opening.

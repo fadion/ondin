@@ -196,7 +196,9 @@ it created. A verb never commits; its caller does, as every edit is committed.
 
 - **Arguments are checked before a verb runs** (`verbs::call`): a JSON object holding every required
   parameter, none it does not take, each of its kind, a model value read as its type
-  (`verbs::check_model`). Each refusal names the verb and the parameter.
+  (`verbs::check_model`). Each refusal names the verb and the parameter, and a model value's the
+  path inside it (``at `children[1].kind.Text.sizing`: …``). A field the type has no place for is
+  refused (`no such field`), where serde alone would drop it without a word.
 - **Every model type a parameter takes has an example** (`verbs::example`), serialized from a real
   value, since a serde form cannot be guessed (a rectangle needs its `corner_radii`, an image brush
   its `sampler`). A test holds each example to `check_model` and commits the `Tree` one.
@@ -229,10 +231,11 @@ it created. A verb never commits; its caller does, as every edit is committed.
   another in `like` to take its paint and text style where it gives none, expanded before the
   tree is read, since only the verb sees the document.
 - **Model parameters read short forms** (`verbs::loose`): hex colours and paints and text styles
-  without their default fields expand into the model's serde shapes before `check_model` and
-  `Args::model` read them, by the field's key, so the model types keep one serde form. `tighten`
-  is its inverse for `verbs::tree` and the examples, written only where `loosen` gives back the
-  same value (a hex colour must read back to the same `f32`s through peniko's own conversion).
+  without their default fields, and what `get_node` and CSS write (lengths in `px`/`em`, flat
+  effects, a path as SVG data; `mcp.md` §8.4), expand into the model's serde shapes before
+  `check_model` and `Args::model` read them, by the field's key, so the model types keep one serde
+  form. `tighten` is its inverse for `verbs::tree` and the examples, written only where `loosen`
+  gives back the same value, but for an sRGB colour, written as hex rounded to the nearest byte.
 - **`style_text` and `style_paragraphs` take a range in characters** and write as the app does:
   the whole text through `build::char_defaults`/`para_defaults` (the type panel's write: new
   defaults, that attribute's runs dropped), a shorter range through `build::char_runs`/`para_runs`
@@ -260,8 +263,8 @@ it created. A verb never commits; its caller does, as every edit is committed.
   and the opacity too, while its paint fields pass a page on to its shapes. `set_name` and
   `add_page` trim a page's name, as the pages list does, and refuse an empty one.
 - **Phase 3's verbs call the builders the app's component doors call**: `build::make_component`
-  (*Create component*, in place or wrapped), `build::place_instance` and `build::centred_on` (the
-  picker's placement), `component::detach`, `variant::combine`, `variant::switch` and
+  (*Create component*, in place or wrapped), `build::place_instance` (the picker's placement,
+  then `build::cornered_at` for the box's left and top), `component::detach`, `variant::combine`, `variant::switch` and
   `variant::swap_carrying` (the instance card's *Main* relink and nested *Swap*); and the variables
   browser's edits, `variable::add_variable_ops`, `rename_variable_ops`, `set_cell_ops`,
   `add_mode_ops`, `mode_name_refusal`, `frame_mode_ops`, beside `remove_ops`, `remove_mode_ops` and

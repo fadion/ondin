@@ -26,7 +26,8 @@ pub(crate) fn color(c: Color, alpha: f32) -> String {
 }
 
 /// One `background` layer for a fill on a `size` box, or `None` when CSS cannot
-/// draw it exactly. A solid is a one-colour gradient so it can stack.
+/// draw it exactly. A solid is a one-colour gradient, the form a layer of a
+/// stack takes; a lone solid is written as its colour before it gets here.
 pub(crate) fn background_layer(brush: &Brush, size: Size) -> Option<String> {
     match brush {
         Brush::Solid(c) => {

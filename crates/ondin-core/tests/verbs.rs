@@ -1487,7 +1487,7 @@ fn pages_are_added_copied_moved_and_deleted() {
 }
 
 /// The component verbs: a rectangle wrapped and made a main, an instance placed
-/// centred on a point that follows its main's edit, swapped to another main, and
+/// with its box's corner on a point that follows its main's edit, swapped to another main, and
 /// detached; a frame already a main is refused.
 ///
 /// flip: the test's commit without `propagate::owed` → fails at "the instance
@@ -1522,7 +1522,7 @@ fn components_are_made_placed_swapped_and_detached() {
     )[0];
     let res = Resolved::rebuild(&doc);
     assert_eq!(
-        res.world_bounds(inst).unwrap().center(),
+        res.world_bounds(inst).unwrap().origin(),
         ondin_core::kurbo::Point::new(500.0, 300.0)
     );
     assert_eq!(ondin_core::component::main_of(&doc, inst), Some(card));
@@ -1579,11 +1579,13 @@ fn components_are_made_placed_swapped_and_detached() {
     );
 }
 
-/// `create_instance` reads `x`/`y` in its parent's space, and `swap_instance` to
-/// the main an instance shows already answers an empty edit.
+/// `create_instance` reads `x`/`y` as its box's left and top in its parent's space,
+/// an edge not given left at the main's place, and `swap_instance` to the main an
+/// instance shows already answers an empty edit.
 ///
-/// flip: `create_instance` taking `x`/`y` as world coordinates → fails at "centred
-/// in the frame's space".
+/// flip: `create_instance` taking `x`/`y` as world coordinates → fails at "its
+/// box's corner in the frame's space"; `cornered_at` moving an edge not given to
+/// 0 → fails at "an edge not given".
 #[test]
 fn an_instance_is_placed_in_its_parents_space_and_swapped_to_its_own_main() {
     let (mut doc, mut ids, page) = blank();
@@ -1608,9 +1610,28 @@ fn an_instance_is_placed_in_its_parents_space_and_swapped_to_its_own_main() {
     )[0];
     let res = Resolved::rebuild(&doc);
     assert_eq!(
-        res.world_bounds(inst).unwrap().center(),
+        res.world_bounds(inst).unwrap().origin(),
         ondin_core::kurbo::Point::new(250.0, 120.0),
-        "centred in the frame's space"
+        "its box's corner in the frame's space"
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_transform",
+        json!({ "node": card.to_wire(), "transform": Affine::translate((0.0, 30.0)) }),
+    );
+    let only_x = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": card.to_wire(), "parent": holder.to_wire(), "x": 50 }),
+    )[0];
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(res.world_bounds(card).unwrap().y0, 30.0);
+    assert_eq!(
+        res.world_bounds(only_x).unwrap().origin(),
+        ondin_core::kurbo::Point::new(250.0, 130.0),
+        "an edge not given stays at the main's own place, in the frame"
     );
     let same = verbs::call(
         &mut Ctx {
@@ -1728,6 +1749,47 @@ fn variables_and_modes_are_added_set_and_removed() {
         "the frame inherits again"
     );
     assert!(doc.get(page).is_some());
+}
+
+/// `set_variable_value` without a `mode` sets the only mode of the variable's
+/// collection, and is refused once the collection has two.
+///
+/// flip: `set_variable_value` taking the first mode whatever the count → fails at
+/// "two modes need a name".
+#[test]
+fn a_variable_value_takes_the_only_mode_unnamed() {
+    let (mut doc, mut ids, _) = blank();
+    let blue = serde_json::to_value(ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255))).unwrap();
+    let made = script(
+        &mut doc,
+        &mut ids,
+        json!([
+            { "verb": "add_variable", "args": { "kind": "color", "name": "brand" }, "as": "v" },
+            { "verb": "set_variable_value", "args": { "variable": "@v", "value": blue } },
+        ]),
+    );
+    let var: ondin_core::VarId = serde_json::from_value(json!(made[0][0])).unwrap();
+    let table = doc.variables();
+    let modes = &table.collection_of(var).unwrap().modes;
+    assert_eq!(modes.len(), 1, "the fixture has one mode");
+    assert_eq!(
+        table.get(var).unwrap().cells.get(&modes[0].id),
+        Some(&ondin_core::Cell::Color(Color::from_rgb8(0, 0, 255)))
+    );
+    script(
+        &mut doc,
+        &mut ids,
+        json!([{ "verb": "add_mode", "args": {} }]),
+    );
+    let two = verbs::run_script(
+        &mut doc,
+        &mut ids,
+        Lent::default(),
+        &json!([{ "verb": "set_variable_value", "args": { "variable": made[0][0], "value": blue } }]),
+    )
+    .expect_err("two modes need a name")
+    .why;
+    assert!(two.contains("more than one mode"), "{two}");
 }
 
 /// `script` run on `doc`, panicking on a refusal; answers what each step made.

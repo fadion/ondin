@@ -94,9 +94,10 @@ Core — listed by default:
 `use_document`, `list_documents`, `get_selection`, `get_view`, `find_nodes`, `get_outline`,
 `get_node`, `get_tree`, `design_context`, `check_layout`, `export_png`, `list_components`,
 `list_variables`, `list_styles`, `list_fonts`, `describe_tools`, `insert_subtree`, `create_text`,
-`set`, `delete_node`, `duplicate`, `reparent`, `group`, `ungroup`, `align`, `distribute`,
-`create_instance`, `set_instance_property`, `apply_style`, `bind_variable`, `batch`, `call`,
-`undo`, `redo`, `set_selection`.
+`create_node`, `set`, `delete_node`, `duplicate`, `reparent`, `group`, `ungroup`, `align`,
+`distribute`, `create_instance`, `set_instance_property`, `make_component`, `define_property`,
+`apply_style`, `add_style`, `bind_variable`, `add_variable`, `batch`, `call`, `undo`, `redo`,
+`set_selection`.
 
 `tools/list` names the core set unless `initialize`'s `_meta` asks for every tool (`wire::TOOLS_META`, which `ondin mcp-proxy --tools all` sends). Every tool answers whether listed or not: a client calls an unlisted one through `call(tool, args)`, or by name where it allows that, and `describe_tools` gives any tool's full definition. The list is read on every turn a client does not cache, and an agent that sees fewer tools picks among them better; the core set is what building and editing a page took in practice, and `set(nodes, props)` stands in for the single-property setters, writing each property through its own setter as one undo step named *set*, `size` and `at` (the layer's place in its parent) last.
 

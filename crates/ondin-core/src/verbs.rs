@@ -1404,7 +1404,7 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "insert_subtree",
-        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first",
+        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy an existing layer's shape from `get_tree`, take a layer's look with `like`, and make one layer with `create_node`",
         params: &[
             req("parent", NODE, "the frame, group or page to create it in"),
             req(
@@ -1921,12 +1921,12 @@ pub static VERBS: &[Verb] = &[
             opt(
                 "x",
                 ParamKind::Number,
-                "where its box is centred, across the parent; at the main's own place unless given",
+                "its box's left edge in the parent; where the main's is unless given",
             ),
             opt(
                 "y",
                 ParamKind::Number,
-                "where its box is centred, down the parent",
+                "its box's top edge in the parent; where the main's is unless given",
             ),
         ],
         run: |ctx, a| {
@@ -1936,15 +1936,14 @@ pub static VERBS: &[Verb] = &[
                 return Err(a.invalid("main", "not a main component or a set"));
             }
             node(ctx, parent)?;
-            let centre = match (a.number("x"), a.number("y")) {
-                (None, None) => None,
-                (x, y) => {
-                    let into = ctx.res.world_transform(parent).unwrap_or(Affine::IDENTITY);
-                    Some(into * kurbo::Point::new(x.unwrap_or(0.0), y.unwrap_or(0.0)))
-                }
-            };
-            let (tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, centre)
+            let (mut tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, None)
                 .ok_or(VerbError::Nothing("the set has no variant to place"))?;
+            let (x, y) = (a.number("x"), a.number("y"));
+            if (x.is_some() || y.is_some())
+                && let Some(op) = build::cornered_at(ctx.doc, &tx, id, x, y)
+            {
+                tx.0.push(op);
+            }
             Ok(Done::made(tx, vec![id]))
         },
     },
@@ -2769,10 +2768,10 @@ pub static VERBS: &[Verb] = &[
         doc: "Set what a variable holds in one mode: a value, or an alias of another variable",
         params: &[
             req("variable", ParamKind::Id("variable"), "the variable"),
-            req(
+            opt(
                 "mode",
                 ParamKind::Id("mode"),
-                "the mode, of the variable's collection",
+                "the mode, of the variable's collection; its only one when it has one",
             ),
             req(
                 "value",
@@ -2781,7 +2780,18 @@ pub static VERBS: &[Verb] = &[
             ),
         ],
         run: |ctx, a| {
-            let (id, mode): (VarId, ModeId) = (own_variable(ctx, a)?, a.id("mode")?);
+            let id = own_variable(ctx, a)?;
+            let only = || match ctx.doc.variables().collection_of(id).map(|c| &c.modes[..]) {
+                Some([m]) => Ok(m.id),
+                _ => Err(a.invalid(
+                    "mode",
+                    "the variable's collection has more than one mode: name one",
+                )),
+            };
+            let mode: ModeId = match a.id_opt("mode")? {
+                Some(mode) => mode,
+                None => only()?,
+            };
             crate::variable::set_cell_ops(ctx.doc.variables(), id, mode, a.model("value")?)
                 .map(Done::ops)
                 .map_err(|why| a.invalid("value", why))

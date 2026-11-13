@@ -698,6 +698,33 @@ pub fn centred_on(
     })
 }
 
+/// The `SetTransform` that puts the left and top of `instance`'s box, just
+/// inserted by `tx`, at `x`, `y` in its parent's space, measured as
+/// [`centred_on`] measures; an edge not given stays where it is.
+pub fn cornered_at(
+    doc: &Document,
+    tx: &Transaction,
+    instance: NodeId,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Option<Operation> {
+    let mut scratch = doc.clone();
+    scratch.apply(tx).ok()?;
+    let at = scratch.get(instance)?.transform();
+    let res = Resolved::rebuild(&scratch);
+    let local = res.used_local(&scratch, instance)?;
+    let b = crate::query::local_box(&scratch, &res, instance)?;
+    let corner = crate::geometry::transform_rect(local, b).origin();
+    let shift = Vec2::new(
+        x.map_or(0.0, |x| x - corner.x),
+        y.map_or(0.0, |y| y - corner.y),
+    );
+    Some(Operation::SetTransform {
+        id: instance,
+        transform: Affine::translate(shift) * at,
+    })
+}
+
 /// Why [`make_component`] made nothing.
 #[derive(Debug)]
 pub enum MakeError {

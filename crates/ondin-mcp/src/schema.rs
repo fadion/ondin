@@ -364,7 +364,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "set",
-        doc: "Set properties of layers in one undo step, each as its own setter takes it: name, visible, locked, opacity, blend, clip, fills, strokes, effects, exports, display, item, insets, text, text_style, paragraph, block, transform, geometry, element, link, size {width, height}, and at [x, y], the layer's place in its parent.",
+        doc: "Set properties of layers in one undo step, each as its own setter takes it: name, visible, locked, opacity, blend, clip, fills, strokes, effects, exports, display, item, insets, text, text_style, paragraph, block, transform, geometry, element, link, size {width, height}, and at [x, y], its box's left and top in its parent. Style part of a text with `style_text`.",
         params: &[
             param("nodes", ParamKind::Nodes, true, "The layers."),
             param(
@@ -391,7 +391,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "describe_tools",
-        doc: "The full definitions of tools, listed or not, by name or by a word in their name or description; run one that is not listed with `call`. Needs no current document.",
+        doc: "The full definitions of tools, listed or not, by name or by a word in their name or description, name matches first; run one that is not listed with `call`. A name that is no tool is answered in `not_found`. Needs no current document.",
         params: &[
             param("names", ParamKind::Model("[Name]"), false, "Tools by name."),
             param(
@@ -399,6 +399,12 @@ pub static TOOLS: &[Tool] = &[
                 ParamKind::Text,
                 false,
                 "A word to look for, ignoring case; at most 12 answered.",
+            ),
+            param(
+                "brief",
+                ParamKind::Bool,
+                false,
+                "Answer every match's name and description only.",
             ),
         ],
     },
@@ -788,7 +794,7 @@ mod tests {
     /// budget.
     #[test]
     fn the_tool_list_stays_within_its_budget() {
-        const CORE_BUDGET: usize = 19_500;
+        const CORE_BUDGET: usize = 23_200;
         const ALL_BUDGET: usize = 94_000;
         let core = listed_bytes(crate::tools::CORE.iter());
         assert!(

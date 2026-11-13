@@ -1160,7 +1160,7 @@ fn named_paths<'a>(
     }
 }
 
-/// `batch`: each step's verb committed in turn, each reading what the last left,
+/// `batch`: each step's verb or `set` committed in turn, each reading what the last left,
 /// then joined into one undo step named `batch`. A refused step takes back the
 /// steps before it, so the batch lands whole or not at all. A step names what an
 /// earlier one made as `"@label"`, the label that step gave in `as`, as
@@ -1253,7 +1253,8 @@ const SET_PROPS: &[(&str, &str, bool, &str)] = &[
 
 /// `set`: each property through its own setter, as a [`batch`] named `set`, so
 /// one call writes what a handful of setters would and lands as one undo step.
-/// `size` and `at` follow the rest, so a move lands where the new size leaves it.
+/// `size` and `at` follow the rest, so a move lands where the new size leaves it;
+/// `at` is measured once they have landed ([`placed_at`]).
 fn set(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1307,33 +1308,47 @@ fn set(
             step("set_size", json!({ "node": id, "width": w, "height": h }));
         }
     }
-    if let Some(at) = props.get("at") {
-        let Some([x, y]) = at
-            .as_array()
-            .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
-            .and_then(|a| <[f64; 2]>::try_from(a).ok())
-        else {
-            return Err("`at` is [x, y], the place in the layer's parent".into());
-        };
-        for id in &ids {
-            let t = s
-                .doc
-                .get(*id)
-                .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?
-                .transform()
-                .as_coeffs();
-            step(
-                "set_transform",
-                json!({ "node": id.to_wire(), "transform": [t[0], t[1], t[2], t[3], x, y] }),
-            );
+    let at = match props.get("at") {
+        None => None,
+        Some(at) => Some(
+            at.as_array()
+                .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
+                .and_then(|a| <[f64; 2]>::try_from(a).ok())
+                .ok_or("`at` is [x, y], the left and top of the layer's box in its parent")?,
+        ),
+    };
+    let batched = |steps: Vec<Value>| {
+        let mut batched = json!({ "steps": steps });
+        if let Some(base) = args.get("base_rev") {
+            batched["base_rev"] = base.clone();
+        }
+        batched
+    };
+    let depth = s.history.undo_depth();
+    if !steps.is_empty() {
+        batch(conn, s, client, &batched(steps))?;
+    }
+    // Measured after the rest landed, so the box is the one the new size left.
+    if let Some([x, y]) = at {
+        let placed = ids
+            .iter()
+            .map(|id| placed_at(s, *id, x, y))
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|steps| batch(conn, s, client, &batched(steps)));
+        if let Err(why) = placed {
+            if s.history.undo_depth() > depth {
+                s.take_back();
+            }
+            return Err(why);
         }
     }
-    let mut batched = json!({ "steps": steps });
-    if let Some(base) = args.get("base_rev") {
-        batched["base_rev"] = base.clone();
+    let made = s.history.undo_depth().saturating_sub(depth);
+    if made > 1 {
+        s.history.join_last(made);
     }
-    batch(conn, s, client, &batched)?;
-    if let Some(note) = s.history.current_note_mut() {
+    if made > 0
+        && let Some(note) = s.history.current_note_mut()
+    {
         note.label = "set".into();
         note.origin = ondin_core::Origin::Mcp {
             client: client.to_owned(),
@@ -1345,15 +1360,37 @@ fn set(
     Ok(Answer::Json(json!({ "set": written })))
 }
 
-/// `describe_tools`: the full definition of each tool named in `names`, or of
-/// those whose name or description holds `query`, at most [`DESCRIBED`].
+/// The `set_transform` step that puts the left and top of `id`'s box at `x`, `y`
+/// in its parent's space, for every kind: the box it is drawn with (a group's is
+/// its children's), moved by the difference so it keeps its rotation and scale.
+/// A layer with no box is placed by its origin.
+fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, String> {
+    let n = s
+        .doc
+        .get(id)
+        .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?;
+    let local = s.resolved.used_local(&s.doc, id).unwrap_or(n.transform());
+    let corner = ondin_core::query::local_box(&s.doc, &s.resolved, id)
+        .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
+        .unwrap_or(local * ondin_core::kurbo::Point::ZERO);
+    let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
+    Ok(json!({ "tool": "set_transform",
+        "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
+}
+
+/// `describe_tools`: the full definition of each tool named in `names`, then of
+/// those whose name holds `query`, then of those whose description alone does,
+/// at most [`DESCRIBED`]; with `brief`, every match's name and description only.
+/// A name that is no tool is answered in `not_found`.
 fn describe_tools(args: &Value) -> Value {
     use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
-    let all = PHASE_1
+    let all: Vec<Value> = PHASE_1
         .iter()
         .chain(&PHASE_2)
         .chain(&PHASE_3)
-        .chain(&PHASE_4);
+        .chain(&PHASE_4)
+        .filter_map(|name| ondin_mcp::schema::definition(name))
+        .collect();
     let names: Vec<&str> = args
         .get("names")
         .and_then(Value::as_array)
@@ -1363,24 +1400,53 @@ fn describe_tools(args: &Value) -> Value {
         .get("query")
         .and_then(Value::as_str)
         .map(str::to_lowercase);
-    let matching: Vec<Value> = all
-        .filter_map(|name| ondin_mcp::schema::definition(name))
-        .filter(|d| {
-            let name = d["name"].as_str().unwrap_or_default();
-            names.contains(&name)
-                || query.as_ref().is_some_and(|q| {
-                    name.contains(q.as_str())
-                        || d["description"]
-                            .as_str()
-                            .is_some_and(|t| t.to_lowercase().contains(q.as_str()))
-                })
-        })
+    let brief = args.get("brief").and_then(Value::as_bool).unwrap_or(false);
+    // 0 named, 1 a name holding the query, 2 a description holding it.
+    let rank = |d: &Value| {
+        let name = d["name"].as_str().unwrap_or_default();
+        if names.contains(&name) {
+            return Some(0);
+        }
+        let q = query.as_deref()?;
+        if name.contains(q) {
+            return Some(1);
+        }
+        d["description"]
+            .as_str()
+            .is_some_and(|t| t.to_lowercase().contains(q))
+            .then_some(2)
+    };
+    let mut matching: Vec<(u8, &Value)> =
+        all.iter().filter_map(|d| rank(d).map(|r| (r, d))).collect();
+    matching.sort_by_key(|(r, _)| *r);
+    let not_found: Vec<&str> = names
+        .iter()
+        .filter(|n| !all.iter().any(|d| d["name"] == **n))
+        .copied()
         .collect();
-    let more = matching.len().saturating_sub(DESCRIBED);
-    json!({ "tools": matching.into_iter().take(DESCRIBED).collect::<Vec<_>>(), "more": more })
+    let (tools, more): (Vec<Value>, usize) = if brief {
+        let tools = matching
+            .iter()
+            .map(|(_, d)| json!({ "name": d["name"], "description": d["description"] }))
+            .collect();
+        (tools, 0)
+    } else {
+        let more = matching.len().saturating_sub(DESCRIBED);
+        let tools = matching
+            .into_iter()
+            .take(DESCRIBED)
+            .map(|(_, d)| d.clone())
+            .collect();
+        (tools, more)
+    };
+    let mut answer = json!({ "tools": tools, "more": more });
+    if !not_found.is_empty() {
+        answer["not_found"] = json!(not_found);
+    }
+    answer
 }
 
-/// The most definitions one `describe_tools` answers.
+/// The most full definitions one `describe_tools` answers.
 const DESCRIBED: usize = 12;
 
 /// One step of [`batch`]: its answer and how many undo steps it committed.
@@ -1402,9 +1468,9 @@ fn batch_step(
         .get("tool")
         .and_then(Value::as_str)
         .ok_or("a step names its `tool`")?;
-    if ondin_core::verbs::find(tool).is_none() {
+    if tool != "set" && ondin_core::verbs::find(tool).is_none() {
         return Err(format!(
-            "a batch runs the write tools that are verbs, and `{tool}` is none"
+            "a batch runs `set` and the write tools that are verbs, and `{tool}` is neither"
         ));
     }
     let mut args = step.get("args").cloned().unwrap_or_else(|| json!({}));
@@ -1413,7 +1479,11 @@ fn batch_step(
         map.insert("base_rev".into(), base.clone());
     }
     let depth = s.history.undo_depth();
-    let Answer::Json(answer) = write(conn, s, client, tool, &args)? else {
+    let ran = match tool {
+        "set" => set(conn, s, client, &args)?,
+        _ => write(conn, s, client, tool, &args)?,
+    };
+    let Answer::Json(answer) = ran else {
         return Err("a write answers JSON".into());
     };
     Ok((answer, s.history.undo_depth().saturating_sub(depth)))
@@ -1934,6 +2004,65 @@ mod tests {
         assert!(bad.is_error, "an unknown property is refused");
     }
 
+    /// `set`'s `at` puts a group's box where it puts a layer's: its left and top in
+    /// the parent, wherever its children sat, not the group's transform moved there.
+    ///
+    /// flip: `placed_at` writing `x`, `y` as the transform's offset → fails at "the
+    /// box's corner".
+    #[test]
+    fn set_places_a_groups_box_by_its_corner() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let a = rect(&mut engine, &mut docs, 1, "A");
+        let b = rect(&mut engine, &mut docs, 1, "B");
+        for (id, at) in [(&a, [100.0, 50.0]), (&b, [160.0, 80.0])] {
+            let props = json!({ "at": at });
+            ok(&call(
+                &mut engine,
+                &mut docs,
+                1,
+                "set",
+                json!({ "nodes": [id], "props": props }),
+            ));
+        }
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "group",
+            json!({ "nodes": [a, b] }),
+        );
+        let group = ok(&made)["created"][0].clone();
+        let gid = NodeId::from_wire(group.as_str().unwrap()).unwrap();
+        let aid = NodeId::from_wire(&a).unwrap();
+        let before = docs.session.resolved.world_bounds(aid).unwrap();
+        let box_of = |docs: &One| {
+            let s = &docs.session;
+            let local = s.resolved.used_local(&s.doc, gid).unwrap();
+            let b = ondin_core::query::local_box(&s.doc, &s.resolved, gid).unwrap();
+            ondin_core::geometry::transform_rect(local, b).origin()
+        };
+        assert_eq!(
+            box_of(&docs),
+            (100.0, 50.0).into(),
+            "the group spans its children"
+        );
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [group], "props": { "at": [10.0, 20.0] } }),
+        ));
+        let after = docs.session.resolved.world_bounds(aid).unwrap();
+        assert_eq!(
+            (after.x0 - before.x0, after.y0 - before.y0),
+            (-90.0, -30.0),
+            "the box's corner moved to [10, 20]"
+        );
+        assert_eq!(box_of(&docs), (10.0, 20.0).into());
+    }
+
     /// `call` answers as the tool it names, listed or not, and never names itself;
     /// `describe_tools` finds a tool by name and by a word.
     ///
@@ -1970,6 +2099,46 @@ mod tests {
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"set_point"), "{names:?}");
         assert!(tools.iter().all(|t| t["inputSchema"].is_object()));
+    }
+
+    /// `describe_tools` answers the tools whose name holds the query before those
+    /// whose description alone does, answers names and descriptions only when
+    /// `brief`, and names what it did not find.
+    ///
+    /// flip: `describe_tools` not sorting by rank → fails at the first tool's name,
+    /// as `get_tree` leads.
+    #[test]
+    fn describe_tools_ranks_name_matches_first() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let found = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "query": "style" }),
+        );
+        let tools = ok(&found)["tools"].as_array().unwrap().clone();
+        let named: Vec<bool> = tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().contains("style"))
+            .collect();
+        assert!(named[0], "{tools:?}");
+        assert!(
+            named.windows(2).all(|w| w[0] || !w[1]),
+            "name matches first: {named:?}"
+        );
+        let found = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "query": "style", "brief": true, "names": ["no_such_tool"] }),
+        );
+        let answer = ok(&found);
+        let tools = answer["tools"].as_array().unwrap();
+        assert!(tools.iter().any(|t| t["name"] == "add_style"), "{tools:?}");
+        assert!(tools.iter().all(|t| t.get("inputSchema").is_none()));
+        assert_eq!(answer["not_found"], json!(["no_such_tool"]), "not found");
     }
 
     /// A subtree names its page and frame once, on the root: a layer below keeps
@@ -2506,6 +2675,55 @@ mod tests {
         assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
         assert_eq!(s.history.undo_depth(), 1);
         assert_eq!(s.history.redo_depth(), 0, "and nothing to redo");
+    }
+
+    /// A batch step can be `set`, naming an earlier step's layer by its label, and
+    /// the batch is still one step; a `set` refused there takes back the steps
+    /// before it.
+    ///
+    /// flip: `batch_step` refusing a tool that is no verb, as it did `set` → fails
+    /// at the first batch's `ok`.
+    #[test]
+    fn a_batch_runs_set_as_a_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let make = json!({ "tool": "create_node", "as": "card",
+            "args": { "parent": page, "kind": kind, "name": "Card" } });
+        let set = json!({ "tool": "set",
+            "args": { "nodes": ["@card"], "props": { "name": "Hero", "opacity": 0.5 } } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, set] }),
+        );
+        let card = ok(&out)["steps"][0]["created"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let s = &docs.session;
+        let n = s.doc.get(NodeId::from_wire(&card).unwrap()).unwrap();
+        assert_eq!((n.name(), n.opacity()), ("Hero", 0.5));
+        assert_eq!(s.history.undo_depth(), 1, "one step");
+        assert_eq!(s.history.done().last().unwrap().note.label, "batch");
+
+        let layers = docs.session.doc.len();
+        let bad = json!({ "tool": "set",
+            "args": { "nodes": ["@card"], "props": { "name": "X", "colour": "#fff" } } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [make, bad] }),
+        );
+        assert!(out.is_error);
+        let s = &docs.session;
+        assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
+        assert_eq!(s.history.undo_depth(), 1);
     }
 
     /// An instance reads back the property values it is set to and each copy the

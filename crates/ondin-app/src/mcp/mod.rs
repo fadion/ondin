@@ -1029,12 +1029,12 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
             Ok(Answer::Image(png))
         }
         "undo" => {
-            own_step(s.history.done().next_back(), &call.client, "undo")?;
-            json(json!({ "undone": s.undo() }))
+            let step = own_step(s.history.done().next_back(), &call.client, "undo")?;
+            json(json!({ "undone": s.undo().then_some(step).flatten() }))
         }
         "redo" => {
-            own_step(s.history.undone().next(), &call.client, "redo")?;
-            json(json!({ "redone": s.redo() }))
+            let step = own_step(s.history.undone().next(), &call.client, "redo")?;
+            json(json!({ "redone": s.redo().then_some(step).flatten() }))
         }
         "run_exports" => reads::run_exports(s, nodes(args, "ids")?),
         "export_code" => reads::export_code(s, args, nodes(args, "ids")?),
@@ -1052,16 +1052,20 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
 /// Refuse an agent's `undo` or `redo` of a step it did not make: the history is
 /// the person's too, and one agent call must not take back their work or another
 /// client's. A step is this client's when it came over MCP under its name.
+/// Answers the step's name as the History panel lists it, `None` at the end of
+/// the history.
 fn own_step(
     step: Option<ondin_core::StepView<'_>>,
     client: &str,
     verb: &str,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let Some(step) = step else {
-        return Ok(());
+        return Ok(None);
     };
     match &step.note.origin {
-        ondin_core::Origin::Mcp { client: c, .. } if c == client => Ok(()),
+        ondin_core::Origin::Mcp { client: c, .. } if c == client => {
+            Ok(Some(step.note.label.clone()))
+        }
         ondin_core::Origin::Mcp { client: c, .. } => Err(format!(
             "The step to {verb} is `{}`, made by {c}, not by you: nothing was changed",
             step.note.label
@@ -2161,6 +2165,38 @@ mod tests {
         assert!(engine.handle(&mut docs, other).is_error, "another client's");
         ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
         assert_eq!(docs.session.history.undo_depth(), 0, "its own is undone");
+    }
+
+    /// `undo` and `redo` answer the name of the step they moved, as the history
+    /// lists it, and `undone: null` at the end of the history.
+    ///
+    /// flip: `own_step` answering `None` for the client's own step → fails at
+    /// the undo's name.
+    #[test]
+    fn undo_and_redo_name_the_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Chip");
+        let args = json!({ "node": id, "name": "Pill" });
+        ok(&call(&mut engine, &mut docs, 1, "set_name", args));
+        let label = docs
+            .session
+            .history
+            .done()
+            .next_back()
+            .unwrap()
+            .note
+            .label
+            .clone();
+        assert!(!label.is_empty());
+        let undo = call(&mut engine, &mut docs, 1, "undo", json!({}));
+        assert_eq!(ok(&undo)["undone"], json!(label), "the undo's name");
+        let redo = call(&mut engine, &mut docs, 1, "redo", json!({}));
+        assert_eq!(ok(&redo)["redone"], json!(label));
+        ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
+        ok(&call(&mut engine, &mut docs, 1, "undo", json!({})));
+        let none = call(&mut engine, &mut docs, 1, "undo", json!({}));
+        assert_eq!(ok(&none)["undone"], Value::Null);
     }
 
     /// `insert_subtree` answers each named layer by its path of names, an unnamed

@@ -366,7 +366,7 @@ The split that survives contact with an agent:
   the world-space facade "also enables a future MCP `eval` tool for free".
 
 `/ai` is a door into the assistant (`ai.md`): a configured agent harness, reached first through its
-chat window. It gains a property worth naming: the agent emits tier-2 Luau, the operator can *read
+panel. It gains a property worth naming: the agent emits tier-2 Luau, the operator can *read
 it before it runs*, and it lands as one undoable step. Natural language in, reviewable code out,
 ordinary undo. `/ai` is built after the assistant.
 

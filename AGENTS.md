@@ -18,7 +18,7 @@ git.
 | `docs/shortcuts.md` | The keymap. |
 | `docs/context-menus.md` | The context-menu spec. |
 | `docs/vm.md` | The Command Mode language. Nothing of it is built. |
-| `docs/ai.md` | The assistant: agent harnesses, the chat window, attaching layers. Nothing of it is built. |
+| `docs/ai.md` | The assistant: agent harnesses, its panel, attaching layers. Nothing of it is built. |
 | `todo.md` | The maintainer's private scratchpad, untracked. Never record anything there. |
 
 ### Keeping the record

@@ -13,9 +13,10 @@ true.
   parameter header, `mlua` exposing Luau's analysis, files outside the document (parked), first-run
   disclosure, schema place, kit scripts. `/ai` is built after the assistant.
 - **The assistant** — `ai.md`. `ondin-mcp` serves every phase's tools. Open: finding and
-  probing each harness, the sealed spawn per harness and its stream parser, `propose_edit` and its
-  card, the chat window, attaching layers from the canvas and the layers tree, Settings'
-  *Assistant* section, the agent log. Open in `ai.md` §9.
+  probing each harness (Gemini CLI's stream, resume and seal not yet measured), the sealed spawn per harness and its stream parser, `propose_edit` and its
+  card, the panel at the rail's foot, attaching layers from the canvas, the ask button and the
+  layers tree, Settings' *Assistant* section, the agent log. Open in `ai.md` §9. Parked: ACP as
+  the transport, until Claude Code speaks it without an adapter (`ai.md` §2).
 - **MCP and headless (M6)** — `design/mcp.md`. The wire, proxy, `serve`, the window as a host and
   every phase's tools are built. The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980),

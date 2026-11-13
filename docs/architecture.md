@@ -65,7 +65,7 @@ Read the file for the exact wording before relying on one.
 | `library.md` | 9.5 | The library: dashboard, projects, versions, trash, *Import files*; document tabs (open, park, close, next launch) |
 
 Also in `docs/`: `shortcuts.md` (the keymap), `context-menus.md` (the menus), `vm.md` (the
-Command Mode language, unbuilt), `ai.md` (the assistant: agent harnesses, the chat window,
+Command Mode language, unbuilt), `ai.md` (the assistant: agent harnesses, its panel,
 attaching layers; unbuilt).
 
 ## Keeping this true

@@ -6,15 +6,15 @@
 
 The assistant lets a person ask a coding agent about the design in front of them: what a layer is
 doing, why a layout breaks at a width, how to name a set of variants, what to change to fix a
-contrast failure. They ask in a chat window, attach layers from the canvas, and read answers that
-can point back at layers and propose edits. Command Mode's `/ai` (`vm.md` §11) is a later door
+contrast failure. They ask in a panel at the tool rail's foot, attach layers from the canvas, and
+read short answers that can point back at layers and propose edits. Command Mode's `/ai` (`vm.md` §11) is a later door
 into the same assistant.
 
 ## 1. The thesis
 
 **Ondin embeds no model and holds no provider key.** The person already pays for, and is signed in
 to, a headless coding agent — Claude Code, Codex and their kin. Ondin starts that agent as a
-child process, points it at Ondin's own MCP endpoint, and shows its turn in a chat window. The
+child process, points it at Ondin's own MCP endpoint, and shows its turn in the assistant panel. The
 harness owns the model, the account, the billing and the rate limits; Ondin owns what the agent
 can see and what it can change.
 
@@ -42,15 +42,24 @@ counts as the parent. Each has a key (persisted), a label (*Claude Code*), a pro
 | OpenCode | `opencode` | one process per turn, prompt as the last argument | `--session <id>` | kill |
 | GitHub Copilot | `copilot` | one process per turn, prompt on stdin | `--resume=<id>` | kill |
 | Cursor | `cursor-agent` | one process per turn, prompt on stdin | `--resume <id>` | kill |
+| Gemini CLI | `gemini` | one process per turn, prompt on stdin | `--resume <id>` | kill |
 
 - **Behaviour is asked as a capability, never by identity**: persistent or per-turn, resume,
   interrupt, prompt on stdin, system prompt in the first turn, effort levels, how it is sealed.
   Each capability is an exhaustive `match`, so a new harness is a compile error, not a quiet
   default.
-- **Every harness streams JSON lines**: stream-json for Claude, Antigravity and Cursor, the
-  `--json` / `--format json` forms for the rest. No protocol that has not been measured against a
-  real binary is driven.
-- **Gemini CLI is not a harness**: it needs an API key, and the assistant holds none.
+- **Every harness streams JSON lines**: stream-json for Claude, Antigravity, Cursor and Gemini,
+  the `--json` / `--format json` forms for the rest. No protocol that has not been measured against
+  a real binary is driven; Gemini CLI's row is still to be measured.
+- **Gemini CLI signs in with Google once.** Running `gemini` in a terminal and choosing *Sign in
+  with Google* caches the credentials, and its headless runs reuse them, on the person's own
+  account and quota. No API key is involved, so it fits the thesis. A headless run with nothing
+  cached fails as not signed in.
+- **Each harness is driven through its own headless mode, not the Agent Client Protocol.** ACP
+  would turn six dialects into one and lets an agent ask permission mid-turn, but Claude Code and
+  Codex speak it only through adapter packages (npm, so Node too). The person would have to
+  install one the harness does not need, or Ondin would install it, and an adapter may not run
+  the program the person signed in to. Parked until Claude Code speaks ACP itself.
 
 ### Finding and probing the program
 
@@ -60,7 +69,7 @@ counts as the parent. Each has a key (persisted), a label (*Claude Code*), a pro
 - **On Windows** npm's `.cmd` shims come last, since Rust refuses a multi-line argument to a batch
   file. Behind a shim, the real program is started directly, so *Stop* kills the agent and not
   only its `cmd.exe`. Every child is started with `CREATE_NO_WINDOW`.
-- **Ondin never installs a harness.** A missing one is said in the chat window with the program it
+- **Ondin never installs a harness.** A missing one is said in the panel with the program it
   looked for.
 - **A probe reads `--help` once per program path** and caches what it finds: which sealing flags
   exist, and so how sealed a session can be (§4). A probe that could not run is not cached. The
@@ -88,6 +97,10 @@ counts as the parent. Each has a key (persisted), a label (*Claude Code*), a pro
   `run/` for each session, never the document's folder and never the app's working directory, so
   no planted agent settings file beside a document can configure the child. A session that
   cannot make one is refused.
+- **The MCP server** in the harness's config is `ondin mcp-proxy --client <key> --document <path>`.
+  The key is the conversation's, so a harness that starts a process per turn finds its document
+  and revisions on its next connection, with `changed` reporting what the person did in between
+  (`design/mcp.md`, *Revisions*). The document spares the agent a `use_document` call.
 - **The environment** marks the child (`ONDIN_AGENT_CHILD=1`; the `ondin` command line refuses to
   run under it, a speed bump rather than a boundary) and clears the variables that would point a
   harness at another configuration.
@@ -104,7 +117,7 @@ excluded where the harness allows it, and only Ondin's tools allowed. The mechan
 harness (flags, a sandbox mode, a rules file in the run folder), and each is chosen to **fail
 closed**: a harness whose restricting config cannot be written is refused, not started open. The
 seal is graded — *Sealed* where built-in tools are off, *Restricted* where a sandbox or rules file
-holds them — and the chat window and Settings say which, naming the mechanism, including where a
+holds them — and the panel's head and Settings say which, naming the mechanism, including where a
 harness cannot keep the person's own MCP servers away.
 
 Never passed, whatever a harness offers: any skip-permissions, auto-approve, allow-all or yolo
@@ -113,17 +126,23 @@ the access level grants and everything else is denied.
 
 ### Access levels
 
-One setting, **Access**, decides what the agent may do. Tools above the level are **left out of
-the tool list**, not listed and refused: an agent that sees a tool plans around it.
+**Access** decides what the agent may do. Settings holds the default for a new chat, and the
+panel's head switches it for the chat in front: it changes from task to task, and *Edit* left on
+by accident is worth a visible control. A switch restarts the session, replaying the thread's
+prose as a restored conversation does. Tools above the level are **left out of the tool list**,
+not listed and refused: an agent that sees a tool plans around it.
 
-- **Look** — Phase 1 reads: the snapshot, nodes, children, bounds, the selection, `hit_test`,
-  `export_png` and `export_svg`. `export_png` is the agent's eyes (§8.4).
+- **Look** — Phase 1's reads and exports (`design/mcp.md` §8.4). `export_png` is the agent's
+  eyes.
 - **Propose** (the default) — Look, plus `propose_edit`. The agent sends a list of registry verb
   calls (`ondin_core::verbs`), which Ondin checks as `verbs::call` checks any call and returns
   the result to the agent. The agent then shows the proposal in its reply, and Ondin draws it as
   a card: what it changes, in the verbs' own words, and **Apply**, which commits it as one
   transaction and one undo step named after the proposal. Nothing changes until the person
-  applies it.
+  applies it. A proposal records the revision it was made at: when a layer it writes has changed
+  since, the card says so in place of *Apply* (*Price changed after this was proposed*) with *Ask
+  again*, which asks for a fresh proposal with that layer attached. Applied, the card offers
+  *Undo* while its step is the last.
 - **Edit** — Look, plus the write tools of Phases 2 and 3. Each call commits as its own undo step
   marked as the assistant's (`Origin::Mcp`), so the History section shows which steps the agent
   made. Kits and the library (Phase 4) stay out of the assistant at every level.
@@ -131,10 +150,26 @@ the tool list**, not listed and refused: an agent that sees a tool plans around 
 ### Context sent with a turn
 
 - **The system prompt** says what Ondin is, the access level and its tools truthfully, how to
-  propose an edit, and the person's own instructions from Settings.
-- **Each turn** carries what changed since the last one (the current page, the selection) and a
-  recap of the person's last three questions, since a harness's own memory of earlier turns is
-  unreliable. The page outline goes only on a thread's first turn for a harness that resumes.
+  propose an edit, and how to answer, then the person's own instructions from Settings, which
+  come last and so win.
+- **Answers are short**, since the panel is narrow: one or two sentences, the answer first, no
+  preamble, recap or offer of more. A choice is at most three options in an ` ```options ` block,
+  one short line each, and a question. A layer is named by its id, so it renders as a chip. A
+  table or code only when asked for one or when the answer is code; longer only when the person
+  asks for detail.
+- **The prompt goes in the harness's system-prompt flag** where it has one (Claude Code's
+  `--append-system-prompt`), so it holds on every turn and survives the harness compacting its
+  context; otherwise at the top of the first turn.
+- **Each turn opens with a preamble**, fenced as data: the revision; the layers added, changed and
+  removed since the last turn, by id and name (forty at most, then how many more and that the page
+  should be read again); the page; the selection; the attached layers; the person's last three
+  questions, since a harness's own memory of earlier turns is unreliable; and `style: brief`, since
+  an instruction given once fades over a long thread. The page outline, names and ids only, goes
+  only on a thread's first turn.
+- **The design is never sent whole.** The agent's earlier reads stay in its session, a process
+  that persists or a resumed id, and the preamble says which went stale, so it reads again only
+  those layers. Tool results' `changed` cannot do this alone: an agent answering from memory calls
+  no tool.
 - **A restored conversation** replays its prose, never its tool calls, into a fresh session's
   system prompt; a thread another harness wrote is not replayed, and the chat says so.
 - **Document content is data, never instructions.** Layer names, text content, component
@@ -146,13 +181,28 @@ the tool list**, not listed and refused: an agent that sees a tool plans around 
 
 The person attaches layers to the next question:
 
-- *Ask the assistant* on a layer's context menu and on the canvas selection's, and dragging rows
-  from the layers tree onto the chat window. Each adds the layer as a **chip** above the composer.
+- *Ask the assistant* on a layer's context menu and on the canvas selection's, in its own group
+  above *Delete*; the ask button on the selection; and dragging rows from the layers tree onto
+  the panel, whose composer lights the accent while a drop would land. Each attaches the layer
+  as a **chip** above the composer, opens the panel and focuses the composer.
+- **The ask button** is a small `icon::SPARKLE` button above the selection's top-right corner,
+  its right edge on the selection's and its bottom 8 clear of it, one for the whole selection and
+  the same size at every zoom. Where there is no room above it sits inside the corner, and it
+  stays left of the inspector's cards. Once the selection is attached it is lit and a click only
+  opens the panel. It hides while the selection is dragged, resized or rotated, during a marquee,
+  while text or a path is edited, in Present and Private mode, and while the assistant is *Off*,
+  so a person who never turns the assistant on never sees it. *View ▸ Show ask assistant* (the
+  canvas group, per machine, on by default; the palette has the same words) hides it; the context
+  menu's row stays.
 - **A chip is a reference, not a copy**: the layer's id, name, kind and size go with the
-  question, and the agent reads the rest through the tools (its subtree, its bounds, a render of
-  it). A chip's × removes it; a chip whose layer is deleted shows as gone and is not sent.
-- **While attached, a layer wears a mark on the canvas**, so the person sees what the agent will
-  be asked about. Hovering a chip outlines its layer; clicking one selects it and zooms to it.
+  question, and the agent reads the rest through the tools (its subtree, its bounds). For a
+  harness whose input takes images, an attached layer also goes with a 1× render, sparing the
+  `export_png` call nearly every first turn makes. A chip's × removes it; a chip whose layer is
+  deleted shows struck through and is not sent.
+- **While the panel is open, an attached layer wears a mark on the canvas**: a dashed accent
+  outline 5 outside it, with a tab carrying the sparkle and its chip's number, which tells two
+  chips both named *Card* apart. A closed panel leaves no ink. Hovering a chip outlines its layer;
+  clicking one selects it and zooms to it.
 - **The agent's reply can name layers.** A layer id in a reply renders as the same chip, which
   selects and zooms on click, so an answer about *the third card's button* is one click from it.
 
@@ -166,7 +216,7 @@ An **Assistant** section in Settings (`app-canvas-chrome.md`, *Settings*), stage
 - **Program** — the path, empty for found automatically, showing what was found.
 - **Model** — free text with the harness's suggestions as chips.
 - **Effort** — the harness's own levels; hidden where it has none.
-- **Access** — *Look*, *Propose*, *Edit*.
+- **Access** — *Look*, *Propose*, *Edit*: the default for a new chat.
 - **Instructions** — free text added to every system prompt.
 - The seal's sentence (§4) under the Agent row.
 
@@ -175,32 +225,66 @@ has, ties downward; each harness's last values come back within the session. A s
 restarts the session only when it changes what the agent was started with. With *Off*, the rows
 below Agent are disabled with that reason.
 
-## 6. The chat window
+## 6. The panel
 
-A floating window of the app's own, like the script editor (`vm.md` §10): resizable, not modal, its
-size and place kept per machine, so the canvas and the selection stay live behind it. Opened by
-`Ctrl+Shift+A`, the palette's *Assistant* row and the context menu's *Ask the assistant*.
+The assistant is a panel at the tool rail's foot, whose buttons read, top to bottom, *Assistant*,
+*Assets*, *Styles and variables*, *Insert components*. A floating window was weighed and dropped:
+it has to be placed, ends up over the layers being asked about, and is one more kind of surface.
 
+- **The door** is the rail button, wearing `icon::SPARKLE`, History's mark for a step made over
+  MCP: the same concept, an agent acting. (`CHAT` stays unused; a speech bubble reads as comments,
+  a non-goal.) Its tooltip is *Assistant (Ctrl+Shift+A)*. The palette's *Assistant* row, the
+  context menu's *Ask the assistant* and the ask button (§4) open it too.
+- **It is a `ui::rail_popup`, taller than its siblings.** Its bottom-left is theirs, 8 right of
+  the rail and level with its button's bottom; its top stops 8 below the canvas's top, so it is
+  the canvas height less 16, never under the siblings' 460. It is 400 wide, and its right edge
+  drags between 360 and 640, the only rail panel with a drag edge, since tables and code need the
+  room; the width is kept per machine. The height has no handle.
+- **It shares the place**: opening a sibling closes it, and opening it closes them. Closing keeps
+  the thread, the draft and a running turn. While a turn runs out of sight the button wears an
+  accent ring; a reply that arrived unseen wears an accent dot until the panel opens; the tooltip
+  says which (*Assistant · reply waiting*).
+- **The canvas stays live** behind it. `Escape` closes it, as it closes its siblings. Only *Stop*
+  stops a turn: a panel switch, a page switch or `Escape` never does; a document switch and a
+  settings restart do, each with a note.
+- **The head**: the harness's label, the seal's grade beside a lock (*Sealed*, *Restricted*), then
+  the Access dropdown and *New chat* (a plus).
 - **The thread:** the person's turns right-aligned and shrink-wrapped; the agent's full width,
   with the speaker name the turn was written by, kept with the turn, not read from the current
-  setting. *Thinking…* with a running time until the first text arrives.
+  setting.
+- **A turn is never blank while it waits.** The agent's turn takes its place at the send, with
+  the speaker's name and `ui::paint_spinner`, and the words name the stage: *Starting Claude
+  Code…* until the harness's first event (on every turn that starts a process), then *Thinking…*
+  until the first text or tool call, and again once a tool has finished and no text has followed.
+  The seconds count from the send. No skeleton bars: they would promise a shape the answer may
+  not have. A harness that exits before answering leaves a note, *Claude Code stopped before
+  answering (exit code 1).*, with *Ask again* (the same question and chips) and *Show details*
+  (the diagnostics, §3).
 - **Replies render markdown**: paragraphs, lists, tables, code blocks with a language bar and
   *Copy*. A Luau block gains *Open in script editor* once the editor exists. A proposal renders
   as its card (§4).
-- **A tool call is a row**: its name, a status dot (running, done, failed in the error
-  colour) and its result cut to a few lines with how many more there were.
+- **An ` ```options ` block renders as a stack of `ui::field_button`s**; a click sends its line as
+  the person's next question, with the same chips. Only the last turn's options are live; older
+  ones are drawn disabled. A harness that never writes the block reads fine, since the fence
+  falls back to a code block.
+- **A tool call is a row**, 22 tall in a well: its name in mono, the argument it was given, a
+  status dot (running as a ring, done, failed in the error colour) and its result cut short (a
+  line count, *image*, the error). After a turn's third call the rest fold into *+N calls*, which
+  opens on click.
 - **Under each finished turn:** its time and tokens, *Copy*, and on the last turn *Regenerate*,
   which drops that turn and asks again.
 - **The composer** is multi-line: Enter sends, Shift+Enter breaks the line, and the send button
   becomes *Stop* while a turn runs. `Ctrl+↑`/`Ctrl+↓` step through earlier questions.
 - **When it cannot send**, the composer is disabled with the reason, and off wins over every other:
-  the assistant is off; the program was not found; the harness reports it is not signed in.
+  the assistant is off (*Open settings*); the program was not found, naming what was looked for
+  and where (*Set the program*); the harness reports it is not signed in, saying to run the
+  program once in a terminal.
 - **The app's own words** (a refused spawn, a stopped turn, a replay withheld) are notes beside a
   turn, never message text, so they are never sent back to the model.
 - **One conversation per document**, kept per machine beside the library's view state, never in
   the `.ondin` file: a chat is the person's, not the work's. At most 100 messages; tool results
   are saved as *(result not saved)*, and a turn still streaming is not saved. *New chat* starts
-  over.
+  over; a list of threads has no room in the panel.
 
 ## 7. Logging and privacy
 
@@ -223,8 +307,4 @@ size and place kept per machine, so the canvas and the selection stay live behin
 
 ## 9. Open questions
 
-1. **Several conversations per document**, or one with *New chat*, as above.
-2. **Images in a question**: an attached layer's render sent inline for harnesses whose input takes
-   images, rather than leaving the agent to call `export_png`.
-3. **Access per document**, for a file whose author should not get *Edit* by default.
-4. **`/ai`'s look in the bar** (`vm.md` §13, question 7).
+1. **`/ai`'s look in the bar** (`vm.md` §13, question 7).

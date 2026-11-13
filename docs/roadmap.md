@@ -17,10 +17,6 @@ true.
   card, the panel at the rail's foot, attaching layers from the canvas, the ask button and the
   layers tree, Settings' *Assistant* section, the agent log. Open in `ai.md` §9. Parked: ACP as
   the transport, until Claude Code speaks it without an adapter (`ai.md` §2).
-- **MCP and headless (M6)** — `design/mcp.md`. The wire, proxy, `serve`, the window as a host and
-  every phase's tools are built. The proxy's loop (`mcp/proxy.rs` `run`) is wired to stdin and stdout, so its test covers only
-  `rewrite`: make it take a reader, a writer and a connect function, and pin the handover from
-  `serve` to the window, the restore before the first call, and a lost answer never re-sent.
 
 ## Later · Platform and dependencies
 

@@ -126,7 +126,7 @@ M0–M6 are complete. (M6 was deliberately deferred until the editor was feature
 | M4 GPU renderer | `VelloGpuRenderer`, shared `scene.rs`, culling, colour verification | fixture renders on a real device; pixel test validates the colour choke point; out-of-view nodes absent from the built scene; feature-gated GPU smoke suite with perceptual diff |
 | M5a App shell | winit + wgpu + egui, Vello canvas, pan/zoom, selection, move/resize/rotate with preview→commit, undo/redo, save/open | multi-artboard manipulation with clean one-gesture-one-undo history; smooth pan/zoom with culling |
 | M5b Tools and panels | Shape tools, pen, text tool with in-canvas editing, font picker over `FontService`, layers panel, inspector, colour editor, copy/paste/duplicate, grouping, multi-select, snapping, unsaved-change protection | a real small design can be built start to finish; an uninstalled Google font downloads, caches, applies, and still renders offline from cache |
-| M6 MCP and headless | Socket endpoint, stdio proxy, `ondin serve`; Phase 1–4 tools (§8.4; Phase 4 is a running GUI's only until the library moves out of `ondin-app`) | an external agent can query/export against a running GUI and `ondin serve`; its edits appear live, join shared undo, and survive save/load |
+| M6 MCP and headless | Socket endpoint, stdio proxy, `ondin serve`; Phase 1–4 tools (§8.4), on either host | an external agent can query/export against a running GUI and `ondin serve`; its edits appear live, join shared undo, and survive save/load |
 
 ## 12. Multiplayer readiness (design now, build later)
 

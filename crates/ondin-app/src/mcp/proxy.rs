@@ -19,8 +19,36 @@ use std::time::{Duration, Instant};
 /// How long the proxy waits for a `serve` it started to listen.
 const START_WAIT: Duration = Duration::from_secs(15);
 
+/// Where the proxy finds its hosts: the machine's endpoints, or a test's.
+trait Hosts {
+    /// A connection to the best host, starting `serve` when none runs, and which
+    /// kind of host it is.
+    fn connect(&mut self) -> Result<(Host, endpoint::Stream), String>;
+    /// Whether a window lists its endpoint, without connecting.
+    fn window_listed(&mut self) -> bool;
+}
+
+/// The hosts this machine runs.
+struct Machine;
+
+impl Hosts for Machine {
+    fn connect(&mut self) -> Result<(Host, endpoint::Stream), String> {
+        let found = match endpoint::hosts().into_iter().next() {
+            Some(h) => h,
+            None => start_serve()?,
+        };
+        let stream =
+            endpoint::connect(&found.endpoint).map_err(|e| format!("cannot reach Ondin: {e}"))?;
+        Ok((found.host, stream))
+    }
+
+    fn window_listed(&mut self) -> bool {
+        window_listed()
+    }
+}
+
 struct Link {
-    host: Found,
+    host: Host,
     read: BufReader<Box<dyn Read + Send>>,
     write: Box<dyn Write + Send>,
     /// Whether the remembered document was named on this link yet.
@@ -69,14 +97,29 @@ struct Remembered {
 /// Run the proxy until the agent closes its stdin, keying the host's state by
 /// `client` and starting on `document` when they are given.
 pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<(), String> {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
+    carry(
+        std::io::stdin().lock(),
+        std::io::stdout(),
+        client,
+        document.map(|d| absolute(&d)),
+        &mut Machine,
+    )
+}
+
+/// The proxy's loop: each line of `input` carried to a host from `hosts` and its
+/// answer written to `stdout`, until `input` ends.
+fn carry(
+    mut input: impl BufRead,
+    mut stdout: impl Write,
+    client: Option<String>,
+    document: Option<String>,
+    hosts: &mut impl Hosts,
+) -> Result<(), String> {
     let mut kept = Remembered {
-        document: document.map(|d| absolute(&d)),
+        document,
         ..Remembered::default()
     };
     let mut link: Option<Link> = None;
-    let mut input = stdin.lock();
     let mut bytes = Vec::new();
     loop {
         bytes.clear();
@@ -119,7 +162,7 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         }
         if link
             .as_ref()
-            .is_some_and(|l| l.host.host == Host::Serve && window_listed())
+            .is_some_and(|l| l.host == Host::Serve && hosts.window_listed())
         {
             link = None;
         }
@@ -128,7 +171,7 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
         for _ in 0..2 {
             let l = match link.as_mut() {
                 Some(l) => l,
-                None => match connect(&kept, method.as_deref()) {
+                None => match connect(&kept, method.as_deref(), hosts) {
                     Ok(l) => link.insert(l),
                     Err(why) => {
                         answer = Err(why);
@@ -284,16 +327,11 @@ fn window_listed() -> bool {
         })
 }
 
-/// Connect to the best host, starting a `serve` if none runs, and replay the
+/// Connect to the best host `hosts` offers, and replay the
 /// handshake, unless `now` is the handshake itself; [`restore`] names the
 /// document before the link's first tool call.
-fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
-    let host = match endpoint::hosts().into_iter().next() {
-        Some(h) => h,
-        None => start_serve()?,
-    };
-    let (read, write) =
-        endpoint::connect(&host.endpoint).map_err(|e| format!("cannot reach Ondin: {e}"))?;
+fn connect(kept: &Remembered, now: Option<&str>, hosts: &mut impl Hosts) -> Result<Link, String> {
+    let (host, (read, write)) = hosts.connect()?;
     let mut link = Link {
         host,
         read: BufReader::new(read),
@@ -377,5 +415,242 @@ mod tests {
         let call =
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_selection"}}"#;
         assert_eq!(rewrite(call, Some("chat-1")).0, call, "only initialize");
+    }
+
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    /// A host a test scripts: it answers every request, keeps the lines it read,
+    /// and goes away without answering a call to `drop_on`. A call to `window_on`
+    /// lists a window before it is answered.
+    struct Scripted {
+        host: Host,
+        drop_on: Option<&'static str>,
+        window_on: Option<&'static str>,
+    }
+
+    /// The hosts a test offers, in the order the proxy connects to them.
+    struct Fake {
+        next: std::collections::VecDeque<Scripted>,
+        window: Arc<AtomicBool>,
+        /// Each host's lines, by the order it was connected to.
+        seen: Vec<Arc<Mutex<Vec<Value>>>>,
+    }
+
+    impl Fake {
+        fn new(hosts: Vec<Scripted>) -> Self {
+            Self {
+                next: hosts.into(),
+                window: Arc::default(),
+                seen: Vec::new(),
+            }
+        }
+
+        /// The tool calls host `i` read, as `(tool, arguments)`.
+        fn calls(&self, i: usize) -> Vec<(String, Value)> {
+            let Some(seen) = self.seen.get(i) else {
+                return Vec::new();
+            };
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter_map(|m| {
+                    let name = m.pointer("/params/name")?.as_str()?;
+                    Some((name.to_owned(), m["params"]["arguments"].clone()))
+                })
+                .collect()
+        }
+
+        /// The methods host `i` read, in order.
+        fn methods(&self, i: usize) -> Vec<String> {
+            let Some(seen) = self.seen.get(i) else {
+                return Vec::new();
+            };
+            let seen = seen.lock().unwrap();
+            seen.iter()
+                .filter_map(|m| m["method"].as_str().map(str::to_owned))
+                .collect()
+        }
+    }
+
+    impl Hosts for Fake {
+        fn connect(&mut self) -> Result<(Host, endpoint::Stream), String> {
+            let script = self.next.pop_front().ok_or("no host")?;
+            let (from_proxy, to_host) = std::io::pipe().map_err(|e| e.to_string())?;
+            let (from_host, mut to_proxy) = std::io::pipe().map_err(|e| e.to_string())?;
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            self.seen.push(seen.clone());
+            let window = self.window.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(from_proxy).lines() {
+                    let Ok(line) = line else { return };
+                    let message: Value = serde_json::from_str(&line).unwrap();
+                    seen.lock().unwrap().push(message.clone());
+                    let tool = message.pointer("/params/name").and_then(Value::as_str);
+                    if tool.is_some() && tool == script.drop_on {
+                        return;
+                    }
+                    let Some(id) = message.get("id") else {
+                        continue;
+                    };
+                    let document = message.pointer("/params/arguments/document");
+                    let result =
+                        json!({ "isError": false, "structuredContent": { "document": document } });
+                    if tool.is_some() && tool == script.window_on {
+                        window.store(true, Ordering::SeqCst);
+                    }
+                    let answer = json!({ "jsonrpc": "2.0", "id": id, "result": result });
+                    if writeln!(to_proxy, "{answer}").is_err() {
+                        return;
+                    }
+                }
+            });
+            Ok((script.host, (Box::new(from_host), Box::new(to_host))))
+        }
+
+        fn window_listed(&mut self) -> bool {
+            self.window.load(Ordering::SeqCst)
+        }
+    }
+
+    /// The agent's lines, one request each, and what the proxy answered them.
+    fn drive(lines: &[Value], hosts: &mut Fake, document: Option<&str>) -> Vec<Value> {
+        let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        let mut out = Vec::new();
+        carry(
+            input.as_bytes(),
+            &mut out,
+            None,
+            document.map(str::to_owned),
+            hosts,
+        )
+        .unwrap();
+        String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    fn handshake() -> [Value; 2] {
+        [
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        ]
+    }
+
+    fn tool_call(id: u64, name: &str, arguments: Value) -> Value {
+        json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": { "name": name, "arguments": arguments } })
+    }
+
+    /// Once a window lists itself, the proxy leaves `serve` at the next request,
+    /// replays the handshake on the window and names the remembered document
+    /// there as a restore before carrying the call.
+    ///
+    /// flip: `carry` keeping the `serve` link when a window lists → fails at "the
+    /// handshake is replayed on the window".
+    #[test]
+    fn a_window_takes_over_from_serve_with_the_document_restored() {
+        let mut hosts = Fake::new(vec![
+            Scripted {
+                host: Host::Serve,
+                drop_on: None,
+                window_on: Some("get_selection"),
+            },
+            Scripted {
+                host: Host::Window,
+                drop_on: None,
+                window_on: None,
+            },
+        ]);
+        let [init, done] = handshake();
+        let lines = [
+            init,
+            done,
+            tool_call(2, "use_document", json!({ "document": "site" })),
+            tool_call(3, "get_selection", json!({})),
+            tool_call(4, "get_document", json!({})),
+        ];
+        let answers = drive(&lines, &mut hosts, None);
+        let ids: Vec<&Value> = answers.iter().map(|a| &a["id"]).collect();
+        assert_eq!(ids, [&json!(1), &json!(2), &json!(3), &json!(4)]);
+        assert!(
+            answers.iter().all(|a| a.get("error").is_none()),
+            "{answers:?}"
+        );
+        assert!(
+            hosts
+                .methods(1)
+                .starts_with(&["initialize".into(), "notifications/initialized".into()]),
+            "the handshake is replayed on the window: {:?}",
+            hosts.methods(1)
+        );
+        assert_eq!(
+            hosts.calls(1),
+            [
+                (
+                    "use_document".to_owned(),
+                    json!({ "document": "site", "restore": true })
+                ),
+                ("get_document".to_owned(), json!({})),
+            ],
+            "the window's calls"
+        );
+    }
+
+    /// A document named with `--document` is restored before the first call, so
+    /// the agent need not call `use_document`.
+    #[test]
+    fn a_named_document_is_restored_before_the_first_call() {
+        let mut hosts = Fake::new(vec![Scripted {
+            host: Host::Window,
+            drop_on: None,
+            window_on: None,
+        }]);
+        let [init, done] = handshake();
+        let lines = [init, done, tool_call(2, "get_selection", json!({}))];
+        drive(&lines, &mut hosts, Some("/work/site.ondin"));
+        let calls = hosts.calls(0);
+        assert_eq!(calls[0].0, "use_document");
+        assert_eq!(calls[0].1["document"], "/work/site.ondin");
+        assert_eq!(calls[1].0, "get_selection");
+    }
+
+    /// A call whose answer was lost is answered as maybe applied and never sent
+    /// again; the next request reaches a new host.
+    ///
+    /// flip: `carry` retrying a call on `Broke::Unanswered` → fails at "never
+    /// sent again".
+    #[test]
+    fn a_lost_answer_is_never_sent_again() {
+        let mut hosts = Fake::new(vec![
+            Scripted {
+                host: Host::Serve,
+                drop_on: Some("set_name"),
+                window_on: None,
+            },
+            Scripted {
+                host: Host::Serve,
+                drop_on: None,
+                window_on: None,
+            },
+        ]);
+        let [init, done] = handshake();
+        let lines = [
+            init,
+            done,
+            tool_call(2, "set_name", json!({ "node": "1:2", "name": "Hero" })),
+            tool_call(3, "get_selection", json!({})),
+        ];
+        let answers = drive(&lines, &mut hosts, None);
+        let resent = hosts.calls(1).iter().any(|(t, _)| t == "set_name");
+        assert!(!resent, "never sent again: {:?}", hosts.calls(1));
+        let lost = &answers[1];
+        assert_eq!(lost["id"], 2);
+        let why = lost["error"]["message"].as_str().unwrap_or_default();
+        assert!(why.contains("may have applied"), "{lost}");
+        assert_eq!(answers[2]["id"], 3);
+        assert!(answers[2].get("error").is_none());
     }
 }

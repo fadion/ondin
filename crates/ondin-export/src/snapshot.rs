@@ -50,7 +50,8 @@ use std::collections::BTreeMap;
 ///   `fill_indices` went; `Geometry::Text` traded `align` and `styled_runs` for
 ///   `color`, `paragraph`, `block`, `runs` and `paragraphs`; `NodeSnapshot::specified`;
 ///   `ComponentSummary::properties` and `overrides`; a missing family in a run warns.
-pub const SNAPSHOT_VERSION: u32 = 21;
+/// - **22** `Geometry::Path` gained `subpaths`, the anchors `set_point` edits.
+pub const SNAPSHOT_VERSION: u32 = 22;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -384,7 +385,12 @@ pub enum Geometry {
         sweep: f64,
     },
     Path {
+        /// The outline as drawn, its corners rounded.
         svg: String,
+        /// The anchors `set_point` edits, in the layer's own space. A rounded
+        /// corner is one point here and several segments in `svg`.
+        #[serde(default)]
+        subpaths: Vec<PathRun>,
     },
     Text {
         content: String,
@@ -434,6 +440,64 @@ pub enum Geometry {
         width: f64,
         height: f64,
     },
+}
+
+/// One subpath of a path's anchors, as `set_point` numbers them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathRun {
+    /// Whether the last point joins back to the first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
+    pub points: Vec<PathPoint>,
+}
+
+/// One anchor of a path, with the ends of its handles: `in` arrives at it, `out`
+/// leaves it. A handle lying on the point is left out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathPoint {
+    pub x: f64,
+    pub y: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_y: Option<f64>,
+    /// How far the corner at the point is rounded; absent when sharp.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub radius: f64,
+}
+
+/// The anchors of a path's `path` and `radii`, as [`PathRun`]s.
+fn path_runs(path: &ondin_core::kurbo::BezPath, radii: &[f64]) -> Vec<PathRun> {
+    let handle = |v: ondin_core::kurbo::Vec2, end: ondin_core::kurbo::Point| {
+        (v.hypot() >= 1e-9).then(|| (round4(end.x), round4(end.y)))
+    };
+    ondin_core::edit::pen_anchors(path, radii)
+        .into_iter()
+        .map(|sub| PathRun {
+            closed: sub.closed,
+            points: sub
+                .anchors
+                .iter()
+                .map(|a| {
+                    let back = handle(a.back, a.arriving());
+                    let out = handle(a.out, a.leaving());
+                    PathPoint {
+                        x: round4(a.at.x),
+                        y: round4(a.at.y),
+                        in_x: back.map(|p| p.0),
+                        in_y: back.map(|p| p.1),
+                        out_x: out.map(|p| p.0),
+                        out_y: out.map(|p| p.1),
+                        radius: round4(a.radius),
+                    }
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -1123,8 +1187,11 @@ fn geometry(kind: &NodeKind) -> Geometry {
         },
         // The resolved outline spelled by the SVG writer (`svg::path_d`, four
         // places), not `BezPath::to_svg`: full `f64` digits differ across platforms.
-        NodeKind::Path { .. } => Geometry::Path {
+        NodeKind::Path {
+            path, corner_radii, ..
+        } => Geometry::Path {
             svg: crate::svg::path_d(&ondin_core::geometry::local_path(kind).unwrap_or_default()),
+            subpaths: path_runs(path, corner_radii),
         },
         NodeKind::Text {
             content,

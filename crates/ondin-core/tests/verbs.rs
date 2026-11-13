@@ -737,6 +737,161 @@ fn join_paths_splices_the_nearest_ends() {
     );
 }
 
+/// A path layer of `path` at `at`, made through `create_node`.
+fn path_at(doc: &mut Document, ids: &mut IdSource, page: NodeId, path: &str, at: Affine) -> NodeId {
+    let kind = serde_json::to_value(NodeKind::Path {
+        path: ondin_core::kurbo::BezPath::from_svg(path).unwrap(),
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
+        mirror: ondin_core::symmetry::PathMirror::NONE,
+    })
+    .unwrap();
+    let transform = serde_json::to_value(at).unwrap();
+    run(
+        doc,
+        ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": kind, "transform": transform }),
+    )[0]
+}
+
+/// The anchors of path `id` in its own space: each point and its arriving and
+/// leaving control points.
+fn local_anchors(doc: &Document, id: NodeId) -> Vec<[(f64, f64); 3]> {
+    let NodeKind::Path {
+        path, corner_radii, ..
+    } = doc.get(id).unwrap().kind()
+    else {
+        panic!("not a path");
+    };
+    let xy = |p: ondin_core::kurbo::Point| ((p.x * 1e6).round() / 1e6, (p.y * 1e6).round() / 1e6);
+    ondin_core::edit::pen_anchors(path, corner_radii)
+        .iter()
+        .flat_map(|s| s.anchors.clone())
+        .map(|a| [xy(a.at), xy(a.arriving()), xy(a.leaving())])
+        .collect()
+}
+
+/// `set_point` reads and writes a point in the layer's own space, keeps a
+/// coordinate it was not given, and leaves the other points where they were.
+///
+/// flip: `set_point` placing `x` and `y` in world space → fails at "moved in
+/// the layer's space".
+#[test]
+fn set_point_moves_a_point_in_the_layers_space() {
+    let (mut doc, mut ids, page) = blank();
+    let at = Affine::translate((100.0, 50.0));
+    let p = path_at(&mut doc, &mut ids, page, "M0,0 L10,0 L10,10", at);
+    run(
+        &mut doc,
+        &mut ids,
+        "set_point",
+        json!({ "node": p.to_wire(), "point": 1, "x": 20 }),
+    );
+    let points: Vec<(f64, f64)> = local_anchors(&doc, p).iter().map(|a| a[0]).collect();
+    assert_eq!(
+        points,
+        [(0.0, 0.0), (20.0, 0.0), (10.0, 10.0)],
+        "moved in the layer's space"
+    );
+}
+
+/// One handle given on a smooth point mirrors the other; both given set both,
+/// breaking the pair; then one given on the broken point leaves the other.
+///
+/// flip: `set_point` always breaking the pair → fails at "a smooth point stays
+/// smooth".
+#[test]
+fn set_point_mirrors_a_handle_only_on_a_smooth_point() {
+    let (mut doc, mut ids, page) = blank();
+    let p = path_at(
+        &mut doc,
+        &mut ids,
+        page,
+        "M0,0 C0,0 5,0 10,0 C15,0 20,0 20,0",
+        Affine::IDENTITY,
+    );
+    let set = |doc: &mut Document, ids: &mut IdSource, args: Value| {
+        let mut call = json!({ "node": p.to_wire(), "point": 1 });
+        call.as_object_mut()
+            .unwrap()
+            .extend(args.as_object().unwrap().clone());
+        run(doc, ids, "set_point", call);
+    };
+    set(&mut doc, &mut ids, json!({ "out_x": 10, "out_y": 5 }));
+    assert_eq!(
+        local_anchors(&doc, p)[1],
+        [(10.0, 0.0), (10.0, -5.0), (10.0, 5.0)],
+        "a smooth point stays smooth"
+    );
+    set(
+        &mut doc,
+        &mut ids,
+        json!({ "in_x": 5, "in_y": 0, "out_x": 10, "out_y": 5 }),
+    );
+    assert_eq!(
+        local_anchors(&doc, p)[1],
+        [(10.0, 0.0), (5.0, 0.0), (10.0, 5.0)],
+        "both handles set as given"
+    );
+    set(&mut doc, &mut ids, json!({ "out_y": 8 }));
+    assert_eq!(
+        local_anchors(&doc, p)[1],
+        [(10.0, 0.0), (5.0, 0.0), (10.0, 8.0)],
+        "a broken point stays broken"
+    );
+}
+
+/// `set_point` rounds the corner at a point, and refuses a layer that is not a
+/// path, a point or subpath past the end, a negative radius and a call that
+/// changes nothing.
+#[test]
+fn set_point_rounds_a_corner_and_refuses_what_is_not_there() {
+    let (mut doc, mut ids, page) = blank();
+    let p = path_at(
+        &mut doc,
+        &mut ids,
+        page,
+        "M0,0 L10,0 L10,10",
+        Affine::IDENTITY,
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_point",
+        json!({ "node": p.to_wire(), "point": 1, "radius": 4 }),
+    );
+    let NodeKind::Path { corner_radii, .. } = doc.get(p).unwrap().kind() else {
+        panic!("not a path");
+    };
+    assert_eq!(corner_radii, &[0.0, 4.0]);
+    let r = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": rect(10.0, 10.0) }),
+    )[0];
+    let wire = p.to_wire();
+    for (args, param) in [
+        (json!({ "node": r.to_wire(), "point": 0, "x": 1 }), "node"),
+        (json!({ "node": wire, "point": 3, "x": 1 }), "point"),
+        (
+            json!({ "node": wire, "point": 0, "subpath": 1, "x": 1 }),
+            "subpath",
+        ),
+        (json!({ "node": wire, "point": 0, "radius": -1 }), "radius"),
+    ] {
+        assert_eq!(refused_param(&doc, &mut ids, "set_point", args), param);
+    }
+    let idle = answer(
+        &doc,
+        &mut ids,
+        "set_point",
+        json!({ "node": wire, "point": 0 }),
+    );
+    assert!(matches!(idle, Err(VerbError::Nothing(_))), "{idle:?}");
+}
+
 /// `repeat` makes a group of the original and its copies round the point, named
 /// for the count.
 #[test]

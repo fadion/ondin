@@ -678,6 +678,70 @@ fn style_nodes(ctx: &Ctx<'_>, a: &Args<'_>) -> Result<Vec<NodeId>, VerbError> {
     Ok(nodes)
 }
 
+/// `set_point`: one anchor of a path edited as the inspector's point fields edit
+/// it, read and written in the layer's own space. A coordinate left out keeps
+/// its value, a handle is placed after the point moves, and one handle given
+/// mirrors the other only on a smooth point. The whole path is written back
+/// through `edit::rewrite_points`, which keeps a mirrored path symmetric.
+fn set_point(ctx: &mut Ctx<'_>, a: &Args<'_>) -> Result<Done, VerbError> {
+    use crate::edit::Side;
+    const EDITS: [&str; 7] = ["x", "y", "in_x", "in_y", "out_x", "out_y", "radius"];
+    let id = a.layer(ctx.doc, "node")?;
+    node(ctx, id)?;
+    let (world, base) = crate::edit::path_subpaths(ctx.doc, ctx.res, id)
+        .ok_or_else(|| a.invalid("node", "not a path"))?;
+    let sub = a.index("subpath").unwrap_or(0);
+    let count = base
+        .get(sub)
+        .ok_or_else(|| a.invalid("subpath", format!("the path has {} subpaths", base.len())))?
+        .anchors
+        .len();
+    let at = a.index("point").unwrap_or(0);
+    if at >= count {
+        return Err(a.invalid("point", format!("subpath {sub} has {count} points")));
+    }
+    if EDITS.iter().all(|p| a.number(p).is_none()) {
+        return Err(VerbError::Nothing(
+            "Give the point a place, a handle or a radius",
+        ));
+    }
+    let radius = a.number("radius");
+    if radius.is_some_and(|r| r < 0.0) {
+        return Err(a.invalid("radius", "a radius is not negative"));
+    }
+    let to_local = world.inverse();
+    // Absent coordinates fall back to `now`, in the layer's space.
+    let place = |x: &'static str, y: &'static str, now: kurbo::Point| {
+        let now = to_local * now;
+        (a.number(x).is_some() || a.number(y).is_some()).then(|| {
+            world * kurbo::Point::new(a.number(x).unwrap_or(now.x), a.number(y).unwrap_or(now.y))
+        })
+    };
+    let mut subpaths = base.clone();
+    let an = &mut subpaths[sub].anchors[at];
+    if let Some(p) = place("x", "y", an.at) {
+        an.at = p;
+    }
+    let smooth = an.is_smooth();
+    let aim_in = place("in_x", "in_y", an.arriving());
+    let aim_out = place("out_x", "out_y", an.leaving());
+    match (aim_in, aim_out) {
+        (Some(i), Some(o)) => {
+            an.back = i - an.at;
+            an.out = o - an.at;
+        }
+        (Some(i), None) => an.pull_side(Side::Back, i, !smooth),
+        (None, Some(o)) => an.pull_side(Side::Out, o, !smooth),
+        (None, None) => {}
+    }
+    if let Some(r) = radius {
+        an.radius = r;
+    }
+    Ok(Done::edit(crate::edit::rewrite_points(
+        ctx.doc, ctx.res, id, world, &base, subpaths,
+    )))
+}
+
 /// A style's value as a caller writes it: the lists as the single-layer verbs take
 /// them, with no item ids, which the verb keys.
 #[derive(serde::Deserialize, Debug)]
@@ -3278,6 +3342,55 @@ pub static VERBS: &[Verb] = &[
                 geometry: a.model::<GeometryPatch>("geometry")?,
             }]))
         },
+    },
+    Verb {
+        name: "set_point",
+        doc: "Move one point of a path, aim its handles or round its corner, in the layer's own space as the snapshot's `subpaths` lists them",
+        params: &[
+            req("node", NODE, "the path"),
+            req(
+                "point",
+                INDEX,
+                "which point of the subpath, counted from 0 as `subpaths` lists them",
+            ),
+            opt("subpath", INDEX, "which subpath; 0 unless given"),
+            opt(
+                "x",
+                ParamKind::Number,
+                "where the point goes across; its handles move with it",
+            ),
+            opt(
+                "y",
+                ParamKind::Number,
+                "where the point goes down; its handles move with it",
+            ),
+            opt(
+                "in_x",
+                ParamKind::Number,
+                "where the handle arriving at the point ends, across",
+            ),
+            opt(
+                "in_y",
+                ParamKind::Number,
+                "where the handle arriving at the point ends, down",
+            ),
+            opt(
+                "out_x",
+                ParamKind::Number,
+                "where the handle leaving the point ends, across; one handle given on a smooth point mirrors the other",
+            ),
+            opt(
+                "out_y",
+                ParamKind::Number,
+                "where the handle leaving the point ends, down",
+            ),
+            opt(
+                "radius",
+                ParamKind::Number,
+                "how far the corner at the point is rounded; 0 for sharp",
+            ),
+        ],
+        run: set_point,
     },
     Verb {
         name: "set_size",

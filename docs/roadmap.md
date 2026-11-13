@@ -55,7 +55,6 @@ Ideas worth weighing, not yet decided or scheduled.
 - Rich text model migration (`runs: Vec<(Range, TextStyle)>`, `architecture.md` §5.4).
 - History cap / snapshot compaction for huge delete inverses.
 - Font embedding for non-Google local fonts (`architecture.md` §5.4a).
-- **Point edits as whole-path `GeometryPatch::Path`** (§15 D123) — revisit with MCP.
 - **Justify-all** — blocked upstream in parley (`align_impl`, `pub(crate)` internals); trigger is a
   parley patch (§15 D825).
 - **A stored, user-placed transform origin for a multi-selection** — unparks when a user asks for it.

@@ -168,7 +168,7 @@ head of its size badge while it is the lone selection (`canvas::size_badge_marks
 row's resting badge (`BADGE_MIRROR`, tooltip *Mirrored path*), which the eye and lock cover on hover.
 
 - **Every point edit that keeps the anchor count is made symmetric before it is written**
-  (`edit::rewrite_points`, `symmetry::symmetric_edit`, in core so a verb writes paths the same way;
+  (`edit::rewrite_points`, `symmetry::symmetric_edit`, in core so a verb, `set_point`, writes paths the same way;
   reached through `canvas::rewrite_edit` and
   `rewrite_scrub`): drag, nudge, handle drag and fields, corner radius, align, distribute and
   spacing, point-box scale and rotate, segment move and bend. In the path's own space, where an

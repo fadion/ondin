@@ -52,8 +52,13 @@ fn rect_snapshot_has_world_data_and_paint() {
     assert_eq!(rect.world()[5], 30.0);
     // Membership: the rect belongs to the artboard.
     assert_eq!(rect.artboard, Some(wire(f.artboard)));
-    // World bounds present.
-    assert!(rect.world_bounds.is_some());
+    // World bounds as `[x, y, w, h]`, the shape of every other MCP box.
+    let b = f.res.world_bounds(f.rect).expect("the rect has bounds");
+    assert_eq!(
+        rect.world_bounds,
+        Some([b.x0, b.y0, b.width(), b.height()]),
+        "a width and height, not the far corner"
+    );
 }
 
 #[test]

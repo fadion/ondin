@@ -306,6 +306,18 @@ pub(super) fn bounds_box(s: &EditorSession, id: NodeId) -> Value {
     }
 }
 
+/// Where `id`'s own (0, 0) lies in world space, as `[x, y]` to 0.1: a child's
+/// position in `id`, which the writes take, is its world box less this. A page
+/// is at the origin.
+pub(super) fn origin(res: &ondin_core::Resolved, id: NodeId) -> Value {
+    let o = res
+        .world_transform(id)
+        .map_or(ondin_core::kurbo::Point::ZERO, |w| {
+            w * ondin_core::kurbo::Point::ZERO
+        });
+    json!([tenth(o.x), tenth(o.y)])
+}
+
 /// Whether `id` is `root` or lies under it.
 pub(super) fn within(doc: &Document, id: NodeId, root: NodeId) -> bool {
     let mut at = Some(id);
@@ -322,7 +334,8 @@ pub(super) fn within(doc: &Document, id: NodeId, root: NodeId) -> bool {
 /// in paint order with a parent before its children, bounds to 0.1. A layer
 /// `root` is its own first row at depth 0; a page is not a row. Rows past `limit`
 /// are counted in `more`, and `selected` lists the selected layers under `root`
-/// at any depth, so a selection below the outline still shows.
+/// at any depth, so a selection below the outline still shows. `origin` is
+/// [`origin`] of `root`.
 pub(super) fn outline(s: &EditorSession, root: NodeId, depth: u64, limit: usize) -> Value {
     let mut stack: Vec<(NodeId, u64)> = match s.doc.page_ids().any(|p| p == root) {
         true => s
@@ -366,6 +379,7 @@ pub(super) fn outline(s: &EditorSession, root: NodeId, depth: u64, limit: usize)
         .map(|id| id.to_wire())
         .collect();
     json!({
+        "origin": origin(&s.resolved, root),
         "columns": ["id", "name", "kind", "x", "y", "w", "h", "depth"],
         "rows": rows,
         "more": more,

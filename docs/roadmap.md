@@ -15,41 +15,6 @@ colours took about ten reads; the one `insert_subtree` was 13 KB of output, most
 colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
 budget test, and the set is checked by re-running the same agent task on the old and new build.
 
-A probe of the core tools with a first-time agent's guesses (about 60 calls on a throwaway
-artboard) found a third of the guesses refused, mostly on form rather than meaning. The fixes:
-
-- **Accept the forms agents write** (`verbs/loose.rs`): enum words in any case and kebab-case
-  (`center`, `auto`, `space-between`); a stroke as a bare colour or with `color` for `brush`, a
-  fill with `color`; `padding` as two or three numbers; `geometry` as bare SVG path data; `Frame`
-  for `Artboard`. Defaults where one is obvious: a text kind's `sizing` (`Auto`), a star's
-  `inner_ratio`, `GeometryPatch::Path`'s `corner_radii`. `add_variable`'s `value` bare when
-  `kind` says what it is. A model parameter sent as a JSON string is read as the JSON.
-- **Refusals that teach the fix** (`verbs::read_model`): an enum variant written without its
-  content, or an unknown one, answers that variant's form or the variants' list with an example;
-  an unknown field lists the fields there are. `set`'s unknown property suggests the property
-  and its shape (`corner_radius` → `geometry {"CornerRadius": n}`; `x`/`y` → `at`;
-  `width`/`height` → `size`; `fill` → `fills`; `rotation` → `transform`); `size` takes one side.
-  `set`'s text on an instance names `set_instance_property` and the instance's text layers;
-  `set_instance_property` quotes the property names with their kinds; a variable named by its
-  name where an id is wanted is taken when unique; `add_variable` on a taken name answers its id;
-  `call` of an unknown tool suggests the nearest by `describe_tools`' search.
-- **One vocabulary for reads and writes**: `get_node`'s `world_bounds` as `[x, y, w, h]` like
-  every other box; `get_tree` writes corners and a line's end in their short forms; a model
-  parameter's example shows its fields filled (`Display`, `LayoutItem`, `NodeKind`); a parameter's
-  description and its model note joined as two sentences (`schema::property`).
-- **Results without noise** (`mcp::verb`): `made` only when something was made, named for what it
-  is; `make_component` does not list a frame it converted as `created`; `define_property`
-  answers the property's name. A batch step names an `insert_subtree` layer by `@label/Path`.
-- **Placing without arithmetic**: `create_node` takes `x`, `y` and `fills`; `insert_subtree`'s
-  root takes `at`; `get_outline` and `design_context` give the origin of the layer they read, so
-  a world box converts to the parent's space in one subtraction. `design_context` names the
-  empty bands between sections and the repeated controls (a button's height, radius, fill and
-  label style) with a sample id to `like`.
-- **`check_layout`**: a zero-height or zero-width box (a horizontal line) is not `outside_clip`
-  when it lies inside; a new `draws_nothing` finds a shape with no paint and no children.
-- **Instructions** (`wire::INSTRUCTIONS`): the coordinate rule, the short forms, and the usual
-  order for adding to a page (`get_outline` → `design_context` → `insert_subtree` with `like` →
-  `export_png` region → `check_layout`).
 - **Short ids per client** — `n36` for `48c991654e6b8e81:36`, mapped per client key, surviving the
   proxy's reconnect.
 - **Revert one step** — with the assistant (`ai.md`): undo an agent's own step under later edits

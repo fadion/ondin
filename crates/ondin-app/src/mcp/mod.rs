@@ -105,17 +105,23 @@ pub(crate) fn resolve(
     }
 }
 
-/// How many revisions a connection's earlier reads are remembered at, for
-/// `since` and `base_rev`.
+/// How many of a connection's latest looks keep every layer's fingerprint, for
+/// `since` and for naming what changed.
 const KEPT: usize = 8;
 
-/// What a connection was last shown: a revision and each layer's fingerprint.
+/// How many of a connection's looks `base_rev` can be checked against. A look
+/// past [`KEPT`] holds only the ids others changed, so an agent writing many
+/// times off one read is not sent back to read again.
+const LOOKS: usize = 1024;
+
+/// What a connection was shown: a revision and, for the latest [`KEPT`], each
+/// layer's fingerprint.
 struct Shown {
     rev: u64,
-    layers: HashMap<String, Layer>,
-    /// Whether this client's own call made it from the look before, so
-    /// `base_rev` does not count that step against the client.
-    own: bool,
+    layers: Option<HashMap<String, Layer>>,
+    /// The layers changed or removed since the look before by anyone but this
+    /// client, so `base_rev` does not count the client's own steps against it.
+    others: Vec<String>,
 }
 
 /// A layer as a connection saw it.
@@ -387,7 +393,7 @@ impl Engine {
                     } else {
                         conn.document = Some(path.clone());
                         conn.shown.clear();
-                        remember(conn, rev, layers(&snap), false);
+                        remember(conn, rev, layers(&snap), Vec::new());
                     }
                     let pages: Vec<Value> = snap
                         .pages
@@ -499,11 +505,8 @@ impl Engine {
             // The call's own edit is not news to the caller; an undo's or redo's
             // layers are, since it did not choose them.
             let now = layers(&snapshot_of(session));
-            let own = conn
-                .shown
-                .back()
-                .map(|s| delta(&s.layers, &now).to_json(&now, &s.layers));
-            remember(conn, after, now, true);
+            let own = last_layers(conn).map(|then| delta(then, &now).to_json(&now, then));
+            remember(conn, after, now, Vec::new());
             if matches!(call.tool.as_str(), "undo" | "redo")
                 && let (Some(own), Some(Value::Object(map))) = (own, output.structured.as_mut())
             {
@@ -550,27 +553,46 @@ fn check_call(call: &Call) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, own: bool) {
+/// Remember a look at `rev`, with the layers `others` changed or removed since
+/// the look before.
+fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, others: Vec<String>) {
     if conn.shown.back().is_some_and(|s| s.rev == rev) {
         return;
     }
-    conn.shown.push_back(Shown { rev, layers, own });
-    while conn.shown.len() > KEPT {
+    conn.shown.push_back(Shown {
+        rev,
+        layers: Some(layers),
+        others,
+    });
+    if let Some(old) = conn.shown.len().checked_sub(KEPT + 1) {
+        conn.shown[old].layers = None;
+    }
+    while conn.shown.len() > LOOKS {
         conn.shown.pop_front();
     }
+}
+
+/// The fingerprints of the connection's last look.
+fn last_layers(conn: &Connection) -> Option<&HashMap<String, Layer>> {
+    conn.shown.back().and_then(|s| s.layers.as_ref())
 }
 
 /// What changed since the connection's last look, and remember this one.
 fn catch_up(conn: &mut Connection, session: &EditorSession) -> Option<Value> {
     let rev = session.revision();
-    let last = conn.shown.back()?;
-    if last.rev == rev {
+    if conn.shown.back()?.rev == rev {
         return None;
     }
     let now = layers(&snapshot_of(session));
-    let d = delta(&last.layers, &now);
-    let report = (!d.is_empty()).then(|| d.to_json(&now, &last.layers));
-    remember(conn, rev, now, false);
+    let (report, others) = match last_layers(conn) {
+        Some(last) => {
+            let d = delta(last, &now);
+            let report = (!d.is_empty()).then(|| d.to_json(&now, last));
+            (report, d.changed.into_iter().chain(d.removed).collect())
+        }
+        None => (None, Vec::new()),
+    };
+    remember(conn, rev, now, others);
     report
 }
 
@@ -1108,11 +1130,16 @@ fn since(
     if since == rev {
         return Ok(Some(json!({ "unchanged": true })));
     }
-    let Some(then) = conn.shown.iter().find(|s| s.rev == since) else {
+    let Some(then) = conn
+        .shown
+        .iter()
+        .find(|s| s.rev == since)
+        .and_then(|s| s.layers.as_ref())
+    else {
         return Ok(None);
     };
     let now = layers(snap);
-    let d = delta(&then.layers, &now);
+    let d = delta(then, &now);
     let fresh: Vec<&ondin_export::snapshot::NodeSnapshot> = snap
         .nodes
         .iter()
@@ -2040,36 +2067,37 @@ fn stale(
             "`base_rev` {base} is older than this connection remembers: read again and retry"
         ));
     };
-    let then = &conn.shown[at];
     // What others changed since `base`: every step but the client's own writes,
     // which are not news to it. `handle` caught up before this call, so the last
     // look is the document as the call found it.
-    let mut others = std::collections::HashSet::new();
-    for (a, b) in conn
+    let others: std::collections::HashSet<&str> = conn
         .shown
         .iter()
-        .skip(at)
-        .zip(conn.shown.iter().skip(at + 1))
-    {
-        if !b.own {
-            let d = delta(&a.layers, &b.layers);
-            others.extend(d.changed.into_iter().chain(d.removed));
-        }
-    }
+        .skip(at + 1)
+        .flat_map(|s| s.others.iter().map(String::as_str))
+        .collect();
     let moved: Vec<String> = tx
         .subjects()
         .iter()
         .map(|id| id.to_wire())
-        .filter(|id| others.contains(id))
+        .filter(|id| others.contains(id.as_str()))
         .collect();
     if moved.is_empty() {
         return Ok(());
     }
+    // Each by the name the caller read, or the earliest look since that holds it.
     let names: Vec<String> = moved
         .iter()
-        .map(|id| match then.layers.get(id) {
-            Some(l) => format!("{} ({id})", l.name),
-            None => id.clone(),
+        .map(|id| {
+            let seen = conn
+                .shown
+                .iter()
+                .skip(at)
+                .find_map(|s| s.layers.as_ref()?.get(id));
+            match seen {
+                Some(l) => format!("{} ({id})", l.name),
+                None => id.clone(),
+            }
         })
         .collect();
     Err(format!(
@@ -2807,6 +2835,38 @@ mod tests {
         let text = format!("{:?}", out.content);
         assert!(text.contains("`set_geometry`"), "{text}");
         assert!(text.contains("describe_tools"), "{text}");
+    }
+
+    /// Writes off one read keep passing its `base_rev` long after the last few
+    /// looks the connection keeps whole, and another client's change to the layer
+    /// in between still refuses it.
+    ///
+    /// flip: `remember` dropping looks past `KEPT` → fails at "an old read still
+    /// holds".
+    #[test]
+    fn a_base_rev_holds_across_many_own_writes() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let id = rect(&mut engine, &mut docs, 1, "Card");
+        let other = rect(&mut engine, &mut docs, 1, "Other");
+        let read = call(&mut engine, &mut docs, 1, "get_selection", json!({}));
+        let base = ok(&read)["rev"].clone();
+        for i in 0..KEPT * 3 {
+            let args = json!({ "node": id, "name": format!("Card {i}"), "base_rev": base });
+            let out = call(&mut engine, &mut docs, 1, "set_name", args);
+            assert!(!out.is_error, "an old read still holds: {:?}", out.content);
+        }
+        let args = json!({ "nodes": [other], "opacity": 0.5 });
+        ok(&call(&mut engine, &mut docs, 2, "set_opacity", args));
+        for _ in 0..KEPT * 2 {
+            let args = json!({ "node": id, "name": "Card", "base_rev": base });
+            ok(&call(&mut engine, &mut docs, 1, "set_name", args));
+        }
+        let args = json!({ "node": other, "name": "Mine", "base_rev": base });
+        let late = call(&mut engine, &mut docs, 1, "set_name", args);
+        assert!(late.is_error, "the other client's change refuses it");
+        assert!(format!("{:?}", late.content).contains("Other"));
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

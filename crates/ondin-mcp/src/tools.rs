@@ -27,6 +27,7 @@ pub const PHASE_1: [&str; 23] = [
     "list_fonts",
     "check_contrast",
     "review_colours",
+    "design_context",
 ];
 
 /// Phase 2 — write, 1:1 with operations/composites (§8.4).

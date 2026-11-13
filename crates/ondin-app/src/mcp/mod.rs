@@ -7,6 +7,7 @@
 //! the door the app's own edits use.
 
 mod actions;
+mod context;
 pub(crate) mod endpoint;
 mod inspect;
 mod kits;
@@ -941,6 +942,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         "list_variables" => json(reads::variables(&s.doc)),
         "list_styles" => json(reads::styles(&s.doc)),
         tool if inspect::TOOLS.contains(&tool) => inspect::run(s, tool, args),
+        tool if context::TOOLS.contains(&tool) => context::run(s, tool, args),
         "batch" => batch(conn, s, &call.client, args),
         tool => write(conn, s, &call.client, tool, args),
     }

@@ -890,7 +890,7 @@ fn specified(doc: &Document, res: &Resolved, node: &Node) -> Option<Specified> {
 }
 
 /// Every field of `node` bound to a variable, in `bind_variable`'s terms.
-fn bindings(node: &Node) -> Vec<BindingSummary> {
+pub fn bindings(node: &Node) -> Vec<BindingSummary> {
     use ondin_core::build::BoundField as F;
     use ondin_core::variable::{TEXT_CONTENT, TEXT_FAMILY};
     let mut out = Vec::new();

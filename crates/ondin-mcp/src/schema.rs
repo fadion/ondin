@@ -302,6 +302,16 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "design_context",
+        doc: "What the shown layers under a frame, group or page already use, to match it without reading its trees: text styles with a sample each (largest first), colours as fill, stroke or text (most used first), corner radii, shadows and blurs, font families, the variables and styles bound, the sections (its children with their boxes) and the content column, the most common left and right edge of what the sections hold, less full-width backgrounds. A page holding one frame is read as that frame.",
+        params: &[param(
+            "id",
+            ParamKind::Node,
+            false,
+            "A frame, group or page; the person's page when absent.",
+        )],
+    },
+    Tool {
         name: "undo",
         doc: "Undo the last step in the document's history when you made it; refused, naming it, when the person or another client did.",
         params: &[],

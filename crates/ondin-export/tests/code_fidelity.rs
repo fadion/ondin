@@ -360,6 +360,31 @@ fn shapes_match_the_canvas() {
     holds("shapes", &doc, &res);
 }
 
+/// One solid fill is written as its colour; a stack keeps each solid as a
+/// one-colour gradient, which is what lets it sit over or under another layer.
+///
+/// flip: `paint` writing a lone layer through the stack's arm → fails at "a
+/// lone solid".
+#[test]
+fn a_lone_solid_fill_is_its_colour() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 120.0, 80.0, "Board");
+    let a = d.rect(f, 10.0, 10.0, 40.0, 40.0, 0.0);
+    d.fill(a, solid(255, 255, 255, 255));
+    let b = d.rect(f, 60.0, 10.0, 40.0, 40.0, 0.0);
+    d.fills(b, vec![solid(20, 160, 90, 255), solid(255, 255, 255, 128)]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains("background: #ffffff;"), "a lone solid: {css}");
+    assert!(
+        css.contains(
+            "background: linear-gradient(#ffffff80, #ffffff80), linear-gradient(#14a05a, #14a05a);"
+        ),
+        "a stack of two: {css}"
+    );
+}
+
 /// `fidelity::check`, the command's door, finds nothing on a page that matches —
 /// white type on a blue fill included, which Chrome draws heavier — names the
 /// layers of one a stray rule moved, and names the type by its ink when a rule
@@ -2796,6 +2821,78 @@ fn text_the_page_cannot_match_is_reported() {
     );
 }
 
+/// A bound corner is its variable read as px, unfloored — CSS clamps Dark's -8
+/// to 0 as the canvas floors it — with a cap at half the box only where a
+/// mode's value passes it: CSS scales radii only once two meet on a side, so a
+/// lone 40 on a 60-high box draws 40 there and the canvas's 30.
+///
+/// flip: `border_radius` leaving out the cap whatever the values → fails at
+/// `holds`, the browser drawing Dark's corner wider.
+#[test]
+fn a_bound_corner_is_capped_only_where_a_value_passes_half() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (i, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        d.apply(vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index: i,
+            cells: vec![],
+        }]);
+    }
+    let var = |d: &mut Doc, name: &str, a: f64, b: f64| {
+        let id = d.ids.mint_var();
+        d.apply(vec![Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Number,
+                cells: [(light, Cell::Number(a)), (dark, Cell::Number(b))]
+                    .into_iter()
+                    .collect(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        }]);
+        id
+    };
+    let card = var(&mut d, "card", 24.0, -8.0);
+    let big = var(&mut d, "big", 24.0, 40.0);
+    for (i, mode) in [light, dark].into_iter().enumerate() {
+        let f = d.frame(None, 0.0, i as f64 * 90.0, 240.0, 80.0, "Board");
+        d.apply(vec![Operation::SetModes {
+            id: f,
+            modes: vec![mode],
+        }]);
+        for (j, v) in [card, big].into_iter().enumerate() {
+            let r = d.rect(f, 10.0 + j as f64 * 120.0, 10.0, 100.0, 60.0, 0.0);
+            d.fill(r, solid(40, 110, 230, 255));
+            d.apply(vec![Operation::SetCornerVars {
+                id: r,
+                vars: [Some(v), None, None, None],
+            }]);
+        }
+    }
+    let (doc, res) = d.done();
+    holds("bound_corner", &doc, &res);
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(
+        css.contains("border-radius: calc(var(--card) * 1px) 0 0 0;"),
+        "no mode passes half: {css}"
+    );
+    assert!(
+        css.contains("border-radius: min(calc(var(--big) * 1px), 30px) 0 0 0;"),
+        "the cap stays: {css}"
+    );
+}
+
 /// Variables as `var()` in two modes: one frame in the default, one set to Dark
 /// with a Light frame inside. A fill bound through an alias (at full and half
 /// alpha), and bound radius, gap, opacity, width, stroke width and shadow blur.
@@ -3009,8 +3106,8 @@ fn variables_match_the_canvas_in_every_mode() {
         "width: max(0px, calc(var(--wide) * 1px))",
         "min-width: max(0px, calc(var(--wide) * 1px))",
         "column-gap: calc(var(--gap) * 1px)",
-        "min(max(0px, calc(var(--radius) * 1px)), 25px)",
-        "min(max(0px, calc(var(--radius) * 1px)), calc(min(max(0px, calc(var(--wide) * 1px)), 50px) / 2))",
+        "border-radius: calc(var(--radius) * 1px) calc(var(--radius) * 1px) 0 calc(var(--radius) * 1px);",
+        "min(calc(var(--radius) * 1px), calc(min(max(0px, calc(var(--wide) * 1px)), 50px) / 2))",
     ] {
         assert!(css.contains(read), "styles.css lacks `{read}`:\n{css}");
     }

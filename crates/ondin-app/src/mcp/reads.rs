@@ -163,7 +163,10 @@ fn value(v: ondin_core::variable::Value) -> Value {
 }
 
 /// Every collection with its modes, and every variable with its cells as
-/// written and the value each mode resolves it to.
+/// written and the value each mode resolves it to. A kit's variable is in none
+/// of the document's collections: its cells are keyed by its kit collection's
+/// own modes, which its `kit` entry names, with the document collection whose
+/// modes pick its column.
 pub(super) fn variables(doc: &Document) -> Value {
     let vars = doc.variables();
     let collections: Vec<Value> = vars
@@ -195,12 +198,64 @@ pub(super) fn variables(doc: &Document) -> Value {
                     })
                     .collect();
                 entry["resolved"] = Value::Object(resolved);
+            } else if let Some(kit) = kit_collection(vars, v) {
+                entry["kit"] = kit;
+                let resolved: serde_json::Map<String, Value> = vars
+                    .columns(v)
+                    .into_iter()
+                    .filter_map(|m| {
+                        let id = serde_json::to_value(m).ok()?.as_str()?.to_owned();
+                        Some((id, value(vars.resolve(v.id, m)?)))
+                    })
+                    .collect();
+                entry["resolved"] = Value::Object(resolved);
             }
             entry["users"] = json!(ondin_core::variable::users(doc, v.id).len());
             entry
         })
         .collect();
     json!({ "collections": collections, "variables": variables })
+}
+
+/// The kit collection kit variable `v` is in: the kit's id and name, the
+/// collection's name (absent for a kit's only one) and modes, the document
+/// collection it is read from, which of its modes each of that collection's
+/// modes reads, and the one read where no frame sets a mode.
+fn kit_collection(
+    vars: &ondin_core::variable::Variables,
+    v: &ondin_core::variable::Variable,
+) -> Option<Value> {
+    fn wire(id: impl serde::Serialize) -> Value {
+        serde_json::to_value(id).unwrap_or(Value::Null)
+    }
+    let kit = v.kit()?;
+    let k = vars.kits().get(kit)?;
+    let name = vars.kit_collection_of(v)?;
+    let mut out = json!({
+        "id": kit,
+        "name": k.name,
+        "modes": k.modes_in(name).map(|m| json!({
+            "id": wire(m.id),
+            "name": m.name,
+        })).collect::<Vec<_>>(),
+    });
+    if !name.is_empty() {
+        out["collection"] = json!(name);
+    }
+    if let Some(onto) = vars.kit_onto(name) {
+        out["read_from"] = wire(onto.id);
+        let mapped: serde_json::Map<String, Value> = onto
+            .modes
+            .iter()
+            .filter_map(|m| {
+                let at = vars.kit_mode_at(kit, name, &[m.id])?;
+                Some((wire(m.id).as_str()?.to_owned(), wire(at)))
+            })
+            .collect();
+        out["mapped"] = Value::Object(mapped);
+    }
+    out["default"] = wire(vars.kit_mode_at(kit, name, &[]));
+    Some(out)
 }
 
 /// Every style with its slot and how many layers use it.
@@ -307,4 +362,102 @@ pub(super) fn outline(s: &EditorSession, root: NodeId, depth: u64, limit: usize)
         "more": more,
         "selected": selected,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::peniko::Color;
+    use ondin_core::variable::{
+        Cell, CollectionId, KitMode, KitModes, Mode, VarKind, VarOrigin, Variable,
+    };
+    use ondin_core::{IdSource, Operation, Transaction};
+
+    /// A kit's variable, its cells keyed by the kit's own mode, names its kit
+    /// collection, the document collection it is read from, and the kit mode
+    /// read with no document mode and then through one added later.
+    ///
+    /// flip: `variables` leaving a kit's variable without its `kit` entry →
+    /// fails at "the kit's name".
+    #[test]
+    fn a_kit_variable_names_its_kit_collection() {
+        const KIT: &str = "0123456789abcdef0123456789abcdef";
+        let mut ids = IdSource::new(7);
+        let mut doc = Document::new(ids.mint());
+        let (light, from, var, foreign) = (
+            ids.mint_mode(),
+            ids.mint_mode(),
+            ids.mint_var(),
+            ids.mint_var(),
+        );
+        doc.apply(&Transaction(vec![
+            Operation::SetKitModes {
+                kit: KIT.into(),
+                modes: Some(KitModes {
+                    name: Some("Review Kit".into()),
+                    modes: vec![KitMode {
+                        id: light,
+                        name: "Light".into(),
+                        from,
+                        collection: String::new(),
+                    }],
+                    map: Default::default(),
+                }),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand/primary".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(Color::from_rgba8(59, 120, 231, 255)))]
+                        .into_iter()
+                        .collect(),
+                    scope: None,
+                    origin: Some(VarOrigin {
+                        kit: KIT.into(),
+                        var: foreign,
+                        version: 1,
+                    }),
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .expect("a kit's variable");
+        let wire = |m| serde_json::to_value(m).unwrap();
+        let read = variables(&doc);
+        assert_eq!(read["collections"][0]["modes"], json!([]), "the fixture");
+        let v = &read["variables"][0];
+        assert!(v.get("collection").is_none(), "in none of the document's");
+        let kit = &v["kit"];
+        assert_eq!(kit["name"], "Review Kit", "the kit's name: {v}");
+        assert_eq!(kit["modes"][0]["id"], wire(light));
+        assert_eq!(kit["modes"][0]["name"], "Light");
+        assert_eq!(
+            kit["read_from"],
+            serde_json::to_value(CollectionId::FIRST).unwrap()
+        );
+        assert_eq!(kit["default"], wire(light), "its only mode, with none here");
+        let key = wire(light).as_str().unwrap().to_owned();
+        assert_eq!(v["resolved"][&key], json!("#3b78e7ff"));
+
+        let mode = ids.mint_mode();
+        doc.apply(&Transaction(vec![Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id: mode,
+                name: "Mode 1".into(),
+            },
+            index: 0,
+            cells: vec![],
+        }]))
+        .expect("a document mode");
+        let read = variables(&doc);
+        let key = wire(mode).as_str().unwrap().to_owned();
+        assert_eq!(
+            read["variables"][0]["kit"]["mapped"][&key],
+            wire(light),
+            "Mode 1 reads the kit's first: {read}"
+        );
+    }
 }

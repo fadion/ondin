@@ -523,6 +523,68 @@ fn passes(inner: Rect, outer: Rect) -> bool {
         || inner.y1 > outer.y1 + SLACK
 }
 
+/// Whether `inner` shares nothing with `outer`. A side of no extent, a
+/// horizontal line's height, counts as inside when it lies within `outer`'s
+/// span on that axis: an area test would call every such layer outside.
+fn apart(inner: Rect, outer: Rect) -> bool {
+    let axis = |a0: f64, a1: f64, c0: f64, c1: f64| match a1 > a0 {
+        true => a1 <= c0 || a0 >= c1,
+        false => a0 < c0 || a0 > c1,
+    };
+    axis(inner.x0, inner.x1, outer.x0, outer.x1) || axis(inner.y0, inner.y1, outer.y0, outer.y1)
+}
+
+/// Whether `brush` puts any ink down: an image always, a colour or a
+/// gradient when some colour of it is not wholly transparent.
+fn inks(brush: &Brush) -> bool {
+    match brush {
+        Brush::Image(_) => true,
+        b => colours_of(b).iter().any(|c| c.components[3] > 0.0),
+    }
+}
+
+/// Whether shown layer `id`, of used kind `kind`, paints nothing: a shape, an
+/// empty frame or an empty group with no visible fill, no stroke of width and
+/// no effect. Text, booleans and slices are never one, nor is a layer a flex or
+/// grid parent lays out, where an empty box is a spacer.
+fn draws_nothing(doc: &Document, id: NodeId, kind: &NodeKind, laid_out: bool) -> bool {
+    let Some(n) = doc.get(id) else { return false };
+    let empty = n.children().is_empty();
+    let shape = match kind {
+        NodeKind::Rect { .. }
+        | NodeKind::Ellipse { .. }
+        | NodeKind::Polygon { .. }
+        | NodeKind::Star { .. }
+        | NodeKind::Line { .. }
+        | NodeKind::Spiral { .. }
+        | NodeKind::Arc { .. }
+        | NodeKind::Path { .. }
+        | NodeKind::Artboard { .. }
+        | NodeKind::Group => empty,
+        _ => false,
+    };
+    if !shape || (laid_out && !n.insets().is_authored()) {
+        return false;
+    }
+    if doc
+        .resolved_effects(id, n.effects())
+        .iter()
+        .any(|e| e.visible)
+    {
+        return false;
+    }
+    let drawn = doc.resolved_paint(id, n.paint());
+    let filled = drawn
+        .fills
+        .iter()
+        .any(|f| f.visible && inks(f.brush.drawn()));
+    let stroked = drawn
+        .strokes
+        .iter()
+        .any(|st| st.visible && st.width > 0.0 && inks(st.brush.drawn()));
+    !filled && !stroked
+}
+
 /// What a walk of `check_layout` carries down to a layer.
 #[derive(Clone, Copy)]
 struct Above {
@@ -645,6 +707,11 @@ fn walk(
             // A box with no area intersects nothing: the clip lint would call it
             // outside too.
             reported = true;
+        } else if draws_nothing(doc, id, kind, above.layout.is_some()) {
+            issues.push(one(
+                "draws_nothing",
+                "It draws nothing: no fill, stroke or content.".into(),
+            ));
         }
         let in_flow = !n.insets().is_authored();
         if let (Some((p, pb)), Some(b)) = (above.layout, bounds)
@@ -658,7 +725,7 @@ fn walk(
             ));
             reported = true;
         } else if let (Some((c, cb)), Some(b), false) = (above.clip, bounds, reported) {
-            if b.intersect(cb).area() <= 0.0 {
+            if apart(b, cb) {
                 issues.push(issue(
                     "outside_clip",
                     &[id, c],
@@ -945,8 +1012,9 @@ mod tests {
             "children": [
                 { "kind": text(long, 16.0, 400, fixed, BlockStyle::default()), "name": "Hangs", "transform": at(10.0, 10.0) },
                 { "kind": text(long, 16.0, 400, fixed, clip), "name": "Cut", "transform": at(150.0, 10.0) },
-                { "kind": rect(100.0, 50.0, 0.0), "name": "Half", "transform": at(250.0, 120.0) },
-                { "kind": rect(50.0, 50.0, 0.0), "name": "Gone", "transform": at(400.0, 10.0) },
+                { "kind": rect(100.0, 50.0, 0.0), "name": "Half", "transform": at(250.0, 120.0), "fills": fill(9, 9, 9) },
+                { "kind": rect(50.0, 50.0, 0.0), "name": "Gone", "transform": at(400.0, 10.0), "fills": fill(9, 9, 9) },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Bare", "transform": at(150.0, 280.0) },
                 { "kind": rect(50.0, 0.0, 0.0), "name": "Flat", "transform": at(10.0, 280.0) },
                 { "kind": text("Overlap one", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "A", "transform": at(10.0, 200.0) },
                 { "kind": text("Overlap two", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "B", "transform": at(20.0, 204.0) },
@@ -955,7 +1023,7 @@ mod tests {
                     "display": Display::Flex(Flex::default()),
                     "children": [{ "kind": rect(200.0, 20.0, 0.0), "name": "Wide", "item": item }],
                 },
-                { "kind": rect(40.0, 40.0, 4.0), "name": "Fine", "transform": at(150.0, 240.0) },
+                { "kind": rect(40.0, 40.0, 4.0), "name": "Fine", "transform": at(150.0, 240.0), "fills": fill(9, 9, 9) },
             ],
         }));
         let name = |id: &Value| {
@@ -972,6 +1040,7 @@ mod tests {
         found.sort();
         let want = [
             ("clipped", "Half"),
+            ("draws_nothing", "Bare"),
             ("layout_overflow", "Wide"),
             ("outside_clip", "Gone"),
             ("text_cut", "Cut"),
@@ -985,5 +1054,111 @@ mod tests {
         let narrowed =
             check_layout(&s, &json!({ "ids": [made.last().unwrap().to_wire()] })).unwrap();
         assert_eq!(narrowed["issues"], json!([]), "{narrowed}");
+    }
+
+    /// The codes `check_layout` finds on `s`'s page, each with its first
+    /// layer's name, sorted.
+    fn found(s: &EditorSession) -> Vec<(String, String)> {
+        let out = check_layout(s, &json!({})).unwrap();
+        let mut found: Vec<(String, String)> = out["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| {
+                let id = NodeId::from_wire(i["ids"][0].as_str().unwrap()).unwrap();
+                let name = s.doc.get(id).unwrap().name().to_owned();
+                (i["code"].as_str().unwrap().to_owned(), name)
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    fn stroke(width: f64) -> Value {
+        json!([ondin_core::Stroke {
+            width,
+            ..Default::default()
+        }])
+    }
+
+    /// A horizontal and a vertical line without a stroke inside a clipping
+    /// frame have boxes of no height or width and are inside it; a line below
+    /// the frame is not. All three draw nothing, which is not asked here.
+    ///
+    /// flip: `apart` as `b.intersect(cb).area() <= 0.0` → fails at the codes,
+    /// which gain `outside_clip` for "Across" and "Down".
+    #[test]
+    fn a_line_inside_a_clip_is_not_outside_it() {
+        let line = |x: f64, y: f64| {
+            json!(NodeKind::Line {
+                end: Point::new(x, y)
+            })
+        };
+        let (s, _) = with(json!({
+            "kind": frame(300.0, 300.0), "name": "Card", "clip": true, "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": line(100.0, 0.0), "name": "Across", "transform": at(10.0, 50.0) },
+                { "kind": line(0.0, 100.0), "name": "Down", "transform": at(50.0, 10.0) },
+                { "kind": line(100.0, 0.0), "name": "Below", "transform": at(10.0, 400.0) },
+            ],
+        }));
+        let card = s.doc.get(s.page).unwrap().children()[0];
+        let across = s.doc.get(card).unwrap().children()[0];
+        let b = s.resolved.world_bounds(across).unwrap();
+        assert_eq!(b.height(), 0.0, "the fixture's line has no height: {b:?}");
+        let want = [("outside_clip", "Below")].map(|(c, n)| (c.to_owned(), n.to_owned()));
+        let got: Vec<_> = found(&s)
+            .into_iter()
+            .filter(|(c, _)| c != "draws_nothing")
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    /// `draws_nothing` takes a shape, an empty frame and a transparent fill,
+    /// and passes over a stroke, a shadow, text, a frame with children, a
+    /// hidden layer and a spacer a flex frame lays out.
+    ///
+    /// flip: `draws_nothing` without its `laid_out` exemption → fails at the
+    /// codes, which gain "Spacer".
+    #[test]
+    fn check_layout_finds_what_draws_nothing() {
+        let clear = json!([Fill {
+            brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 0)).into(),
+            visible: true,
+        }]);
+        let (s, _) = with(json!({
+            "kind": frame(400.0, 400.0), "name": "Page", "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Bare", "transform": at(10.0, 10.0) },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Clear", "transform": at(40.0, 10.0), "fills": clear },
+                { "kind": frame(20.0, 20.0), "name": "Empty", "transform": at(70.0, 10.0) },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Outlined", "transform": at(100.0, 10.0), "strokes": stroke(1.0) },
+                {
+                    "kind": rect(20.0, 20.0, 0.0), "name": "Shadowed", "transform": at(130.0, 10.0),
+                    "effects": [Effect::new(EffectKind::DropShadow(Shadow::default()))],
+                },
+                { "kind": rect(20.0, 20.0, 0.0), "name": "Hidden", "transform": at(160.0, 10.0), "visible": false },
+                { "kind": text("Words", 16.0, 400, TextSizing::Auto, BlockStyle::default()), "name": "Words", "transform": at(10.0, 100.0) },
+                {
+                    "kind": frame(100.0, 40.0), "name": "Holder", "transform": at(10.0, 200.0),
+                    "children": [{ "kind": rect(20.0, 20.0, 0.0), "name": "Dot", "fills": fill(9, 9, 9) }],
+                },
+                {
+                    "kind": frame(200.0, 40.0), "name": "Row", "transform": at(10.0, 300.0), "fills": fill(9, 9, 9),
+                    "display": Display::Flex(Flex::default()),
+                    "children": [{ "kind": frame(20.0, 20.0), "name": "Spacer" }],
+                },
+            ],
+        }));
+        let hidden = s.doc.get(s.page).unwrap().children()[0];
+        let hidden = s.doc.get(hidden).unwrap().children()[5];
+        assert!(!s.doc.shown(hidden), "the fixture hides one");
+        let want = [
+            ("draws_nothing", "Bare"),
+            ("draws_nothing", "Clear"),
+            ("draws_nothing", "Empty"),
+        ]
+        .map(|(c, n)| (c.to_owned(), n.to_owned()));
+        assert_eq!(found(&s), want);
     }
 }

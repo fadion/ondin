@@ -3,7 +3,7 @@
 
 /// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
 /// reordering shows as a diff.
-pub const PHASE_1: [&str; 25] = [
+pub const PHASE_1: [&str; 26] = [
     "use_document",
     "get_document",
     "get_node",
@@ -29,13 +29,14 @@ pub const PHASE_1: [&str; 25] = [
     "review_colours",
     "design_context",
     "check_layout",
+    "describe_tools",
 ];
 
 /// Phase 2 — write, 1:1 with operations/composites (§8.4).
 ///
 /// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
 /// ids: the handler minted them, so it knows them.
-pub const PHASE_2: [&str; 77] = [
+pub const PHASE_2: [&str; 79] = [
     "create_node",
     "create_text",
     "insert_subtree",
@@ -113,6 +114,8 @@ pub const PHASE_2: [&str; 77] = [
     "redo",
     "set_selection",
     "batch",
+    "set",
+    "call",
 ];
 
 /// Phase 3 — components, variables and styles, through the verbs rather than
@@ -201,9 +204,50 @@ pub const PHASE_4: [&str; 16] = [
     "save_version",
 ];
 
+/// The tools `tools/list` names by default (§8.4, *Core*): what nearly every
+/// task uses. Every other tool still answers by name, through `call`, or listed
+/// with `ondin mcp-proxy --tools all`; a short list is read on every turn.
+pub const CORE: [&str; 35] = [
+    "use_document",
+    "list_documents",
+    "get_selection",
+    "get_view",
+    "find_nodes",
+    "get_outline",
+    "get_node",
+    "get_tree",
+    "design_context",
+    "check_layout",
+    "export_png",
+    "list_components",
+    "list_variables",
+    "list_styles",
+    "list_fonts",
+    "describe_tools",
+    "insert_subtree",
+    "create_text",
+    "set",
+    "delete_node",
+    "duplicate",
+    "reparent",
+    "group",
+    "ungroup",
+    "align",
+    "distribute",
+    "create_instance",
+    "set_instance_property",
+    "apply_style",
+    "bind_variable",
+    "batch",
+    "call",
+    "undo",
+    "redo",
+    "set_selection",
+];
+
 #[cfg(test)]
 mod tests {
-    use super::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
+    use super::{CORE, PHASE_1, PHASE_2, PHASE_3, PHASE_4};
 
     /// `docs/design/mcp.md` (§8), embedded at compile time. `include_str!` rather
     /// than a runtime read, so cargo knows the test depends on the document and
@@ -261,6 +305,7 @@ mod tests {
                 "Phase 4 — kits and the library (the app's own actions, some outside undo):",
                 &PHASE_4[..],
             ),
+            ("Core — listed by default:", &CORE[..]),
         ] {
             let theirs = listed(prefix);
             assert!(
@@ -278,7 +323,7 @@ mod tests {
     }
 
     /// Phase 2 tools no verb answers: the session's, and `batch`, which runs verbs.
-    const SESSION: [&str; 4] = ["undo", "redo", "set_selection", "batch"];
+    const SESSION: [&str; 6] = ["undo", "redo", "set_selection", "batch", "set", "call"];
 
     /// Every Phase 2 tool is a verb of `ondin_core::verbs` under the same name or a
     /// host's tool, never both.
@@ -298,6 +343,24 @@ mod tests {
         }
         for name in SESSION {
             assert!(PHASE_2.contains(&name), "`{name}` is no Phase 2 tool");
+        }
+    }
+
+    /// Every core tool is a tool of some phase, listed once.
+    ///
+    /// flip: a typo in one `CORE` name → fails at "no phase's".
+    #[test]
+    fn every_core_tool_is_a_phase_tool() {
+        let all: Vec<&str> = PHASE_1
+            .iter()
+            .chain(&PHASE_2)
+            .chain(&PHASE_3)
+            .chain(&PHASE_4)
+            .copied()
+            .collect();
+        for (i, name) in CORE.iter().enumerate() {
+            assert!(all.contains(name), "`{name}` is no phase's tool");
+            assert!(!CORE[..i].contains(name), "`{name}` is listed twice");
         }
     }
 

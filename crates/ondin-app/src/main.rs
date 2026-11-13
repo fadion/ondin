@@ -250,11 +250,13 @@ enum Command {
         mode: Option<String>,
         out: Option<String>,
     },
-    /// `ondin mcp-proxy`, with the client key the host keeps its state under
-    /// and a document to use from the first call.
+    /// `ondin mcp-proxy`, with the client key the host keeps its state under,
+    /// a document to use from the first call, and whether to list every tool
+    /// rather than the core set.
     McpProxy {
         client: Option<String>,
         document: Option<String>,
+        all_tools: bool,
     },
 }
 
@@ -406,13 +408,15 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
 /// `ondin mcp-proxy [--client <key>] [--document <path>]`; the key falls back to
 /// `ONDIN_MCP_CLIENT`.
 fn parse_mcp_proxy(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin mcp-proxy [--client <key>] [--document <path>]";
-    let (mut client, mut document) = (None, None);
+    const USAGE: &str =
+        "usage: ondin mcp-proxy [--client <key>] [--document <path>] [--tools core|all]";
+    let (mut client, mut document, mut tools) = (None, None, None);
     let mut i = 0;
     while i < args.len() {
         let slot = match args[i].as_str() {
             "--client" => &mut client,
             "--document" => &mut document,
+            "--tools" => &mut tools,
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         };
         let value = args
@@ -427,7 +431,16 @@ fn parse_mcp_proxy(args: &[String]) -> Result<Command, String> {
             .ok()
             .filter(|k| !k.trim().is_empty())
     });
-    Ok(Command::McpProxy { client, document })
+    let all_tools = match tools.as_deref() {
+        None | Some("core") => false,
+        Some("all") => true,
+        Some(other) => return Err(format!("--tools is core or all, not {other}\n{USAGE}")),
+    };
+    Ok(Command::McpProxy {
+        client,
+        document,
+        all_tools,
+    })
 }
 
 fn parse_check(args: &[String]) -> Result<Command, String> {
@@ -1140,7 +1153,11 @@ fn main() {
             run_tokens_export(&file, mode.as_deref(), out.as_deref())
         }
         Ok(Command::Serve) => mcp::serve::run(),
-        Ok(Command::McpProxy { client, document }) => mcp::proxy::run(client, document),
+        Ok(Command::McpProxy {
+            client,
+            document,
+            all_tools,
+        }) => mcp::proxy::run(client, document, all_tools),
         Err(msg) => {
             eprintln!("{msg}");
             std::process::exit(2);
@@ -1640,8 +1657,8 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
 mod tests {
     use super::*;
 
-    /// `mcp-proxy` takes `--client` and `--document`, each with a value, and
-    /// nothing else.
+    /// `mcp-proxy` takes `--client`, `--document` and `--tools core|all`, each
+    /// with a value, and nothing else.
     #[test]
     fn mcp_proxy_takes_a_client_and_a_document() {
         let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -1656,8 +1673,18 @@ mod tests {
             Ok(Command::McpProxy {
                 client: Some("chat-1".into()),
                 document: Some("site".into()),
+                all_tools: false,
             })
         );
+        assert_eq!(
+            parse(&args(&["mcp-proxy", "--tools", "all"])),
+            Ok(Command::McpProxy {
+                client: None,
+                document: None,
+                all_tools: true,
+            })
+        );
+        assert!(parse(&args(&["mcp-proxy", "--tools", "some"])).is_err());
         assert!(parse(&args(&["mcp-proxy", "--client"])).is_err());
         assert!(parse(&args(&["mcp-proxy", "--port", "1"])).is_err());
     }

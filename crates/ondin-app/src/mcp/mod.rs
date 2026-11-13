@@ -283,6 +283,20 @@ impl Engine {
 
     /// Answer one call.
     pub(crate) fn handle(&mut self, docs: &mut impl Documents, call: Call) -> Output {
+        // `call` is the named tool's call itself, so it is checked and answered
+        // as that tool, listed or not.
+        let mut call = call;
+        if call.tool == "call" {
+            let Some(tool) = call.args.get("tool").and_then(Value::as_str) else {
+                return Output::error("`call` needs `tool`, a tool's name");
+            };
+            if tool == "call" {
+                return Output::error("`call` runs another tool, not itself");
+            }
+            let args = call.args.get("args").cloned().unwrap_or_else(|| json!({}));
+            call.tool = tool.to_owned();
+            call.args = args;
+        }
         if let Err(why) = check_call(&call) {
             return Output::error(why);
         }
@@ -334,6 +348,9 @@ impl Engine {
         if call.tool == "list_fonts" {
             return Output::json(fonts(docs, &call.args));
         }
+        if call.tool == "describe_tools" {
+            return Output::json(describe_tools(&call.args));
+        }
         if kits::WITHOUT_DOCUMENT.contains(&call.tool.as_str()) {
             return match kits::without_document(docs, &call) {
                 Ok(v) => Output::json(v),
@@ -351,7 +368,6 @@ impl Engine {
         };
         // Core cannot see the host's fonts: a family nobody can set text in would
         // draw every replaced layer in a fallback. Written in the host's spelling.
-        let mut call = call;
         if call.tool == "replace_font"
             && let Some(to) = call.args.get("to").and_then(Value::as_str)
         {
@@ -957,6 +973,7 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
         tool if inspect::TOOLS.contains(&tool) => inspect::run(s, tool, args),
         tool if context::TOOLS.contains(&tool) => context::run(s, tool, args),
         "batch" => batch(conn, s, &call.client, args),
+        "set" => set(conn, s, &call.client, args),
         tool => write(conn, s, &call.client, tool, args),
     }
 }
@@ -1194,6 +1211,165 @@ fn batch(
     }
     Ok(Answer::Json(json!({ "steps": answers })))
 }
+
+/// What `set` writes for each property, in the order it writes them: the setter
+/// verb, whether it takes the layers at once as `nodes` (else one `node` per
+/// call), and the name it takes the value under.
+const SET_PROPS: &[(&str, &str, bool, &str)] = &[
+    ("name", "set_name", false, "name"),
+    ("visible", "set_visible", true, "visible"),
+    ("locked", "set_locked", true, "locked"),
+    ("opacity", "set_opacity", true, "opacity"),
+    ("blend", "set_blend", true, "blend"),
+    ("clip", "set_clip", true, "clip"),
+    ("geometry", "set_geometry", false, "geometry"),
+    ("text", "set_text", false, "text"),
+    ("text_style", "set_text_style", true, "style"),
+    ("paragraph", "set_paragraph_style", true, "paragraph"),
+    ("block", "set_block_style", true, "block"),
+    ("fills", "set_fills", true, "fills"),
+    ("strokes", "set_strokes", true, "strokes"),
+    ("effects", "set_effects", true, "effects"),
+    ("exports", "set_exports", true, "exports"),
+    ("display", "set_display", true, "display"),
+    ("item", "set_layout_item", true, "item"),
+    ("insets", "set_insets", true, "insets"),
+    ("element", "set_element", false, "element"),
+    ("link", "set_link", false, "href"),
+    ("transform", "set_transform", false, "transform"),
+];
+
+/// `set`: each property through its own setter, as a [`batch`] named `set`, so
+/// one call writes what a handful of setters would and lands as one undo step.
+/// `size` and `at` follow the rest, so a move lands where the new size leaves it.
+fn set(
+    conn: &Connection,
+    s: &mut EditorSession,
+    client: &str,
+    args: &Value,
+) -> Result<Answer, String> {
+    let ids = nodes(args, "nodes")?.unwrap_or_default();
+    if ids.is_empty() {
+        return Err("`nodes` names no layer".into());
+    }
+    let Some(Value::Object(props)) = args.get("props") else {
+        return Err("`props` is an object of properties".into());
+    };
+    let known = || {
+        SET_PROPS
+            .iter()
+            .map(|p| p.0)
+            .chain(["size", "at"])
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if let Some(k) = props.keys().find(|k| {
+        !SET_PROPS.iter().any(|p| p.0 == k.as_str()) && !["size", "at"].contains(&k.as_str())
+    }) {
+        return Err(format!("`set` sets no `{k}`; it sets {}", known()));
+    }
+    let wire: Vec<Value> = ids.iter().map(|id| json!(id.to_wire())).collect();
+    let mut steps = Vec::new();
+    let mut step = |tool: &str, args: Value| steps.push(json!({ "tool": tool, "args": args }));
+    for (prop, verb, all, param) in SET_PROPS {
+        let Some(v) = props.get(*prop) else { continue };
+        let with = |key: &str, layers: Value| {
+            let mut m = Map::new();
+            m.insert(key.into(), layers);
+            m.insert((*param).into(), v.clone());
+            Value::Object(m)
+        };
+        if *all {
+            step(verb, with("nodes", json!(wire)));
+        } else {
+            for id in &wire {
+                step(verb, with("node", id.clone()));
+            }
+        }
+    }
+    if let Some(size) = props.get("size") {
+        let (Some(w), Some(h)) = (size.get("width"), size.get("height")) else {
+            return Err("`size` is {width, height}".into());
+        };
+        for id in &wire {
+            step("set_size", json!({ "node": id, "width": w, "height": h }));
+        }
+    }
+    if let Some(at) = props.get("at") {
+        let Some([x, y]) = at
+            .as_array()
+            .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
+            .and_then(|a| <[f64; 2]>::try_from(a).ok())
+        else {
+            return Err("`at` is [x, y], the place in the layer's parent".into());
+        };
+        for id in &ids {
+            let t = s
+                .doc
+                .get(*id)
+                .ok_or_else(|| format!("no layer `{}`", id.to_wire()))?
+                .transform()
+                .as_coeffs();
+            step(
+                "set_transform",
+                json!({ "node": id.to_wire(), "transform": [t[0], t[1], t[2], t[3], x, y] }),
+            );
+        }
+    }
+    let mut batched = json!({ "steps": steps });
+    if let Some(base) = args.get("base_rev") {
+        batched["base_rev"] = base.clone();
+    }
+    batch(conn, s, client, &batched)?;
+    if let Some(note) = s.history.current_note_mut() {
+        note.label = "set".into();
+        note.origin = ondin_core::Origin::Mcp {
+            client: client.to_owned(),
+            tool: "set".into(),
+        };
+    }
+    let mut written: Vec<&str> = props.keys().map(String::as_str).collect();
+    written.sort_unstable();
+    Ok(Answer::Json(json!({ "set": written })))
+}
+
+/// `describe_tools`: the full definition of each tool named in `names`, or of
+/// those whose name or description holds `query`, at most [`DESCRIBED`].
+fn describe_tools(args: &Value) -> Value {
+    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
+    let all = PHASE_1
+        .iter()
+        .chain(&PHASE_2)
+        .chain(&PHASE_3)
+        .chain(&PHASE_4);
+    let names: Vec<&str> = args
+        .get("names")
+        .and_then(Value::as_array)
+        .map(|n| n.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let matching: Vec<Value> = all
+        .filter_map(|name| ondin_mcp::schema::definition(name))
+        .filter(|d| {
+            let name = d["name"].as_str().unwrap_or_default();
+            names.contains(&name)
+                || query.as_ref().is_some_and(|q| {
+                    name.contains(q.as_str())
+                        || d["description"]
+                            .as_str()
+                            .is_some_and(|t| t.to_lowercase().contains(q.as_str()))
+                })
+        })
+        .collect();
+    let more = matching.len().saturating_sub(DESCRIBED);
+    json!({ "tools": matching.into_iter().take(DESCRIBED).collect::<Vec<_>>(), "more": more })
+}
+
+/// The most definitions one `describe_tools` answers.
+const DESCRIBED: usize = 12;
 
 /// One step of [`batch`]: its answer and how many undo steps it committed.
 fn batch_step(
@@ -1460,7 +1636,8 @@ mod tests {
             K::Model(model) => ondin_core::verbs::example(model).unwrap_or(json!({})),
         };
         for tool in ondin_mcp::schema::TOOLS {
-            if tool.name == "use_document" {
+            // `call` answers as the tool it names, which its own test covers.
+            if tool.name == "use_document" || tool.name == "call" {
                 continue;
             }
             let args: serde_json::Map<String, Value> = tool
@@ -1697,6 +1874,90 @@ mod tests {
             "set_name",
             rename("Mine", &now),
         ));
+    }
+
+    /// `set` writes several properties through their setters as one undo step
+    /// named `set`, the size before the place.
+    ///
+    /// flip: `set` skipping its `at` → fails at "moved".
+    #[test]
+    fn set_writes_several_properties_as_one_step() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Box");
+        let props = json!({ "name": "Card", "opacity": 0.5, "fills": ["#ff0000"],
+            "size": { "width": 30.0, "height": 40.0 }, "at": [10.0, 20.0] });
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [id], "props": props }),
+        ));
+        let nid = NodeId::from_wire(&id).unwrap();
+        let n = docs.session.doc.get(nid).unwrap();
+        assert_eq!(n.name(), "Card");
+        assert_eq!(n.opacity(), 0.5);
+        let r = docs.session.resolved.world_bounds(nid).unwrap();
+        assert_eq!((r.x0, r.y0), (10.0, 20.0), "moved");
+        assert_eq!((r.width(), r.height()), (30.0, 40.0));
+        assert_eq!(docs.session.history.undo_depth(), 2, "one step for `set`");
+        let label = docs
+            .session
+            .history
+            .done()
+            .next_back()
+            .unwrap()
+            .note
+            .label
+            .clone();
+        assert_eq!(label, "set");
+        let bad = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [id], "props": { "colour": "#fff" } }),
+        );
+        assert!(bad.is_error, "an unknown property is refused");
+    }
+
+    /// `call` answers as the tool it names, listed or not, and never names itself;
+    /// `describe_tools` finds a tool by name and by a word.
+    ///
+    /// flip: `handle` leaving `call` unrewritten → fails at the call's `ok`, as no
+    /// tool.
+    #[test]
+    fn call_runs_any_tool_and_describe_tools_finds_it() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Box");
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "call",
+            json!({ "tool": "set_name", "args": { "node": id, "name": "Called" } }),
+        );
+        ok(&out);
+        let n = docs
+            .session
+            .doc
+            .get(NodeId::from_wire(&id).unwrap())
+            .unwrap();
+        assert_eq!(n.name(), "Called", "renamed");
+        assert!(call(&mut engine, &mut docs, 1, "call", json!({ "tool": "call" })).is_error);
+        let found = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "describe_tools",
+            json!({ "names": ["set_point"], "query": "gradient" }),
+        );
+        let tools = ok(&found)["tools"].as_array().unwrap().clone();
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert!(names.contains(&"set_point"), "{names:?}");
+        assert!(tools.iter().all(|t| t["inputSchema"].is_object()));
     }
 
     /// A subtree names its page and frame once, on the root: a layer below keeps

@@ -86,6 +86,10 @@ impl Output {
 /// connections.
 pub const CLIENT_KEY_META: &str = "io.github.fadion.ondin/client";
 
+/// Where `initialize`'s `_meta` asks for every tool, `"all"`, rather than the
+/// core set (`ondin mcp-proxy --tools all`).
+pub const TOOLS_META: &str = "io.github.fadion.ondin/tools";
+
 /// Who is calling, as `initialize` said.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Peer {
@@ -93,12 +97,14 @@ pub struct Peer {
     pub name: String,
     /// The key under [`CLIENT_KEY_META`], when one was given.
     pub key: Option<String>,
+    /// Whether it asked for every tool under [`TOOLS_META`].
+    pub all_tools: bool,
 }
 
 /// What answers a connection's tool calls.
 pub trait Handler {
-    /// The tool definitions `tools/list` answers.
-    fn tools(&self) -> Vec<Value>;
+    /// The tool definitions `tools/list` answers `peer`.
+    fn tools(&self, peer: &Peer) -> Vec<Value>;
     /// Answer one call from `peer`.
     fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output;
 }
@@ -158,6 +164,8 @@ fn answer(line: &str, client: &mut Peer, handler: &mut impl Handler) -> Option<V
                 .and_then(Value::as_str)
                 .filter(|k| !k.trim().is_empty())
                 .map(str::to_owned);
+            client.all_tools =
+                params.pointer("/_meta").and_then(|m| m.get(TOOLS_META)) == Some(&json!("all"));
             let version = negotiate(params.get("protocolVersion").and_then(Value::as_str));
             json!({
                 "protocolVersion": version,
@@ -167,7 +175,7 @@ fn answer(line: &str, client: &mut Peer, handler: &mut impl Handler) -> Option<V
             })
         }
         "ping" => json!({}),
-        "tools/list" => json!({ "tools": handler.tools() }),
+        "tools/list" => json!({ "tools": handler.tools(client) }),
         "tools/call" => {
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return Some(failure(id, -32602, "tools/call needs `name`"));
@@ -244,8 +252,8 @@ mod tests {
     struct Echo;
 
     impl Handler for Echo {
-        fn tools(&self) -> Vec<Value> {
-            vec![json!({ "name": "echo" })]
+        fn tools(&self, peer: &Peer) -> Vec<Value> {
+            vec![json!({ "name": "echo", "all": peer.all_tools })]
         }
         fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output {
             Output::json(
@@ -295,6 +303,27 @@ mod tests {
             "\n",
         ));
         assert_eq!(replies[1]["result"]["structuredContent"]["key"], "chat-7");
+    }
+
+    /// `tools/list` is asked for every tool only when `initialize`'s `_meta`
+    /// says `all`.
+    ///
+    /// flip: `answer` setting `all_tools` for any value under the key → fails at
+    /// "core".
+    #[test]
+    fn every_tool_is_listed_only_when_asked_for() {
+        let list = |meta: &str| {
+            run(&format!(
+                "{}\n{}\n",
+                format_args!(
+                    r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"_meta":{{"{TOOLS_META}":"{meta}"}}}}}}"#
+                ),
+                r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            ))[1]["result"]["tools"][0]["all"]
+                .clone()
+        };
+        assert_eq!(list("all"), json!(true));
+        assert_eq!(list("core"), json!(false), "core");
     }
 
     /// An unknown protocol revision gets the newest; an unknown method and a

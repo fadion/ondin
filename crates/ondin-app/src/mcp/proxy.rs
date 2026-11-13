@@ -95,15 +95,28 @@ struct Remembered {
 }
 
 /// Run the proxy until the agent closes its stdin, keying the host's state by
-/// `client` and starting on `document` when they are given.
-pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<(), String> {
+/// `client` and starting on `document` when they are given, and asking for
+/// every tool with `all_tools`.
+pub(crate) fn run(
+    client: Option<String>,
+    document: Option<String>,
+    all_tools: bool,
+) -> Result<(), String> {
     carry(
         std::io::stdin().lock(),
         std::io::stdout(),
-        client,
+        Ask { client, all_tools },
         document.map(|d| absolute(&d)),
         &mut Machine,
     )
+}
+
+/// What the proxy adds to `initialize` for the host: the client key, and a
+/// request for every tool rather than the core set.
+#[derive(Default)]
+struct Ask {
+    client: Option<String>,
+    all_tools: bool,
 }
 
 /// The proxy's loop: each line of `input` carried to a host from `hosts` and its
@@ -111,7 +124,7 @@ pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<()
 fn carry(
     mut input: impl BufRead,
     mut stdout: impl Write,
-    client: Option<String>,
+    ask: Ask,
     document: Option<String>,
     hosts: &mut impl Hosts,
 ) -> Result<(), String> {
@@ -146,7 +159,7 @@ fn carry(
         if line.trim().is_empty() {
             continue;
         }
-        let (line, message) = rewrite(line, client.as_deref());
+        let (line, message) = rewrite(line, &ask);
         let method = message
             .as_ref()
             .and_then(|m| m.get("method")?.as_str().map(str::to_owned));
@@ -254,8 +267,9 @@ fn absolute(asked: &str) -> String {
 }
 
 /// The line as the host gets it: a `use_document`'s path made absolute, and
-/// `initialize` carrying the client key when there is one.
-fn rewrite(line: &str, client: Option<&str>) -> (String, Option<Value>) {
+/// `initialize` carrying what `ask` adds: the client key when there is one, and
+/// the request for every tool.
+fn rewrite(line: &str, ask: &Ask) -> (String, Option<Value>) {
     let Ok(mut message) = serde_json::from_str::<Value>(line) else {
         return (line.to_owned(), None);
     };
@@ -270,13 +284,18 @@ fn rewrite(line: &str, client: Option<&str>) -> (String, Option<Value>) {
             changed = true;
         }
     }
-    if let Some(key) = client
+    if (ask.client.is_some() || ask.all_tools)
         && message.get("method").and_then(Value::as_str) == Some("initialize")
         && let Some(params) = message.get_mut("params").and_then(Value::as_object_mut)
     {
         let meta = params.entry("_meta").or_insert_with(|| json!({}));
         if let Some(meta) = meta.as_object_mut() {
-            meta.insert(ondin_mcp::wire::CLIENT_KEY_META.into(), json!(key));
+            if let Some(key) = &ask.client {
+                meta.insert(ondin_mcp::wire::CLIENT_KEY_META.into(), json!(key));
+            }
+            if ask.all_tools {
+                meta.insert(ondin_mcp::wire::TOOLS_META.into(), json!("all"));
+            }
             changed = true;
         }
     }
@@ -398,23 +417,40 @@ mod tests {
     use super::*;
 
     /// With a key, `initialize` carries it under the host's `_meta` name beside
-    /// whatever `_meta` it had; without one, the line passes untouched.
+    /// whatever `_meta` it had, and with `--tools all` the request for every
+    /// tool; with neither, the line passes untouched.
     ///
     /// flip: `rewrite` ignoring `client` → fails at the key.
     #[test]
     fn initialize_carries_the_client_key() {
+        let keyed = Ask {
+            client: Some("chat-1".into()),
+            all_tools: false,
+        };
         let line = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"x":1}}}"#;
-        let (out, _) = rewrite(line, Some("chat-1"));
+        let (out, _) = rewrite(line, &keyed);
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(
             v["params"]["_meta"][ondin_mcp::wire::CLIENT_KEY_META],
             "chat-1"
         );
         assert_eq!(v["params"]["_meta"]["x"], 1);
-        assert_eq!(rewrite(line, None).0, line);
+        assert!(
+            v["params"]["_meta"]
+                .get(ondin_mcp::wire::TOOLS_META)
+                .is_none()
+        );
+        assert_eq!(rewrite(line, &Ask::default()).0, line);
+        let all = Ask {
+            client: None,
+            all_tools: true,
+        };
+        let (out, _) = rewrite(line, &all);
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["params"]["_meta"][ondin_mcp::wire::TOOLS_META], "all");
         let call =
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_selection"}}"#;
-        assert_eq!(rewrite(call, Some("chat-1")).0, call, "only initialize");
+        assert_eq!(rewrite(call, &keyed).0, call, "only initialize");
     }
 
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -520,7 +556,7 @@ mod tests {
         carry(
             input.as_bytes(),
             &mut out,
-            None,
+            Ask::default(),
             document.map(str::to_owned),
             hosts,
         )

@@ -85,15 +85,20 @@ pub fn queue() -> (Sender<Request>, Receiver<Request>) {
 pub struct Forward {
     pub conn: Conn,
     pub to: Sender<Request>,
-    /// The tool definitions this host serves.
+    /// The tool definitions this host lists by default: the core set.
     pub tools: Vec<Value>,
+    /// The definitions it lists to a peer that asked for every tool.
+    pub all_tools: Vec<Value>,
     /// How long a call waits to be taken: [`TAKE_WAIT`].
     pub wait: Duration,
 }
 
 impl Handler for Forward {
-    fn tools(&self) -> Vec<Value> {
-        self.tools.clone()
+    fn tools(&self, peer: &Peer) -> Vec<Value> {
+        match peer.all_tools {
+            true => self.all_tools.clone(),
+            false => self.tools.clone(),
+        }
     }
 
     fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output {
@@ -170,11 +175,12 @@ mod tests {
             conn: 7,
             to,
             tools: Vec::new(),
+            all_tools: Vec::new(),
             wait: TAKE_WAIT,
         };
         let peer = Peer {
             name: "agent".into(),
-            key: None,
+            ..Peer::default()
         };
         let out = f.call(&peer, "get_node", json!({ "n": 3 }));
         assert_eq!(out.structured, Some(json!(3)));
@@ -194,6 +200,7 @@ mod tests {
             conn: 1,
             to,
             tools: Vec::new(),
+            all_tools: Vec::new(),
             wait: Duration::from_millis(20),
         };
         let out = f.call(&Peer::default(), "set_name", json!({}));

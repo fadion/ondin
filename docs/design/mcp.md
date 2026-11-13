@@ -9,7 +9,7 @@ The MCP endpoint: the running Ondin process hosts it, agents connect through a s
 Documents live in a running Ondin process, the window or a headless `serve`, so that process hosts the MCP endpoint and agents connect to it. A person configures one server in their harness, `ondin mcp-proxy` with no arguments, and it reaches any document.
 
 - **Hosts.** The window (one per machine, holding its documents as tabs, `one_window.rs`) and `ondin serve` each listen on a local endpoint and serve any number of documents, addressed by absolute path. Each writes a discovery file naming its endpoint, `mcp/<pid>.json` in the window lock's folder (`one_window::window_dir`: the machine folder on Windows, the user's runtime folder elsewhere), and removes it on exit; the proxy removes one whose endpoint does not answer.
-- **The proxy** (`ondin mcp-proxy`) bridges an agent that spawns its server over stdio. It connects to the window's endpoint when a window runs, else to a running `serve`, else starts `ondin serve` and connects to that. It forwards lines and remembers one thing: the connection's current document, so that when its host goes away or a window starts it reconnects to the window and restores it before the next tool call. `--client <key>` keys the host's state for the client (*Revisions*), and `--document <path>` names the document from the first call, so an assistant that starts the proxy per turn skips `use_document`.
+- **The proxy** (`ondin mcp-proxy`) bridges an agent that spawns its server over stdio. It connects to the window's endpoint when a window runs, else to a running `serve`, else starts `ondin serve` and connects to that. It forwards lines and remembers one thing: the connection's current document, so that when its host goes away or a window starts it reconnects to the window and restores it before the next tool call. `--client <key>` keys the host's state for the client (*Revisions*), and `--document <path>` names the document from the first call, so an assistant that starts the proxy per turn skips `use_document`. `--tools all` lists every tool rather than the core set (*Core*, §8.4).
 - **The current document** is per client: the proxy's key when it was given one, else the connection (*Revisions*). `use_document(document)` sets it and every other tool acts on it until the next `use_document`; a tool called before any fails naming `use_document`. The document is an absolute path, or a name or relative path matched against the host's open documents, then the library's by file name or document name; the proxy first turns a relative path that exists from the harness's working folder, with or without `.ondin`, into an absolute one. Several matches fail with the candidates, for the agent to ask. The tool's description tells the agent to switch only when the person names another file.
 - **Opening.** In the window, a document not yet open opens as a tab in the background: the window is not raised and the tab in front does not change, and the agent's edits show when the person looks at it. An agent's edit to a tab behind is written to its file at once, since a tab behind is kept clean (`tabs.rs`); one to the tab in front waits for the save or the autosave, as the person's own edits do. In `serve` it loads into memory.
 - **Security.** Same user, same machine, no token: a same-user process can already read and write the files the endpoint guards. On Windows the pipe rejects remote clients, its default DACL lets only the current user write to it, and the host drops a client whose process runs as anyone else (`one_window::same_user`). Elsewhere the socket sits in a 0700 folder, is 0600, and the host checks the peer's uid. TCP or remote transport is parked.
@@ -47,7 +47,7 @@ Phase 1 — read/export (ship first):
 `get_bounds(id) -> [x, y, width, height]`, `get_selection() -> {ids}`, `get_view()`, `export_svg(id?)`, `export_png(id?, region?, max?)`,
 `run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
 `list_styles() -> StyleTable`, `export_tokens()`, `list_fonts(query?)`, `check_contrast(ids?, page?, level?, non_text?)`,
-`review_colours(ids?, threshold?)`, `design_context(id?)`, `check_layout(ids?, page?)`.
+`review_colours(ids?, threshold?)`, `design_context(id?)`, `check_layout(ids?, page?)`, `describe_tools(names?, query?)`.
 
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `create_text(parent, text, x?, y?, width?)`, `insert_subtree`, `import_svg(parent, svg, x?, y?, name?)`, `delete_node`,
@@ -63,7 +63,7 @@ Phase 2 — write (1:1 with operations/composites):
 `set_effects(nodes, effects)`, `merge_colours(colours, into, nodes?)`, `add_image(bytes) -> ImageId`, `replace_image(id, image, index?)`, `fix_contrast(ids, level?, colour?, variable?)`, `clean_up(ids?, hidden_paint?, covered_fills?, hidden_layers?, empty_layers?, one_layer_groups?, guides?, skip_locked?)`, `fill_content(ids, locale?, kind?, records?, avatars?, seed?, example_emails?)`, `set_display(nodes, display?)`, `set_layout_item(nodes, item)`, `set_insets(nodes, insets)`,
 `insert_chart(parent, kind, table?, mapping?, x?, y?, width?, height?)`, `set_chart(id, kind?, mapping?, options?)`, `set_chart_data(id, table)`, `flatten_chart(ids)`,
 `set_exports(nodes, exports)`, `add_page(name?, index?)`, `duplicate_page(page)`, `delete_page(page)`,
-`move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`, `batch(steps)`.
+`move_page(page, index)`, `set_page_draft(page, draft)`, `undo()`, `redo()`, `set_selection(ids)`, `batch(steps)`, `set(nodes, props)`, `call(tool, args?)`.
 
 Phase 3 — components, variables and styles (through the verbs, never the raw ops):
 `make_component(id)`, `duplicate_as_component(id)`, `create_instance(main, parent, x?, y?)`, `detach_instance(id)`,
@@ -89,6 +89,16 @@ Phase 4 — kits and the library (the app's own actions, some outside undo):
 `insert_from_kit(kit, main, parent, x?, y?)`, `list_kit_updates()`, `accept_kit_updates(kit?)`,
 `make_local(ids)`, `map_kit_modes(kit, mapping)`, `make_kit()`, `publish_kit(note)`,
 `stop_sharing_kit()`, `import_tokens(tokens, collection?, removals?)`, `list_versions()`, `compare_version(version)`, `save_version(name?)`.
+
+Core — listed by default:
+`use_document`, `list_documents`, `get_selection`, `get_view`, `find_nodes`, `get_outline`,
+`get_node`, `get_tree`, `design_context`, `check_layout`, `export_png`, `list_components`,
+`list_variables`, `list_styles`, `list_fonts`, `describe_tools`, `insert_subtree`, `create_text`,
+`set`, `delete_node`, `duplicate`, `reparent`, `group`, `ungroup`, `align`, `distribute`,
+`create_instance`, `set_instance_property`, `apply_style`, `bind_variable`, `batch`, `call`,
+`undo`, `redo`, `set_selection`.
+
+`tools/list` names the core set unless `initialize`'s `_meta` asks for every tool (`wire::TOOLS_META`, which `ondin mcp-proxy --tools all` sends). Every tool answers whether listed or not: a client calls an unlisted one through `call(tool, args)`, or by name where it allows that, and `describe_tools` gives any tool's full definition. The list is read on every turn a client does not cache, and an agent that sees fewer tools picks among them better; the core set is what building and editing a page took in practice, and `set(nodes, props)` stands in for the single-property setters, writing each property through its own setter as one undo step named *set*, `size` and `at` (the layer's place in its parent) last.
 
 Selection is app state, not document state (§9.3), but deliberately part of the MCP surface, because "the selected layer" is how humans phrase most AI requests. The MCP layer reads and writes it in the owning process's session state, never the `Document`. So is the view: `get_view` answers the page the person is on, the camera's centre and zoom, and the world rectangle the canvas shows while the document is the tab in front, so "what I'm looking at" resolves without a guess. A read that takes a page (`get_outline`, `hit_test`, `export_svg`, `export_png`, `check_contrast`, `export_code` with nothing selected) defaults to that page; `serve` and a document nobody has open are on the first page.
 

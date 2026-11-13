@@ -500,6 +500,9 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
             Ok(())
         }
         "Region" => Err("expected [x, y, w, h]".into()),
+        "Props" | "Args" if v.is_object() => Ok(()),
+        "Props" | "Args" => Err("expected an object".into()),
+        "[Name]" => reads::<Vec<String>>(v),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }
@@ -585,6 +588,12 @@ pub fn example(model: &str) -> Option<Value> {
         "Color" => json(&Color::from_rgb8(0x1f, 0x3a, 0x5f)),
         "[Hex]" => serde_json::json!(["#203b5eff", "#1e395fff"]),
         "[Node]" => serde_json::json!(["7e5b:12", "7e5b:40"]),
+        "Props" => serde_json::json!({
+            "name": "Title",
+            "fills": ["#12352a"],
+            "size": { "width": 320.0, "height": 48.0 },
+            "at": [120.0, 96.0],
+        }),
         "Scope" => serde_json::json!(["corner", "spacing"]),
         "PropValue" => Value::Bool(true),
         "[ParaAttr]" => json(&vec![

@@ -32,15 +32,23 @@ pub(crate) fn run_dir() -> Option<PathBuf> {
     Some(crate::one_window::window_dir()?.join("mcp"))
 }
 
-/// The tool definitions a host serves: every tool of every phase.
-pub(crate) fn tools() -> Vec<serde_json::Value> {
-    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
-    PHASE_1
-        .iter()
-        .chain(&PHASE_2)
-        .chain(&PHASE_3)
-        .chain(&PHASE_4)
-        .filter_map(|name| ondin_mcp::schema::definition(name))
+/// The tool definitions a host lists: the core set, or with `all` every tool of
+/// every phase. An unlisted tool still answers, through `call` or by name.
+pub(crate) fn tools(all: bool) -> Vec<serde_json::Value> {
+    use ondin_mcp::tools::{CORE, PHASE_1, PHASE_2, PHASE_3, PHASE_4};
+    let names: Vec<&str> = match all {
+        true => PHASE_1
+            .iter()
+            .chain(&PHASE_2)
+            .chain(&PHASE_3)
+            .chain(&PHASE_4)
+            .copied()
+            .collect(),
+        false => CORE.to_vec(),
+    };
+    names
+        .into_iter()
+        .filter_map(ondin_mcp::schema::definition)
         .collect()
 }
 
@@ -122,7 +130,8 @@ fn spawn_connection(read: Box<dyn Read + Send>, write: Box<dyn Write + Send>, to
             let mut handler = Forward {
                 conn,
                 to,
-                tools: tools(),
+                tools: tools(false),
+                all_tools: tools(true),
                 wait: ondin_mcp::queue::TAKE_WAIT,
             };
             let _ = wire::serve(BufReader::new(read), write, &mut handler);

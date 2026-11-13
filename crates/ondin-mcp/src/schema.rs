@@ -363,6 +363,46 @@ pub static TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "set",
+        doc: "Set properties of layers in one undo step, each as its own setter takes it: name, visible, locked, opacity, blend, clip, fills, strokes, effects, exports, display, item, insets, text, text_style, paragraph, block, transform, geometry, element, link, size {width, height}, and at [x, y], the layer's place in its parent.",
+        params: &[
+            param("nodes", ParamKind::Nodes, true, "The layers."),
+            param(
+                "props",
+                ParamKind::Model("Props"),
+                true,
+                "The properties to set, by name.",
+            ),
+            BASE_REV,
+        ],
+    },
+    Tool {
+        name: "call",
+        doc: "Call any tool by name, listed or not: what `describe_tools` describes.",
+        params: &[
+            param("tool", ParamKind::Text, true, "The tool's name."),
+            param(
+                "args",
+                ParamKind::Model("Args"),
+                false,
+                "Its arguments, as its schema takes them.",
+            ),
+        ],
+    },
+    Tool {
+        name: "describe_tools",
+        doc: "The full definitions of tools, listed or not, by name or by a word in their name or description; run one that is not listed with `call`. Needs no current document.",
+        params: &[
+            param("names", ParamKind::Model("[Name]"), false, "Tools by name."),
+            param(
+                "query",
+                ParamKind::Text,
+                false,
+                "A word to look for, ignoring case; at most 12 answered.",
+            ),
+        ],
+    },
+    Tool {
         name: "list_documents",
         doc: "Every document in the person's library: path, name, project and whether it is a kit. Needs no current document.",
         params: &[],
@@ -733,29 +773,38 @@ mod tests {
     }
 
     /// The bytes `tools/list` sends, every phase's definitions as compact JSON.
-    fn listed_bytes() -> usize {
-        PHASE_1
-            .iter()
-            .chain(&PHASE_2)
-            .chain(&PHASE_3)
-            .chain(&PHASE_4)
+    fn listed_bytes<'a>(names: impl Iterator<Item = &'a &'a str>) -> usize {
+        names
             .map(|name| definition(name).unwrap().to_string().len())
             .sum()
     }
 
-    /// The tool list stays within its budget: every client pays for it on every
-    /// turn it is not cached. Raise the budget only for a new tool, never for
-    /// wording repeated across tools.
+    /// The tool lists stay within their budgets, the core set's most of all:
+    /// every client pays for it on every turn it is not cached. Raise a budget
+    /// only for a new tool, never for wording repeated across tools.
     ///
     /// flip: restoring the per-parameter id-form note in `property` → fails at
-    /// the budget.
+    /// every tool's budget; listing `PHASE_2` whole as core → fails at the core
+    /// budget.
     #[test]
     fn the_tool_list_stays_within_its_budget() {
-        const BUDGET: usize = 92_000;
-        let bytes = listed_bytes();
+        const CORE_BUDGET: usize = 19_500;
+        const ALL_BUDGET: usize = 94_000;
+        let core = listed_bytes(crate::tools::CORE.iter());
         assert!(
-            bytes <= BUDGET,
-            "tools/list is {bytes} bytes, past {BUDGET}"
+            core <= CORE_BUDGET,
+            "the core list is {core} bytes, past {CORE_BUDGET}"
+        );
+        let all = listed_bytes(
+            PHASE_1
+                .iter()
+                .chain(&PHASE_2)
+                .chain(&PHASE_3)
+                .chain(&PHASE_4),
+        );
+        assert!(
+            all <= ALL_BUDGET,
+            "every tool is {all} bytes, past {ALL_BUDGET}"
         );
     }
 }

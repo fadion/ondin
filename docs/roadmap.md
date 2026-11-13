@@ -15,9 +15,6 @@ colours took about ten reads; the one `insert_subtree` was 13 KB of output, most
 colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
 budget test, and the set is checked by re-running the same agent task on the old and new build.
 
-- **Core tool set** — a default list of the tools nearly every task uses, a generic `set` patch in
-  place of the single-property setters, `describe_tools` for the rest, which run through `batch`;
-  `--tools all` lists everything.
 - **Short ids per client** — `n36` for `48c991654e6b8e81:36`, mapped per client key, surviving the
   proxy's reconnect.
 - **Revert one step** — with the assistant (`ai.md`): undo an agent's own step under later edits

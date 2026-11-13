@@ -30,6 +30,11 @@ roxmltree = "0.20.0"
 # matcher serves both, and a pattern's groups are what its template can insert.
 # Already in the workspace lock through `velopack`, at this version.
 regex = "1.13.1"
+# A verb's model argument refused with where it went wrong (`children[1].kind`),
+# and a field the model does not have refused rather than dropped: agents write
+# these by hand, and serde alone says neither. Both depend on serde alone.
+serde_path_to_error = "0.1.20"
+serde_ignored = "0.1.14"
 kurbo.workspace = true
 parley.workspace = true
 peniko.workspace = true

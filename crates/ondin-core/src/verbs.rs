@@ -439,7 +439,7 @@ fn check_kind(kind: ParamKind, v: &Value) -> Result<(), String> {
 /// `model` names (a [`ParamKind::Model`]'s name), or why not.
 pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
     fn reads<T: serde::de::DeserializeOwned>(v: &Value) -> Result<(), String> {
-        T::deserialize(v).map(|_| ()).map_err(|e| e.to_string())
+        read_model::<T>(v).map(|_| ())
     }
     let mut loose = v.clone();
     if model != "DtcgFile" {
@@ -507,6 +507,89 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
     }
 }
 
+/// `v` read as a `T`, refused naming where it went wrong: the path of the value
+/// serde refused, or of a field `T` has no place for, which serde alone would
+/// drop without a word (`Flex { gap }` laid out with no gap).
+pub(crate) fn read_model<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, String> {
+    let mut unknown = Vec::new();
+    let mut note = |path: serde_ignored::Path<'_>| unknown.push(ignored_steps(&path));
+    let de = serde_ignored::Deserializer::new(v, &mut note);
+    let t = serde_path_to_error::deserialize(de).map_err(|e| {
+        let steps = e.path().iter().map(|s| {
+            use serde_path_to_error::Segment;
+            match s {
+                Segment::Seq { index } => Some(Step::Index(*index)),
+                Segment::Map { key } => Some(Step::Key(key.clone())),
+                Segment::Enum { variant } => Some(Step::Key(variant.clone())),
+                Segment::Unknown => None,
+            }
+        });
+        match json_path(v, steps.collect()) {
+            p if p.is_empty() => e.into_inner().to_string(),
+            p => format!("at `{p}`: {}", e.into_inner()),
+        }
+    })?;
+    match unknown.into_iter().next() {
+        None => Ok(t),
+        Some(steps) => Err(format!("at `{}`: no such field", json_path(v, steps))),
+    }
+}
+
+/// One step down a JSON value: a member by its key or an item by its place.
+#[derive(Clone)]
+enum Step {
+    Key(String),
+    Index(usize),
+}
+
+/// The steps of a path `serde_ignored` reports, `None` where it cannot name one
+/// (an enum's variant).
+fn ignored_steps(path: &serde_ignored::Path<'_>) -> Vec<Option<Step>> {
+    use serde_ignored::Path;
+    let (parent, step) = match path {
+        Path::Root => return Vec::new(),
+        Path::Seq { parent, index } => (*parent, Some(Step::Index(*index))),
+        Path::Map { parent, key } => (*parent, Some(Step::Key(key.clone()))),
+        Path::Some { parent } | Path::NewtypeStruct { parent } => return ignored_steps(parent),
+        Path::NewtypeVariant { parent } => (*parent, None),
+    };
+    let mut steps = ignored_steps(parent);
+    steps.push(step);
+    steps
+}
+
+/// `steps` written against `v` as `children[1].kind.Text`, an unnamed step taken
+/// as the one key of an externally tagged enum, which is how the value spells it.
+fn json_path(v: &Value, steps: Vec<Option<Step>>) -> String {
+    let mut out = String::new();
+    let mut at = Some(v);
+    for step in steps {
+        let step = match step {
+            Some(s) => s,
+            None => match at.and_then(Value::as_object) {
+                Some(map) if map.len() == 1 => {
+                    Step::Key(map.keys().next().cloned().unwrap_or_default())
+                }
+                _ => continue,
+            },
+        };
+        match &step {
+            Step::Key(k) => {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(k);
+                at = at.and_then(|v| v.get(k));
+            }
+            Step::Index(i) => {
+                out.push_str(&format!("[{i}]"));
+                at = at.and_then(|v| v.get(*i));
+            }
+        }
+    }
+    out
+}
+
 /// `v` with every null member of an object left out.
 fn without_nulls(v: &Value) -> Value {
     match v {
@@ -539,18 +622,6 @@ pub fn example(model: &str) -> Option<Value> {
         size: Size::new(120.0, 80.0),
         corner_radii: kurbo::RoundedRectRadii::from_single_radius(8.0),
         corner_smoothing: 0.0,
-    };
-    let text = NodeKind::Text {
-        content: "Hello".into(),
-        style: Box::default(),
-        spans: Default::default(),
-        para_spans: Default::default(),
-        paragraph: Default::default(),
-        block: Default::default(),
-        sizing: crate::node::TextSizing::Auto,
-        on_path: None,
-        on_path_flip: false,
-        on_path_offset: 0.0,
     };
     let fill = Fill {
         brush: peniko::Brush::Solid(Color::from_rgb8(0x33, 0x66, 0xcc)).into(),
@@ -600,20 +671,27 @@ pub fn example(model: &str) -> Option<Value> {
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::IndentStart(Length::Px(24.0)),
         ]),
+        // Written in the short forms, so the example shows them.
         "Tree" => serde_json::json!({
-            "kind": json(&NodeKind::Artboard {
-                size: Size::new(320.0, 200.0),
-                corner_radii: Default::default(),
-                corner_smoothing: 0.0,
-            }),
+            "kind": { "Artboard": { "size": { "width": 320, "height": 200 } } },
             "name": "Card",
-            "fills": [json(&fill)],
-            "display": json(&flex),
+            "fills": ["#ffffff"],
+            "display": { "Flex": { "direction": "Column", "gap": 12, "padding": 16 } },
             "children": [
-                { "kind": json(&rect), "name": "Picture", "fills": [json(&image_fill)] },
                 {
-                    "kind": json(&text),
-                    "transform": json(&Affine::translate((16.0, 96.0))),
+                    "kind": { "Rect": { "size": { "width": 288, "height": 96 }, "corner_radii": 8 } },
+                    "name": "Picture",
+                    "fills": ["#3366cc"],
+                    "effects": [{ "kind": { "type": "drop_shadow", "offset": [0, 6], "blur": 14, "spread": 0, "color": "#12352a2e" } }],
+                },
+                {
+                    "kind": { "Text": {
+                        "content": "Hello",
+                        "sizing": { "AutoHeight": 288 },
+                        "paragraph": { "align": "Center" },
+                        "style": { "font_family": "Inter", "font_size": 16, "weight": 600, "line_height": "22px" },
+                    } },
+                    "fills": ["#12352a"],
                 },
             ],
         }),
@@ -648,6 +726,7 @@ pub fn example(model: &str) -> Option<Value> {
 fn model_key<'a>(model: &str, param: &'a str) -> &'a str {
     match model {
         "Color" => "color",
+        "TextStyle" => "style",
         "[Fill]" => "fills",
         "[Stroke]" => "strokes",
         _ => param,
@@ -3985,7 +4064,11 @@ pub static VERBS: &[Verb] = &[
         doc: "Set text layers' character style, and optionally one text's runs",
         params: &[
             req("nodes", NODES, "the text layers"),
-            req("style", ParamKind::Model("TextStyle"), "the style"),
+            req(
+                "style",
+                ParamKind::Model("TextStyle"),
+                "the fields to change; each text keeps the rest of its own",
+            ),
             opt(
                 "spans",
                 ParamKind::Model("CharSpans"),
@@ -3994,20 +4077,33 @@ pub static VERBS: &[Verb] = &[
         ],
         run: |ctx, a| {
             let ids = texts(ctx, a)?;
-            let style = a.model::<TextStyle>("style")?;
+            let mut patch = a.get("style").cloned().unwrap_or_default();
+            loose::loosen("", &mut patch);
+            let Value::Object(patch) = patch else {
+                return Err(a.invalid("style", "expected an object"));
+            };
             let spans = a.model_opt::<CharSpans>("spans")?;
             if spans.is_some() && ids.len() > 1 {
                 return Err(a.invalid("spans", "runs are counted in one text's characters"));
             }
-            Ok(Done::ops(
-                ids.into_iter()
-                    .map(|id| Operation::SetTextStyle {
-                        id,
-                        style: style.clone(),
-                        spans: spans.clone(),
-                    })
-                    .collect(),
-            ))
+            let mut ops = Vec::new();
+            for id in ids {
+                let Some(NodeKind::Text { style, .. }) = ctx.doc.get(id).map(|n| n.kind()) else {
+                    continue;
+                };
+                let mut whole = serde_json::to_value(style.as_ref()).unwrap_or_default();
+                if let Value::Object(map) = &mut whole {
+                    map.extend(patch.clone());
+                }
+                let style =
+                    read_model::<TextStyle>(&whole).map_err(|why| a.invalid("style", why))?;
+                ops.push(Operation::SetTextStyle {
+                    id,
+                    style,
+                    spans: spans.clone(),
+                });
+            }
+            Ok(Done::ops(ops))
         },
     },
     Verb {

@@ -575,6 +575,129 @@ fn insert_subtree_creates_a_tree_in_one_edit() {
     );
 }
 
+/// Why a model argument is refused, panicking when it is not refused so.
+fn refused_why(doc: &Document, ids: &mut IdSource, name: &str, args: Value) -> String {
+    match answer(doc, ids, name, args) {
+        Err(VerbError::Invalid { why, .. }) => why,
+        other => panic!("{name}: {other:?}"),
+    }
+}
+
+/// A model argument is refused naming where it went wrong, and a field the model
+/// has no place for is refused rather than dropped.
+///
+/// flip: `read_model` leaving out the `serde_ignored` check → the misspelt tree
+/// is taken, and `refused_why` panics.
+#[test]
+fn a_model_argument_is_refused_with_its_path() {
+    let (doc, mut ids, page) = blank();
+    let typo = json!({ "kind": frame(10.0, 10.0), "display": { "Flex": { "gapp": 4 } } });
+    let why = refused_why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": typo }),
+    );
+    assert_eq!(
+        why, "at `display.Flex.gapp`: no such field",
+        "a field it does not have"
+    );
+    let text = json!({ "Text": { "content": "Hi", "sizing": { "AutoHeight": { "w": 1 } } } });
+    let bad =
+        json!({ "kind": "Group", "children": [{ "kind": rect(1.0, 1.0) }, { "kind": text }] });
+    let why = refused_why(
+        &doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": bad }),
+    );
+    assert!(
+        why.starts_with("at `children[1].kind.Text.sizing"),
+        "the path of the refused value: {why}"
+    );
+}
+
+/// `insert_subtree` takes the forms `get_node` and CSS write: lengths as `"22px"`,
+/// a sizing as `{type, width}`, an effect and a fill flat with their opacity, a
+/// rectangle with no corners, one-number padding and `gap`, a path as SVG data;
+/// and `verbs::tree` answers the path as SVG data that reads back.
+///
+/// flip: `loosen_effect` keeping a flat effect's `opacity` out of its colour →
+/// fails at "the opacity is the shadow's alpha".
+#[test]
+fn insert_subtree_takes_what_get_node_and_css_write() {
+    use ondin_core::container::Display;
+    use ondin_core::{EffectKind, Length, TextSizing};
+    let (mut doc, mut ids, page) = blank();
+    let tree = json!({
+        "kind": frame(300.0, 200.0),
+        "display": { "Flex": { "gap": 12, "padding": 8 } },
+        "children": [
+            { "kind": { "Rect": { "size": { "width": 40, "height": 40 } } },
+              "fills": [{ "id": "0:0", "index": 0, "paint": { "type": "Solid", "color": "#ff7a1a", "alpha": 0.5 } }],
+              "effects": [{ "kind": "DropShadow", "blur": 14, "color": "#12352a", "opacity": 0.3, "offset": [0, 6], "spread": 0 }] },
+            { "kind": { "Text": { "content": "Hi", "sizing": { "type": "AutoHeight", "width": 120 },
+                                   "style": { "line_height": "22px", "letter_spacing": "-0.5px" } } } },
+            { "kind": { "Path": { "svg": "M0,0 L10,10 L20,0" } } },
+        ],
+    });
+    let created = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": tree }),
+    );
+    let [card, rect, text, path] = created[..] else {
+        panic!("four layers: {created:?}");
+    };
+    let Some(Display::Flex(flex)) = doc.get(card).unwrap().display() else {
+        panic!("a flex frame");
+    };
+    assert_eq!(
+        (flex.row_gap, flex.column_gap, flex.padding),
+        (12.0, 12.0, [8.0; 4])
+    );
+    let r = doc.get(rect).unwrap();
+    let NodeKind::Rect { corner_radii, .. } = r.kind() else {
+        panic!("a rect");
+    };
+    assert_eq!(corner_radii.top_left, 0.0, "square unless given");
+    let fill = &r.paint().fills[0];
+    assert_eq!(
+        fill.brush,
+        Brush::Solid(Color::from_rgb8(255, 122, 26).multiply_alpha(0.5)).into(),
+        "the paint's alpha is the fill's"
+    );
+    let effect = &r.effects()[0];
+    let EffectKind::DropShadow(shadow) = &effect.kind else {
+        panic!("a drop shadow");
+    };
+    assert!(effect.visible);
+    assert!(
+        (shadow.color.components[3] - 0.3).abs() < 1e-6,
+        "the opacity is the shadow's alpha"
+    );
+    let NodeKind::Text { style, sizing, .. } = doc.get(text).unwrap().kind() else {
+        panic!("a text");
+    };
+    assert_eq!(style.line_height, Some(Length::Px(22.0)));
+    assert_eq!(style.letter_spacing, Length::Px(-0.5));
+    assert_eq!(*sizing, TextSizing::AutoHeight(120.0));
+    let read = verbs::tree(&doc, path).expect("the path's tree");
+    assert_eq!(read["kind"]["Path"]["path"], json!("M0,0 L10,10 L20,0"));
+    let again = run(
+        &mut doc,
+        &mut ids,
+        "insert_subtree",
+        json!({ "parent": page.to_wire(), "tree": read }),
+    );
+    assert_eq!(
+        doc.get(again[0]).unwrap().kind(),
+        doc.get(path).unwrap().kind(),
+        "the tree read back writes the same path"
+    );
+}
+
 /// `style_text` sets a range of characters as runs, counted in characters, not
 /// bytes, and the whole text as its defaults with that attribute's runs dropped;
 /// `style_paragraphs` reaches the whole paragraph a range touches; a range past the
@@ -681,6 +804,47 @@ fn style_text_sets_runs_over_a_range_and_defaults_over_all() {
     assert!(
         matches!(past, Err(VerbError::Invalid { param: "end", .. })),
         "{past:?}"
+    );
+}
+
+/// `set_text_style` changes only the fields it is given: each text keeps its own
+/// family and the rest, and a length may be written `"28px"`.
+///
+/// flip: `set_text_style` completing the style from the default rather than from
+/// the text's own → fails at "the family is the text's own".
+#[test]
+fn set_text_style_changes_only_what_it_is_given() {
+    use ondin_core::{Length, TextStyle};
+    let (mut doc, mut ids, page) = blank();
+    let style = TextStyle {
+        font_family: "Inter Tight".into(),
+        italic: true,
+        ..TextStyle::default()
+    };
+    let kind = json!({ "Text": { "content": "Hi", "sizing": "Auto", "style": style } });
+    let t = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": kind }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "set_text_style",
+        json!({ "nodes": [t.to_wire()], "style": { "font_size": 20, "line_height": "28px" } }),
+    );
+    let NodeKind::Text { style, .. } = doc.get(t).unwrap().kind() else {
+        unreachable!()
+    };
+    assert_eq!(
+        style.font_family, "Inter Tight",
+        "the family is the text's own"
+    );
+    assert!(style.italic);
+    assert_eq!(
+        (style.font_size, style.line_height),
+        (20.0, Some(Length::Px(28.0)))
     );
 }
 
@@ -2064,6 +2228,27 @@ fn bind_variable_binds_and_detaches_fields() {
     let err =
         verbs::run_script(&mut doc, &mut ids, Lent::default(), &past).expect_err("no fifth corner");
     assert!(err.why.contains("no such place"), "{err}");
+}
+
+/// A corner is named as well as numbered: `bottom_right` is corner 2.
+///
+/// flip: `corner_index` listing the corners clockwise from bottom-left → fails at
+/// "bottom-right is bound".
+#[test]
+fn bind_variable_names_a_corner() {
+    let (mut doc, mut ids, _) = blank();
+    let eight = serde_json::to_value(ondin_core::Cell::Number(8.0)).unwrap();
+    let script = json!([
+        { "verb": "add_variable", "args": { "kind": "number", "name": "r", "value": eight }, "as": "n" },
+        { "verb": "create_node", "args": { "parent": "@page", "kind": rect(40.0, 40.0) }, "as": "x" },
+        { "verb": "bind_variable", "args": { "nodes": ["@x"], "field": { "corner": "bottom_right" }, "variable": "@n" } },
+    ]);
+    let made = verbs::run_script(&mut doc, &mut ids, Lent::default(), &script)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let x = NodeId::from_wire(&made[1][0]).unwrap();
+    let node = doc.get(x).unwrap();
+    let bound: Vec<bool> = node.corner_vars().iter().map(Option::is_some).collect();
+    assert_eq!(bound, [false, false, true, false], "bottom-right is bound");
 }
 
 /// `bind_variable` binds a polygon's one radius whichever corner it is given, so
@@ -4965,12 +5150,13 @@ fn short_forms_make_what_full_forms_make() {
     );
 }
 
-/// `tree` writes a colour as hex only where hex reads back to the same value; a
-/// colour between two bytes keeps its components.
+/// `tree` writes a colour between two bytes as its nearest hex, and the copy
+/// that hex makes reads back as the same tree.
 ///
-/// flip: `exact_hex` rounding without the read-back check → fails at "kept".
+/// flip: `nearest_hex` refusing a colour that does not read back exactly → fails
+/// at "the nearest byte".
 #[test]
-fn tree_writes_hex_only_where_it_reads_back_exactly() {
+fn tree_writes_a_colour_as_its_nearest_hex() {
     let (mut doc, mut ids, page) = blank();
     let between = Color::new([0.123_456_7, 0.5, 0.25, 1.0]);
     let fills = |c: Color| {
@@ -4993,10 +5179,7 @@ fn tree_writes_hex_only_where_it_reads_back_exactly() {
         json!({ "nodes": [r.to_wire()], "fills": fills(between) }),
     );
     let read = verbs::tree(&doc, r).unwrap();
-    assert!(
-        read["fills"][0]["brush"]["Solid"]["components"].is_array(),
-        "kept: {read}"
-    );
+    assert_eq!(read["fills"][0], json!("#1f8040"), "the nearest byte");
     let copy = run(
         &mut doc,
         &mut ids,

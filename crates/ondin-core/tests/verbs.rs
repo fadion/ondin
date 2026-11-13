@@ -2816,6 +2816,69 @@ fn component_properties_are_renamed_and_deleted() {
     assert!(names(&doc).is_empty());
 }
 
+/// A swap property's preferred mains are those its slot can show, each once: the
+/// main holding the slot is refused, as the card's picker never offers it.
+///
+/// flip: `edit_property` taking any main → fails at "the owner is refused";
+/// without dropping repeats → fails at "each once".
+#[test]
+fn preferred_mains_are_what_the_slot_can_show() {
+    let (mut doc, mut ids, page) = blank();
+    let (icon_a, _) = main_component(&mut doc, &mut ids, page, "Icon A", 20.0);
+    let (icon_b, _) = main_component(&mut doc, &mut ids, page, "Icon B", 20.0);
+    let button = run(
+        &mut doc,
+        &mut ids,
+        "create_node",
+        json!({ "parent": page.to_wire(), "kind": frame(120.0, 40.0), "name": "Button" }),
+    )[0];
+    let slot = run(
+        &mut doc,
+        &mut ids,
+        "create_instance",
+        json!({ "main": icon_a.to_wire(), "parent": button.to_wire() }),
+    )[0];
+    run(
+        &mut doc,
+        &mut ids,
+        "make_component",
+        json!({ "nodes": [button.to_wire()] }),
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "define_property",
+        json!({ "node": slot.to_wire(), "kind": "swap", "name": "Icon" }),
+    );
+    let prefer =
+        |list: Value| json!({ "node": button.to_wire(), "property": "Icon", "preferred": list });
+    run(
+        &mut doc,
+        &mut ids,
+        "edit_property",
+        prefer(json!([
+            icon_b.to_wire(),
+            icon_b.to_wire(),
+            icon_a.to_wire()
+        ])),
+    );
+    assert_eq!(
+        doc.get(button).unwrap().props()[0].preferred,
+        [icon_b, icon_a],
+        "each once"
+    );
+    assert_eq!(
+        refused_param(
+            &doc,
+            &mut ids,
+            "edit_property",
+            prefer(json!([button.to_wire()]))
+        ),
+        "preferred",
+        "the owner is refused"
+    );
+}
+
 /// A nested instance's properties are shown on the main holding it, and stop;
 /// a layer that is no nested instance is refused.
 ///

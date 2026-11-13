@@ -2323,14 +2323,28 @@ pub static VERBS: &[Verb] = &[
             let preferred = match a.model_opt::<Vec<String>>("preferred")? {
                 Some(list) => {
                     swap("preferred")?;
+                    // What the picker offers the slot, as the card's own picker of
+                    // preferred mains lists it; each once.
+                    let slot = p.bound.first().copied().ok_or_else(|| {
+                        a.invalid(
+                            "preferred",
+                            "the property is bound to no nested instance yet",
+                        )
+                    })?;
+                    let offered = crate::swap::options(ctx.doc, slot, "", "");
                     let mut mains = Vec::new();
                     for s in &list {
                         let m = NodeId::from_wire(s)
-                            .filter(|m| ctx.doc.get(*m).is_some_and(|n| n.component()))
+                            .filter(|m| offered.contains(m))
                             .ok_or_else(|| {
-                                a.invalid("preferred", format!("`{s}` is not a main component"))
+                                a.invalid(
+                                    "preferred",
+                                    format!("`{s}` is not a main the slot can show"),
+                                )
                             })?;
-                        mains.push(m);
+                        if !mains.contains(&m) {
+                            mains.push(m);
+                        }
                     }
                     mains
                 }

@@ -122,8 +122,16 @@ struct Shown {
 #[derive(Clone, PartialEq)]
 struct Layer {
     name: String,
+    /// `None` on a page's root.
+    parent: Option<String>,
     hash: u64,
 }
+
+/// The most layers one list of a `changed` report names. One deletion of a
+/// frame lists every layer in it, which buried the answer it rode on; past
+/// this, the report counts the rest and names the top-level layers they sit
+/// in, which an agent reads again.
+const CHANGED_LISTED: usize = 20;
 
 /// One client's state: its current document and what it was last shown.
 #[derive(Default)]
@@ -171,18 +179,72 @@ impl Delta {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }
 
-    /// Each id with the name it has (or, removed, had).
+    /// Each id with the name it has (or, removed, had), at most [`CHANGED_LISTED`] a
+    /// list. Past that, `left_out` counts the rest of each list and names, in
+    /// `in`, the top-level layers holding them (at most [`CHANGED_LISTED`] too).
     fn to_json(&self, now: &HashMap<String, Layer>, then: &HashMap<String, Layer>) -> Value {
+        let name = |l: &Layer| json!(l.name);
         let named = |ids: &[String], from: &HashMap<String, Layer>| -> Vec<Value> {
             ids.iter()
-                .map(|id| json!({ "id": id, "name": from.get(id).map_or("", |l| l.name.as_str()) }))
+                .take(CHANGED_LISTED)
+                .map(|id| json!({ "id": id, "name": from.get(id).map_or(json!(""), name) }))
                 .collect()
         };
-        json!({
+        let mut report = json!({
             "added": named(&self.added, now),
             "changed": named(&self.changed, now),
             "removed": named(&self.removed, then),
-        })
+        });
+        let past = |ids: &[String]| ids.len().saturating_sub(CHANGED_LISTED);
+        if [&self.added, &self.changed, &self.removed]
+            .iter()
+            .all(|ids| past(ids) == 0)
+        {
+            return report;
+        }
+        let mut sections: Vec<String> = Vec::new();
+        let left = [
+            (&self.added, now),
+            (&self.changed, now),
+            (&self.removed, then),
+        ];
+        for (ids, from) in left {
+            for id in ids.iter().skip(CHANGED_LISTED) {
+                if let Some(top) = top_level(id, from)
+                    && !sections.contains(&top)
+                {
+                    sections.push(top);
+                }
+            }
+        }
+        sections.sort();
+        let sections: Vec<Value> = sections
+            .iter()
+            .take(CHANGED_LISTED)
+            .map(|id| {
+                let layer = now.get(id).or_else(|| then.get(id));
+                json!({ "id": id, "name": layer.map_or(json!(""), name) })
+            })
+            .collect();
+        report["left_out"] = json!({
+            "added": past(&self.added),
+            "changed": past(&self.changed),
+            "removed": past(&self.removed),
+            "in": sections,
+        });
+        report
+    }
+}
+
+/// The layer of `from` that holds `id` (or is it) directly under a page.
+fn top_level(id: &str, from: &HashMap<String, Layer>) -> Option<String> {
+    let mut at = id;
+    loop {
+        let parent = from.get(at)?.parent.as_deref()?;
+        if from.get(parent)?.parent.is_none() {
+            return Some(at.to_owned());
+        }
+        at = parent;
     }
 }
 
@@ -219,6 +281,7 @@ fn layers(snapshot: &ondin_export::Snapshot) -> HashMap<String, Layer> {
                 n.id.clone(),
                 Layer {
                     name: n.name.clone(),
+                    parent: n.parent.clone(),
                     hash: h.finish(),
                 },
             )
@@ -1848,6 +1911,66 @@ mod tests {
         assert_eq!(changed["added"][0]["name"], "Card");
         let again = call(&mut engine, &mut docs, 2, "get_selection", json!({}));
         assert!(ok(&again).get("changed").is_none(), "reported twice");
+    }
+
+    /// The person deleting a frame of many layers is reported with each list cut
+    /// at `CHANGED_LISTED`, the rest counted, and the frame named as where they were; a
+    /// sibling frame's layers do not read as changed.
+    ///
+    /// flip: `Delta::to_json` naming every id → fails at the cut list's length.
+    #[test]
+    fn a_large_change_is_cut_and_names_its_sections() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page();
+        let frame = docs.session.doc.get(page).unwrap().children()[0];
+        let args = json!({ "nodes": [frame.to_wire()] });
+        let out = call(&mut engine, &mut docs, 1, "duplicate", args);
+        let copy = ok(&out)["created"][0].as_str().unwrap().to_owned();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let kind: ondin_core::NodeKind = serde_json::from_value(kind).unwrap();
+        let ops = (0..CHANGED_LISTED + 5)
+            .map(|i| ondin_core::Operation::CreateNode {
+                id: docs.session.ids.mint(),
+                parent: frame,
+                index: i,
+                kind: kind.clone(),
+                transform: None,
+                name: None,
+            })
+            .collect();
+        docs.session
+            .try_commit(ondin_core::Transaction(ops))
+            .unwrap();
+        ok(&call(&mut engine, &mut docs, 1, "get_selection", json!({})));
+        let held = 1 + docs.session.doc.get(frame).unwrap().children().len();
+        assert!(
+            held > CHANGED_LISTED + 5,
+            "the frame holds more than a list names"
+        );
+        let tx = ondin_core::Transaction(vec![ondin_core::Operation::DeleteNode { id: frame }]);
+        docs.session.try_commit(tx).unwrap();
+        let view = call(&mut engine, &mut docs, 1, "get_view", json!({}));
+        let changed = &ok(&view)["changed"];
+        assert_eq!(
+            changed["removed"].as_array().map(Vec::len),
+            Some(CHANGED_LISTED)
+        );
+        assert_eq!(
+            changed["left_out"]["removed"],
+            held - CHANGED_LISTED,
+            "{changed}"
+        );
+        assert_eq!(changed["left_out"]["in"][0]["id"], json!(frame.to_wire()));
+        let page = json!([{ "id": page.to_wire(), "name": "Page 1" }]);
+        assert_eq!(
+            changed["changed"], page,
+            "only the page's children: {changed}"
+        );
+        assert!(
+            !changed.to_string().contains(&copy),
+            "the sibling is unchanged"
+        );
     }
 
     /// A write whose layer changed after its `base_rev` is refused naming it; one

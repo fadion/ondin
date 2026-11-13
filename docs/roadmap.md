@@ -6,6 +6,40 @@ work is described in `architecture.md`. Refs are file + function name, never lin
 the code before picking an item up — an item's premise can go stale while its ask still reads
 true.
 
+## Now · MCP
+
+Fewer tokens and fewer round trips for an agent driving `ondin-mcp`. Measured on a live run (a
+hero section built into an existing page): `tools/list` is 164 tools and ~119 KB, a third of it
+the same `base_rev` and results-are-data text repeated per tool; learning the page's type and
+colours took about ten reads; the one `insert_subtree` was 13 KB of output, most of it float
+colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
+budget test, and the set is checked by re-running the same agent task on the old and new build.
+
+- **Hex colours and default fields in writes** — `verbs::Args::model`, `verbs::tree`. A colour is
+  `"#rrggbb"` or `"#rrggbbaa"`; a fill or stroke takes only what differs from a new one's; a fill
+  may be a bare colour. `get_tree` answers hex where it round-trips exactly.
+- **Lean snapshot** — `ondin_export::snapshot`. `get_node` leaves out fields at their defaults and
+  what repeats its parent's.
+- **Named results** — `mcp::write`. `insert_subtree` answers each named layer's path with its id.
+- **Undo guards its caller** — `mcp::run`'s `undo`/`redo`. An agent's undo takes back only its
+  own step; one under the person's edit is refused, naming it.
+- **Design context** — a read of what a frame already uses: text styles, colours, radii,
+  shadows, the content column and its sections' boxes, each with a layer that uses it.
+- **Outline read** — one row per layer (id, name, kind, box, depth), with a depth limit;
+  `find_nodes` gives each match's box and whether it holds the selection.
+- **`like` in trees** — a layer takes another's text style or paint by id instead of restating it.
+- **Layout check and region renders** — overlaps, overflowing or clipped text and layers off their
+  frame, before any image; `export_png` takes a region.
+- **Core tool set** — a default list of the tools nearly every task uses, a generic `set` patch in
+  place of the single-property setters, `describe_tools` for the rest, which run through `batch`;
+  `--tools all` lists everything.
+- **Short ids per client** — `n36` for `48c991654e6b8e81:36`, mapped per client key, surviving the
+  proxy's reconnect.
+- **Revert one step** — with the assistant (`ai.md`): undo an agent's own step under later edits
+  that touch other layers.
+- **A script tool** — Command Mode (`vm.md`) exposed to agents, so a loop runs in one call. Waits on
+  Command Mode.
+
 ## Now
 
 - **Command Mode** — `architecture.md` §13, `vm.md`. Its verbs are the registry's (`ondin_core::verbs`, built). Scripts

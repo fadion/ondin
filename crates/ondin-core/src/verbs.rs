@@ -1325,7 +1325,7 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "insert_subtree",
-        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first",
+        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy an existing layer's shape from `get_tree`, take a layer's look with `like`, and make one layer with `create_node`",
         params: &[
             req("parent", NODE, "the frame, group or page to create it in"),
             req(

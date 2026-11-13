@@ -1842,12 +1842,12 @@ pub static VERBS: &[Verb] = &[
             opt(
                 "x",
                 ParamKind::Number,
-                "where its box is centred, across the parent; at the main's own place unless given",
+                "its box's left edge in the parent; where the main's is unless given",
             ),
             opt(
                 "y",
                 ParamKind::Number,
-                "where its box is centred, down the parent",
+                "its box's top edge in the parent; where the main's is unless given",
             ),
         ],
         run: |ctx, a| {
@@ -1857,15 +1857,14 @@ pub static VERBS: &[Verb] = &[
                 return Err(a.invalid("main", "not a main component or a set"));
             }
             node(ctx, parent)?;
-            let centre = match (a.number("x"), a.number("y")) {
-                (None, None) => None,
-                (x, y) => {
-                    let into = ctx.res.world_transform(parent).unwrap_or(Affine::IDENTITY);
-                    Some(into * kurbo::Point::new(x.unwrap_or(0.0), y.unwrap_or(0.0)))
-                }
-            };
-            let (tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, centre)
+            let (mut tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, None)
                 .ok_or(VerbError::Nothing("the set has no variant to place"))?;
+            let (x, y) = (a.number("x"), a.number("y"));
+            if (x.is_some() || y.is_some())
+                && let Some(op) = build::cornered_at(ctx.doc, &tx, id, x, y)
+            {
+                tx.0.push(op);
+            }
             Ok(Done::made(tx, vec![id]))
         },
     },

@@ -204,7 +204,7 @@ against an eager model, not a boundary against a hostile one. The seal's sentenc
   system prompt; a thread another harness wrote is not replayed, and the chat says so.
 - **Document content is data, never instructions.** Layer names, text content, component
   descriptions and variable names may come from someone else's file or kit, so every piece of the
-  document the agent reads is fenced and marked as data, and each tool's description ends saying
+  document the agent reads is fenced and marked as data, and the MCP server's instructions say
   so.
 
 ### Attaching layers

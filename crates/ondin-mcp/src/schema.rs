@@ -255,7 +255,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "check_contrast",
-        doc: "Measure each shown text layer, and with `non_text` each small shape, against what is drawn behind it, in every mode: its score, what its size needs, and whether it passes. `fix_contrast` fixes a failing one.",
+        doc: "Measure each shown text layer, and with `non_text` each small shape, against what is drawn behind it, in every mode: `measured` and `failing` count them, and `findings` lists each failing one (every one with `all`) with its score, what its size needs, and whether it passes. `fix_contrast` fixes a failing one.",
         params: &[
             param(
                 "ids",
@@ -280,6 +280,12 @@ pub static TOOLS: &[Tool] = &[
                 ParamKind::Bool,
                 false,
                 "Also measure icons and other shapes under 24 units across.",
+            ),
+            param(
+                "all",
+                ParamKind::Bool,
+                false,
+                "List the passing findings too.",
             ),
         ],
     },

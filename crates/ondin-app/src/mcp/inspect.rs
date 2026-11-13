@@ -105,7 +105,8 @@ fn find_like(s: &EditorSession, args: &Value) -> Result<Answer, String> {
 /// The contrast check (*Check contrast*, `ondin check contrast`): each shown
 /// text layer, and with `non_text` each small shape, measured against what is
 /// drawn behind it in every mode. `ids` limits it to the layers under them; else
-/// a page, the first when none is named.
+/// a page, the first when none is named. Only the failing findings are listed
+/// unless `all` asks for every one; `measured` counts them all.
 fn check_contrast(s: &EditorSession, args: &Value) -> Result<Answer, String> {
     use ondin_export::contrast::{self, Level, Options};
     let level = match args.get("level").and_then(Value::as_str) {
@@ -159,10 +160,14 @@ fn check_contrast(s: &EditorSession, args: &Value) -> Result<Answer, String> {
             skipped.push(json!({ "id": k.id.to_wire(), "trail": k.trail, "why": k.why }));
         }
     }
+    let measured = findings.len();
+    if args.get("all").and_then(Value::as_bool) != Some(true) {
+        findings.retain(|f| f["passes"] == false);
+    }
     let failing = findings.iter().filter(|f| f["passes"] == false).count();
     Ok(Answer::Json(json!({
         "level": level.label(),
-        "measured": findings.len(),
+        "measured": measured,
         "failing": failing,
         "findings": findings,
         "skipped": skipped,

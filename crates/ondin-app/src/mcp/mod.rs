@@ -2916,7 +2916,10 @@ mod tests {
     }
 
     /// `check_contrast` measures a text layer on the page and says whether it
-    /// passes.
+    /// passes, listing a passing one only when asked for `all`.
+    ///
+    /// flip: `check_contrast` keeping every finding without `all` → fails at "a
+    /// pass is not listed".
     #[test]
     fn check_contrast_measures_text() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2930,6 +2933,15 @@ mod tests {
             json!({ "parent": page, "text": "Hello" }),
         ));
         let out = call(&mut engine, &mut docs, 1, "check_contrast", json!({}));
+        let quiet = ok(&out);
+        assert_eq!(
+            quiet["findings"],
+            json!([]),
+            "a pass is not listed: {quiet}"
+        );
+        assert!(quiet["measured"].as_u64() > Some(0), "but counted: {quiet}");
+        let args = json!({ "all": true });
+        let out = call(&mut engine, &mut docs, 1, "check_contrast", args);
         let report = ok(&out);
         let findings = report["findings"].as_array().unwrap();
         assert!(

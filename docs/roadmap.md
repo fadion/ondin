@@ -21,8 +21,7 @@ true.
   every phase's tools are built. The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980),
   specified beside used values (§15 D868), and an instance's overrides and property values.
-  Tools owed:
-  comparing a version, and several verbs as one undo step.
+  Tools owed: comparing a version, and several verbs as one undo step.
   The proxy's loop (`mcp/proxy.rs` `run`) is wired to stdin and stdout, so its test covers only
   `rewrite`: make it take a reader, a writer and a connect function, and pin the handover from
   `serve` to the window, the restore before the first call, and a lost answer never re-sent.

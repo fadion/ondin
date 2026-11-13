@@ -892,6 +892,65 @@ fn set_point_rounds_a_corner_and_refuses_what_is_not_there() {
     assert!(matches!(idle, Err(VerbError::Nothing(_))), "{idle:?}");
 }
 
+/// `set_geometry` refuses a rounded path's drawn outline written back as its
+/// points, whole or with a point moved, and takes its anchors moved.
+///
+/// flip: `bakes_rounding` answering `false` → the drawn outline commits, and
+/// `refused_param` panics on it.
+#[test]
+fn set_geometry_refuses_a_rounded_paths_drawn_outline() {
+    use ondin_core::kurbo::BezPath;
+    let (mut doc, mut ids, page) = blank();
+    let p = path_at(
+        &mut doc,
+        &mut ids,
+        page,
+        "M0,0 L40,0 L40,40",
+        Affine::IDENTITY,
+    );
+    run(
+        &mut doc,
+        &mut ids,
+        "set_point",
+        json!({ "node": p.to_wire(), "point": 1, "radius": 8 }),
+    );
+    let drawn = ondin_core::geometry::local_path(doc.get(p).unwrap().kind()).unwrap();
+    let mut nudged = drawn.clone();
+    if let Some(ondin_core::kurbo::PathEl::LineTo(end)) = nudged.elements_mut().last_mut() {
+        end.y += 5.0;
+    }
+    let patch = |path: BezPath, radii: Vec<f64>| {
+        json!({
+            "node": p.to_wire(),
+            "geometry": serde_json::to_value(ondin_core::GeometryPatch::Path {
+                path,
+                corner_radii: radii,
+                mirror: None,
+            })
+            .unwrap(),
+        })
+    };
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_geometry", patch(drawn, vec![])),
+        "geometry",
+        "the outline as drawn"
+    );
+    assert_eq!(
+        refused_param(&doc, &mut ids, "set_geometry", patch(nudged, vec![])),
+        "geometry",
+        "the outline with its last point moved"
+    );
+    let moved = BezPath::from_svg("M0,0 L50,0 L40,40").unwrap();
+    run(
+        &mut doc,
+        &mut ids,
+        "set_geometry",
+        patch(moved, vec![0.0, 8.0]),
+    );
+    let points: Vec<(f64, f64)> = local_anchors(&doc, p).iter().map(|a| a[0]).collect();
+    assert_eq!(points, [(0.0, 0.0), (50.0, 0.0), (40.0, 40.0)]);
+}
+
 /// `repeat` makes a group of the original and its copies round the point, named
 /// for the count.
 #[test]

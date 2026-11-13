@@ -742,6 +742,46 @@ fn set_point(ctx: &mut Ctx<'_>, a: &Args<'_>) -> Result<Done, VerbError> {
     )))
 }
 
+/// Whether `patch` writes the drawn outline of the rounded path `id` back as its
+/// points, which would bake each fillet into curves and round it again.
+///
+/// The snapshot's `svg` is that outline, so it is the likely mistake. A patch is
+/// caught by any one point the outline has only because a corner is rounded, so
+/// the outline written back with an edit is caught too. Four decimal places is the
+/// snapshot's precision; the tolerance sits above it.
+fn bakes_rounding(ctx: &Ctx<'_>, id: NodeId, patch: &GeometryPatch) -> bool {
+    const NEAR: f64 = 1e-3;
+    let GeometryPatch::Path { path: written, .. } = patch else {
+        return false;
+    };
+    let Some(
+        kind @ NodeKind::Path {
+            path, corner_radii, ..
+        },
+    ) = ctx.res.used_kind(ctx.doc, id)
+    else {
+        return false;
+    };
+    if corner_radii.iter().all(|r| *r <= 0.0) {
+        return false;
+    }
+    let points = |p: &kurbo::BezPath, radii: &[f64]| -> Vec<kurbo::Point> {
+        crate::edit::pen_anchors(p, radii)
+            .iter()
+            .flat_map(|s| s.anchors.iter().map(|a| a.at))
+            .collect()
+    };
+    let near =
+        |list: &[kurbo::Point], p: kurbo::Point| list.iter().any(|q| (*q - p).hypot() < NEAR);
+    let anchors = points(path, corner_radii);
+    let drawn = crate::geometry::local_path(kind).unwrap_or_default();
+    let fillets: Vec<kurbo::Point> = points(&drawn, &[])
+        .into_iter()
+        .filter(|p| !near(&anchors, *p))
+        .collect();
+    points(written, &[]).into_iter().any(|p| near(&fillets, p))
+}
+
 /// A style's value as a caller writes it: the lists as the single-layer verbs take
 /// them, with no item ids, which the verb keys.
 #[derive(serde::Deserialize, Debug)]
@@ -3336,11 +3376,16 @@ pub static VERBS: &[Verb] = &[
             req("node", NODE, "the layer"),
             req("geometry", ParamKind::Model("GeometryPatch"), "the change"),
         ],
-        run: |_, a| {
-            Ok(Done::ops(vec![Operation::SetGeometry {
-                id: a.node("node")?,
-                geometry: a.model::<GeometryPatch>("geometry")?,
-            }]))
+        run: |ctx, a| {
+            let id = a.node("node")?;
+            let geometry = a.model::<GeometryPatch>("geometry")?;
+            if bakes_rounding(ctx, id, &geometry) {
+                return Err(a.invalid(
+                    "geometry",
+                    "this is the path as drawn, its rounded corners expanded; write the points the snapshot's `subpaths` lists, or move one with `set_point`",
+                ));
+            }
+            Ok(Done::ops(vec![Operation::SetGeometry { id, geometry }]))
         },
     },
     Verb {

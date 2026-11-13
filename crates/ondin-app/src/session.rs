@@ -584,9 +584,10 @@ pub struct EditorSession {
     saved_at: Option<Instant>,
     /// Bumped by every change to the document — a commit, an undo, a redo, a
     /// document adopted — and what a cache of something *derived from* the
-    /// document keys on. **Not `dirty`**: this only goes up, because a save changes
-    /// nothing a render would produce. Drawn from [`next_revision`], so it is also
-    /// unique across sessions.
+    /// document keys on. **Not `dirty`**: a save changes nothing a render would
+    /// produce. Drawn from [`next_revision`], so it is also unique across
+    /// sessions; it goes back only in [`Self::rewind`], to the value it had for
+    /// the same document.
     revision: u64,
     /// Bumped whenever the canvas would draw differently while `revision` stands
     /// still: a preview installed or cleared, or text re-shaped for a landed font.
@@ -650,6 +651,15 @@ pub struct FlexReceipt {
     )>,
     commit: u64,
     depth: usize,
+}
+
+/// Where a document stood ([`EditorSession::mark`]): its revision, the history
+/// step it was at, and whether it had unsaved edits.
+pub struct Mark {
+    revision: u64,
+    step: Option<u64>,
+    depth: usize,
+    dirty: bool,
 }
 
 /// What the last few document changes did to the drawing, so the canvas can redraw
@@ -771,6 +781,14 @@ impl InkLog {
             tops,
             was,
         });
+    }
+
+    /// Drop the changes recorded from revision `rev` on, which
+    /// [`EditorSession::rewind`] took back before any canvas drew them.
+    fn forget_since(&mut self, rev: u64) {
+        while self.0.back().is_some_and(|s| s.from >= rev) {
+            self.0.pop_back();
+        }
     }
 
     /// What the changes from revision `from` to `to` did, when every one of them is
@@ -1929,6 +1947,32 @@ impl EditorSession {
             self.history.clear_redo();
         }
         taken
+    }
+
+    /// Where the document stands now, for [`Self::rewind`].
+    pub fn mark(&self) -> Mark {
+        Mark {
+            revision: self.revision,
+            step: self.history.current(),
+            depth: self.history.undo_depth(),
+            dirty: self.dirty,
+        }
+    }
+
+    /// Put the revision and the unsaved mark back to `mark`'s when the history
+    /// stands on the same step again: a refused agent call took back every step
+    /// it made, so the document is the one `mark` saw, and a reader keyed on the
+    /// revision must not see it move. The ink of the steps taken back is dropped,
+    /// since no canvas drew them. Answers whether it rewound.
+    pub fn rewind(&mut self, mark: &Mark) -> bool {
+        let here = (self.history.current(), self.history.undo_depth());
+        if self.revision == mark.revision || here != (mark.step, mark.depth) {
+            return false;
+        }
+        self.ink.forget_since(mark.revision);
+        self.revision = mark.revision;
+        self.dirty = mark.dirty;
+        true
     }
 
     /// One undo (`back`) or redo with nothing said and no page followed. Answers

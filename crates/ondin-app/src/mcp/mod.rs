@@ -457,6 +457,7 @@ impl Engine {
         // undos included, reported before the call runs.
         let before = session.revision();
         let changed = catch_up(conn, session);
+        let mark = session.mark();
         let answer = if kits::is_kit_tool(&call.tool) {
             kits::run(docs, &path, &call)
         } else if actions::TOOLS.contains(&call.tool.as_str()) {
@@ -469,6 +470,13 @@ impl Engine {
         let Some(session) = docs.session(&path) else {
             return Output::error(format!("{} closed during the call", path.display()));
         };
+        // A refused `batch` or `set` takes back the steps it made, and leaves the
+        // revision where it was, so no client sees a change that is not there.
+        // Only these two: they change the document through the history alone,
+        // which is what `rewind` checks.
+        if answer.is_err() && matches!(call.tool.as_str(), "batch" | "set") {
+            session.rewind(&mark);
+        }
         let after = session.revision();
         let mut output = match answer {
             Ok(Answer::Json(v)) => Output::json(v),
@@ -2629,6 +2637,46 @@ mod tests {
         assert_eq!(s.doc.len(), layers, "nothing of a refused batch stays");
         assert_eq!(s.history.undo_depth(), 1);
         assert_eq!(s.history.redo_depth(), 0, "and nothing to redo");
+    }
+
+    /// A refused `batch` or `set` that took back the steps it made leaves `rev`
+    /// where it was, for the caller and for another client, with no `changed`.
+    ///
+    /// flip: `handle` without its `rewind` → fails at "the batch's rev".
+    #[test]
+    fn a_refused_write_leaves_rev_where_it_was() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let id = rect(&mut engine, &mut docs, 1, "Card");
+        let look = |e: &mut Engine, d: &mut One, conn| {
+            let out = call(e, d, conn, "get_selection", json!({}));
+            ok(&out).clone()
+        };
+        let seen = look(&mut engine, &mut docs, 2);
+        let rev = look(&mut engine, &mut docs, 1)["rev"].clone();
+        let renamed = json!({ "tool": "set_name", "args": { "node": id, "name": "Hero" } });
+        let bad = json!({ "tool": "set_name", "args": { "node": "@nobody", "name": "X" } });
+        let args = json!({ "steps": [renamed, bad] });
+        let out = call(&mut engine, &mut docs, 1, "batch", args);
+        assert!(out.is_error, "the fixture's batch is refused");
+        assert_eq!(docs.session.history.undo_depth(), 1, "after a step it made");
+        assert_eq!(json!(docs.session.revision()), rev, "the batch's rev");
+        let props = json!({ "name": "Hero", "opacity": "loud" });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [id], "props": props }),
+        );
+        assert!(out.is_error, "the fixture's set is refused");
+        assert_eq!(json!(docs.session.revision()), rev, "the set's rev");
+        let mine = look(&mut engine, &mut docs, 1);
+        assert_eq!((&mine["rev"], mine.get("changed")), (&rev, None));
+        let theirs = look(&mut engine, &mut docs, 2);
+        assert_eq!(theirs["rev"], seen["rev"]);
+        assert!(theirs.get("changed").is_none(), "{theirs}");
     }
 
     /// An instance reads back the property values it is set to and each copy the

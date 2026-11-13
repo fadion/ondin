@@ -108,6 +108,9 @@ const KEPT: usize = 8;
 struct Shown {
     rev: u64,
     layers: HashMap<String, Layer>,
+    /// Whether this client's own call made it from the look before, so
+    /// `base_rev` does not count that step against the client.
+    own: bool,
 }
 
 /// A layer as a connection saw it.
@@ -299,7 +302,7 @@ impl Engine {
                     } else {
                         conn.document = Some(path.clone());
                         conn.shown.clear();
-                        remember(conn, rev, layers(&snap));
+                        remember(conn, rev, layers(&snap), false);
                     }
                     let pages: Vec<Value> = snap
                         .pages
@@ -382,7 +385,7 @@ impl Engine {
                 .shown
                 .back()
                 .map(|s| delta(&s.layers, &now).to_json(&now, &s.layers));
-            remember(conn, after, now);
+            remember(conn, after, now, true);
             if matches!(call.tool.as_str(), "undo" | "redo")
                 && let (Some(own), Some(Value::Object(map))) = (own, output.structured.as_mut())
             {
@@ -403,11 +406,11 @@ impl Engine {
     }
 }
 
-fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>) {
+fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, own: bool) {
     if conn.shown.back().is_some_and(|s| s.rev == rev) {
         return;
     }
-    conn.shown.push_back(Shown { rev, layers });
+    conn.shown.push_back(Shown { rev, layers, own });
     while conn.shown.len() > KEPT {
         conn.shown.pop_front();
     }
@@ -423,7 +426,7 @@ fn catch_up(conn: &mut Connection, session: &EditorSession) -> Option<Value> {
     let now = layers(&snapshot_of(session));
     let d = delta(&last.layers, &now);
     let report = (!d.is_empty()).then(|| d.to_json(&now, &last.layers));
-    remember(conn, rev, now);
+    remember(conn, rev, now, false);
     report
 }
 
@@ -879,18 +882,32 @@ fn stale(
     if base == s.revision() {
         return Ok(());
     }
-    let Some(then) = conn.shown.iter().find(|x| x.rev == base) else {
+    let Some(at) = conn.shown.iter().position(|x| x.rev == base) else {
         return Err(format!(
             "`base_rev` {base} is older than this connection remembers: read again and retry"
         ));
     };
-    let now = layers(&snapshot_of(s));
-    let d = delta(&then.layers, &now);
+    let then = &conn.shown[at];
+    // What others changed since `base`: every step but the client's own writes,
+    // which are not news to it. `handle` caught up before this call, so the last
+    // look is the document as the call found it.
+    let mut others = std::collections::HashSet::new();
+    for (a, b) in conn
+        .shown
+        .iter()
+        .skip(at)
+        .zip(conn.shown.iter().skip(at + 1))
+    {
+        if !b.own {
+            let d = delta(&a.layers, &b.layers);
+            others.extend(d.changed.into_iter().chain(d.removed));
+        }
+    }
     let moved: Vec<String> = tx
         .subjects()
         .iter()
         .map(|id| id.to_wire())
-        .filter(|id| d.changed.contains(id) || d.removed.contains(id))
+        .filter(|id| others.contains(id))
         .collect();
     if moved.is_empty() {
         return Ok(());
@@ -975,14 +992,7 @@ mod tests {
         let (reply, _answer) = sync_channel(1);
         engine.handle(
             docs,
-            Call {
-                conn,
-                client: "test".into(),
-                key: key.map(str::to_owned),
-                tool: tool.into(),
-                args,
-                reply,
-            },
+            Call::new(conn, key.map(str::to_owned), tool, args, reply),
         )
     }
 
@@ -1117,6 +1127,36 @@ mod tests {
             "set_name",
             rename("Mine", &now),
         ));
+    }
+
+    /// Two writes off one read apply: the client's own first write is no change
+    /// against its `base_rev`. Another client's write in between still refuses.
+    ///
+    /// flip: `stale` counting every step, its own included → fails at "its own
+    /// write is not news".
+    #[test]
+    fn a_clients_own_write_does_not_stale_its_base() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let id = rect(&mut engine, &mut docs, 1, "Button");
+        let read = call(&mut engine, &mut docs, 1, "get_node", json!({ "id": id }));
+        let base = ok(&read)["rev"].clone();
+        let rename = |name: &str| json!({ "node": id, "name": name, "base_rev": base });
+        ok(&call(&mut engine, &mut docs, 1, "set_name", rename("One")));
+        let second = call(&mut engine, &mut docs, 1, "set_name", rename("Two"));
+        assert!(
+            !second.is_error,
+            "its own write is not news: {:?}",
+            second.content
+        );
+
+        let other = json!({ "node": id, "name": "Theirs" });
+        ok(&call(&mut engine, &mut docs, 2, "set_name", other));
+        assert!(
+            call(&mut engine, &mut docs, 1, "set_name", rename("Three")).is_error,
+            "another client's write still refuses"
+        );
     }
 
     /// `find_nodes` finds by name, ignoring case, with its ancestors' names; a

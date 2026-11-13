@@ -67,11 +67,13 @@ impl OndinApp {
         let mut answered = false;
         while let Ok(request) = host.calls.try_recv() {
             match request {
-                Request::Call(call) => {
+                Request::Call(call) if call.take() => {
                     let reply = call.reply.clone();
                     let _ = reply.send(host.engine.handle(self, call));
                     answered = true;
                 }
+                // Its connection gave up waiting and told the agent nothing changed.
+                Request::Call(_) => {}
                 Request::Closed(conn) => {
                     host.engine.closed(conn);
                 }
@@ -235,14 +237,7 @@ mod tests {
 
     fn call(engine: &mut Engine, app: &mut OndinApp, tool: &str, args: Value) -> Value {
         let (reply, _answer) = std::sync::mpsc::sync_channel(1);
-        let call = Call {
-            conn: 1,
-            client: "test".into(),
-            key: None,
-            tool: tool.into(),
-            args,
-            reply,
-        };
+        let call = Call::new(1, None, tool, args, reply);
         let out = engine.handle(app, call);
         assert!(!out.is_error, "{tool}: {:?}", out.content);
         out.structured.unwrap()
@@ -483,14 +478,7 @@ mod tests {
         let (reply, _answer) = std::sync::mpsc::sync_channel(1);
         let out = engine.handle(
             &mut app,
-            ondin_mcp::queue::Call {
-                conn: 1,
-                client: "test".into(),
-                key: None,
-                tool: "stop_sharing_kit".into(),
-                args: json!({}),
-                reply,
-            },
+            Call::new(1, None, "stop_sharing_kit", json!({}), reply),
         );
         assert!(
             out.is_error

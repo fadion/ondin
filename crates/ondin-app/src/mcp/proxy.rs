@@ -308,16 +308,25 @@ fn start_serve() -> Result<Found, String> {
         // harness closing the proxy's console does not end it.
         command.creation_flags(0x0000_0008 | 0x0800_0000);
     }
-    let child = command
+    // Its own process group: a harness ending the proxy's group would otherwise
+    // end `serve` too, and the client state it keeps between turns.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("cannot start ondin serve: {e}"))?;
-    let pid = child.id();
+    // Reaped when it ends, so it never lingers as a zombie on Unix.
+    let _ = std::thread::Builder::new()
+        .name("serve-reaper".into())
+        .spawn(move || child.wait());
     let started = Instant::now();
     while started.elapsed() < START_WAIT {
-        if let Some(h) = endpoint::hosts()
-            .into_iter()
-            .find(|h| h.pid == pid || h.host == Host::Window)
-        {
+        // Any host will do: the one started may have left at once because
+        // another proxy's `serve` holds the lock.
+        if let Some(h) = endpoint::hosts().into_iter().next() {
             return Ok(h);
         }
         std::thread::sleep(Duration::from_millis(100));

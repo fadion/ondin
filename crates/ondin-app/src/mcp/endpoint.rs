@@ -44,14 +44,19 @@ pub(crate) fn tools() -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// A listening endpoint; dropping it removes the discovery file.
+/// A listening endpoint; dropping it removes the discovery file and, off
+/// Windows, the socket.
 pub(crate) struct Endpoint {
     file: PathBuf,
+    socket: Option<PathBuf>,
 }
 
 impl Drop for Endpoint {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.file);
+        if let Some(socket) = &self.socket {
+            let _ = std::fs::remove_file(socket);
+        }
     }
 }
 
@@ -63,6 +68,7 @@ pub(crate) fn listen(host: Host, to: Sender<Request>) -> std::io::Result<Endpoin
     let endpoint = address(&dir, pid);
     serve_at(&endpoint, to)?;
     let file = dir.join(format!("{pid}.json"));
+    let socket = cfg!(not(windows)).then(|| endpoint.clone());
     let found = Found {
         pid,
         host,
@@ -70,7 +76,7 @@ pub(crate) fn listen(host: Host, to: Sender<Request>) -> std::io::Result<Endpoin
     };
     let bytes = serde_json::to_vec(&found).map_err(std::io::Error::other)?;
     crate::atomic::write(&file, &bytes)?;
-    Ok(Endpoint { file })
+    Ok(Endpoint { file, socket })
 }
 
 /// Every discovery file in the run folder, the window's first. A file whose
@@ -117,6 +123,7 @@ fn spawn_connection(read: Box<dyn Read + Send>, write: Box<dyn Write + Send>, to
                 conn,
                 to,
                 tools: tools(),
+                wait: ondin_mcp::queue::TAKE_WAIT,
             };
             let _ = wire::serve(BufReader::new(read), write, &mut handler);
         });

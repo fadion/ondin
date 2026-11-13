@@ -146,8 +146,39 @@ impl Documents for Headless {
     }
 }
 
+/// The lock only one `serve` holds, `None` when another does. Without a run
+/// folder, or a lock the system will not take, it runs unguarded.
+fn one_serve() -> Option<Option<std::fs::File>> {
+    let Some(dir) = endpoint::run_dir() else {
+        return Some(None);
+    };
+    let file = std::fs::create_dir_all(&dir).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join("serve.lock"))
+    });
+    let Ok(file) = file else {
+        return Some(None);
+    };
+    match file.try_lock() {
+        Ok(()) => Some(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => None,
+        Err(std::fs::TryLockError::Error(_)) => Some(None),
+    }
+}
+
 /// Run `ondin serve` until a window takes over or the last client leaves.
 pub(crate) fn run() -> Result<(), String> {
+    // One `serve` per user: two proxies starting together would otherwise each
+    // start one, and two sessions of one file overwrite each other's writes.
+    // The lock lasts as long as this process; a second `serve` leaves at once,
+    // and its proxy connects to the first.
+    let _only = match one_serve() {
+        Some(lock) => lock,
+        None => return Ok(()),
+    };
     let (to, from) = queue::queue();
     let _endpoint = endpoint::listen(Host::Serve, to)
         .map_err(|e| format!("ondin serve: cannot listen: {e}"))?;
@@ -163,6 +194,8 @@ pub(crate) fn run() -> Result<(), String> {
     let mut window = false;
     loop {
         match from.recv_timeout(Duration::from_millis(500)) {
+            // One its connection gave up waiting for is not run.
+            Ok(Request::Call(call)) if !call.take() => {}
             Ok(Request::Call(call)) => {
                 served = true;
                 idle = None;

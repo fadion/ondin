@@ -544,17 +544,7 @@ mod tests {
 
     fn send(engine: &mut Engine, docs: &mut Headless, tool: &str, args: Value) -> Output {
         let (reply, _answer) = std::sync::mpsc::sync_channel(1);
-        engine.handle(
-            docs,
-            Call {
-                conn: 1,
-                client: "test".into(),
-                key: None,
-                tool: tool.into(),
-                args,
-                reply,
-            },
-        )
+        engine.handle(docs, Call::new(1, None, tool, args, reply))
     }
 
     fn ok(engine: &mut Engine, docs: &mut Headless, tool: &str, args: Value) -> Value {

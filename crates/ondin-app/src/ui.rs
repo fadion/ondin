@@ -2421,6 +2421,8 @@ pub struct LayerChip<'a> {
 /// What a [`layer_chip`] was asked.
 pub struct LayerChipOut {
     pub resp: egui::Response,
+    /// The chip or its × is under the pointer.
+    pub hovered: bool,
     pub removed: bool,
 }
 
@@ -2432,6 +2434,10 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
     const GAP: f32 = 5.0;
     const X_W: f32 = CLOSE_BUTTON_W;
     const X_INSET: f32 = 3.0;
+    /// Air between the name and the ×'s box.
+    const X_GAP: f32 = 2.0;
+    /// The × sits this far under the chip's centre, level with the name's ink.
+    const X_DROP: f32 = 1.0;
     let pt = SMALL_PT;
     let font = egui::FontId::proportional(pt);
     let label = match chip.number {
@@ -2445,12 +2451,26 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
     let galley = ui.painter().layout_no_wrap(label, font, ink);
     let glyph_w = SMALL_PT;
     // The × stands in the trailing inset, its box [`X_INSET`] from the edge.
-    let tail = if chip.removable { X_W + X_INSET } else { PAD };
+    let tail = if chip.removable {
+        X_GAP + X_W + X_INSET
+    } else {
+        PAD
+    };
     let w = PAD + glyph_w + GAP + galley.size().x + tail;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, CHIP_H), egui::Sense::click());
+    // The × sits on the chip and takes its hover, so the chip counts as
+    // hovered while either is.
+    let x = chip.removable.then(|| {
+        let xr = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - X_INSET - X_W / 2.0, rect.center().y + X_DROP),
+            egui::vec2(X_W, X_W),
+        );
+        (xr, ui.interact(xr, resp.id.with("x"), egui::Sense::click()))
+    });
+    let hovered = resp.hovered() || x.as_ref().is_some_and(|(_, r)| r.hovered());
     let p = ui.painter();
     p.rect_filled(rect, 4.0, ground);
-    if chip.lit || (resp.hovered() && !chip.gone) {
+    if chip.lit || (hovered && !chip.gone) {
         p.rect_stroke(
             rect,
             4.0,
@@ -2480,12 +2500,7 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
         );
     }
     let mut removed = false;
-    if chip.removable {
-        let xr = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - X_INSET - X_W / 2.0, rect.center().y),
-            egui::vec2(X_W, X_W),
-        );
-        let xresp = ui.interact(xr, resp.id.with("x"), egui::Sense::click());
+    if let Some((xr, xresp)) = x {
         let x_ink = match xresp.hovered() {
             true => color::text(),
             false => color::accent_300(),
@@ -2499,7 +2514,11 @@ pub fn layer_chip(ui: &mut egui::Ui, chip: LayerChip<'_>) -> LayerChipOut {
         );
         removed = xresp.on_hover_text("Remove").clicked();
     }
-    LayerChipOut { resp, removed }
+    LayerChipOut {
+        resp,
+        hovered,
+        removed,
+    }
 }
 
 /// The hairline a field wears while what was typed in it is refused, in place
@@ -5360,12 +5379,24 @@ const ACTION_GLYPH_PT: f32 = CONTROL_GLYPH_PT;
 /// status line's *Cancel*, the variables browser's offer to bind other uses.
 /// For an act that sits inside a line of words, where a button would outweigh it.
 pub fn word_link(ui: &mut egui::Ui, label: &str, quiet: bool) -> egui::Response {
-    word_link_pt(ui, label, quiet, SMALL_PT)
+    word_link_raised(ui, label, quiet, SMALL_PT, 0.0)
 }
 
 /// [`word_link`] at `pt`, for a link inside prose of that size: a layer named
-/// in the assistant's reply.
+/// in the assistant's reply. Its box, centred in a wrapped row of labels,
+/// sits a point under their baseline, so its ink is lifted that point.
 pub fn word_link_pt(ui: &mut egui::Ui, label: &str, quiet: bool, pt: f32) -> egui::Response {
+    word_link_raised(ui, label, quiet, pt, 1.0)
+}
+
+/// A [`word_link`] at `pt`, its ink drawn `rise` above its box.
+fn word_link_raised(
+    ui: &mut egui::Ui,
+    label: &str,
+    quiet: bool,
+    pt: f32,
+    rise: f32,
+) -> egui::Response {
     let word = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
@@ -5380,7 +5411,8 @@ pub fn word_link_pt(ui: &mut egui::Ui, label: &str, quiet: bool, pt: f32) -> egu
         (true, false) => theme::text::dim(),
         (true, true) => theme::text::strong(),
     };
-    ui.painter().galley(rect.min, word, ink);
+    ui.painter()
+        .galley(rect.min - egui::vec2(0.0, rise), word, ink);
     resp
 }
 

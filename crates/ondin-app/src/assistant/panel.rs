@@ -131,6 +131,12 @@ impl OndinApp {
             let top = ui.cursor().top();
             self.assistant_composer(ui, blocked.as_ref(), &mut acts);
             let used = ui.cursor().top() - top;
+            // A composer that changed height (a chip, a line) left the thread
+            // the wrong room: lay the pass out again before it is shown, or the
+            // thread and the composer's foot jump for a frame.
+            if (used - composer_h).abs() > 0.5 {
+                ui.ctx().request_discard("assistant composer height");
+            }
             ui.data_mut(|d| d.insert_temp(composer_id, used));
         });
 
@@ -140,17 +146,36 @@ impl OndinApp {
             egui::pos2(rect.right() - EDGE_GRAB / 2.0, rect.top() + 12.0),
             egui::pos2(rect.right() + EDGE_GRAB / 2.0, rect.bottom() - 12.0),
         );
+        // Lit as the layers panel's edge is: a hairline, after the same dwell,
+        // so a pointer merely crossing it does not light it.
+        let (pos, pressed, down) = ctx.input(|i| {
+            (
+                i.pointer.hover_pos(),
+                i.pointer.button_pressed(egui::PointerButton::Primary),
+                i.pointer.button_down(egui::PointerButton::Primary),
+            )
+        });
+        let in_band = pos.is_some_and(|p| edge.contains(p));
+        self.assistant.edge = self.assistant.edge.advance(now, in_band, pressed, down);
+        if let Some(due) = self.assistant.edge.due() {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64((due - now).max(0.0)));
+        }
+        let lit = self.assistant.edge.lit();
         let edge_resp = egui::Area::new(egui::Id::new("assistant-edge"))
             .order(egui::Order::Foreground)
             .fixed_pos(edge.min)
             .show(ctx, |ui| {
                 let (r, resp) = ui.allocate_exact_size(edge.size(), egui::Sense::drag());
-                if resp.hovered() || resp.dragged() {
-                    ui.painter().rect_filled(
-                        egui::Rect::from_center_size(r.center(), egui::vec2(3.0, r.height())),
-                        2.0,
-                        color::accent_600(),
-                    );
+                if lit || resp.dragged() {
+                    let ink = match resp.dragged() {
+                        true => color::accent(),
+                        false => color::accent_700(),
+                    };
+                    // Over the card's own border, which is inside its rect.
+                    let ppp = ui.ctx().pixels_per_point();
+                    let x = ui::hairline_in_column(r.center().x - 0.5, ppp, 1.0);
+                    ui.painter()
+                        .vline(x, r.y_range(), egui::Stroke::new(1.0, ink));
                 }
                 resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
             })
@@ -415,7 +440,7 @@ impl OndinApp {
                 if out.removed {
                     acts.push(Act::RemoveChip(n));
                 } else if !gone {
-                    if out.resp.hovered() {
+                    if out.hovered {
                         acts.push(Act::Hover(c.id.clone()));
                     }
                     if out.resp.clicked() {

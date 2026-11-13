@@ -301,7 +301,8 @@ layers being asked about, and is one more kind of surface.
   (`OndinApp::rail_popup_anchor`); its top stops 50 below the canvas's top, leaving the top of the page in view, down to a floor that
   still holds the head, one line of thread and the composer. It is 400 wide, and its right edge
   drags between 360 and 640, the only rail panel with a drag edge, since tables and code need the
-  room; the width is kept per machine.
+  room; the width is kept per machine. The edge lights as the layers panel's does: a hairline over
+  the card's border, after the same dwell (`EdgeDwell`), the full accent while dragged.
 - **It shares the place**: opening a sibling closes it, and opening it closes them. Closing keeps
   the thread, the draft and a running turn. While a turn runs out of sight the button wears an
   accent ring; a reply that arrived unseen wears an accent dot until the panel opens; the tooltip

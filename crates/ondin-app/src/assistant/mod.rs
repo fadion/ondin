@@ -227,6 +227,8 @@ pub(crate) struct Assistant {
     pub(crate) applied: std::collections::HashMap<u64, crate::mcp::propose::Applied>,
     /// The layer a chip under the pointer outlines.
     pub(crate) hovered: Option<String>,
+    /// The panel's drag edge lights after the layers panel's dwell.
+    pub(crate) edge: crate::app::EdgeDwell,
     /// Counts sessions, so each gets its own client key.
     sessions: u64,
     /// Each harness's program, model and effort as last set in Settings this

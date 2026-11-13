@@ -52,7 +52,11 @@
 //!                                variables and styles as DTCG tokens.json,
 //!                                the default mode's values unless --mode
 //! ondin serve                    headless: documents behind the MCP endpoint (§8.2)
-//! ondin mcp-proxy                the MCP server an agent harness configures (§8.1)
+//! ondin mcp-proxy [--client <key>] [--document <path>]
+//!                                the MCP server an agent harness configures
+//!                                (§8.1); a key (else ONDIN_MCP_CLIENT) keeps
+//!                                the client's document and revisions across
+//!                                its processes, a document is used from the start
 //! ```
 //!
 //! `ondin reader` is left out above: it is the app's own child, reading another
@@ -176,9 +180,7 @@ use ondin_core::{ExportScale, ExportText};
 enum Command {
     /// The window, opening `open` when the command line named a document
     /// (`ondin file.ondin`, which is also what a double-click runs).
-    Gui {
-        open: Option<std::path::PathBuf>,
-    },
+    Gui { open: Option<std::path::PathBuf> },
     /// Host documents with no window, behind the MCP endpoint (§8.2).
     Serve,
     Export {
@@ -215,11 +217,7 @@ enum Command {
     /// `ondin render`: a component once per CSV row, or every frame once per mode.
     Render(render_cli::Render),
     /// Compare two documents (`ondin_core::diff`), `a` the earlier.
-    Diff {
-        a: String,
-        b: String,
-        json: bool,
-    },
+    Diff { a: String, b: String, json: bool },
     /// Measure every text layer's contrast against what is drawn behind it
     /// (`ondin_export::contrast`), on one page.
     CheckContrast {
@@ -229,10 +227,7 @@ enum Command {
     },
     /// Open the page's HTML export in a headless browser and name every layer it
     /// draws differently from the canvas (`ondin_export::code::fidelity`).
-    CheckCode {
-        file: String,
-        page: Option<String>,
-    },
+    CheckCode { file: String, page: Option<String> },
     /// Three-way merge of a document (`ondin_core::merge`), the result written to
     /// `out`, by default over `ours` as git's merge driver expects.
     Merge {
@@ -255,7 +250,12 @@ enum Command {
         mode: Option<String>,
         out: Option<String>,
     },
-    McpProxy,
+    /// `ondin mcp-proxy`, with the client key the host keeps its state under
+    /// and a document to use from the first call.
+    McpProxy {
+        client: Option<String>,
+        document: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,7 +368,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("merge") => parse_merge(&args[1..]),
         Some("check") => parse_check(&args[1..]),
         Some("run") => parse_run(&args[1..]),
-        Some("mcp-proxy") => Ok(Command::McpProxy),
+        Some("mcp-proxy") => parse_mcp_proxy(&args[1..]),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
         Some(file) if names_a_document(file) => match args.get(1) {
@@ -401,6 +401,33 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
             files.len()
         )),
     }
+}
+
+/// `ondin mcp-proxy [--client <key>] [--document <path>]`; the key falls back to
+/// `ONDIN_MCP_CLIENT`.
+fn parse_mcp_proxy(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str = "usage: ondin mcp-proxy [--client <key>] [--document <path>]";
+    let (mut client, mut document) = (None, None);
+    let mut i = 0;
+    while i < args.len() {
+        let slot = match args[i].as_str() {
+            "--client" => &mut client,
+            "--document" => &mut document,
+            other => return Err(format!("unknown option {other}\n{USAGE}")),
+        };
+        let value = args
+            .get(i + 1)
+            .filter(|v| !v.starts_with("--"))
+            .ok_or_else(|| format!("{} wants a value\n{USAGE}", args[i]))?;
+        *slot = Some(value.clone());
+        i += 2;
+    }
+    let client = client.or_else(|| {
+        std::env::var("ONDIN_MCP_CLIENT")
+            .ok()
+            .filter(|k| !k.trim().is_empty())
+    });
+    Ok(Command::McpProxy { client, document })
 }
 
 fn parse_check(args: &[String]) -> Result<Command, String> {
@@ -1113,7 +1140,7 @@ fn main() {
             run_tokens_export(&file, mode.as_deref(), out.as_deref())
         }
         Ok(Command::Serve) => mcp::serve::run(),
-        Ok(Command::McpProxy) => mcp::proxy::run(),
+        Ok(Command::McpProxy { client, document }) => mcp::proxy::run(client, document),
         Err(msg) => {
             eprintln!("{msg}");
             std::process::exit(2);
@@ -1612,6 +1639,28 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `mcp-proxy` takes `--client` and `--document`, each with a value, and
+    /// nothing else.
+    #[test]
+    fn mcp_proxy_takes_a_client_and_a_document() {
+        let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            parse(&args(&[
+                "mcp-proxy",
+                "--client",
+                "chat-1",
+                "--document",
+                "site"
+            ])),
+            Ok(Command::McpProxy {
+                client: Some("chat-1".into()),
+                document: Some("site".into()),
+            })
+        );
+        assert!(parse(&args(&["mcp-proxy", "--client"])).is_err());
+        assert!(parse(&args(&["mcp-proxy", "--port", "1"])).is_err());
+    }
 
     /// Only a GUI launch and Velopack's own re-invocations reach the install hook;
     /// a CLI command or a malformed command line (a typo, `--version`) does not.

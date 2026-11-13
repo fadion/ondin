@@ -32,7 +32,22 @@ const RUN_WINDOW: Duration = Duration::from_millis(600);
 /// same one: an app-side cache keyed on a revision alone (the frame index, the
 /// Component card's drift) would otherwise answer for one tab's document with
 /// another's.
-static NEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+///
+/// Seeded with the launch time in microseconds, so no two processes hand out the
+/// same revision either: an agent carries a `rev` from `serve` to the window, or
+/// across a restart, and a match there would read as *unchanged*. A process
+/// started later starts higher than an earlier one could have counted to, and
+/// the value stays under 2^53, which a JavaScript client reads exactly, until 2255.
+static NEXT_REVISION: std::sync::LazyLock<std::sync::atomic::AtomicU64> =
+    std::sync::LazyLock::new(|| std::sync::atomic::AtomicU64::new(revision_seed()));
+
+/// The first revision this process hands out.
+fn revision_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_micros() as u64)
+        .max(1)
+}
 
 /// A revision no session has held before ([`EditorSession::revision`]).
 pub(crate) fn next_revision() -> u64 {

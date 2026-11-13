@@ -6,6 +6,10 @@
 //! away, or a window starts while it talks to `serve`, it reconnects to the
 //! window and restores both. Requests are carried one at a time: the hosts send
 //! nothing unasked, and a pipe handle cannot read and write at once.
+//!
+//! `--client <key>` puts a key in `initialize`, under which the host keeps the
+//! client's document and revisions across its connections; `--document` names
+//! the document every call acts on until the agent picks another.
 
 use super::endpoint::{self, Found, Host};
 use serde_json::{Value, json};
@@ -19,6 +23,8 @@ struct Link {
     host: Found,
     read: BufReader<Box<dyn Read + Send>>,
     write: Box<dyn Write + Send>,
+    /// Whether the remembered document was named on this link yet.
+    restored: bool,
 }
 
 impl Link {
@@ -44,18 +50,22 @@ struct Remembered {
     document: Option<String>,
 }
 
-/// Run the proxy until the agent closes its stdin.
-pub(crate) fn run() -> Result<(), String> {
+/// Run the proxy until the agent closes its stdin, keying the host's state by
+/// `client` and starting on `document` when they are given.
+pub(crate) fn run(client: Option<String>, document: Option<String>) -> Result<(), String> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
-    let mut kept = Remembered::default();
+    let mut kept = Remembered {
+        document: document.map(|d| absolute(&d)),
+        ..Remembered::default()
+    };
     let mut link: Option<Link> = None;
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| e.to_string())?;
         if line.trim().is_empty() {
             continue;
         }
-        let (line, message) = rewrite(&line);
+        let (line, message) = rewrite(&line, client.as_deref());
         let method = message
             .as_ref()
             .and_then(|m| m.get("method")?.as_str().map(str::to_owned));
@@ -75,6 +85,13 @@ pub(crate) fn run() -> Result<(), String> {
         for _ in 0..2 {
             if link.is_none() {
                 link = Some(connect(&kept, method.as_deref())?);
+            }
+            if method.as_deref() == Some("tools/call")
+                && let Some(l) = link.as_mut()
+                && restore(l, &kept).is_err()
+            {
+                link = None;
+                continue;
             }
             match link.as_mut().map(|l| l.exchange(&line, reply)) {
                 Some(Ok(a)) => {
@@ -112,26 +129,74 @@ fn is_tool_call(message: &Option<Value>, tool: &str) -> bool {
     })
 }
 
-/// A `use_document` naming a relative path that exists from here, the harness's
-/// working folder, with or without `.ondin`, names it absolutely, since the
-/// host's folder is another.
-fn rewrite(line: &str) -> (String, Option<Value>) {
+/// `asked` named absolutely when it is a relative path that exists from here,
+/// the harness's working folder, with or without `.ondin`, since the host's
+/// folder is another; else as it is, for the host to match by name.
+fn absolute(asked: &str) -> String {
+    if !std::path::Path::new(asked).is_relative() {
+        return asked.to_owned();
+    }
+    [asked.to_owned(), format!("{asked}.ondin")]
+        .iter()
+        .filter_map(|p| std::path::absolute(p).ok())
+        .find(|p| p.is_file())
+        .map_or_else(|| asked.to_owned(), |p| p.display().to_string())
+}
+
+/// The line as the host gets it: a `use_document`'s path made absolute, and
+/// `initialize` carrying the client key when there is one.
+fn rewrite(line: &str, client: Option<&str>) -> (String, Option<Value>) {
     let Ok(mut message) = serde_json::from_str::<Value>(line) else {
         return (line.to_owned(), None);
     };
+    let mut changed = false;
     if is_tool_call(&Some(message.clone()), "use_document")
         && let Some(arg) = message.pointer_mut("/params/arguments/document")
         && let Some(asked) = arg.as_str()
-        && std::path::Path::new(asked).is_relative()
-        && let Some(full) = [asked.to_owned(), format!("{asked}.ondin")]
-            .iter()
-            .filter_map(|p| std::path::absolute(p).ok())
-            .find(|p| p.is_file())
     {
-        *arg = json!(full.display().to_string());
-        return (message.to_string(), Some(message));
+        let full = absolute(asked);
+        if full != asked {
+            *arg = json!(full);
+            changed = true;
+        }
     }
-    (line.to_owned(), Some(message))
+    if let Some(key) = client
+        && message.get("method").and_then(Value::as_str) == Some("initialize")
+        && let Some(params) = message.get_mut("params").and_then(Value::as_object_mut)
+    {
+        let meta = params.entry("_meta").or_insert_with(|| json!({}));
+        if let Some(meta) = meta.as_object_mut() {
+            meta.insert(ondin_mcp::wire::CLIENT_KEY_META.into(), json!(key));
+            changed = true;
+        }
+    }
+    match changed {
+        true => (message.to_string(), Some(message)),
+        false => (line.to_owned(), Some(message)),
+    }
+}
+
+/// Name the remembered document on `link` once, before its first tool call, as
+/// a restore: the host keeps a keyed client's history for it and reports no
+/// `changed`, which the agent's own call then hears.
+fn restore(link: &mut Link, kept: &Remembered) -> std::io::Result<()> {
+    if link.restored {
+        return Ok(());
+    }
+    if let Some(doc) = &kept.document {
+        let call = json!({
+            "jsonrpc": "2.0",
+            "id": "ondin-proxy-restore",
+            "method": "tools/call",
+            "params": {
+                "name": "use_document",
+                "arguments": { "document": doc, "restore": true },
+            },
+        });
+        link.exchange(&call.to_string(), true)?;
+    }
+    link.restored = true;
+    Ok(())
 }
 
 /// Whether a window's discovery file is there, without connecting.
@@ -152,7 +217,8 @@ fn window_listed() -> bool {
 }
 
 /// Connect to the best host, starting a `serve` if none runs, and replay the
-/// handshake and the current document, unless `now` is the handshake itself.
+/// handshake, unless `now` is the handshake itself; [`restore`] names the
+/// document before the link's first tool call.
 fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
     let host = match endpoint::hosts().into_iter().next() {
         Some(h) => h,
@@ -164,6 +230,7 @@ fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
         host,
         read: BufReader::new(read),
         write,
+        restored: false,
     };
     if now == Some("initialize") {
         return Ok(link);
@@ -174,15 +241,6 @@ fn connect(kept: &Remembered, now: Option<&str>) -> Result<Link, String> {
     }
     if let Some(done) = &kept.initialized {
         link.exchange(done, false).map_err(fail)?;
-    }
-    if let Some(doc) = &kept.document {
-        let call = json!({
-            "jsonrpc": "2.0",
-            "id": "ondin-proxy-restore",
-            "method": "tools/call",
-            "params": { "name": "use_document", "arguments": { "document": doc } },
-        });
-        link.exchange(&call.to_string(), true).map_err(fail)?;
     }
     Ok(link)
 }
@@ -218,4 +276,29 @@ fn start_serve() -> Result<Found, String> {
         std::thread::sleep(Duration::from_millis(100));
     }
     Err("ondin mcp-proxy: ondin serve did not start listening".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With a key, `initialize` carries it under the host's `_meta` name beside
+    /// whatever `_meta` it had; without one, the line passes untouched.
+    ///
+    /// flip: `rewrite` ignoring `client` → fails at the key.
+    #[test]
+    fn initialize_carries_the_client_key() {
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"x":1}}}"#;
+        let (out, _) = rewrite(line, Some("chat-1"));
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["params"]["_meta"][ondin_mcp::wire::CLIENT_KEY_META],
+            "chat-1"
+        );
+        assert_eq!(v["params"]["_meta"]["x"], 1);
+        assert_eq!(rewrite(line, None).0, line);
+        let call =
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_selection"}}"#;
+        assert_eq!(rewrite(call, Some("chat-1")).0, call, "only initialize");
+    }
 }

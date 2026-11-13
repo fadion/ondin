@@ -5,12 +5,12 @@
 //! a verb reads the document to answer its edit, and the document lives on the
 //! owning thread, which commits through the same door as the app's own edits.
 
-use crate::wire::{Handler, Output};
+use crate::wire::{Handler, Output, Peer};
 use serde_json::Value;
 use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 
-/// Which connection a call came from; the owning thread keeps each one's
-/// current document and last revision under it.
+/// Which connection a call came from; the owning thread keeps an unkeyed
+/// client's current document and revisions under it.
 pub type Conn = u64;
 
 /// One tool call waiting for the owning thread.
@@ -18,6 +18,9 @@ pub struct Call {
     pub conn: Conn,
     /// The name the client gave at `initialize`.
     pub client: String,
+    /// The key it gave there; the host keeps a keyed client's state across its
+    /// connections, an unkeyed one's for this connection.
+    pub key: Option<String>,
     pub tool: String,
     pub args: Value,
     pub reply: SyncSender<Output>,
@@ -48,11 +51,12 @@ impl Handler for Forward {
         self.tools.clone()
     }
 
-    fn call(&mut self, client: &str, name: &str, args: Value) -> Output {
+    fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output {
         let (reply, answer) = sync_channel(1);
         let call = Call {
             conn: self.conn,
-            client: client.to_owned(),
+            client: peer.name.clone(),
+            key: peer.key.clone(),
             tool: name.to_owned(),
             args,
             reply,
@@ -103,7 +107,11 @@ mod tests {
             to,
             tools: Vec::new(),
         };
-        let out = f.call("agent", "get_node", json!({ "n": 3 }));
+        let peer = Peer {
+            name: "agent".into(),
+            key: None,
+        };
+        let out = f.call(&peer, "get_node", json!({ "n": 3 }));
         assert_eq!(out.structured, Some(json!(3)));
         drop(f);
         assert_eq!(owner.join().unwrap(), ["7 agent get_node", "closed 7"]);

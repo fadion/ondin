@@ -67,12 +67,26 @@ impl Output {
     }
 }
 
+/// Where `initialize`'s `_meta` carries the key `ondin mcp-proxy --client` was
+/// given: the host keeps a keyed client's document and revisions across its
+/// connections.
+pub const CLIENT_KEY_META: &str = "io.github.fadion.ondin/client";
+
+/// Who is calling, as `initialize` said.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Peer {
+    /// The name in `clientInfo`.
+    pub name: String,
+    /// The key under [`CLIENT_KEY_META`], when one was given.
+    pub key: Option<String>,
+}
+
 /// What answers a connection's tool calls.
 pub trait Handler {
     /// The tool definitions `tools/list` answers.
     fn tools(&self) -> Vec<Value>;
-    /// Answer one call; `client` is the name the client gave at `initialize`.
-    fn call(&mut self, client: &str, name: &str, args: Value) -> Output;
+    /// Answer one call from `peer`.
+    fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output;
 }
 
 /// Answer requests read from `read` on `write` until the reader ends.
@@ -81,7 +95,7 @@ pub fn serve(
     mut write: impl Write,
     handler: &mut impl Handler,
 ) -> std::io::Result<()> {
-    let mut client = String::new();
+    let mut client = Peer::default();
     for line in read.lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -96,7 +110,7 @@ pub fn serve(
 }
 
 /// The reply to one line, `None` for a notification.
-fn answer(line: &str, client: &mut String, handler: &mut impl Handler) -> Option<Value> {
+fn answer(line: &str, client: &mut Peer, handler: &mut impl Handler) -> Option<Value> {
     let message: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => return Some(failure(Value::Null, -32700, &format!("not JSON: {e}"))),
@@ -112,8 +126,14 @@ fn answer(line: &str, client: &mut String, handler: &mut impl Handler) -> Option
     let result = match method {
         "initialize" => {
             if let Some(name) = params.pointer("/clientInfo/name").and_then(Value::as_str) {
-                name.clone_into(client);
+                name.clone_into(&mut client.name);
             }
+            client.key = params
+                .get("_meta")
+                .and_then(|m| m.get(CLIENT_KEY_META))
+                .and_then(Value::as_str)
+                .filter(|k| !k.trim().is_empty())
+                .map(str::to_owned);
             let asked = params.get("protocolVersion").and_then(Value::as_str);
             let version = asked
                 .filter(|v| PROTOCOL_VERSIONS.contains(v))
@@ -206,8 +226,10 @@ mod tests {
         fn tools(&self) -> Vec<Value> {
             vec![json!({ "name": "echo" })]
         }
-        fn call(&mut self, client: &str, name: &str, args: Value) -> Output {
-            Output::json(json!({ "client": client, "name": name, "args": args }))
+        fn call(&mut self, peer: &Peer, name: &str, args: Value) -> Output {
+            Output::json(
+                json!({ "client": peer.name, "key": peer.key, "name": name, "args": args }),
+            )
         }
     }
 
@@ -238,7 +260,20 @@ mod tests {
         assert_eq!(replies[1]["id"], 2);
         let s = &replies[1]["result"]["structuredContent"];
         assert_eq!(s["client"], "claude-code");
+        assert_eq!(s["key"], Value::Null, "no key was given");
         assert_eq!(s["args"]["a"], 1);
+    }
+
+    /// A key in `initialize`'s `_meta` reaches every call.
+    #[test]
+    fn a_client_key_reaches_the_calls() {
+        let replies = run(concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"assistant"},"_meta":{"io.github.fadion.ondin/client":"chat-7"}}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo"}}"#,
+            "\n",
+        ));
+        assert_eq!(replies[1]["result"]["structuredContent"]["key"], "chat-7");
     }
 
     /// An unknown protocol revision gets the newest; an unknown method and a

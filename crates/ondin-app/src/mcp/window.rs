@@ -228,6 +228,7 @@ mod tests {
         let call = Call {
             conn: 1,
             client: "test".into(),
+            key: None,
             tool: tool.into(),
             args,
             reply,
@@ -475,6 +476,7 @@ mod tests {
             ondin_mcp::queue::Call {
                 conn: 1,
                 client: "test".into(),
+                key: None,
                 tool: "stop_sharing_kit".into(),
                 args: json!({}),
                 reply,

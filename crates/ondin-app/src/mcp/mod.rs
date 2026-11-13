@@ -116,17 +116,37 @@ struct Layer {
     hash: u64,
 }
 
+/// One client's state: its current document and what it was last shown.
 #[derive(Default)]
 struct Connection {
     document: Option<PathBuf>,
     /// Newest last.
     shown: VecDeque<Shown>,
+    /// When it last called, in [`Engine::tick`]s: the least recent keyed client
+    /// is forgotten first.
+    used: u64,
 }
 
-/// The tool handlers and every connection's state.
+/// Whose state a call reads: a keyed client's, which outlives its connections,
+/// or an unkeyed connection's, which ends with it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Who {
+    Key(String),
+    Conn(Conn),
+}
+
+/// How many keyed clients a host remembers after their connections close. A
+/// harness that starts a process per turn comes back on a new connection each
+/// turn with the same key.
+const CLIENTS: usize = 32;
+
+/// The tool handlers and every client's state.
 #[derive(Default)]
 pub(crate) struct Engine {
-    connections: HashMap<Conn, Connection>,
+    clients: HashMap<Who, Connection>,
+    /// The connections open now, which `serve` waits on.
+    live: std::collections::HashSet<Conn>,
+    tick: u64,
 }
 
 /// What changed between two looks at a document.
@@ -202,26 +222,57 @@ fn snapshot_of(s: &EditorSession) -> ondin_export::Snapshot {
 }
 
 impl Engine {
-    /// Forget a connection that closed.
+    /// Forget a connection that closed, and its state unless a key holds it.
     pub(crate) fn closed(&mut self, conn: Conn) {
-        self.connections.remove(&conn);
+        self.live.remove(&conn);
+        self.clients.remove(&Who::Conn(conn));
     }
 
-    /// The documents some connection is using, for a host deciding what it may close.
+    /// The documents some client is using, for a host deciding what it may close.
     pub(crate) fn in_use(&self) -> impl Iterator<Item = &Path> {
-        self.connections
-            .values()
-            .filter_map(|c| c.document.as_deref())
+        self.clients.values().filter_map(|c| c.document.as_deref())
     }
 
     /// Whether any connection is open.
     pub(crate) fn has_connections(&self) -> bool {
-        !self.connections.is_empty()
+        !self.live.is_empty()
+    }
+
+    /// Whether a keyed client's state is held, which a host keeps for its next
+    /// connection.
+    pub(crate) fn remembers_clients(&self) -> bool {
+        self.clients.keys().any(|w| matches!(w, Who::Key(_)))
+    }
+
+    /// The state `call` reads and writes, made when new; the least recently
+    /// used keyed client is forgotten past [`CLIENTS`].
+    fn client(&mut self, call: &Call) -> &mut Connection {
+        self.live.insert(call.conn);
+        self.tick += 1;
+        let who = match &call.key {
+            Some(key) => Who::Key(key.clone()),
+            None => Who::Conn(call.conn),
+        };
+        if !self.clients.contains_key(&who) && matches!(who, Who::Key(_)) {
+            let keyed = self
+                .clients
+                .iter()
+                .filter(|(w, _)| matches!(w, Who::Key(_)));
+            if keyed.clone().count() >= CLIENTS
+                && let Some(oldest) = keyed.min_by_key(|(_, c)| c.used).map(|(w, _)| w.clone())
+            {
+                self.clients.remove(&oldest);
+            }
+        }
+        let tick = self.tick;
+        let client = self.clients.entry(who).or_default();
+        client.used = tick;
+        client
     }
 
     /// Answer one call.
     pub(crate) fn handle(&mut self, docs: &mut impl Documents, call: Call) -> Output {
-        let conn = self.connections.entry(call.conn).or_default();
+        let conn = self.client(&call);
         if call.tool == "use_document" {
             let Some(wanted) = call.args.get("document").and_then(Value::as_str) else {
                 return Output::error("`use_document` needs `document`");
@@ -233,20 +284,35 @@ impl Engine {
                     };
                     let snap = snapshot_of(session);
                     let rev = session.revision();
-                    conn.document = Some(path.clone());
-                    conn.shown.clear();
-                    remember(conn, rev, layers(&snap));
+                    // The document already in use keeps what this client was
+                    // shown, so `since`, `base_rev` and `changed` carry across a
+                    // reconnect. The proxy's own restore reports no `changed`,
+                    // leaving it for the agent's next call.
+                    let mut changed = None;
+                    if conn.document.as_deref() == Some(path.as_path()) {
+                        if call.args.get("restore") != Some(&json!(true)) {
+                            changed = catch_up(conn, session);
+                        }
+                    } else {
+                        conn.document = Some(path.clone());
+                        conn.shown.clear();
+                        remember(conn, rev, layers(&snap));
+                    }
                     let pages: Vec<Value> = snap
                         .pages
                         .iter()
                         .map(|p| json!({ "id": p.id, "name": p.name }))
                         .collect();
-                    Output::json(json!({
+                    let mut answer = json!({
                         "rev": rev,
                         "document": path.display().to_string(),
                         "pages": pages,
                         "layers": snap.nodes.len(),
-                    }))
+                    });
+                    if let Some(c) = changed {
+                        answer["changed"] = c;
+                    }
+                    Output::json(answer)
                 }
                 Err(why) => Output::error(why),
             };
@@ -267,6 +333,7 @@ impl Engine {
         };
         let Some(session) = docs.session(&path) else {
             conn.document = None;
+            conn.shown.clear();
             return Output::error(format!(
                 "{} is no longer open: call `use_document` again.",
                 path.display()
@@ -830,12 +897,25 @@ mod tests {
     }
 
     fn call(engine: &mut Engine, docs: &mut One, conn: Conn, tool: &str, args: Value) -> Output {
+        keyed(engine, docs, conn, None, tool, args)
+    }
+
+    /// [`call`] from a client that gave `key`.
+    fn keyed(
+        engine: &mut Engine,
+        docs: &mut One,
+        conn: Conn,
+        key: Option<&str>,
+        tool: &str,
+        args: Value,
+    ) -> Output {
         let (reply, _answer) = sync_channel(1);
         engine.handle(
             docs,
             Call {
                 conn,
                 client: "test".into(),
+                key: key.map(str::to_owned),
                 tool: tool.into(),
                 args,
                 reply,
@@ -1325,6 +1405,173 @@ mod tests {
             )
             .is_error
         );
+    }
+
+    /// A keyed client that closes its connection and comes back on another, as a
+    /// harness starting a process per turn does, keeps its document, hears what
+    /// the person changed in between as `changed`, and its `since` and `base_rev`
+    /// still work. An unkeyed connection's state ends with it.
+    ///
+    /// flip: `Engine::closed` removing keyed state too → fails at the first call
+    /// back, refused with *No document yet*.
+    #[test]
+    fn a_keyed_client_keeps_its_state_across_connections() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let k = Some("chat-1");
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            1,
+            k,
+            "use_document",
+            json!({ "document": "a" }),
+        ));
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let made = keyed(
+            &mut engine,
+            &mut docs,
+            1,
+            k,
+            "create_node",
+            json!({ "parent": page, "kind": kind, "name": "Card" }),
+        );
+        let card = ok(&made)["created"][0].clone();
+        let base = ok(&made)["rev"].clone();
+        engine.closed(1);
+
+        // The person renames it while no connection is open.
+        open(&mut engine, &mut docs, 9);
+        ok(&call(
+            &mut engine,
+            &mut docs,
+            9,
+            "set_name",
+            json!({ "node": card, "name": "Hero" }),
+        ));
+
+        let back = keyed(&mut engine, &mut docs, 2, k, "get_selection", json!({}));
+        let back = ok(&back);
+        assert_eq!(
+            back["changed"]["changed"][0]["id"], card,
+            "the document is remembered, and the rename reported: {back}"
+        );
+        let since = keyed(
+            &mut engine,
+            &mut docs,
+            2,
+            k,
+            "get_document",
+            json!({ "since": base }),
+        );
+        assert_eq!(ok(&since)["since"], base, "answered as a delta");
+        let stale = keyed(
+            &mut engine,
+            &mut docs,
+            2,
+            k,
+            "set_name",
+            json!({ "node": card, "name": "Mine", "base_rev": base }),
+        );
+        let Content::Text(why) = &stale.content[0] else {
+            panic!("no text")
+        };
+        assert!(
+            stale.is_error && why.contains("Card"),
+            "refused by the name it read: {why}"
+        );
+
+        engine.closed(9);
+        assert!(
+            call(&mut engine, &mut docs, 10, "get_selection", json!({})).is_error,
+            "a new unkeyed connection starts with no document"
+        );
+    }
+
+    /// The proxy's restore of the document a keyed client already uses keeps its
+    /// history and reports nothing, so the agent's own next call hears what
+    /// changed; a plain `use_document` of it reports the change itself.
+    ///
+    /// flip: `use_document` clearing `shown` whatever document it names → fails
+    /// at "the next call hears it".
+    #[test]
+    fn a_restore_leaves_the_change_for_the_agent() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let k = Some("chat-2");
+        let use_doc = |restore: bool| json!({ "document": "a", "restore": restore });
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            1,
+            k,
+            "use_document",
+            use_doc(false),
+        ));
+        engine.closed(1);
+        open(&mut engine, &mut docs, 9);
+        rect(&mut engine, &mut docs, 9, "Badge");
+        let restored = keyed(&mut engine, &mut docs, 2, k, "use_document", use_doc(true));
+        assert!(ok(&restored).get("changed").is_none());
+        let next = keyed(&mut engine, &mut docs, 2, k, "get_selection", json!({}));
+        assert_eq!(
+            ok(&next)["changed"]["added"][0]["name"],
+            "Badge",
+            "the next call hears it"
+        );
+        rect(&mut engine, &mut docs, 9, "Chip");
+        let again = keyed(&mut engine, &mut docs, 2, k, "use_document", use_doc(false));
+        assert_eq!(ok(&again)["changed"]["added"][0]["name"], "Chip");
+    }
+
+    /// Past [`CLIENTS`] keyed clients, the least recently used is forgotten.
+    #[test]
+    fn keyed_clients_are_bounded() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        for n in 0..=CLIENTS {
+            let key = format!("k{n}");
+            ok(&keyed(
+                &mut engine,
+                &mut docs,
+                n as Conn,
+                Some(&key),
+                "use_document",
+                json!({ "document": "a" }),
+            ));
+            engine.closed(n as Conn);
+        }
+        // The kept one first: asking for the forgotten one makes it anew,
+        // forgetting the next oldest.
+        ok(&keyed(
+            &mut engine,
+            &mut docs,
+            99,
+            Some("k1"),
+            "get_selection",
+            json!({}),
+        ));
+        assert!(
+            keyed(
+                &mut engine,
+                &mut docs,
+                99,
+                Some("k0"),
+                "get_selection",
+                json!({})
+            )
+            .is_error,
+            "the oldest was forgotten"
+        );
+    }
+
+    /// Revisions start from the launch time, not from 1, so a `rev` another
+    /// process handed out does not match one here; they stay exact in JavaScript.
+    ///
+    /// flip: `revision_seed` answering 1 → fails at "not a small counter".
+    #[test]
+    fn revisions_start_from_the_launch_time() {
+        let rev = crate::session::next_revision();
+        assert!(rev > 1_700_000_000_000_000, "not a small counter: {rev}");
+        assert!(rev < 1 << 53);
     }
 
     /// An agent's write leaves the style browser's *Edit* as it found it.

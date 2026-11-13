@@ -207,7 +207,7 @@ pub const PHASE_4: [&str; 16] = [
 /// The tools `tools/list` names by default (§8.4, *Core*): what nearly every
 /// task uses. Every other tool still answers by name, through `call`, or listed
 /// with `ondin mcp-proxy --tools all`; a short list is read on every turn.
-pub const CORE: [&str; 35] = [
+pub const CORE: [&str; 40] = [
     "use_document",
     "list_documents",
     "get_selection",
@@ -226,6 +226,7 @@ pub const CORE: [&str; 35] = [
     "describe_tools",
     "insert_subtree",
     "create_text",
+    "create_node",
     "set",
     "delete_node",
     "duplicate",
@@ -236,8 +237,12 @@ pub const CORE: [&str; 35] = [
     "distribute",
     "create_instance",
     "set_instance_property",
+    "make_component",
+    "define_property",
     "apply_style",
+    "add_style",
     "bind_variable",
+    "add_variable",
     "batch",
     "call",
     "undo",

@@ -380,6 +380,21 @@ pub(crate) fn tighten(key: &str, v: &mut Value) {
             for (k, child) in map.iter_mut() {
                 tighten(k, child);
             }
+            if LENGTH_KEYS.contains(&key)
+                && map.len() == 1
+                && let Some((unit, Value::Number(n))) = map.iter().next()
+                && let (Some(n), Some(suffix)) = (
+                    n.as_f64(),
+                    match unit.as_str() {
+                        "Px" => Some("px"),
+                        "Em" => Some("em"),
+                        _ => None,
+                    },
+                )
+            {
+                *v = Value::String(format!("{n}{suffix}"));
+                return;
+            }
             if key == "Path"
                 && let Some(path) = map.get("path")
                 && let Ok(bez) = serde_json::from_value::<kurbo::BezPath>(path.clone())

@@ -187,6 +187,7 @@ pub(super) fn variables(doc: &Document) -> Value {
         .iter()
         .map(|v| {
             let mut entry = serde_json::to_value(v).unwrap_or(Value::Null);
+            ondin_core::verbs::shorten(&mut entry);
             if let Some(c) = vars.collection_of(v.id) {
                 entry["collection"] = serde_json::to_value(c.id).unwrap_or(Value::Null);
                 let resolved: serde_json::Map<String, Value> = c
@@ -265,6 +266,7 @@ pub(super) fn styles(doc: &Document) -> Value {
         .iter()
         .map(|s| {
             let mut entry = serde_json::to_value(s).unwrap_or(Value::Null);
+            ondin_core::verbs::shorten(&mut entry);
             entry["slot"] = json!(format!("{:?}", s.slot()).to_lowercase());
             entry["users"] = json!(ondin_core::style::users(doc, s.id).len());
             entry

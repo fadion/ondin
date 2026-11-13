@@ -620,7 +620,7 @@ fn a_model_argument_is_refused_with_its_path() {
 /// `insert_subtree` takes the forms `get_node` and CSS write: lengths as `"22px"`,
 /// a sizing as `{type, width}`, an effect and a fill flat with their opacity, a
 /// rectangle with no corners, one-number padding and `gap`, a path as SVG data;
-/// and `verbs::tree` answers the path as SVG data that reads back.
+/// and `verbs::tree` answers a length and the path in those forms, which read back.
 ///
 /// flip: `loosen_effect` keeping a flat effect's `opacity` out of its colour →
 /// fails at "the opacity is the shadow's alpha".
@@ -683,6 +683,12 @@ fn insert_subtree_takes_what_get_node_and_css_write() {
     assert_eq!(style.line_height, Some(Length::Px(22.0)));
     assert_eq!(style.letter_spacing, Length::Px(-0.5));
     assert_eq!(*sizing, TextSizing::AutoHeight(120.0));
+    let read_text = verbs::tree(&doc, text).expect("the text's tree");
+    assert_eq!(
+        read_text["kind"]["Text"]["style"]["line_height"],
+        json!("22px"),
+        "a length reads back as written"
+    );
     let read = verbs::tree(&doc, path).expect("the path's tree");
     assert_eq!(read["kind"]["Path"]["path"], json!("M0,0 L10,10 L20,0"));
     let again = run(
@@ -5287,7 +5293,7 @@ fn like_takes_another_layers_text_style_and_paint() {
         "the size comes from the like"
     );
     assert_eq!(style["weight"], json!(600), "its own weight wins");
-    assert_eq!(style["letter_spacing"], json!({ "Px": -1.4 }), "{read}");
+    assert_eq!(style["letter_spacing"], json!("-1.4px"), "{read}");
     assert_eq!(read["fills"], json!(["#12352a"]), "and the fills");
     assert!(
         refused_param(

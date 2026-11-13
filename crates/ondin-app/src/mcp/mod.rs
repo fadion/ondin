@@ -1421,17 +1421,18 @@ fn set(
     if made > 1 {
         s.history.join_last(made);
     }
+    let mut written: Vec<&str> = props.keys().map(String::as_str).collect();
+    written.sort_unstable();
+    // Named by what it set, as a setter's step is named by its tool.
     if made > 0
         && let Some(note) = s.history.current_note_mut()
     {
-        note.label = "set".into();
+        note.label = format!("set {}", written.join(", "));
         note.origin = ondin_core::Origin::Mcp {
             client: client.to_owned(),
             tool: "set".into(),
         };
     }
-    let mut written: Vec<&str> = props.keys().map(String::as_str).collect();
-    written.sort_unstable();
     Ok(Answer::Json(json!({ "set": written })))
 }
 
@@ -1502,7 +1503,10 @@ fn describe_tools(args: &Value) -> Value {
     let (tools, more): (Vec<Value>, usize) = if brief {
         let tools = matching
             .iter()
-            .map(|(_, d)| json!({ "name": d["name"], "description": d["description"] }))
+            .map(|(_, d)| {
+                let full = d["description"].as_str().unwrap_or_default();
+                json!({ "name": d["name"], "description": gist(full) })
+            })
             .collect();
         (tools, 0)
     } else {
@@ -1519,6 +1523,24 @@ fn describe_tools(args: &Value) -> Value {
         answer["not_found"] = json!(not_found);
     }
     answer
+}
+
+/// The longest `gist` a brief `describe_tools` gives, in characters.
+const GIST: usize = 120;
+
+/// A tool's description cut to what a brief listing needs to pick it: its first
+/// sentence, and of a long one the words up to [`GIST`] characters.
+fn gist(description: &str) -> String {
+    let first = description
+        .split_once(". ")
+        .map_or(description, |(s, _)| s)
+        .trim_end_matches('.');
+    if first.chars().count() <= GIST {
+        return format!("{first}.");
+    }
+    let cut: String = first.chars().take(GIST).collect();
+    let at = cut.rfind(' ').unwrap_or(cut.len());
+    format!("{}…", cut[..at].trim_end_matches([',', ':', ';']))
 }
 
 /// The most full definitions one `describe_tools` answers.
@@ -2094,7 +2116,7 @@ mod tests {
     }
 
     /// `set` writes several properties through their setters as one undo step
-    /// named `set`, the size before the place.
+    /// named by what it set, the size before the place.
     ///
     /// flip: `set` skipping its `at` → fails at "moved".
     #[test]
@@ -2128,7 +2150,10 @@ mod tests {
             .note
             .label
             .clone();
-        assert_eq!(label, "set");
+        assert_eq!(
+            label, "set at, fills, name, opacity, size",
+            "named by what it set"
+        );
         let bad = call(
             &mut engine,
             &mut docs,
@@ -2237,11 +2262,12 @@ mod tests {
     }
 
     /// `describe_tools` answers the tools whose name holds the query before those
-    /// whose description alone does, answers names and descriptions only when
+    /// whose description alone does, answers names and a short line each when
     /// `brief`, and names what it did not find.
     ///
     /// flip: `describe_tools` not sorting by rank → fails at the first tool's name,
-    /// as `get_tree` leads.
+    /// as `get_tree` leads; a brief listing the whole description → fails at "a
+    /// brief line is short".
     #[test]
     fn describe_tools_ranks_name_matches_first() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2273,6 +2299,14 @@ mod tests {
         let tools = answer["tools"].as_array().unwrap();
         assert!(tools.iter().any(|t| t["name"] == "add_style"), "{tools:?}");
         assert!(tools.iter().all(|t| t.get("inputSchema").is_none()));
+        let longest = tools
+            .iter()
+            .map(|t| t["description"].as_str().unwrap().chars().count())
+            .max();
+        assert!(
+            longest <= Some(GIST + 1),
+            "a brief line is short: {longest:?}"
+        );
         assert_eq!(answer["not_found"], json!(["no_such_tool"]), "not found");
     }
 
@@ -2784,10 +2818,11 @@ mod tests {
 
     /// The three table reads list what the verbs made: a variable with its
     /// resolved value per mode, a style with its users, a main component with
-    /// the properties it owns.
+    /// the properties it owns; cells and values in the short forms writes take.
     ///
     /// flip: `components` listing properties for sets alone → fails at "a plain
-    /// main's properties are listed".
+    /// main's properties are listed"; `variables` without `shorten` → fails at "a
+    /// cell as set_variable_value takes it".
     #[test]
     fn the_lists_show_variables_styles_and_components() {
         let (mut engine, mut docs) = (Engine::default(), One::new());
@@ -2800,6 +2835,12 @@ mod tests {
         assert_eq!(v["name"], "brand/blue");
         let resolved = v["resolved"].as_object().unwrap();
         assert_eq!(resolved.values().next(), Some(&json!("#3366ccff")));
+        let cells = v["cells"].as_object().unwrap();
+        assert_eq!(
+            cells.values().next(),
+            Some(&json!({ "color": "#3366cc" })),
+            "a cell as set_variable_value takes it"
+        );
 
         let id = rect(&mut engine, &mut docs, 1, "Chip");
         let value = ondin_core::verbs::example("StyleValue").unwrap();
@@ -2810,6 +2851,10 @@ mod tests {
         assert_eq!(s["name"], "Surface");
         assert_eq!(s["slot"], "fills");
         assert_eq!(s["users"], 1);
+        assert!(
+            !s["value"].to_string().contains("components"),
+            "a style's value in the short forms: {s}"
+        );
 
         // A rectangle becomes a main inside a frame of its own.
         let made = call(

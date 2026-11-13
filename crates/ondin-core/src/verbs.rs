@@ -5231,12 +5231,18 @@ fn full_tree(doc: &Document, id: NodeId) -> Option<Value> {
     Some(Value::Object(out))
 }
 
-/// [`full_tree`] in the short forms `insert_subtree` reads back to the same
-/// tree: hex colours where they are exact, paints without their default fields.
+/// [`full_tree`] in the short forms `insert_subtree` reads: hex colours, paints
+/// without their default fields, lengths as `"22px"`, a path as SVG data.
 pub fn tree(doc: &Document, id: NodeId) -> Option<Value> {
     let mut v = full_tree(doc, id)?;
     loose::tighten("tree", &mut v);
     Some(v)
+}
+
+/// `v`, a read of the model such as a variable's cells or a style's value, in
+/// the short forms the writes take, as [`tree`] writes a layer.
+pub fn shorten(v: &mut Value) {
+    loose::tighten("", v);
 }
 
 /// Fill in a tree's `like`s: a layer with `"like": "<id>"` takes that layer's

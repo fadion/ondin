@@ -105,17 +105,23 @@ pub(crate) fn resolve(
     }
 }
 
-/// How many revisions a connection's earlier reads are remembered at, for
-/// `since` and `base_rev`.
+/// How many of a connection's latest looks keep every layer's fingerprint, for
+/// `since` and for naming what changed.
 const KEPT: usize = 8;
 
-/// What a connection was last shown: a revision and each layer's fingerprint.
+/// How many of a connection's looks `base_rev` can be checked against. A look
+/// past [`KEPT`] holds only the ids others changed, so an agent writing many
+/// times off one read is not sent back to read again.
+const LOOKS: usize = 1024;
+
+/// What a connection was shown: a revision and, for the latest [`KEPT`], each
+/// layer's fingerprint.
 struct Shown {
     rev: u64,
-    layers: HashMap<String, Layer>,
-    /// Whether this client's own call made it from the look before, so
-    /// `base_rev` does not count that step against the client.
-    own: bool,
+    layers: Option<HashMap<String, Layer>>,
+    /// The layers changed or removed since the look before by anyone but this
+    /// client, so `base_rev` does not count the client's own steps against it.
+    others: Vec<String>,
 }
 
 /// A layer as a connection saw it.
@@ -387,7 +393,7 @@ impl Engine {
                     } else {
                         conn.document = Some(path.clone());
                         conn.shown.clear();
-                        remember(conn, rev, layers(&snap), false);
+                        remember(conn, rev, layers(&snap), Vec::new());
                     }
                     let pages: Vec<Value> = snap
                         .pages
@@ -499,11 +505,8 @@ impl Engine {
             // The call's own edit is not news to the caller; an undo's or redo's
             // layers are, since it did not choose them.
             let now = layers(&snapshot_of(session));
-            let own = conn
-                .shown
-                .back()
-                .map(|s| delta(&s.layers, &now).to_json(&now, &s.layers));
-            remember(conn, after, now, true);
+            let own = last_layers(conn).map(|then| delta(then, &now).to_json(&now, then));
+            remember(conn, after, now, Vec::new());
             if matches!(call.tool.as_str(), "undo" | "redo")
                 && let (Some(own), Some(Value::Object(map))) = (own, output.structured.as_mut())
             {
@@ -532,10 +535,7 @@ fn check_call(call: &Call) -> Result<(), String> {
         return Ok(());
     }
     let Some(tool) = ondin_mcp::schema::tool(&call.tool) else {
-        return Err(format!(
-            "No tool is called `{}`; `tools/list` names them.",
-            call.tool
-        ));
+        return Err(no_such_tool(&call.tool));
     };
     let mut args = call.args.clone();
     // An empty selection clears it, where a layer list elsewhere needs one.
@@ -553,27 +553,46 @@ fn check_call(call: &Call) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, own: bool) {
+/// Remember a look at `rev`, with the layers `others` changed or removed since
+/// the look before.
+fn remember(conn: &mut Connection, rev: u64, layers: HashMap<String, Layer>, others: Vec<String>) {
     if conn.shown.back().is_some_and(|s| s.rev == rev) {
         return;
     }
-    conn.shown.push_back(Shown { rev, layers, own });
-    while conn.shown.len() > KEPT {
+    conn.shown.push_back(Shown {
+        rev,
+        layers: Some(layers),
+        others,
+    });
+    if let Some(old) = conn.shown.len().checked_sub(KEPT + 1) {
+        conn.shown[old].layers = None;
+    }
+    while conn.shown.len() > LOOKS {
         conn.shown.pop_front();
     }
+}
+
+/// The fingerprints of the connection's last look.
+fn last_layers(conn: &Connection) -> Option<&HashMap<String, Layer>> {
+    conn.shown.back().and_then(|s| s.layers.as_ref())
 }
 
 /// What changed since the connection's last look, and remember this one.
 fn catch_up(conn: &mut Connection, session: &EditorSession) -> Option<Value> {
     let rev = session.revision();
-    let last = conn.shown.back()?;
-    if last.rev == rev {
+    if conn.shown.back()?.rev == rev {
         return None;
     }
     let now = layers(&snapshot_of(session));
-    let d = delta(&last.layers, &now);
-    let report = (!d.is_empty()).then(|| d.to_json(&now, &last.layers));
-    remember(conn, rev, now, false);
+    let (report, others) = match last_layers(conn) {
+        Some(last) => {
+            let d = delta(last, &now);
+            let report = (!d.is_empty()).then(|| d.to_json(&now, last));
+            (report, d.changed.into_iter().chain(d.removed).collect())
+        }
+        None => (None, Vec::new()),
+    };
+    remember(conn, rev, now, others);
     report
 }
 
@@ -1111,11 +1130,16 @@ fn since(
     if since == rev {
         return Ok(Some(json!({ "unchanged": true })));
     }
-    let Some(then) = conn.shown.iter().find(|s| s.rev == since) else {
+    let Some(then) = conn
+        .shown
+        .iter()
+        .find(|s| s.rev == since)
+        .and_then(|s| s.layers.as_ref())
+    else {
         return Ok(None);
     };
     let now = layers(snap);
-    let d = delta(&then.layers, &now);
+    let d = delta(then, &now);
     let fresh: Vec<&ondin_export::snapshot::NodeSnapshot> = snap
         .nodes
         .iter()
@@ -1158,6 +1182,14 @@ fn write(
         let base = base.as_u64().ok_or("`base_rev` must be a `rev`")?;
         stale(conn, s, base, &done.tx)?;
     }
+    // A layer that was there before is not one the call created: `make_component`
+    // answers a frame it turned into a main as `main` alone.
+    let created: Vec<Value> = done
+        .created
+        .iter()
+        .filter(|id| s.doc.get(**id).is_none())
+        .map(|id| json!(id.to_wire()))
+        .collect();
     commit(s, client, verb.name, done.tx)?;
     // A picture's own size, which decides what aspect `fit` and `crop` keep.
     let pixels = match verb.name {
@@ -1168,10 +1200,18 @@ fn write(
             .map(|e| [e.width, e.height]),
         _ => None,
     };
-    let mut answer = json!({
-        "created": done.created.iter().map(|i| i.to_wire()).collect::<Vec<_>>(),
-        "made": done.made,
-    });
+    let mut answer = json!({ "created": created });
+    if let Some(made) = done.made {
+        answer[made_key(verb.name)] = match verb.name {
+            "define_property" => json!(property_name(s, &args, &made).unwrap_or(made)),
+            _ => json!(made),
+        };
+    }
+    if verb.name == "make_component"
+        && let Some(main) = done.created.first()
+    {
+        answer["main"] = json!(main.to_wire());
+    }
     if let Some(said) = done.said {
         answer["said"] = json!(said);
     }
@@ -1198,6 +1238,30 @@ fn write(
         answer["pixel_size"] = json!(px);
     }
     Ok(Answer::Json(answer))
+}
+
+/// The key a write answers what else it made under, named for what it is.
+fn made_key(verb: &str) -> &'static str {
+    match verb {
+        "add_image" => "image",
+        "add_variable" => "variable",
+        "add_mode" => "mode",
+        "add_collection" | "duplicate_collection" => "collection",
+        "add_style" => "style",
+        "define_property" => "property",
+        _ => "made",
+    }
+}
+
+/// The name of the property `define_property` just made, whose id is `item`:
+/// `set_instance_property` takes a property by its name.
+fn property_name(s: &EditorSession, args: &Value, item: &str) -> Option<String> {
+    let owner = ondin_core::variant::owner_above(&s.doc, node(args, "node").ok()??)?;
+    let props = s.doc.get(owner)?.props();
+    props
+        .iter()
+        .find(|p| p.id.0.to_wire() == item)
+        .map(|p| p.name.clone())
 }
 
 /// Each layer of `tree` the caller named, by the `/`-joined names of it and its
@@ -1239,7 +1303,9 @@ fn named_paths<'a>(
 /// then joined into one undo step named `batch`. A refused step takes back the
 /// steps before it, so the batch lands whole or not at all. A step names what an
 /// earlier one made as `"@label"`, the label that step gave in `as`, as
-/// `ondin script` does; `base_rev` holds for every step.
+/// `ondin script` does, and a layer an `insert_subtree` step named by
+/// `"@label/Path"`, its path of names below the root; `base_rev` holds for every
+/// step.
 fn batch(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1275,11 +1341,28 @@ fn batch(
         if let Some(label) = step.get("as").and_then(Value::as_str) {
             let first = answer["created"]
                 .get(0)
-                .or_else(|| answer.get("made"))
+                .or_else(|| answer.get("main"))
+                .or_else(|| answer.get(made_key(tool)))
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             if let Some(first) = first {
                 labels.insert(label.to_owned(), first);
+            }
+            // `insert_subtree`'s layers by `label/Path`, the path below the root.
+            let root = step["args"]["tree"]["name"].as_str();
+            for (path, id) in answer
+                .get("named")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                let below = match root {
+                    Some(root) => path.strip_prefix(root).and_then(|p| p.strip_prefix('/')),
+                    None => Some(path.as_str()),
+                };
+                if let (Some(below), Some(id)) = (below, id.as_str()) {
+                    labels.insert(format!("{label}/{below}"), id.to_owned());
+                }
             }
         }
         answers.push(answer);
@@ -1326,10 +1409,43 @@ const SET_PROPS: &[(&str, &str, bool, &str)] = &[
     ("transform", "set_transform", false, "transform"),
 ];
 
+/// The names agents write for what `set` takes otherwise: `x`, `y` for `at`,
+/// `width`, `height` for `size`, `corner_radius` for `geometry`, `fill` and
+/// `stroke` for one paint, and `rotation`, which no setter takes.
+const SET_ALIASES: [&str; 8] = [
+    "x",
+    "y",
+    "width",
+    "height",
+    "corner_radius",
+    "rotation",
+    "fill",
+    "stroke",
+];
+
+/// Guesses at a `set` property no spelling slip reaches, with the one each means.
+const SET_GUESSES: &[(&str, &str)] = &[
+    ("color", "fill"),
+    ("colour", "fill"),
+    ("background", "fill"),
+    ("border", "stroke"),
+    ("radius", "corner_radius"),
+    ("border_radius", "corner_radius"),
+    ("hidden", "visible"),
+    ("font", "text_style"),
+    ("font_size", "text_style"),
+    ("content", "text"),
+    ("characters", "text"),
+    ("angle", "rotation"),
+    ("position", "at"),
+    ("shadow", "effects"),
+];
+
 /// `set`: each property through its own setter, as a [`batch`] named `set`, so
 /// one call writes what a handful of setters would and lands as one undo step.
-/// `size` and `at` follow the rest, so a move lands where the new size leaves it;
-/// `at` is measured once they have landed ([`placed_at`]).
+/// `size`, `rotation` and `at` follow the rest in that order, each measured once
+/// the ones before have landed, so a move lands where the new size and turn
+/// leave the box ([`placed_at`]).
 fn set(
     conn: &Connection,
     s: &mut EditorSession,
@@ -1343,24 +1459,49 @@ fn set(
     let Some(Value::Object(props)) = args.get("props") else {
         return Err("`props` is an object of properties".into());
     };
-    let known = || {
-        SET_PROPS
-            .iter()
-            .map(|p| p.0)
-            .chain(["size", "at"])
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    if let Some(k) = props.keys().find(|k| {
-        !SET_PROPS.iter().any(|p| p.0 == k.as_str()) && !["size", "at"].contains(&k.as_str())
-    }) {
-        return Err(format!("`set` sets no `{k}`; it sets {}", known()));
+    let known: Vec<&str> = SET_PROPS
+        .iter()
+        .map(|p| p.0)
+        .chain(["size", "at"])
+        .chain(SET_ALIASES)
+        .collect();
+    if let Some(k) = props.keys().find(|k| !known.contains(&k.as_str())) {
+        let near = nearest_name(k, &known)
+            .map(|n| format!(" Did you mean `{n}`?"))
+            .unwrap_or_default();
+        return Err(format!(
+            "`set` sets no `{k}`; it sets {}.{near}",
+            known.join(", ")
+        ));
     }
+    let canon = canonical(props)?;
+    if canon.contains_key("text") {
+        text_targets(s, &ids)?;
+    }
+    let size = sides(
+        props,
+        "size",
+        ["width", "height"],
+        "`size` is {width, height}",
+    )?;
+    let at = sides(
+        props,
+        "at",
+        ["x", "y"],
+        "`at` is [x, y], the left and top of the layer's box in its parent",
+    )?;
+    let rotation = match props.get("rotation") {
+        None => None,
+        Some(v) => Some(
+            v.as_f64()
+                .ok_or("`rotation` is the layer's angle in degrees, clockwise")?,
+        ),
+    };
     let wire: Vec<Value> = ids.iter().map(|id| json!(id.to_wire())).collect();
     let mut steps = Vec::new();
     let mut step = |tool: &str, args: Value| steps.push(json!({ "tool": tool, "args": args }));
     for (prop, verb, all, param) in SET_PROPS {
-        let Some(v) = props.get(*prop) else { continue };
+        let Some(v) = canon.get(*prop) else { continue };
         let with = |key: &str, layers: Value| {
             let mut m = Map::new();
             m.insert(key.into(), layers);
@@ -1375,23 +1516,6 @@ fn set(
             }
         }
     }
-    if let Some(size) = props.get("size") {
-        let (Some(w), Some(h)) = (size.get("width"), size.get("height")) else {
-            return Err("`size` is {width, height}".into());
-        };
-        for id in &wire {
-            step("set_size", json!({ "node": id, "width": w, "height": h }));
-        }
-    }
-    let at = match props.get("at") {
-        None => None,
-        Some(at) => Some(
-            at.as_array()
-                .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
-                .and_then(|a| <[f64; 2]>::try_from(a).ok())
-                .ok_or("`at` is [x, y], the left and top of the layer's box in its parent")?,
-        ),
-    };
     let batched = |steps: Vec<Value>| {
         let mut batched = json!({ "steps": steps });
         if let Some(base) = args.get("base_rev") {
@@ -1399,23 +1523,48 @@ fn set(
         }
         batched
     };
+    let base = match args.get("base_rev").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => Some(v.as_u64().ok_or("`base_rev` must be a `rev`")?),
+    };
     let depth = s.history.undo_depth();
-    if !steps.is_empty() {
-        batch(conn, s, client, &batched(steps))?;
-    }
-    // Measured after the rest landed, so the box is the one the new size left.
-    if let Some([x, y]) = at {
-        let placed = ids
-            .iter()
-            .map(|id| placed_at(s, *id, x, y))
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|steps| batch(conn, s, client, &batched(steps)));
-        if let Err(why) = placed {
-            if s.history.undo_depth() > depth {
-                s.take_back();
-            }
-            return Err(why);
+    let landed = (|| {
+        if !steps.is_empty() {
+            batch(conn, s, client, &batched(steps))?;
         }
+        // Each measured after the ones before landed: a side kept is the side
+        // the other properties left, and `at` places the box the size and turn left.
+        if let Some([w, h]) = size {
+            let steps = ids
+                .iter()
+                .map(|id| sized(s, *id, w, h))
+                .collect::<Result<Vec<_>, _>>()?;
+            batch(conn, s, client, &batched(steps))?;
+        }
+        if let Some(degrees) = rotation {
+            for id in &ids {
+                let Some(tx) = turned_to(s, *id, degrees) else {
+                    continue;
+                };
+                refuse_kit_vault(s, &json!({ "node": id.to_wire() }))?;
+                if let Some(base) = base {
+                    stale(conn, s, base, &tx)?;
+                }
+                commit(s, client, "set", tx)?;
+            }
+        }
+        if let Some([x, y]) = at {
+            let steps = ids
+                .iter()
+                .map(|id| placed_at(s, *id, x, y))
+                .collect::<Result<Vec<_>, _>>()?;
+            batch(conn, s, client, &batched(steps))?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(why) = landed {
+        while s.history.undo_depth() > depth && s.take_back() {}
+        return Err(why);
     }
     let made = s.history.undo_depth().saturating_sub(depth);
     if made > 1 {
@@ -1439,8 +1588,14 @@ fn set(
 /// The `set_transform` step that puts the left and top of `id`'s box at `x`, `y`
 /// in its parent's space, for every kind: the box it is drawn with (a group's is
 /// its children's), moved by the difference so it keeps its rotation and scale.
-/// A layer with no box is placed by its origin.
-fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, String> {
+/// A side not given stays where it is. A layer with no box is placed by its
+/// origin.
+fn placed_at(
+    s: &EditorSession,
+    id: NodeId,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<Value, String> {
     let n = s
         .doc
         .get(id)
@@ -1449,24 +1604,232 @@ fn placed_at(s: &EditorSession, id: NodeId, x: f64, y: f64) -> Result<Value, Str
     let corner = ondin_core::query::local_box(&s.doc, &s.resolved, id)
         .map(|b| ondin_core::geometry::transform_rect(local, b).origin())
         .unwrap_or(local * ondin_core::kurbo::Point::ZERO);
+    let (x, y) = (x.unwrap_or(corner.x), y.unwrap_or(corner.y));
     let moved = ondin_core::kurbo::Affine::translate((x - corner.x, y - corner.y)) * n.transform();
     Ok(json!({ "tool": "set_transform",
         "args": { "node": id.to_wire(), "transform": moved.as_coeffs() } }))
 }
+
+/// The `set_size` step that makes `id` `w` wide and `h` high, a side not given
+/// kept at its box's.
+fn sized(s: &EditorSession, id: NodeId, w: Option<f64>, h: Option<f64>) -> Result<Value, String> {
+    let now = match (w, h) {
+        (Some(_), Some(_)) => ondin_core::kurbo::Size::ZERO,
+        _ => ondin_core::query::local_box(&s.doc, &s.resolved, id)
+            .map(|b| b.size())
+            .ok_or_else(|| {
+                format!(
+                    "`{}` has no box to keep a side of: give `width` and `height`",
+                    id.to_wire()
+                )
+            })?,
+    };
+    Ok(json!({ "tool": "set_size", "args": { "node": id.to_wire(),
+        "width": w.unwrap_or(now.width), "height": h.unwrap_or(now.height) } }))
+}
+
+/// The edit that turns `id` to `degrees` clockwise on the page about its box's
+/// centre, keeping its scale, skew and mirror, as the Rotation field turns it;
+/// `None` when it stands so already.
+fn turned_to(s: &EditorSession, id: NodeId, degrees: f64) -> Option<ondin_core::Transaction> {
+    let world = s.resolved.world_transform(id)?;
+    let by = degrees.to_radians() - ondin_core::build::Basis::of(world).orientation.angle;
+    if by.abs() < 1e-9 {
+        return None;
+    }
+    let centre = ondin_core::query::local_box(&s.doc, &s.resolved, id)
+        .map_or(ondin_core::kurbo::Point::ZERO, |b| b.center());
+    let tx = ondin_core::edit::rotate_node(&s.doc, &s.resolved, id, world * centre, by);
+    (!tx.0.is_empty()).then_some(tx)
+}
+
+/// `set`'s pair `key` (`size` or `at`) as two sides, each `None` when not
+/// given: from the pair as an object or `[a, b]`, then from its sides' own
+/// names (`x`, `width`), which win. `None` when neither is written.
+fn sides(
+    props: &Map<String, Value>,
+    key: &str,
+    names: [&str; 2],
+    form: &str,
+) -> Result<Option<[Option<f64>; 2]>, String> {
+    let mut out = [None, None];
+    let number = |v: &Value| v.as_f64().ok_or_else(|| form.to_owned());
+    match props.get(key) {
+        None => {}
+        Some(Value::Array(a)) if a.len() == 2 => {
+            out = [Some(number(&a[0])?), Some(number(&a[1])?)];
+        }
+        Some(Value::Object(m)) if m.keys().all(|k| names.contains(&k.as_str())) => {
+            for (side, name) in out.iter_mut().zip(names) {
+                *side = m.get(name).map(number).transpose()?;
+            }
+        }
+        Some(_) => return Err(form.to_owned()),
+    }
+    for (side, name) in out.iter_mut().zip(names) {
+        if let Some(v) = props.get(name) {
+            *side = Some(v.as_f64().ok_or_else(|| format!("`{name}` is a number"))?);
+        }
+    }
+    Ok(match out {
+        [None, None] if props.contains_key(key) => {
+            return Err(format!("{form}; either side alone keeps the other"));
+        }
+        [None, None] => None,
+        sides => Some(sides),
+    })
+}
+
+/// `props` with `fill`, `stroke` and `corner_radius` written as what their
+/// setters take: `fills` and `strokes` lists, and a `geometry` patch.
+fn canonical(props: &Map<String, Value>) -> Result<Map<String, Value>, String> {
+    let mut canon = props.clone();
+    for (alias, prop) in [
+        ("fill", "fills"),
+        ("stroke", "strokes"),
+        ("corner_radius", "geometry"),
+    ] {
+        let Some(v) = canon.remove(alias) else {
+            continue;
+        };
+        if canon.contains_key(prop) {
+            return Err(format!("`{alias}` and `{prop}` set one thing: give one"));
+        }
+        let v = match (alias, v) {
+            ("corner_radius", Value::Number(n)) => json!({ "CornerRadius": n }),
+            ("corner_radius", Value::Array(r)) if r.len() == 4 => json!({ "CornerRadii": {
+                "top_left": r[0], "top_right": r[1], "bottom_right": r[2], "bottom_left": r[3] } }),
+            ("corner_radius", corners @ Value::Object(_)) => json!({ "CornerRadii": corners }),
+            ("corner_radius", _) => {
+                return Err(
+                    "`corner_radius` is a number, or four as [top_left, top_right, \
+                     bottom_right, bottom_left]"
+                        .into(),
+                );
+            }
+            (_, list @ Value::Array(_)) => list,
+            (_, one) => json!([one]),
+        };
+        canon.insert(prop.into(), v);
+    }
+    Ok(canon)
+}
+
+/// The name of `known` an unknown `set` property most likely meant: a guess
+/// [`SET_GUESSES`] lists, else the nearest within two edits once written in
+/// snake case.
+fn nearest_name<'a>(asked: &str, known: &[&'a str]) -> Option<&'a str> {
+    let mut snake = String::new();
+    for c in asked.chars() {
+        match c {
+            '-' | ' ' => snake.push('_'),
+            c if c.is_uppercase() => {
+                if !snake.is_empty() {
+                    snake.push('_');
+                }
+                snake.extend(c.to_lowercase());
+            }
+            c => snake.push(c),
+        }
+    }
+    let meant = SET_GUESSES
+        .iter()
+        .find(|(guess, _)| *guess == snake)
+        .map_or(snake.as_str(), |(_, meant)| meant);
+    known
+        .iter()
+        .map(|k| (edits(meant, k), *k))
+        .filter(|(d, _)| *d <= 2)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, k)| k)
+}
+
+/// The edit distance between `a` and `b`, in characters.
+fn edits(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(above + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// Refuse `set`'s `text` on a layer that is no text, saying where its text is
+/// set: an instance's through its properties, any layer's through the text
+/// layers inside it.
+fn text_targets(s: &EditorSession, ids: &[NodeId]) -> Result<(), String> {
+    for &id in ids {
+        let Some(n) = s.doc.get(id) else {
+            continue;
+        };
+        if matches!(n.kind(), ondin_core::NodeKind::Text { .. }) {
+            continue;
+        }
+        let mut texts = Vec::new();
+        let mut below: Vec<NodeId> = n.children().iter().rev().copied().collect();
+        while let Some(at) = below.pop() {
+            let Some(c) = s.doc.get(at) else { continue };
+            if matches!(c.kind(), ondin_core::NodeKind::Text { .. }) {
+                texts.push(format!("`{}` {}", at.to_wire(), c.name()));
+            }
+            below.extend(c.children().iter().rev());
+        }
+        let listed = match texts.len() {
+            0 => None,
+            n if n > TEXTS_LISTED => Some(format!(
+                "{}, and {} more",
+                texts[..TEXTS_LISTED].join(", "),
+                n - TEXTS_LISTED
+            )),
+            _ => Some(texts.join(", ")),
+        };
+        let id_wire = id.to_wire();
+        if ondin_core::component::instance_root(&s.doc, id) == Some(id) {
+            let props: Vec<String> = ondin_core::variant::instance_properties(&s.doc, id)
+                .iter()
+                .filter(|p| p.kind != ondin_core::variant::PropKind::Nested && !p.name.is_empty())
+                .map(|p| {
+                    let kind = format!("{:?}", p.kind).to_lowercase();
+                    format!("`{}` ({kind})", p.name)
+                })
+                .collect();
+            let props = match props.is_empty() {
+                true => "it has none".to_owned(),
+                false => format!("its properties: {}", props.join(", ")),
+            };
+            let inside = listed
+                .map(|l| format!(" or set a text layer inside it ({l})"))
+                .unwrap_or_default();
+            return Err(format!(
+                "`{id_wire}` is an instance; set its text with `set_instance_property` \
+                 ({props}){inside}"
+            ));
+        }
+        return Err(match listed {
+            Some(l) => format!("`{id_wire}` is no text layer; set a text layer inside it ({l})"),
+            None => format!("`{id_wire}` is no text layer and holds none"),
+        });
+    }
+    Ok(())
+}
+
+/// The most text layers a refusal of `set`'s `text` names.
+const TEXTS_LISTED: usize = 8;
 
 /// `describe_tools`: the full definition of each tool named in `names`, then of
 /// those whose name holds `query`, then of those whose description alone does,
 /// at most [`DESCRIBED`]; with `brief`, every match's name and description only.
 /// A name that is no tool is answered in `not_found`.
 fn describe_tools(args: &Value) -> Value {
-    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
-    let all: Vec<Value> = PHASE_1
-        .iter()
-        .chain(&PHASE_2)
-        .chain(&PHASE_3)
-        .chain(&PHASE_4)
-        .filter_map(|name| ondin_mcp::schema::definition(name))
-        .collect();
+    let all = every_definition();
     let names: Vec<&str> = args
         .get("names")
         .and_then(Value::as_array)
@@ -1524,6 +1887,68 @@ fn describe_tools(args: &Value) -> Value {
     }
     answer
 }
+
+/// Every tool's `tools/list` entry, listed or not.
+fn every_definition() -> Vec<Value> {
+    use ondin_mcp::tools::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
+    PHASE_1
+        .iter()
+        .chain(&PHASE_2)
+        .chain(&PHASE_3)
+        .chain(&PHASE_4)
+        .filter_map(|name| ondin_mcp::schema::definition(name))
+        .collect()
+}
+
+/// Why `name` is refused as no tool, with the nearest tools by `describe_tools`'
+/// search run on each of its words: a word in a tool's name counts twice one in
+/// its description. `tools/list` names only the core set, so pointing there
+/// alone does not find the rest.
+fn no_such_tool(name: &str) -> String {
+    let words: Vec<String> = name
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 1)
+        .map(str::to_owned)
+        .collect();
+    let mut scored: Vec<(usize, String, String)> = every_definition()
+        .iter()
+        .filter_map(|d| {
+            let tool = d["name"].as_str()?;
+            let about = d["description"].as_str().unwrap_or_default();
+            let lower = about.to_lowercase();
+            let score: usize = words
+                .iter()
+                .map(
+                    |w| match (tool.contains(w.as_str()), lower.contains(w.as_str())) {
+                        (true, _) => 2,
+                        (false, true) => 1,
+                        _ => 0,
+                    },
+                )
+                .sum();
+            (score > 0).then(|| (score, tool.to_owned(), gist(about)))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+    let nearest: Vec<String> = scored
+        .iter()
+        .take(NEAREST)
+        .map(|(_, tool, about)| format!("`{tool}`: {about}"))
+        .collect();
+    match nearest.is_empty() {
+        true => format!(
+            "No tool is called `{name}`; `describe_tools` with a `query` finds one by a word."
+        ),
+        false => format!(
+            "No tool is called `{name}`. Nearest: {} `describe_tools` with a `query` finds others.",
+            nearest.join(" ")
+        ),
+    }
+}
+
+/// How many tools an unknown name's refusal suggests.
+const NEAREST: usize = 3;
 
 /// The longest `gist` a brief `describe_tools` gives, in characters.
 const GIST: usize = 120;
@@ -1642,36 +2067,37 @@ fn stale(
             "`base_rev` {base} is older than this connection remembers: read again and retry"
         ));
     };
-    let then = &conn.shown[at];
     // What others changed since `base`: every step but the client's own writes,
     // which are not news to it. `handle` caught up before this call, so the last
     // look is the document as the call found it.
-    let mut others = std::collections::HashSet::new();
-    for (a, b) in conn
+    let others: std::collections::HashSet<&str> = conn
         .shown
         .iter()
-        .skip(at)
-        .zip(conn.shown.iter().skip(at + 1))
-    {
-        if !b.own {
-            let d = delta(&a.layers, &b.layers);
-            others.extend(d.changed.into_iter().chain(d.removed));
-        }
-    }
+        .skip(at + 1)
+        .flat_map(|s| s.others.iter().map(String::as_str))
+        .collect();
     let moved: Vec<String> = tx
         .subjects()
         .iter()
         .map(|id| id.to_wire())
-        .filter(|id| others.contains(id))
+        .filter(|id| others.contains(id.as_str()))
         .collect();
     if moved.is_empty() {
         return Ok(());
     }
+    // Each by the name the caller read, or the earliest look since that holds it.
     let names: Vec<String> = moved
         .iter()
-        .map(|id| match then.layers.get(id) {
-            Some(l) => format!("{} ({id})", l.name),
-            None => id.clone(),
+        .map(|id| {
+            let seen = conn
+                .shown
+                .iter()
+                .skip(at)
+                .find_map(|s| s.layers.as_ref()?.get(id));
+            match seen {
+                Some(l) => format!("{} ({id})", l.name),
+                None => id.clone(),
+            }
         })
         .collect();
     Err(format!(
@@ -1975,7 +2401,7 @@ mod tests {
         open(&mut engine, &mut docs, 1);
         let args = json!({ "bytes": base64(&png) });
         let out = call(&mut engine, &mut docs, 1, "add_image", args);
-        assert!(ok(&out)["made"].is_string());
+        assert!(ok(&out)["image"].is_string());
         assert_eq!(ok(&out)["pixel_size"], json!([3, 2]), "the size");
     }
 
@@ -2224,6 +2650,226 @@ mod tests {
             "the box's corner moved to [10, 20]"
         );
         assert_eq!(box_of(&docs), (10.0, 20.0).into());
+    }
+
+    /// `set` takes the names agents guess: one side of `at` or `size` keeps the
+    /// other, `corner_radius`, `fill` and `rotation` land as their setters would,
+    /// and an unknown name is answered with the one it most likely meant.
+    ///
+    /// flip: `placed_at` taking an absent side as 0 → fails at "y kept";
+    /// `turned_to` turning about the layer's origin → fails at "about its centre".
+    #[test]
+    fn set_takes_the_names_agents_guess() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let id = rect(&mut engine, &mut docs, 1, "Box");
+        let nid = NodeId::from_wire(&id).unwrap();
+        let mut set = |docs: &mut One, props: Value| {
+            call(
+                &mut engine,
+                docs,
+                1,
+                "set",
+                json!({ "nodes": [id], "props": props }),
+            )
+        };
+        ok(&set(
+            &mut docs,
+            json!({ "at": [10.0, 20.0], "size": { "width": 30.0, "height": 40.0 } }),
+        ));
+        ok(&set(&mut docs, json!({ "x": 50.0, "width": 60.0 })));
+        let bounds = |docs: &One| docs.session.resolved.world_bounds(nid).unwrap();
+        let r = bounds(&docs);
+        assert_eq!((r.x0, r.width()), (50.0, 60.0), "the sides given");
+        assert_eq!((r.y0, r.height()), (20.0, 40.0), "y kept, and the height");
+        ok(&set(&mut docs, json!({ "size": { "height": 10.0 } })));
+        assert_eq!(
+            (bounds(&docs).width(), bounds(&docs).height()),
+            (60.0, 10.0)
+        );
+
+        ok(&set(
+            &mut docs,
+            json!({ "corner_radius": 4.0, "fill": "#ff0000" }),
+        ));
+        let n = docs.session.doc.get(nid).unwrap();
+        let ondin_core::NodeKind::Rect { corner_radii, .. } = n.kind() else {
+            panic!("the fixture is a rect");
+        };
+        assert_eq!(corner_radii.top_left, 4.0);
+        assert_eq!(n.paint().fills.len(), 1, "one paint as a list");
+
+        let centre = bounds(&docs).center();
+        ok(&set(&mut docs, json!({ "rotation": 90.0 })));
+        let r = bounds(&docs);
+        assert!(
+            (r.width() - 10.0).abs() < 1e-6 && (r.height() - 60.0).abs() < 1e-6,
+            "a quarter turn: {r:?}"
+        );
+        let moved = r.center() - centre;
+        assert!(moved.hypot() < 1e-6, "about its centre: {moved:?}");
+        ok(&set(&mut docs, json!({ "rotation": 90.0 })));
+        assert!(
+            (bounds(&docs).width() - 10.0).abs() < 1e-6,
+            "the angle is set, not added"
+        );
+
+        for (guess, meant) in [("corner_radiu", "corner_radius"), ("colour", "fill")] {
+            let out = set(&mut docs, json!({ guess: 1.0 }));
+            let text = format!("{:?}", out.content);
+            assert!(out.is_error, "{guess} is refused");
+            assert!(text.contains(&format!("Did you mean `{meant}`")), "{text}");
+        }
+    }
+
+    /// `set`'s `text` on an instance names `set_instance_property` with the
+    /// instance's properties and the text layers inside it, before any setter runs.
+    /// On the way, `make_component` answers a group it made a main as `main`, not
+    /// `created`, and `define_property` answers the property by its name.
+    ///
+    /// flip: `set` without its `text_targets` check → fails at "names the tool",
+    /// as the setter's own refusal; `write` not filtering `created` → fails at
+    /// "not answered as created".
+    #[test]
+    fn set_text_on_an_instance_names_where_its_text_is() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "name": "Button", "kind": { "Group": null },
+            "children": [{ "name": "Label", "kind": { "Text": { "content": "Go",
+                "style": ondin_core::verbs::example("TextStyle").unwrap(), "sizing": "Auto" } } }] });
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let answer = ok(&made).clone();
+        let group = answer["created"][0].clone();
+        let label = answer["named"]["Button/Label"].clone();
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "make_component",
+            json!({ "nodes": [group] }),
+        );
+        let main = ok(&made)["main"].clone();
+        assert_eq!(main, group, "the group itself is made the main");
+        assert_eq!(
+            ok(&made)["created"],
+            json!([]),
+            "and is not answered as created"
+        );
+        let args = json!({ "node": label, "kind": "text", "name": "Caption" });
+        let defined = call(&mut engine, &mut docs, 1, "define_property", args);
+        assert_eq!(ok(&defined)["property"], "Caption", "named, not by id");
+        assert!(ok(&defined).get("made").is_none());
+        let args = json!({ "main": main, "parent": page, "x": 300, "y": 300 });
+        let made = call(&mut engine, &mut docs, 1, "create_instance", args);
+        let instance = ok(&made)["created"][0].clone();
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "set",
+            json!({ "nodes": [instance], "props": { "text": "Stop" } }),
+        );
+        let text = format!("{:?}", out.content);
+        assert!(out.is_error);
+        assert!(
+            text.contains("set_instance_property"),
+            "names the tool: {text}"
+        );
+        assert!(text.contains("`Caption` (text)"), "{text}");
+        assert!(text.contains("Label"), "the text layer inside: {text}");
+    }
+
+    /// A batch step names a layer an earlier `insert_subtree` step made by
+    /// `@label/Path`, its path of names below the root.
+    ///
+    /// flip: `batch` not labelling `named` → fails at the batch's `ok`, as no
+    /// earlier step is called `card/Title`.
+    #[test]
+    fn a_batch_names_a_subtrees_layer_by_its_path() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let kind = ondin_core::verbs::example("NodeKind").unwrap();
+        let tree = json!({ "name": "Card", "kind": { "Group": null }, "children": [
+            { "name": "Title", "kind": kind },
+        ]});
+        let insert = json!({ "tool": "insert_subtree", "as": "card",
+            "args": { "parent": page, "tree": tree } });
+        let rename = json!({ "tool": "set_name",
+            "args": { "node": "@card/Title", "name": "Heading" } });
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "batch",
+            json!({ "steps": [insert, rename] }),
+        );
+        let title = ok(&out)["steps"][0]["named"]["Card/Title"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let n = docs.session.doc.get(NodeId::from_wire(&title).unwrap());
+        assert_eq!(n.unwrap().name(), "Heading");
+    }
+
+    /// `call` of a tool that does not exist suggests the nearest by the words of
+    /// its name, and points at `describe_tools`.
+    ///
+    /// flip: `no_such_tool` scoring a description's word as nothing → fails at
+    /// `set_geometry`, which only its description reaches.
+    #[test]
+    fn an_unknown_tool_suggests_the_nearest() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        let out = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "call",
+            json!({ "tool": "set_corner_radius", "args": {} }),
+        );
+        assert!(out.is_error);
+        let text = format!("{:?}", out.content);
+        assert!(text.contains("`set_geometry`"), "{text}");
+        assert!(text.contains("describe_tools"), "{text}");
+    }
+
+    /// Writes off one read keep passing its `base_rev` long after the last few
+    /// looks the connection keeps whole, and another client's change to the layer
+    /// in between still refuses it.
+    ///
+    /// flip: `remember` dropping looks past `KEPT` → fails at "an old read still
+    /// holds".
+    #[test]
+    fn a_base_rev_holds_across_many_own_writes() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        open(&mut engine, &mut docs, 2);
+        let id = rect(&mut engine, &mut docs, 1, "Card");
+        let other = rect(&mut engine, &mut docs, 1, "Other");
+        let read = call(&mut engine, &mut docs, 1, "get_selection", json!({}));
+        let base = ok(&read)["rev"].clone();
+        for i in 0..KEPT * 3 {
+            let args = json!({ "node": id, "name": format!("Card {i}"), "base_rev": base });
+            let out = call(&mut engine, &mut docs, 1, "set_name", args);
+            assert!(!out.is_error, "an old read still holds: {:?}", out.content);
+        }
+        let args = json!({ "nodes": [other], "opacity": 0.5 });
+        ok(&call(&mut engine, &mut docs, 2, "set_opacity", args));
+        for _ in 0..KEPT * 2 {
+            let args = json!({ "node": id, "name": "Card", "base_rev": base });
+            ok(&call(&mut engine, &mut docs, 1, "set_name", args));
+        }
+        let args = json!({ "node": other, "name": "Mine", "base_rev": base });
+        let late = call(&mut engine, &mut docs, 1, "set_name", args);
+        assert!(late.is_error, "the other client's change refuses it");
+        assert!(format!("{:?}", late.content).contains("Other"));
     }
 
     /// `call` answers as the tool it names, listed or not, and never names itself;

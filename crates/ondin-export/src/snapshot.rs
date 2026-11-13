@@ -51,7 +51,11 @@ use std::collections::BTreeMap;
 ///   `color`, `paragraph`, `block`, `runs` and `paragraphs`; `NodeSnapshot::specified`;
 ///   `ComponentSummary::properties` and `overrides`; a missing family in a run warns.
 /// - **22** `Geometry::Path` gained `subpaths`, the anchors `set_point` edits.
-pub const SNAPSHOT_VERSION: u32 = 22;
+/// - **23** a node's fields at their defaults are absent (an identity
+///   `local_transform` among them), `world_transform` where it equals
+///   `local_transform`, `mask_mode` off a mask; lengths in geometry, strokes,
+///   effects and `pivot` are at four places.
+pub const SNAPSHOT_VERSION: u32 = 23;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -89,28 +93,43 @@ pub struct PageSnapshot {
     pub mode: Option<String>,
 }
 
+/// One layer. A field absent from the JSON is at its default: `false`, `true`
+/// for `visible`, `1` for `opacity`, the identity for `local_transform`, empty,
+/// none, or for `world_transform` the same as `local_transform`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeSnapshot {
     pub id: String,
     pub kind: String,
     pub name: String,
-    /// The page this node is on (its own id for a page's root).
+    /// The page this node is on (its own id for a page's root). Kept on every
+    /// node: `get_node` answers one layer alone, and its page is not in it otherwise.
     pub page: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
     /// The artboard this node belongs to (its nearest artboard ancestor), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artboard: Option<String>,
-    /// Local transform coefficients `[a, b, c, d, e, f]`.
+    /// Local transform coefficients `[a, b, c, d, e, f]`, absent at the identity.
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
     pub local_transform: [f64; 6],
-    /// World transform coefficients `[a, b, c, d, e, f]`.
-    pub world_transform: [f64; 6],
+    /// World transform coefficients `[a, b, c, d, e, f]`, absent where they
+    /// equal `local_transform`; [`NodeSnapshot::world`] reads either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_transform: Option<[f64; 6]>,
     /// World-space, stroke-expanded bounds `[min_x, min_y, max_x, max_y]`, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_bounds: Option<[f64; 4]>,
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub visible: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
     /// Whether a resize of this node holds its aspect ratio. Not `locked`
     /// above, which says the layer refuses edits altogether.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub proportions_locked: bool,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
     pub opacity: f32,
     /// How the node mixes with what is beneath it, as the menu names it
     /// (`"Multiply"`, `"Pass through"`), absent at its kind's default: Pass
@@ -118,26 +137,32 @@ pub struct NodeSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<String>,
     /// Whether this node clips its children to its own frame. Only frames act
-    /// on it; it is reported for every node because the model carries it there.
+    /// on it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clip: bool,
     /// Whether this node is a mask for the siblings above it — it draws nothing,
     /// and its outline clips them. Not `clip` above, which is about children.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mask: bool,
-    /// *How* it masks: `"Shape"`, `"Alpha"` or `"Luminance"`, reported for every
-    /// node.
+    /// *How* it masks: `"Shape"`, `"Alpha"` or `"Luminance"`, on a mask only.
     ///
     /// A string, not the enum, so a name survives a mode being added; owned
     /// because the type is `Deserialize` too.
-    pub mask_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_mode: Option<String>,
     /// Where the node's transforms turn and mirror about, in its local space, or
     /// absent while it sits on the centre of its box. Reported as the resolved
     /// point, not the model's fraction-or-point enum.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pivot: Option<[f64; 2]>,
-    /// Kind-specific geometry (size, endpoints, text content, …).
+    /// Kind-specific geometry (size, endpoints, text content, …), absent on a
+    /// page, group or boolean, which have none of their own.
+    #[serde(default, skip_serializing_if = "Geometry::is_none")]
     pub geometry: Geometry,
     /// The fills, visible entries only, bottom first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fills: Vec<FillSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub strokes: Vec<StrokeSummary>,
     /// The effect stack (§5.3a), visible entries only, in compositing order — the
     /// same filter `fills` and `strokes` apply. Absent when empty.
@@ -191,6 +216,37 @@ pub struct NodeSnapshot {
     /// otherwise; absent where it is drawn as authored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub specified: Option<Specified>,
+}
+
+impl NodeSnapshot {
+    /// The world transform, which is `local_transform` where none is written.
+    pub fn world(&self) -> [f64; 6] {
+        self.world_transform.unwrap_or(self.local_transform)
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
+}
+
+fn identity() -> [f64; 6] {
+    Affine::IDENTITY.as_coeffs()
+}
+
+fn is_identity(v: &[f64; 6]) -> bool {
+    *v == identity()
 }
 
 /// One bound field and the variable it reads.
@@ -319,19 +375,23 @@ pub struct EffectSummary {
     pub hue: Option<f64>,
 }
 
-/// A node's kind-specific geometry, as drawn.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A node's kind-specific geometry, as drawn. Lengths and coordinates are at
+/// four places, like the transforms; ratios, counts and angles are as stored.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[expect(
     clippy::large_enum_variant,
     reason = "built once per read and serialized at once; boxing Text would only move its size"
 )]
 pub enum Geometry {
+    #[default]
     None,
     Rect {
         width: f64,
         height: f64,
-        /// Per corner, named so a reader need not know the positional order.
+        /// Per corner, named so a reader need not know the positional order;
+        /// absent when square-cornered.
+        #[serde(default, skip_serializing_if = "is_default")]
         corner_radii: RoundedRectRadii,
         /// `0..=1`, absent at 0 (circular corners).
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -397,6 +457,7 @@ pub enum Geometry {
         font_family: String,
         font_size: f64,
         weight: u16,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         italic: bool,
         /// `auto` (the font's own line height), `N%` of the font size, or `Npx`;
         /// a string because a bare number could report only one of the three modes.
@@ -440,6 +501,12 @@ pub enum Geometry {
         width: f64,
         height: f64,
     },
+}
+
+impl Geometry {
+    fn is_none(&self) -> bool {
+        matches!(self, Geometry::None)
+    }
 }
 
 /// One subpath of a path's anchors, as `set_point` numbers them.
@@ -702,6 +769,16 @@ fn node_snapshot(
     artboard: Option<NodeId>,
 ) -> NodeSnapshot {
     let id = node.id();
+    // The used local, not the specified one: `world_transform` below composes
+    // used locals, so a specified local would stop multiplying out to it once
+    // container layout places something. Rounded to the SVG writer's four places
+    // because platforms' maths libraries differ in the last digit.
+    let local_transform = res.used_local_of(node).as_coeffs().map(round4);
+    let world_transform = res
+        .world_transform(id)
+        .unwrap_or(Affine::IDENTITY)
+        .as_coeffs()
+        .map(round4);
     NodeSnapshot {
         id: id.to_wire(),
         kind: kind_name(node.kind()).to_string(),
@@ -710,16 +787,8 @@ fn node_snapshot(
         parent: node.parent().map(|p| p.to_wire()),
         children: node.children().iter().map(|c| c.to_wire()).collect(),
         artboard: artboard.map(|a| a.to_wire()),
-        // The used local, not the specified one: `world_transform` below composes
-        // used locals, so a specified local would stop multiplying out to it once
-        // container layout places something. Rounded to the SVG writer's four places
-        // because platforms' maths libraries differ in the last digit.
-        local_transform: res.used_local_of(node).as_coeffs().map(round4),
-        world_transform: res
-            .world_transform(id)
-            .unwrap_or(Affine::IDENTITY)
-            .as_coeffs()
-            .map(round4),
+        local_transform,
+        world_transform: (world_transform != local_transform).then_some(world_transform),
         world_bounds: res
             .world_bounds(id)
             .map(|b| [b.min_x(), b.min_y(), b.max_x(), b.max_y()].map(round4)),
@@ -733,11 +802,11 @@ fn node_snapshot(
             .map(|b| b.label().to_string()),
         clip: node.clip(),
         mask: node.mask(),
-        mask_mode: node.mask_mode().label().to_string(),
+        mask_mode: node.mask().then(|| node.mask_mode().label().to_string()),
         pivot: node.pivot().map(|p| {
             let local = ondin_core::local_box(doc, res, id).unwrap_or_default();
             let at = ondin_core::geometry::pivot_point(Some(p), local);
-            [at.x, at.y]
+            [at.x, at.y].map(round4)
         }),
         // Used, for `local_transform`'s reason: `world_bounds` is measured from it.
         geometry: geometry(res.used_kind_of(node)),
@@ -764,10 +833,10 @@ fn node_snapshot(
                 id: s.id,
                 index,
                 paint: paint_summary(doc, &doc.resolve_brush(id, &s.brush)),
-                width: match s.width_var {
+                width: round4(match s.width_var {
                     Some(v) => doc.stroke_width_drawn_in(doc.variables(), id, v),
                     None => s.width,
-                },
+                }),
             })
             .collect(),
         effects: doc
@@ -1044,9 +1113,9 @@ fn effect_summary(id: ondin_core::ItemId, e: &ondin_core::Effect) -> EffectSumma
         EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
             let (color, alpha) = hex(s.color);
             EffectSummary {
-                offset: Some([s.offset.x, s.offset.y]),
-                blur: Some(s.blur),
-                spread: Some(s.spread),
+                offset: Some([s.offset.x, s.offset.y].map(round4)),
+                blur: Some(round4(s.blur)),
+                spread: Some(round4(s.spread)),
                 color: Some(color),
                 opacity: Some(alpha),
                 blend: s.blends().then(|| s.blend.label().to_string()),
@@ -1057,11 +1126,11 @@ fn effect_summary(id: ondin_core::ItemId, e: &ondin_core::Effect) -> EffectSumma
             }
         }
         EffectKind::LayerBlur { radius } => EffectSummary {
-            blur: Some(*radius),
+            blur: Some(round4(*radius)),
             ..base("LayerBlur")
         },
         EffectKind::BackgroundBlur { radius } => EffectSummary {
-            blur: Some(*radius),
+            blur: Some(round4(*radius)),
             ..base("BackgroundBlur")
         },
         EffectKind::Filters(f) => EffectSummary {
@@ -1083,6 +1152,16 @@ fn round4(v: f64) -> f64 {
     }
     let r = (v * 1e4).round() / 1e4;
     if r == 0.0 { 0.0 } else { r }
+}
+
+/// Each corner of `r` at four places.
+fn radii4(r: &RoundedRectRadii) -> RoundedRectRadii {
+    RoundedRectRadii::new(
+        round4(r.top_left),
+        round4(r.top_right),
+        round4(r.bottom_right),
+        round4(r.bottom_left),
+    )
 }
 
 fn kind_name(kind: &NodeKind) -> &'static str {
@@ -1120,29 +1199,29 @@ fn geometry(kind: &NodeKind) -> Geometry {
             corner_radii,
             corner_smoothing,
         } => Geometry::Artboard {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
             corner_radii: (!ondin_core::geometry::is_square_cornered(corner_radii))
-                .then_some(*corner_radii),
+                .then(|| radii4(corner_radii)),
             corner_smoothing: *corner_smoothing,
         },
         NodeKind::Slice { size } => Geometry::Slice {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
         },
         NodeKind::Rect {
             size,
             corner_radii,
             corner_smoothing,
         } => Geometry::Rect {
-            width: size.width,
-            height: size.height,
-            corner_radii: *corner_radii,
+            width: round4(size.width),
+            height: round4(size.height),
+            corner_radii: radii4(corner_radii),
             corner_smoothing: *corner_smoothing,
         },
         NodeKind::Ellipse { size, arc } => Geometry::Ellipse {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
             arc: (!arc.is_default()).then_some(*arc),
         },
         NodeKind::Polygon {
@@ -1151,10 +1230,10 @@ fn geometry(kind: &NodeKind) -> Geometry {
             corner_radius,
             corner_smoothing,
         } => Geometry::Polygon {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
             sides: *sides,
-            corner_radius: *corner_radius,
+            corner_radius: round4(*corner_radius),
             corner_smoothing: *corner_smoothing,
         },
         NodeKind::Star {
@@ -1164,25 +1243,25 @@ fn geometry(kind: &NodeKind) -> Geometry {
             corner_radius,
             corner_smoothing,
         } => Geometry::Star {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
             points: *points,
             inner_ratio: *inner_ratio,
-            corner_radius: *corner_radius,
+            corner_radius: round4(*corner_radius),
             corner_smoothing: *corner_smoothing,
         },
         NodeKind::Line { end } => Geometry::Line {
-            end_x: end.x,
-            end_y: end.y,
+            end_x: round4(end.x),
+            end_y: round4(end.y),
         },
         NodeKind::Spiral { size, turns } => Geometry::Spiral {
-            width: size.width,
-            height: size.height,
+            width: round4(size.width),
+            height: round4(size.height),
             turns: *turns,
         },
         NodeKind::Arc { end, sweep } => Geometry::Arc {
-            end_x: end.x,
-            end_y: end.y,
+            end_x: round4(end.x),
+            end_y: round4(end.y),
             sweep: *sweep,
         },
         // The resolved outline spelled by the SVG writer (`svg::path_d`, four
@@ -1205,23 +1284,23 @@ fn geometry(kind: &NodeKind) -> Geometry {
         } => Geometry::Text {
             content: content.clone(),
             font_family: style.font_family.clone(),
-            font_size: style.font_size,
+            font_size: round4(style.font_size),
             weight: style.weight,
             italic: style.italic,
             line_height: match style.line_height {
                 None => "auto".to_string(),
-                Some(ondin_core::Length::Em(m)) => format!("{}%", m * 100.0),
-                Some(ondin_core::Length::Px(v)) => format!("{v}px"),
+                Some(ondin_core::Length::Em(m)) => format!("{}%", round4(m * 100.0)),
+                Some(ondin_core::Length::Px(v)) => format!("{}px", round4(v)),
             },
             color: style.color.map(hex8),
             sizing: match sizing {
                 ondin_core::TextSizing::Auto => TextSizingSummary::Auto,
                 ondin_core::TextSizing::AutoHeight(w) => {
-                    TextSizingSummary::AutoHeight { width: *w }
+                    TextSizingSummary::AutoHeight { width: round4(*w) }
                 }
                 ondin_core::TextSizing::Fixed(s) => TextSizingSummary::Fixed {
-                    width: s.width,
-                    height: s.height,
+                    width: round4(s.width),
+                    height: round4(s.height),
                 },
             },
             paragraph: paragraph.clone(),

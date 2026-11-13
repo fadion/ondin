@@ -48,8 +48,8 @@ fn rect_snapshot_has_world_data_and_paint() {
     );
     assert_eq!(rect.strokes.len(), 1);
     // World transform = artboard(10,10)+rect(20,20) translation => e=30, f=30.
-    assert_eq!(rect.world_transform[4], 30.0);
-    assert_eq!(rect.world_transform[5], 30.0);
+    assert_eq!(rect.world()[4], 30.0);
+    assert_eq!(rect.world()[5], 30.0);
     // Membership: the rect belongs to the artboard.
     assert_eq!(rect.artboard, Some(wire(f.artboard)));
     // World bounds present.
@@ -63,6 +63,65 @@ fn snapshot_round_trips_through_json() {
     let json = serde_json::to_string_pretty(&snap).unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();
     assert_eq!(snap, back);
+}
+
+/// A field away from its default is written and one at it is absent, and the
+/// absent ones read back as their defaults.
+/// flip: `mask_mode` written on every node → fails at the text's `mask_mode`.
+#[test]
+fn a_field_is_written_only_away_from_its_default() {
+    use ondin_core::{MaskMode, Operation, Resolved, Transaction};
+    let mut f = common::fixture();
+    let id = f.rect;
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetVisible { id, visible: false },
+            Operation::SetLocked { id, locked: true },
+            Operation::SetProportionsLocked { id, locked: true },
+            Operation::SetOpacity { id, opacity: 0.5 },
+            Operation::SetMask { id, mask: true },
+            Operation::SetMaskMode {
+                id,
+                mode: MaskMode::Alpha,
+            },
+        ]))
+        .expect("the rect away from every default");
+    f.res = Resolved::rebuild(&f.doc);
+    let snap = snapshot(&f.doc, &f.res);
+    let value = serde_json::to_value(&snap).unwrap();
+    let entry = |id: ondin_core::NodeId| {
+        value["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == wire(id))
+            .unwrap()
+            .clone()
+    };
+    let rect = entry(f.rect);
+    assert_eq!(rect["visible"], false, "{rect}");
+    assert_eq!(rect["locked"], true);
+    assert_eq!(rect["proportions_locked"], true);
+    assert_eq!(rect["opacity"], 0.5);
+    assert_eq!(rect["mask"], true);
+    assert_eq!(rect["mask_mode"], "Alpha");
+    let text = entry(f.text);
+    for key in [
+        "visible",
+        "locked",
+        "proportions_locked",
+        "opacity",
+        "mask",
+        "mask_mode",
+        "clip",
+        "fills",
+        "strokes",
+        "children",
+    ] {
+        assert!(text.get(key).is_none(), "the text writes `{key}`: {text}");
+    }
+    let back: Snapshot = serde_json::from_value(value).unwrap();
+    assert_eq!(back, snap, "an absent field reads back as its default");
 }
 
 #[test]
@@ -605,7 +664,7 @@ fn a_rotated_layers_numbers_are_written_at_four_places() {
         let numbers = node
             .local_transform
             .iter()
-            .chain(&node.world_transform)
+            .chain(node.world_transform.iter().flatten())
             .chain(node.world_bounds.iter().flatten());
         for &v in numbers {
             assert!(places(v) <= 4, "{} writes {v}", node.id);
@@ -1279,5 +1338,92 @@ fn a_texts_runs_paragraphs_and_block_read_back() {
         }),
         "{:?}",
         snap.warnings
+    );
+}
+
+/// A frame's subtree, read the way `get_node` with `subtree` answers it, stays
+/// within a byte budget: defaults and repeats are left out and lengths are
+/// written at four places.
+/// flips: `visible` serialised unconditionally → fails at the budget;
+/// `geometry` writing a rect's size unrounded → fails at four places.
+#[test]
+fn a_frames_subtree_stays_within_its_byte_budget() {
+    use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+    use ondin_core::{IdSource, NodeKind, Operation, Resolved, Transaction};
+
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xB0D6);
+    let (star, polygon, third) = (ids.mint(), ids.mint(), ids.mint());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: star,
+                parent: f.artboard,
+                index: 6,
+                kind: NodeKind::Star {
+                    size: Size::new(60.0, 60.0),
+                    points: 5,
+                    inner_ratio: 0.382,
+                    corner_radius: 0.0,
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((240.0, 20.0))),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: polygon,
+                parent: f.artboard,
+                index: 7,
+                kind: NodeKind::Polygon {
+                    size: Size::new(60.0, 60.0),
+                    sides: 6,
+                    corner_radius: 0.0,
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((310.0, 20.0))),
+                name: None,
+            },
+            // A width with float noise in its last digits.
+            Operation::CreateNode {
+                id: third,
+                parent: f.artboard,
+                index: 8,
+                kind: NodeKind::Rect {
+                    size: Size::new(0.1 + 0.2, 100.0 / 3.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((240.0, 120.0))),
+                name: None,
+            },
+        ]))
+        .expect("three more layers in the frame");
+    f.res = Resolved::rebuild(&f.doc);
+
+    let snap = snapshot(&f.doc, &f.res);
+    let by_id: std::collections::HashMap<&str, &ondin_export::snapshot::NodeSnapshot> =
+        snap.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let mut nodes = vec![by_id[wire(f.artboard).as_str()]];
+    let mut i = 0;
+    while i < nodes.len() {
+        for c in &nodes[i].children {
+            nodes.push(by_id[c.as_str()]);
+        }
+        i += 1;
+    }
+    assert_eq!(nodes.len(), 11, "the frame and its ten layers");
+    assert!(
+        matches!(
+            by_id[wire(third).as_str()].geometry,
+            Geometry::Rect { width, height, .. } if width == 0.3 && height == 33.3333
+        ),
+        "a length is written at four places"
+    );
+    let json = serde_json::json!({ "nodes": nodes }).to_string();
+    const BUDGET: usize = 3850;
+    assert!(
+        json.len() <= BUDGET,
+        "the subtree is {} bytes, past its {BUDGET}: {json}",
+        json.len()
     );
 }

@@ -1,5 +1,5 @@
 {
-  "snapshot_version": 22,
+  "snapshot_version": 23,
   "pages": [
     {
       "id": "601d:1",
@@ -22,45 +22,15 @@
       "kind": "root",
       "name": "Page 1",
       "page": "601d:1",
-      "parent": null,
       "children": [
         "601d:2"
-      ],
-      "artboard": null,
-      "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
-      "world_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
       ],
       "world_bounds": [
         10.0,
         10.0,
         410.0,
         330.0
-      ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
-      "geometry": {
-        "type": "None"
-      },
-      "fills": [],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:10",
@@ -68,16 +38,7 @@
       "name": "Rectangle 1",
       "page": "601d:1",
       "parent": "601d:9",
-      "children": [],
       "artboard": "601d:2",
-      "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
       "world_transform": [
         1.0,
         0.0,
@@ -92,24 +53,11 @@
         290.0,
         150.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
       "blend": "Multiply",
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Rect",
         "width": 40.0,
-        "height": 40.0,
-        "corner_radii": {
-          "top_left": 0.0,
-          "top_right": 0.0,
-          "bottom_right": 0.0,
-          "bottom_left": 0.0
-        }
+        "height": 40.0
       },
       "fills": [
         {
@@ -121,8 +69,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:11",
@@ -157,16 +104,6 @@
         110.0,
         240.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
-      "geometry": {
-        "type": "None"
-      },
       "fills": [
         {
           "id": "0:0",
@@ -177,8 +114,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:12",
@@ -186,16 +122,7 @@
       "name": "Rectangle 1",
       "page": "601d:1",
       "parent": "601d:11",
-      "children": [],
       "artboard": "601d:2",
-      "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
       "world_transform": [
         1.0,
         0.0,
@@ -210,23 +137,10 @@
         110.0,
         240.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Rect",
         "width": 80.0,
-        "height": 60.0,
-        "corner_radii": {
-          "top_left": 0.0,
-          "top_right": 0.0,
-          "bottom_right": 0.0,
-          "bottom_left": 0.0
-        }
+        "height": 60.0
       },
       "fills": [
         {
@@ -238,8 +152,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:13",
@@ -247,7 +160,6 @@
       "name": "Ellipse 1",
       "page": "601d:1",
       "parent": "601d:11",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -271,20 +183,11 @@
         135.0,
         250.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Ellipse",
         "width": 50.0,
         "height": 50.0
-      },
-      "fills": [],
-      "strokes": []
+      }
     },
     {
       "id": "601d:14",
@@ -292,7 +195,6 @@
       "name": "Text 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -316,53 +218,25 @@
         347.9434,
         282.5
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Text",
         "content": "Golden & <escaped>",
         "font_family": "Inter",
         "font_size": 18.0,
         "weight": 500,
-        "italic": false,
         "line_height": "125%",
         "sizing": {
           "type": "Auto"
         }
-      },
-      "fills": [],
-      "strokes": []
+      }
     },
     {
       "id": "601d:16",
       "kind": "root",
       "name": "Drafts",
       "page": "601d:16",
-      "parent": null,
       "children": [
         "601d:17"
-      ],
-      "artboard": null,
-      "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
-      "world_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
       ],
       "world_bounds": [
         0.0,
@@ -370,18 +244,6 @@
         120.0,
         80.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
-      "geometry": {
-        "type": "None"
-      },
-      "fills": [],
-      "strokes": [],
       "modes": [
         "601d:15"
       ]
@@ -392,44 +254,18 @@
       "name": "Sketch",
       "page": "601d:16",
       "parent": "601d:16",
-      "children": [],
-      "artboard": null,
-      "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
-      "world_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0
-      ],
       "world_bounds": [
         0.0,
         0.0,
         120.0,
         80.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
       "clip": true,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Artboard",
         "width": 120.0,
         "height": 80.0
-      },
-      "fills": [],
-      "strokes": []
+      }
     },
     {
       "id": "601d:18",
@@ -437,7 +273,6 @@
       "name": "Crop",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -461,20 +296,11 @@
         80.0,
         60.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Slice",
         "width": 60.0,
         "height": 40.0
-      },
-      "fills": [],
-      "strokes": []
+      }
     },
     {
       "id": "601d:19",
@@ -482,7 +308,6 @@
       "name": "Ring",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -506,13 +331,6 @@
         390.0,
         300.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Ellipse",
         "width": 50.0,
@@ -533,8 +351,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:2",
@@ -559,16 +376,7 @@
         "601d:24",
         "601d:14"
       ],
-      "artboard": null,
       "local_transform": [
-        1.0,
-        0.0,
-        0.0,
-        1.0,
-        10.0,
-        10.0
-      ],
-      "world_transform": [
         1.0,
         0.0,
         0.0,
@@ -582,13 +390,7 @@
         410.0,
         330.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
       "clip": true,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Artboard",
         "width": 400.0,
@@ -604,8 +406,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:20",
@@ -613,7 +414,6 @@
       "name": "Wedge",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -637,13 +437,6 @@
         370.0,
         160.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Ellipse",
         "width": 50.0,
@@ -664,8 +457,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:21",
@@ -699,13 +491,7 @@
         220.0,
         235.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
       "clip": true,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Artboard",
         "width": 70.0,
@@ -727,8 +513,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:22",
@@ -736,7 +521,6 @@
       "name": "Rectangle 1",
       "page": "601d:1",
       "parent": "601d:21",
-      "children": [],
       "artboard": "601d:21",
       "local_transform": [
         1.0,
@@ -760,23 +544,10 @@
         240.0,
         250.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Rect",
         "width": 50.0,
-        "height": 40.0,
-        "corner_radii": {
-          "top_left": 0.0,
-          "top_right": 0.0,
-          "bottom_right": 0.0,
-          "bottom_left": 0.0
-        }
+        "height": 40.0
       },
       "fills": [
         {
@@ -788,8 +559,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:23",
@@ -797,7 +567,6 @@
       "name": "Spiral 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -821,20 +590,12 @@
         91.0,
         307.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Spiral",
         "width": 60.0,
         "height": 56.0,
         "turns": 2.5
       },
-      "fills": [],
       "strokes": [
         {
           "id": "0:0",
@@ -854,7 +615,6 @@
       "name": "Arc 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -878,20 +638,12 @@
         181.0,
         311.2073
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Arc",
         "end_x": 70.0,
         "end_y": 0.0,
         "sweep": -120.0
       },
-      "fills": [],
       "strokes": [
         {
           "id": "0:0",
@@ -911,7 +663,6 @@
       "name": "Rounded",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -935,13 +686,6 @@
         121.25,
         81.25
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Rect",
         "width": 90.0,
@@ -1028,7 +772,6 @@
       "name": "Ellipse 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -1052,13 +795,6 @@
         220.0,
         75.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "pivot": [
         17.5,
         33.75
@@ -1095,8 +831,7 @@
             ]
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:5",
@@ -1104,7 +839,6 @@
       "name": "Polygon 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -1128,13 +862,6 @@
         313.0,
         93.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Polygon",
         "width": 60.0,
@@ -1172,7 +899,6 @@
       "name": "Star 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -1196,13 +922,6 @@
         380.0,
         90.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Star",
         "width": 60.0,
@@ -1221,8 +940,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:7",
@@ -1230,7 +948,6 @@
       "name": "Line 1",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -1254,19 +971,11 @@
         151.5,
         141.5
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Line",
         "end_x": 120.0,
         "end_y": 30.0
       },
-      "fills": [],
       "strokes": [
         {
           "id": "0:0",
@@ -1286,7 +995,6 @@
       "name": "Triangle",
       "page": "601d:1",
       "parent": "601d:2",
-      "children": [],
       "artboard": "601d:2",
       "local_transform": [
         1.0,
@@ -1310,13 +1018,6 @@
         210.0,
         150.523
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
-      "opacity": 1.0,
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
       "geometry": {
         "type": "Path",
         "svg": "M13.9811,4.1943 L40,12 L26.5677,38.8647 C26.0681,39.8638 25.0548,40.5026 23.9379,40.5226 C22.8211,40.5425 21.7856,39.9403 21.2507,38.9596 L6.9897,12.8144 C5.8248,10.6788 6.0647,8.0511 7.5971,6.1618 C9.1295,4.2724 11.6511,3.4953 13.9811,4.1943 Z",
@@ -1352,8 +1053,7 @@
             "alpha": 1.0
           }
         }
-      ],
-      "strokes": []
+      ]
     },
     {
       "id": "601d:9",
@@ -1387,19 +1087,8 @@
         290.0,
         150.0
       ],
-      "visible": true,
-      "locked": false,
-      "proportions_locked": false,
       "opacity": 0.6,
-      "blend": "Normal",
-      "clip": false,
-      "mask": false,
-      "mask_mode": "Shape",
-      "geometry": {
-        "type": "None"
-      },
-      "fills": [],
-      "strokes": []
+      "blend": "Normal"
     }
   ],
   "warnings": []

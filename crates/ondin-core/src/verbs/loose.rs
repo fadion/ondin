@@ -2,17 +2,20 @@
 //! expansion into the model's own serde shapes.
 //!
 //! A colour under `Solid`, `color` or `Color`, or a gradient stop's `color`, may
-//! be `"#rgb"`, `"#rgba"`, `"#rrggbb"` or `"#rrggbbaa"`. A fill may be a bare
-//! colour; a fill's or stroke's `brush` may be one; and a fill or stroke leaves out
-//! what a new one has (shown, mitre join, butt cap, no dashes). A text kind's
-//! `style` leaves out what [`TextStyle::default`](crate::TextStyle) has.
+//! be `"#rgb"`, `"#rgba"`, `"#rrggbb"` or `"#rrggbbaa"`. A fill or stroke may be
+//! a bare colour; its `brush` may be one, or be written `color` with an `opacity`
+//! folded in; and it leaves out what a new one has (shown, 1px wide, mitre join,
+//! butt cap, no dashes). A text kind's `style` leaves out what
+//! [`TextStyle::default`](crate::TextStyle) has, and its `sizing` is `Auto` unless
+//! given; a star's points and inner ratio are 5 and 0.382 unless given.
 //!
 //! What `get_node` and CSS write is taken too: a length as `"22px"`, `"1.2em"` or
 //! `"auto"`; a sizing as `{"type": "AutoHeight", "width": w}`; a fill as
 //! `{"paint": {"type": "Solid", "color", "alpha"}}`; an effect flat, its kind
 //! `DropShadow` or `drop_shadow`, its `opacity` folded into its colour, shown
 //! unless it says not; a rectangle's corners left out (square) or as one number;
-//! padding as one number and `gap` for both gaps; a path as SVG path data; a
+//! padding as one, two, three or four numbers and `gap` for both gaps; a path as
+//! SVG path data, a `geometry` as path data alone; a line's end as `[x, y]`; a
 //! bound corner by its name.
 //!
 //! [`tighten`] writes the short forms only where [`loosen`] gives back the same
@@ -26,9 +29,10 @@ use serde_json::{Map, Value};
 const COLOUR_KEYS: [&str; 3] = ["Solid", "color", "Color"];
 
 /// What a stroke has unless it says otherwise, as its serde shape spells it.
-fn stroke_defaults() -> [(&'static str, Value); 5] {
+fn stroke_defaults() -> [(&'static str, Value); 6] {
     [
         ("visible", Value::Bool(true)),
+        ("width", Value::from(1.0)),
         ("join", Value::from("Miter")),
         ("cap", Value::from("Butt")),
         ("dashes", Value::Array(Vec::new())),
@@ -75,6 +79,16 @@ fn nearest_hex(components: &[Value]) -> Option<String> {
         255 => format!("#{r:02x}{g:02x}{b:02x}"),
         _ => format!("#{r:02x}{g:02x}{b:02x}{a:02x}"),
     })
+}
+
+/// A colour as [`nearest_hex`] writes it.
+fn nearest_hex_of(c: peniko::Color) -> String {
+    let components: Vec<Value> = c
+        .components
+        .iter()
+        .map(|&f| Value::from(f64::from(f)))
+        .collect();
+    nearest_hex(&components).unwrap_or_else(|| "#000000".into())
 }
 
 /// The keys whose value is a [`Length`](crate::Length), as fields and as
@@ -130,7 +144,7 @@ fn corner_index(name: &str) -> Option<usize> {
 }
 
 /// `CamelCase` as `snake_case`, how an effect's `type` is spelled.
-fn snake(name: &str) -> String {
+pub(crate) fn snake(name: &str) -> String {
     let mut out = String::new();
     for (i, c) in name.chars().enumerate() {
         if c.is_ascii_uppercase() {
@@ -230,8 +244,19 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
             let n = n.clone();
             *v = Value::Array(vec![Value::Number(n); 4]);
         }
+        ("padding", Value::Array(sides)) if matches!(sides.len(), 2 | 3) => {
+            // CSS's shorthand: [vertical, horizontal] or [top, horizontal, bottom].
+            let [top, right, bottom] = match sides.as_slice() {
+                [a, b] => [a.clone(), b.clone(), a.clone()],
+                [a, b, c] => [a.clone(), b.clone(), c.clone()],
+                _ => unreachable!(),
+            };
+            *v = Value::Array(vec![top, right.clone(), bottom, right]);
+        }
         ("corner_radii", Value::Number(n)) => *v = corners(n.as_f64().unwrap_or(0.0)),
         ("Path", Value::String(s)) => *v = serde_json::json!({ "path": s.clone() }),
+        // A geometry given as path data alone is a path's outline.
+        ("geometry", Value::String(s)) => *v = serde_json::json!({ "Path": { "path": s.clone() } }),
         _ => {}
     }
     if let Value::Object(map) = v {
@@ -239,7 +264,16 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
             "Rect" => {
                 map.entry("corner_radii").or_insert_with(|| corners(0.0));
             }
-            "Path" => loosen_path(map),
+            "Star" => {
+                map.entry("points").or_insert(Value::from(5));
+                map.entry("inner_ratio").or_insert(Value::from(0.382));
+            }
+            "Path" => {
+                loosen_path(map);
+                // A path patch carries its per-anchor radii; none is no rounding.
+                map.entry("corner_radii")
+                    .or_insert_with(|| Value::Array(Vec::new()));
+            }
             "style" => complete_style(map),
             "Flex" | "Grid" => {
                 if let Some(gap) = map.remove("gap") {
@@ -288,6 +322,7 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
             }
             if key == "Text" {
                 loosen_text_style(map);
+                map.entry("sizing").or_insert_with(|| Value::from("Auto"));
             }
         }
         _ => {}
@@ -297,9 +332,7 @@ pub(crate) fn loosen(key: &str, v: &mut Value) {
 /// A fill or stroke written short: a bare colour, a colour as its `brush`, or
 /// without the fields a new one has.
 fn loosen_paint(item: &mut Value, stroke: bool) {
-    if let Value::String(s) = item
-        && !stroke
-    {
+    if let Value::String(s) = item {
         let brush = std::mem::take(s);
         *item = serde_json::json!({ "brush": brush });
     }
@@ -309,6 +342,21 @@ fn loosen_paint(item: &mut Value, stroke: bool) {
     // As `get_node` writes one: `{"id", "index", "paint": {"type": "Solid", …}}`.
     map.remove("id");
     map.remove("index");
+    // As CSS and other tools write one: the colour under `color`, an `opacity`
+    // folded into its alpha.
+    if !map.contains_key("brush")
+        && let Some(c) = map.remove("color")
+    {
+        map.insert("brush".into(), c);
+    }
+    if let Some(Value::String(s)) = map.get("brush")
+        && let Some(c) = hex_colour(s)
+        && let Some(o) = map.get("opacity").and_then(Value::as_f64)
+    {
+        let c = nearest_hex_of(c.multiply_alpha(o as f32));
+        map.remove("opacity");
+        map.insert("brush".into(), Value::String(c));
+    }
     if let Some(Value::Object(paint)) = map.get("paint")
         && paint.get("type").and_then(Value::as_str) == Some("Solid")
         && let Some(c) = paint
@@ -393,6 +441,27 @@ pub(crate) fn tighten(key: &str, v: &mut Value) {
                 )
             {
                 *v = Value::String(format!("{n}{suffix}"));
+                return;
+            }
+            if key == "corner_radii"
+                && map.len() == 4
+                && let Some(r) = map.get("top_left").and_then(Value::as_f64)
+                && ["top_right", "bottom_right", "bottom_left"]
+                    .iter()
+                    .all(|k| map.get(*k).and_then(Value::as_f64) == Some(r))
+            {
+                *v = Value::from(r);
+                return;
+            }
+            // A line's or an arc's end as `[x, y]`, which serde reads as the point.
+            if key == "end"
+                && map.len() == 2
+                && let (Some(x), Some(y)) = (
+                    map.get("x").and_then(Value::as_f64),
+                    map.get("y").and_then(Value::as_f64),
+                )
+            {
+                *v = serde_json::json!([x, y]);
                 return;
             }
             if key == "Path"

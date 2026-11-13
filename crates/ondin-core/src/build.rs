@@ -698,8 +698,8 @@ pub fn centred_on(
     })
 }
 
-/// The `SetTransform` that puts the left and top of `instance`'s box, just
-/// inserted by `tx`, at `x`, `y` in its parent's space, measured as
+/// The `SetTransform` that puts the left and top of `instance`'s box (any layer
+/// `tx` just inserted), at `x`, `y` in its parent's space, measured as
 /// [`centred_on`] measures; an edge not given stays where it is.
 pub fn cornered_at(
     doc: &Document,

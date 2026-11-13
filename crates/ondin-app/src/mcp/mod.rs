@@ -2031,8 +2031,11 @@ mod tests {
         let args = json!({ "nodes": [frame.to_wire()] });
         let out = call(&mut engine, &mut docs, 1, "duplicate", args);
         let copy = ok(&out)["created"][0].as_str().unwrap().to_owned();
-        let kind = ondin_core::verbs::example("NodeKind").unwrap();
-        let kind: ondin_core::NodeKind = serde_json::from_value(kind).unwrap();
+        let kind = ondin_core::NodeKind::Rect {
+            size: ondin_core::kurbo::Size::new(120.0, 80.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(8.0),
+            corner_smoothing: 0.0,
+        };
         let ops = (0..CHANGED_LISTED + 5)
             .map(|i| ondin_core::Operation::CreateNode {
                 id: docs.session.ids.mint(),

@@ -598,9 +598,10 @@ fn a_model_argument_is_refused_with_its_path() {
         "insert_subtree",
         json!({ "parent": page.to_wire(), "tree": typo }),
     );
-    assert_eq!(
-        why, "at `display.Flex.gapp`: no such field",
-        "a field it does not have"
+    assert!(
+        why.starts_with("at `display.Flex.gapp`: no such field; fields there include")
+            && why.contains("`gap`"),
+        "a field it does not have, with the ones there are: {why}"
     );
     let text = json!({ "Text": { "content": "Hi", "sizing": { "AutoHeight": { "w": 1 } } } });
     let bad =

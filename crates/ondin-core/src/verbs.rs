@@ -217,7 +217,19 @@ fn loosened<'v>(p: &Param, v: &'v Value) -> std::borrow::Cow<'v, Value> {
                 }
                 unlike(&mut v);
             }
+            // Some clients send a parameter with no schema type as JSON text.
+            if let Value::String(s) = &v
+                && model != "PropValue"
+                && let Ok(parsed) = serde_json::from_str::<Value>(s.trim())
+                && (parsed.is_object() || parsed.is_array() || parsed.is_string())
+            {
+                v = parsed;
+            }
             loose::loosen(model_key(model, p.name), &mut v);
+            // What `settle` puts right reaches the verb, not only the check.
+            if let Ok(settled) = settled_model(model, &v) {
+                v = settled;
+            }
             std::borrow::Cow::Owned(v)
         }
         _ => std::borrow::Cow::Borrowed(v),
@@ -438,34 +450,65 @@ fn check_kind(kind: ParamKind, v: &Value) -> Result<(), String> {
 /// Whether `v`, in its own shape or the short forms, reads as the model type
 /// `model` names (a [`ParamKind::Model`]'s name), or why not.
 pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
-    fn reads<T: serde::de::DeserializeOwned>(v: &Value) -> Result<(), String> {
-        read_model::<T>(v).map(|_| ())
-    }
+    settled_model(model, v).map(|_| ())
+}
+
+/// `v` in the model's own shape: its short forms expanded and the slips
+/// [`settle`] puts right put right, or why it does not read as the model.
+fn settled_model(model: &str, v: &Value) -> Result<Value, String> {
     let mut loose = v.clone();
     if model != "DtcgFile" {
         loose::loosen(model_key(model, ""), &mut loose);
     }
     let v = &loose;
+    macro_rules! reads {
+        ($t:ty) => {
+            settle::<$t>(model, v.clone())
+        };
+    }
+    let checked = |r: Result<(), String>| r.map(|()| v.clone());
     match model {
-        "Affine" => reads::<Affine>(v),
-        "BlockStyle" => reads::<BlockStyle>(v),
-        "CharSpans" => reads::<CharSpans>(v),
-        "Display" => reads::<Display>(v),
-        "GeometryPatch" => reads::<GeometryPatch>(v),
-        "Insets" => reads::<Insets>(v),
-        "LayoutItem" => reads::<LayoutItem>(v),
-        "NodeKind" => reads::<NodeKind>(v),
-        "ParagraphStyle" => reads::<ParagraphStyle>(v),
-        "Pivot" => reads::<Pivot>(v),
-        "TextStyle" => reads::<TextStyle>(v),
-        "[CharAttr]" => reads::<Vec<CharAttr>>(v),
-        "[ParaAttr]" => reads::<Vec<ParaAttr>>(v),
-        "Cell" => reads::<Cell>(v),
-        "StyleValue" => reads::<StyleInput>(v),
-        "BoundField" => reads::<build::BoundField>(v),
-        "Color" => reads::<peniko::Color>(v),
-        "[Hex]" => reads::<Vec<String>>(v),
-        "Scope" => reads::<Vec<String>>(v),
+        "Affine" => reads!(Affine),
+        "BlockStyle" => reads!(BlockStyle),
+        "CharSpans" => reads!(CharSpans),
+        "Display" => reads!(Display),
+        "GeometryPatch" => reads!(GeometryPatch),
+        "Insets" => reads!(Insets),
+        "LayoutItem" => reads!(LayoutItem),
+        "NodeKind" => reads!(NodeKind),
+        "ParagraphStyle" => reads!(ParagraphStyle),
+        "Pivot" => reads!(Pivot),
+        "TextStyle" => reads!(TextStyle),
+        "[CharAttr]" => reads!(Vec<CharAttr>),
+        "[ParaAttr]" => reads!(Vec<ParaAttr>),
+        "Cell" => reads!(Cell),
+        "StyleValue" => reads!(StyleInput),
+        "BoundField" => reads!(build::BoundField),
+        "Color" => reads!(peniko::Color),
+        "[Hex]" => reads!(Vec<String>),
+        "Scope" => reads!(Vec<String>),
+        "Tree" => reads!(Tree),
+        "[Effect]" => reads!(Vec<Effect>),
+        "[ExportSpec]" => reads!(Vec<ExportSpec>),
+        "[Fill]" => reads!(Vec<Fill>),
+        "[Stroke]" => reads!(Vec<Stroke>),
+        "ChartTable" => reads!(crate::chart::Table),
+        "[Name]" => reads!(Vec<String>),
+        // Patches, whose nulls reset what they name (`patched`): read without
+        // them, kept with them.
+        "ChartMapping" => {
+            checked(read_model::<crate::chart::Mapping>(&without_nulls(v)).map(|_| ()))
+        }
+        "ChartOptions" => {
+            checked(read_model::<crate::chart::Options>(&without_nulls(v)).map(|_| ()))
+        }
+        other => checked(check_other(other, v)),
+    }
+}
+
+/// Whether `v` is the model `model` names that no serde type reads, or why not.
+fn check_other(model: &str, v: &Value) -> Result<(), String> {
+    match model {
         // A list of node ids that may be empty, where `Nodes` may not.
         "[Node]" => match v {
             Value::Array(list) => list.iter().try_for_each(|v| wire(v).map(|_| ())),
@@ -475,15 +518,6 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
             Value::Bool(_) | Value::String(_) => Ok(()),
             _ => Err("expected true, false or a string".into()),
         },
-        "Tree" => reads::<Tree>(v),
-        "[Effect]" => reads::<Vec<Effect>>(v),
-        "[ExportSpec]" => reads::<Vec<ExportSpec>>(v),
-        "[Fill]" => reads::<Vec<Fill>>(v),
-        "[Stroke]" => reads::<Vec<Stroke>>(v),
-        "ChartTable" => reads::<crate::chart::Table>(v),
-        // Patches, whose nulls reset what they name (`patched`).
-        "ChartMapping" => reads::<crate::chart::Mapping>(&without_nulls(v)),
-        "ChartOptions" => reads::<crate::chart::Options>(&without_nulls(v)),
         // MCP's own tools: their handlers read the rest.
         "KitModeMap" if v.is_object() => Ok(()),
         "KitModeMap" => Err("expected an object of mode ids".into()),
@@ -502,7 +536,6 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
         "Region" => Err("expected [x, y, w, h]".into()),
         "Props" | "Args" if v.is_object() => Ok(()),
         "Props" | "Args" => Err("expected an object".into()),
-        "[Name]" => reads::<Vec<String>>(v),
         _ => Err(format!("no model type is called `{model}`")),
     }
 }
@@ -511,6 +544,31 @@ pub fn check_model(model: &str, v: &Value) -> Result<(), String> {
 /// serde refused, or of a field `T` has no place for, which serde alone would
 /// drop without a word (`Flex { gap }` laid out with no gap).
 pub(crate) fn read_model<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, String> {
+    attempt(v).map_err(|miss| miss.said(v))
+}
+
+/// Where and why a value did not read as its model type.
+struct Miss {
+    steps: Vec<Option<Step>>,
+    /// A field the type has no place for, rather than a value serde refused.
+    unknown_field: bool,
+    why: String,
+}
+
+impl Miss {
+    /// The refusal as [`read_model`] words it, its path written against `v`.
+    fn said(&self, v: &Value) -> String {
+        let path = json_path(v, self.steps.clone());
+        match (path.is_empty(), self.unknown_field) {
+            (_, true) => format!("at `{path}`: no such field"),
+            (true, false) => self.why.clone(),
+            (false, false) => format!("at `{path}`: {}", self.why),
+        }
+    }
+}
+
+/// `v` read as a `T`, or where and why not.
+fn attempt<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, Miss> {
     let mut unknown = Vec::new();
     let mut note = |path: serde_ignored::Path<'_>| unknown.push(ignored_steps(&path));
     let de = serde_ignored::Deserializer::new(v, &mut note);
@@ -524,15 +582,240 @@ pub(crate) fn read_model<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T,
                 Segment::Unknown => None,
             }
         });
-        match json_path(v, steps.collect()) {
-            p if p.is_empty() => e.into_inner().to_string(),
-            p => format!("at `{p}`: {}", e.into_inner()),
+        Miss {
+            steps: steps.collect(),
+            unknown_field: false,
+            why: e.into_inner().to_string(),
         }
     })?;
     match unknown.into_iter().next() {
         None => Ok(t),
-        Some(steps) => Err(format!("at `{}`: no such field", json_path(v, steps))),
+        Some(steps) => Err(Miss {
+            steps,
+            unknown_field: true,
+            why: String::new(),
+        }),
     }
+}
+
+/// `v` as a `T` reads it once the slips an agent makes are put right: an enum
+/// word in another case or in kebab-case (`center`, `space-between`), a field in
+/// camelCase or kebab-case (`fontSize`). Refused with the form to write when a
+/// slip is not one of those.
+fn settle<T: serde::de::DeserializeOwned>(model: &str, mut v: Value) -> Result<Value, String> {
+    // Each repair fixes one place, so a value has at most a handful.
+    for _ in 0..64 {
+        match attempt::<T>(&v) {
+            Ok(_) => return Ok(v),
+            Err(miss) => {
+                if !repair(&mut v, &miss) {
+                    return Err(explain(model, &v, &miss));
+                }
+            }
+        }
+    }
+    read_model::<T>(&v).map(|_| v)
+}
+
+/// A word reduced to what tells variants and fields apart: no case, no `-`, `_`
+/// or spaces, no quotes a client wrapped it in.
+fn plain(word: &str) -> String {
+    word.chars()
+        .filter(|c| !matches!(c, '-' | '_' | ' ' | '"'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The words of the model's own variants an agent writes by another name.
+fn alias(plain: &str) -> &str {
+    match plain {
+        "frame" => "artboard",
+        other => other,
+    }
+}
+
+/// `v`'s value at `steps`, an unnamed step taken as an object's one key.
+fn walk_mut<'v>(mut at: &'v mut Value, steps: &[Option<Step>]) -> Option<&'v mut Value> {
+    for step in steps {
+        at = match (step, at) {
+            (Some(Step::Key(k)), Value::Object(map)) => map.get_mut(k)?,
+            (Some(Step::Index(i)), Value::Array(list)) => list.get_mut(*i)?,
+            (None, Value::Object(map)) if map.len() == 1 => map.values_mut().next()?,
+            _ => return None,
+        };
+    }
+    Some(at)
+}
+
+/// Put right the slip `miss` names in `v`; whether anything changed.
+fn repair(v: &mut Value, miss: &Miss) -> bool {
+    if miss.unknown_field {
+        let Some((Some(Step::Key(key)), above)) = miss.steps.split_last() else {
+            return false;
+        };
+        let snake = loose::snake(&key.replace(['-', ' '], "_")).replace("__", "_");
+        let Some(Value::Object(map)) = walk_mut(v, above) else {
+            return false;
+        };
+        // The written field wins over one the short forms filled in by default.
+        if snake == *key {
+            return false;
+        }
+        let Some(value) = map.remove(key) else {
+            return false;
+        };
+        map.insert(snake, value);
+        return true;
+    }
+    let Some(rest) = miss.why.strip_prefix("unknown variant `") else {
+        return false;
+    };
+    // serde writes the refused word and then the ones it takes, each in backticks.
+    let mut words = rest.split('`').step_by(2);
+    let Some(bad) = words.next() else {
+        return false;
+    };
+    let wanted = alias(&plain(bad)).to_owned();
+    let mut hits = words.filter(|w| plain(w) == wanted);
+    let (Some(good), None) = (hits.next(), hits.next()) else {
+        return false;
+    };
+    match walk_mut(v, &miss.steps) {
+        Some(at @ Value::String(_)) if at.as_str() == Some(bad) => {
+            *at = Value::from(good);
+            true
+        }
+        Some(Value::Object(map)) if map.contains_key(bad) => {
+            let inner = map.remove(bad).unwrap_or(Value::Null);
+            map.insert(good.to_owned(), inner);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The refusal for a slip [`repair`] cannot put right, with the form to write:
+/// the variant's own form when one was written without its fields, the fields
+/// there are when one is unknown, else the model's example.
+fn explain(model: &str, v: &Value, miss: &Miss) -> String {
+    let said = miss.said(v);
+    let compact = |e: &Value| serde_json::to_string(e).unwrap_or_default();
+    let named = match miss.steps.last() {
+        Some(Some(Step::Key(k))) => Some(k.clone()),
+        _ => walk_ref(v, &miss.steps)
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    };
+    if miss.unknown_field {
+        let above = &miss.steps[..miss.steps.len().saturating_sub(1)];
+        // The nearest field holding a model of its own reads that model's example,
+        // which shows its fields filled in.
+        let nested = above.iter().enumerate().rev().find_map(|(i, s)| match s {
+            Some(Step::Key(k)) => field_model(k).map(|m| (m, &above[i + 1..])),
+            _ => None,
+        });
+        let (model, above) = nested.unwrap_or((model, above));
+        let fields = example(model)
+            .and_then(|e| walk_ref(&e, above).cloned())
+            .and_then(|e| match e {
+                Value::Object(map) => Some(map.keys().cloned().collect::<Vec<_>>()),
+                _ => None,
+            });
+        return match fields {
+            Some(f) if !f.is_empty() => {
+                format!("{said}; fields there include `{}`", f.join("`, `"))
+            }
+            _ => said,
+        };
+    }
+    let without_fields = [
+        "unit variant",
+        "expected struct variant",
+        "expected newtype variant",
+    ]
+    .iter()
+    .any(|w| miss.why.contains(w));
+    if without_fields && let Some(form) = named.as_deref().and_then(|n| kind_example(&plain(n))) {
+        return format!("{said}; write it with its fields, as `{}`", compact(&form));
+    }
+    match example(model) {
+        Some(e) if miss.why.contains("single key") => {
+            format!("{said}: one key naming the variant, as `{}`", compact(&e))
+        }
+        Some(e) if miss.why.contains("unknown variant") || miss.why.contains("missing field") => {
+            format!("{said}; for example `{}`", compact(&e))
+        }
+        _ => said,
+    }
+}
+
+/// The model a field of that name holds, wherever it sits.
+fn field_model(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "display" => "Display",
+        "item" => "LayoutItem",
+        "style" | "text_style" => "TextStyle",
+        "paragraph" => "ParagraphStyle",
+        "block" => "BlockStyle",
+        "insets" => "Insets",
+        _ => return None,
+    })
+}
+
+/// `v`'s value at `steps`, as [`walk_mut`] finds it.
+fn walk_ref<'v>(mut at: &'v Value, steps: &[Option<Step>]) -> Option<&'v Value> {
+    for step in steps {
+        at = match (step, at) {
+            (Some(Step::Key(k)), Value::Object(map)) => map.get(k)?,
+            (Some(Step::Index(i)), Value::Array(list)) => list.get(*i)?,
+            (None, Value::Object(map)) if map.len() == 1 => map.values().next()?,
+            _ => return None,
+        };
+    }
+    Some(at)
+}
+
+/// Component properties as a refusal lists them: each name quoted, with its kind.
+fn listed_props(props: Vec<&crate::variant::Property>) -> String {
+    props
+        .iter()
+        .map(|p| {
+            let kind = format!("{:?}", p.kind).to_lowercase();
+            format!("\"{}\" ({kind})", p.name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Move `id`, which `tx` inserts, so its box's left and top land on the verb's
+/// `x` and `y` in its parent; an edge not given stays where it is.
+fn place_corner(doc: &Document, a: &Args<'_>, tx: &mut Transaction, id: NodeId) {
+    let (x, y) = (a.number("x"), a.number("y"));
+    if (x.is_some() || y.is_some())
+        && let Some(op) = build::cornered_at(doc, tx, id, x, y)
+    {
+        tx.0.push(op);
+    }
+}
+
+/// A layer kind written with its fields, by the kind's name reduced by
+/// [`plain`]: what an agent that wrote `"Ellipse"` alone is shown.
+fn kind_example(plain: &str) -> Option<Value> {
+    use serde_json::json;
+    let size = json!({ "width": 120, "height": 80 });
+    Some(match alias(plain) {
+        "artboard" => json!({ "Artboard": { "size": size } }),
+        "rect" => json!({ "Rect": { "size": size, "corner_radii": 8 } }),
+        "ellipse" => json!({ "Ellipse": { "size": size } }),
+        "polygon" => json!({ "Polygon": { "size": size, "sides": 6 } }),
+        "star" => json!({ "Star": { "size": size, "points": 5 } }),
+        "line" => json!({ "Line": { "end": [120, 0] } }),
+        "arc" => json!({ "Arc": { "end": [120, 0], "sweep": 90 } }),
+        "spiral" => json!({ "Spiral": { "size": size, "turns": 3 } }),
+        "path" => json!({ "Path": { "path": "M0,0 L120,0 L60,80 Z" } }),
+        "text" => json!({ "Text": { "content": "Hello", "style": { "font_size": 16 } } }),
+        _ => return None,
+    })
 }
 
 /// One step down a JSON value: a member by its key or an item by its place.
@@ -608,7 +891,6 @@ fn without_nulls(v: &Value) -> Value {
 /// needs its `corner_radii`, an image brush its `sampler`). `None` for a name no
 /// parameter uses.
 pub fn example(model: &str) -> Option<Value> {
-    use crate::container::Flex;
     use crate::effect::{EffectKind, Shadow};
     use crate::export::{ExportFormat, ExportScale};
     use crate::typography::CharAttr;
@@ -631,7 +913,6 @@ pub fn example(model: &str) -> Option<Value> {
         brush: crate::image::image_brush(crate::image::ImageId("<add_image's id>".into())).into(),
         visible: true,
     };
-    let flex = Display::Flex(Flex::default());
     Some(match model {
         "Affine" => json(&Affine::translate((40.0, 24.0))),
         "BlockStyle" => json(&BlockStyle::default()),
@@ -640,14 +921,35 @@ pub fn example(model: &str) -> Option<Value> {
             spans.set(0..5, CharAttr::Weight(700), &TextStyle::default());
             json(&spans)
         }
-        "Display" => json(&flex),
+        // Filled in, since a default flex writes as `{}` and shows no field.
+        "Display" => serde_json::json!({ "Flex": {
+            "direction": "Row",
+            "align_items": "Center",
+            "justify_content": "SpaceBetween",
+            "gap": 12,
+            "padding": [16, 24],
+        } }),
         "GeometryPatch" => json(&GeometryPatch::Size(Size::new(200.0, 100.0))),
         "Insets" => json(&Insets::default()),
-        "LayoutItem" => json(&LayoutItem::default()),
+        "LayoutItem" => serde_json::json!({
+            "width": { "Px": 320 },
+            "height": "Auto",
+            "grow": 1,
+            "align_self": "Center",
+        }),
         "NodeKind" => json(&rect),
         "ParagraphStyle" => json(&ParagraphStyle::default()),
         "Pivot" => json(&Pivot::Normalized(Vec2::new(0.5, 0.5))),
-        "TextStyle" => json(&TextStyle::default()),
+        "TextStyle" => serde_json::json!({
+            "font_family": "Inter",
+            "font_size": 16,
+            "weight": 600,
+            "italic": false,
+            "line_height": "22px",
+            "letter_spacing": "-0.2px",
+            "color": "#12352a",
+            "case": "Upper",
+        }),
         "[CharAttr]" => json(&vec![
             CharAttr::Weight(700),
             CharAttr::Size(24.0),
@@ -746,8 +1048,127 @@ pub fn find(name: &str) -> Option<&'static Verb> {
 /// Check `args` against the verb called `name` and answer its edit.
 pub fn call(ctx: &mut Ctx<'_>, name: &str, args: &Value) -> Result<Done, VerbError> {
     let verb = find(name).ok_or_else(|| VerbError::Unknown(name.to_owned()))?;
-    let args = Args::check(verb, args)?;
+    let args = by_names(ctx.doc, verb, args)?;
+    let args = Args::check(verb, &args)?;
     (verb.run)(ctx, &args)
+}
+
+/// `args` with each variable, style, collection or mode given by its name
+/// taken as its id, and a variable's `value` given bare (`"#ff7a1a"`, `16`)
+/// written as the cell of the variable's kind.
+fn by_names(doc: &Document, verb: &'static Verb, args: &Value) -> Result<Value, VerbError> {
+    let mut args = args.clone();
+    let Value::Object(map) = &mut args else {
+        return Ok(args);
+    };
+    for p in verb.params {
+        let ParamKind::Id(what) = p.kind else {
+            continue;
+        };
+        let Some(Value::String(name)) = map.get(p.name) else {
+            continue;
+        };
+        if NodeId::from_wire(name).is_some() {
+            continue;
+        }
+        let id = id_named(doc, what, name).map_err(|why| VerbError::Invalid {
+            verb: verb.name,
+            param: p.name,
+            why,
+        })?;
+        map.insert(p.name.into(), id);
+    }
+    if let Some(value) = map.get("value")
+        && !value.is_object()
+        && !value.is_null()
+        && verb
+            .params
+            .iter()
+            .any(|p| p.kind == ParamKind::Model("Cell"))
+    {
+        let kind = match map.get("kind").and_then(Value::as_str) {
+            Some(k) => Some(k.to_owned()),
+            None => map
+                .get("variable")
+                .and_then(|v| serde_json::from_value::<crate::variable::VarId>(v.clone()).ok())
+                .and_then(|id| doc.variables().get(id))
+                .and_then(|var| serde_json::to_value(var.kind).ok())
+                .and_then(|k| k.as_str().map(str::to_owned)),
+        };
+        if let Some(kind) = kind {
+            let cell = serde_json::json!({ kind: value.clone() });
+            map.insert("value".into(), cell);
+        }
+    }
+    Ok(args)
+}
+
+/// The id of the `what` (variable, style, collection, mode) called `name`, or
+/// why there is not exactly one.
+fn id_named(doc: &Document, what: &str, name: &str) -> Result<Value, String> {
+    let vars = doc.variables();
+    let named: Vec<(String, Value)> = match what {
+        "variable" => vars
+            .iter()
+            .map(|v| (v.name.clone(), serde_json::to_value(v.id)))
+            .map(|(n, id)| (n, id.unwrap_or_default()))
+            .collect(),
+        "style" => doc
+            .styles()
+            .iter()
+            .map(|s| {
+                (
+                    s.name.clone(),
+                    serde_json::to_value(s.id).unwrap_or_default(),
+                )
+            })
+            .collect(),
+        "collection" => vars
+            .collections()
+            .iter()
+            .map(|c| {
+                (
+                    c.name.clone(),
+                    serde_json::to_value(c.id).unwrap_or_default(),
+                )
+            })
+            .collect(),
+        "mode" => vars
+            .modes()
+            .map(|m| {
+                (
+                    m.name.clone(),
+                    serde_json::to_value(m.id).unwrap_or_default(),
+                )
+            })
+            .collect(),
+        _ => return Err(format!("expected a {what}'s id")),
+    };
+    let hits: Vec<&Value> = named
+        .iter()
+        .filter(|(n, _)| n == name)
+        .map(|(_, id)| id)
+        .collect();
+    match hits.as_slice() {
+        [id] => Ok((*id).clone()),
+        [] => {
+            let mut names: Vec<&str> = named.iter().map(|(n, _)| n.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            let more = names.len().saturating_sub(12);
+            names.truncate(12);
+            let list = match names.is_empty() {
+                true => "there are none".to_owned(),
+                false if more > 0 => format!("they are `{}` and {more} more", names.join("`, `")),
+                false => format!("they are `{}`", names.join("`, `")),
+            };
+            Err(format!("no {what} has the id or name `{name}`; {list}"))
+        }
+        _ => Err(format!(
+            "{} {what}s are named `{name}`; give its id",
+            hits.len()
+        )),
+    }
 }
 
 const NODE: ParamKind = ParamKind::Node;
@@ -1188,16 +1609,13 @@ fn component_prop(
         .find(|p| p.name == name)
         .map(|p| (owner, p.clone()))
         .ok_or_else(|| {
-            let names: Vec<&str> = props
-                .iter()
-                .filter(named)
-                .map(|p| p.name.as_str())
-                .collect();
+            let names: Vec<&crate::variant::Property> =
+                props.iter().filter(named).map(|p| &**p).collect();
             a.invalid(
                 "property",
                 match names.as_slice() {
                     [] => "it has no component properties".to_owned(),
-                    _ => format!("its properties are {}", names.join(", ")),
+                    _ => format!("its properties are {}", listed_props(names)),
                 },
             )
         })
@@ -1278,7 +1696,7 @@ pub static VERBS: &[Verb] = &[
     // --- structure ---------------------------------------------------------
     Verb {
         name: "create_node",
-        doc: "Create a layer of `kind` in `parent`, on top unless `index` says where",
+        doc: "Create a layer of `kind` in `parent`, on top unless `index` says where, with no fills",
         params: &[
             req("parent", NODE, "the frame, group or page to create it in"),
             req(
@@ -1296,13 +1714,15 @@ pub static VERBS: &[Verb] = &[
                 ParamKind::Model("Affine"),
                 "its placement in the parent",
             ),
+            opt("x", ParamKind::Number, "its box's left in the parent"),
+            opt("y", ParamKind::Number, "its box's top in the parent"),
             opt("name", TEXT, "its name"),
         ],
         run: |ctx, a| {
             let parent = a.node("parent")?;
             let count = node(ctx, parent)?.children().len();
             let id = ctx.ids.mint();
-            let tx = Transaction(vec![Operation::CreateNode {
+            let mut tx = Transaction(vec![Operation::CreateNode {
                 id,
                 parent,
                 index: a.index("index").unwrap_or(count).min(count),
@@ -1310,6 +1730,7 @@ pub static VERBS: &[Verb] = &[
                 transform: a.model_opt::<Affine>("transform")?,
                 name: a.text("name").map(str::to_owned),
             }]);
+            place_corner(ctx.doc, a, &mut tx, id);
             Ok(Done::made(tx, vec![id]))
         },
     },
@@ -1404,7 +1825,7 @@ pub static VERBS: &[Verb] = &[
     },
     Verb {
         name: "insert_subtree",
-        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy an existing layer's shape from `get_tree`, take a layer's look with `like`, and make one layer with `create_node`",
+        doc: "Create a whole tree of layers in `parent` in one edit; answers its layers, root first. Copy a layer's shape from `get_tree`; take a layer's look with `like`",
         params: &[
             req("parent", NODE, "the frame, group or page to create it in"),
             req(
@@ -1417,6 +1838,12 @@ pub static VERBS: &[Verb] = &[
                 INDEX,
                 "the root's place among the parent's children, 0 the bottom",
             ),
+            opt(
+                "x",
+                ParamKind::Number,
+                "the root's box's left in the parent",
+            ),
+            opt("y", ParamKind::Number, "the root's box's top in the parent"),
         ],
         run: |ctx, a| {
             let parent = a.node("parent")?;
@@ -1426,11 +1853,20 @@ pub static VERBS: &[Verb] = &[
                 verb: a.verb.name,
                 param: "tree",
             })?;
+            if let Value::String(s) = &raw
+                && let Ok(parsed) = serde_json::from_str::<Value>(s)
+            {
+                raw = parsed;
+            }
             expand_like(ctx.doc, &mut raw).map_err(|why| a.invalid("tree", why))?;
             loose::loosen("tree", &mut raw);
+            let raw = settle::<Tree>("Tree", raw).map_err(|why| a.invalid("tree", why))?;
             let tree: Tree = serde_json::from_value(raw).map_err(|e| a.invalid("tree", e))?;
             let mut done = Done::default();
             tree_ops(ctx, a, &tree, parent, index, &mut done)?;
+            if let Some(&root) = done.created.first() {
+                place_corner(ctx.doc, a, &mut done.tx, root);
+            }
             Ok(done)
         },
     },
@@ -1938,12 +2374,7 @@ pub static VERBS: &[Verb] = &[
             node(ctx, parent)?;
             let (mut tx, id) = build::place_instance(ctx.doc, ctx.ids, main, parent, None)
                 .ok_or(VerbError::Nothing("the set has no variant to place"))?;
-            let (x, y) = (a.number("x"), a.number("y"));
-            if (x.is_some() || y.is_some())
-                && let Some(op) = build::cornered_at(ctx.doc, &tx, id, x, y)
-            {
-                tx.0.push(op);
-            }
+            place_corner(ctx.doc, a, &mut tx, id);
             Ok(Done::made(tx, vec![id]))
         },
     },
@@ -2142,12 +2573,19 @@ pub static VERBS: &[Verb] = &[
                     p.value.name = name.to_owned();
                 }
             }
+            // The name `set_instance_property` takes it by, which `rebind` chose.
+            let named = item
+                .and_then(|item| next.iter().find(|p| p.id == item))
+                .map(|p| format!("named \"{}\"", p.value.name));
             let ops = vec![Operation::SetProperties {
                 id: owner,
                 props: next,
             }];
             Ok(match item {
-                Some(item) => Done::making(ops, item.0.to_wire()),
+                Some(item) => Done {
+                    said: named,
+                    ..Done::making(ops, item.0.to_wire())
+                },
                 None => Done::ops(ops),
             })
         },
@@ -2174,14 +2612,14 @@ pub static VERBS: &[Verb] = &[
                 .iter()
                 .find(|p| p.name == name && p.kind != PropKind::Nested)
                 .ok_or_else(|| {
-                    let names: Vec<&str> = props
+                    let names: Vec<&crate::variant::Property> = props
                         .iter()
-                        .map(|p| p.name.as_str())
-                        .filter(|n| !n.is_empty())
+                        .map(|p| &**p)
+                        .filter(|p| !p.name.is_empty() && p.kind != PropKind::Nested)
                         .collect();
                     a.invalid(
                         "property",
-                        format!("its properties are {}", names.join(", ")),
+                        format!("its properties are {}", listed_props(names)),
                     )
                 })?;
             let v = a.get("value").cloned().unwrap_or(Value::Null);
@@ -2732,7 +3170,19 @@ pub static VERBS: &[Verb] = &[
             let value = a.model_opt::<Cell>("value")?;
             let (ops, id) =
                 crate::variable::add_variable_ops(table, ctx.ids, c, kind, a.text("name"), value)
-                    .map_err(|why| a.invalid("name", why))?;
+                    .map_err(|why| {
+                    // A taken name: the variable already there may be the one wanted.
+                    let held = a.text("name").and_then(|n| {
+                        table
+                            .of_collection(c)
+                            .find(|v| v.name == n)
+                            .map(|v| v.id.0.to_wire())
+                    });
+                    match held {
+                        Some(id) => a.invalid("name", format!("{why} Its id is `{id}`.")),
+                        None => a.invalid("name", why),
+                    }
+                })?;
             Ok(Done::making(ops, id.0.to_wire()))
         },
     },
@@ -4105,8 +4555,9 @@ pub static VERBS: &[Verb] = &[
                 if let Value::Object(map) = &mut whole {
                     map.extend(patch.clone());
                 }
-                let style =
-                    read_model::<TextStyle>(&whole).map_err(|why| a.invalid("style", why))?;
+                let style = settle::<TextStyle>("TextStyle", whole)
+                    .and_then(|v| read_model::<TextStyle>(&v))
+                    .map_err(|why| a.invalid("style", why))?;
                 ops.push(Operation::SetTextStyle {
                     id,
                     style,

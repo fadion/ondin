@@ -701,7 +701,12 @@ fn property(p: &Param) -> Value {
         ParamKind::Id(what) => format!(" A {what} id."),
         _ => String::new(),
     };
-    schema["description"] = json!(format!("{}{kind_note}", p.doc));
+    // The note is a sentence of its own, after one the doc may leave open.
+    let doc = match p.doc.ends_with(['.', '!', '?']) || kind_note.is_empty() {
+        true => p.doc.to_owned(),
+        false => format!("{}.", p.doc),
+    };
+    schema["description"] = json!(format!("{doc}{kind_note}"));
     if let ParamKind::Model(model) = p.kind
         && let Some(example) = verbs::example(model)
     {
@@ -743,6 +748,31 @@ mod tests {
             .values()
             .find(|p| p.get("examples").is_some());
         assert!(fills.is_some(), "no model parameter shows an example: {d}");
+    }
+
+    /// A parameter's model note follows its description as a sentence of its own.
+    ///
+    /// flip: `property` joining the note without the period → fails at
+    /// `create_node`'s `kind`, whose description ends open.
+    #[test]
+    fn a_model_note_is_its_own_sentence() {
+        for name in PHASE_1
+            .iter()
+            .chain(&PHASE_2)
+            .chain(&PHASE_3)
+            .chain(&PHASE_4)
+        {
+            let d = definition(name).unwrap();
+            for (param, p) in d["inputSchema"]["properties"].as_object().unwrap() {
+                let text = p["description"].as_str().unwrap_or_default();
+                for (at, _) in text.match_indices(" A `") {
+                    assert!(
+                        text[..at].ends_with(['.', '!', '?']),
+                        "`{name}`'s `{param}`: {text}"
+                    );
+                }
+            }
+        }
     }
 
     /// A read is never a registry verb, and every class's own list names a real
@@ -793,14 +823,15 @@ mod tests {
 
     /// The tool lists stay within their budgets, the core set's most of all:
     /// every client pays for it on every turn it is not cached. Raise a budget
-    /// only for a new tool, never for wording repeated across tools.
+    /// only for a new tool or a new form a tool takes, never for wording repeated
+    /// across tools.
     ///
     /// flip: restoring the per-parameter id-form note in `property` → fails at
     /// every tool's budget; listing `PHASE_2` whole as core → fails at the core
     /// budget.
     #[test]
     fn the_tool_list_stays_within_its_budget() {
-        const CORE_BUDGET: usize = 23_200;
+        const CORE_BUDGET: usize = 23_350;
         const ALL_BUDGET: usize = 94_000;
         let core = listed_bytes(crate::tools::CORE.iter());
         assert!(

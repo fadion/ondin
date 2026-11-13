@@ -48,7 +48,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_node",
-        doc: "One layer's snapshot, and with `subtree` every layer under it. Its `world_bounds` take in the stroke.",
+        doc: "One layer's snapshot, and with `subtree` every layer under it. Its `world_bounds` (x, y, w, h) take in the stroke.",
         params: &[
             param("id", ParamKind::Node, true, "The layer."),
             param(
@@ -75,7 +75,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "get_outline",
-        doc: "A page's or layer's layers a few levels down in one compact table: `columns` names each row's fields (id, name, kind, the layer's own box as world x, y, w, h to 0.1 with its stroke left out, depth), `rows` are in paint order with a parent before its children, `more` counts the rows left out past `limit`, and `selected` lists the selected layers under it. A layer `id` is its own first row, at depth 0. Read this to see where the sections of a page sit before reading one with `get_node`.",
+        doc: "A page's or layer's layers a few levels down as one table: `columns` names each row's fields (id, name, kind, own world box x, y, w, h to 0.1 less its stroke, depth), `rows` are in paint order, parent first, `more` counts rows past `limit`, `selected` the selected layers under it. `origin` is the layer's (0, 0) in world space: a child's position in it is its world box less `origin`. A layer `id` is its own first row, at depth 0. Shows where a page's sections sit before `get_node`.",
         params: &[
             param(
                 "id",
@@ -309,7 +309,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "design_context",
-        doc: "What the shown layers under a frame, group or page already use, to match it without reading its trees: text styles with a sample each (largest first), colours as fill, stroke or text (most used first), corner radii, shadows and blurs, font families, the variables and styles bound, the sections (its children with their boxes) and the content column, the most common left and right edge of what the sections hold, less full-width backgrounds. A page holding one frame is read as that frame.",
+        doc: "What the shown layers under a frame, group or page use, to match it without reading its trees: text styles, colours, radii, shadows, families, bound variables and styles, sections with boxes, the content column, `gaps` (empty bands between sections) and `controls` (repeated buttons and fields). `root.origin` is its (0, 0) in world space: a child's position is its world box less that. Sample ids (a text style's, a control's `ground` and `label`) are `like` targets for `insert_subtree`. A page of one frame reads as that frame.",
         params: &[param(
             "id",
             ParamKind::Node,
@@ -319,7 +319,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "check_layout",
-        doc: "Placement mistakes, each with its layers, a code and a line, from boxes already laid out (no render): `text_cut` (content cut at its box or line limit), `text_overflow` (lines outside a fixed box), `clipped` and `outside_clip` (partly or wholly outside the frame that clips it), `layout_overflow` (a flex or grid child running past its frame), `zero_size`, and `text_overlap` (two unrotated texts sharing more than a sliver). A layer reported as clipped or overflowing answers for those inside it.",
+        doc: "Placement mistakes, each with its layers, a code and a line, from boxes already laid out (no render): `text_cut` (cut at its box or line limit), `text_overflow` (lines outside a fixed box), `clipped` and `outside_clip` (partly or wholly outside the frame clipping it), `layout_overflow` (a flex or grid child past its frame), `zero_size`, `draws_nothing` (no fill, stroke or content), and `text_overlap` (two texts overlapping). A layer reported as clipped or overflowing answers for those inside it.",
         params: &[
             param(
                 "ids",

@@ -319,7 +319,7 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "check_layout",
-        doc: "Placement mistakes, each with its layers, a code and a line, from boxes already laid out (no render): `text_cut` (cut at its box or line limit), `text_overflow` (lines outside a fixed box), `clipped` and `outside_clip` (partly or wholly outside the frame clipping it), `layout_overflow` (a flex or grid child past its frame), `zero_size`, `draws_nothing` (no fill, stroke or content), and `text_overlap` (two texts overlapping). A layer reported as clipped or overflowing answers for those inside it.",
+        doc: "Placement mistakes, each with its layers, a code and a line, from boxes already laid out (no render): `text_cut` (cut at its box or line limit), `text_overflow` (lines outside a fixed box), `clipped` and `outside_clip` (partly or wholly cut by a clipping frame; not a plain shape it crops), `layout_overflow` (a flex or grid child past its frame), `zero_size`, `draws_nothing`, `text_overlap`, `text_covered` (under a filled sibling), `text_spill` (out of the filled sibling under it) and `missing_glyph`. A layer reported as clipped or overflowing answers for those inside it.",
         params: &[
             param(
                 "ids",

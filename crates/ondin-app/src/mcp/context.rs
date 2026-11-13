@@ -181,12 +181,17 @@ fn radius(doc: &Document, res: &Resolved, id: NodeId) -> Option<Value> {
     }
 }
 
+/// What tells two text styles apart in `design_context`: family, size, weight,
+/// italic, line height, letter spacing, ink and the layer's opacity.
+type StyleKey = (String, String, u16, bool, String, String, String, String);
+
 /// `design_context`: what the layers under a frame, group or page already use,
 /// so an agent adding to it can match it without reading its trees.
 ///
 /// Counts only what is seen: hidden layers, hidden paints and masks are left
 /// out, and so are image fills, blend modes, opacity and a text's paragraph
-/// settings. A text style is its layer's default, its runs' differences unread
+/// settings, but for a text style's layer opacity, which `like` takes from its
+/// sample. A text style is its layer's default, its runs' differences unread
 /// but for their families and colours.
 fn design_context(s: &EditorSession, args: &Value) -> Result<Value, String> {
     let doc = &s.doc;
@@ -213,7 +218,7 @@ fn design_context(s: &EditorSession, args: &Value) -> Result<Value, String> {
         _ => asked,
     };
 
-    let mut styles: Tally<(String, String, u16, bool, String, String, String)> = Tally::new();
+    let mut styles: Tally<StyleKey> = Tally::new();
     let mut samples: HashMap<usize, (NodeId, String)> = HashMap::new();
     let mut colours: Tally<String> = Tally::new();
     let mut roles: HashMap<String, Vec<&'static str>> = HashMap::new();
@@ -337,6 +342,8 @@ fn design_context(s: &EditorSession, args: &Value) -> Result<Value, String> {
             style.line_height.map_or_else(|| "auto".to_owned(), length),
             length(style.letter_spacing),
             ink,
+            // The layer's own opacity, which `like` takes along with the style.
+            format!("{}", r2(f64::from(n.opacity()))),
         );
         if styles.add(key.clone()) {
             let sample: String = content.chars().take(30).collect();
@@ -367,6 +374,9 @@ fn design_context(s: &EditorSession, args: &Value) -> Result<Value, String> {
             }
             if !k.6.is_empty() {
                 v["colour"] = json!(k.6);
+            }
+            if k.7 != "1" {
+                v["opacity"] = json!(k.7.parse::<f64>().unwrap_or(1.0));
             }
             (styles.counts[k], v, size)
         })
@@ -780,6 +790,122 @@ fn draws_nothing(doc: &Document, id: NodeId, kind: &NodeKind, laid_out: bool) ->
     !filled && !stroked
 }
 
+/// Whether layer `id` has a visible fill that puts ink down.
+fn filled(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| {
+        doc.resolved_paint(id, n.paint())
+            .fills
+            .iter()
+            .any(|f| f.visible && inks(f.brush.drawn()))
+    })
+}
+
+/// Whether layer `id`, of used kind `kind`, is a vector shape with no picture
+/// in it: one a clipping frame cuts on purpose to crop a decoration, so its
+/// being cut is no mistake worth naming.
+fn decoration(doc: &Document, id: NodeId, kind: &NodeKind) -> bool {
+    let shape = matches!(
+        kind,
+        NodeKind::Rect { .. }
+            | NodeKind::Ellipse { .. }
+            | NodeKind::Polygon { .. }
+            | NodeKind::Star { .. }
+            | NodeKind::Line { .. }
+            | NodeKind::Spiral { .. }
+            | NodeKind::Arc { .. }
+            | NodeKind::Path { .. }
+    );
+    shape
+        && doc.get(id).is_some_and(|n| {
+            !doc.resolved_paint(id, n.paint())
+                .fills
+                .iter()
+                .any(|f| matches!(f.brush.drawn(), Brush::Image(_)))
+        })
+}
+
+/// Whether text box `t` and box `b` share more than a sliver: over 2 units
+/// across and a quarter of the text's height.
+fn covers(t: Rect, b: Rect) -> bool {
+    let x = t.intersect(b);
+    x.width() > 2.0 && x.height() > 0.25 * t.height()
+}
+
+/// The characters of `content` no face of `runs` has, which draw as empty
+/// boxes, each once and at most eight.
+fn missing_chars(content: &str, runs: &[ondin_core::text::GlyphRun]) -> Vec<char> {
+    // A run per face, each face once.
+    let mut faces: Vec<&ondin_core::text::GlyphRun> = Vec::new();
+    for r in runs {
+        if !faces
+            .iter()
+            .any(|f| f.font.data.id() == r.font.data.id() && f.font.index == r.font.index)
+        {
+            faces.push(r);
+        }
+    }
+    let mut missing = Vec::new();
+    for c in content
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+    {
+        if missing.len() < 8
+            && !missing.contains(&c)
+            && !faces
+                .iter()
+                .any(|f| ondin_core::text::face_covers(f.font.data.as_ref(), f.font.index, c))
+        {
+            missing.push(c);
+        }
+    }
+    missing
+}
+
+/// The lints between a frame's shown children, in paint order: a text a filled
+/// sibling painted above covers (`text_covered`), and a text that runs out of the
+/// nearest filled sibling under it that holds its centre (`text_spill`), as a
+/// label leaving its button does. Siblings only: a layer elsewhere in the tree
+/// is not compared.
+fn sibling_lints(doc: &Document, res: &Resolved, children: &[NodeId], issues: &mut Vec<Value>) {
+    let laid: Vec<(NodeId, Rect, bool, bool)> = children
+        .iter()
+        .filter(|c| doc.shown(**c) && doc.get(**c).is_some_and(|n| !n.mask()))
+        .filter_map(|&c| {
+            let b = res.world_bounds(c)?;
+            let text = matches!(res.used_kind(doc, c)?, NodeKind::Text { .. });
+            Some((c, b, text, !text && filled(doc, c)))
+        })
+        .collect();
+    for (i, &(t, tb, is_text, _)) in laid.iter().enumerate() {
+        if !is_text {
+            continue;
+        }
+        if let Some(&(c, ..)) = laid[i + 1..]
+            .iter()
+            .find(|(_, b, _, filled)| *filled && covers(tb, *b))
+        {
+            issues.push(issue(
+                "text_covered",
+                &[t, c],
+                "A filled layer painted above it covers part of it.".into(),
+            ));
+            continue;
+        }
+        if let Some(&(g, gb, ..)) = laid[..i]
+            .iter()
+            .rev()
+            .find(|(_, b, _, filled)| *filled && b.contains(tb.center()))
+            && passes(tb, gb)
+        {
+            issues.push(issue(
+                "text_spill",
+                &[t, g],
+                "It runs out of the filled layer under it.".into(),
+            ));
+        }
+    }
+}
+
 /// What a walk of `check_layout` carries down to a layer.
 #[derive(Clone, Copy)]
 struct Above {
@@ -927,7 +1053,7 @@ fn walk(
                     "It lies wholly outside the frame that clips it: none of it shows.".into(),
                 ));
                 reported = true;
-            } else if passes(b, cb) {
+            } else if passes(b, cb) && !decoration(doc, id, kind) {
                 issues.push(issue(
                     "clipped",
                     &[id, c],
@@ -936,9 +1062,26 @@ fn walk(
                 reported = true;
             }
         }
-        if let NodeKind::Text { sizing, .. } = kind
+        if let NodeKind::Text {
+            sizing, content, ..
+        } = kind
             && let Some(l) = res.text_layout(id)
         {
+            if l.runs.iter().any(|r| r.glyphs.iter().any(|g| g.id == 0)) {
+                let missing = missing_chars(content, &l.runs);
+                let what = match missing.is_empty() {
+                    true => "Some of its characters".to_owned(),
+                    false => missing
+                        .iter()
+                        .map(|c| format!("`{c}`"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                };
+                issues.push(one(
+                    "missing_glyph",
+                    format!("{what} draw as empty boxes: no font it uses has them."),
+                ));
+            }
             if l.truncated {
                 issues.push(one(
                     "text_cut",
@@ -978,6 +1121,7 @@ fn walk(
             .map(|b| (id, b)),
         reported,
     };
+    sibling_lints(doc, res, n.children(), issues);
     for &c in n.children() {
         walk(doc, res, c, below, issues, texts, checked);
     }
@@ -1096,6 +1240,7 @@ mod tests {
                         {
                             "kind": text("A lead paragraph under the title.", 20.0, 400, wrap(1200.0), BlockStyle::default()),
                             "transform": at(120.0, 180.0), "fills": fill(0x55, 0x55, 0x55),
+                            "opacity": 0.75,
                         },
                         {
                             "kind": rect(160.0, 48.0, 8.0), "name": "Button",
@@ -1122,11 +1267,11 @@ mod tests {
 
     /// `design_context` on a page of one frame reads that frame: its two
     /// sections, the 120–1320 column past the full-width background, the type
-    /// ramp largest first with its ink, the text colours as text, the radius
-    /// and the shadow, in a small answer.
+    /// ramp largest first with its ink and any layer opacity, the text colours
+    /// as text, the radius and the shadow, in a small answer.
     ///
     /// flip: `design_context` without its one-frame descent → fails at the
-    /// root's id.
+    /// root's id; leaving the opacity out of the style → fails at the lead's.
     #[test]
     fn design_context_reads_a_landing_page() {
         let (s, made) = landing();
@@ -1156,6 +1301,12 @@ mod tests {
             .map(|t| t["size"].as_f64().unwrap())
             .collect();
         assert_eq!(sizes, [56.0, 40.0, 20.0]);
+        assert_eq!(
+            out["text"][2]["opacity"],
+            json!(0.75),
+            "the lead's layer opacity, which `like` takes"
+        );
+        assert!(out["text"][0].get("opacity").is_none(), "absent at 1");
         assert_eq!(out["text"][0]["weight"], json!(700));
         assert_eq!(out["text"][0]["colour"], json!("#111111"));
         assert_eq!(
@@ -1325,10 +1476,11 @@ mod tests {
     }
 
     /// `check_layout` finds each lint once on a card built to show it, and
-    /// nothing on the layers placed well.
+    /// nothing on the layers placed well; a plain shape the card crops ("Bleed")
+    /// is a decoration, not a clipped layer.
     ///
     /// flip: `walk` without its `truncated` check → fails at the codes, which
-    /// lose `text_cut`.
+    /// lose `text_cut`; without its `decoration` exemption → they gain "Bleed".
     #[test]
     fn check_layout_finds_each_lint() {
         let long = "A sentence far too long for a box one line high and a hundred wide.";
@@ -1346,7 +1498,8 @@ mod tests {
             "children": [
                 { "kind": text(long, 16.0, 400, fixed, BlockStyle::default()), "name": "Hangs", "transform": at(10.0, 10.0) },
                 { "kind": text(long, 16.0, 400, fixed, clip), "name": "Cut", "transform": at(150.0, 10.0) },
-                { "kind": rect(100.0, 50.0, 0.0), "name": "Half", "transform": at(250.0, 120.0), "fills": fill(9, 9, 9) },
+                { "kind": frame(100.0, 50.0), "name": "Half", "transform": at(250.0, 120.0), "fills": fill(9, 9, 9) },
+                { "kind": rect(60.0, 60.0, 30.0), "name": "Bleed", "transform": at(270.0, 220.0), "fills": fill(9, 9, 9) },
                 { "kind": rect(50.0, 50.0, 0.0), "name": "Gone", "transform": at(400.0, 10.0), "fills": fill(9, 9, 9) },
                 { "kind": rect(20.0, 20.0, 0.0), "name": "Bare", "transform": at(150.0, 280.0) },
                 { "kind": rect(50.0, 0.0, 0.0), "name": "Flat", "transform": at(10.0, 280.0) },
@@ -1406,6 +1559,56 @@ mod tests {
             .collect();
         found.sort();
         found
+    }
+
+    /// A label running out of its pill is `text_spill`, a text under a filled
+    /// layer painted after it `text_covered`, and a character no font has
+    /// `missing_glyph`, named; a label inside its pill and a text under a
+    /// stroke-only ring are none of them.
+    ///
+    /// flip: `sibling_lints` finding the cover among the siblings below the
+    /// text → fails at the codes, which lose `text_covered` for "Words".
+    #[test]
+    fn check_layout_finds_texts_cut_by_their_neighbours() {
+        let auto = || TextSizing::Auto;
+        let ring = json!([ondin_core::Stroke {
+            width: 2.0,
+            ..Default::default()
+        }]);
+        let (s, _) = with(json!({
+            "kind": frame(400.0, 300.0), "name": "Card", "fills": fill(255, 255, 255),
+            "children": [
+                { "kind": rect(100.0, 30.0, 15.0), "name": "Pill", "transform": at(10.0, 10.0), "fills": fill(9, 9, 9) },
+                { "kind": text("A label far too long", 16.0, 400, TextSizing::AutoHeight(160.0), BlockStyle::default()), "name": "Label", "transform": at(10.0, 15.0) },
+                { "kind": rect(200.0, 40.0, 20.0), "name": "Wide pill", "transform": at(10.0, 60.0), "fills": fill(9, 9, 9) },
+                { "kind": text("Fits", 16.0, 400, auto(), BlockStyle::default()), "name": "Fits", "transform": at(20.0, 70.0) },
+                { "kind": text("Covered words here", 16.0, 400, TextSizing::AutoHeight(200.0), BlockStyle::default()), "name": "Words", "transform": at(10.0, 150.0) },
+                { "kind": rect(80.0, 40.0, 0.0), "name": "Over", "transform": at(150.0, 145.0), "fills": fill(9, 9, 9) },
+                { "kind": text("Under a ring", 16.0, 400, auto(), BlockStyle::default()), "name": "Ringed", "transform": at(250.0, 200.0) },
+                { "kind": rect(60.0, 60.0, 30.0), "name": "Ring", "transform": at(250.0, 190.0), "strokes": ring },
+                { "kind": text("a\u{10FFFD}b", 16.0, 400, auto(), BlockStyle::default()), "name": "Glyph", "transform": at(10.0, 250.0) },
+            ],
+        }));
+        let out = check_layout(&s, &json!({})).unwrap();
+        let glyph = out["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["code"] == "missing_glyph")
+            .map(|i| i["message"].as_str().unwrap().to_owned());
+        assert!(
+            glyph
+                .as_deref()
+                .is_some_and(|m| m.starts_with("`\u{10FFFD}` draw")),
+            "the character is named: {glyph:?}"
+        );
+        let want = [
+            ("missing_glyph", "Glyph"),
+            ("text_covered", "Words"),
+            ("text_spill", "Label"),
+        ]
+        .map(|(c, n)| (c.to_owned(), n.to_owned()));
+        assert_eq!(found(&s), want, "{out}");
     }
 
     fn stroke(width: f64) -> Value {

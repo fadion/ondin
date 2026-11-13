@@ -15,14 +15,6 @@ colours took about ten reads; the one `insert_subtree` was 13 KB of output, most
 colours, stroke fields at their defaults and hand-placed coordinates. Each item lands with a size
 budget test, and the set is checked by re-running the same agent task on the old and new build.
 
-- **Lean snapshot** — `ondin_export::snapshot`. `get_node` leaves out fields at their defaults and
-  what repeats its parent's.
-- **Design context** — a read of what a frame already uses: text styles, colours, radii,
-  shadows, the content column and its sections' boxes, each with a layer that uses it.
-- **Outline read** — one row per layer (id, name, kind, box, depth), with a depth limit;
-  `find_nodes` gives each match's box and whether it holds the selection.
-- **Layout check and region renders** — overlaps, overflowing or clipped text and layers off their
-  frame, before any image; `export_png` takes a region.
 - **Core tool set** — a default list of the tools nearly every task uses, a generic `set` patch in
   place of the single-property setters, `describe_tools` for the rest, which run through `batch`;
   `--tools all` lists everything.

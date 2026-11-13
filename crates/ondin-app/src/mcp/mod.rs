@@ -701,7 +701,20 @@ fn run(conn: &Connection, s: &mut EditorSession, call: &Call) -> Result<Answer, 
                     i += 1;
                 }
             }
-            let answer = json!({ "nodes": nodes });
+            let mut answer = json!({ "nodes": nodes });
+            // Below the root, a layer's page and frame are the root's or the
+            // root itself: written once, on the root.
+            if let Some(Value::Array(list)) = answer.get_mut("nodes")
+                && let Some((root, below)) = list.split_first_mut()
+            {
+                let frame = root.get("artboard").cloned();
+                for n in below.iter_mut().filter_map(Value::as_object_mut) {
+                    n.remove("page");
+                    if n.get("artboard") == frame.as_ref() || n.get("artboard") == root.get("id") {
+                        n.remove("artboard");
+                    }
+                }
+            }
             within_budget(&answer.to_string(), "This subtree", NARROWER)?;
             json(answer)
         }
@@ -1684,6 +1697,39 @@ mod tests {
             "set_name",
             rename("Mine", &now),
         ));
+    }
+
+    /// A subtree names its page and frame once, on the root: a layer below keeps
+    /// only a frame that is not the root's.
+    ///
+    /// flip: `get_node` writing every layer's `page` → fails at "said once".
+    #[test]
+    fn a_subtree_names_its_page_and_frame_once() {
+        let (mut engine, mut docs) = (Engine::default(), One::new());
+        open(&mut engine, &mut docs, 1);
+        let page = docs.session.doc.first_page().to_wire();
+        let tree = json!({ "name": "Card", "kind": { "Artboard": { "size": { "width": 200.0, "height": 100.0 },
+            "corner_radii": { "top_left": 0.0, "top_right": 0.0, "bottom_right": 0.0, "bottom_left": 0.0 } } },
+            "children": [{ "kind": ondin_core::verbs::example("NodeKind").unwrap() }] });
+        let made = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "insert_subtree",
+            json!({ "parent": page, "tree": tree }),
+        );
+        let card = ok(&made)["created"][0].clone();
+        let read = call(
+            &mut engine,
+            &mut docs,
+            1,
+            "get_node",
+            json!({ "id": card, "subtree": true }),
+        );
+        let nodes = &ok(&read)["nodes"];
+        assert_eq!(nodes[0]["page"], json!(page), "{nodes}");
+        assert!(nodes[1].get("page").is_none(), "said once: {nodes}");
+        assert!(nodes[1].get("artboard").is_none(), "{nodes}");
     }
 
     /// An agent's `undo` takes back its own step, and is refused over the person's
